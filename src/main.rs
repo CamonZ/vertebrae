@@ -5,6 +5,7 @@ use std::process;
 mod commands;
 mod db;
 mod id;
+mod output;
 
 use commands::Command;
 use db::{Database, DbError};
@@ -56,7 +57,7 @@ async fn run_with_args(args: &Args) -> Result<(), DbError> {
     match &args.command {
         Some(cmd) => {
             let result = cmd.execute(&db).await?;
-            println!("Created task: {}", result);
+            println!("{}", result);
         }
         None => {
             println!("Welcome to Vertebrae!");

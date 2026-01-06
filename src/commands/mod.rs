@@ -3,10 +3,13 @@
 //! This module contains all subcommand implementations for the vtb CLI.
 
 pub mod add;
+pub mod list;
 
 pub use add::AddCommand;
+pub use list::ListCommand;
 
 use crate::db::{Database, DbError};
+use crate::output::format_task_table;
 use clap::Subcommand;
 
 /// Available CLI commands
@@ -14,6 +17,25 @@ use clap::Subcommand;
 pub enum Command {
     /// Create a new task
     Add(AddCommand),
+    /// List tasks with optional filters
+    List(ListCommand),
+}
+
+/// Result of executing a command
+pub enum CommandResult {
+    /// A simple message to display
+    Message(String),
+    /// A formatted table to display
+    Table(String),
+}
+
+impl std::fmt::Display for CommandResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CommandResult::Message(msg) => write!(f, "{}", msg),
+            CommandResult::Table(table) => write!(f, "{}", table),
+        }
+    }
 }
 
 impl Command {
@@ -26,9 +48,16 @@ impl Command {
     /// # Errors
     ///
     /// Returns `DbError` if the command execution fails.
-    pub async fn execute(&self, db: &Database) -> Result<String, DbError> {
+    pub async fn execute(&self, db: &Database) -> Result<CommandResult, DbError> {
         match self {
-            Command::Add(cmd) => cmd.execute(db).await,
+            Command::Add(cmd) => {
+                let id = cmd.execute(db).await?;
+                Ok(CommandResult::Message(format!("Created task: {}", id)))
+            }
+            Command::List(cmd) => {
+                let tasks = cmd.execute(db).await?;
+                Ok(CommandResult::Table(format_task_table(&tasks)))
+            }
         }
     }
 }
@@ -53,6 +82,7 @@ mod tests {
             Command::Add(cmd) => {
                 assert_eq!(cmd.title, "My task");
             }
+            _ => panic!("Expected Add command"),
         }
     }
 
@@ -65,6 +95,7 @@ mod tests {
                 assert_eq!(cmd.title, "Epic task");
                 assert_eq!(cmd.level.unwrap().as_str(), "epic");
             }
+            _ => panic!("Expected Add command"),
         }
     }
 
@@ -76,6 +107,7 @@ mod tests {
             Command::Add(cmd) => {
                 assert_eq!(cmd.level.unwrap().as_str(), "ticket");
             }
+            _ => panic!("Expected Add command"),
         }
     }
 
@@ -87,6 +119,7 @@ mod tests {
             Command::Add(cmd) => {
                 assert_eq!(cmd.priority.unwrap().as_str(), "high");
             }
+            _ => panic!("Expected Add command"),
         }
     }
 
@@ -98,6 +131,7 @@ mod tests {
             Command::Add(cmd) => {
                 assert_eq!(cmd.tags, vec!["backend", "api"]);
             }
+            _ => panic!("Expected Add command"),
         }
     }
 
@@ -109,6 +143,7 @@ mod tests {
             Command::Add(cmd) => {
                 assert_eq!(cmd.parent, Some("abc123".to_string()));
             }
+            _ => panic!("Expected Add command"),
         }
     }
 
@@ -128,6 +163,7 @@ mod tests {
             Command::Add(cmd) => {
                 assert_eq!(cmd.depends_on, vec!["xyz789", "abc123"]);
             }
+            _ => panic!("Expected Add command"),
         }
     }
 
@@ -148,6 +184,7 @@ mod tests {
                     Some("This is a detailed description".to_string())
                 );
             }
+            _ => panic!("Expected Add command"),
         }
     }
 
@@ -175,6 +212,7 @@ mod tests {
         assert!(cli.is_ok());
         let cmd = match cli.unwrap().command {
             Command::Add(cmd) => cmd,
+            _ => panic!("Expected Add command"),
         };
         assert_eq!(cmd.title, "Complete Task");
         assert_eq!(cmd.level.unwrap().as_str(), "epic");
@@ -191,5 +229,149 @@ mod tests {
         // Test Debug trait is implemented
         let debug_str = format!("{:?}", cli.command);
         assert!(debug_str.contains("Add"));
+    }
+
+    #[test]
+    fn test_command_list_parses() {
+        let cli = TestCli::try_parse_from(["test", "list"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::List(cmd) => {
+                assert!(cmd.levels.is_empty());
+                assert!(cmd.statuses.is_empty());
+                assert!(!cmd.all);
+                assert!(!cmd.root);
+            }
+            _ => panic!("Expected List command"),
+        }
+    }
+
+    #[test]
+    fn test_command_list_with_level() {
+        let cli = TestCli::try_parse_from(["test", "list", "--level", "epic"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::List(cmd) => {
+                assert_eq!(cmd.levels.len(), 1);
+                assert_eq!(cmd.levels[0].as_str(), "epic");
+            }
+            _ => panic!("Expected List command"),
+        }
+    }
+
+    #[test]
+    fn test_command_list_with_multiple_levels() {
+        let cli = TestCli::try_parse_from(["test", "list", "-l", "epic", "-l", "ticket"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::List(cmd) => {
+                assert_eq!(cmd.levels.len(), 2);
+            }
+            _ => panic!("Expected List command"),
+        }
+    }
+
+    #[test]
+    fn test_command_list_with_status() {
+        let cli = TestCli::try_parse_from(["test", "list", "--status", "blocked"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::List(cmd) => {
+                assert_eq!(cmd.statuses.len(), 1);
+                assert_eq!(cmd.statuses[0].as_str(), "blocked");
+            }
+            _ => panic!("Expected List command"),
+        }
+    }
+
+    #[test]
+    fn test_command_list_with_priority() {
+        let cli = TestCli::try_parse_from(["test", "list", "--priority", "high"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::List(cmd) => {
+                assert_eq!(cmd.priorities.len(), 1);
+                assert_eq!(cmd.priorities[0].as_str(), "high");
+            }
+            _ => panic!("Expected List command"),
+        }
+    }
+
+    #[test]
+    fn test_command_list_with_tag() {
+        let cli = TestCli::try_parse_from(["test", "list", "--tag", "backend"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::List(cmd) => {
+                assert_eq!(cmd.tags, vec!["backend"]);
+            }
+            _ => panic!("Expected List command"),
+        }
+    }
+
+    #[test]
+    fn test_command_list_with_root() {
+        let cli = TestCli::try_parse_from(["test", "list", "--root"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::List(cmd) => {
+                assert!(cmd.root);
+            }
+            _ => panic!("Expected List command"),
+        }
+    }
+
+    #[test]
+    fn test_command_list_with_children() {
+        let cli = TestCli::try_parse_from(["test", "list", "--children", "abc123"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::List(cmd) => {
+                assert_eq!(cmd.children, Some("abc123".to_string()));
+            }
+            _ => panic!("Expected List command"),
+        }
+    }
+
+    #[test]
+    fn test_command_list_with_all() {
+        let cli = TestCli::try_parse_from(["test", "list", "--all"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::List(cmd) => {
+                assert!(cmd.all);
+            }
+            _ => panic!("Expected List command"),
+        }
+    }
+
+    #[test]
+    fn test_command_list_invalid_level() {
+        let result = TestCli::try_parse_from(["test", "list", "--level", "invalid"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_command_list_invalid_status() {
+        let result = TestCli::try_parse_from(["test", "list", "--status", "unknown"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_command_list_invalid_priority() {
+        let result = TestCli::try_parse_from(["test", "list", "--priority", "wrong"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_command_result_display_message() {
+        let result = CommandResult::Message("Test message".to_string());
+        assert_eq!(format!("{}", result), "Test message");
+    }
+
+    #[test]
+    fn test_command_result_display_table() {
+        let result = CommandResult::Table("Table content".to_string());
+        assert_eq!(format!("{}", result), "Table content");
     }
 }
