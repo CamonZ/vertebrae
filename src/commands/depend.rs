@@ -2,10 +2,15 @@
 //!
 //! Implements the `vtb depend` command to create dependency relationships between tasks
 //! with cycle detection to ensure the dependency graph remains acyclic.
+//!
+//! Cycle detection is delegated to `GraphQueries` from the db crate, which provides:
+//! - `would_create_cycle()` - Check if adding an edge would create a cycle
+//! - `get_cycle_path()` - Get the path forming the cycle for error messages
+//! - `format_cycle_path()` - Format the path as a human-readable string
 
 use clap::Args;
 use serde::Deserialize;
-use vertebrae_db::{Database, DbError};
+use vertebrae_db::{Database, DbError, GraphQueries};
 
 /// Create a dependency relationship between tasks
 #[derive(Debug, Args)]
@@ -118,13 +123,14 @@ impl DependCommand {
             });
         }
 
-        // Check for cycles before creating the edge
-        // A cycle would exist if we can reach task_id from blocker_id via depends_on edges
-        if self.would_create_cycle(db, &task_id, &blocker_id).await? {
-            let cycle_path = self
-                .get_cycle_path(db, &task_id, &blocker_id)
-                .await
-                .unwrap_or_else(|_| format!("{} -> {}", blocker_id, task_id));
+        // Check for cycles using GraphQueries from the db crate
+        let graph = GraphQueries::new(db.client());
+        if graph.would_create_cycle(&task_id, &blocker_id).await? {
+            // Get the cycle path for a helpful error message
+            let cycle_path = match graph.get_cycle_path(&task_id, &blocker_id).await? {
+                Some(path) => GraphQueries::format_cycle_path(&path),
+                None => format!("{} -> {}", blocker_id, task_id),
+            };
             return Err(DbError::InvalidPath {
                 path: std::path::PathBuf::from(&self.id),
                 reason: format!("Cycle detected: {}", cycle_path),
@@ -167,111 +173,6 @@ impl DependCommand {
         let mut result = db.client().query(&query).await?;
         let edges: Vec<DependencyEdge> = result.take(0)?;
         Ok(!edges.is_empty())
-    }
-
-    /// Check if creating a dependency would form a cycle.
-    ///
-    /// A cycle would be created if we can reach `task_id` from `blocker_id`
-    /// by following existing depends_on edges. This means blocker_id
-    /// (directly or transitively) already depends on task_id.
-    ///
-    /// Uses iterative BFS to avoid async recursion issues.
-    async fn would_create_cycle(
-        &self,
-        db: &Database,
-        task_id: &str,
-        blocker_id: &str,
-    ) -> Result<bool, DbError> {
-        // Use BFS to check if we can reach task_id from blocker_id via depends_on edges.
-        // If blocker_id depends on X, and X depends on Y, and Y depends on task_id,
-        // then creating task_id -> blocker_id would form a cycle.
-
-        let mut visited = std::collections::HashSet::new();
-        let mut queue = std::collections::VecDeque::new();
-
-        // Start from blocker_id and traverse its dependencies
-        queue.push_back(blocker_id.to_string());
-        visited.insert(blocker_id.to_string());
-
-        while let Some(current) = queue.pop_front() {
-            // Get all tasks that current depends on
-            let query = format!("SELECT VALUE out FROM task:{}->depends_on", current);
-            let mut result = db.client().query(&query).await?;
-            let deps: Vec<surrealdb::sql::Thing> = result.take(0)?;
-
-            for dep in deps {
-                let dep_id = dep.id.to_string();
-
-                // If we can reach task_id from blocker_id, creating task_id -> blocker_id
-                // would form a cycle
-                if dep_id == task_id {
-                    return Ok(true);
-                }
-
-                // Add to queue if not visited
-                if visited.insert(dep_id.clone()) {
-                    queue.push_back(dep_id);
-                }
-            }
-        }
-
-        Ok(false)
-    }
-
-    /// Get the cycle path for error reporting.
-    ///
-    /// Uses BFS with parent tracking to reconstruct the path.
-    async fn get_cycle_path(
-        &self,
-        db: &Database,
-        task_id: &str,
-        blocker_id: &str,
-    ) -> Result<String, DbError> {
-        // Use BFS with parent tracking to find the path from blocker_id to task_id
-        let mut visited = std::collections::HashSet::new();
-        let mut queue = std::collections::VecDeque::new();
-        let mut parent_map: std::collections::HashMap<String, String> =
-            std::collections::HashMap::new();
-
-        queue.push_back(blocker_id.to_string());
-        visited.insert(blocker_id.to_string());
-
-        while let Some(current) = queue.pop_front() {
-            let query = format!("SELECT VALUE out FROM task:{}->depends_on", current);
-            let mut result = db.client().query(&query).await?;
-            let deps: Vec<surrealdb::sql::Thing> = result.take(0)?;
-
-            for dep in deps {
-                let dep_id = dep.id.to_string();
-
-                if dep_id == task_id {
-                    // Found the path - reconstruct it
-                    let mut path = vec![task_id.to_string()];
-                    let mut curr = current.clone();
-                    path.push(curr.clone());
-
-                    while let Some(p) = parent_map.get(&curr) {
-                        path.push(p.clone());
-                        curr = p.clone();
-                    }
-
-                    // Add the starting task_id to complete the cycle representation
-                    path.push(task_id.to_string());
-
-                    // Reverse to show task_id -> ... -> blocker_id -> task_id
-                    path.reverse();
-                    return Ok(path.join(" -> "));
-                }
-
-                if visited.insert(dep_id.clone()) {
-                    parent_map.insert(dep_id.clone(), current.clone());
-                    queue.push_back(dep_id);
-                }
-            }
-        }
-
-        // Fallback if path not found (shouldn't happen if would_create_cycle returned true)
-        Ok(format!("{} -> ... -> {}", task_id, blocker_id))
     }
 
     /// Create a dependency edge between tasks.

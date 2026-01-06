@@ -243,6 +243,15 @@ impl<'a> GraphQueries<'a> {
     /// # Returns
     ///
     /// `true` if adding the dependency would create a cycle, `false` otherwise.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Given: A -> B (A depends on B)
+    /// // Check: Would B -> A create a cycle?
+    /// let would_cycle = graph.would_create_cycle("taskb", "taska").await?;
+    /// assert!(would_cycle); // Yes, it would create A -> B -> A
+    /// ```
     pub async fn would_create_cycle(&self, task_id: &str, depends_on_id: &str) -> DbResult<bool> {
         // Use BFS to check if we can reach task_id from depends_on_id via depends_on edges.
         // If depends_on_id depends on X, and X depends on Y, and Y depends on task_id,
@@ -280,7 +289,7 @@ impl<'a> GraphQueries<'a> {
         Ok(false)
     }
 
-    /// Get the cycle path for error reporting.
+    /// Get the cycle path that would be created by adding a dependency.
     ///
     /// Uses BFS with parent tracking to reconstruct the path that would
     /// form a cycle if the dependency were created.
@@ -292,8 +301,22 @@ impl<'a> GraphQueries<'a> {
     ///
     /// # Returns
     ///
-    /// A string representing the cycle path (e.g., "A -> B -> C -> A").
-    pub async fn get_cycle_path(&self, task_id: &str, depends_on_id: &str) -> DbResult<String> {
+    /// `Some(path)` containing the task IDs forming the cycle if one would be created,
+    /// `None` if no cycle would be created.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Given: A -> B -> C (A depends on B, B depends on C)
+    /// // Check: What cycle would C -> A create?
+    /// let path = graph.get_cycle_path("taskc", "taska").await?;
+    /// assert_eq!(path, Some(vec!["taskc", "taska", "taskb", "taskc"]));
+    /// ```
+    pub async fn get_cycle_path(
+        &self,
+        task_id: &str,
+        depends_on_id: &str,
+    ) -> DbResult<Option<Vec<String>>> {
         // Use BFS with parent tracking to find the path from depends_on_id to task_id
         let mut visited = HashSet::new();
         let mut queue = VecDeque::new();
@@ -326,7 +349,7 @@ impl<'a> GraphQueries<'a> {
 
                     // Reverse to show task_id -> ... -> depends_on_id -> task_id
                     path.reverse();
-                    return Ok(path.join(" -> "));
+                    return Ok(Some(path));
                 }
 
                 if visited.insert(dep_id.clone()) {
@@ -336,8 +359,122 @@ impl<'a> GraphQueries<'a> {
             }
         }
 
-        // Fallback if path not found (shouldn't happen if would_create_cycle returned true)
-        Ok(format!("{} -> ... -> {}", task_id, depends_on_id))
+        // No cycle would be created
+        Ok(None)
+    }
+
+    /// Format a cycle path as a human-readable string.
+    ///
+    /// Converts a vector of task IDs into an arrow-separated path string
+    /// suitable for error messages.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - Vector of task IDs forming the cycle
+    ///
+    /// # Returns
+    ///
+    /// A string like "task1 -> task2 -> task3 -> task1"
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let path = vec!["a".to_string(), "b".to_string(), "c".to_string(), "a".to_string()];
+    /// let formatted = GraphQueries::format_cycle_path(&path);
+    /// assert_eq!(formatted, "a -> b -> c -> a");
+    /// ```
+    pub fn format_cycle_path(path: &[String]) -> String {
+        path.join(" -> ")
+    }
+
+    /// Detect if a task is part of any existing cycle.
+    ///
+    /// Checks whether the given task participates in a cycle in the current
+    /// dependency graph. This differs from `would_create_cycle` which checks
+    /// hypothetical cycles from adding a new edge.
+    ///
+    /// # Arguments
+    ///
+    /// * `task_id` - The task to check for cycle membership
+    ///
+    /// # Returns
+    ///
+    /// `Some(path)` if the task is part of a cycle, containing the cycle path.
+    /// `None` if the task is not part of any cycle.
+    ///
+    /// # Note
+    ///
+    /// In a properly maintained graph with cycle prevention, this should always
+    /// return `None`. This method is useful for validation and debugging.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Check if task is in a cycle
+    /// if let Some(cycle) = graph.detect_cycle("taska").await? {
+    ///     println!("Task is in cycle: {}", GraphQueries::format_cycle_path(&cycle));
+    /// }
+    /// ```
+    pub async fn detect_cycle(&self, task_id: &str) -> DbResult<Option<Vec<String>>> {
+        // Use DFS with path tracking to find cycles
+        let mut visited = HashSet::new();
+        let mut path = Vec::new();
+        let mut path_set = HashSet::new();
+
+        self.detect_cycle_dfs(task_id, &mut visited, &mut path, &mut path_set)
+            .await
+    }
+
+    /// DFS helper for cycle detection.
+    ///
+    /// Recursively traverses the dependency graph looking for back edges
+    /// that indicate cycles.
+    async fn detect_cycle_dfs(
+        &self,
+        current: &str,
+        visited: &mut HashSet<String>,
+        path: &mut Vec<String>,
+        path_set: &mut HashSet<String>,
+    ) -> DbResult<Option<Vec<String>>> {
+        // If we've seen this node in the current path, we found a cycle
+        if path_set.contains(current) {
+            // Extract the cycle from the path
+            let cycle_start = path.iter().position(|x| x == current).unwrap();
+            let mut cycle: Vec<String> = path[cycle_start..].to_vec();
+            cycle.push(current.to_string()); // Close the cycle
+            return Ok(Some(cycle));
+        }
+
+        // If already fully explored, no cycle through this node
+        if visited.contains(current) {
+            return Ok(None);
+        }
+
+        // Mark as in current path and visited
+        path.push(current.to_string());
+        path_set.insert(current.to_string());
+        visited.insert(current.to_string());
+
+        // Get dependencies
+        let query = format!("SELECT VALUE out FROM task:{}->depends_on", current);
+        let mut result = self.client.query(&query).await?;
+        let deps: Vec<surrealdb::sql::Thing> = result.take(0)?;
+
+        // Recursively check each dependency
+        for dep in deps {
+            let dep_id = dep.id.to_string();
+            if let Some(cycle) =
+                Box::pin(self.detect_cycle_dfs(&dep_id, visited, path, path_set)).await?
+            {
+                return Ok(Some(cycle));
+            }
+        }
+
+        // Backtrack
+        path.pop();
+        path_set.remove(current);
+
+        Ok(None)
     }
 
     // ========================================
@@ -811,8 +948,92 @@ mod tests {
         create_depends_on(&db, "taska", "taskb").await;
 
         let cycle_path = graph.get_cycle_path("taskb", "taska").await.unwrap();
-        assert!(cycle_path.contains("taska"));
-        assert!(cycle_path.contains("taskb"));
+        assert!(cycle_path.is_some());
+        let path = cycle_path.unwrap();
+        assert!(path.contains(&"taska".to_string()));
+        assert!(path.contains(&"taskb".to_string()));
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_get_cycle_path_no_cycle() {
+        let (db, temp_dir) = setup_test_db().await;
+        let graph = GraphQueries::new(db.client());
+
+        create_task(&db, "taska", "Task A", "task", "todo").await;
+        create_task(&db, "taskb", "Task B", "task", "todo").await;
+        // No dependencies
+
+        let cycle_path = graph.get_cycle_path("taska", "taskb").await.unwrap();
+        assert!(cycle_path.is_none());
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_get_cycle_path_transitive() {
+        let (db, temp_dir) = setup_test_db().await;
+        let graph = GraphQueries::new(db.client());
+
+        create_task(&db, "taska", "Task A", "task", "todo").await;
+        create_task(&db, "taskb", "Task B", "task", "todo").await;
+        create_task(&db, "taskc", "Task C", "task", "todo").await;
+
+        // A depends on B, B depends on C
+        create_depends_on(&db, "taska", "taskb").await;
+        create_depends_on(&db, "taskb", "taskc").await;
+
+        // Creating C -> A would create cycle: C -> A -> B -> C
+        let cycle_path = graph.get_cycle_path("taskc", "taska").await.unwrap();
+        assert!(cycle_path.is_some());
+        let path = cycle_path.unwrap();
+        assert_eq!(path.len(), 4); // C -> A -> B -> C
+        assert!(path.contains(&"taska".to_string()));
+        assert!(path.contains(&"taskb".to_string()));
+        assert!(path.contains(&"taskc".to_string()));
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_format_cycle_path() {
+        let path = vec![
+            "a".to_string(),
+            "b".to_string(),
+            "c".to_string(),
+            "a".to_string(),
+        ];
+        let formatted = GraphQueries::format_cycle_path(&path);
+        assert_eq!(formatted, "a -> b -> c -> a");
+    }
+
+    #[tokio::test]
+    async fn test_detect_cycle_no_cycle() {
+        let (db, temp_dir) = setup_test_db().await;
+        let graph = GraphQueries::new(db.client());
+
+        create_task(&db, "taska", "Task A", "task", "todo").await;
+        create_task(&db, "taskb", "Task B", "task", "todo").await;
+        create_depends_on(&db, "taska", "taskb").await;
+
+        // No cycle in this graph
+        let cycle = graph.detect_cycle("taska").await.unwrap();
+        assert!(cycle.is_none());
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_detect_cycle_no_dependencies() {
+        let (db, temp_dir) = setup_test_db().await;
+        let graph = GraphQueries::new(db.client());
+
+        create_task(&db, "taska", "Task A", "task", "todo").await;
+
+        // No dependencies at all
+        let cycle = graph.detect_cycle("taska").await.unwrap();
+        assert!(cycle.is_none());
 
         cleanup(&temp_dir);
     }
