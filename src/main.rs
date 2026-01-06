@@ -10,20 +10,48 @@ mod output;
 use commands::Command;
 use db::{Database, DbError};
 
+/// Environment variable name for the database path
+const VTB_DB_PATH_ENV: &str = "VTB_DB_PATH";
+
 /// Vertebrae - A task management CLI tool
 #[derive(Parser)]
 #[command(name = "vtb")]
 #[command(version = "0.1.0")]
 #[command(about = "A task management CLI tool", long_about = None)]
 struct Args {
-    /// Path to the database directory
-    #[arg(long, global = true, env = "VTB_DB_PATH")]
+    /// Path to the database directory (can also be set via VTB_DB_PATH env var)
+    #[arg(long, global = true)]
     db: Option<PathBuf>,
 
     /// Subcommand to execute
     #[command(subcommand)]
     command: Option<Command>,
 }
+
+/// Get the database path from command line, environment variable, or default.
+///
+/// Priority:
+/// 1. Command line --db argument
+/// 2. VTB_DB_PATH environment variable (if non-empty)
+/// 3. Default path (~/.vtb/data)
+fn resolve_db_path(cli_db: Option<PathBuf>) -> DbResult<PathBuf> {
+    // First priority: explicit command line argument
+    if let Some(path) = cli_db {
+        return Ok(path);
+    }
+
+    // Second priority: environment variable (if set and non-empty)
+    if let Ok(env_path) = std::env::var(VTB_DB_PATH_ENV)
+        && !env_path.is_empty()
+    {
+        return Ok(PathBuf::from(env_path));
+    }
+
+    // Third priority: default path
+    Database::default_path()
+}
+
+use db::DbResult;
 
 #[tokio::main]
 async fn main() {
@@ -41,11 +69,8 @@ async fn run_app() -> Result<(), DbError> {
 
 /// Run the application with the given arguments
 async fn run_with_args(args: &Args) -> Result<(), DbError> {
-    // Determine database path
-    let db_path = match &args.db {
-        Some(path) => path.clone(),
-        None => Database::default_path()?,
-    };
+    // Determine database path using priority: CLI arg > env var > default
+    let db_path = resolve_db_path(args.db.clone())?;
 
     // Initialize database connection
     let db = Database::connect(&db_path).await?;
@@ -294,6 +319,110 @@ mod tests {
                 cmd_debug.contains("Add") && cmd_debug.contains("Test task title"),
                 "Command debug should contain Add variant and title field value"
             );
+        }
+    }
+
+    #[test]
+    fn test_resolve_db_path_cli_takes_priority() {
+        // CLI argument takes priority over everything else
+        let cli_path = PathBuf::from("/custom/path");
+        let result = resolve_db_path(Some(cli_path.clone()));
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), cli_path);
+    }
+
+    #[test]
+    fn test_resolve_db_path_env_var_takes_priority_over_default() {
+        // Set environment variable
+        let original = env::var(VTB_DB_PATH_ENV).ok();
+        // SAFETY: Test is single-threaded and we restore the original value
+        unsafe { env::set_var(VTB_DB_PATH_ENV, "/env/path") };
+
+        let result = resolve_db_path(None);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), PathBuf::from("/env/path"));
+
+        // Restore original
+        // SAFETY: Test is single-threaded and we're restoring to original state
+        unsafe {
+            match original {
+                Some(val) => env::set_var(VTB_DB_PATH_ENV, val),
+                None => env::remove_var(VTB_DB_PATH_ENV),
+            }
+        }
+    }
+
+    #[test]
+    fn test_resolve_db_path_empty_env_var_uses_default() {
+        // Set environment variable to empty string
+        let original = env::var(VTB_DB_PATH_ENV).ok();
+        // SAFETY: Test is single-threaded and we restore the original value
+        unsafe { env::set_var(VTB_DB_PATH_ENV, "") };
+
+        let result = resolve_db_path(None);
+        assert!(result.is_ok());
+        // Should use default path, not empty string
+        let path = result.unwrap();
+        assert!(
+            path.to_string_lossy().contains(".vtb/data"),
+            "Expected default path containing .vtb/data, got: {:?}",
+            path
+        );
+
+        // Restore original
+        // SAFETY: Test is single-threaded and we're restoring to original state
+        unsafe {
+            match original {
+                Some(val) => env::set_var(VTB_DB_PATH_ENV, val),
+                None => env::remove_var(VTB_DB_PATH_ENV),
+            }
+        }
+    }
+
+    #[test]
+    fn test_resolve_db_path_unset_env_var_uses_default() {
+        // Unset environment variable
+        let original = env::var(VTB_DB_PATH_ENV).ok();
+        // SAFETY: Test is single-threaded and we restore the original value
+        unsafe { env::remove_var(VTB_DB_PATH_ENV) };
+
+        let result = resolve_db_path(None);
+        assert!(result.is_ok());
+        // Should use default path
+        let path = result.unwrap();
+        assert!(
+            path.to_string_lossy().contains(".vtb/data"),
+            "Expected default path containing .vtb/data, got: {:?}",
+            path
+        );
+
+        // Restore original
+        // SAFETY: Test is single-threaded and we're restoring to original state
+        if let Some(val) = original {
+            unsafe { env::set_var(VTB_DB_PATH_ENV, val) };
+        }
+    }
+
+    #[test]
+    fn test_resolve_db_path_cli_overrides_env_var() {
+        // Set environment variable
+        let original = env::var(VTB_DB_PATH_ENV).ok();
+        // SAFETY: Test is single-threaded and we restore the original value
+        unsafe { env::set_var(VTB_DB_PATH_ENV, "/env/path") };
+
+        // CLI should take priority
+        let cli_path = PathBuf::from("/cli/path");
+        let result = resolve_db_path(Some(cli_path.clone()));
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), cli_path);
+
+        // Restore original
+        // SAFETY: Test is single-threaded and we're restoring to original state
+        unsafe {
+            match original {
+                Some(val) => env::set_var(VTB_DB_PATH_ENV, val),
+                None => env::remove_var(VTB_DB_PATH_ENV),
+            }
         }
     }
 }
