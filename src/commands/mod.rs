@@ -5,10 +5,12 @@
 pub mod add;
 pub mod list;
 pub mod show;
+pub mod update;
 
 pub use add::AddCommand;
 pub use list::ListCommand;
 pub use show::ShowCommand;
+pub use update::UpdateCommand;
 
 use crate::db::{Database, DbError};
 use crate::output::format_task_table;
@@ -23,6 +25,8 @@ pub enum Command {
     List(ListCommand),
     /// Show full details of a task
     Show(ShowCommand),
+    /// Update an existing task
+    Update(UpdateCommand),
 }
 
 /// Result of executing a command
@@ -65,6 +69,10 @@ impl Command {
             Command::Show(cmd) => {
                 let detail = cmd.execute(db).await?;
                 Ok(CommandResult::Message(format!("{}", detail)))
+            }
+            Command::Update(cmd) => {
+                let id = cmd.execute(db).await?;
+                Ok(CommandResult::Message(format!("Updated task: {}", id)))
             }
         }
     }
@@ -406,5 +414,165 @@ mod tests {
         let cli = TestCli::try_parse_from(["test", "show", "test123"]).unwrap();
         let debug_str = format!("{:?}", cli.command);
         assert!(debug_str.contains("Show"));
+    }
+
+    #[test]
+    fn test_command_update_parses() {
+        let cli = TestCli::try_parse_from(["test", "update", "abc123"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Update(cmd) => {
+                assert_eq!(cmd.id, "abc123");
+            }
+            _ => panic!("Expected Update command"),
+        }
+    }
+
+    #[test]
+    fn test_command_update_requires_id() {
+        let result = TestCli::try_parse_from(["test", "update"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_command_update_with_title() {
+        let cli = TestCli::try_parse_from(["test", "update", "abc123", "--title", "New Title"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Update(cmd) => {
+                assert_eq!(cmd.id, "abc123");
+                assert_eq!(cmd.title, Some("New Title".to_string()));
+            }
+            _ => panic!("Expected Update command"),
+        }
+    }
+
+    #[test]
+    fn test_command_update_with_priority() {
+        let cli = TestCli::try_parse_from(["test", "update", "abc123", "--priority", "high"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Update(cmd) => {
+                assert_eq!(
+                    cmd.priority.map(|p| p.as_str().to_string()),
+                    Some("high".to_string())
+                );
+            }
+            _ => panic!("Expected Update command"),
+        }
+    }
+
+    #[test]
+    fn test_command_update_with_add_tag() {
+        let cli = TestCli::try_parse_from(["test", "update", "abc123", "--add-tag", "urgent"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Update(cmd) => {
+                assert_eq!(cmd.add_tags, vec!["urgent"]);
+            }
+            _ => panic!("Expected Update command"),
+        }
+    }
+
+    #[test]
+    fn test_command_update_with_multiple_add_tags() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "update",
+            "abc123",
+            "--add-tag",
+            "urgent",
+            "--add-tag",
+            "backend",
+        ]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Update(cmd) => {
+                assert_eq!(cmd.add_tags, vec!["urgent", "backend"]);
+            }
+            _ => panic!("Expected Update command"),
+        }
+    }
+
+    #[test]
+    fn test_command_update_with_remove_tag() {
+        let cli = TestCli::try_parse_from(["test", "update", "abc123", "--remove-tag", "old"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Update(cmd) => {
+                assert_eq!(cmd.remove_tags, vec!["old"]);
+            }
+            _ => panic!("Expected Update command"),
+        }
+    }
+
+    #[test]
+    fn test_command_update_with_parent() {
+        let cli = TestCli::try_parse_from(["test", "update", "abc123", "--parent", "xyz789"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Update(cmd) => {
+                assert_eq!(cmd.parent, Some("xyz789".to_string()));
+            }
+            _ => panic!("Expected Update command"),
+        }
+    }
+
+    #[test]
+    fn test_command_update_with_empty_parent() {
+        let cli = TestCli::try_parse_from(["test", "update", "abc123", "--parent", ""]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Update(cmd) => {
+                assert_eq!(cmd.parent, Some("".to_string()));
+            }
+            _ => panic!("Expected Update command"),
+        }
+    }
+
+    #[test]
+    fn test_command_update_invalid_priority() {
+        let result = TestCli::try_parse_from(["test", "update", "abc123", "--priority", "invalid"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_command_update_with_all_options() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "update",
+            "abc123",
+            "--title",
+            "New Title",
+            "--priority",
+            "critical",
+            "--add-tag",
+            "urgent",
+            "--remove-tag",
+            "old",
+            "--parent",
+            "xyz789",
+        ]);
+        assert!(cli.is_ok());
+        let cmd = match cli.unwrap().command {
+            Command::Update(cmd) => cmd,
+            _ => panic!("Expected Update command"),
+        };
+        assert_eq!(cmd.id, "abc123");
+        assert_eq!(cmd.title, Some("New Title".to_string()));
+        assert_eq!(
+            cmd.priority.map(|p| p.as_str().to_string()),
+            Some("critical".to_string())
+        );
+        assert_eq!(cmd.add_tags, vec!["urgent"]);
+        assert_eq!(cmd.remove_tags, vec!["old"]);
+        assert_eq!(cmd.parent, Some("xyz789".to_string()));
+    }
+
+    #[test]
+    fn test_command_update_debug() {
+        let cli = TestCli::try_parse_from(["test", "update", "test123"]).unwrap();
+        let debug_str = format!("{:?}", cli.command);
+        assert!(debug_str.contains("Update"));
     }
 }
