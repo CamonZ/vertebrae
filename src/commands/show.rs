@@ -90,6 +90,8 @@ struct CodeRefRow {
     #[serde(default)]
     line_end: Option<u32>,
     #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
     description: Option<String>,
 }
 
@@ -175,6 +177,9 @@ impl ShowCommand {
                 } else {
                     CodeRef::file(path)
                 };
+                if let Some(name) = r.name {
+                    code_ref = code_ref.with_name(name);
+                }
                 if let Some(desc) = r.description {
                     code_ref = code_ref.with_description(desc);
                 }
@@ -447,11 +452,17 @@ impl std::fmt::Display for TaskDetail {
 
             for code_ref in &self.code_refs {
                 let location = format_code_ref_location(code_ref);
-                if let Some(ref desc) = code_ref.description {
-                    writeln!(f, "  - {} ({})", location, desc)?;
-                } else {
-                    writeln!(f, "  - {}", location)?;
-                }
+                let name_part = code_ref
+                    .name
+                    .as_ref()
+                    .map(|n| format!(" [{}]", n))
+                    .unwrap_or_default();
+                let desc_part = code_ref
+                    .description
+                    .as_ref()
+                    .map(|d| format!(" ({})", d))
+                    .unwrap_or_default();
+                writeln!(f, "  - {}{}{}", location, name_part, desc_part)?;
             }
         }
 
@@ -843,12 +854,14 @@ mod tests {
                 path: Some("src/main.rs".to_string()),
                 line_start: Some(1),
                 line_end: Some(50),
+                name: None,
                 description: None,
             },
             CodeRefRow {
                 path: Some("README.md".to_string()),
                 line_start: None,
                 line_end: None,
+                name: Some("readme".to_string()),
                 description: Some("Documentation".to_string()),
             },
             // Invalid row without path - should be filtered out
@@ -856,6 +869,7 @@ mod tests {
                 path: None,
                 line_start: Some(10),
                 line_end: None,
+                name: None,
                 description: None,
             },
         ];

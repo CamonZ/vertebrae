@@ -10,6 +10,7 @@ pub mod depend;
 pub mod done;
 pub mod list;
 pub mod path;
+pub mod r#ref;
 pub mod section;
 pub mod sections;
 pub mod show;
@@ -26,6 +27,7 @@ pub use depend::DependCommand;
 pub use done::DoneCommand;
 pub use list::ListCommand;
 pub use path::PathCommand;
+pub use r#ref::RefCommand;
 pub use section::SectionCommand;
 pub use sections::SectionsCommand;
 pub use show::ShowCommand;
@@ -57,6 +59,8 @@ pub enum Command {
     List(ListCommand),
     /// Find the dependency path between two tasks
     Path(PathCommand),
+    /// Add a code reference to a task
+    Ref(RefCommand),
     /// Add a typed content section to a task
     Section(SectionCommand),
     /// List all sections for a task
@@ -131,6 +135,10 @@ impl Command {
                 Ok(CommandResult::Table(format_task_table(&tasks)))
             }
             Command::Path(cmd) => {
+                let result = cmd.execute(db).await?;
+                Ok(CommandResult::Message(format!("{}", result)))
+            }
+            Command::Ref(cmd) => {
                 let result = cmd.execute(db).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
