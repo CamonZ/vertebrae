@@ -16,4 +16,14 @@ pub enum TuiError {
     /// Database connection or query error.
     #[error("Database error: {0}")]
     Database(#[from] vertebrae_db::DbError),
+
+    /// SurrealDB error (for direct queries).
+    #[error("SurrealDB error: {0}")]
+    Surreal(Box<surrealdb::Error>),
+}
+
+impl From<surrealdb::Error> for TuiError {
+    fn from(err: surrealdb::Error) -> Self {
+        TuiError::Surreal(Box::new(err))
+    }
 }

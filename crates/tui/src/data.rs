@@ -12,6 +12,10 @@ use vertebrae_db::{
 use crate::details::{TaskDetails, TaskRelationships};
 use crate::error::TuiResult;
 use crate::navigation::TreeNode;
+use crate::timeline::TimelineTask;
+
+// Re-export needed for TimelineTaskRow deserialization
+use surrealdb;
 
 /// Load all root tasks (epics with no parent) from the database.
 pub async fn load_root_tasks(db: &Database) -> TuiResult<Vec<TaskSummary>> {
@@ -237,6 +241,66 @@ pub async fn load_task_details(db: &Database, task_id: &str) -> TuiResult<Option
         id: task_id.to_string(),
         relationships,
     }))
+}
+
+/// Row type for timeline task query
+#[derive(Debug, serde::Deserialize)]
+struct TimelineTaskRow {
+    id: surrealdb::sql::Thing,
+    title: String,
+    status: vertebrae_db::Status,
+    started_at: chrono::DateTime<chrono::Utc>,
+    completed_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// Load all tasks that have been started for the timeline view.
+///
+/// Only returns tasks where `started_at` is set. Tasks are sorted by
+/// their start time (oldest first).
+///
+/// # Arguments
+///
+/// * `db` - Database connection
+///
+/// # Returns
+///
+/// A vector of `TimelineTask` objects for tasks that have been started.
+pub async fn load_timeline_tasks(db: &Database) -> TuiResult<Vec<TimelineTask>> {
+    let rel_repo = RelationshipRepository::new(db.client());
+
+    // Query tasks with started_at directly from the database
+    // The TaskRepository.get() doesn't include started_at/completed_at
+    // Note: In SurrealDB, we need to check both that the field exists AND is not None
+    let query = "SELECT id, title, status, started_at, completed_at \
+                 FROM task WHERE started_at != NONE";
+
+    let mut result = db.client().query(query).await?;
+    let rows: Vec<TimelineTaskRow> = result.take(0)?;
+
+    let mut timeline_tasks = Vec::new();
+
+    for row in rows {
+        // Extract ID from the Thing type
+        let id = row.id.id.to_string();
+
+        // Check if this task has dependencies
+        let dependencies = rel_repo.get_dependencies(&id).await?;
+        let has_dependencies = !dependencies.is_empty();
+
+        timeline_tasks.push(TimelineTask {
+            id,
+            title: row.title,
+            status: row.status,
+            started_at: row.started_at,
+            completed_at: row.completed_at,
+            has_dependencies,
+        });
+    }
+
+    // Sort by start time (oldest first)
+    timeline_tasks.sort_by_key(|t| t.started_at);
+
+    Ok(timeline_tasks)
 }
 
 #[cfg(test)]
@@ -523,6 +587,152 @@ mod tests {
         assert_eq!(details.relationships.blocks.len(), 1);
         assert_eq!(details.relationships.blocks[0].0, "dependent");
         assert_eq!(details.relationships.blocks[0].1, "Dependent Task");
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_load_timeline_tasks_empty_db() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        let timeline_tasks = load_timeline_tasks(&db).await.unwrap();
+        assert!(timeline_tasks.is_empty());
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_load_timeline_tasks_excludes_unstarted() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        // Create a task without started_at
+        create_task_with_parent(&db, "task1", "Unstarted Task", Level::Task, None).await;
+
+        let timeline_tasks = load_timeline_tasks(&db).await.unwrap();
+        assert!(
+            timeline_tasks.is_empty(),
+            "Should not include tasks without started_at"
+        );
+
+        cleanup(&temp_dir);
+    }
+
+    /// Helper to set started_at timestamp on a task
+    async fn set_started_at(db: &Database, id: &str) {
+        let query = format!(
+            "UPDATE task:{} SET started_at = time::now(), status = 'in_progress'",
+            id
+        );
+        db.client().query(&query).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_load_timeline_tasks_includes_started() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        // Create a task
+        create_task_with_parent(&db, "started1", "Started Task", Level::Task, None).await;
+
+        // Set started_at using raw SQL (the repo.create doesn't include started_at)
+        set_started_at(&db, "started1").await;
+
+        let timeline_tasks = load_timeline_tasks(&db).await.unwrap();
+        assert_eq!(timeline_tasks.len(), 1);
+        assert_eq!(timeline_tasks[0].id, "started1");
+        assert_eq!(timeline_tasks[0].title, "Started Task");
+        assert_eq!(timeline_tasks[0].status, Status::InProgress);
+        assert!(timeline_tasks[0].completed_at.is_none());
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_load_timeline_tasks_includes_completed() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        // Create a task
+        create_task_with_parent(&db, "done1", "Completed Task", Level::Task, None).await;
+
+        // Set started_at and completed_at using raw SQL
+        let query = "UPDATE task:done1 SET started_at = time::now() - 2h, completed_at = time::now(), status = 'done'";
+        db.client().query(query).await.unwrap();
+
+        let timeline_tasks = load_timeline_tasks(&db).await.unwrap();
+        assert_eq!(timeline_tasks.len(), 1);
+        assert_eq!(timeline_tasks[0].id, "done1");
+        assert_eq!(timeline_tasks[0].status, Status::Done);
+        assert!(timeline_tasks[0].completed_at.is_some());
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_load_timeline_tasks_sorted_by_start_time() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        // Create tasks
+        create_task_with_parent(&db, "task1", "Task 1", Level::Task, None).await;
+        create_task_with_parent(&db, "task2", "Task 2", Level::Task, None).await;
+        create_task_with_parent(&db, "task3", "Task 3", Level::Task, None).await;
+
+        // Set start times using raw SQL with different offsets
+        let query1 = "UPDATE task:task1 SET started_at = time::now() - 1h, status = 'done'";
+        let query2 = "UPDATE task:task2 SET started_at = time::now() - 3h, status = 'in_progress'";
+        let query3 = "UPDATE task:task3 SET started_at = time::now() - 2h, status = 'done'";
+
+        db.client().query(query1).await.unwrap();
+        db.client().query(query2).await.unwrap();
+        db.client().query(query3).await.unwrap();
+
+        let timeline_tasks = load_timeline_tasks(&db).await.unwrap();
+        assert_eq!(timeline_tasks.len(), 3);
+
+        // Should be sorted by start time (oldest first)
+        assert_eq!(timeline_tasks[0].id, "task2"); // Started 3 hours ago
+        assert_eq!(timeline_tasks[1].id, "task3"); // Started 2 hours ago
+        assert_eq!(timeline_tasks[2].id, "task1"); // Started 1 hour ago
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_load_timeline_tasks_with_dependencies() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        let rel_repo = RelationshipRepository::new(db.client());
+
+        // Create two tasks
+        create_task_with_parent(&db, "blocker", "Blocker", Level::Task, None).await;
+        create_task_with_parent(&db, "dependent", "Dependent", Level::Task, None).await;
+
+        // Set timestamps using raw SQL
+        let query1 = "UPDATE task:blocker SET started_at = time::now() - 2h, status = 'done'";
+        let query2 = "UPDATE task:dependent SET started_at = time::now(), status = 'in_progress'";
+        db.client().query(query1).await.unwrap();
+        db.client().query(query2).await.unwrap();
+
+        // Create dependency relationship
+        rel_repo
+            .create_depends_on("dependent", "blocker")
+            .await
+            .unwrap();
+
+        let timeline_tasks = load_timeline_tasks(&db).await.unwrap();
+        assert_eq!(timeline_tasks.len(), 2);
+
+        // Find the dependent task and verify it has has_dependencies set
+        let dependent_task = timeline_tasks.iter().find(|t| t.id == "dependent").unwrap();
+        assert!(
+            dependent_task.has_dependencies,
+            "Dependent task should have has_dependencies=true"
+        );
+
+        // Blocker task should not have dependencies
+        let blocker_task = timeline_tasks.iter().find(|t| t.id == "blocker").unwrap();
+        assert!(
+            !blocker_task.has_dependencies,
+            "Blocker task should have has_dependencies=false"
+        );
 
         cleanup(&temp_dir);
     }

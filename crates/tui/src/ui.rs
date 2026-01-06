@@ -13,6 +13,7 @@ use ratatui::{
 use crate::app::{ActiveTab, App};
 use crate::details::render_details_view;
 use crate::navigation::render_nav_panel;
+use crate::timeline::render_timeline_view;
 use crate::tree_view::render_tree_view;
 
 /// Tab titles for the right panel.
@@ -124,25 +125,14 @@ fn draw_tab_content(frame: &mut Frame, area: Rect, app: &App) {
             render_tree_view(frame, area, app.tree_roots(), Some("No tasks found"));
         }
         ActiveTab::Timeline => {
-            draw_placeholder_content(
+            render_timeline_view(
                 frame,
                 area,
-                " Timeline ",
-                "Task timeline will be shown here.",
+                app.timeline_tasks(),
+                Some("No started tasks found"),
             );
         }
     }
-}
-
-/// Draw placeholder content for tabs not yet implemented.
-fn draw_placeholder_content(frame: &mut Frame, area: Rect, title: &str, content: &str) {
-    let block = Block::default()
-        .title(title)
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan));
-
-    let paragraph = Paragraph::new(content).block(block);
-    frame.render_widget(paragraph, area);
 }
 
 /// Draw the legend bar at the bottom.

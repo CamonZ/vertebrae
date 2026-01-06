@@ -13,11 +13,12 @@ use ratatui::prelude::*;
 
 use vertebrae_db::Database;
 
-use crate::data::{load_full_tree, load_task_details};
+use crate::data::{load_full_tree, load_task_details, load_timeline_tasks};
 use crate::details::TaskDetails;
 use crate::error::TuiResult;
 use crate::event::{is_down, is_enter, is_quit, is_tab, is_up, poll_key};
 use crate::navigation::{FlatNode, TreeNode, TreeState, flatten_tree};
+use crate::timeline::TimelineTask;
 use crate::ui;
 
 /// The active tab in the right panel.
@@ -69,6 +70,8 @@ pub struct App {
     selected_task_details: Option<TaskDetails>,
     /// Flag indicating that task details need to be reloaded.
     details_dirty: bool,
+    /// Cached timeline tasks for the timeline view.
+    timeline_tasks: Vec<TimelineTask>,
 }
 
 impl App {
@@ -102,6 +105,9 @@ impl App {
             None
         };
 
+        // Load timeline tasks (tasks with started_at timestamp)
+        let timeline_tasks = load_timeline_tasks(&db).await?;
+
         Ok(Self {
             db,
             selected_index: 0,
@@ -112,6 +118,7 @@ impl App {
             visible_nodes,
             selected_task_details,
             details_dirty: false,
+            timeline_tasks,
         })
     }
 
@@ -163,6 +170,11 @@ impl App {
     /// Get the tree roots.
     pub fn tree_roots(&self) -> &[TreeNode] {
         &self.tree_roots
+    }
+
+    /// Get the timeline tasks for the timeline view.
+    pub fn timeline_tasks(&self) -> &[TimelineTask] {
+        &self.timeline_tasks
     }
 
     /// Set the tree roots and refresh the visible nodes.
