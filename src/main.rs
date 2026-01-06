@@ -239,19 +239,49 @@ mod tests {
     fn test_add_command_requires_title() {
         // Add command without title should fail
         let result = Args::try_parse_from(["vtb", "add"]);
-        assert!(result.is_err());
+        match result {
+            Err(e) => {
+                let err = e.to_string();
+                assert!(
+                    err.contains("required") || err.contains("<TITLE>"),
+                    "Error should mention the required title argument, got: {}",
+                    err
+                );
+            }
+            Ok(_) => panic!("Expected error for missing title"),
+        }
     }
 
     #[test]
     fn test_add_command_invalid_level() {
         let result = Args::try_parse_from(["vtb", "add", "Task", "--level", "invalid"]);
-        assert!(result.is_err());
+        match result {
+            Err(e) => {
+                let err = e.to_string();
+                assert!(
+                    err.contains("level") || err.contains("invalid"),
+                    "Error should mention the level argument, got: {}",
+                    err
+                );
+            }
+            Ok(_) => panic!("Expected error for invalid level"),
+        }
     }
 
     #[test]
     fn test_add_command_invalid_priority() {
         let result = Args::try_parse_from(["vtb", "add", "Task", "--priority", "wrong"]);
-        assert!(result.is_err());
+        match result {
+            Err(e) => {
+                let err = e.to_string();
+                assert!(
+                    err.contains("priority") || err.contains("wrong"),
+                    "Error should mention the priority argument, got: {}",
+                    err
+                );
+            }
+            Ok(_) => panic!("Expected error for invalid priority"),
+        }
     }
 
     #[test]
