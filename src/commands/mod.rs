@@ -8,6 +8,7 @@ pub mod delete;
 pub mod done;
 pub mod list;
 pub mod section;
+pub mod sections;
 pub mod show;
 pub mod start;
 pub mod update;
@@ -18,6 +19,7 @@ pub use delete::DeleteCommand;
 pub use done::DoneCommand;
 pub use list::ListCommand;
 pub use section::SectionCommand;
+pub use sections::SectionsCommand;
 pub use show::ShowCommand;
 pub use start::StartCommand;
 pub use update::UpdateCommand;
@@ -41,6 +43,8 @@ pub enum Command {
     List(ListCommand),
     /// Add a typed content section to a task
     Section(SectionCommand),
+    /// List all sections for a task
+    Sections(SectionsCommand),
     /// Show full details of a task
     Show(ShowCommand),
     /// Start working on a task (transition to in_progress)
@@ -99,6 +103,10 @@ impl Command {
                 Ok(CommandResult::Table(format_task_table(&tasks)))
             }
             Command::Section(cmd) => {
+                let result = cmd.execute(db).await?;
+                Ok(CommandResult::Message(format!("{}", result)))
+            }
+            Command::Sections(cmd) => {
                 let result = cmd.execute(db).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
@@ -797,5 +805,63 @@ mod tests {
         let cli = TestCli::try_parse_from(["test", "block", "test123"]).unwrap();
         let debug_str = format!("{:?}", cli.command);
         assert!(debug_str.contains("Block"));
+    }
+
+    #[test]
+    fn test_command_sections_parses() {
+        let cli = TestCli::try_parse_from(["test", "sections", "abc123"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Sections(cmd) => {
+                assert_eq!(cmd.id, "abc123");
+                assert!(cmd.section_type.is_none());
+            }
+            _ => panic!("Expected Sections command"),
+        }
+    }
+
+    #[test]
+    fn test_command_sections_requires_id() {
+        let result = TestCli::try_parse_from(["test", "sections"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_command_sections_with_type_filter() {
+        let cli = TestCli::try_parse_from(["test", "sections", "abc123", "--type", "step"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Sections(cmd) => {
+                assert_eq!(cmd.id, "abc123");
+                assert!(cmd.section_type.is_some());
+                assert_eq!(cmd.section_type.unwrap().as_str(), "step");
+            }
+            _ => panic!("Expected Sections command"),
+        }
+    }
+
+    #[test]
+    fn test_command_sections_with_anti_pattern_filter() {
+        let cli = TestCli::try_parse_from(["test", "sections", "abc123", "--type", "anti_pattern"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Sections(cmd) => {
+                assert_eq!(cmd.section_type.unwrap().as_str(), "anti_pattern");
+            }
+            _ => panic!("Expected Sections command"),
+        }
+    }
+
+    #[test]
+    fn test_command_sections_invalid_type() {
+        let result = TestCli::try_parse_from(["test", "sections", "abc123", "--type", "invalid"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_command_sections_debug() {
+        let cli = TestCli::try_parse_from(["test", "sections", "test123"]).unwrap();
+        let debug_str = format!("{:?}", cli.command);
+        assert!(debug_str.contains("Sections"));
     }
 }
