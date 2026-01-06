@@ -1,0 +1,10 @@
+{
+  "hooks": {
+    "post-tool-use": [
+      {
+        "tools": ["edit", "write"],
+        "command": "cargo fmt"
+      }
+    ]
+  }
+}
