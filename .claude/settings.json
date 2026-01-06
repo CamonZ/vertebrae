@@ -1,9 +1,14 @@
 {
   "hooks": {
-    "post-tool-use": [
+    "PostToolUse": [
       {
-        "tools": ["edit", "write"],
-        "command": "cargo fmt"
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cargo fmt"
+          }
+        ]
       }
     ]
   }
