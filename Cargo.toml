@@ -10,4 +10,9 @@ name = "vtb"
 path = "src/main.rs"
 
 [dependencies]
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
+surrealdb = { version = "2", features = ["kv-rocksdb"] }
+tokio = { version = "1", features = ["full"] }
+thiserror = "2"
+dirs = "5"
+static_assertions = "1"
