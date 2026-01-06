@@ -468,8 +468,10 @@ mod tests {
 
         // Check display shows warning
         let display = format!("{}", unref_result);
-        assert!(display.contains("Warning"));
-        assert!(display.contains("No references to src/nonexistent.ex"));
+        assert_eq!(
+            display,
+            "Warning: No references to src/nonexistent.ex in task: task1"
+        );
 
         cleanup(&temp_dir);
     }
@@ -552,7 +554,10 @@ mod tests {
         assert!(result.is_err());
 
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("not found"));
+        assert_eq!(
+            err,
+            "Invalid database path: nonexistent - Task 'nonexistent' not found"
+        );
 
         cleanup(&temp_dir);
     }
@@ -731,9 +736,10 @@ mod tests {
         };
 
         let output = format!("{}", result);
-        assert!(output.contains("Warning"));
-        assert!(output.contains("No references to src/nonexistent.ex"));
-        assert!(output.contains("task1"));
+        assert_eq!(
+            output,
+            "Warning: No references to src/nonexistent.ex in task: task1"
+        );
     }
 
     #[test]
@@ -770,7 +776,12 @@ mod tests {
             all: false,
         };
         let debug_str = format!("{:?}", cmd);
-        assert!(debug_str.contains("UnrefCommand"));
+        assert!(
+            debug_str.contains("UnrefCommand")
+                && debug_str.contains("id: \"test\"")
+                && debug_str.contains("file: Some(\"src/main.rs\")"),
+            "Debug output should contain UnrefCommand and its fields"
+        );
     }
 
     #[test]
@@ -782,6 +793,11 @@ mod tests {
             removed_count: 0,
         };
         let debug_str = format!("{:?}", result);
-        assert!(debug_str.contains("UnrefResult"));
+        assert!(
+            debug_str.contains("UnrefResult")
+                && debug_str.contains("id: \"task1\"")
+                && debug_str.contains("removed_all: true"),
+            "Debug output should contain UnrefResult and its fields"
+        );
     }
 }

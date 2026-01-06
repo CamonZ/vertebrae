@@ -684,7 +684,16 @@ mod tests {
     async fn test_show_with_parent() {
         let (db, temp_dir) = setup_test_db().await;
 
-        create_task(&db, "parent1", "Parent Epic", "epic", "todo", None, &[]).await;
+        create_task(
+            &db,
+            "parent1",
+            "Parent Epic",
+            "epic",
+            "in_progress",
+            Some("high"),
+            &["backend", "core"],
+        )
+        .await;
         create_task(&db, "child1", "Child Task", "task", "todo", None, &[]).await;
         create_child_of(&db, "child1", "parent1").await;
 
@@ -697,7 +706,13 @@ mod tests {
 
         let detail = result.unwrap();
         assert!(detail.parent.is_some());
-        assert_eq!(detail.parent.unwrap().id, "parent1");
+        let parent = detail.parent.unwrap();
+        assert_eq!(parent.id, "parent1");
+        assert_eq!(parent.title, "Parent Epic");
+        assert_eq!(parent.level, "epic");
+        assert_eq!(parent.status, "in_progress");
+        assert_eq!(parent.priority, Some("high".to_string()));
+        assert_eq!(parent.tags, vec!["backend", "core"]);
 
         cleanup(&temp_dir);
     }
@@ -707,8 +722,26 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
 
         create_task(&db, "parent1", "Parent Epic", "epic", "todo", None, &[]).await;
-        create_task(&db, "child1", "Child 1", "ticket", "todo", None, &[]).await;
-        create_task(&db, "child2", "Child 2", "ticket", "todo", None, &[]).await;
+        create_task(
+            &db,
+            "child1",
+            "Child 1",
+            "ticket",
+            "in_progress",
+            Some("high"),
+            &["frontend"],
+        )
+        .await;
+        create_task(
+            &db,
+            "child2",
+            "Child 2",
+            "ticket",
+            "blocked",
+            Some("medium"),
+            &["backend"],
+        )
+        .await;
         create_child_of(&db, "child1", "parent1").await;
         create_child_of(&db, "child2", "parent1").await;
 
@@ -722,6 +755,21 @@ mod tests {
         let detail = result.unwrap();
         assert_eq!(detail.children.len(), 2);
 
+        // Find and verify each child by ID
+        let child1 = detail.children.iter().find(|c| c.id == "child1").unwrap();
+        assert_eq!(child1.title, "Child 1");
+        assert_eq!(child1.level, "ticket");
+        assert_eq!(child1.status, "in_progress");
+        assert_eq!(child1.priority, Some("high".to_string()));
+        assert_eq!(child1.tags, vec!["frontend"]);
+
+        let child2 = detail.children.iter().find(|c| c.id == "child2").unwrap();
+        assert_eq!(child2.title, "Child 2");
+        assert_eq!(child2.level, "ticket");
+        assert_eq!(child2.status, "blocked");
+        assert_eq!(child2.priority, Some("medium".to_string()));
+        assert_eq!(child2.tags, vec!["backend"]);
+
         cleanup(&temp_dir);
     }
 
@@ -729,7 +777,16 @@ mod tests {
     async fn test_show_with_dependencies() {
         let (db, temp_dir) = setup_test_db().await;
 
-        create_task(&db, "dep1", "Dependency Task", "task", "done", None, &[]).await;
+        create_task(
+            &db,
+            "dep1",
+            "Dependency Task",
+            "task",
+            "done",
+            Some("critical"),
+            &["blocker", "core"],
+        )
+        .await;
         create_task(&db, "task1", "Main Task", "task", "blocked", None, &[]).await;
         create_depends_on(&db, "task1", "dep1").await;
 
@@ -742,7 +799,14 @@ mod tests {
 
         let detail = result.unwrap();
         assert_eq!(detail.blocked_by.len(), 1);
-        assert_eq!(detail.blocked_by[0].id, "dep1");
+
+        let dep = &detail.blocked_by[0];
+        assert_eq!(dep.id, "dep1");
+        assert_eq!(dep.title, "Dependency Task");
+        assert_eq!(dep.level, "task");
+        assert_eq!(dep.status, "done");
+        assert_eq!(dep.priority, Some("critical".to_string()));
+        assert_eq!(dep.tags, vec!["blocker", "core"]);
 
         cleanup(&temp_dir);
     }

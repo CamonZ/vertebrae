@@ -540,6 +540,26 @@ mod tests {
         // Only child1 and child2 are incomplete (child3 is done)
         assert_eq!(done_result.incomplete_children.len(), 2);
 
+        // Verify specific incomplete children
+        use std::collections::HashSet;
+        let incomplete_ids: HashSet<_> = done_result
+            .incomplete_children
+            .iter()
+            .map(|(id, _, _)| id.as_str())
+            .collect();
+        assert!(
+            incomplete_ids.contains("child1"),
+            "Should contain child1 (status=todo)"
+        );
+        assert!(
+            incomplete_ids.contains("child2"),
+            "Should contain child2 (status=blocked)"
+        );
+        assert!(
+            !incomplete_ids.contains("child3"),
+            "Should not contain child3 (status=done)"
+        );
+
         cleanup(&temp_dir);
     }
 
@@ -564,7 +584,11 @@ mod tests {
         let done_result = result.unwrap();
         assert!(!done_result.unblocked_tasks.is_empty());
         assert_eq!(done_result.unblocked_tasks.len(), 1);
-        assert_eq!(done_result.unblocked_tasks[0].0, "dependent");
+
+        // Verify both fields of the unblocked task tuple (id, title)
+        let (unblocked_id, unblocked_title) = &done_result.unblocked_tasks[0];
+        assert_eq!(unblocked_id, "dependent");
+        assert_eq!(unblocked_title, "Dependent Task");
 
         cleanup(&temp_dir);
     }
@@ -644,6 +668,26 @@ mod tests {
 
         let done_result = result.unwrap();
         assert_eq!(done_result.unblocked_tasks.len(), 2);
+
+        // Verify all fields of each unblocked task tuple (id, title)
+        use std::collections::HashMap;
+        let unblocked_map: HashMap<_, _> = done_result
+            .unblocked_tasks
+            .iter()
+            .map(|(id, title)| (id.as_str(), title.as_str()))
+            .collect();
+
+        assert!(
+            unblocked_map.contains_key("dep1"),
+            "Should contain dep1 as unblocked"
+        );
+        assert_eq!(unblocked_map.get("dep1"), Some(&"Dependent 1"));
+
+        assert!(
+            unblocked_map.contains_key("dep2"),
+            "Should contain dep2 as unblocked"
+        );
+        assert_eq!(unblocked_map.get("dep2"), Some(&"Dependent 2"));
 
         cleanup(&temp_dir);
     }
@@ -787,9 +831,12 @@ mod tests {
     #[test]
     fn test_done_command_debug() {
         let cmd = DoneCommand {
-            id: "test".to_string(),
+            id: "test123".to_string(),
         };
         let debug_str = format!("{:?}", cmd);
-        assert!(debug_str.contains("DoneCommand"));
+        assert!(
+            debug_str.contains("DoneCommand") && debug_str.contains("id: \"test123\""),
+            "Debug output should contain DoneCommand and id field value"
+        );
     }
 }

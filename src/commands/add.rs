@@ -314,6 +314,58 @@ mod tests {
         assert!(result.unwrap_err().contains("invalid priority"));
     }
 
+    /// Helper to get a task from the database
+    async fn get_task(db: &Database, id: &str) -> Option<TaskRow> {
+        let query = format!(
+            "SELECT title, level, status, priority, tags FROM task:{}",
+            id
+        );
+        let mut result = db.client().query(&query).await.ok()?;
+        result.take(0).ok()?
+    }
+
+    /// Struct for querying task fields
+    #[derive(Debug, serde::Deserialize)]
+    struct TaskRow {
+        title: String,
+        level: String,
+        status: String,
+        priority: Option<String>,
+        #[serde(default)]
+        tags: Vec<String>,
+    }
+
+    /// Helper to check if an edge exists between two tasks
+    async fn edge_exists(db: &Database, relation: &str, from_id: &str, to_id: &str) -> bool {
+        #[derive(serde::Deserialize)]
+        struct EdgeRow {
+            #[allow(dead_code)]
+            id: surrealdb::sql::Thing,
+        }
+
+        let query = format!(
+            "SELECT id FROM {} WHERE in = task:{} AND out = task:{}",
+            relation, from_id, to_id
+        );
+        let mut result = db.client().query(&query).await.unwrap();
+        let edges: Vec<EdgeRow> = result.take(0).unwrap();
+        !edges.is_empty()
+    }
+
+    /// Helper to count edges from a task for a given relation
+    async fn count_edges(db: &Database, relation: &str, from_id: &str) -> usize {
+        #[derive(serde::Deserialize)]
+        struct EdgeRow {
+            #[allow(dead_code)]
+            id: surrealdb::sql::Thing,
+        }
+
+        let query = format!("SELECT id FROM {} WHERE in = task:{}", relation, from_id);
+        let mut result = db.client().query(&query).await.unwrap();
+        let edges: Vec<EdgeRow> = result.take(0).unwrap();
+        edges.len()
+    }
+
     #[tokio::test]
     async fn test_add_simple_task() {
         let (db, temp_dir) = setup_test_db().await;
@@ -328,11 +380,16 @@ mod tests {
             depends_on: vec![],
         };
 
-        let result = cmd.execute(&db).await;
-        assert!(result.is_ok(), "Add failed: {:?}", result.err());
-
-        let id = result.unwrap();
+        let id = cmd.execute(&db).await.expect("Add should succeed");
         assert_eq!(id.len(), 6);
+
+        // Verify task was persisted with correct fields
+        let task = get_task(&db, &id).await.expect("Task should exist in DB");
+        assert_eq!(task.title, "My first task");
+        assert_eq!(task.level, "task"); // Default level
+        assert_eq!(task.status, "todo"); // Default status
+        assert!(task.priority.is_none());
+        assert!(task.tags.is_empty());
 
         cleanup(&temp_dir);
     }
@@ -351,8 +408,12 @@ mod tests {
             depends_on: vec![],
         };
 
-        let result = cmd.execute(&db).await;
-        assert!(result.is_ok());
+        let id = cmd.execute(&db).await.expect("Add should succeed");
+
+        // Verify level was persisted correctly
+        let task = get_task(&db, &id).await.expect("Task should exist in DB");
+        assert_eq!(task.title, "Epic task");
+        assert_eq!(task.level, "epic");
 
         cleanup(&temp_dir);
     }
@@ -371,8 +432,12 @@ mod tests {
             depends_on: vec![],
         };
 
-        let result = cmd.execute(&db).await;
-        assert!(result.is_ok());
+        let id = cmd.execute(&db).await.expect("Add should succeed");
+
+        // Verify priority was persisted correctly
+        let task = get_task(&db, &id).await.expect("Task should exist in DB");
+        assert_eq!(task.title, "Urgent task");
+        assert_eq!(task.priority, Some("high".to_string()));
 
         cleanup(&temp_dir);
     }
@@ -391,8 +456,14 @@ mod tests {
             depends_on: vec![],
         };
 
-        let result = cmd.execute(&db).await;
-        assert!(result.is_ok());
+        let id = cmd.execute(&db).await.expect("Add should succeed");
+
+        // Verify tags were persisted correctly
+        let task = get_task(&db, &id).await.expect("Task should exist in DB");
+        assert_eq!(task.title, "Tagged task");
+        assert_eq!(task.tags.len(), 2);
+        assert!(task.tags.contains(&"backend".to_string()));
+        assert!(task.tags.contains(&"urgent".to_string()));
 
         cleanup(&temp_dir);
     }
@@ -511,8 +582,22 @@ mod tests {
             depends_on: vec![],
         };
 
-        let result = child_cmd.execute(&db).await;
-        assert!(result.is_ok(), "Child creation failed: {:?}", result.err());
+        let child_id = child_cmd.execute(&db).await.unwrap();
+
+        // Verify child_of edge was created in the database
+        assert!(
+            edge_exists(&db, "child_of", &child_id, &parent_id).await,
+            "child_of edge should exist from child {} to parent {}",
+            child_id,
+            parent_id
+        );
+
+        // Verify exactly one child_of edge from child
+        assert_eq!(
+            count_edges(&db, "child_of", &child_id).await,
+            1,
+            "child should have exactly one child_of edge"
+        );
 
         cleanup(&temp_dir);
     }
@@ -545,11 +630,21 @@ mod tests {
             depends_on: vec![dep_id.clone()],
         };
 
-        let result = task_cmd.execute(&db).await;
+        let task_id = task_cmd.execute(&db).await.unwrap();
+
+        // Verify depends_on edge was created in the database
         assert!(
-            result.is_ok(),
-            "Dependent creation failed: {:?}",
-            result.err()
+            edge_exists(&db, "depends_on", &task_id, &dep_id).await,
+            "depends_on edge should exist from task {} to dependency {}",
+            task_id,
+            dep_id
+        );
+
+        // Verify exactly one depends_on edge from task
+        assert_eq!(
+            count_edges(&db, "depends_on", &task_id).await,
+            1,
+            "task should have exactly one depends_on edge"
         );
 
         cleanup(&temp_dir);
@@ -593,8 +688,28 @@ mod tests {
             depends_on: vec![dep1_id.clone(), dep2_id.clone()],
         };
 
-        let result = task_cmd.execute(&db).await;
-        assert!(result.is_ok());
+        let task_id = task_cmd.execute(&db).await.unwrap();
+
+        // Verify both depends_on edges were created in the database
+        assert!(
+            edge_exists(&db, "depends_on", &task_id, &dep1_id).await,
+            "depends_on edge should exist from task {} to dependency {}",
+            task_id,
+            dep1_id
+        );
+        assert!(
+            edge_exists(&db, "depends_on", &task_id, &dep2_id).await,
+            "depends_on edge should exist from task {} to dependency {}",
+            task_id,
+            dep2_id
+        );
+
+        // Verify exactly two depends_on edges from task
+        assert_eq!(
+            count_edges(&db, "depends_on", &task_id).await,
+            2,
+            "task should have exactly two depends_on edges"
+        );
 
         cleanup(&temp_dir);
     }
@@ -613,7 +728,10 @@ mod tests {
             parent: None,
             depends_on: vec![],
         };
-        let parent_id = parent_cmd.execute(&db).await.unwrap();
+        let parent_id = parent_cmd
+            .execute(&db)
+            .await
+            .expect("Parent should be created");
 
         // Create a dependency
         let dep_cmd = AddCommand {
@@ -625,7 +743,10 @@ mod tests {
             parent: None,
             depends_on: vec![],
         };
-        let dep_id = dep_cmd.execute(&db).await.unwrap();
+        let dep_id = dep_cmd
+            .execute(&db)
+            .await
+            .expect("Dependency should be created");
 
         // Create task with all options
         let cmd = AddCommand {
@@ -634,13 +755,36 @@ mod tests {
             description: Some("Detailed description".to_string()),
             priority: Some(Priority::Critical),
             tags: vec!["urgent".to_string(), "backend".to_string()],
-            parent: Some(parent_id),
-            depends_on: vec![dep_id],
+            parent: Some(parent_id.clone()),
+            depends_on: vec![dep_id.clone()],
         };
 
-        let result = cmd.execute(&db).await;
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().len(), 6);
+        let task_id = cmd.execute(&db).await.expect("Task should be created");
+        assert_eq!(task_id.len(), 6);
+
+        // Verify all task fields were persisted correctly
+        let task = get_task(&db, &task_id)
+            .await
+            .expect("Task should exist in DB");
+        assert_eq!(task.title, "Complete task");
+        assert_eq!(task.level, "ticket");
+        assert_eq!(task.status, "todo");
+        assert_eq!(task.priority, Some("critical".to_string()));
+        assert_eq!(task.tags.len(), 2);
+        assert!(task.tags.contains(&"urgent".to_string()));
+        assert!(task.tags.contains(&"backend".to_string()));
+
+        // Verify parent relationship was created
+        assert!(
+            edge_exists(&db, "child_of", &task_id, &parent_id).await,
+            "child_of edge should exist"
+        );
+
+        // Verify dependency relationship was created
+        assert!(
+            edge_exists(&db, "depends_on", &task_id, &dep_id).await,
+            "depends_on edge should exist"
+        );
 
         cleanup(&temp_dir);
     }

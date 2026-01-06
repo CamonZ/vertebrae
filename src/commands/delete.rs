@@ -433,6 +433,23 @@ mod tests {
         rows.first().map(|r| r.id.id.to_string())
     }
 
+    /// Helper to check if a child_of relationship exists
+    async fn child_of_exists(db: &Database, child_id: &str, parent_id: &str) -> bool {
+        #[derive(Deserialize)]
+        struct EdgeRow {
+            #[allow(dead_code)]
+            id: surrealdb::sql::Thing,
+        }
+
+        let query = format!(
+            "SELECT id FROM child_of WHERE in = task:{} AND out = task:{}",
+            child_id, parent_id
+        );
+        let mut result = db.client().query(&query).await.unwrap();
+        let rows: Vec<EdgeRow> = result.take(0).unwrap();
+        !rows.is_empty()
+    }
+
     /// Clean up test database
     fn cleanup(path: &std::path::Path) {
         let _ = std::fs::remove_dir_all(path);
@@ -453,7 +470,7 @@ mod tests {
 
         let result = cmd.execute(&db).await;
         assert!(result.is_ok(), "Delete failed: {:?}", result.err());
-        assert!(result.unwrap().contains("Deleted task: abc123"));
+        assert_eq!(result.unwrap(), "Deleted task: abc123");
 
         assert!(!task_exists(&db, "abc123").await);
 
@@ -473,7 +490,10 @@ mod tests {
         let result = cmd.execute(&db).await;
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("not found"));
+        assert_eq!(
+            err,
+            "Invalid database path: nonexistent - Task 'nonexistent' not found"
+        );
 
         cleanup(&temp_dir);
     }
@@ -512,6 +532,20 @@ mod tests {
         create_child_of(&db, "child2", "parent1").await;
         create_child_of(&db, "grandchild", "child1").await;
 
+        // Verify child_of edges exist before deletion
+        assert!(
+            child_of_exists(&db, "child1", "parent1").await,
+            "child1 -> parent1 edge should exist before delete"
+        );
+        assert!(
+            child_of_exists(&db, "child2", "parent1").await,
+            "child2 -> parent1 edge should exist before delete"
+        );
+        assert!(
+            child_of_exists(&db, "grandchild", "child1").await,
+            "grandchild -> child1 edge should exist before delete"
+        );
+
         let cmd = DeleteCommand {
             id: "parent1".to_string(),
             cascade: true,
@@ -520,12 +554,27 @@ mod tests {
 
         let result = cmd.execute(&db).await;
         assert!(result.is_ok(), "Cascade delete failed: {:?}", result.err());
-        assert!(result.unwrap().contains("Deleted 4 tasks"));
+        assert_eq!(result.unwrap(), "Deleted 4 tasks (including children)");
 
+        // Verify all tasks are deleted
         assert!(!task_exists(&db, "parent1").await);
         assert!(!task_exists(&db, "child1").await);
         assert!(!task_exists(&db, "child2").await);
         assert!(!task_exists(&db, "grandchild").await);
+
+        // Verify all child_of edges are cleaned up
+        assert!(
+            !child_of_exists(&db, "child1", "parent1").await,
+            "child1 -> parent1 edge should be removed"
+        );
+        assert!(
+            !child_of_exists(&db, "child2", "parent1").await,
+            "child2 -> parent1 edge should be removed"
+        );
+        assert!(
+            !child_of_exists(&db, "grandchild", "child1").await,
+            "grandchild -> child1 edge should be removed"
+        );
 
         cleanup(&temp_dir);
     }
@@ -714,7 +763,7 @@ mod tests {
 
         // Test Debug
         let debug_str = format!("{:?}", cancel);
-        assert!(debug_str.contains("Cancel"));
+        assert_eq!(debug_str, "Cancel");
     }
 
     #[tokio::test]
@@ -784,6 +833,12 @@ mod tests {
         let blocked = blocked.unwrap();
         assert_eq!(blocked.len(), 2);
 
+        // Verify specific blocked tasks
+        use std::collections::HashSet;
+        let blocked_ids: HashSet<_> = blocked.iter().map(|id| id.as_str()).collect();
+        assert!(blocked_ids.contains("blocked1"), "Should contain blocked1");
+        assert!(blocked_ids.contains("blocked2"), "Should contain blocked2");
+
         cleanup(&temp_dir);
     }
 
@@ -822,8 +877,10 @@ mod tests {
             force: false,
         };
         let debug_str = format!("{:?}", cmd);
-        assert!(debug_str.contains("DeleteCommand"));
-        assert!(debug_str.contains("cascade: true"));
+        assert!(
+            debug_str.contains("DeleteCommand") && debug_str.contains("cascade: true"),
+            "Debug output should contain DeleteCommand and cascade: true"
+        );
     }
 
     #[tokio::test]
@@ -867,7 +924,7 @@ mod tests {
 
         let result = cmd.execute(&db).await;
         assert!(result.is_ok());
-        assert!(result.unwrap().contains("Deleted 4 tasks"));
+        assert_eq!(result.unwrap(), "Deleted 4 tasks (including children)");
 
         assert!(!task_exists(&db, "level1").await);
         assert!(!task_exists(&db, "level2").await);

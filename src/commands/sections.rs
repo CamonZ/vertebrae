@@ -445,8 +445,14 @@ mod tests {
         let result = parse_section_type("invalid");
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(err.contains("invalid section type"));
-        assert!(err.contains("goal"));
+        assert!(
+            err.contains("invalid section type 'invalid'"),
+            "Error should indicate the invalid section type"
+        );
+        assert!(
+            err.contains("goal"),
+            "Error should list valid section types"
+        );
     }
 
     #[test]
@@ -649,7 +655,10 @@ mod tests {
         assert!(result.is_err());
 
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("not found"));
+        assert_eq!(
+            err,
+            "Invalid database path: nonexistent - Task 'nonexistent' not found"
+        );
 
         cleanup(&temp_dir);
     }
@@ -716,16 +725,51 @@ mod tests {
         };
 
         let output = format!("{}", result);
+        let lines: Vec<&str> = output.lines().collect();
 
-        assert!(output.contains("Sections for task: task1"));
-        assert!(output.contains("Positive Space"));
-        assert!(output.contains("Goal: The goal"));
-        assert!(output.contains("Steps:"));
-        assert!(output.contains("[0] Step 1"));
-        assert!(output.contains("[1] Step 2"));
-        assert!(output.contains("Negative Space"));
-        assert!(output.contains("Anti-Patterns:"));
-        assert!(output.contains("[0] Don't do this"));
+        // Check structured output
+        assert_eq!(lines[0], "Sections for task: task1");
+        assert!(lines[1].starts_with("="), "Second line should be separator");
+
+        // Find Positive Space section
+        let pos_idx = lines.iter().position(|l| *l == "Positive Space").unwrap();
+        assert!(
+            lines[pos_idx + 1].starts_with("-"),
+            "Should have separator after Positive Space"
+        );
+
+        // Check goal and steps appear
+        assert!(
+            lines.iter().any(|l| *l == "Goal: The goal"),
+            "Should have Goal line"
+        );
+        assert!(
+            lines.iter().any(|l| *l == "Steps:"),
+            "Should have Steps header"
+        );
+        assert!(
+            lines.iter().any(|l| l.trim() == "[0] Step 1"),
+            "Should have Step 1 with ordinal"
+        );
+        assert!(
+            lines.iter().any(|l| l.trim() == "[1] Step 2"),
+            "Should have Step 2 with ordinal"
+        );
+
+        // Find Negative Space section
+        let neg_idx = lines.iter().position(|l| *l == "Negative Space").unwrap();
+        assert!(
+            neg_idx > pos_idx,
+            "Negative Space should come after Positive Space"
+        );
+        assert!(
+            lines.iter().any(|l| *l == "Anti-Patterns:"),
+            "Should have Anti-Patterns header"
+        );
+        assert!(
+            lines.iter().any(|l| l.trim() == "[0] Don't do this"),
+            "Should have anti-pattern with ordinal"
+        );
     }
 
     #[test]
@@ -740,11 +784,25 @@ mod tests {
         };
 
         let output = format!("{}", result);
+        let lines: Vec<&str> = output.lines().collect();
 
-        assert!(output.contains("Positive Space"));
-        assert!(output.contains("Goal: The goal"));
-        assert!(output.contains("Context: Some context"));
-        assert!(!output.contains("Negative Space"));
+        // Check Positive Space exists
+        assert!(
+            lines.iter().any(|l| *l == "Positive Space"),
+            "Should have Positive Space header"
+        );
+        assert!(
+            lines.iter().any(|l| *l == "Goal: The goal"),
+            "Should have Goal line"
+        );
+        assert!(
+            lines.iter().any(|l| *l == "Context: Some context"),
+            "Should have Context line"
+        );
+        assert!(
+            !lines.iter().any(|l| *l == "Negative Space"),
+            "Should not have Negative Space header"
+        );
     }
 
     #[test]
@@ -759,11 +817,24 @@ mod tests {
         };
 
         let output = format!("{}", result);
+        let lines: Vec<&str> = output.lines().collect();
 
-        assert!(!output.contains("Positive Space"));
-        assert!(output.contains("Negative Space"));
-        assert!(output.contains("Anti-Patterns:"));
-        assert!(output.contains("Constraints:"));
+        assert!(
+            !lines.iter().any(|l| *l == "Positive Space"),
+            "Should not have Positive Space header"
+        );
+        assert!(
+            lines.iter().any(|l| *l == "Negative Space"),
+            "Should have Negative Space header"
+        );
+        assert!(
+            lines.iter().any(|l| *l == "Anti-Patterns:"),
+            "Should have Anti-Patterns header"
+        );
+        assert!(
+            lines.iter().any(|l| *l == "Constraints:"),
+            "Should have Constraints header"
+        );
     }
 
     #[test]
@@ -773,7 +844,10 @@ mod tests {
             section_type: None,
         };
         let debug_str = format!("{:?}", cmd);
-        assert!(debug_str.contains("SectionsCommand"));
+        assert!(
+            debug_str.contains("SectionsCommand") && debug_str.contains("id: \"test\""),
+            "Debug output should contain SectionsCommand and id field"
+        );
     }
 
     #[test]
@@ -784,6 +858,9 @@ mod tests {
             filter_type: None,
         };
         let debug_str = format!("{:?}", result);
-        assert!(debug_str.contains("SectionsResult"));
+        assert!(
+            debug_str.contains("SectionsResult") && debug_str.contains("id: \"task1\""),
+            "Debug output should contain SectionsResult and id field"
+        );
     }
 }

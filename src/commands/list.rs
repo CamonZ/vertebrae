@@ -515,6 +515,13 @@ mod tests {
         assert_eq!(result.len(), 2);
         assert!(result.iter().all(|t| t.status != "done"));
 
+        // Verify specific tasks are included
+        use std::collections::HashSet;
+        let ids: HashSet<_> = result.iter().map(|t| t.id.as_str()).collect();
+        assert!(ids.contains("task1"), "Should contain task1");
+        assert!(ids.contains("task2"), "Should contain task2");
+        assert!(!ids.contains("task3"), "Should not contain done task");
+
         cleanup(&temp_dir);
     }
 
@@ -540,6 +547,15 @@ mod tests {
 
         // Should have all 2 tasks
         assert_eq!(result.len(), 2);
+
+        // Verify specific tasks are included (including done task)
+        use std::collections::HashSet;
+        let ids: HashSet<_> = result.iter().map(|t| t.id.as_str()).collect();
+        assert!(ids.contains("task1"), "Should contain task1");
+        assert!(
+            ids.contains("task2"),
+            "Should contain done task2 with --all flag"
+        );
 
         cleanup(&temp_dir);
     }
@@ -595,6 +611,16 @@ mod tests {
             result
                 .iter()
                 .all(|t| t.level == "epic" || t.level == "ticket")
+        );
+
+        // Verify specific tasks are included
+        use std::collections::HashSet;
+        let ids: HashSet<_> = result.iter().map(|t| t.id.as_str()).collect();
+        assert!(ids.contains("epic1"), "Should contain epic1");
+        assert!(ids.contains("ticket1"), "Should contain ticket1");
+        assert!(
+            !ids.contains("task1"),
+            "Should not contain task1 (level=task)"
         );
 
         cleanup(&temp_dir);
@@ -686,6 +712,22 @@ mod tests {
             result
                 .iter()
                 .all(|t| t.tags.contains(&"backend".to_string()))
+        );
+
+        // Verify specific tasks are included
+        use std::collections::HashSet;
+        let ids: HashSet<_> = result.iter().map(|t| t.id.as_str()).collect();
+        assert!(
+            ids.contains("task1"),
+            "Should contain task1 (has backend tag)"
+        );
+        assert!(
+            ids.contains("task3"),
+            "Should contain task3 (has backend tag)"
+        );
+        assert!(
+            !ids.contains("task2"),
+            "Should not contain task2 (only has frontend tag)"
         );
 
         cleanup(&temp_dir);
@@ -957,28 +999,41 @@ mod tests {
             title: "Test".to_string(),
             level: "task".to_string(),
             status: "todo".to_string(),
-            priority: None,
-            tags: vec![],
+            priority: Some("high".to_string()),
+            tags: vec!["backend".to_string(), "urgent".to_string()],
         };
 
         let cloned = summary.clone();
         assert_eq!(summary.id, cloned.id);
         assert_eq!(summary.title, cloned.title);
+        assert_eq!(summary.level, cloned.level);
+        assert_eq!(summary.status, cloned.status);
+        assert_eq!(summary.priority, cloned.priority);
+        assert_eq!(summary.tags, cloned.tags);
     }
 
     #[test]
     fn test_task_summary_debug() {
         let summary = TaskSummary {
-            id: "123".to_string(),
-            title: "Test".to_string(),
-            level: "task".to_string(),
-            status: "todo".to_string(),
-            priority: None,
-            tags: vec![],
+            id: "abc123".to_string(),
+            title: "Test Task".to_string(),
+            level: "ticket".to_string(),
+            status: "in_progress".to_string(),
+            priority: Some("high".to_string()),
+            tags: vec!["backend".to_string()],
         };
 
         let debug_str = format!("{:?}", summary);
-        assert!(debug_str.contains("TaskSummary"));
+        assert!(
+            debug_str.contains("TaskSummary")
+                && debug_str.contains("id: \"abc123\"")
+                && debug_str.contains("title: \"Test Task\"")
+                && debug_str.contains("level: \"ticket\"")
+                && debug_str.contains("status: \"in_progress\"")
+                && debug_str.contains("high")
+                && debug_str.contains("backend"),
+            "Debug output should contain TaskSummary and all field values"
+        );
     }
 
     #[test]
@@ -987,13 +1042,23 @@ mod tests {
             levels: vec![Level::Epic],
             statuses: vec![Status::Todo],
             priorities: vec![Priority::High],
-            tags: vec!["test".to_string()],
+            tags: vec!["backend".to_string()],
             root: true,
-            children: Some("parent".to_string()),
+            children: Some("parent123".to_string()),
             all: true,
         };
 
         let debug_str = format!("{:?}", cmd);
-        assert!(debug_str.contains("ListCommand"));
+        assert!(
+            debug_str.contains("ListCommand")
+                && debug_str.contains("Epic")
+                && debug_str.contains("Todo")
+                && debug_str.contains("High")
+                && debug_str.contains("backend")
+                && debug_str.contains("root: true")
+                && debug_str.contains("parent123")
+                && debug_str.contains("all: true"),
+            "Debug output should contain ListCommand and all field values"
+        );
     }
 }

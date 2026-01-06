@@ -322,7 +322,7 @@ mod tests {
         assert_eq!(blockers_result.total_count, 0);
 
         let output = format!("{}", blockers_result);
-        assert!(output.contains("No blockers"));
+        assert_eq!(output, "No blockers\n");
 
         cleanup(&temp_dir);
     }
@@ -491,7 +491,10 @@ mod tests {
         assert!(result.is_err());
 
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("not found"));
+        assert_eq!(
+            err,
+            "Invalid database path: nonexistent - Task 'nonexistent' not found"
+        );
 
         cleanup(&temp_dir);
     }
@@ -548,7 +551,7 @@ mod tests {
     async fn test_blockers_shows_status() {
         let (db, temp_dir) = setup_test_db().await;
 
-        create_task(&db, "done_blocker", "Done Blocker", "task", "done").await;
+        create_task(&db, "done_blocker", "Done Blocker", "ticket", "done").await;
         create_task(&db, "todo_blocker", "Todo Blocker", "task", "todo").await;
         create_task(&db, "task1", "Main Task", "task", "blocked").await;
 
@@ -564,19 +567,38 @@ mod tests {
         assert!(result.is_ok());
 
         let blockers_result = result.unwrap();
+        assert_eq!(blockers_result.blockers.len(), 2);
 
-        // Check that statuses are captured
-        let statuses: Vec<&str> = blockers_result
+        // Verify all fields of each BlockerNode
+        let done_blocker = blockers_result
             .blockers
             .iter()
-            .map(|b| b.status.as_str())
-            .collect();
-        assert!(statuses.contains(&"done"));
-        assert!(statuses.contains(&"todo"));
+            .find(|b| b.id == "done_blocker")
+            .expect("Should find done_blocker");
+        assert_eq!(done_blocker.title, "Done Blocker");
+        assert_eq!(done_blocker.level, "ticket");
+        assert_eq!(done_blocker.status, "done");
+        assert!(done_blocker.children.is_empty());
 
-        // Check output contains status info
+        let todo_blocker = blockers_result
+            .blockers
+            .iter()
+            .find(|b| b.id == "todo_blocker")
+            .expect("Should find todo_blocker");
+        assert_eq!(todo_blocker.title, "Todo Blocker");
+        assert_eq!(todo_blocker.level, "task");
+        assert_eq!(todo_blocker.status, "todo");
+        assert!(todo_blocker.children.is_empty());
+
+        // Check output contains status info by verifying blockers have the expected statuses
         let output = format!("{}", blockers_result);
-        assert!(output.contains("done") || output.contains("todo"));
+        // The output should contain the status values from the blockers
+        let has_done = output.lines().any(|line| line.contains("done"));
+        let has_todo = output.lines().any(|line| line.contains("todo"));
+        assert!(
+            has_done && has_todo,
+            "Output should contain both 'done' and 'todo' status values"
+        );
 
         cleanup(&temp_dir);
     }
@@ -619,7 +641,7 @@ mod tests {
         };
 
         let output = format!("{}", result);
-        assert!(output.contains("No blockers"));
+        assert_eq!(output, "No blockers\n");
     }
 
     #[test]
@@ -638,11 +660,16 @@ mod tests {
         };
 
         let output = format!("{}", result);
-        assert!(output.contains("Blockers for: task1"));
-        assert!(output.contains("Test Task"));
-        assert!(output.contains("blocker1"));
-        assert!(output.contains("Blocker Task"));
-        assert!(output.contains("Total: 1 blocking item"));
+        let lines: Vec<&str> = output.lines().collect();
+        assert_eq!(lines[0], "Blockers for: task1 \"Test Task\"");
+        assert!(lines[1].starts_with("="), "Second line should be separator");
+        // Third line is blank
+        // Fourth line has the blocker info
+        assert!(
+            lines[3].contains("blocker1") && lines[3].contains("Blocker Task"),
+            "Blocker line should contain blocker1 and Blocker Task"
+        );
+        assert_eq!(lines[lines.len() - 1], "Total: 1 blocking item");
     }
 
     #[test]
@@ -670,7 +697,8 @@ mod tests {
         };
 
         let output = format!("{}", result);
-        assert!(output.contains("Total: 2 blocking items"));
+        let last_line = output.lines().last().unwrap();
+        assert_eq!(last_line, "Total: 2 blocking items");
     }
 
     #[test]
@@ -680,7 +708,10 @@ mod tests {
             depth: Some(5),
         };
         let debug_str = format!("{:?}", cmd);
-        assert!(debug_str.contains("BlockersCommand"));
+        assert!(
+            debug_str.contains("BlockersCommand") && debug_str.contains("depth: Some(5)"),
+            "Debug output should contain BlockersCommand and depth info"
+        );
     }
 
     #[test]
@@ -693,7 +724,10 @@ mod tests {
             children: vec![],
         };
         let debug_str = format!("{:?}", node);
-        assert!(debug_str.contains("BlockerNode"));
+        assert!(
+            debug_str.contains("BlockerNode") && debug_str.contains("id: \"test\""),
+            "Debug output should contain BlockerNode and id field"
+        );
     }
 
     #[test]
@@ -705,6 +739,9 @@ mod tests {
             total_count: 0,
         };
         let debug_str = format!("{:?}", result);
-        assert!(debug_str.contains("BlockersResult"));
+        assert!(
+            debug_str.contains("BlockersResult") && debug_str.contains("task_id: \"test\""),
+            "Debug output should contain BlockersResult and task_id field"
+        );
     }
 }
