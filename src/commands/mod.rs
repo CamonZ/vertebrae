@@ -4,9 +4,11 @@
 
 pub mod add;
 pub mod list;
+pub mod show;
 
 pub use add::AddCommand;
 pub use list::ListCommand;
+pub use show::ShowCommand;
 
 use crate::db::{Database, DbError};
 use crate::output::format_task_table;
@@ -19,6 +21,8 @@ pub enum Command {
     Add(AddCommand),
     /// List tasks with optional filters
     List(ListCommand),
+    /// Show full details of a task
+    Show(ShowCommand),
 }
 
 /// Result of executing a command
@@ -57,6 +61,10 @@ impl Command {
             Command::List(cmd) => {
                 let tasks = cmd.execute(db).await?;
                 Ok(CommandResult::Table(format_task_table(&tasks)))
+            }
+            Command::Show(cmd) => {
+                let detail = cmd.execute(db).await?;
+                Ok(CommandResult::Message(format!("{}", detail)))
             }
         }
     }
@@ -373,5 +381,30 @@ mod tests {
     fn test_command_result_display_table() {
         let result = CommandResult::Table("Table content".to_string());
         assert_eq!(format!("{}", result), "Table content");
+    }
+
+    #[test]
+    fn test_command_show_parses() {
+        let cli = TestCli::try_parse_from(["test", "show", "abc123"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Show(cmd) => {
+                assert_eq!(cmd.id, "abc123");
+            }
+            _ => panic!("Expected Show command"),
+        }
+    }
+
+    #[test]
+    fn test_command_show_requires_id() {
+        let result = TestCli::try_parse_from(["test", "show"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_command_show_debug() {
+        let cli = TestCli::try_parse_from(["test", "show", "test123"]).unwrap();
+        let debug_str = format!("{:?}", cli.command);
+        assert!(debug_str.contains("Show"));
     }
 }
