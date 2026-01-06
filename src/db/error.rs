@@ -52,8 +52,10 @@ mod tests {
             path: PathBuf::from("/invalid/path"),
             reason: "Directory does not exist".to_string(),
         };
-        assert!(err.to_string().contains("/invalid/path"));
-        assert!(err.to_string().contains("Directory does not exist"));
+        assert_eq!(
+            err.to_string(),
+            "Invalid database path: /invalid/path - Directory does not exist"
+        );
     }
 
     #[test]
@@ -63,7 +65,10 @@ mod tests {
             path: PathBuf::from("/root/vtb"),
             source: io_err,
         };
-        assert!(err.to_string().contains("/root/vtb"));
+        assert_eq!(
+            err.to_string(),
+            "Failed to create database directory at /root/vtb: access denied"
+        );
     }
 
     #[test]
