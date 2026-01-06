@@ -197,6 +197,10 @@ pub struct CodeRef {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub line_end: Option<u32>,
 
+    /// Optional name/label for this reference (e.g., function name)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+
     /// Optional description of what this reference points to
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -209,6 +213,7 @@ impl CodeRef {
             path: path.into(),
             line_start: None,
             line_end: None,
+            name: None,
             description: None,
         }
     }
@@ -219,6 +224,7 @@ impl CodeRef {
             path: path.into(),
             line_start: Some(line),
             line_end: None,
+            name: None,
             description: None,
         }
     }
@@ -229,8 +235,15 @@ impl CodeRef {
             path: path.into(),
             line_start: Some(start),
             line_end: Some(end),
+            name: None,
             description: None,
         }
+    }
+
+    /// Add a name/label to this code reference
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
+        self
     }
 
     /// Add a description to this code reference
