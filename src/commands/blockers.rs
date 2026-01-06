@@ -404,6 +404,16 @@ mod tests {
         assert_eq!(blockers_result.blockers.len(), 2);
         assert_eq!(blockers_result.total_count, 2);
 
+        // Verify specific blockers are present
+        use std::collections::HashSet;
+        let blocker_ids: HashSet<_> = blockers_result
+            .blockers
+            .iter()
+            .map(|b| b.id.as_str())
+            .collect();
+        assert!(blocker_ids.contains("blocker1"), "Should contain blocker1");
+        assert!(blocker_ids.contains("blocker2"), "Should contain blocker2");
+
         cleanup(&temp_dir);
     }
 
@@ -552,6 +562,16 @@ mod tests {
         assert_eq!(blockers_result.blockers.len(), 2);
         // Each path shows the shared blocker
         assert_eq!(blockers_result.total_count, 4); // blocker1, blocker2, and shared appears twice
+
+        // Verify the direct blockers are blocker1 and blocker2
+        use std::collections::HashSet;
+        let blocker_ids: HashSet<_> = blockers_result
+            .blockers
+            .iter()
+            .map(|b| b.id.as_str())
+            .collect();
+        assert!(blocker_ids.contains("blocker1"), "Should contain blocker1");
+        assert!(blocker_ids.contains("blocker2"), "Should contain blocker2");
 
         cleanup(&temp_dir);
     }
