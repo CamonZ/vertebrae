@@ -35,12 +35,16 @@ A task management CLI tool written in Rust.
 2. **Explore codebase** → Identify scope, affected areas, dependencies
 3. **Break into tickets** → `vtb add -l ticket --parent <epic>` for each deliverable
 4. **Break tickets into tasks** → `vtb add --parent <ticket>` for each unit of work
-5. **Optionally add subtasks** → `vtb add -l subtask --parent <task>` for fine-grained steps
-6. **Set dependencies** → `vtb depend <task> --on <blocker>` to enforce order
-7. **Add details** → `vtb section` for steps, constraints, testing criteria
-8. **Link code** → `vtb ref` to relevant source locations
-9. **Execute** → `vtb start`, do work, `vtb done`, repeat
-10. **Track progress** → `vtb list`, `vtb blockers`, `vtb show`
+5. **Set dependencies** → `vtb depend <task> --on <blocker>` to enforce order
+6. **Add details** → `vtb section` for steps, constraints, testing criteria
+7. **Link code** → `vtb ref` to relevant source locations
+8. **Execute** → `vtb start`, do work, `vtb done`, **commit**, repeat
+9. **Track progress** → `vtb list`, `vtb blockers`, `vtb show`
+
+**IMPORTANT: Commit after each `vtb done`** - Each completed ticket should have its own commit. This ensures:
+- Atomic, traceable changes linked to tickets
+- Easy rollback if needed
+- Clear git history matching task progression
 
 ### Hierarchy
 
@@ -48,7 +52,6 @@ A task management CLI tool written in Rust.
 epic           Large initiative (e.g., "Refactor authentication")
   └── ticket   Deliverable feature (e.g., "Implement JWT service")
         └── task      Unit of work (e.g., "Create token signing")
-              └── subtask   Fine-grained step (e.g., "Add RS256 support")
 ```
 
 ### Quick reference

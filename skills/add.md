@@ -24,7 +24,7 @@ vtb add "Urgent fix" -p critical -t bug -t backend
 ## Hierarchy (use in order)
 
 ```
-epic       → tickets → tasks → subtasks
+epic       → tickets → tasks
 ```
 
 | Level | When to use | Example |
@@ -32,7 +32,6 @@ epic       → tickets → tasks → subtasks
 | `epic` | Large initiative spanning multiple features | "Refactor auth system" |
 | `ticket` | Single deliverable feature | "Implement JWT service" |
 | `task` | Unit of work (default) | "Create sign() function" |
-| `subtask` | Fine-grained step (optional) | "Add RS256 support" |
 
 ## Priorities
 - `low`, `medium`, `high`, `critical`

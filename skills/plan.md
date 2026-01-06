@@ -13,7 +13,6 @@ Create an implementation plan for a complex task using vertebrae.
 epic           Large initiative
   └── ticket   Deliverable feature
         └── task      Unit of work
-              └── subtask   Fine-grained step (optional)
 ```
 
 ## Steps
@@ -37,17 +36,12 @@ epic           Large initiative
    vtb add "<task 2>" --parent <ticket-id>
    ```
 
-5. Optionally decompose tasks into subtasks:
-   ```bash
-   vtb add "<subtask>" -l subtask --parent <task-id>
-   ```
-
-6. Set dependencies between tasks:
+5. Set dependencies between tasks:
    ```bash
    vtb depend <task-id> --on <blocker-id>
    ```
 
-7. Add implementation details:
+6. Add implementation details:
    ```bash
    vtb section <task-id> step "<step description>"
    vtb section <task-id> constraint "<constraint>"
@@ -55,13 +49,13 @@ epic           Large initiative
    vtb ref <task-id> "path/to/file.rs:L<line>" --name "<description>"
    ```
 
-8. Show the plan:
+7. Show the plan:
    ```bash
    vtb show <epic-id>
    vtb blockers <final-task-id>
    ```
 
-9. Start the first unblocked task:
+8. Start the first unblocked task:
    ```bash
    vtb start <task-id>
    ```

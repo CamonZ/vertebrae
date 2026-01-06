@@ -13,7 +13,7 @@ pub struct AddCommand {
     #[arg(required = true)]
     pub title: String,
 
-    /// Task level (epic, ticket, task, subtask)
+    /// Task level (epic, ticket, task)
     #[arg(short, long, value_parser = parse_level)]
     pub level: Option<Level>,
 
@@ -44,9 +44,8 @@ fn parse_level(s: &str) -> Result<Level, String> {
         "epic" => Ok(Level::Epic),
         "ticket" => Ok(Level::Ticket),
         "task" => Ok(Level::Task),
-        "subtask" => Ok(Level::Subtask),
         _ => Err(format!(
-            "invalid level '{}'. Valid values: epic, ticket, task, subtask",
+            "invalid level '{}'. Valid values: epic, ticket, task",
             s
         )),
     }
@@ -275,7 +274,6 @@ mod tests {
         assert_eq!(parse_level("epic").unwrap(), Level::Epic);
         assert_eq!(parse_level("ticket").unwrap(), Level::Ticket);
         assert_eq!(parse_level("task").unwrap(), Level::Task);
-        assert_eq!(parse_level("subtask").unwrap(), Level::Subtask);
     }
 
     #[test]
@@ -618,7 +616,7 @@ mod tests {
         // Now create a child task
         let child_cmd = AddCommand {
             title: "Child task".to_string(),
-            level: Some(Level::Subtask),
+            level: Some(Level::Ticket),
             description: None,
             priority: None,
             tags: vec![],
