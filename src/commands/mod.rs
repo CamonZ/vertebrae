@@ -3,11 +3,13 @@
 //! This module contains all subcommand implementations for the vtb CLI.
 
 pub mod add;
+pub mod delete;
 pub mod list;
 pub mod show;
 pub mod update;
 
 pub use add::AddCommand;
+pub use delete::DeleteCommand;
 pub use list::ListCommand;
 pub use show::ShowCommand;
 pub use update::UpdateCommand;
@@ -21,6 +23,8 @@ use clap::Subcommand;
 pub enum Command {
     /// Create a new task
     Add(AddCommand),
+    /// Delete a task (with optional cascade)
+    Delete(DeleteCommand),
     /// List tasks with optional filters
     List(ListCommand),
     /// Show full details of a task
@@ -61,6 +65,10 @@ impl Command {
             Command::Add(cmd) => {
                 let id = cmd.execute(db).await?;
                 Ok(CommandResult::Message(format!("Created task: {}", id)))
+            }
+            Command::Delete(cmd) => {
+                let message = cmd.execute(db).await?;
+                Ok(CommandResult::Message(message))
             }
             Command::List(cmd) => {
                 let tasks = cmd.execute(db).await?;
@@ -574,5 +582,86 @@ mod tests {
         let cli = TestCli::try_parse_from(["test", "update", "test123"]).unwrap();
         let debug_str = format!("{:?}", cli.command);
         assert!(debug_str.contains("Update"));
+    }
+
+    #[test]
+    fn test_command_delete_parses() {
+        let cli = TestCli::try_parse_from(["test", "delete", "abc123"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Delete(cmd) => {
+                assert_eq!(cmd.id, "abc123");
+                assert!(!cmd.cascade);
+                assert!(!cmd.force);
+            }
+            _ => panic!("Expected Delete command"),
+        }
+    }
+
+    #[test]
+    fn test_command_delete_requires_id() {
+        let result = TestCli::try_parse_from(["test", "delete"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_command_delete_with_cascade() {
+        let cli = TestCli::try_parse_from(["test", "delete", "abc123", "--cascade"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Delete(cmd) => {
+                assert_eq!(cmd.id, "abc123");
+                assert!(cmd.cascade);
+                assert!(!cmd.force);
+            }
+            _ => panic!("Expected Delete command"),
+        }
+    }
+
+    #[test]
+    fn test_command_delete_with_force() {
+        let cli = TestCli::try_parse_from(["test", "delete", "abc123", "--force"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Delete(cmd) => {
+                assert_eq!(cmd.id, "abc123");
+                assert!(!cmd.cascade);
+                assert!(cmd.force);
+            }
+            _ => panic!("Expected Delete command"),
+        }
+    }
+
+    #[test]
+    fn test_command_delete_with_force_short() {
+        let cli = TestCli::try_parse_from(["test", "delete", "abc123", "-f"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Delete(cmd) => {
+                assert!(cmd.force);
+            }
+            _ => panic!("Expected Delete command"),
+        }
+    }
+
+    #[test]
+    fn test_command_delete_with_cascade_and_force() {
+        let cli = TestCli::try_parse_from(["test", "delete", "abc123", "--cascade", "--force"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Delete(cmd) => {
+                assert_eq!(cmd.id, "abc123");
+                assert!(cmd.cascade);
+                assert!(cmd.force);
+            }
+            _ => panic!("Expected Delete command"),
+        }
+    }
+
+    #[test]
+    fn test_command_delete_debug() {
+        let cli = TestCli::try_parse_from(["test", "delete", "test123"]).unwrap();
+        let debug_str = format!("{:?}", cli.command);
+        assert!(debug_str.contains("Delete"));
     }
 }
