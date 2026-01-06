@@ -5,12 +5,14 @@
 
 pub mod app;
 pub mod data;
+pub mod details;
 pub mod error;
 pub mod event;
 pub mod navigation;
 pub mod ui;
 
 pub use app::App;
-pub use data::{load_full_tree, load_node_children, load_root_epics_lazy};
+pub use data::{load_full_tree, load_node_children, load_root_epics_lazy, load_task_details};
+pub use details::{TaskDetails, TaskRelationships, render_details_view};
 pub use error::{TuiError, TuiResult};
 pub use navigation::{FlatNode, TreeNode, TreeState, flatten_tree, render_nav_panel};

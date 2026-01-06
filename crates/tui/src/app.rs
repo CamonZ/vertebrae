@@ -13,7 +13,8 @@ use ratatui::prelude::*;
 
 use vertebrae_db::Database;
 
-use crate::data::load_full_tree;
+use crate::data::{load_full_tree, load_task_details};
+use crate::details::TaskDetails;
 use crate::error::TuiResult;
 use crate::event::{is_down, is_enter, is_quit, is_tab, is_up, poll_key};
 use crate::navigation::{FlatNode, TreeNode, TreeState, flatten_tree};
@@ -64,6 +65,10 @@ pub struct App {
     tree_roots: Vec<TreeNode>,
     /// Flattened visible nodes (cached).
     visible_nodes: Vec<FlatNode>,
+    /// Cached details for the currently selected task.
+    selected_task_details: Option<TaskDetails>,
+    /// Flag indicating that task details need to be reloaded.
+    details_dirty: bool,
 }
 
 impl App {
@@ -90,6 +95,13 @@ impl App {
         let tree_state = TreeState::new();
         let visible_nodes = flatten_tree(&tree_roots, &tree_state);
 
+        // Load details for the initially selected task
+        let selected_task_details = if let Some(first_node) = visible_nodes.first() {
+            load_task_details(&db, &first_node.id).await?
+        } else {
+            None
+        };
+
         Ok(Self {
             db,
             selected_index: 0,
@@ -98,6 +110,8 @@ impl App {
             tree_state,
             tree_roots,
             visible_nodes,
+            selected_task_details,
+            details_dirty: false,
         })
     }
 
@@ -134,6 +148,11 @@ impl App {
     /// Get the visible nodes in the navigation panel.
     pub fn visible_nodes(&self) -> &[FlatNode] {
         &self.visible_nodes
+    }
+
+    /// Get the currently selected task's details for the details view.
+    pub fn selected_task_details(&self) -> Option<&TaskDetails> {
+        self.selected_task_details.as_ref()
     }
 
     /// Get a mutable reference to the tree state.
@@ -178,6 +197,7 @@ impl App {
         let max_items = self.visible_nodes.len();
         if max_items > 0 && self.selected_index < max_items - 1 {
             self.selected_index += 1;
+            self.details_dirty = true;
         }
     }
 
@@ -187,6 +207,7 @@ impl App {
     pub fn select_previous(&mut self) {
         if self.selected_index > 0 {
             self.selected_index -= 1;
+            self.details_dirty = true;
         }
     }
 
@@ -199,12 +220,29 @@ impl App {
         {
             self.tree_state.toggle(&node.id);
             self.refresh_visible_nodes();
+            // Selection may have changed after refresh, so reload details
+            self.details_dirty = true;
         }
     }
 
     /// Get the currently selected node, if any.
     pub fn selected_node(&self) -> Option<&FlatNode> {
         self.visible_nodes.get(self.selected_index)
+    }
+
+    /// Reload task details if they are dirty.
+    ///
+    /// This should be called in the event loop after handling key events.
+    pub async fn reload_details_if_dirty(&mut self) -> TuiResult<()> {
+        if self.details_dirty {
+            self.details_dirty = false;
+            if let Some(node) = self.visible_nodes.get(self.selected_index) {
+                self.selected_task_details = load_task_details(&self.db, &node.id).await?;
+            } else {
+                self.selected_task_details = None;
+            }
+        }
+        Ok(())
     }
 
     /// Run the main application loop.
@@ -241,6 +279,8 @@ impl App {
             // Poll for keyboard events
             if let Some(key) = poll_key(Duration::from_millis(100))? {
                 self.handle_key(&key);
+                // Reload task details if selection changed
+                self.reload_details_if_dirty().await?;
             }
         }
         Ok(())
