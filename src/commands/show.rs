@@ -503,12 +503,33 @@ fn format_section_group(
     let mut sorted: Vec<_> = matching.into_iter().collect();
     sorted.sort_by_key(|s| s.order.unwrap_or(u32::MAX));
 
+    // For steps, show with checkboxes
+    let is_step = section_type == SectionType::Step;
+
     if sorted.len() == 1 {
-        writeln!(f, "{}: {}", label, sorted[0].content)?;
+        if is_step {
+            let checkbox = if sorted[0].done.unwrap_or(false) {
+                "[x]"
+            } else {
+                "[ ]"
+            };
+            writeln!(f, "{}: {} {}", label, checkbox, sorted[0].content)?;
+        } else {
+            writeln!(f, "{}: {}", label, sorted[0].content)?;
+        }
     } else {
         writeln!(f, "{}:", label)?;
         for (i, section) in sorted.iter().enumerate() {
-            writeln!(f, "  {}. {}", i + 1, section.content)?;
+            if is_step {
+                let checkbox = if section.done.unwrap_or(false) {
+                    "[x]"
+                } else {
+                    "[ ]"
+                };
+                writeln!(f, "  {}. {} {}", i + 1, checkbox, section.content)?;
+            } else {
+                writeln!(f, "  {}. {}", i + 1, section.content)?;
+            }
         }
     }
 
@@ -1174,8 +1195,8 @@ mod tests {
         let output = format!("{}", detail);
 
         assert!(output.contains("Steps:"));
-        assert!(output.contains("1. First step"));
-        assert!(output.contains("2. Second step"));
+        assert!(output.contains("1. [ ] First step"));
+        assert!(output.contains("2. [ ] Second step"));
     }
 
     #[test]

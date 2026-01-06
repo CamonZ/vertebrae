@@ -16,6 +16,7 @@ pub mod section;
 pub mod sections;
 pub mod show;
 pub mod start;
+pub mod step_done;
 pub mod undepend;
 pub mod unref;
 pub mod unsection;
@@ -35,6 +36,7 @@ pub use section::SectionCommand;
 pub use sections::SectionsCommand;
 pub use show::ShowCommand;
 pub use start::StartCommand;
+pub use step_done::StepDoneCommand;
 pub use undepend::UndependCommand;
 pub use unref::UnrefCommand;
 pub use unsection::UnsectionCommand;
@@ -81,6 +83,9 @@ pub enum Command {
     Unsection(UnsectionCommand),
     /// Start working on a task (transition to in_progress)
     Start(StartCommand),
+    /// Mark a step as done within a task
+    #[command(name = "step-done")]
+    StepDone(StepDoneCommand),
     /// Update an existing task
     Update(UpdateCommand),
 }
@@ -179,6 +184,10 @@ impl Command {
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Start(cmd) => {
+                let result = cmd.execute(db).await?;
+                Ok(CommandResult::Message(format!("{}", result)))
+            }
+            Command::StepDone(cmd) => {
                 let result = cmd.execute(db).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }

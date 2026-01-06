@@ -156,6 +156,10 @@ pub struct Section {
     /// Optional ordering for sections of the same type
     #[serde(skip_serializing_if = "Option::is_none")]
     pub order: Option<u32>,
+
+    /// Whether this section (typically a step) is done
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub done: Option<bool>,
 }
 
 impl Section {
@@ -165,6 +169,7 @@ impl Section {
             section_type,
             content: content.into(),
             order: None,
+            done: None,
         }
     }
 
@@ -174,7 +179,14 @@ impl Section {
             section_type,
             content: content.into(),
             order: Some(order),
+            done: None,
         }
+    }
+
+    /// Mark this section as done
+    pub fn with_done(mut self, done: bool) -> Self {
+        self.done = Some(done);
+        self
     }
 }
 
@@ -666,6 +678,22 @@ mod tests {
         assert_eq!(section.section_type, SectionType::Step);
         assert_eq!(section.content, "Step 1: Do something");
         assert_eq!(section.order, Some(1));
+        assert!(section.done.is_none());
+    }
+
+    #[test]
+    fn test_section_with_done() {
+        let section = Section::with_order(SectionType::Step, "Step 1", 1).with_done(true);
+        assert_eq!(section.section_type, SectionType::Step);
+        assert_eq!(section.content, "Step 1");
+        assert_eq!(section.order, Some(1));
+        assert_eq!(section.done, Some(true));
+    }
+
+    #[test]
+    fn test_section_with_done_false() {
+        let section = Section::new(SectionType::Step, "Step 1").with_done(false);
+        assert_eq!(section.done, Some(false));
     }
 
     #[test]
@@ -683,6 +711,26 @@ mod tests {
         assert_eq!(value["type"], "step");
         assert_eq!(value["content"], "Step content");
         assert_eq!(value["order"], 5);
+    }
+
+    #[test]
+    fn test_section_serialize_with_done() {
+        let section = Section::with_order(SectionType::Step, "Step content", 1).with_done(true);
+        let value = serde_json::to_value(&section).unwrap();
+        assert_eq!(value["type"], "step");
+        assert_eq!(value["content"], "Step content");
+        assert_eq!(value["order"], 1);
+        assert_eq!(value["done"], true);
+    }
+
+    #[test]
+    fn test_section_deserialize_with_done() {
+        let json = r#"{"type":"step","content":"Do this","order":1,"done":true}"#;
+        let section: Section = serde_json::from_str(json).unwrap();
+        assert_eq!(section.section_type, SectionType::Step);
+        assert_eq!(section.content, "Do this");
+        assert_eq!(section.order, Some(1));
+        assert_eq!(section.done, Some(true));
     }
 
     #[test]
