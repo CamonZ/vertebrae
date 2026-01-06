@@ -17,10 +17,11 @@ pub use repository::{
 };
 
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use surrealdb::Surreal;
 use surrealdb::engine::local::{Db, RocksDb};
 
-/// Default database path relative to current working directory
+/// Default database path relative to project root or current working directory
 pub const DEFAULT_DB_PATH: &str = ".vtb/data";
 
 /// Database wrapper providing connection management for SurrealDB
@@ -98,11 +99,14 @@ impl Database {
         &self.path
     }
 
-    /// Get the default database path relative to current working directory.
+    /// Get the default database path based on project root.
     ///
-    /// Returns `.vtb/data` as a relative path for project-local storage.
+    /// Uses `git rev-parse --show-toplevel` to find the project root and
+    /// returns `<project_root>/.vtb/data`. If not in a git repository,
+    /// falls back to `.vtb/data` relative to the current working directory.
     pub fn default_path() -> DbResult<PathBuf> {
-        Ok(PathBuf::from(DEFAULT_DB_PATH))
+        let base_path = find_project_root().unwrap_or_else(|| PathBuf::from("."));
+        Ok(base_path.join(DEFAULT_DB_PATH))
     }
 
     /// Prepare the database path by validating and creating directories.
@@ -134,6 +138,24 @@ impl Database {
 // Ensure Database is Send + Sync for async compatibility
 static_assertions::assert_impl_all!(Database: Send, Sync);
 
+/// Find the project root by running `git rev-parse --show-toplevel`.
+///
+/// Returns `Some(PathBuf)` with the absolute path to the git repository root,
+/// or `None` if not in a git repository or the command fails.
+pub fn find_project_root() -> Option<PathBuf> {
+    let output = Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .ok()?;
+
+    if output.status.success() {
+        let path_str = String::from_utf8(output.stdout).ok()?;
+        Some(PathBuf::from(path_str.trim()))
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -144,7 +166,30 @@ mod tests {
         let result = Database::default_path();
         assert!(result.is_ok());
         let path = result.unwrap();
-        assert_eq!(path, PathBuf::from(".vtb/data"));
+        // In a git repository, default_path returns an absolute path to project root
+        // If not in a git repo, it falls back to relative path
+        assert!(
+            path.ends_with(".vtb/data"),
+            "Path should end with .vtb/data, got: {:?}",
+            path
+        );
+    }
+
+    #[test]
+    fn test_find_project_root() {
+        // This test runs inside the vertebrae git repository
+        let result = find_project_root();
+        // Should find the project root since we're in a git repo
+        assert!(result.is_some(), "Should find project root in git repo");
+        let path = result.unwrap();
+        // The path should be absolute and exist
+        assert!(path.is_absolute(), "Project root should be absolute path");
+        assert!(path.exists(), "Project root should exist");
+        // The path should contain a .git directory
+        assert!(
+            path.join(".git").exists(),
+            "Project root should contain .git directory"
+        );
     }
 
     #[test]
