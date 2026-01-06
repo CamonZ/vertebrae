@@ -683,16 +683,18 @@ mod tests {
     #[test]
     fn test_section_serialize() {
         let section = Section::new(SectionType::Goal, "Test goal");
-        let json = serde_json::to_string(&section).unwrap();
-        assert!(json.contains("\"type\":\"goal\""));
-        assert!(json.contains("\"content\":\"Test goal\""));
+        let value = serde_json::to_value(&section).unwrap();
+        assert_eq!(value["type"], "goal");
+        assert_eq!(value["content"], "Test goal");
     }
 
     #[test]
     fn test_section_serialize_with_order() {
         let section = Section::with_order(SectionType::Step, "Step content", 5);
-        let json = serde_json::to_string(&section).unwrap();
-        assert!(json.contains("\"order\":5"));
+        let value = serde_json::to_value(&section).unwrap();
+        assert_eq!(value["type"], "step");
+        assert_eq!(value["content"], "Step content");
+        assert_eq!(value["order"], 5);
     }
 
     #[test]
@@ -758,20 +760,20 @@ mod tests {
     #[test]
     fn test_code_ref_serialize() {
         let code_ref = CodeRef::range("test.rs", 1, 10);
-        let json = serde_json::to_string(&code_ref).unwrap();
-        assert!(json.contains("\"path\":\"test.rs\""));
-        assert!(json.contains("\"line_start\":1"));
-        assert!(json.contains("\"line_end\":10"));
+        let value = serde_json::to_value(&code_ref).unwrap();
+        assert_eq!(value["path"], "test.rs");
+        assert_eq!(value["line_start"], 1);
+        assert_eq!(value["line_end"], 10);
     }
 
     #[test]
     fn test_code_ref_serialize_minimal() {
         let code_ref = CodeRef::file("minimal.rs");
-        let json = serde_json::to_string(&code_ref).unwrap();
-        assert!(json.contains("\"path\":\"minimal.rs\""));
-        assert!(!json.contains("line_start"));
-        assert!(!json.contains("line_end"));
-        assert!(!json.contains("description"));
+        let value = serde_json::to_value(&code_ref).unwrap();
+        assert_eq!(value["path"], "minimal.rs");
+        assert!(value.get("line_start").is_none());
+        assert!(value.get("line_end").is_none());
+        assert!(value.get("description").is_none());
     }
 
     #[test]
@@ -880,23 +882,23 @@ mod tests {
             .with_priority(Priority::Medium)
             .with_tag("test");
 
-        let json = serde_json::to_string(&task).unwrap();
-        assert!(json.contains("\"title\":\"Test Task\""));
-        assert!(json.contains("\"level\":\"ticket\""));
-        assert!(json.contains("\"status\":\"done\""));
-        assert!(json.contains("\"priority\":\"medium\""));
-        assert!(json.contains("\"tags\":[\"test\"]"));
+        let value = serde_json::to_value(&task).unwrap();
+        assert_eq!(value["title"], "Test Task");
+        assert_eq!(value["level"], "ticket");
+        assert_eq!(value["status"], "done");
+        assert_eq!(value["priority"], "medium");
+        assert_eq!(value["tags"], serde_json::json!(["test"]));
     }
 
     #[test]
     fn test_task_serialize_minimal() {
         let task = Task::new("Minimal", Level::Subtask);
-        let json = serde_json::to_string(&task).unwrap();
-        assert!(json.contains("\"title\":\"Minimal\""));
-        assert!(json.contains("\"level\":\"subtask\""));
-        assert!(json.contains("\"status\":\"todo\""));
-        assert!(!json.contains("\"priority\""));
-        assert!(!json.contains("\"id\""));
+        let value = serde_json::to_value(&task).unwrap();
+        assert_eq!(value["title"], "Minimal");
+        assert_eq!(value["level"], "subtask");
+        assert_eq!(value["status"], "todo");
+        assert!(value.get("priority").is_none());
+        assert!(value.get("id").is_none());
     }
 
     #[test]

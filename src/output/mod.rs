@@ -185,19 +185,30 @@ mod tests {
         }];
 
         let result = format_task_table(&tasks);
+        let lines: Vec<&str> = result.lines().collect();
 
-        assert!(result.contains("ID"));
-        assert!(result.contains("Level"));
-        assert!(result.contains("Status"));
-        assert!(result.contains("Priority"));
-        assert!(result.contains("Title"));
-        assert!(result.contains("Tags"));
-        assert!(result.contains("abc123"));
-        assert!(result.contains("Test Task"));
-        assert!(result.contains("task"));
-        assert!(result.contains("todo"));
-        assert!(result.contains("high"));
-        assert!(result.contains("backend"));
+        // Should have header, separator, and 1 data row
+        assert_eq!(lines.len(), 3, "Expected 3 lines: header, separator, data");
+
+        // Verify header columns
+        let header_parts: Vec<&str> = lines[0].split_whitespace().collect();
+        assert_eq!(
+            header_parts,
+            vec!["ID", "Level", "Status", "Priority", "Title", "Tags"]
+        );
+
+        // Verify separator line contains dashes
+        assert!(lines[1].chars().all(|c| c == '-' || c == ' '));
+
+        // Verify data row columns
+        let data_parts: Vec<&str> = lines[2].split_whitespace().collect();
+        assert_eq!(data_parts[0], "abc123", "ID column");
+        assert_eq!(data_parts[1], "task", "Level column");
+        assert_eq!(data_parts[2], "todo", "Status column");
+        assert_eq!(data_parts[3], "high", "Priority column");
+        assert_eq!(data_parts[4], "Test", "Title column (first word)");
+        assert_eq!(data_parts[5], "Task", "Title column (second word)");
+        assert_eq!(data_parts[6], "backend", "Tags column");
     }
 
     #[test]
@@ -226,10 +237,21 @@ mod tests {
 
         // Should have header, separator, and 2 data rows
         assert_eq!(lines.len(), 4);
-        assert!(lines[0].contains("ID"));
-        assert!(lines[1].contains("--"));
-        assert!(lines[2].contains("a1b2c3"));
-        assert!(lines[3].contains("d4e5f6"));
+
+        // Verify header
+        let header_parts: Vec<&str> = lines[0].split_whitespace().collect();
+        assert_eq!(header_parts[0], "ID");
+
+        // Verify separator contains dashes
+        assert!(lines[1].chars().all(|c| c == '-' || c == ' '));
+
+        // Verify first data row
+        let row1_parts: Vec<&str> = lines[2].split_whitespace().collect();
+        assert_eq!(row1_parts[0], "a1b2c3", "First row ID");
+
+        // Verify second data row
+        let row2_parts: Vec<&str> = lines[3].split_whitespace().collect();
+        assert_eq!(row2_parts[0], "d4e5f6", "Second row ID");
     }
 
     #[test]
@@ -244,9 +266,11 @@ mod tests {
         }];
 
         let result = format_task_table(&tasks);
+        let lines: Vec<&str> = result.lines().collect();
 
-        // Should show "-" for missing priority
-        assert!(result.contains("-"));
+        // Verify data row - priority column (4th column, index 3) should be "-"
+        let data_parts: Vec<&str> = lines[2].split_whitespace().collect();
+        assert_eq!(data_parts[3], "-", "Priority column should be '-' for None");
     }
 
     #[test]
@@ -261,10 +285,13 @@ mod tests {
         }];
 
         let result = format_task_table(&tasks);
-
-        // Should show "-" for empty tags
         let lines: Vec<&str> = result.lines().collect();
-        assert!(lines[2].contains("-"));
+
+        // Verify data row - tags column (last column) should be "-"
+        let data_parts: Vec<&str> = lines[2].split_whitespace().collect();
+        // Data parts: abc123, task, todo, low, No, Tags, -
+        let last_part = data_parts.last().unwrap();
+        assert_eq!(*last_part, "-", "Tags column should be '-' for empty tags");
     }
 
     #[test]
@@ -324,33 +351,56 @@ mod tests {
         }];
 
         let result = format_task_table(&tasks);
+        let lines: Vec<&str> = result.lines().collect();
 
-        // Title should be truncated with ellipsis
-        assert!(result.contains("..."));
+        // Verify the truncated title appears with ellipsis
+        // MAX_TITLE_WIDTH is 30, so the title should be truncated to 27 chars + "..."
+        let expected_truncated = truncate(
+            "This is a very long task title that should be truncated",
+            MAX_TITLE_WIDTH,
+        );
+        // Verify truncation function produces expected result
+        assert_eq!(expected_truncated, "This is a very long task ti...");
+        assert!(
+            lines[2].contains(&expected_truncated),
+            "Data row should contain truncated title"
+        );
+
         // Original full title should not appear
-        assert!(!result.contains("that should be truncated"));
+        assert!(
+            !result.contains("that should be truncated"),
+            "Full title should not appear in output"
+        );
     }
 
     #[test]
     fn test_format_long_tags_truncated() {
+        let tags_input = vec![
+            "backend".to_string(),
+            "frontend".to_string(),
+            "infrastructure".to_string(),
+            "urgent".to_string(),
+        ];
         let tasks = vec![TaskSummary {
             id: "abc123".to_string(),
             title: "Task".to_string(),
             level: "task".to_string(),
             status: "todo".to_string(),
             priority: None,
-            tags: vec![
-                "backend".to_string(),
-                "frontend".to_string(),
-                "infrastructure".to_string(),
-                "urgent".to_string(),
-            ],
+            tags: tags_input.clone(),
         }];
 
         let result = format_task_table(&tasks);
+        let lines: Vec<&str> = result.lines().collect();
 
-        // Should contain some tags
-        assert!(result.contains("backend"));
+        // The tags should be truncated to MAX_TAGS_WIDTH (20)
+        let full_tags = format_tags(&tags_input);
+        let expected_truncated = truncate(&full_tags, MAX_TAGS_WIDTH);
+        assert_eq!(expected_truncated, "backend, frontend...");
+        assert!(
+            lines[2].contains(&expected_truncated),
+            "Data row should contain truncated tags"
+        );
     }
 
     #[test]
@@ -377,9 +427,21 @@ mod tests {
         let result = format_task_table(&tasks);
         let lines: Vec<&str> = result.lines().collect();
 
-        // Header and data rows should have consistent structure
-        assert!(lines[0].contains("ID"));
-        assert!(lines[1].contains("--"));
+        // Verify header row
+        let header_parts: Vec<&str> = lines[0].split_whitespace().collect();
+        assert_eq!(header_parts[0], "ID");
+
+        // Verify separator contains only dashes and spaces
+        assert!(lines[1].chars().all(|c| c == '-' || c == ' '));
+
+        // Verify column alignment by checking that columns have consistent spacing
+        // All lines should have the same length (properly aligned)
+        let header_len = lines[0].len();
+        let sep_len = lines[1].len();
+        assert_eq!(
+            header_len, sep_len,
+            "Header and separator should have same length"
+        );
     }
 
     #[test]

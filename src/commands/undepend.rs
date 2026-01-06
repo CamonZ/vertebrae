@@ -321,8 +321,7 @@ mod tests {
 
         // Verify display message shows warning
         let display = format!("{}", undepend_result);
-        assert!(display.contains("Warning"));
-        assert!(display.contains("No dependency"));
+        assert_eq!(display, "Warning: No dependency from taskb to taska exists");
 
         cleanup(&temp_dir);
     }
@@ -530,9 +529,10 @@ mod tests {
         };
 
         let output = format!("{}", result);
-        assert!(output.contains("Removed dependency"));
-        assert!(output.contains("taskb"));
-        assert!(output.contains("taska"));
+        assert_eq!(
+            output,
+            "Removed dependency: taskb no longer depends on taska"
+        );
     }
 
     #[test]
@@ -544,8 +544,7 @@ mod tests {
         };
 
         let output = format!("{}", result);
-        assert!(output.contains("Warning"));
-        assert!(output.contains("No dependency"));
+        assert_eq!(output, "Warning: No dependency from taskb to taska exists");
     }
 
     #[test]
