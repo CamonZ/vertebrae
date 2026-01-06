@@ -17,6 +17,7 @@ pub mod sections;
 pub mod show;
 pub mod start;
 pub mod undepend;
+pub mod unref;
 pub mod unsection;
 pub mod update;
 
@@ -35,6 +36,7 @@ pub use sections::SectionsCommand;
 pub use show::ShowCommand;
 pub use start::StartCommand;
 pub use undepend::UndependCommand;
+pub use unref::UnrefCommand;
 pub use unsection::UnsectionCommand;
 pub use update::UpdateCommand;
 
@@ -73,6 +75,8 @@ pub enum Command {
     Show(ShowCommand),
     /// Remove a dependency relationship between tasks
     Undepend(UndependCommand),
+    /// Remove code references from a task
+    Unref(UnrefCommand),
     /// Remove sections from a task
     Unsection(UnsectionCommand),
     /// Start working on a task (transition to in_progress)
@@ -163,6 +167,10 @@ impl Command {
                 Ok(CommandResult::Message(format!("{}", detail)))
             }
             Command::Undepend(cmd) => {
+                let result = cmd.execute(db).await?;
+                Ok(CommandResult::Message(format!("{}", result)))
+            }
+            Command::Unref(cmd) => {
                 let result = cmd.execute(db).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
