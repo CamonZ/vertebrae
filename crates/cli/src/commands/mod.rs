@@ -8,6 +8,7 @@ pub mod blockers;
 pub mod delete;
 pub mod depend;
 pub mod done;
+pub mod init;
 pub mod list;
 pub mod path;
 pub mod r#ref;
@@ -28,6 +29,7 @@ pub use blockers::BlockersCommand;
 pub use delete::DeleteCommand;
 pub use depend::DependCommand;
 pub use done::DoneCommand;
+pub use init::InitCommand;
 pub use list::ListCommand;
 pub use path::PathCommand;
 pub use r#ref::RefCommand;
@@ -61,6 +63,8 @@ pub enum Command {
     Depend(DependCommand),
     /// Mark a task as complete (transition to done)
     Done(DoneCommand),
+    /// Initialize vertebrae in the current project
+    Init(InitCommand),
     /// List tasks with optional filters
     List(ListCommand),
     /// Find the dependency path between two tasks
@@ -141,6 +145,14 @@ impl Command {
             }
             Command::Done(cmd) => {
                 let result = cmd.execute(db).await?;
+                Ok(CommandResult::Message(format!("{}", result)))
+            }
+            Command::Init(cmd) => {
+                // Init doesn't use the database - it creates the db directory
+                let result = cmd.execute().map_err(|e| DbError::InvalidPath {
+                    path: std::path::PathBuf::from("."),
+                    reason: e.to_string(),
+                })?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::List(cmd) => {
@@ -959,6 +971,53 @@ mod tests {
         assert!(
             debug_str.contains("Sections") && debug_str.contains("test123"),
             "Debug output should contain Sections variant and id field value"
+        );
+    }
+
+    #[test]
+    fn test_command_init_parses() {
+        let cli = TestCli::try_parse_from(["test", "init"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Init(cmd) => {
+                assert_eq!(cmd.skills_source.to_str().unwrap(), "skills");
+                assert_eq!(cmd.skills_target.to_str().unwrap(), ".claude/skills");
+            }
+            _ => panic!("Expected Init command"),
+        }
+    }
+
+    #[test]
+    fn test_command_init_with_custom_source() {
+        let cli = TestCli::try_parse_from(["test", "init", "--skills-source", "custom/skills"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Init(cmd) => {
+                assert_eq!(cmd.skills_source.to_str().unwrap(), "custom/skills");
+            }
+            _ => panic!("Expected Init command"),
+        }
+    }
+
+    #[test]
+    fn test_command_init_with_custom_target() {
+        let cli = TestCli::try_parse_from(["test", "init", "--skills-target", ".custom/skills"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Init(cmd) => {
+                assert_eq!(cmd.skills_target.to_str().unwrap(), ".custom/skills");
+            }
+            _ => panic!("Expected Init command"),
+        }
+    }
+
+    #[test]
+    fn test_command_init_debug() {
+        let cli = TestCli::try_parse_from(["test", "init"]).unwrap();
+        let debug_str = format!("{:?}", cli.command);
+        assert!(
+            debug_str.contains("Init"),
+            "Debug output should contain Init variant"
         );
     }
 }
