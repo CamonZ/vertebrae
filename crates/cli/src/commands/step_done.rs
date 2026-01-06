@@ -51,6 +51,8 @@ struct SectionRow {
     order: Option<u32>,
     #[serde(default)]
     done: Option<bool>,
+    #[serde(default)]
+    done_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 impl StepDoneCommand {
@@ -141,17 +143,17 @@ impl StepDoneCommand {
         }
     }
 
-    /// Update a specific step's done field to true.
+    /// Update a specific step's done field to true and set done_at timestamp.
     async fn update_step_done(
         &self,
         db: &Database,
         id: &str,
         section_index: usize,
     ) -> Result<(), DbError> {
-        // Use SurrealDB array update syntax
+        // Use SurrealDB array update syntax to set both done and done_at
         let query = format!(
-            "UPDATE task:{} SET sections[{}].done = true",
-            id, section_index
+            "UPDATE task:{} SET sections[{}].done = true, sections[{}].done_at = time::now()",
+            id, section_index, section_index
         );
         db.client().query(&query).await?;
         Ok(())
@@ -215,24 +217,34 @@ mod tests {
         db.client().query(&query).await.unwrap();
     }
 
+    /// Helper struct for section status
+    #[derive(Debug, Clone, Deserialize)]
+    struct SectionStatus {
+        #[serde(default)]
+        done: Option<bool>,
+        #[serde(default)]
+        done_at: Option<chrono::DateTime<chrono::Utc>>,
+    }
+
     /// Helper to get step done status
     async fn get_step_done(db: &Database, id: &str, step_index: usize) -> Option<bool> {
-        #[derive(Debug, Deserialize)]
-        struct SectionRow {
-            #[serde(default)]
-            done: Option<bool>,
-        }
+        get_step_status(db, id, step_index)
+            .await
+            .and_then(|s| s.done)
+    }
 
+    /// Helper to get full step status including done_at
+    async fn get_step_status(db: &Database, id: &str, step_index: usize) -> Option<SectionStatus> {
         #[derive(Debug, Deserialize)]
         struct TaskRow {
             #[serde(default)]
-            sections: Vec<SectionRow>,
+            sections: Vec<SectionStatus>,
         }
 
         let query = format!("SELECT sections FROM task:{}", id);
         let mut result = db.client().query(&query).await.ok()?;
         let task: Option<TaskRow> = result.take(0).ok()?;
-        task.and_then(|t| t.sections.get(step_index).and_then(|s| s.done))
+        task.and_then(|t| t.sections.get(step_index).cloned())
     }
 
     /// Clean up test database
@@ -262,6 +274,47 @@ mod tests {
         // Verify step is marked as done
         let done = get_step_done(&db, "abc123", 0).await;
         assert_eq!(done, Some(true));
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_step_done_sets_done_at_timestamp() {
+        use chrono::Utc;
+
+        let (db, temp_dir) = setup_test_db().await;
+        let before = Utc::now();
+
+        create_task_with_steps(&db, "abc123", &["Step with timestamp"]).await;
+
+        let cmd = StepDoneCommand {
+            id: "abc123".to_string(),
+            index: 1,
+        };
+
+        let result = cmd.execute(&db).await;
+        let after = Utc::now();
+        assert!(result.is_ok(), "step-done failed: {:?}", result.err());
+
+        // Verify done_at is set
+        let status = get_step_status(&db, "abc123", 0).await;
+        assert!(status.is_some(), "Section status should be present");
+        let status = status.unwrap();
+
+        assert_eq!(status.done, Some(true), "done should be true");
+        assert!(
+            status.done_at.is_some(),
+            "done_at should be set when step is marked done"
+        );
+
+        let done_at = status.done_at.unwrap();
+        assert!(
+            done_at >= before && done_at <= after,
+            "done_at ({}) should be within test execution time (before: {}, after: {})",
+            done_at,
+            before,
+            after
+        );
 
         cleanup(&temp_dir);
     }

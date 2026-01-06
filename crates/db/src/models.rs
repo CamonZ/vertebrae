@@ -144,7 +144,7 @@ impl std::fmt::Display for SectionType {
 ///
 /// Sections provide structured documentation for tasks,
 /// organized by type (goal, context, steps, etc.)
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Section {
     /// The type of this section
     #[serde(rename = "type")]
@@ -160,6 +160,10 @@ pub struct Section {
     /// Whether this section (typically a step) is done
     #[serde(skip_serializing_if = "Option::is_none")]
     pub done: Option<bool>,
+
+    /// When this section was marked as done (only for steps)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub done_at: Option<DateTime<Utc>>,
 }
 
 impl Section {
@@ -170,6 +174,7 @@ impl Section {
             content: content.into(),
             order: None,
             done: None,
+            done_at: None,
         }
     }
 
@@ -180,15 +185,39 @@ impl Section {
             content: content.into(),
             order: Some(order),
             done: None,
+            done_at: None,
         }
     }
 
-    /// Mark this section as done
+    /// Mark this section as done, setting done_at to the current time if done is true
     pub fn with_done(mut self, done: bool) -> Self {
         self.done = Some(done);
+        if done {
+            self.done_at = Some(Utc::now());
+        } else {
+            self.done_at = None;
+        }
         self
     }
+
+    /// Mark this section as done with a specific timestamp
+    pub fn mark_done(&mut self) {
+        self.done = Some(true);
+        self.done_at = Some(Utc::now());
+    }
 }
+
+impl PartialEq for Section {
+    fn eq(&self, other: &Self) -> bool {
+        self.section_type == other.section_type
+            && self.content == other.content
+            && self.order == other.order
+            && self.done == other.done
+        // Ignore done_at in equality comparison (similar to how Task ignores timestamps)
+    }
+}
+
+impl Eq for Section {}
 
 /// A code reference attached to a task
 ///
@@ -681,6 +710,8 @@ mod tests {
         assert_eq!(section.section_type, SectionType::Goal);
         assert_eq!(section.content, "Implement feature X");
         assert!(section.order.is_none());
+        assert!(section.done.is_none());
+        assert!(section.done_at.is_none());
     }
 
     #[test]
@@ -690,21 +721,40 @@ mod tests {
         assert_eq!(section.content, "Step 1: Do something");
         assert_eq!(section.order, Some(1));
         assert!(section.done.is_none());
+        assert!(section.done_at.is_none());
     }
 
     #[test]
     fn test_section_with_done() {
+        let before = Utc::now();
         let section = Section::with_order(SectionType::Step, "Step 1", 1).with_done(true);
+        let after = Utc::now();
+
         assert_eq!(section.section_type, SectionType::Step);
         assert_eq!(section.content, "Step 1");
         assert_eq!(section.order, Some(1));
         assert_eq!(section.done, Some(true));
+        // done_at should be set when done is true
+        assert!(
+            section.done_at.is_some(),
+            "done_at should be set when done is true"
+        );
+        let done_at = section.done_at.unwrap();
+        assert!(
+            done_at >= before && done_at <= after,
+            "done_at should be within the test execution time"
+        );
     }
 
     #[test]
     fn test_section_with_done_false() {
         let section = Section::new(SectionType::Step, "Step 1").with_done(false);
         assert_eq!(section.done, Some(false));
+        // done_at should be None when done is false
+        assert!(
+            section.done_at.is_none(),
+            "done_at should be None when done is false"
+        );
     }
 
     #[test]
@@ -732,16 +782,34 @@ mod tests {
         assert_eq!(value["content"], "Step content");
         assert_eq!(value["order"], 1);
         assert_eq!(value["done"], true);
+        // done_at should be serialized when present
+        assert!(
+            value.get("done_at").is_some(),
+            "done_at should be serialized when done is true"
+        );
+        // Verify it's a proper ISO8601 datetime string
+        let done_at_str = value["done_at"].as_str().unwrap();
+        assert!(
+            done_at_str.contains('T'),
+            "done_at should be ISO8601 format with 'T' separator"
+        );
     }
 
     #[test]
     fn test_section_deserialize_with_done() {
-        let json = r#"{"type":"step","content":"Do this","order":1,"done":true}"#;
+        let json = r#"{"type":"step","content":"Do this","order":1,"done":true,"done_at":"2025-01-06T12:00:00Z"}"#;
         let section: Section = serde_json::from_str(json).unwrap();
         assert_eq!(section.section_type, SectionType::Step);
         assert_eq!(section.content, "Do this");
         assert_eq!(section.order, Some(1));
         assert_eq!(section.done, Some(true));
+        // done_at should be deserialized
+        assert!(
+            section.done_at.is_some(),
+            "done_at should be deserialized when present"
+        );
+        let done_at = section.done_at.unwrap();
+        assert_eq!(done_at.hour(), 12);
     }
 
     #[test]
@@ -767,6 +835,96 @@ mod tests {
         let section = Section::new(SectionType::Goal, "Test");
         let cloned = section.clone();
         assert_eq!(section, cloned);
+    }
+
+    // Section done_at tests
+    #[test]
+    fn test_section_mark_done_sets_done_at() {
+        let before = Utc::now();
+        let mut section = Section::new(SectionType::Step, "Step to mark done");
+        section.mark_done();
+        let after = Utc::now();
+
+        assert_eq!(
+            section.done,
+            Some(true),
+            "done should be true after mark_done"
+        );
+        assert!(
+            section.done_at.is_some(),
+            "done_at should be set after mark_done"
+        );
+        let done_at = section.done_at.unwrap();
+        assert!(
+            done_at >= before && done_at <= after,
+            "done_at should be within 1 second of call time"
+        );
+    }
+
+    #[test]
+    fn test_section_deserialize_without_done_at_field() {
+        // Testing backward compatibility: old JSON without done_at should work
+        let json = r#"{"type":"step","content":"Old step","order":1,"done":true}"#;
+        let section: Section = serde_json::from_str(json).unwrap();
+        assert_eq!(section.section_type, SectionType::Step);
+        assert_eq!(section.content, "Old step");
+        assert_eq!(section.done, Some(true));
+        // done_at should be None when not in JSON (backward compatibility)
+        assert!(
+            section.done_at.is_none(),
+            "done_at should be None when not present in old JSON"
+        );
+    }
+
+    #[test]
+    fn test_section_serialize_omits_done_at_when_none() {
+        let section = Section::new(SectionType::Step, "Step without done_at");
+        let value = serde_json::to_value(&section).unwrap();
+        assert!(
+            value.get("done_at").is_none(),
+            "done_at should be omitted when None"
+        );
+    }
+
+    #[test]
+    fn test_section_done_false_clears_done_at() {
+        // First mark as done
+        let mut section = Section::new(SectionType::Step, "Step").with_done(true);
+        assert!(
+            section.done_at.is_some(),
+            "done_at should be set after with_done(true)"
+        );
+
+        // Then mark as not done - done_at should be cleared
+        section = section.with_done(false);
+        assert_eq!(section.done, Some(false));
+        assert!(
+            section.done_at.is_none(),
+            "done_at should be None when done is false"
+        );
+    }
+
+    #[test]
+    fn test_section_eq_ignores_done_at() {
+        let section1 = Section::new(SectionType::Step, "Same step");
+        let mut section2 = Section::new(SectionType::Step, "Same step");
+        section2.done_at = Some(Utc::now());
+
+        // Sections should be equal even with different done_at values
+        assert_eq!(
+            section1, section2,
+            "Sections should be equal regardless of done_at timestamp"
+        );
+    }
+
+    #[test]
+    fn test_section_done_at_is_datetime_type() {
+        let mut section = Section::new(SectionType::Step, "Type check");
+        let now: DateTime<Utc> = Utc::now();
+        section.done_at = Some(now);
+
+        // This is a compile-time check - if it compiles, the types are correct
+        let _done_at: Option<DateTime<Utc>> = section.done_at;
     }
 
     // CodeRef tests
