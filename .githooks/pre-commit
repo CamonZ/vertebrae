@@ -1,0 +1,21 @@
+#!/bin/bash
+# Pre-commit hook for vertebrae project
+# Runs formatting, linting, testing, and coverage checks
+
+set -e
+
+echo "Running pre-commit checks..."
+
+echo "==> Checking code formatting..."
+cargo fmt --check
+
+echo "==> Running clippy linter..."
+cargo clippy -- -D warnings
+
+echo "==> Running tests..."
+cargo test
+
+echo "==> Checking code coverage (threshold: 85%)..."
+cargo llvm-cov --fail-under-lines 85
+
+echo "All pre-commit checks passed!"
