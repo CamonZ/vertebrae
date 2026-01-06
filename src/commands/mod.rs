@@ -3,6 +3,7 @@
 //! This module contains all subcommand implementations for the vtb CLI.
 
 pub mod add;
+pub mod block;
 pub mod delete;
 pub mod done;
 pub mod list;
@@ -11,6 +12,7 @@ pub mod start;
 pub mod update;
 
 pub use add::AddCommand;
+pub use block::BlockCommand;
 pub use delete::DeleteCommand;
 pub use done::DoneCommand;
 pub use list::ListCommand;
@@ -27,6 +29,8 @@ use clap::Subcommand;
 pub enum Command {
     /// Create a new task
     Add(AddCommand),
+    /// Mark a task as blocked (with optional reason)
+    Block(BlockCommand),
     /// Delete a task (with optional cascade)
     Delete(DeleteCommand),
     /// Mark a task as complete (transition to done)
@@ -73,6 +77,10 @@ impl Command {
             Command::Add(cmd) => {
                 let id = cmd.execute(db).await?;
                 Ok(CommandResult::Message(format!("Created task: {}", id)))
+            }
+            Command::Block(cmd) => {
+                let result = cmd.execute(db).await?;
+                Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Delete(cmd) => {
                 let message = cmd.execute(db).await?;
@@ -729,5 +737,57 @@ mod tests {
         let cli = TestCli::try_parse_from(["test", "done", "test123"]).unwrap();
         let debug_str = format!("{:?}", cli.command);
         assert!(debug_str.contains("Done"));
+    }
+
+    #[test]
+    fn test_command_block_parses() {
+        let cli = TestCli::try_parse_from(["test", "block", "abc123"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Block(cmd) => {
+                assert_eq!(cmd.id, "abc123");
+                assert!(cmd.reason.is_none());
+            }
+            _ => panic!("Expected Block command"),
+        }
+    }
+
+    #[test]
+    fn test_command_block_requires_id() {
+        let result = TestCli::try_parse_from(["test", "block"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_command_block_with_reason() {
+        let cli =
+            TestCli::try_parse_from(["test", "block", "abc123", "--reason", "Waiting for API"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Block(cmd) => {
+                assert_eq!(cmd.id, "abc123");
+                assert_eq!(cmd.reason, Some("Waiting for API".to_string()));
+            }
+            _ => panic!("Expected Block command"),
+        }
+    }
+
+    #[test]
+    fn test_command_block_with_short_reason() {
+        let cli = TestCli::try_parse_from(["test", "block", "abc123", "-r", "Short reason"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Block(cmd) => {
+                assert_eq!(cmd.reason, Some("Short reason".to_string()));
+            }
+            _ => panic!("Expected Block command"),
+        }
+    }
+
+    #[test]
+    fn test_command_block_debug() {
+        let cli = TestCli::try_parse_from(["test", "block", "test123"]).unwrap();
+        let debug_str = format!("{:?}", cli.command);
+        assert!(debug_str.contains("Block"));
     }
 }
