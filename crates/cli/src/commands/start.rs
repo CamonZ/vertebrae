@@ -162,9 +162,18 @@ impl StartCommand {
     }
 
     /// Update the task status to in_progress and refresh updated_at.
+    ///
+    /// Also sets started_at to the current time if it hasn't been set before.
+    /// This ensures that re-starting a blocked task preserves the original start time.
     async fn update_status(&self, db: &Database, id: &str) -> Result<(), DbError> {
+        // Set started_at only if it's currently NULL (first time starting)
+        // This preserves the original start time when restarting a blocked task
+        // Uses null coalescing operator (??) to keep existing value or set new one
         let query = format!(
-            "UPDATE task:{} SET status = 'in_progress', updated_at = time::now()",
+            "UPDATE task:{} SET \
+                status = 'in_progress', \
+                updated_at = time::now(), \
+                started_at = started_at ?? time::now()",
             id
         );
         db.client().query(&query).await?;
@@ -608,5 +617,280 @@ mod tests {
             debug_str.contains("StartCommand") && debug_str.contains("id: \"test123\""),
             "Debug output should contain StartCommand and id field value"
         );
+    }
+
+    /// Helper to get started_at timestamp from database
+    async fn get_started_at(db: &Database, id: &str) -> Option<surrealdb::sql::Datetime> {
+        #[derive(Deserialize)]
+        struct TimestampRow {
+            started_at: Option<surrealdb::sql::Datetime>,
+        }
+
+        let query = format!("SELECT started_at FROM task:{}", id);
+        let mut result = db.client().query(&query).await.unwrap();
+        let row: Option<TimestampRow> = result.take(0).unwrap();
+        row.and_then(|r| r.started_at)
+    }
+
+    /// Helper to create a task with a pre-set started_at timestamp
+    async fn create_task_with_started_at(
+        db: &Database,
+        id: &str,
+        title: &str,
+        level: &str,
+        status: &str,
+        started_at_expr: &str,
+    ) {
+        let query = format!(
+            r#"CREATE task:{} SET
+                title = "{}",
+                level = "{}",
+                status = "{}",
+                tags = [],
+                sections = [],
+                refs = [],
+                started_at = {}"#,
+            id, title, level, status, started_at_expr
+        );
+
+        db.client().query(&query).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_start_sets_started_at() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        create_task(&db, "task1", "Test Task", "task", "todo").await;
+
+        // Verify started_at is initially NULL
+        let initial_started_at = get_started_at(&db, "task1").await;
+        assert!(
+            initial_started_at.is_none(),
+            "started_at should be NULL before starting"
+        );
+
+        let before_start = std::time::SystemTime::now();
+
+        let cmd = StartCommand {
+            id: "task1".to_string(),
+        };
+        let result = cmd.execute(&db).await;
+        assert!(result.is_ok(), "Start failed: {:?}", result.err());
+
+        let after_start = std::time::SystemTime::now();
+
+        // Verify started_at is now set
+        let started_at = get_started_at(&db, "task1").await;
+        assert!(started_at.is_some(), "started_at should be set after start");
+
+        // Verify started_at is within 1 second of command execution time
+        let started_at_ts = started_at.unwrap().0;
+        let before_ts = chrono::DateTime::<chrono::Utc>::from(before_start);
+        let after_ts = chrono::DateTime::<chrono::Utc>::from(after_start);
+
+        assert!(
+            started_at_ts >= before_ts - chrono::Duration::seconds(1),
+            "started_at should be after (or within 1 second of) command start: {} vs {}",
+            started_at_ts,
+            before_ts
+        );
+        assert!(
+            started_at_ts <= after_ts + chrono::Duration::seconds(1),
+            "started_at should be before (or within 1 second of) command end: {} vs {}",
+            started_at_ts,
+            after_ts
+        );
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_start_sets_started_at_even_with_incomplete_deps() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        // Create dependency task (not done)
+        create_task(&db, "dep1", "Dependency Task", "task", "todo").await;
+        // Create main task
+        create_task(&db, "task1", "Main Task", "task", "todo").await;
+        // Create dependency relationship
+        create_depends_on(&db, "task1", "dep1").await;
+
+        let cmd = StartCommand {
+            id: "task1".to_string(),
+        };
+        let result = cmd.execute(&db).await;
+        assert!(result.is_ok(), "Start should succeed with warnings");
+
+        // started_at should still be set even with incomplete dependencies
+        let started_at = get_started_at(&db, "task1").await;
+        assert!(
+            started_at.is_some(),
+            "started_at should be set even with incomplete dependencies (soft enforcement)"
+        );
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_start_already_in_progress_does_not_update_started_at() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        // Create task that is already in_progress with a started_at timestamp
+        let past_time = "d'2025-01-01T00:00:00Z'";
+        create_task_with_started_at(
+            &db,
+            "task1",
+            "In Progress Task",
+            "task",
+            "in_progress",
+            past_time,
+        )
+        .await;
+
+        // Record the original started_at
+        let original_started_at = get_started_at(&db, "task1").await;
+        assert!(
+            original_started_at.is_some(),
+            "Task should have started_at set"
+        );
+
+        let cmd = StartCommand {
+            id: "task1".to_string(),
+        };
+        let result = cmd.execute(&db).await;
+        assert!(result.is_ok(), "Start should succeed with warning");
+        assert!(
+            result.unwrap().already_in_progress,
+            "Should indicate already in progress"
+        );
+
+        // Verify started_at was NOT updated (should still be the original value)
+        let after_started_at = get_started_at(&db, "task1").await;
+        assert_eq!(
+            original_started_at, after_started_at,
+            "Re-running vtb start on in_progress task should NOT update started_at"
+        );
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_restart_blocked_task_preserves_started_at() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        // Create a blocked task with an existing started_at (was started before, then blocked)
+        let past_time = "d'2025-06-15T12:30:00Z'";
+        create_task_with_started_at(
+            &db,
+            "task1",
+            "Previously Started Task",
+            "task",
+            "blocked",
+            past_time,
+        )
+        .await;
+
+        // Record the original started_at
+        let original_started_at = get_started_at(&db, "task1").await;
+        assert!(
+            original_started_at.is_some(),
+            "Task should have started_at set"
+        );
+        let original_ts = original_started_at.unwrap().0;
+
+        let cmd = StartCommand {
+            id: "task1".to_string(),
+        };
+        let result = cmd.execute(&db).await;
+        assert!(result.is_ok(), "Start failed: {:?}", result.err());
+
+        // Verify status changed to in_progress
+        let status = get_task_status(&db, "task1").await;
+        assert_eq!(status, "in_progress");
+
+        // Verify started_at was NOT updated (should preserve original)
+        let after_started_at = get_started_at(&db, "task1").await;
+        assert!(after_started_at.is_some(), "started_at should still be set");
+
+        let after_ts = after_started_at.unwrap().0;
+        assert_eq!(
+            original_ts, after_ts,
+            "started_at should preserve the original value when restarting blocked task. \
+             Original: {}, After: {}",
+            original_ts, after_ts
+        );
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_start_blocked_task_without_started_at_sets_it() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        // Create a blocked task WITHOUT started_at (edge case: blocked before ever being started)
+        create_task(&db, "task1", "Never Started Task", "task", "blocked").await;
+
+        // Verify started_at is initially NULL
+        let initial_started_at = get_started_at(&db, "task1").await;
+        assert!(
+            initial_started_at.is_none(),
+            "started_at should be NULL initially"
+        );
+
+        let cmd = StartCommand {
+            id: "task1".to_string(),
+        };
+        let result = cmd.execute(&db).await;
+        assert!(result.is_ok(), "Start failed: {:?}", result.err());
+
+        // Verify started_at is now set
+        let started_at = get_started_at(&db, "task1").await;
+        assert!(
+            started_at.is_some(),
+            "started_at should be set when starting a blocked task for the first time"
+        );
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_started_at_persists_after_query() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        create_task(&db, "task1", "Persistence Test", "task", "todo").await;
+
+        let cmd = StartCommand {
+            id: "task1".to_string(),
+        };
+        cmd.execute(&db).await.unwrap();
+
+        // Query started_at multiple times to verify persistence
+        let first_query = get_started_at(&db, "task1").await;
+        let second_query = get_started_at(&db, "task1").await;
+        let third_query = get_started_at(&db, "task1").await;
+
+        assert!(
+            first_query.is_some(),
+            "First query should return started_at"
+        );
+        assert!(
+            second_query.is_some(),
+            "Second query should return started_at"
+        );
+        assert!(
+            third_query.is_some(),
+            "Third query should return started_at"
+        );
+
+        assert_eq!(
+            first_query, second_query,
+            "started_at should be consistent across queries"
+        );
+        assert_eq!(
+            second_query, third_query,
+            "started_at should be consistent across queries"
+        );
+
+        cleanup(&temp_dir);
     }
 }
