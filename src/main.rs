@@ -363,9 +363,10 @@ mod tests {
         assert!(result.is_ok());
         // Should use default path, not empty string
         let path = result.unwrap();
-        assert!(
-            path.to_string_lossy().contains(".vtb/data"),
-            "Expected default path containing .vtb/data, got: {:?}",
+        assert_eq!(
+            path,
+            PathBuf::from(".vtb/data"),
+            "Expected default path .vtb/data, got: {:?}",
             path
         );
 
@@ -390,9 +391,10 @@ mod tests {
         assert!(result.is_ok());
         // Should use default path
         let path = result.unwrap();
-        assert!(
-            path.to_string_lossy().contains(".vtb/data"),
-            "Expected default path containing .vtb/data, got: {:?}",
+        assert_eq!(
+            path,
+            PathBuf::from(".vtb/data"),
+            "Expected default path .vtb/data, got: {:?}",
             path
         );
 

@@ -15,8 +15,8 @@ use std::path::{Path, PathBuf};
 use surrealdb::Surreal;
 use surrealdb::engine::local::{Db, RocksDb};
 
-/// Default database path relative to user's home directory
-pub const DEFAULT_DB_SUBPATH: &str = ".vtb/data";
+/// Default database path relative to current working directory
+pub const DEFAULT_DB_PATH: &str = ".vtb/data";
 
 /// Database wrapper providing connection management for SurrealDB
 pub struct Database {
@@ -93,20 +93,11 @@ impl Database {
         &self.path
     }
 
-    /// Get the default database path based on user's home directory.
+    /// Get the default database path relative to current working directory.
     ///
-    /// Returns `~/.vtb/data` expanded to the actual home directory path.
-    ///
-    /// # Errors
-    ///
-    /// Returns `DbError::InvalidPath` if the home directory cannot be determined.
+    /// Returns `.vtb/data` as a relative path for project-local storage.
     pub fn default_path() -> DbResult<PathBuf> {
-        dirs::home_dir()
-            .map(|home| home.join(DEFAULT_DB_SUBPATH))
-            .ok_or_else(|| DbError::InvalidPath {
-                path: PathBuf::from("~"),
-                reason: "Could not determine home directory".to_string(),
-            })
+        Ok(PathBuf::from(DEFAULT_DB_PATH))
     }
 
     /// Prepare the database path by validating and creating directories.
@@ -148,12 +139,12 @@ mod tests {
         let result = Database::default_path();
         assert!(result.is_ok());
         let path = result.unwrap();
-        assert!(path.to_string_lossy().contains(".vtb/data"));
+        assert_eq!(path, PathBuf::from(".vtb/data"));
     }
 
     #[test]
-    fn test_default_db_subpath_constant() {
-        assert_eq!(DEFAULT_DB_SUBPATH, ".vtb/data");
+    fn test_default_db_path_constant() {
+        assert_eq!(DEFAULT_DB_PATH, ".vtb/data");
     }
 
     #[tokio::test]
