@@ -1,10 +1,15 @@
 //! Database module for Vertebrae
 //!
-//! Provides SurrealDB connection management with embedded RocksDB backend.
+//! Provides SurrealDB connection management with embedded RocksDB backend,
+//! schema initialization, and data models for task management.
 
 pub mod error;
+pub mod models;
+pub mod schema;
 
 pub use error::{DbError, DbResult};
+#[allow(unused_imports)]
+pub use models::{CodeRef, Level, Priority, Section, SectionType, Status, Task};
 
 use std::path::{Path, PathBuf};
 use surrealdb::Surreal;
@@ -54,7 +59,8 @@ impl Database {
 
     /// Initialize the database schema.
     ///
-    /// Sets up the namespace and database for Vertebrae operations.
+    /// Sets up the namespace and database for Vertebrae operations,
+    /// then initializes the task table and graph relations.
     ///
     /// # Errors
     ///
@@ -66,6 +72,9 @@ impl Database {
             .use_db("main")
             .await
             .map_err(|e| DbError::Schema(Box::new(e)))?;
+
+        // Initialize the schema (task table, relations)
+        schema::init_schema(&self.client).await?;
 
         Ok(())
     }
