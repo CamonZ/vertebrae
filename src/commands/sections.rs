@@ -76,10 +76,10 @@ impl std::fmt::Display for SectionsResult {
         writeln!(f, "Sections for task: {}", self.id)?;
         writeln!(f, "{}", "=".repeat(60))?;
 
-        // Display positive space sections
+        // Display desired behavior sections
         if !positive.is_empty() {
             writeln!(f)?;
-            writeln!(f, "Positive Space")?;
+            writeln!(f, "Desired Behavior")?;
             writeln!(f, "{}", "-".repeat(40))?;
             format_section_group(f, &positive, SectionType::Goal, "Goal")?;
             format_section_group(f, &positive, SectionType::Context, "Context")?;
@@ -104,10 +104,10 @@ impl std::fmt::Display for SectionsResult {
             )?;
         }
 
-        // Display negative space sections
+        // Display undesired behavior sections
         if !negative.is_empty() {
             writeln!(f)?;
-            writeln!(f, "Negative Space")?;
+            writeln!(f, "Undesired Behavior")?;
             writeln!(f, "{}", "-".repeat(40))?;
             format_section_group(f, &negative, SectionType::AntiPattern, "Anti-Patterns")?;
             format_section_group(f, &negative, SectionType::FailureTest, "Failure Tests")?;
@@ -766,11 +766,11 @@ mod tests {
         assert_eq!(lines[0], "Sections for task: task1");
         assert!(lines[1].starts_with("="), "Second line should be separator");
 
-        // Find Positive Space section
-        let pos_idx = lines.iter().position(|l| *l == "Positive Space").unwrap();
+        // Find Desired Behavior section
+        let pos_idx = lines.iter().position(|l| *l == "Desired Behavior").unwrap();
         assert!(
             lines[pos_idx + 1].starts_with("-"),
-            "Should have separator after Positive Space"
+            "Should have separator after Desired Behavior"
         );
 
         // Check goal and steps appear
@@ -791,11 +791,14 @@ mod tests {
             "Should have Step 2 with ordinal"
         );
 
-        // Find Negative Space section
-        let neg_idx = lines.iter().position(|l| *l == "Negative Space").unwrap();
+        // Find Undesired Behavior section
+        let neg_idx = lines
+            .iter()
+            .position(|l| *l == "Undesired Behavior")
+            .unwrap();
         assert!(
             neg_idx > pos_idx,
-            "Negative Space should come after Positive Space"
+            "Undesired Behavior should come after Desired Behavior"
         );
         assert!(
             lines.iter().any(|l| *l == "Anti-Patterns:"),
@@ -821,10 +824,10 @@ mod tests {
         let output = format!("{}", result);
         let lines: Vec<&str> = output.lines().collect();
 
-        // Check Positive Space exists
+        // Check Desired Behavior exists
         assert!(
-            lines.iter().any(|l| *l == "Positive Space"),
-            "Should have Positive Space header"
+            lines.iter().any(|l| *l == "Desired Behavior"),
+            "Should have Desired Behavior header"
         );
         assert!(
             lines.iter().any(|l| *l == "Goal: The goal"),
@@ -835,8 +838,8 @@ mod tests {
             "Should have Context line"
         );
         assert!(
-            !lines.iter().any(|l| *l == "Negative Space"),
-            "Should not have Negative Space header"
+            !lines.iter().any(|l| *l == "Undesired Behavior"),
+            "Should not have Undesired Behavior header"
         );
     }
 
@@ -855,12 +858,12 @@ mod tests {
         let lines: Vec<&str> = output.lines().collect();
 
         assert!(
-            !lines.iter().any(|l| *l == "Positive Space"),
-            "Should not have Positive Space header"
+            !lines.iter().any(|l| *l == "Desired Behavior"),
+            "Should not have Desired Behavior header"
         );
         assert!(
-            lines.iter().any(|l| *l == "Negative Space"),
-            "Should have Negative Space header"
+            lines.iter().any(|l| *l == "Undesired Behavior"),
+            "Should have Undesired Behavior header"
         );
         assert!(
             lines.iter().any(|l| *l == "Anti-Patterns:"),
