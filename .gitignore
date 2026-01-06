@@ -3,6 +3,7 @@
 
 # Vertebrae database
 .vertebrae/
+/.vtb
 
 # IDE files
 .idea/
@@ -20,3 +21,4 @@ Thumbs.db
 /docs
 /scratch
 /.claude
+
