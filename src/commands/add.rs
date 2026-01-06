@@ -483,9 +483,17 @@ mod tests {
         };
 
         let result = cmd.execute(&db).await;
-        assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
-        assert!(err.contains("title required"));
+        match result {
+            Err(DbError::InvalidPath { reason, .. }) => {
+                assert!(
+                    reason.contains("title required"),
+                    "Expected 'title required' in error, got: {}",
+                    reason
+                );
+            }
+            Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
+            Ok(_) => panic!("Expected error, got success"),
+        }
 
         cleanup(&temp_dir);
     }
@@ -505,7 +513,17 @@ mod tests {
         };
 
         let result = cmd.execute(&db).await;
-        assert!(result.is_err());
+        match result {
+            Err(DbError::InvalidPath { reason, .. }) => {
+                assert!(
+                    reason.contains("title required"),
+                    "Expected 'title required' in error, got: {}",
+                    reason
+                );
+            }
+            Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
+            Ok(_) => panic!("Expected error, got success"),
+        }
 
         cleanup(&temp_dir);
     }
@@ -525,9 +543,22 @@ mod tests {
         };
 
         let result = cmd.execute(&db).await;
-        assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
-        assert!(err.contains("does not exist"));
+        match result {
+            Err(DbError::InvalidPath { reason, .. }) => {
+                assert!(
+                    reason.contains("does not exist"),
+                    "Expected 'does not exist' in error, got: {}",
+                    reason
+                );
+                assert!(
+                    reason.contains("nonexistent"),
+                    "Expected parent ID 'nonexistent' in error, got: {}",
+                    reason
+                );
+            }
+            Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
+            Ok(_) => panic!("Expected error, got success"),
+        }
 
         cleanup(&temp_dir);
     }
@@ -547,9 +578,22 @@ mod tests {
         };
 
         let result = cmd.execute(&db).await;
-        assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
-        assert!(err.contains("does not exist"));
+        match result {
+            Err(DbError::InvalidPath { reason, .. }) => {
+                assert!(
+                    reason.contains("does not exist"),
+                    "Expected 'does not exist' in error, got: {}",
+                    reason
+                );
+                assert!(
+                    reason.contains("nonexistent"),
+                    "Expected dependency ID 'nonexistent' in error, got: {}",
+                    reason
+                );
+            }
+            Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
+            Ok(_) => panic!("Expected error, got success"),
+        }
 
         cleanup(&temp_dir);
     }

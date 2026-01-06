@@ -745,10 +745,17 @@ mod tests {
         };
 
         let result = cmd.execute(&db).await;
-        assert!(result.is_err());
-
-        let err = result.unwrap_err().to_string();
-        assert!(err.contains("No goal section found"));
+        match result {
+            Err(DbError::InvalidPath { reason, .. }) => {
+                assert!(
+                    reason.contains("No goal section found"),
+                    "Expected 'No goal section found' in error, got: {}",
+                    reason
+                );
+            }
+            Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
+            Ok(_) => panic!("Expected error, got success"),
+        }
 
         cleanup(&temp_dir);
     }
@@ -768,10 +775,17 @@ mod tests {
         };
 
         let result = cmd.execute(&db).await;
-        assert!(result.is_err());
-
-        let err = result.unwrap_err().to_string();
-        assert!(err.contains("index 99"));
+        match result {
+            Err(DbError::InvalidPath { reason, .. }) => {
+                assert!(
+                    reason.contains("index 99"),
+                    "Expected 'index 99' in error, got: {}",
+                    reason
+                );
+            }
+            Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
+            Ok(_) => panic!("Expected error, got success"),
+        }
 
         cleanup(&temp_dir);
     }
@@ -788,10 +802,22 @@ mod tests {
         };
 
         let result = cmd.execute(&db).await;
-        assert!(result.is_err());
-
-        let err = result.unwrap_err().to_string();
-        assert!(err.contains("not found"));
+        match result {
+            Err(DbError::InvalidPath { reason, .. }) => {
+                assert!(
+                    reason.contains("not found"),
+                    "Expected 'not found' in error, got: {}",
+                    reason
+                );
+                assert!(
+                    reason.contains("nonexistent"),
+                    "Expected task ID 'nonexistent' in error, got: {}",
+                    reason
+                );
+            }
+            Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
+            Ok(_) => panic!("Expected error, got success"),
+        }
 
         cleanup(&temp_dir);
     }
@@ -811,11 +837,22 @@ mod tests {
         };
 
         let result = cmd.execute(&db).await;
-        assert!(result.is_err());
-
-        let err = result.unwrap_err().to_string();
-        assert!(err.contains("multiple instances"));
-        assert!(err.contains("--index"));
+        match result {
+            Err(DbError::InvalidPath { reason, .. }) => {
+                assert!(
+                    reason.contains("multiple instances"),
+                    "Expected 'multiple instances' in error, got: {}",
+                    reason
+                );
+                assert!(
+                    reason.contains("--index"),
+                    "Expected '--index' in error, got: {}",
+                    reason
+                );
+            }
+            Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
+            Ok(_) => panic!("Expected error, got success"),
+        }
 
         cleanup(&temp_dir);
     }
@@ -947,10 +984,17 @@ mod tests {
         };
 
         let result = cmd.execute(&db).await;
-        assert!(result.is_err());
-
-        let err = result.unwrap_err().to_string();
-        assert!(err.contains("Must specify a section type or use --all"));
+        match result {
+            Err(DbError::InvalidPath { reason, .. }) => {
+                assert!(
+                    reason.contains("Must specify a section type or use --all"),
+                    "Expected 'Must specify a section type or use --all' in error, got: {}",
+                    reason
+                );
+            }
+            Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
+            Ok(_) => panic!("Expected error, got success"),
+        }
 
         cleanup(&temp_dir);
     }
@@ -969,10 +1013,17 @@ mod tests {
         };
 
         let result = cmd.execute(&db).await;
-        assert!(result.is_err());
-
-        let err = result.unwrap_err().to_string();
-        assert!(err.contains("--index requires a section type"));
+        match result {
+            Err(DbError::InvalidPath { reason, .. }) => {
+                assert!(
+                    reason.contains("--index requires a section type"),
+                    "Expected '--index requires a section type' in error, got: {}",
+                    reason
+                );
+            }
+            Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
+            Ok(_) => panic!("Expected error, got success"),
+        }
 
         cleanup(&temp_dir);
     }

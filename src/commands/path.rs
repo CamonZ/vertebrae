@@ -452,13 +452,22 @@ mod tests {
         };
 
         let result = cmd.execute(&db).await;
-        assert!(result.is_err());
-
-        let err = result.unwrap_err().to_string();
-        assert_eq!(
-            err,
-            "Invalid database path: nonexistent - Task 'nonexistent' not found"
-        );
+        match result {
+            Err(DbError::InvalidPath { reason, .. }) => {
+                assert!(
+                    reason.contains("not found"),
+                    "Expected 'not found' in error, got: {}",
+                    reason
+                );
+                assert!(
+                    reason.contains("nonexistent"),
+                    "Expected task ID 'nonexistent' in error, got: {}",
+                    reason
+                );
+            }
+            Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
+            Ok(_) => panic!("Expected error, got success"),
+        }
 
         cleanup(&temp_dir);
     }
@@ -475,13 +484,22 @@ mod tests {
         };
 
         let result = cmd.execute(&db).await;
-        assert!(result.is_err());
-
-        let err = result.unwrap_err().to_string();
-        assert_eq!(
-            err,
-            "Invalid database path: nonexistent - Task 'nonexistent' not found"
-        );
+        match result {
+            Err(DbError::InvalidPath { reason, .. }) => {
+                assert!(
+                    reason.contains("not found"),
+                    "Expected 'not found' in error, got: {}",
+                    reason
+                );
+                assert!(
+                    reason.contains("nonexistent"),
+                    "Expected task ID 'nonexistent' in error, got: {}",
+                    reason
+                );
+            }
+            Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
+            Ok(_) => panic!("Expected error, got success"),
+        }
 
         cleanup(&temp_dir);
     }

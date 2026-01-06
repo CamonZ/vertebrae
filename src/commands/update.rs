@@ -478,9 +478,22 @@ mod tests {
         };
 
         let result = cmd.execute(&db).await;
-        assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
-        assert!(err.contains("not found"));
+        match result {
+            Err(DbError::InvalidPath { reason, .. }) => {
+                assert!(
+                    reason.contains("not found"),
+                    "Expected 'not found' in error, got: {}",
+                    reason
+                );
+                assert!(
+                    reason.contains("nonexistent"),
+                    "Expected task ID 'nonexistent' in error, got: {}",
+                    reason
+                );
+            }
+            Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
+            Ok(_) => panic!("Expected error, got success"),
+        }
 
         cleanup(&temp_dir);
     }
@@ -762,9 +775,17 @@ mod tests {
         };
 
         let result = cmd.execute(&db).await;
-        assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
-        assert!(err.contains("own parent"));
+        match result {
+            Err(DbError::InvalidPath { reason, .. }) => {
+                assert!(
+                    reason.contains("own parent"),
+                    "Expected 'own parent' in error, got: {}",
+                    reason
+                );
+            }
+            Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
+            Ok(_) => panic!("Expected error, got success"),
+        }
 
         cleanup(&temp_dir);
     }
@@ -785,9 +806,22 @@ mod tests {
         };
 
         let result = cmd.execute(&db).await;
-        assert!(result.is_err());
-        let err = result.unwrap_err().to_string();
-        assert!(err.contains("does not exist"));
+        match result {
+            Err(DbError::InvalidPath { reason, .. }) => {
+                assert!(
+                    reason.contains("does not exist"),
+                    "Expected 'does not exist' in error, got: {}",
+                    reason
+                );
+                assert!(
+                    reason.contains("nonexistent"),
+                    "Expected parent ID 'nonexistent' in error, got: {}",
+                    reason
+                );
+            }
+            Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
+            Ok(_) => panic!("Expected error, got success"),
+        }
 
         cleanup(&temp_dir);
     }
