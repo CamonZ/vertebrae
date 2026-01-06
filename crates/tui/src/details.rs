@@ -11,7 +11,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Wrap},
 };
-use vertebrae_db::{CodeRef, Level, Priority, Section, SectionType, Status, Task};
+use vertebrae_db::{CodeRef, Level, Priority, Progress, Section, SectionType, Status, Task};
 
 /// Additional relationship data for a task
 #[derive(Debug, Clone, Default)]
@@ -33,6 +33,8 @@ pub struct TaskDetails {
     pub id: String,
     /// Relationship information
     pub relationships: TaskRelationships,
+    /// Progress information for tasks with children (optional)
+    pub progress: Option<Progress>,
 }
 
 /// Render the details view for a task.
@@ -69,6 +71,12 @@ fn build_details_lines(details: &TaskDetails) -> Vec<Line<'static>> {
     // Header section
     lines.extend(build_header_section(details));
     lines.push(Line::from(""));
+
+    // Progress section (if task has children)
+    if let Some(progress) = &details.progress {
+        lines.extend(build_progress_section(progress));
+        lines.push(Line::from(""));
+    }
 
     // Metadata section
     lines.extend(build_metadata_section(task));
@@ -152,6 +160,51 @@ fn build_header_section(details: &TaskDetails) -> Vec<Line<'static>> {
     ]);
 
     vec![id_line, title_line, badges_line]
+}
+
+/// Build the progress section with a visual progress bar.
+fn build_progress_section(progress: &Progress) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+
+    lines.push(section_header("Progress"));
+
+    // Progress color based on completion
+    let progress_color = if progress.is_complete() {
+        Color::Green
+    } else if progress.is_empty() {
+        Color::DarkGray
+    } else {
+        Color::Yellow
+    };
+
+    // Progress text: "3/5 (60%)"
+    let progress_text = format!(
+        "{}/{} ({}%)",
+        progress.done_count, progress.total_count, progress.percentage
+    );
+
+    lines.push(Line::from(vec![
+        Span::styled("  ", Style::default()),
+        Span::styled(progress_text, Style::default().fg(progress_color)),
+    ]));
+
+    // Progress bar: [████████░░░░░░░░░░░░]
+    let bar_width = 20;
+    let filled = (bar_width * progress.percentage as usize) / 100;
+    let empty = bar_width - filled;
+
+    let bar = format!(
+        "[{}{}]",
+        "\u{2588}".repeat(filled), // █ filled
+        "\u{2591}".repeat(empty)   // ░ empty
+    );
+
+    lines.push(Line::from(vec![
+        Span::styled("  ", Style::default()),
+        Span::styled(bar, Style::default().fg(progress_color)),
+    ]));
+
+    lines
 }
 
 /// Build the metadata section (priority).
@@ -523,6 +576,7 @@ mod tests {
             task,
             id: "abc123".to_string(),
             relationships: TaskRelationships::default(),
+            progress: None,
         };
 
         let lines = build_header_section(&details);
@@ -620,9 +674,61 @@ mod tests {
             task,
             id: "test123".to_string(),
             relationships: TaskRelationships::default(),
+            progress: None,
         };
 
         let lines = build_details_lines(&details);
         assert!(!lines.is_empty());
+    }
+
+    #[test]
+    fn test_build_progress_section() {
+        let progress = Progress::new(3, 5);
+        let lines = build_progress_section(&progress);
+
+        // Should have header + percentage line + progress bar = 3 lines
+        assert_eq!(lines.len(), 3);
+
+        // Check for percentage in the output
+        let all_text: String = lines
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.to_string()))
+            .collect();
+        assert!(all_text.contains("3/5"));
+        assert!(all_text.contains("60%"));
+    }
+
+    #[test]
+    fn test_build_progress_section_complete() {
+        let progress = Progress::new(5, 5);
+        let lines = build_progress_section(&progress);
+
+        let all_text: String = lines
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.to_string()))
+            .collect();
+        assert!(all_text.contains("100%"));
+    }
+
+    #[test]
+    fn test_build_details_lines_with_progress() {
+        let task = Task::new("Epic Task", Level::Epic).with_status(Status::InProgress);
+
+        let details = TaskDetails {
+            task,
+            id: "epic123".to_string(),
+            relationships: TaskRelationships::default(),
+            progress: Some(Progress::new(2, 4)),
+        };
+
+        let lines = build_details_lines(&details);
+
+        // Should include progress section
+        let all_text: String = lines
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.to_string()))
+            .collect();
+        assert!(all_text.contains("Progress"));
+        assert!(all_text.contains("2/4"));
     }
 }

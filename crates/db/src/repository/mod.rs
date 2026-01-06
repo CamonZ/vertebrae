@@ -9,6 +9,6 @@ mod relationship;
 mod task;
 
 pub use filter::{TaskFilter, TaskLister, TaskSummary};
-pub use graph::{BlockerNode, GraphQueries};
+pub use graph::{BlockerNode, GraphQueries, Progress};
 pub use relationship::RelationshipRepository;
 pub use task::{TaskRepository, TaskUpdate};
