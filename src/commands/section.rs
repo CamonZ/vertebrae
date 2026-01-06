@@ -518,6 +518,22 @@ mod tests {
         let sections = get_sections(&db, "task1").await;
         assert_eq!(sections.len(), 3);
 
+        // Verify specific step contents and ordinals
+        use std::collections::HashSet;
+        let step_contents: HashSet<_> = sections
+            .iter()
+            .filter_map(|s| s.content.as_deref())
+            .collect();
+        assert!(step_contents.contains("Step 1"), "Should contain Step 1");
+        assert!(step_contents.contains("Step 2"), "Should contain Step 2");
+        assert!(step_contents.contains("Step 3"), "Should contain Step 3");
+
+        // Verify ordinals are 0, 1, 2
+        let ordinals: HashSet<_> = sections.iter().filter_map(|s| s.order).collect();
+        assert!(ordinals.contains(&0), "Should have ordinal 0");
+        assert!(ordinals.contains(&1), "Should have ordinal 1");
+        assert!(ordinals.contains(&2), "Should have ordinal 2");
+
         cleanup(&temp_dir);
     }
 
@@ -589,6 +605,49 @@ mod tests {
         // Verify all 9 sections exist
         let sections = get_sections(&db, "task1").await;
         assert_eq!(sections.len(), 9);
+
+        // Verify all section types are present
+        use std::collections::HashSet;
+        let section_type_names: HashSet<_> = sections
+            .iter()
+            .filter_map(|s| s.section_type.as_deref())
+            .collect();
+        assert!(
+            section_type_names.contains("goal"),
+            "Should contain goal section"
+        );
+        assert!(
+            section_type_names.contains("context"),
+            "Should contain context section"
+        );
+        assert!(
+            section_type_names.contains("current_behavior"),
+            "Should contain current_behavior section"
+        );
+        assert!(
+            section_type_names.contains("desired_behavior"),
+            "Should contain desired_behavior section"
+        );
+        assert!(
+            section_type_names.contains("step"),
+            "Should contain step section"
+        );
+        assert!(
+            section_type_names.contains("testing_criterion"),
+            "Should contain testing_criterion section"
+        );
+        assert!(
+            section_type_names.contains("anti_pattern"),
+            "Should contain anti_pattern section"
+        );
+        assert!(
+            section_type_names.contains("failure_test"),
+            "Should contain failure_test section"
+        );
+        assert!(
+            section_type_names.contains("constraint"),
+            "Should contain constraint section"
+        );
 
         cleanup(&temp_dir);
     }

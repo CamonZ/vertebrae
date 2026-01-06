@@ -489,7 +489,16 @@ mod tests {
     async fn test_update_title() {
         let (db, temp_dir) = setup_test_db().await;
 
-        create_task(&db, "abc123", "Original title", "task", "todo", None, &[]).await;
+        create_task(
+            &db,
+            "abc123",
+            "Original title",
+            "task",
+            "todo",
+            Some("low"),
+            &["backend"],
+        )
+        .await;
 
         let cmd = UpdateCommand {
             id: "abc123".to_string(),
@@ -503,8 +512,13 @@ mod tests {
         let result = cmd.execute(&db).await;
         assert!(result.is_ok());
 
-        let task = get_task(&db, "abc123").await.unwrap();
+        // Verify title was changed
+        let task = get_task(&db, "abc123").await.expect("Task should exist");
         assert_eq!(task.title, "New title");
+
+        // Verify other fields were not changed
+        assert_eq!(task.priority, Some("low".to_string()));
+        assert!(task.tags.contains(&"backend".to_string()));
 
         cleanup(&temp_dir);
     }
@@ -513,7 +527,16 @@ mod tests {
     async fn test_update_priority() {
         let (db, temp_dir) = setup_test_db().await;
 
-        create_task(&db, "abc123", "Test task", "task", "todo", Some("low"), &[]).await;
+        create_task(
+            &db,
+            "abc123",
+            "Test task",
+            "task",
+            "todo",
+            Some("low"),
+            &["api"],
+        )
+        .await;
 
         let cmd = UpdateCommand {
             id: "abc123".to_string(),
@@ -527,8 +550,13 @@ mod tests {
         let result = cmd.execute(&db).await;
         assert!(result.is_ok());
 
-        let task = get_task(&db, "abc123").await.unwrap();
+        // Verify priority was changed
+        let task = get_task(&db, "abc123").await.expect("Task should exist");
         assert_eq!(task.priority, Some("high".to_string()));
+
+        // Verify other fields were not changed
+        assert_eq!(task.title, "Test task");
+        assert!(task.tags.contains(&"api".to_string()));
 
         cleanup(&temp_dir);
     }

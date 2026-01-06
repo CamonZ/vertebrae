@@ -391,7 +391,10 @@ mod tests {
         assert!(result.is_err());
 
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("not found"));
+        assert_eq!(
+            err,
+            "Invalid database path: nonexistent - Task 'nonexistent' not found"
+        );
 
         cleanup(&temp_dir);
     }
@@ -538,10 +541,14 @@ mod tests {
             result.err()
         );
 
-        // Verify constraint section was added with escaped content
+        // Verify constraint section was added with special characters intact
         let constraints = get_constraint_sections(&db, "task1").await;
         assert_eq!(constraints.len(), 1);
-        assert!(constraints[0].contains("external"));
+        // Verify the full content was stored correctly with special characters
+        assert_eq!(
+            constraints[0],
+            "BLOCKED: Waiting for \"external\" API (v2.0)"
+        );
 
         cleanup(&temp_dir);
     }
@@ -567,8 +574,7 @@ mod tests {
         };
 
         let output = format!("{}", result);
-        assert!(output.contains("Blocked task: task1"));
-        assert!(output.contains("Reason: Waiting for API"));
+        assert_eq!(output, "Blocked task: task1\nReason: Waiting for API");
     }
 
     #[test]
@@ -580,7 +586,7 @@ mod tests {
         };
 
         let output = format!("{}", result);
-        assert!(output.contains("already blocked"));
+        assert_eq!(output, "Task 'task1' is already blocked");
     }
 
     #[test]
@@ -592,8 +598,10 @@ mod tests {
         };
 
         let output = format!("{}", result);
-        assert!(output.contains("already blocked"));
-        assert!(output.contains("added reason: New reason"));
+        assert_eq!(
+            output,
+            "Task 'task1' is already blocked (added reason: New reason)"
+        );
     }
 
     #[test]
@@ -603,6 +611,11 @@ mod tests {
             reason: Some("reason".to_string()),
         };
         let debug_str = format!("{:?}", cmd);
-        assert!(debug_str.contains("BlockCommand"));
+        assert!(
+            debug_str.contains("BlockCommand")
+                && debug_str.contains("id: \"test\"")
+                && debug_str.contains("reason: Some(\"reason\")"),
+            "Debug output should contain BlockCommand and its fields"
+        );
     }
 }

@@ -353,10 +353,13 @@ mod tests {
 
     #[test]
     fn test_command_debug() {
-        let cli = TestCli::try_parse_from(["test", "add", "Debug test"]).unwrap();
-        // Test Debug trait is implemented
+        let cli = TestCli::try_parse_from(["test", "add", "Debug test title"]).unwrap();
+        // Test Debug trait is implemented and shows field values
         let debug_str = format!("{:?}", cli.command);
-        assert!(debug_str.contains("Add"));
+        assert!(
+            debug_str.contains("Add") && debug_str.contains("Debug test title"),
+            "Debug output should contain Add command and title field value"
+        );
     }
 
     #[test]

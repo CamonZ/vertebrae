@@ -676,6 +676,29 @@ mod tests {
         let refs = get_refs(&db, "task1").await;
         assert_eq!(refs.len(), 3);
 
+        // Verify specific ref names and paths
+        use std::collections::HashSet;
+        let ref_names: HashSet<_> = refs.iter().filter_map(|r| r.name.as_deref()).collect();
+        assert!(
+            ref_names.contains("hash_password"),
+            "Should contain hash_password ref"
+        );
+        assert!(
+            ref_names.contains("authenticate"),
+            "Should contain authenticate ref"
+        );
+        assert!(ref_names.contains("config"), "Should contain config ref");
+
+        let ref_paths: HashSet<_> = refs.iter().filter_map(|r| r.path.as_deref()).collect();
+        assert!(
+            ref_paths.contains("src/auth.ex"),
+            "Should contain src/auth.ex path"
+        );
+        assert!(
+            ref_paths.contains("config/auth.exs"),
+            "Should contain config/auth.exs path"
+        );
+
         cleanup(&temp_dir);
     }
 

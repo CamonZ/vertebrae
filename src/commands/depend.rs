@@ -667,6 +667,24 @@ mod tests {
 
         assert!(result.is_ok(), "Diamond dependency should be allowed");
 
+        // Verify all 4 edges exist in the database
+        assert!(
+            dependency_exists(&db, "taskb", "taska").await,
+            "B -> A edge should exist"
+        );
+        assert!(
+            dependency_exists(&db, "taskc", "taska").await,
+            "C -> A edge should exist"
+        );
+        assert!(
+            dependency_exists(&db, "taskd", "taskb").await,
+            "D -> B edge should exist"
+        );
+        assert!(
+            dependency_exists(&db, "taskd", "taskc").await,
+            "D -> C edge should exist"
+        );
+
         cleanup(&temp_dir);
     }
 
@@ -712,6 +730,30 @@ mod tests {
         assert!(result.is_err(), "Should detect cycle in long chain");
         assert!(result.unwrap_err().to_string().contains("Cycle detected"));
 
+        // Verify all chain edges exist in the database
+        assert!(
+            dependency_exists(&db, "taskb", "taska").await,
+            "B -> A edge should exist"
+        );
+        assert!(
+            dependency_exists(&db, "taskc", "taskb").await,
+            "C -> B edge should exist"
+        );
+        assert!(
+            dependency_exists(&db, "taskd", "taskc").await,
+            "D -> C edge should exist"
+        );
+        assert!(
+            dependency_exists(&db, "taske", "taskd").await,
+            "E -> D edge should exist"
+        );
+
+        // Verify the cycle edge was NOT created
+        assert!(
+            !dependency_exists(&db, "taska", "taske").await,
+            "A -> E edge should NOT exist (would create cycle)"
+        );
+
         cleanup(&temp_dir);
     }
 
@@ -744,11 +786,16 @@ mod tests {
     #[test]
     fn test_depend_command_debug() {
         let cmd = DependCommand {
-            id: "test".to_string(),
-            blocker_id: "other".to_string(),
+            id: "test123".to_string(),
+            blocker_id: "blocker456".to_string(),
         };
         let debug_str = format!("{:?}", cmd);
-        assert!(debug_str.contains("DependCommand"));
+        assert!(
+            debug_str.contains("DependCommand")
+                && debug_str.contains("id: \"test123\"")
+                && debug_str.contains("blocker_id: \"blocker456\""),
+            "Debug output should contain DependCommand and both id field values"
+        );
     }
 
     #[tokio::test]

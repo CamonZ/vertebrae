@@ -400,7 +400,12 @@ mod tests {
         assert!(!start_result.already_in_progress);
         assert!(!start_result.incomplete_deps.is_empty());
         assert_eq!(start_result.incomplete_deps.len(), 1);
-        assert_eq!(start_result.incomplete_deps[0].0, "dep1");
+
+        // Verify all fields of the incomplete dependency tuple (id, title, status)
+        let (dep_id, dep_title, dep_status) = &start_result.incomplete_deps[0];
+        assert_eq!(dep_id, "dep1");
+        assert_eq!(dep_title, "Dependency Task");
+        assert_eq!(dep_status, "todo");
 
         // Task should still be started despite incomplete deps
         let status = get_task_status(&db, "task1").await;
@@ -458,6 +463,26 @@ mod tests {
         let start_result = result.unwrap();
         // Only dep1 and dep2 are incomplete (dep3 is done)
         assert_eq!(start_result.incomplete_deps.len(), 2);
+
+        // Verify specific incomplete dependencies
+        use std::collections::HashSet;
+        let incomplete_ids: HashSet<_> = start_result
+            .incomplete_deps
+            .iter()
+            .map(|(id, _, _)| id.as_str())
+            .collect();
+        assert!(
+            incomplete_ids.contains("dep1"),
+            "Should contain dep1 (status=todo)"
+        );
+        assert!(
+            incomplete_ids.contains("dep2"),
+            "Should contain dep2 (status=blocked)"
+        );
+        assert!(
+            !incomplete_ids.contains("dep3"),
+            "Should not contain dep3 (status=done)"
+        );
 
         cleanup(&temp_dir);
     }
@@ -557,9 +582,12 @@ mod tests {
     #[test]
     fn test_start_command_debug() {
         let cmd = StartCommand {
-            id: "test".to_string(),
+            id: "test123".to_string(),
         };
         let debug_str = format!("{:?}", cmd);
-        assert!(debug_str.contains("StartCommand"));
+        assert!(
+            debug_str.contains("StartCommand") && debug_str.contains("id: \"test123\""),
+            "Debug output should contain StartCommand and id field value"
+        );
     }
 }

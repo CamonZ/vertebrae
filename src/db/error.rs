@@ -69,12 +69,17 @@ mod tests {
     #[test]
     fn test_db_error_debug() {
         let err = DbError::InvalidPath {
-            path: PathBuf::from("/test"),
-            reason: "test reason".to_string(),
+            path: PathBuf::from("/test/path"),
+            reason: "test reason message".to_string(),
         };
-        // Test that Debug is implemented
+        // Test that Debug is implemented and shows field values
         let debug_str = format!("{:?}", err);
-        assert!(debug_str.contains("InvalidPath"));
+        assert!(
+            debug_str.contains("InvalidPath")
+                && debug_str.contains("/test/path")
+                && debug_str.contains("test reason message"),
+            "Debug output should contain InvalidPath and its field values"
+        );
     }
 
     #[test]

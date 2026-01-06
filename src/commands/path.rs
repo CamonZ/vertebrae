@@ -325,7 +325,8 @@ mod tests {
         assert_eq!(path[0].id, "taska");
 
         let output = format!("{}", path_result);
-        assert!(output.contains("Same task"));
+        let first_line = output.lines().next().unwrap();
+        assert_eq!(first_line, "Same task: taska \"Task A\"");
 
         cleanup(&temp_dir);
     }
@@ -350,8 +351,12 @@ mod tests {
         assert!(path_result.path.is_some());
         let path = path_result.path.unwrap();
         assert_eq!(path.len(), 2);
+
+        // Verify all fields of each TaskSummary in the path
         assert_eq!(path[0].id, "taska");
+        assert_eq!(path[0].title, "Task A");
         assert_eq!(path[1].id, "taskb");
+        assert_eq!(path[1].title, "Task B");
 
         cleanup(&temp_dir);
     }
@@ -406,7 +411,8 @@ mod tests {
         assert!(path_result.path.is_none());
 
         let output = format!("{}", path_result);
-        assert!(output.contains("No dependency path"));
+        let first_line = output.lines().next().unwrap();
+        assert_eq!(first_line, "No dependency path from taska to taskb");
 
         cleanup(&temp_dir);
     }
@@ -449,7 +455,10 @@ mod tests {
         assert!(result.is_err());
 
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("not found"));
+        assert_eq!(
+            err,
+            "Invalid database path: nonexistent - Task 'nonexistent' not found"
+        );
 
         cleanup(&temp_dir);
     }
@@ -469,7 +478,10 @@ mod tests {
         assert!(result.is_err());
 
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("not found"));
+        assert_eq!(
+            err,
+            "Invalid database path: nonexistent - Task 'nonexistent' not found"
+        );
 
         cleanup(&temp_dir);
     }
@@ -579,9 +591,8 @@ mod tests {
         };
 
         let output = format!("{}", result);
-        assert!(output.contains("No dependency path"));
-        assert!(output.contains("taska"));
-        assert!(output.contains("taskb"));
+        let first_line = output.lines().next().unwrap();
+        assert_eq!(first_line, "No dependency path from taska to taskb");
     }
 
     #[test]
@@ -596,8 +607,8 @@ mod tests {
         };
 
         let output = format!("{}", result);
-        assert!(output.contains("Same task"));
-        assert!(output.contains("Task A"));
+        let first_line = output.lines().next().unwrap();
+        assert_eq!(first_line, "Same task: taska \"Task A\"");
     }
 
     #[test]
@@ -622,15 +633,27 @@ mod tests {
         };
 
         let output = format!("{}", result);
-        assert!(output.contains("Path from taska to taskc"));
-        assert!(output.contains("taska"));
-        assert!(output.contains("Task A"));
-        assert!(output.contains("taskb"));
-        assert!(output.contains("Task B"));
-        assert!(output.contains("taskc"));
-        assert!(output.contains("Task C"));
-        assert!(output.contains("depends on"));
-        assert!(output.contains("3 tasks in path"));
+        let lines: Vec<&str> = output.lines().collect();
+        assert_eq!(lines[0], "Path from taska to taskc:");
+        // Line 1 is blank
+        // Lines 2-6 contain the path with arrows
+        assert!(
+            lines[2].contains("taska") && lines[2].contains("Task A"),
+            "First task line should contain taska and Task A"
+        );
+        assert!(
+            lines[3].contains("depends on"),
+            "Arrow line should contain 'depends on'"
+        );
+        assert!(
+            lines[4].contains("taskb") && lines[4].contains("Task B"),
+            "Second task line should contain taskb and Task B"
+        );
+        assert!(
+            lines[6].contains("taskc") && lines[6].contains("Task C"),
+            "Third task line should contain taskc and Task C"
+        );
+        assert_eq!(lines[lines.len() - 1], "3 tasks in path");
     }
 
     #[test]
@@ -640,7 +663,12 @@ mod tests {
             to_id: "test2".to_string(),
         };
         let debug_str = format!("{:?}", cmd);
-        assert!(debug_str.contains("PathCommand"));
+        assert!(
+            debug_str.contains("PathCommand")
+                && debug_str.contains("from_id: \"test1\"")
+                && debug_str.contains("to_id: \"test2\""),
+            "Debug output should contain PathCommand and both ID fields"
+        );
     }
 
     #[test]
@@ -650,7 +678,12 @@ mod tests {
             title: "Test Task".to_string(),
         };
         let debug_str = format!("{:?}", summary);
-        assert!(debug_str.contains("TaskSummary"));
+        assert!(
+            debug_str.contains("TaskSummary")
+                && debug_str.contains("id: \"test\"")
+                && debug_str.contains("title: \"Test Task\""),
+            "Debug output should contain TaskSummary and its fields"
+        );
     }
 
     #[test]
@@ -661,6 +694,11 @@ mod tests {
             path: None,
         };
         let debug_str = format!("{:?}", result);
-        assert!(debug_str.contains("PathResult"));
+        assert!(
+            debug_str.contains("PathResult")
+                && debug_str.contains("from_id: \"a\"")
+                && debug_str.contains("to_id: \"b\""),
+            "Debug output should contain PathResult and its fields"
+        );
     }
 }
