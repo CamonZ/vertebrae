@@ -6,12 +6,14 @@ pub mod add;
 pub mod delete;
 pub mod list;
 pub mod show;
+pub mod start;
 pub mod update;
 
 pub use add::AddCommand;
 pub use delete::DeleteCommand;
 pub use list::ListCommand;
 pub use show::ShowCommand;
+pub use start::StartCommand;
 pub use update::UpdateCommand;
 
 use crate::db::{Database, DbError};
@@ -29,6 +31,8 @@ pub enum Command {
     List(ListCommand),
     /// Show full details of a task
     Show(ShowCommand),
+    /// Start working on a task (transition to in_progress)
+    Start(StartCommand),
     /// Update an existing task
     Update(UpdateCommand),
 }
@@ -77,6 +81,10 @@ impl Command {
             Command::Show(cmd) => {
                 let detail = cmd.execute(db).await?;
                 Ok(CommandResult::Message(format!("{}", detail)))
+            }
+            Command::Start(cmd) => {
+                let result = cmd.execute(db).await?;
+                Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Update(cmd) => {
                 let id = cmd.execute(db).await?;
@@ -663,5 +671,30 @@ mod tests {
         let cli = TestCli::try_parse_from(["test", "delete", "test123"]).unwrap();
         let debug_str = format!("{:?}", cli.command);
         assert!(debug_str.contains("Delete"));
+    }
+
+    #[test]
+    fn test_command_start_parses() {
+        let cli = TestCli::try_parse_from(["test", "start", "abc123"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Start(cmd) => {
+                assert_eq!(cmd.id, "abc123");
+            }
+            _ => panic!("Expected Start command"),
+        }
+    }
+
+    #[test]
+    fn test_command_start_requires_id() {
+        let result = TestCli::try_parse_from(["test", "start"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_command_start_debug() {
+        let cli = TestCli::try_parse_from(["test", "start", "test123"]).unwrap();
+        let debug_str = format!("{:?}", cli.command);
+        assert!(debug_str.contains("Start"));
     }
 }
