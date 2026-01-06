@@ -9,6 +9,7 @@ pub mod delete;
 pub mod depend;
 pub mod done;
 pub mod list;
+pub mod path;
 pub mod section;
 pub mod sections;
 pub mod show;
@@ -24,6 +25,7 @@ pub use delete::DeleteCommand;
 pub use depend::DependCommand;
 pub use done::DoneCommand;
 pub use list::ListCommand;
+pub use path::PathCommand;
 pub use section::SectionCommand;
 pub use sections::SectionsCommand;
 pub use show::ShowCommand;
@@ -53,6 +55,8 @@ pub enum Command {
     Done(DoneCommand),
     /// List tasks with optional filters
     List(ListCommand),
+    /// Find the dependency path between two tasks
+    Path(PathCommand),
     /// Add a typed content section to a task
     Section(SectionCommand),
     /// List all sections for a task
@@ -125,6 +129,10 @@ impl Command {
             Command::List(cmd) => {
                 let tasks = cmd.execute(db).await?;
                 Ok(CommandResult::Table(format_task_table(&tasks)))
+            }
+            Command::Path(cmd) => {
+                let result = cmd.execute(db).await?;
+                Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Section(cmd) => {
                 let result = cmd.execute(db).await?;
