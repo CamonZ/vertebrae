@@ -30,9 +30,9 @@ mod sql {
 
         DEFINE FIELD updated_at ON task TYPE datetime DEFAULT time::now();
 
-        DEFINE FIELD sections ON task TYPE array<object> DEFAULT [];
+        DEFINE FIELD sections ON task FLEXIBLE TYPE array<object> DEFAULT [];
 
-        DEFINE FIELD refs ON task TYPE array<object> DEFAULT [];
+        DEFINE FIELD refs ON task FLEXIBLE TYPE array<object> DEFAULT [];
     "#;
 
     /// Define the child_of relation table for hierarchy edges
