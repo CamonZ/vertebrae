@@ -337,7 +337,7 @@ impl std::fmt::Display for TaskDetail {
         }
         writeln!(f)?;
 
-        // Positive Space sections
+        // Desired Behavior sections
         let positive_sections: Vec<&Section> = self
             .sections
             .iter()
@@ -345,7 +345,7 @@ impl std::fmt::Display for TaskDetail {
             .collect();
 
         if !positive_sections.is_empty() {
-            writeln!(f, "Positive Space")?;
+            writeln!(f, "Desired Behavior")?;
             writeln!(f, "{}", "-".repeat(40))?;
 
             // Group by section type for display
@@ -374,7 +374,7 @@ impl std::fmt::Display for TaskDetail {
             writeln!(f)?;
         }
 
-        // Negative Space sections
+        // Undesired Behavior sections
         let negative_sections: Vec<&Section> = self
             .sections
             .iter()
@@ -382,7 +382,7 @@ impl std::fmt::Display for TaskDetail {
             .collect();
 
         if !negative_sections.is_empty() {
-            writeln!(f, "Negative Space")?;
+            writeln!(f, "Undesired Behavior")?;
             writeln!(f, "{}", "-".repeat(40))?;
 
             format_section_group(
@@ -1131,9 +1131,9 @@ mod tests {
         assert!(output.contains("Status:   todo"));
         assert!(output.contains("Priority: high"));
         assert!(output.contains("Tags:     backend"));
-        assert!(output.contains("Positive Space"));
+        assert!(output.contains("Desired Behavior"));
         assert!(output.contains("Goal: The goal"));
-        assert!(output.contains("Negative Space"));
+        assert!(output.contains("Undesired Behavior"));
         assert!(output.contains("Anti-Patterns: Don't do this"));
         assert!(output.contains("Parent: parent - Parent"));
         assert!(output.contains("src/main.rs:42"));
@@ -1164,8 +1164,8 @@ mod tests {
         assert!(output.contains("Priority: (none)"));
         assert!(output.contains("Tags:     (none)"));
         // Should not contain sections or relationships
-        assert!(!output.contains("Positive Space"));
-        assert!(!output.contains("Negative Space"));
+        assert!(!output.contains("Desired Behavior"));
+        assert!(!output.contains("Undesired Behavior"));
         assert!(!output.contains("Relationships"));
         assert!(!output.contains("Code References"));
     }
