@@ -360,12 +360,13 @@ mod tests {
 
         let result = resolve_db_path(None);
         assert!(result.is_ok());
-        // Should use default path, not empty string
+        // Should use default path (based on project root), not empty string
         let path = result.unwrap();
-        assert_eq!(
-            path,
-            PathBuf::from(".vtb/data"),
-            "Expected default path .vtb/data, got: {:?}",
+        // In a git repo, default_path returns an absolute path ending with .vtb/data
+        // If not in a git repo, it returns a relative path
+        assert!(
+            path.ends_with(".vtb/data"),
+            "Expected path ending with .vtb/data, got: {:?}",
             path
         );
 
@@ -388,12 +389,13 @@ mod tests {
 
         let result = resolve_db_path(None);
         assert!(result.is_ok());
-        // Should use default path
+        // Should use default path (based on project root)
         let path = result.unwrap();
-        assert_eq!(
-            path,
-            PathBuf::from(".vtb/data"),
-            "Expected default path .vtb/data, got: {:?}",
+        // In a git repo, default_path returns an absolute path ending with .vtb/data
+        // If not in a git repo, it returns a relative path
+        assert!(
+            path.ends_with(".vtb/data"),
+            "Expected path ending with .vtb/data, got: {:?}",
             path
         );
 

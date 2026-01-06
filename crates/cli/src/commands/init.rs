@@ -7,6 +7,7 @@
 use clap::Args;
 use std::fs;
 use std::path::{Path, PathBuf};
+use vertebrae_db::find_project_root;
 
 /// Initialize vertebrae in the current project
 #[derive(Debug, Args)]
@@ -138,7 +139,9 @@ impl InitCommand {
     /// - Failed to create directories
     /// - Failed to copy skill files
     pub fn execute(&self) -> Result<InitResult, InitError> {
-        let db_path = PathBuf::from(".vtb/data");
+        // Use git project root if available, otherwise fall back to current directory
+        let base_path = find_project_root().unwrap_or_else(|| PathBuf::from("."));
+        let db_path = base_path.join(".vtb/data");
         let db_created = self.create_dir_if_not_exists(&db_path)?;
 
         let skills_dir_created = self.create_dir_if_not_exists(&self.skills_target)?;
