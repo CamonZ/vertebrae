@@ -11,6 +11,7 @@ use ratatui::{
 };
 
 use crate::app::{ActiveTab, App};
+use crate::details::render_details_view;
 use crate::navigation::render_nav_panel;
 
 /// Tab titles for the right panel.
@@ -114,12 +115,31 @@ fn draw_tabs(frame: &mut Frame, area: Rect, active: ActiveTab) {
 
 /// Draw the content for the active tab.
 fn draw_tab_content(frame: &mut Frame, area: Rect, app: &App) {
-    let (title, content) = match app.active_tab() {
-        ActiveTab::Details => (" Details ", "Task details will be shown here."),
-        ActiveTab::Tree => (" Tree ", "Task tree hierarchy will be shown here."),
-        ActiveTab::Timeline => (" Timeline ", "Task timeline will be shown here."),
-    };
+    match app.active_tab() {
+        ActiveTab::Details => {
+            render_details_view(frame, area, app.selected_task_details());
+        }
+        ActiveTab::Tree => {
+            draw_placeholder_content(
+                frame,
+                area,
+                " Tree ",
+                "Task tree hierarchy will be shown here.",
+            );
+        }
+        ActiveTab::Timeline => {
+            draw_placeholder_content(
+                frame,
+                area,
+                " Timeline ",
+                "Task timeline will be shown here.",
+            );
+        }
+    }
+}
 
+/// Draw placeholder content for tabs not yet implemented.
+fn draw_placeholder_content(frame: &mut Frame, area: Rect, title: &str, content: &str) {
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)

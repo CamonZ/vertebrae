@@ -5,8 +5,11 @@
 
 use std::collections::HashMap;
 
-use vertebrae_db::{Database, Level, TaskFilter, TaskLister, TaskSummary};
+use vertebrae_db::{
+    Database, Level, RelationshipRepository, TaskFilter, TaskLister, TaskRepository, TaskSummary,
+};
 
+use crate::details::{TaskDetails, TaskRelationships};
 use crate::error::TuiResult;
 use crate::navigation::TreeNode;
 
@@ -166,11 +169,81 @@ pub async fn load_node_children(db: &Database, node_id: &str) -> TuiResult<Vec<T
     Ok(nodes)
 }
 
+/// Load full task details including relationships for the details view.
+///
+/// This function fetches the complete task data along with parent and
+/// dependency relationships for display in the details panel.
+///
+/// # Arguments
+///
+/// * `db` - Database connection
+/// * `task_id` - The ID of the task to load
+///
+/// # Returns
+///
+/// `Some(TaskDetails)` if the task exists, `None` otherwise.
+pub async fn load_task_details(db: &Database, task_id: &str) -> TuiResult<Option<TaskDetails>> {
+    let task_repo = TaskRepository::new(db.client());
+    let rel_repo = RelationshipRepository::new(db.client());
+
+    // Load the task
+    let task = match task_repo.get(task_id).await? {
+        Some(t) => t,
+        None => return Ok(None),
+    };
+
+    // Load parent relationship
+    let parent = if let Some(parent_id) = rel_repo.get_parent(task_id).await? {
+        // Get parent title
+        if let Some(parent_task) = task_repo.get(&parent_id).await? {
+            Some((parent_id, parent_task.title))
+        } else {
+            Some((parent_id, "Unknown".to_string()))
+        }
+    } else {
+        None
+    };
+
+    // Load dependencies (tasks this task depends on / blocked by)
+    let dependency_ids = rel_repo.get_dependencies(task_id).await?;
+    let mut blocked_by = Vec::new();
+    for dep_id in dependency_ids {
+        if let Some(dep_task) = task_repo.get(&dep_id).await? {
+            blocked_by.push((dep_id, dep_task.title));
+        } else {
+            blocked_by.push((dep_id, "Unknown".to_string()));
+        }
+    }
+
+    // Load dependents (tasks that depend on this task / blocks)
+    let dependent_ids = rel_repo.get_dependents(task_id).await?;
+    let mut blocks = Vec::new();
+    for dep_id in dependent_ids {
+        if let Some(dep_task) = task_repo.get(&dep_id).await? {
+            blocks.push((dep_id, dep_task.title));
+        } else {
+            blocks.push((dep_id, "Unknown".to_string()));
+        }
+    }
+
+    let relationships = TaskRelationships {
+        parent,
+        blocked_by,
+        blocks,
+    };
+
+    Ok(Some(TaskDetails {
+        task,
+        id: task_id.to_string(),
+        relationships,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::env;
-    use vertebrae_db::{Level, Status, Task, TaskRepository};
+    use vertebrae_db::{Level, Status, Task};
 
     /// Helper to create a test database
     async fn setup_test_db() -> (Database, std::path::PathBuf) {
@@ -366,6 +439,90 @@ mod tests {
 
         let tree = load_full_tree(&db).await.unwrap();
         assert_eq!(tree[0].title, "My Custom Epic Title");
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_load_task_details_not_found() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        let details = load_task_details(&db, "nonexistent").await.unwrap();
+        assert!(details.is_none());
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_load_task_details_basic() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        create_task_with_parent(&db, "task1", "My Task", Level::Task, None).await;
+
+        let details = load_task_details(&db, "task1").await.unwrap();
+        assert!(details.is_some());
+        let details = details.unwrap();
+        assert_eq!(details.id, "task1");
+        assert_eq!(details.task.title, "My Task");
+        assert!(details.relationships.parent.is_none());
+        assert!(details.relationships.blocked_by.is_empty());
+        assert!(details.relationships.blocks.is_empty());
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_load_task_details_with_parent() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        create_task_with_parent(&db, "epic1", "Parent Epic", Level::Epic, None).await;
+        create_task_with_parent(&db, "ticket1", "Child Ticket", Level::Ticket, Some("epic1")).await;
+
+        let details = load_task_details(&db, "ticket1").await.unwrap();
+        assert!(details.is_some());
+        let details = details.unwrap();
+        assert_eq!(details.id, "ticket1");
+        assert!(details.relationships.parent.is_some());
+        let (parent_id, parent_title) = details.relationships.parent.unwrap();
+        assert_eq!(parent_id, "epic1");
+        assert_eq!(parent_title, "Parent Epic");
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_load_task_details_with_dependencies() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        // Create tasks
+        create_task_with_parent(&db, "blocker", "Blocker Task", Level::Task, None).await;
+        create_task_with_parent(&db, "task1", "Main Task", Level::Task, None).await;
+        create_task_with_parent(&db, "dependent", "Dependent Task", Level::Task, None).await;
+
+        // Create relationships: dependent -> task1 -> blocker
+        let rel_repo = RelationshipRepository::new(db.client());
+        rel_repo
+            .create_depends_on("task1", "blocker")
+            .await
+            .unwrap();
+        rel_repo
+            .create_depends_on("dependent", "task1")
+            .await
+            .unwrap();
+
+        let details = load_task_details(&db, "task1").await.unwrap();
+        assert!(details.is_some());
+        let details = details.unwrap();
+
+        // task1 is blocked by "blocker"
+        assert_eq!(details.relationships.blocked_by.len(), 1);
+        assert_eq!(details.relationships.blocked_by[0].0, "blocker");
+        assert_eq!(details.relationships.blocked_by[0].1, "Blocker Task");
+
+        // task1 blocks "dependent"
+        assert_eq!(details.relationships.blocks.len(), 1);
+        assert_eq!(details.relationships.blocks[0].0, "dependent");
+        assert_eq!(details.relationships.blocks[0].1, "Dependent Task");
 
         cleanup(&temp_dir);
     }

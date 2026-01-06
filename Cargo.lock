@@ -5005,6 +5005,7 @@ dependencies = [
 name = "vertebrae-tui"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "crossterm",
  "ratatui",
  "scopeguard",

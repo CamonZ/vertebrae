@@ -16,3 +16,4 @@ vertebrae-db = { path = "../db" }
 tokio = { version = "1", features = ["full"] }
 thiserror = "2"
 scopeguard = "1"
+chrono = { version = "0.4", features = ["serde"] }
