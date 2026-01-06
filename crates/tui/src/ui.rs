@@ -6,11 +6,12 @@ use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::{Line, Span},
+    text::Line,
     widgets::{Block, Borders, Paragraph, Tabs},
 };
 
 use crate::app::{ActiveTab, App};
+use crate::navigation::render_nav_panel;
 
 /// Tab titles for the right panel.
 const TAB_TITLES: [&str; 3] = ["Details", "Tree", "Timeline"];
@@ -61,34 +62,15 @@ fn create_main_layout(area: Rect) -> Vec<Rect> {
         .collect()
 }
 
-/// Draw the left navigation panel.
+/// Draw the left navigation panel using the tree widget.
 fn draw_nav_panel(frame: &mut Frame, area: Rect, app: &App) {
-    let block = Block::default()
-        .title(" Navigation ")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan));
-
-    // TODO: Populate with actual task list from database
-    let items: Vec<Line> = (0..10)
-        .map(|i| {
-            let style = if i == app.selected_index() {
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default()
-            };
-            let prefix = if i == app.selected_index() {
-                "> "
-            } else {
-                "  "
-            };
-            Line::from(Span::styled(format!("{}Task {}", prefix, i + 1), style))
-        })
-        .collect();
-
-    let nav_list = Paragraph::new(items).block(block);
-    frame.render_widget(nav_list, area);
+    render_nav_panel(
+        frame,
+        area,
+        app.visible_nodes(),
+        app.selected_index(),
+        Some("No tasks found"),
+    );
 }
 
 /// Draw the right content area with tabs and content.
