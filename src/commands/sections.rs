@@ -561,6 +561,16 @@ mod tests {
         assert_eq!(sections_result.sections[0].order, Some(0));
         assert_eq!(sections_result.sections[1].order, Some(1));
 
+        // Verify specific step contents
+        use std::collections::HashSet;
+        let step_contents: HashSet<_> = sections_result
+            .sections
+            .iter()
+            .map(|s| s.content.as_str())
+            .collect();
+        assert!(step_contents.contains("Step 1"), "Should contain 'Step 1'");
+        assert!(step_contents.contains("Step 2"), "Should contain 'Step 2'");
+
         cleanup(&temp_dir);
     }
 
@@ -588,6 +598,22 @@ mod tests {
                 .sections
                 .iter()
                 .all(|s| s.section_type == SectionType::AntiPattern)
+        );
+
+        // Verify specific anti-pattern contents
+        use std::collections::HashSet;
+        let contents: HashSet<_> = sections_result
+            .sections
+            .iter()
+            .map(|s| s.content.as_str())
+            .collect();
+        assert!(
+            contents.contains("Don't do this"),
+            "Should contain 'Don't do this'"
+        );
+        assert!(
+            contents.contains("Avoid that"),
+            "Should contain 'Avoid that'"
         );
 
         cleanup(&temp_dir);
