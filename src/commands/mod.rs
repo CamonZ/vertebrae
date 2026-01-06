@@ -4,6 +4,7 @@
 
 pub mod add;
 pub mod block;
+pub mod blockers;
 pub mod delete;
 pub mod depend;
 pub mod done;
@@ -18,6 +19,7 @@ pub mod update;
 
 pub use add::AddCommand;
 pub use block::BlockCommand;
+pub use blockers::BlockersCommand;
 pub use delete::DeleteCommand;
 pub use depend::DependCommand;
 pub use done::DoneCommand;
@@ -41,6 +43,8 @@ pub enum Command {
     Add(AddCommand),
     /// Mark a task as blocked (with optional reason)
     Block(BlockCommand),
+    /// Show all tasks blocking a given task (recursive)
+    Blockers(BlockersCommand),
     /// Delete a task (with optional cascade)
     Delete(DeleteCommand),
     /// Create a dependency relationship between tasks
@@ -99,6 +103,10 @@ impl Command {
                 Ok(CommandResult::Message(format!("Created task: {}", id)))
             }
             Command::Block(cmd) => {
+                let result = cmd.execute(db).await?;
+                Ok(CommandResult::Message(format!("{}", result)))
+            }
+            Command::Blockers(cmd) => {
                 let result = cmd.execute(db).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
