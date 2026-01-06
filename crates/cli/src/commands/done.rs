@@ -235,10 +235,10 @@ impl DoneCommand {
         Ok(unblocked)
     }
 
-    /// Update the task status to done and refresh updated_at.
+    /// Update the task status to done and refresh updated_at and completed_at.
     async fn update_status(&self, db: &Database, id: &str) -> Result<(), DbError> {
         let query = format!(
-            "UPDATE task:{} SET status = 'done', updated_at = time::now()",
+            "UPDATE task:{} SET status = 'done', updated_at = time::now(), completed_at = time::now()",
             id
         );
         db.client().query(&query).await?;
@@ -336,6 +336,38 @@ mod tests {
         let mut result = db.client().query(&query).await.unwrap();
         let row: Option<TimestampRow> = result.take(0).unwrap();
         row.map(|r| r.updated_at.is_some()).unwrap_or(false)
+    }
+
+    /// Helper to get completed_at timestamp
+    async fn get_completed_at(db: &Database, id: &str) -> Option<surrealdb::sql::Datetime> {
+        #[derive(Deserialize)]
+        struct TimestampRow {
+            completed_at: Option<surrealdb::sql::Datetime>,
+        }
+
+        let query = format!("SELECT completed_at FROM task:{}", id);
+        let mut result = db.client().query(&query).await.unwrap();
+        let row: Option<TimestampRow> = result.take(0).unwrap();
+        row.and_then(|r| r.completed_at)
+    }
+
+    /// Helper to get started_at timestamp
+    async fn get_started_at(db: &Database, id: &str) -> Option<surrealdb::sql::Datetime> {
+        #[derive(Deserialize)]
+        struct TimestampRow {
+            started_at: Option<surrealdb::sql::Datetime>,
+        }
+
+        let query = format!("SELECT started_at FROM task:{}", id);
+        let mut result = db.client().query(&query).await.unwrap();
+        let row: Option<TimestampRow> = result.take(0).unwrap();
+        row.and_then(|r| r.started_at)
+    }
+
+    /// Helper to set started_at timestamp for a task
+    async fn set_started_at(db: &Database, id: &str) {
+        let query = format!("UPDATE task:{} SET started_at = time::now()", id);
+        db.client().query(&query).await.unwrap();
     }
 
     /// Clean up test database
@@ -850,5 +882,199 @@ mod tests {
             debug_str.contains("DoneCommand") && debug_str.contains("id: \"test123\""),
             "Debug output should contain DoneCommand and id field value"
         );
+    }
+
+    #[tokio::test]
+    async fn test_done_sets_completed_at() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        create_task(&db, "task1", "Test Task", "task", "todo").await;
+
+        // Record time before execution
+        let before = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let cmd = DoneCommand {
+            id: "task1".to_string(),
+        };
+
+        let result = cmd.execute(&db).await;
+        assert!(result.is_ok(), "Done should succeed: {:?}", result.err());
+
+        // Record time after execution
+        let after = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        // Verify completed_at was set
+        let completed_at = get_completed_at(&db, "task1").await;
+        assert!(
+            completed_at.is_some(),
+            "completed_at should be set after vtb done"
+        );
+
+        // Verify completed_at is within 1 second of command execution
+        let completed_timestamp = completed_at.unwrap().0.timestamp() as u64;
+        assert!(
+            completed_timestamp >= before && completed_timestamp <= after + 1,
+            "completed_at ({}) should be within execution window ({} - {})",
+            completed_timestamp,
+            before,
+            after + 1
+        );
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_done_already_done_does_not_update_completed_at() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        // Create a task that's already done with a completed_at timestamp
+        let query = r#"CREATE task:task1 SET
+            title = "Already Done Task",
+            level = "task",
+            status = "done",
+            tags = [],
+            sections = [],
+            refs = [],
+            completed_at = d'2025-01-01T00:00:00Z'"#;
+        db.client().query(query).await.unwrap();
+
+        // Get the original completed_at
+        let original_completed_at = get_completed_at(&db, "task1").await;
+        assert!(
+            original_completed_at.is_some(),
+            "Task should have completed_at set"
+        );
+
+        // Try to mark the task as done again
+        let cmd = DoneCommand {
+            id: "task1".to_string(),
+        };
+
+        let result = cmd.execute(&db).await;
+        assert!(result.is_ok());
+        assert!(
+            result.unwrap().already_done,
+            "Task should be reported as already done"
+        );
+
+        // Verify completed_at was NOT updated
+        let new_completed_at = get_completed_at(&db, "task1").await;
+        assert_eq!(
+            original_completed_at, new_completed_at,
+            "completed_at should not be updated when task is already done"
+        );
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_done_sets_completed_at_with_incomplete_children() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        // Create parent task
+        create_task(&db, "parent", "Parent Task", "ticket", "in_progress").await;
+        // Create incomplete child task
+        create_task(&db, "child1", "Child Task", "task", "todo").await;
+        create_child_of(&db, "child1", "parent").await;
+
+        let cmd = DoneCommand {
+            id: "parent".to_string(),
+        };
+
+        let result = cmd.execute(&db).await;
+        assert!(result.is_ok());
+        let done_result = result.unwrap();
+
+        // Task should have warnings about incomplete children
+        assert!(
+            !done_result.incomplete_children.is_empty(),
+            "Should warn about incomplete children"
+        );
+
+        // But completed_at should still be set (soft enforcement)
+        let completed_at = get_completed_at(&db, "parent").await;
+        assert!(
+            completed_at.is_some(),
+            "completed_at should be set even with incomplete children"
+        );
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_done_completed_at_after_started_at() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        create_task(&db, "task1", "Test Task", "task", "in_progress").await;
+
+        // Set started_at before marking done
+        set_started_at(&db, "task1").await;
+
+        // Small delay to ensure time difference
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+
+        let cmd = DoneCommand {
+            id: "task1".to_string(),
+        };
+
+        let result = cmd.execute(&db).await;
+        assert!(result.is_ok());
+
+        let started_at = get_started_at(&db, "task1").await;
+        let completed_at = get_completed_at(&db, "task1").await;
+
+        assert!(started_at.is_some(), "started_at should be set");
+        assert!(completed_at.is_some(), "completed_at should be set");
+
+        let started_timestamp = started_at.unwrap().0.timestamp();
+        let completed_timestamp = completed_at.unwrap().0.timestamp();
+
+        assert!(
+            completed_timestamp >= started_timestamp,
+            "completed_at ({}) should be >= started_at ({})",
+            completed_timestamp,
+            started_timestamp
+        );
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_done_completed_at_persists_in_database() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        create_task(&db, "task1", "Persist Test", "task", "todo").await;
+
+        let cmd = DoneCommand {
+            id: "task1".to_string(),
+        };
+        let result = cmd.execute(&db).await;
+        assert!(result.is_ok());
+
+        // Verify completed_at is persisted in database (query it fresh)
+        let completed_at = get_completed_at(&db, "task1").await;
+        assert!(
+            completed_at.is_some(),
+            "completed_at should persist in database"
+        );
+
+        // Verify status is persisted
+        let status = get_task_status(&db, "task1").await;
+        assert_eq!(status, "done", "status should persist in database");
+
+        // Verify the value survives multiple queries (testing persistence)
+        let completed_at_again = get_completed_at(&db, "task1").await;
+        assert_eq!(
+            completed_at, completed_at_again,
+            "completed_at should remain consistent across queries"
+        );
+
+        cleanup(&temp_dir);
     }
 }
