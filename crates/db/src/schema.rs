@@ -30,6 +30,10 @@ mod sql {
 
         DEFINE FIELD updated_at ON task TYPE datetime DEFAULT time::now();
 
+        DEFINE FIELD started_at ON task TYPE option<datetime>;
+
+        DEFINE FIELD completed_at ON task TYPE option<datetime>;
+
         DEFINE FIELD sections ON task FLEXIBLE TYPE array<object> DEFAULT [];
 
         DEFINE FIELD refs ON task FLEXIBLE TYPE array<object> DEFAULT [];
@@ -559,5 +563,254 @@ mod tests {
 
         assert!(sql::DEFINE_DEPENDS_ON_RELATION.contains("RELATION"));
         assert!(sql::DEFINE_DEPENDS_ON_RELATION.contains("depends_on"));
+    }
+
+    #[test]
+    fn test_sql_contains_timestamp_fields() {
+        assert!(
+            sql::DEFINE_TASK_TABLE.contains("started_at"),
+            "Schema should define started_at field"
+        );
+        assert!(
+            sql::DEFINE_TASK_TABLE.contains("completed_at"),
+            "Schema should define completed_at field"
+        );
+        assert!(
+            sql::DEFINE_TASK_TABLE.contains("option<datetime>"),
+            "Timestamp fields should use option<datetime> type"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_task_creation_without_timestamps_succeeds() {
+        let (client, temp_dir) = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // Create task without providing started_at or completed_at
+        let result = client
+            .query(
+                r#"
+                CREATE task:no_timestamps SET
+                    title = "Task without timestamps",
+                    level = "task",
+                    status = "todo"
+            "#,
+            )
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "Task creation without timestamps should succeed: {:?}",
+            result.err()
+        );
+
+        // Verify the timestamps are NULL
+        #[derive(Debug, serde::Deserialize)]
+        struct TimestampRow {
+            started_at: Option<surrealdb::sql::Datetime>,
+            completed_at: Option<surrealdb::sql::Datetime>,
+        }
+
+        let mut result = client
+            .query("SELECT started_at, completed_at FROM task:no_timestamps")
+            .await
+            .unwrap();
+
+        let row: Option<TimestampRow> = result.take(0).unwrap();
+        let row = row.expect("Task should exist");
+        assert!(row.started_at.is_none(), "started_at should be NULL");
+        assert!(row.completed_at.is_none(), "completed_at should be NULL");
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_started_at_accepts_datetime() {
+        let (client, temp_dir) = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // Create task with started_at set to time::now()
+        let result = client
+            .query(
+                r#"
+                CREATE task:with_started SET
+                    title = "Started task",
+                    level = "task",
+                    status = "in_progress",
+                    started_at = time::now()
+            "#,
+            )
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "Task creation with started_at should succeed: {:?}",
+            result.err()
+        );
+
+        // Query and verify it's a datetime type, not string
+        let mut result = client
+            .query("SELECT started_at FROM task:with_started WHERE started_at IS NOT NULL")
+            .await
+            .unwrap();
+
+        #[derive(Debug, serde::Deserialize)]
+        struct DatetimeRow {
+            started_at: surrealdb::sql::Datetime,
+        }
+
+        let row: Option<DatetimeRow> = result.take(0).unwrap();
+        let row = row.expect("Task should exist with non-null started_at");
+        // If we can deserialize as Datetime (not String), the type is correct
+        // The Datetime type in SurrealDB should be a proper datetime
+        let timestamp = row.started_at.0;
+        assert!(
+            timestamp.timestamp() > 0,
+            "started_at should be a valid datetime with positive timestamp"
+        );
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_completed_at_accepts_datetime() {
+        let (client, temp_dir) = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // Create task with completed_at set to time::now()
+        let result = client
+            .query(
+                r#"
+                CREATE task:with_completed SET
+                    title = "Completed task",
+                    level = "task",
+                    status = "done",
+                    completed_at = time::now()
+            "#,
+            )
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "Task creation with completed_at should succeed: {:?}",
+            result.err()
+        );
+
+        // Query and verify it's a datetime type, not string
+        let mut result = client
+            .query("SELECT completed_at FROM task:with_completed WHERE completed_at IS NOT NULL")
+            .await
+            .unwrap();
+
+        #[derive(Debug, serde::Deserialize)]
+        struct DatetimeRow {
+            completed_at: surrealdb::sql::Datetime,
+        }
+
+        let row: Option<DatetimeRow> = result.take(0).unwrap();
+        let row = row.expect("Task should exist with non-null completed_at");
+        // If we can deserialize as Datetime (not String), the type is correct
+        let timestamp = row.completed_at.0;
+        assert!(
+            timestamp.timestamp() > 0,
+            "completed_at should be a valid datetime with positive timestamp"
+        );
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_timestamp_persists_across_queries() {
+        let (client, temp_dir) = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // Create task and set started_at
+        client
+            .query(
+                r#"
+                CREATE task:persist_test SET
+                    title = "Persistence test",
+                    level = "task",
+                    status = "in_progress",
+                    started_at = time::now()
+            "#,
+            )
+            .await
+            .unwrap();
+
+        // Query the timestamp multiple times to ensure persistence
+        #[derive(Debug, serde::Deserialize)]
+        struct DatetimeRow {
+            started_at: surrealdb::sql::Datetime,
+        }
+
+        let mut result1 = client
+            .query("SELECT started_at FROM task:persist_test")
+            .await
+            .unwrap();
+        let row1: Option<DatetimeRow> = result1.take(0).unwrap();
+        let ts1 = row1.expect("Should have timestamp").started_at.0;
+
+        let mut result2 = client
+            .query("SELECT started_at FROM task:persist_test")
+            .await
+            .unwrap();
+        let row2: Option<DatetimeRow> = result2.take(0).unwrap();
+        let ts2 = row2.expect("Should have timestamp").started_at.0;
+
+        assert_eq!(ts1, ts2, "Timestamp should persist and be consistent");
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_update_started_at_with_time_now() {
+        let (client, temp_dir) = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // Create task without started_at
+        client
+            .query(
+                r#"
+                CREATE task:update_test SET
+                    title = "Update test",
+                    level = "task",
+                    status = "todo"
+            "#,
+            )
+            .await
+            .unwrap();
+
+        // Update to set started_at
+        let result = client
+            .query(
+                r#"
+                UPDATE task:update_test SET
+                    status = "in_progress",
+                    started_at = time::now()
+            "#,
+            )
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "Update with started_at should succeed: {:?}",
+            result.err()
+        );
+
+        // Verify the update persisted
+        #[derive(Debug, serde::Deserialize)]
+        struct DatetimeRow {
+            started_at: surrealdb::sql::Datetime,
+        }
+
+        let mut result = client
+            .query("SELECT started_at FROM task:update_test")
+            .await
+            .unwrap();
+        let row: Option<DatetimeRow> = result.take(0).unwrap();
+        assert!(row.is_some(), "started_at should be set after update");
+
+        cleanup(&temp_dir);
     }
 }

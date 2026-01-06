@@ -298,6 +298,14 @@ pub struct Task {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<DateTime<Utc>>,
 
+    /// When this task was started (transitioned to in_progress)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<DateTime<Utc>>,
+
+    /// When this task was completed (transitioned to done)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completed_at: Option<DateTime<Utc>>,
+
     /// Embedded sections
     #[serde(default)]
     pub sections: Vec<Section>,
@@ -319,6 +327,8 @@ impl Task {
             tags: Vec::new(),
             created_at: None,
             updated_at: None,
+            started_at: None,
+            completed_at: None,
             sections: Vec::new(),
             code_refs: Vec::new(),
         }
@@ -378,6 +388,7 @@ impl Eq for Task {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Timelike;
 
     // Level enum tests
     #[test]
@@ -850,6 +861,8 @@ mod tests {
         assert!(task.tags.is_empty());
         assert!(task.created_at.is_none());
         assert!(task.updated_at.is_none());
+        assert!(task.started_at.is_none());
+        assert!(task.completed_at.is_none());
         assert!(task.sections.is_empty());
         assert!(task.code_refs.is_empty());
     }
@@ -1034,5 +1047,156 @@ mod tests {
             task.code_refs[2].description,
             Some("Core logic".to_string())
         );
+    }
+
+    #[test]
+    fn test_task_started_at_field() {
+        let mut task = Task::new("Test", Level::Task);
+        assert!(task.started_at.is_none());
+
+        let now = Utc::now();
+        task.started_at = Some(now);
+        assert_eq!(task.started_at, Some(now));
+    }
+
+    #[test]
+    fn test_task_completed_at_field() {
+        let mut task = Task::new("Test", Level::Task);
+        assert!(task.completed_at.is_none());
+
+        let now = Utc::now();
+        task.completed_at = Some(now);
+        assert_eq!(task.completed_at, Some(now));
+    }
+
+    #[test]
+    fn test_task_serialize_with_started_at() {
+        let mut task = Task::new("Started Task", Level::Task);
+        let now = Utc::now();
+        task.started_at = Some(now);
+
+        let value = serde_json::to_value(&task).unwrap();
+        assert!(
+            value.get("started_at").is_some(),
+            "started_at should be serialized"
+        );
+        // Verify it's a proper ISO8601 datetime string
+        let started_at_str = value["started_at"].as_str().unwrap();
+        assert!(
+            started_at_str.contains('T'),
+            "started_at should be ISO8601 format with 'T' separator"
+        );
+    }
+
+    #[test]
+    fn test_task_serialize_with_completed_at() {
+        let mut task = Task::new("Completed Task", Level::Task);
+        let now = Utc::now();
+        task.completed_at = Some(now);
+
+        let value = serde_json::to_value(&task).unwrap();
+        assert!(
+            value.get("completed_at").is_some(),
+            "completed_at should be serialized"
+        );
+        // Verify it's a proper ISO8601 datetime string
+        let completed_at_str = value["completed_at"].as_str().unwrap();
+        assert!(
+            completed_at_str.contains('T'),
+            "completed_at should be ISO8601 format with 'T' separator"
+        );
+    }
+
+    #[test]
+    fn test_task_serialize_without_timestamps_omits_fields() {
+        let task = Task::new("No Timestamps", Level::Task);
+        let value = serde_json::to_value(&task).unwrap();
+        assert!(
+            value.get("started_at").is_none(),
+            "started_at should be omitted when None"
+        );
+        assert!(
+            value.get("completed_at").is_none(),
+            "completed_at should be omitted when None"
+        );
+    }
+
+    #[test]
+    fn test_task_deserialize_with_started_at() {
+        let json = r#"{
+            "title": "Started Task",
+            "level": "task",
+            "status": "in_progress",
+            "started_at": "2025-01-06T12:00:00Z"
+        }"#;
+
+        let task: Task = serde_json::from_str(json).unwrap();
+        assert!(task.started_at.is_some());
+        let started_at = task.started_at.unwrap();
+        assert_eq!(started_at.hour(), 12);
+    }
+
+    #[test]
+    fn test_task_deserialize_with_completed_at() {
+        let json = r#"{
+            "title": "Completed Task",
+            "level": "task",
+            "status": "done",
+            "completed_at": "2025-01-06T15:30:00Z"
+        }"#;
+
+        let task: Task = serde_json::from_str(json).unwrap();
+        assert!(task.completed_at.is_some());
+        let completed_at = task.completed_at.unwrap();
+        assert_eq!(completed_at.hour(), 15);
+        assert_eq!(completed_at.minute(), 30);
+    }
+
+    #[test]
+    fn test_task_deserialize_without_timestamps() {
+        let json = r#"{
+            "title": "No Timestamps",
+            "level": "task",
+            "status": "todo"
+        }"#;
+
+        let task: Task = serde_json::from_str(json).unwrap();
+        assert!(task.started_at.is_none());
+        assert!(task.completed_at.is_none());
+    }
+
+    #[test]
+    fn test_task_deserialize_with_both_timestamps() {
+        let json = r#"{
+            "title": "Full Lifecycle Task",
+            "level": "task",
+            "status": "done",
+            "started_at": "2025-01-06T10:00:00Z",
+            "completed_at": "2025-01-06T14:00:00Z"
+        }"#;
+
+        let task: Task = serde_json::from_str(json).unwrap();
+        assert!(task.started_at.is_some());
+        assert!(task.completed_at.is_some());
+        // completed_at should be after started_at
+        let started = task.started_at.unwrap();
+        let completed = task.completed_at.unwrap();
+        assert!(
+            completed > started,
+            "completed_at should be after started_at"
+        );
+    }
+
+    #[test]
+    fn test_task_timestamps_are_datetime_type() {
+        let mut task = Task::new("Type Check", Level::Task);
+        let now: DateTime<Utc> = Utc::now();
+        task.started_at = Some(now);
+        task.completed_at = Some(now);
+
+        // Verify the types are DateTime<Utc>, not String
+        // This is a compile-time check - if it compiles, the types are correct
+        let _started: Option<DateTime<Utc>> = task.started_at;
+        let _completed: Option<DateTime<Utc>> = task.completed_at;
     }
 }
