@@ -199,8 +199,22 @@ fn build_node_line(prefix: &str, node: &TreeNode) -> Line<'static> {
 
     spans.push(Span::styled(node.title.clone(), title_style));
 
-    // Show children count for non-leaf nodes
-    if !node.children.is_empty() {
+    // Show progress for non-leaf nodes
+    if let Some(progress) = &node.progress {
+        let progress_color = if progress.is_complete() {
+            Color::Green
+        } else if progress.is_empty() {
+            Color::DarkGray
+        } else {
+            Color::Yellow
+        };
+
+        spans.push(Span::styled(
+            format!(" [{}/{}]", progress.done_count, progress.total_count),
+            Style::default().fg(progress_color),
+        ));
+    } else if !node.children.is_empty() {
+        // Fallback to children count if no progress
         spans.push(Span::styled(
             format!(" ({})", node.children.len()),
             Style::default().fg(Color::DarkGray),
@@ -424,5 +438,53 @@ mod tests {
         assert_eq!(tree_chars::LAST_BRANCH.chars().count(), 3); // └──
         assert_eq!(tree_chars::VERTICAL.chars().count(), 4); // │   (3 spaces)
         assert_eq!(tree_chars::SPACE.chars().count(), 4); // 4 spaces
+    }
+
+    // ========================================
+    // Progress display tests
+    // ========================================
+
+    #[test]
+    fn test_build_node_line_with_progress() {
+        use vertebrae_db::Progress;
+
+        let node = TreeNode::new("epic", "Epic", Level::Epic)
+            .with_child(TreeNode::new("child1", "Child 1", Level::Ticket))
+            .with_progress(Progress::new(2, 3));
+
+        let line = build_node_line("", &node);
+
+        let line_text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
+        // Should show progress instead of child count
+        assert!(line_text.contains("[2/3]"));
+        assert!(!line_text.contains("(1)")); // Not showing children count
+    }
+
+    #[test]
+    fn test_build_node_line_with_progress_complete() {
+        use vertebrae_db::Progress;
+
+        let node = TreeNode::new("epic", "Epic", Level::Epic)
+            .with_child(TreeNode::new("child1", "Child 1", Level::Ticket))
+            .with_progress(Progress::new(3, 3));
+
+        let line = build_node_line("", &node);
+
+        let line_text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
+        assert!(line_text.contains("[3/3]"));
+    }
+
+    #[test]
+    fn test_build_node_line_no_progress_shows_children_count() {
+        // Node with children but no progress (fallback behavior)
+        let node = TreeNode::new("parent", "Parent", Level::Epic)
+            .with_child(TreeNode::new("c1", "Child 1", Level::Ticket))
+            .with_child(TreeNode::new("c2", "Child 2", Level::Ticket));
+
+        let line = build_node_line("", &node);
+
+        let line_text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
+        // Should show children count when no progress
+        assert!(line_text.contains("(2)"));
     }
 }

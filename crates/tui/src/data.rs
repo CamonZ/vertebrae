@@ -6,7 +6,8 @@
 use std::collections::HashMap;
 
 use vertebrae_db::{
-    Database, Level, RelationshipRepository, TaskFilter, TaskLister, TaskRepository, TaskSummary,
+    Database, GraphQueries, Level, RelationshipRepository, TaskFilter, TaskLister, TaskRepository,
+    TaskSummary,
 };
 
 use crate::details::{TaskDetails, TaskRelationships};
@@ -86,40 +87,50 @@ pub async fn load_full_tree(db: &Database) -> TuiResult<Vec<TreeNode>> {
         .collect();
 
     // Build tree recursively
-    let roots: Vec<TreeNode> = root_ids
-        .iter()
-        .filter_map(|id| {
-            task_map
-                .get(id)
-                .map(|task| build_tree_node(task, &task_map, &children_map))
-        })
-        .collect();
+    let mut roots: Vec<TreeNode> = Vec::with_capacity(root_ids.len());
+    for id in &root_ids {
+        if let Some(task) = task_map.get(id) {
+            let node = build_tree_node_with_progress(db, task, &task_map, &children_map).await?;
+            roots.push(node);
+        }
+    }
 
     Ok(roots)
 }
 
-/// Recursively build a TreeNode with its children.
-fn build_tree_node(
+/// Recursively build a TreeNode with its children and progress.
+async fn build_tree_node_with_progress(
+    db: &Database,
     task: &TaskSummary,
     task_map: &HashMap<String, &TaskSummary>,
     children_map: &HashMap<String, Vec<String>>,
-) -> TreeNode {
+) -> TuiResult<TreeNode> {
     let mut node = task_to_node(task);
 
     if let Some(child_ids) = children_map.get(&task.id) {
-        let children: Vec<TreeNode> = child_ids
-            .iter()
-            .filter_map(|id| {
-                task_map
-                    .get(id)
-                    .map(|child| build_tree_node(child, task_map, children_map))
-            })
-            .collect();
+        let mut children: Vec<TreeNode> = Vec::with_capacity(child_ids.len());
+        for id in child_ids {
+            if let Some(child) = task_map.get(id) {
+                let child_node = Box::pin(build_tree_node_with_progress(
+                    db,
+                    child,
+                    task_map,
+                    children_map,
+                ))
+                .await?;
+                children.push(child_node);
+            }
+        }
 
         node = node.with_children(children);
+
+        // Load progress for nodes with children
+        let graph = GraphQueries::new(db.client());
+        let progress = graph.get_progress(&task.id).await?;
+        node = node.with_progress(progress);
     }
 
-    node
+    Ok(node)
 }
 
 /// Load root epics only (for lazy loading).
@@ -129,6 +140,7 @@ fn build_tree_node(
 /// a node is expanded.
 pub async fn load_root_epics_lazy(db: &Database) -> TuiResult<Vec<TreeNode>> {
     let roots = load_root_tasks(db).await?;
+    let graph = GraphQueries::new(db.client());
 
     let mut nodes = Vec::with_capacity(roots.len());
 
@@ -141,6 +153,10 @@ pub async fn load_root_epics_lazy(db: &Database) -> TuiResult<Vec<TreeNode>> {
             // Add placeholder children so has_children() returns true
             // These will be replaced when the node is expanded
             node = node.with_children(children.iter().map(task_to_node).collect::<Vec<_>>());
+
+            // Load progress for nodes with children
+            let progress = graph.get_progress(&root.id).await?;
+            node = node.with_progress(progress);
         }
 
         nodes.push(node);
@@ -155,6 +171,7 @@ pub async fn load_root_epics_lazy(db: &Database) -> TuiResult<Vec<TreeNode>> {
 /// its children from the database.
 pub async fn load_node_children(db: &Database, node_id: &str) -> TuiResult<Vec<TreeNode>> {
     let children = load_children(db, node_id).await?;
+    let graph = GraphQueries::new(db.client());
 
     let mut nodes = Vec::with_capacity(children.len());
 
@@ -165,6 +182,10 @@ pub async fn load_node_children(db: &Database, node_id: &str) -> TuiResult<Vec<T
         let grandchildren = load_children(db, &child.id).await?;
         if !grandchildren.is_empty() {
             node = node.with_children(grandchildren.iter().map(task_to_node).collect::<Vec<_>>());
+
+            // Load progress for nodes with children
+            let progress = graph.get_progress(&child.id).await?;
+            node = node.with_progress(progress);
         }
 
         nodes.push(node);
@@ -189,6 +210,7 @@ pub async fn load_node_children(db: &Database, node_id: &str) -> TuiResult<Vec<T
 pub async fn load_task_details(db: &Database, task_id: &str) -> TuiResult<Option<TaskDetails>> {
     let task_repo = TaskRepository::new(db.client());
     let rel_repo = RelationshipRepository::new(db.client());
+    let graph = GraphQueries::new(db.client());
 
     // Load the task
     let task = match task_repo.get(task_id).await? {
@@ -236,10 +258,19 @@ pub async fn load_task_details(db: &Database, task_id: &str) -> TuiResult<Option
         blocks,
     };
 
+    // Load progress (only meaningful for tasks with children)
+    let progress = {
+        let p = graph.get_progress(task_id).await?;
+        // Only include progress if total_count > 1 (meaning task has children)
+        // A leaf task returns total_count = 1 (itself)
+        if p.total_count > 1 { Some(p) } else { None }
+    };
+
     Ok(Some(TaskDetails {
         task,
         id: task_id.to_string(),
         relationships,
+        progress,
     }))
 }
 
@@ -732,6 +763,57 @@ mod tests {
         assert!(
             !blocker_task.has_dependencies,
             "Blocker task should have has_dependencies=false"
+        );
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_load_task_details_with_progress() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        // Create epic with children
+        create_task_with_parent(&db, "epic1", "Progress Epic", Level::Epic, None).await;
+        create_task_with_parent(&db, "ticket1", "Ticket 1", Level::Ticket, Some("epic1")).await;
+        create_task_with_parent(&db, "ticket2", "Ticket 2", Level::Ticket, Some("epic1")).await;
+
+        // Mark one ticket as done
+        let query = "UPDATE task:ticket1 SET status = 'done'";
+        db.client().query(query).await.unwrap();
+
+        let details = load_task_details(&db, "epic1").await.unwrap();
+        assert!(details.is_some());
+        let details = details.unwrap();
+
+        // Epic should have progress since it has children
+        assert!(
+            details.progress.is_some(),
+            "Epic with children should have progress"
+        );
+
+        let progress = details.progress.unwrap();
+        assert_eq!(progress.done_count, 1);
+        assert_eq!(progress.total_count, 2);
+        assert_eq!(progress.percentage, 50);
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_load_task_details_leaf_no_progress() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        // Create leaf task with no children
+        create_task_with_parent(&db, "task1", "Leaf Task", Level::Task, None).await;
+
+        let details = load_task_details(&db, "task1").await.unwrap();
+        assert!(details.is_some());
+        let details = details.unwrap();
+
+        // Leaf task should not have progress (or have total_count = 1)
+        assert!(
+            details.progress.is_none(),
+            "Leaf task should not have progress displayed"
         );
 
         cleanup(&temp_dir);

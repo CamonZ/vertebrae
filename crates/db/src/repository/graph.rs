@@ -19,6 +19,43 @@ pub struct GraphQueries<'a> {
     client: &'a Surreal<Db>,
 }
 
+/// Progress information for a task and its descendants.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Progress {
+    /// Number of descendants (including self) that are done.
+    pub done_count: usize,
+    /// Total number of descendants (including self).
+    pub total_count: usize,
+    /// Completion percentage (0-100).
+    pub percentage: u8,
+}
+
+impl Progress {
+    /// Create a new Progress with computed percentage.
+    pub fn new(done_count: usize, total_count: usize) -> Self {
+        let percentage = if total_count == 0 {
+            0
+        } else {
+            ((done_count as f64 / total_count as f64) * 100.0).round() as u8
+        };
+        Self {
+            done_count,
+            total_count,
+            percentage,
+        }
+    }
+
+    /// Check if this represents complete progress (100%).
+    pub fn is_complete(&self) -> bool {
+        self.percentage == 100
+    }
+
+    /// Check if this represents no progress (0%).
+    pub fn is_empty(&self) -> bool {
+        self.percentage == 0
+    }
+}
+
 /// A node in the blocker tree with full task information
 #[derive(Debug, Clone)]
 pub struct BlockerNode {
@@ -611,6 +648,92 @@ impl<'a> GraphQueries<'a> {
         let blockers: Vec<TaskIdRow> = result.take(0)?;
 
         Ok(blockers.into_iter().map(|r| r.id.id.to_string()).collect())
+    }
+
+    // ========================================
+    // Progress Aggregation
+    // ========================================
+
+    /// Get progress information for a task based on its descendants.
+    ///
+    /// For a leaf task (no children), returns progress based on the task's own status.
+    /// For a parent task, recursively counts all descendants and how many are done.
+    ///
+    /// # Arguments
+    ///
+    /// * `task_id` - The ID of the task to get progress for
+    ///
+    /// # Returns
+    ///
+    /// A `Progress` struct with done_count, total_count, and percentage.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Epic with 3 tickets, 2 done, 1 in progress
+    /// let progress = graph.get_progress("epic1").await?;
+    /// assert_eq!(progress.done_count, 2);
+    /// assert_eq!(progress.total_count, 3);
+    /// assert_eq!(progress.percentage, 67);
+    /// ```
+    pub async fn get_progress(&self, task_id: &str) -> DbResult<Progress> {
+        // First check if the task has any descendants
+        let descendants = self.get_all_descendants(task_id).await?;
+
+        if descendants.is_empty() {
+            // Leaf task - progress is based on own status
+            let query = format!(r#"SELECT status FROM task:{}"#, task_id);
+            let mut result = self.client.query(&query).await?;
+
+            #[derive(Debug, Deserialize)]
+            struct StatusRow {
+                status: String,
+            }
+
+            let rows: Vec<StatusRow> = result.take(0)?;
+
+            let is_done = rows.first().map(|r| r.status == "done").unwrap_or(false);
+
+            if is_done {
+                return Ok(Progress::new(1, 1));
+            } else {
+                return Ok(Progress::new(0, 1));
+            }
+        }
+
+        // Has descendants - count them efficiently with a single query
+        // Get the status of all descendants in one query
+        let ids_quoted: Vec<String> = descendants
+            .iter()
+            .map(|id| format!("task:{}", id))
+            .collect();
+        let ids_str = ids_quoted.join(", ");
+
+        let query = format!(
+            r#"SELECT count() as total,
+                      count(status = "done") as done
+               FROM task
+               WHERE id IN [{}]
+               GROUP ALL"#,
+            ids_str
+        );
+
+        let mut result = self.client.query(&query).await?;
+
+        #[derive(Debug, Deserialize)]
+        struct CountRow {
+            total: usize,
+            done: usize,
+        }
+
+        let rows: Vec<CountRow> = result.take(0)?;
+
+        let (done_count, total_count) = rows
+            .first()
+            .map(|r| (r.done, r.total))
+            .unwrap_or((0, descendants.len()));
+
+        Ok(Progress::new(done_count, total_count))
     }
 }
 
@@ -1312,6 +1435,207 @@ mod tests {
         assert_eq!(path.len(), 3); // A -> B/C -> D
         assert_eq!(path[0], "taska");
         assert_eq!(path[2], "taskd");
+
+        cleanup(&temp_dir);
+    }
+
+    // ========================================
+    // Progress tests
+    // ========================================
+
+    #[test]
+    fn test_progress_new() {
+        let progress = Progress::new(2, 5);
+        assert_eq!(progress.done_count, 2);
+        assert_eq!(progress.total_count, 5);
+        assert_eq!(progress.percentage, 40);
+    }
+
+    #[test]
+    fn test_progress_new_zero_total() {
+        let progress = Progress::new(0, 0);
+        assert_eq!(progress.percentage, 0);
+    }
+
+    #[test]
+    fn test_progress_new_all_done() {
+        let progress = Progress::new(5, 5);
+        assert_eq!(progress.percentage, 100);
+        assert!(progress.is_complete());
+        assert!(!progress.is_empty());
+    }
+
+    #[test]
+    fn test_progress_new_none_done() {
+        let progress = Progress::new(0, 5);
+        assert_eq!(progress.percentage, 0);
+        assert!(!progress.is_complete());
+        assert!(progress.is_empty());
+    }
+
+    #[test]
+    fn test_progress_rounding() {
+        // 2/3 = 66.67% -> rounds to 67%
+        let progress = Progress::new(2, 3);
+        assert_eq!(progress.percentage, 67);
+
+        // 1/3 = 33.33% -> rounds to 33%
+        let progress = Progress::new(1, 3);
+        assert_eq!(progress.percentage, 33);
+    }
+
+    #[test]
+    fn test_progress_clone_and_eq() {
+        let p1 = Progress::new(3, 5);
+        let p2 = p1.clone();
+        assert_eq!(p1, p2);
+    }
+
+    #[test]
+    fn test_progress_debug() {
+        let progress = Progress::new(2, 5);
+        let debug = format!("{:?}", progress);
+        assert!(debug.contains("Progress"));
+        assert!(debug.contains("done_count: 2"));
+    }
+
+    #[tokio::test]
+    async fn test_get_progress_leaf_task_done() {
+        let (db, temp_dir) = setup_test_db().await;
+        let graph = GraphQueries::new(db.client());
+
+        create_task(&db, "task1", "Task 1", "task", "done").await;
+
+        let progress = graph.get_progress("task1").await.unwrap();
+        assert_eq!(progress.done_count, 1);
+        assert_eq!(progress.total_count, 1);
+        assert_eq!(progress.percentage, 100);
+        assert!(progress.is_complete());
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_get_progress_leaf_task_not_done() {
+        let (db, temp_dir) = setup_test_db().await;
+        let graph = GraphQueries::new(db.client());
+
+        create_task(&db, "task1", "Task 1", "task", "todo").await;
+
+        let progress = graph.get_progress("task1").await.unwrap();
+        assert_eq!(progress.done_count, 0);
+        assert_eq!(progress.total_count, 1);
+        assert_eq!(progress.percentage, 0);
+        assert!(progress.is_empty());
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_get_progress_leaf_task_in_progress() {
+        let (db, temp_dir) = setup_test_db().await;
+        let graph = GraphQueries::new(db.client());
+
+        create_task(&db, "task1", "Task 1", "task", "in_progress").await;
+
+        let progress = graph.get_progress("task1").await.unwrap();
+        assert_eq!(progress.done_count, 0);
+        assert_eq!(progress.total_count, 1);
+        assert_eq!(progress.percentage, 0);
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_get_progress_epic_with_tickets() {
+        let (db, temp_dir) = setup_test_db().await;
+        let graph = GraphQueries::new(db.client());
+
+        // Epic with 3 tickets: 2 done, 1 todo
+        create_task(&db, "epic1", "Epic 1", "epic", "in_progress").await;
+        create_task(&db, "ticket1", "Ticket 1", "ticket", "done").await;
+        create_task(&db, "ticket2", "Ticket 2", "ticket", "done").await;
+        create_task(&db, "ticket3", "Ticket 3", "ticket", "todo").await;
+
+        create_child_of(&db, "ticket1", "epic1").await;
+        create_child_of(&db, "ticket2", "epic1").await;
+        create_child_of(&db, "ticket3", "epic1").await;
+
+        let progress = graph.get_progress("epic1").await.unwrap();
+        assert_eq!(progress.done_count, 2);
+        assert_eq!(progress.total_count, 3);
+        assert_eq!(progress.percentage, 67);
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_get_progress_all_descendants_done() {
+        let (db, temp_dir) = setup_test_db().await;
+        let graph = GraphQueries::new(db.client());
+
+        // Ticket with 4 tasks all done
+        create_task(&db, "ticket1", "Ticket 1", "ticket", "in_progress").await;
+        create_task(&db, "task1", "Task 1", "task", "done").await;
+        create_task(&db, "task2", "Task 2", "task", "done").await;
+        create_task(&db, "task3", "Task 3", "task", "done").await;
+        create_task(&db, "task4", "Task 4", "task", "done").await;
+
+        create_child_of(&db, "task1", "ticket1").await;
+        create_child_of(&db, "task2", "ticket1").await;
+        create_child_of(&db, "task3", "ticket1").await;
+        create_child_of(&db, "task4", "ticket1").await;
+
+        let progress = graph.get_progress("ticket1").await.unwrap();
+        assert_eq!(progress.done_count, 4);
+        assert_eq!(progress.total_count, 4);
+        assert_eq!(progress.percentage, 100);
+        assert!(progress.is_complete());
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_get_progress_nested_descendants() {
+        let (db, temp_dir) = setup_test_db().await;
+        let graph = GraphQueries::new(db.client());
+
+        // Epic -> Ticket -> Task (all counted)
+        create_task(&db, "epic1", "Epic 1", "epic", "in_progress").await;
+        create_task(&db, "ticket1", "Ticket 1", "ticket", "done").await;
+        create_task(&db, "task1", "Task 1", "task", "done").await;
+        create_task(&db, "task2", "Task 2", "task", "todo").await;
+
+        create_child_of(&db, "ticket1", "epic1").await;
+        create_child_of(&db, "task1", "ticket1").await;
+        create_child_of(&db, "task2", "ticket1").await;
+
+        // Epic has 3 descendants: ticket1 (done), task1 (done), task2 (todo)
+        let progress = graph.get_progress("epic1").await.unwrap();
+        assert_eq!(progress.total_count, 3);
+        assert_eq!(progress.done_count, 2);
+        assert_eq!(progress.percentage, 67);
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_get_progress_no_descendants_done() {
+        let (db, temp_dir) = setup_test_db().await;
+        let graph = GraphQueries::new(db.client());
+
+        create_task(&db, "epic1", "Epic 1", "epic", "todo").await;
+        create_task(&db, "ticket1", "Ticket 1", "ticket", "todo").await;
+        create_task(&db, "ticket2", "Ticket 2", "ticket", "blocked").await;
+
+        create_child_of(&db, "ticket1", "epic1").await;
+        create_child_of(&db, "ticket2", "epic1").await;
+
+        let progress = graph.get_progress("epic1").await.unwrap();
+        assert_eq!(progress.done_count, 0);
+        assert_eq!(progress.total_count, 2);
+        assert_eq!(progress.percentage, 0);
+        assert!(progress.is_empty());
 
         cleanup(&temp_dir);
     }

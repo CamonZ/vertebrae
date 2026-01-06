@@ -12,7 +12,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
-use vertebrae_db::{Level, Status};
+use vertebrae_db::{Level, Progress, Status};
 
 /// A node in the task tree hierarchy.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,6 +27,8 @@ pub struct TreeNode {
     pub status: Status,
     /// Child nodes (subtasks/tickets under this node).
     pub children: Vec<TreeNode>,
+    /// Progress information for nodes with children.
+    pub progress: Option<Progress>,
 }
 
 impl TreeNode {
@@ -38,7 +40,14 @@ impl TreeNode {
             level,
             status: Status::Todo,
             children: Vec::new(),
+            progress: None,
         }
+    }
+
+    /// Set progress for this node.
+    pub fn with_progress(mut self, progress: Progress) -> Self {
+        self.progress = Some(progress);
+        self
     }
 
     /// Set the status of this node.
@@ -82,6 +91,8 @@ pub struct FlatNode {
     pub has_children: bool,
     /// Whether this node is expanded (only relevant if has_children).
     pub is_expanded: bool,
+    /// Progress information for nodes with children.
+    pub progress: Option<Progress>,
 }
 
 /// State for managing expanded nodes in the tree.
@@ -177,6 +188,7 @@ fn flatten_node(result: &mut Vec<FlatNode>, node: &TreeNode, depth: usize, state
         depth,
         has_children: node.has_children(),
         is_expanded,
+        progress: node.progress.clone(),
     });
 
     // Only include children if the node is expanded
@@ -222,6 +234,8 @@ pub fn render_nav_panel(
 
 /// Render a single node as a styled line.
 fn render_node_line(node: &FlatNode, is_selected: bool) -> Line<'static> {
+    let mut spans = Vec::new();
+
     // Calculate indentation (2 spaces per depth level)
     let indent = "  ".repeat(node.depth);
 
@@ -244,7 +258,7 @@ fn render_node_line(node: &FlatNode, is_selected: bool) -> Line<'static> {
         Status::Todo => "[ ]",
     };
 
-    // Build the display text
+    // Build the main text
     let text = format!("{}{} {} {}", indent, prefix, status_indicator, node.title);
 
     // Apply styling
@@ -262,7 +276,26 @@ fn render_node_line(node: &FlatNode, is_selected: bool) -> Line<'static> {
         }
     };
 
-    Line::from(Span::styled(text, style))
+    spans.push(Span::styled(text, style));
+
+    // Add progress indicator for nodes with children
+    if let Some(progress) = &node.progress {
+        let progress_color = if progress.is_complete() {
+            Color::Green
+        } else if progress.is_empty() {
+            Color::DarkGray
+        } else {
+            Color::Yellow
+        };
+
+        let progress_text = format!(" [{}/{}]", progress.done_count, progress.total_count);
+        spans.push(Span::styled(
+            progress_text,
+            Style::default().fg(progress_color),
+        ));
+    }
+
+    Line::from(spans)
 }
 
 /// Get the status color for a task.
@@ -538,6 +571,7 @@ mod tests {
             depth: 0,
             has_children: true,
             is_expanded: false,
+            progress: None,
         };
 
         // When collapsed with children, should use collapsed prefix
@@ -555,6 +589,7 @@ mod tests {
             depth: 0,
             has_children: true,
             is_expanded: true,
+            progress: None,
         };
 
         assert!(node.has_children);
@@ -571,6 +606,7 @@ mod tests {
             depth: 0,
             has_children: false,
             is_expanded: false,
+            progress: None,
         };
 
         assert!(!node.has_children);
@@ -586,11 +622,41 @@ mod tests {
             depth: 2,
             has_children: false,
             is_expanded: false,
+            progress: None,
         };
 
         // Depth of 2 should result in 4 spaces of indentation
         let indent = "  ".repeat(flat.depth);
         assert_eq!(indent.len(), 4);
+    }
+
+    #[test]
+    fn test_flat_node_with_progress() {
+        let node = FlatNode {
+            id: "test".to_string(),
+            title: "Test".to_string(),
+            level: Level::Epic,
+            status: Status::InProgress,
+            depth: 0,
+            has_children: true,
+            is_expanded: false,
+            progress: Some(Progress::new(2, 3)),
+        };
+
+        assert!(node.progress.is_some());
+        let progress = node.progress.unwrap();
+        assert_eq!(progress.done_count, 2);
+        assert_eq!(progress.total_count, 3);
+        assert_eq!(progress.percentage, 67);
+    }
+
+    #[test]
+    fn test_tree_node_with_progress() {
+        let node = TreeNode::new("epic", "Epic", Level::Epic).with_progress(Progress::new(5, 10));
+
+        assert!(node.progress.is_some());
+        let progress = node.progress.unwrap();
+        assert_eq!(progress.percentage, 50);
     }
 
     // ========================================
