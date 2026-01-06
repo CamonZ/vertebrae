@@ -2,8 +2,11 @@ use clap::Parser;
 use std::path::PathBuf;
 use std::process;
 
+mod commands;
 mod db;
+mod id;
 
+use commands::Command;
 use db::{Database, DbError};
 
 /// Vertebrae - A task management CLI tool
@@ -16,9 +19,9 @@ struct Args {
     #[arg(long, global = true, env = "VTB_DB_PATH")]
     db: Option<PathBuf>,
 
-    /// Optional name to greet
-    #[arg(short, long)]
-    name: Option<String>,
+    /// Subcommand to execute
+    #[command(subcommand)]
+    command: Option<Command>,
 }
 
 #[tokio::main]
@@ -49,16 +52,16 @@ async fn run_with_args(args: &Args) -> Result<(), DbError> {
     // Initialize database schema
     db.init().await?;
 
-    // Run the application logic
-    execute(args)
-}
-
-/// Execute the main application logic
-fn execute(args: &Args) -> Result<(), DbError> {
-    if let Some(name) = &args.name {
-        println!("Hello, {}!", name);
-    } else {
-        println!("Welcome to Vertebrae!");
+    // Run the command or show welcome message
+    match &args.command {
+        Some(cmd) => {
+            let result = cmd.execute(&db).await?;
+            println!("Created task: {}", result);
+        }
+        None => {
+            println!("Welcome to Vertebrae!");
+            println!("Use 'vtb --help' for usage information.");
+        }
     }
 
     Ok(())
@@ -74,7 +77,7 @@ mod tests {
         // Test that Args can be parsed with default values
         let args = Args::try_parse_from(["vtb"]).unwrap();
         assert!(args.db.is_none());
-        assert!(args.name.is_none());
+        assert!(args.command.is_none());
     }
 
     #[test]
@@ -84,45 +87,52 @@ mod tests {
     }
 
     #[test]
-    fn test_args_with_name() {
-        let args = Args::try_parse_from(["vtb", "--name", "Alice"]).unwrap();
-        assert_eq!(args.name, Some("Alice".to_string()));
+    fn test_args_with_add_command() {
+        let args = Args::try_parse_from(["vtb", "add", "My task"]).unwrap();
+        assert!(args.command.is_some());
     }
 
     #[test]
-    fn test_args_with_all_options() {
-        let args = Args::try_parse_from(["vtb", "--db", "/custom/path", "--name", "Bob"]).unwrap();
+    fn test_args_with_db_and_add_command() {
+        let args = Args::try_parse_from(["vtb", "--db", "/custom/path", "add", "My task"]).unwrap();
         assert_eq!(args.db, Some(PathBuf::from("/custom/path")));
-        assert_eq!(args.name, Some("Bob".to_string()));
+        assert!(args.command.is_some());
     }
 
     #[test]
-    fn test_execute_with_name() {
-        let args = Args {
-            db: None,
-            name: Some("TestUser".to_string()),
-        };
-        let result = execute(&args);
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_execute_without_name() {
-        let args = Args {
-            db: None,
-            name: None,
-        };
-        let result = execute(&args);
-        assert!(result.is_ok());
+    fn test_args_add_with_all_options() {
+        let args = Args::try_parse_from([
+            "vtb",
+            "add",
+            "Task title",
+            "--level",
+            "epic",
+            "--priority",
+            "high",
+            "-t",
+            "backend",
+            "-t",
+            "api",
+        ])
+        .unwrap();
+        assert!(args.command.is_some());
     }
 
     #[tokio::test]
-    async fn test_run_with_args_custom_db_path() {
-        let temp_dir = env::temp_dir().join(format!("vtb-main-test-{}", std::process::id()));
+    async fn test_run_with_args_no_command() {
+        let temp_dir = env::temp_dir().join(format!(
+            "vtb-main-test-{}-{:?}-{}",
+            std::process::id(),
+            std::thread::current().id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
 
         let args = Args {
             db: Some(temp_dir.clone()),
-            name: Some("IntegrationTest".to_string()),
+            command: None,
         };
 
         let result = run_with_args(&args).await;
@@ -137,7 +147,7 @@ mod tests {
         // Test with default path (will use ~/.vtb/data)
         let args = Args {
             db: None,
-            name: None,
+            command: None,
         };
 
         // This should succeed as it will use the default path
@@ -150,42 +160,69 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_run_with_args_with_name() {
-        let temp_dir = env::temp_dir().join(format!("vtb-main-name-test-{}", std::process::id()));
+    async fn test_run_with_add_command() {
+        let temp_dir = env::temp_dir().join(format!(
+            "vtb-main-add-test-{}-{:?}-{}",
+            std::process::id(),
+            std::thread::current().id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
 
-        let args = Args {
-            db: Some(temp_dir.clone()),
-            name: Some("NameTest".to_string()),
-        };
+        let args = Args::try_parse_from([
+            "vtb",
+            "--db",
+            temp_dir.to_str().unwrap(),
+            "add",
+            "Test task",
+        ])
+        .unwrap();
 
         let result = run_with_args(&args).await;
-        assert!(result.is_ok());
+        assert!(result.is_ok(), "Add command failed: {:?}", result.err());
 
         // Clean up
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
     #[tokio::test]
-    async fn test_run_with_args_without_name() {
-        let temp_dir = env::temp_dir().join(format!("vtb-main-noname-test-{}", std::process::id()));
+    async fn test_run_with_add_command_all_options() {
+        let temp_dir = env::temp_dir().join(format!(
+            "vtb-main-add-full-test-{}-{:?}-{}",
+            std::process::id(),
+            std::thread::current().id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
 
-        let args = Args {
-            db: Some(temp_dir.clone()),
-            name: None,
-        };
+        let args = Args::try_parse_from([
+            "vtb",
+            "--db",
+            temp_dir.to_str().unwrap(),
+            "add",
+            "Full task",
+            "--level",
+            "epic",
+            "--priority",
+            "critical",
+            "-t",
+            "urgent",
+        ])
+        .unwrap();
 
         let result = run_with_args(&args).await;
-        assert!(result.is_ok());
+        assert!(
+            result.is_ok(),
+            "Full add command failed: {:?}",
+            result.err()
+        );
 
         // Clean up
         let _ = std::fs::remove_dir_all(&temp_dir);
-    }
-
-    #[test]
-    fn test_args_short_name_flag() {
-        // Test the -n short flag for name
-        let args = Args::try_parse_from(["vtb", "-n", "ShortFlag"]).unwrap();
-        assert_eq!(args.name, Some("ShortFlag".to_string()));
     }
 
     #[test]
@@ -195,5 +232,33 @@ mod tests {
         // but we can verify the Args struct handles None correctly
         let args = Args::try_parse_from(["vtb"]).unwrap();
         assert!(args.db.is_none());
+    }
+
+    #[test]
+    fn test_add_command_requires_title() {
+        // Add command without title should fail
+        let result = Args::try_parse_from(["vtb", "add"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_add_command_invalid_level() {
+        let result = Args::try_parse_from(["vtb", "add", "Task", "--level", "invalid"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_add_command_invalid_priority() {
+        let result = Args::try_parse_from(["vtb", "add", "Task", "--priority", "wrong"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_args_debug() {
+        let args = Args::try_parse_from(["vtb", "add", "Test"]).unwrap();
+        // Command should implement Debug
+        if let Some(cmd) = &args.command {
+            let _ = format!("{:?}", cmd);
+        }
     }
 }
