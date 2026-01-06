@@ -12,7 +12,8 @@ pub use error::{DbError, DbResult};
 #[allow(unused_imports)]
 pub use models::{CodeRef, Level, Priority, Section, SectionType, Status, Task};
 pub use repository::{
-    BlockerNode, GraphQueries, RelationshipRepository, TaskRepository, TaskUpdate,
+    BlockerNode, GraphQueries, RelationshipRepository, TaskFilter, TaskLister, TaskRepository,
+    TaskSummary, TaskUpdate,
 };
 
 use std::path::{Path, PathBuf};
