@@ -1,0 +1,18 @@
+[package]
+name = "vertebrae-tui"
+version = "0.1.0"
+edition = "2024"
+description = "TUI for Vertebrae task management"
+license = "MIT"
+
+[[bin]]
+name = "vtb-tui"
+path = "src/main.rs"
+
+[dependencies]
+ratatui = "0.30"
+crossterm = "0.29"
+vertebrae-db = { path = "../db" }
+tokio = { version = "1", features = ["full"] }
+thiserror = "2"
+scopeguard = "1"
