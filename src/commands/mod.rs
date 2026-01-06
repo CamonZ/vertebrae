@@ -5,6 +5,7 @@
 pub mod add;
 pub mod block;
 pub mod delete;
+pub mod depend;
 pub mod done;
 pub mod list;
 pub mod section;
@@ -17,6 +18,7 @@ pub mod update;
 pub use add::AddCommand;
 pub use block::BlockCommand;
 pub use delete::DeleteCommand;
+pub use depend::DependCommand;
 pub use done::DoneCommand;
 pub use list::ListCommand;
 pub use section::SectionCommand;
@@ -39,6 +41,8 @@ pub enum Command {
     Block(BlockCommand),
     /// Delete a task (with optional cascade)
     Delete(DeleteCommand),
+    /// Create a dependency relationship between tasks
+    Depend(DependCommand),
     /// Mark a task as complete (transition to done)
     Done(DoneCommand),
     /// List tasks with optional filters
@@ -97,6 +101,10 @@ impl Command {
             Command::Delete(cmd) => {
                 let message = cmd.execute(db).await?;
                 Ok(CommandResult::Message(message))
+            }
+            Command::Depend(cmd) => {
+                let result = cmd.execute(db).await?;
+                Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Done(cmd) => {
                 let result = cmd.execute(db).await?;
