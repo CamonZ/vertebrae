@@ -95,6 +95,7 @@ async fn run_with_args(args: &Args) -> Result<(), DbError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use std::env;
 
     #[test]
@@ -331,6 +332,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_resolve_db_path_env_var_takes_priority_over_default() {
         // Set environment variable
         let original = env::var(VTB_DB_PATH_ENV).ok();
@@ -352,6 +354,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_resolve_db_path_empty_env_var_uses_default() {
         // Set environment variable to empty string
         let original = env::var(VTB_DB_PATH_ENV).ok();
@@ -381,6 +384,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_resolve_db_path_unset_env_var_uses_default() {
         // Unset environment variable
         let original = env::var(VTB_DB_PATH_ENV).ok();
@@ -407,6 +411,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_resolve_db_path_cli_overrides_env_var() {
         // Set environment variable
         let original = env::var(VTB_DB_PATH_ENV).ok();
