@@ -3,9 +3,9 @@
 //! Implements the `vtb block` command to mark a task as blocked with an optional reason.
 //! The blocking reason is stored as a constraint section for persistent documentation.
 
-use crate::db::{Database, DbError, Status};
 use clap::Args;
 use serde::Deserialize;
+use vertebrae_db::{Database, DbError, Status};
 
 /// Mark a task as blocked (transition to blocked)
 #[derive(Debug, Args)]

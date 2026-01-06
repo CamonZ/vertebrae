@@ -3,12 +3,11 @@ use std::path::PathBuf;
 use std::process;
 
 mod commands;
-mod db;
 mod id;
 mod output;
 
 use commands::Command;
-use db::{Database, DbError};
+use vertebrae_db::{Database, DbError};
 
 /// Environment variable name for the database path
 const VTB_DB_PATH_ENV: &str = "VTB_DB_PATH";
@@ -51,7 +50,7 @@ fn resolve_db_path(cli_db: Option<PathBuf>) -> DbResult<PathBuf> {
     Database::default_path()
 }
 
-use db::DbResult;
+use vertebrae_db::DbResult;
 
 #[tokio::main]
 async fn main() {

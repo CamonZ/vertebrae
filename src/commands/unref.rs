@@ -3,9 +3,9 @@
 //! Implements the `vtb unref` command to remove code references from tasks.
 //! Supports removing by file path or removing all references.
 
-use crate::db::{Database, DbError};
 use clap::Args;
 use serde::Deserialize;
+use vertebrae_db::{Database, DbError};
 
 /// Remove code references from a task
 #[derive(Debug, Args)]

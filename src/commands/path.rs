@@ -3,10 +3,10 @@
 //! Implements the `vtb path` command to find the shortest dependency path
 //! between two tasks using BFS traversal of the dependency graph.
 
-use crate::db::{Database, DbError};
 use clap::Args;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet, VecDeque};
+use vertebrae_db::{Database, DbError};
 
 /// Find the dependency path between two tasks
 #[derive(Debug, Args)]

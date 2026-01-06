@@ -3,10 +3,10 @@
 //! Implements the `vtb ref` command to add code references for context curation.
 //! Supports GitHub-style file:line notation (file:L45-67, file:L45, or just file).
 
-use crate::db::{Database, DbError};
 use clap::Args;
 use serde::Deserialize;
 use std::path::Path;
+use vertebrae_db::{Database, DbError};
 
 /// Add a code reference to a task
 #[derive(Debug, Args)]

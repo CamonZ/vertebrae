@@ -7,9 +7,9 @@
 //! because it requires storing data in sections, which have limitations with
 //! SurrealDB's SCHEMAFULL mode and array<object> types.
 
-use crate::db::{Database, DbError, Priority};
 use clap::Args;
 use serde::Deserialize;
+use vertebrae_db::{Database, DbError, Priority};
 
 /// Update an existing task
 #[derive(Debug, Args)]

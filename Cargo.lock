@@ -4456,6 +4456,20 @@ dependencies = [
  "surrealdb",
  "thiserror 2.0.17",
  "tokio",
+ "vertebrae-db",
+]
+
+[[package]]
+name = "vertebrae-db"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "static_assertions",
+ "surrealdb",
+ "thiserror 2.0.17",
+ "tokio",
 ]
 
 [[package]]

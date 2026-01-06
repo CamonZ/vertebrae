@@ -3,9 +3,9 @@
 //! Implements the `vtb sections` command to display all sections for a task,
 //! optionally filtered by type and grouped by positive/negative space.
 
-use crate::db::{Database, DbError, Section, SectionType};
 use clap::Args;
 use serde::Deserialize;
+use vertebrae_db::{Database, DbError, Section, SectionType};
 
 /// List all sections for a task
 #[derive(Debug, Args)]

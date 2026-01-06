@@ -2,9 +2,9 @@
 //!
 //! Implements the `vtb undepend` command to remove dependency relationships between tasks.
 
-use crate::db::{Database, DbError};
 use clap::Args;
 use serde::Deserialize;
+use vertebrae_db::{Database, DbError};
 
 /// Remove a dependency relationship between tasks
 #[derive(Debug, Args)]

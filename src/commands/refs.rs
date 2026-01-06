@@ -3,9 +3,9 @@
 //! Implements the `vtb refs` command to display all code references for a task,
 //! sorted by file path and then line number.
 
-use crate::db::{CodeRef, Database, DbError};
 use clap::Args;
 use serde::Deserialize;
+use vertebrae_db::{CodeRef, Database, DbError};
 
 /// List all code references for a task
 #[derive(Debug, Args)]

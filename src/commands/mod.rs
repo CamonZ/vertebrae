@@ -42,9 +42,9 @@ pub use unref::UnrefCommand;
 pub use unsection::UnsectionCommand;
 pub use update::UpdateCommand;
 
-use crate::db::{Database, DbError};
 use crate::output::format_task_table;
 use clap::Subcommand;
+use vertebrae_db::{Database, DbError};
 
 /// Available CLI commands
 #[derive(Debug, Subcommand)]

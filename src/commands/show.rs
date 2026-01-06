@@ -4,9 +4,9 @@
 //! including sections, relationships, and code references.
 
 use crate::commands::list::TaskSummary;
-use crate::db::{CodeRef, Database, DbError, Section, SectionType};
 use clap::Args;
 use serde::Deserialize;
+use vertebrae_db::{CodeRef, Database, DbError, Section, SectionType};
 
 /// Show full details of a task
 #[derive(Debug, Args)]

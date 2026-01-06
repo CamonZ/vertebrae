@@ -2,9 +2,9 @@
 //!
 //! Implements the `vtb list` command to display tasks with filtering options.
 
-use crate::db::{Database, DbError, Level, Priority, Status};
 use clap::Args;
 use serde::Deserialize;
+use vertebrae_db::{Database, DbError, Level, Priority, Status};
 
 /// A summary of a task for display in the list
 #[derive(Debug, Clone, Deserialize)]
