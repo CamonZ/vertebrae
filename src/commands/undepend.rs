@@ -317,6 +317,9 @@ mod tests {
         );
 
         let undepend_result = result.unwrap();
+        // Verify all fields of UndependResult
+        assert_eq!(undepend_result.task_id, "taskb");
+        assert_eq!(undepend_result.blocker_id, "taska");
         assert!(!undepend_result.existed);
 
         // Verify display message shows warning
@@ -348,12 +351,20 @@ mod tests {
         // Remove dependency first time
         let result1 = undepend_cmd.execute(&db).await;
         assert!(result1.is_ok());
-        assert!(result1.unwrap().existed);
+        let undepend_result1 = result1.unwrap();
+        // Verify all fields of UndependResult
+        assert_eq!(undepend_result1.task_id, "taskb");
+        assert_eq!(undepend_result1.blocker_id, "taska");
+        assert!(undepend_result1.existed);
 
         // Remove dependency second time - should be idempotent (warn but not fail)
         let result2 = undepend_cmd.execute(&db).await;
         assert!(result2.is_ok());
-        assert!(!result2.unwrap().existed);
+        let undepend_result2 = result2.unwrap();
+        // Verify all fields of UndependResult
+        assert_eq!(undepend_result2.task_id, "taskb");
+        assert_eq!(undepend_result2.blocker_id, "taska");
+        assert!(!undepend_result2.existed);
 
         cleanup(&temp_dir);
     }
@@ -404,7 +415,11 @@ mod tests {
 
         let result = undepend_cmd.execute(&db).await;
         assert!(result.is_ok(), "Should not fail when target doesn't exist");
-        assert!(!result.unwrap().existed);
+        let undepend_result = result.unwrap();
+        // Verify all fields of UndependResult
+        assert_eq!(undepend_result.task_id, "taska");
+        assert_eq!(undepend_result.blocker_id, "nonexistent");
+        assert!(!undepend_result.existed);
 
         cleanup(&temp_dir);
     }

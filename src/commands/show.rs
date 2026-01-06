@@ -638,11 +638,21 @@ mod tests {
         assert!(result.is_ok(), "Show failed: {:?}", result.err());
 
         let detail = result.unwrap();
+        // Verify all main fields
         assert_eq!(detail.id, "abc123");
         assert_eq!(detail.title, "Test Task");
         assert_eq!(detail.level, "task");
         assert_eq!(detail.status, "todo");
         assert_eq!(detail.priority, Some("high".to_string()));
+        assert!(detail.tags.is_empty(), "Tags should be empty");
+
+        // Verify all optional/collection fields are None/empty for a simple task
+        assert!(detail.parent.is_none(), "Parent should be None");
+        assert!(detail.children.is_empty(), "Children should be empty");
+        assert!(detail.blocked_by.is_empty(), "Blocked_by should be empty");
+        assert!(detail.blocks.is_empty(), "Blocks should be empty");
+        assert!(detail.sections.is_empty(), "Sections should be empty");
+        assert!(detail.code_refs.is_empty(), "Code_refs should be empty");
 
         cleanup(&temp_dir);
     }
