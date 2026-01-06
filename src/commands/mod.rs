@@ -4,6 +4,7 @@
 
 pub mod add;
 pub mod delete;
+pub mod done;
 pub mod list;
 pub mod show;
 pub mod start;
@@ -11,6 +12,7 @@ pub mod update;
 
 pub use add::AddCommand;
 pub use delete::DeleteCommand;
+pub use done::DoneCommand;
 pub use list::ListCommand;
 pub use show::ShowCommand;
 pub use start::StartCommand;
@@ -27,6 +29,8 @@ pub enum Command {
     Add(AddCommand),
     /// Delete a task (with optional cascade)
     Delete(DeleteCommand),
+    /// Mark a task as complete (transition to done)
+    Done(DoneCommand),
     /// List tasks with optional filters
     List(ListCommand),
     /// Show full details of a task
@@ -73,6 +77,10 @@ impl Command {
             Command::Delete(cmd) => {
                 let message = cmd.execute(db).await?;
                 Ok(CommandResult::Message(message))
+            }
+            Command::Done(cmd) => {
+                let result = cmd.execute(db).await?;
+                Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::List(cmd) => {
                 let tasks = cmd.execute(db).await?;
@@ -696,5 +704,30 @@ mod tests {
         let cli = TestCli::try_parse_from(["test", "start", "test123"]).unwrap();
         let debug_str = format!("{:?}", cli.command);
         assert!(debug_str.contains("Start"));
+    }
+
+    #[test]
+    fn test_command_done_parses() {
+        let cli = TestCli::try_parse_from(["test", "done", "abc123"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Done(cmd) => {
+                assert_eq!(cmd.id, "abc123");
+            }
+            _ => panic!("Expected Done command"),
+        }
+    }
+
+    #[test]
+    fn test_command_done_requires_id() {
+        let result = TestCli::try_parse_from(["test", "done"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_command_done_debug() {
+        let cli = TestCli::try_parse_from(["test", "done", "test123"]).unwrap();
+        let debug_str = format!("{:?}", cli.command);
+        assert!(debug_str.contains("Done"));
     }
 }
