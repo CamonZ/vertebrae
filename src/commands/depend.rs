@@ -3,9 +3,9 @@
 //! Implements the `vtb depend` command to create dependency relationships between tasks
 //! with cycle detection to ensure the dependency graph remains acyclic.
 
-use crate::db::{Database, DbError};
 use clap::Args;
 use serde::Deserialize;
+use vertebrae_db::{Database, DbError};
 
 /// Create a dependency relationship between tasks
 #[derive(Debug, Args)]

@@ -5,9 +5,9 @@
 //! step, testing_criterion) and negative space (anti_pattern, failure_test, constraint)
 //! section types.
 
-use crate::db::{Database, DbError, SectionType};
 use clap::Args;
 use serde::Deserialize;
+use vertebrae_db::{Database, DbError, SectionType};
 
 /// Add a typed content section to a task
 #[derive(Debug, Args)]

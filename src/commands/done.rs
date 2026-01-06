@@ -4,9 +4,9 @@
 //! Provides soft enforcement by warning about incomplete children without blocking.
 //! Reports tasks that were blocked by this one and are now unblocked.
 
-use crate::db::{Database, DbError, Status};
 use clap::Args;
 use serde::Deserialize;
+use vertebrae_db::{Database, DbError, Status};
 
 /// Mark a task as complete (transition to done)
 #[derive(Debug, Args)]

@@ -2,9 +2,9 @@
 //!
 //! Implements the `vtb add` command to create new tasks with all supported options.
 
-use crate::db::{Database, DbError, Level, Priority, Status, Task};
 use crate::id::IdGenerator;
 use clap::Args;
+use vertebrae_db::{Database, DbError, Level, Priority, Status, Task};
 
 /// Create a new task
 #[derive(Debug, Args)]

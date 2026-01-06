@@ -3,9 +3,9 @@
 //! Implements the `vtb start` command to mark a task as actively being worked on.
 //! Provides soft enforcement by warning about incomplete dependencies without blocking.
 
-use crate::db::{Database, DbError, Status};
 use clap::Args;
 use serde::Deserialize;
+use vertebrae_db::{Database, DbError, Status};
 
 /// Start working on a task (transition to in_progress)
 #[derive(Debug, Args)]

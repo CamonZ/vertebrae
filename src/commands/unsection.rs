@@ -4,9 +4,9 @@
 //! Supports removing single-instance types, specific multi-instance sections by index,
 //! all sections of a type, or all sections from a task.
 
-use crate::db::{Database, DbError, SectionType};
 use clap::Args;
 use serde::Deserialize;
+use vertebrae_db::{Database, DbError, SectionType};
 
 /// Remove sections from a task
 #[derive(Debug, Args)]

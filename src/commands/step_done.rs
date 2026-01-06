@@ -2,9 +2,9 @@
 //!
 //! Implements the `vtb step-done` command to mark individual steps within a task as done.
 
-use crate::db::{Database, DbError};
 use clap::Args;
 use serde::Deserialize;
+use vertebrae_db::{Database, DbError};
 
 /// Mark a step as done within a task
 #[derive(Debug, Args)]

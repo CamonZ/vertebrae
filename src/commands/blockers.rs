@@ -3,9 +3,9 @@
 //! Implements the `vtb blockers` command to show all tasks blocking a given task,
 //! recursively traversing the dependency graph.
 
-use crate::db::{Database, DbError};
 use clap::Args;
 use serde::Deserialize;
+use vertebrae_db::{Database, DbError};
 
 /// Show all tasks blocking a given task
 #[derive(Debug, Args)]

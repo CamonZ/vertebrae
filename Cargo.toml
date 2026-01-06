@@ -1,3 +1,7 @@
+[workspace]
+members = ["crates/db"]
+resolver = "2"
+
 [package]
 name = "vertebrae"
 version = "0.1.0"
@@ -20,6 +24,7 @@ dirs = "5"
 static_assertions = "1"
 sha2 = "0.10"
 rand = "0.9"
+vertebrae-db = { path = "crates/db" }
 
 [dev-dependencies]
 serde_json = "1"

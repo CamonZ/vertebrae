@@ -3,10 +3,10 @@
 //! Implements the `vtb delete` command to remove tasks with proper handling
 //! of children and dependencies.
 
-use crate::db::{Database, DbError};
 use clap::Args;
 use serde::Deserialize;
 use std::io::{self, Write};
+use vertebrae_db::{Database, DbError};
 
 /// Delete a task with optional cascade behavior
 #[derive(Debug, Args)]

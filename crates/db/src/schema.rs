@@ -3,7 +3,7 @@
 //! Defines the SurrealDB schema for tasks, sections, code references,
 //! and graph edges (hierarchy and dependencies).
 
-use super::error::DbError;
+use crate::error::DbError;
 use surrealdb::Surreal;
 use surrealdb::engine::local::Db;
 
