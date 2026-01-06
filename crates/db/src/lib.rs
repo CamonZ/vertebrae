@@ -5,11 +5,13 @@
 
 pub mod error;
 pub mod models;
+pub mod repository;
 pub mod schema;
 
 pub use error::{DbError, DbResult};
 #[allow(unused_imports)]
 pub use models::{CodeRef, Level, Priority, Section, SectionType, Status, Task};
+pub use repository::{TaskRepository, TaskUpdate};
 
 use std::path::{Path, PathBuf};
 use surrealdb::Surreal;
