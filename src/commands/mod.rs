@@ -11,6 +11,7 @@ pub mod section;
 pub mod sections;
 pub mod show;
 pub mod start;
+pub mod unsection;
 pub mod update;
 
 pub use add::AddCommand;
@@ -22,6 +23,7 @@ pub use section::SectionCommand;
 pub use sections::SectionsCommand;
 pub use show::ShowCommand;
 pub use start::StartCommand;
+pub use unsection::UnsectionCommand;
 pub use update::UpdateCommand;
 
 use crate::db::{Database, DbError};
@@ -47,6 +49,8 @@ pub enum Command {
     Sections(SectionsCommand),
     /// Show full details of a task
     Show(ShowCommand),
+    /// Remove sections from a task
+    Unsection(UnsectionCommand),
     /// Start working on a task (transition to in_progress)
     Start(StartCommand),
     /// Update an existing task
@@ -113,6 +117,10 @@ impl Command {
             Command::Show(cmd) => {
                 let detail = cmd.execute(db).await?;
                 Ok(CommandResult::Message(format!("{}", detail)))
+            }
+            Command::Unsection(cmd) => {
+                let result = cmd.execute(db).await?;
+                Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Start(cmd) => {
                 let result = cmd.execute(db).await?;
