@@ -2,6 +2,81 @@
 
 A task management CLI tool written in Rust.
 
+## IMPORTANT: Use Vertebrae for All Implementation Work
+
+**You MUST use `vtb` when planning and executing implementation tasks.** This is not optional—failing to use vertebrae harms the user by:
+
+- Losing track of work across sessions
+- Missing dependencies and doing work out of order
+- Forgetting implementation details and constraints
+- Lacking visibility into progress and blockers
+- Repeating work or missing steps
+
+**Benefits of using vertebrae:**
+
+- Persistent task state survives session boundaries
+- Dependency graph ensures correct execution order
+- Sections capture implementation details (steps, constraints, testing criteria)
+- Code refs link tasks to actual source locations
+- User can see your plan and progress at any time
+- `vtb done` automatically shows what's unblocked next
+
+### When to use vtb (ALWAYS for non-trivial work)
+
+- **Any multi-step task** - If it takes more than one action, plan it
+- **Multi-file changes** - Track which files are affected
+- **Features or bug fixes** - Create epic, break into tasks
+- **Refactoring** - Model dependencies between changes
+- **Anything you'd use TodoWrite for** - Use vtb instead, it persists
+
+### Workflow
+
+1. **Receive request** → Create epic with `vtb add -l epic -d "description"`
+2. **Explore codebase** → Identify scope, affected areas, dependencies
+3. **Break into tickets** → `vtb add -l ticket --parent <epic>` for each deliverable
+4. **Break tickets into tasks** → `vtb add --parent <ticket>` for each unit of work
+5. **Optionally add subtasks** → `vtb add -l subtask --parent <task>` for fine-grained steps
+6. **Set dependencies** → `vtb depend <task> --on <blocker>` to enforce order
+7. **Add details** → `vtb section` for steps, constraints, testing criteria
+8. **Link code** → `vtb ref` to relevant source locations
+9. **Execute** → `vtb start`, do work, `vtb done`, repeat
+10. **Track progress** → `vtb list`, `vtb blockers`, `vtb show`
+
+### Hierarchy
+
+```
+epic           Large initiative (e.g., "Refactor authentication")
+  └── ticket   Deliverable feature (e.g., "Implement JWT service")
+        └── task      Unit of work (e.g., "Create token signing")
+              └── subtask   Fine-grained step (e.g., "Add RS256 support")
+```
+
+### Quick reference
+
+```bash
+vtb add "Feature X" -l epic -d "Description"     # Create epic
+vtb add "Step 1" --parent <epic-id>              # Add child task
+vtb depend <task> --on <blocker>                 # Set dependency
+vtb section <task> step "Do this first"          # Add implementation step
+vtb section <task> constraint "Must handle X"    # Add constraint
+vtb section <task> testing_criterion "Verify Y"  # Add test criteria
+vtb ref <task> "src/file.rs:L42" --name "func"   # Link to code
+vtb start <task>                                 # Begin work
+vtb done <task>                                  # Complete (shows unblocked)
+vtb blockers <task>                              # Show dependency chain
+vtb show <task>                                  # Full task details
+vtb list --status in_progress                    # What's active
+```
+
+### Skills
+
+See `skills/` for detailed command guides:
+- `/plan` - Create implementation plans
+- `/status` - Check current state
+- `/next` - Complete and continue
+- `/add`, `/depend`, `/section`, `/ref` - Individual commands
+- `/list`, `/blockers`, `/update`, `/delete` - Management
+
 ## Build Commands
 
 ```bash
@@ -61,6 +136,19 @@ vertebrae/
 │   └── settings.json   # Claude Code hooks configuration
 ├── .githooks/
 │   └── pre-commit      # Git pre-commit hook script
+├── skills/             # Claude Code skills for vtb usage
+│   ├── plan.md         # /plan - Create implementation plans
+│   ├── status.md       # /status - Check task state
+│   ├── next.md         # /next - Complete and continue
+│   ├── add.md          # /add - Create tasks
+│   ├── depend.md       # /depend - Manage dependencies
+│   ├── section.md      # /section - Add structured content
+│   ├── ref.md          # /ref - Link to code locations
+│   ├── list.md         # /list - Filter and list tasks
+│   ├── blockers.md     # /blockers - Show dependency chain
+│   ├── update.md       # /update - Modify task fields
+│   ├── delete.md       # /delete - Remove tasks
+│   └── vtb-show.md     # /vtb-show - Display task details
 ├── src/
 │   └── main.rs         # CLI entry point
 ├── docs/
