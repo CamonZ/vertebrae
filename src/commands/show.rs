@@ -1181,31 +1181,51 @@ mod tests {
     #[test]
     fn test_show_command_debug() {
         let cmd = ShowCommand {
-            id: "test".to_string(),
+            id: "test123".to_string(),
         };
         let debug_str = format!("{:?}", cmd);
-        assert!(debug_str.contains("ShowCommand"));
+        assert!(
+            debug_str.contains("ShowCommand") && debug_str.contains("id: \"test123\""),
+            "Debug output should contain ShowCommand and id field value"
+        );
     }
 
     #[test]
     fn test_task_detail_debug() {
         let detail = TaskDetail {
-            id: "abc".to_string(),
-            title: "Test".to_string(),
-            level: "task".to_string(),
-            status: "todo".to_string(),
-            priority: None,
-            tags: vec![],
+            id: "abc123".to_string(),
+            title: "Test Task Title".to_string(),
+            level: "ticket".to_string(),
+            status: "in_progress".to_string(),
+            priority: Some("high".to_string()),
+            tags: vec!["backend".to_string()],
             created_at: None,
             updated_at: None,
             sections: vec![],
             code_refs: vec![],
-            parent: None,
+            parent: Some(TaskSummary {
+                id: "parent1".to_string(),
+                title: "Parent Task".to_string(),
+                level: "epic".to_string(),
+                status: "todo".to_string(),
+                priority: None,
+                tags: vec![],
+            }),
             children: vec![],
             blocked_by: vec![],
             blocks: vec![],
         };
         let debug_str = format!("{:?}", detail);
-        assert!(debug_str.contains("TaskDetail"));
+        assert!(
+            debug_str.contains("TaskDetail")
+                && debug_str.contains("id: \"abc123\"")
+                && debug_str.contains("Test Task Title")
+                && debug_str.contains("ticket")
+                && debug_str.contains("in_progress")
+                && debug_str.contains("high")
+                && debug_str.contains("backend")
+                && debug_str.contains("parent1"),
+            "Debug output should contain TaskDetail and all field values"
+        );
     }
 }

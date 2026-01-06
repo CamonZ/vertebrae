@@ -286,10 +286,14 @@ mod tests {
 
     #[test]
     fn test_args_debug() {
-        let args = Args::try_parse_from(["vtb", "add", "Test"]).unwrap();
-        // Command should implement Debug
+        let args = Args::try_parse_from(["vtb", "add", "Test task title"]).unwrap();
+        // Args does not derive Debug, but Command does - verify Command debug works
         if let Some(cmd) = &args.command {
-            let _ = format!("{:?}", cmd);
+            let cmd_debug = format!("{:?}", cmd);
+            assert!(
+                cmd_debug.contains("Add") && cmd_debug.contains("Test task title"),
+                "Command debug should contain Add variant and title field value"
+            );
         }
     }
 }

@@ -565,10 +565,15 @@ mod tests {
     #[test]
     fn test_undepend_command_debug() {
         let cmd = UndependCommand {
-            id: "test".to_string(),
-            blocker_id: "other".to_string(),
+            id: "test123".to_string(),
+            blocker_id: "blocker456".to_string(),
         };
         let debug_str = format!("{:?}", cmd);
-        assert!(debug_str.contains("UndependCommand"));
+        assert!(
+            debug_str.contains("UndependCommand")
+                && debug_str.contains("id: \"test123\"")
+                && debug_str.contains("blocker_id: \"blocker456\""),
+            "Debug output should contain UndependCommand and both id field values"
+        );
     }
 }

@@ -913,12 +913,18 @@ mod tests {
     #[test]
     fn test_section_command_debug() {
         let cmd = SectionCommand {
-            id: "test".to_string(),
+            id: "test123".to_string(),
             section_type: SectionType::Goal,
-            content: "content".to_string(),
+            content: "section content".to_string(),
         };
         let debug_str = format!("{:?}", cmd);
-        assert!(debug_str.contains("SectionCommand"));
+        assert!(
+            debug_str.contains("SectionCommand")
+                && debug_str.contains("id: \"test123\"")
+                && debug_str.contains("Goal")
+                && debug_str.contains("section content"),
+            "Debug output should contain SectionCommand and all field values"
+        );
     }
 
     #[test]
@@ -926,10 +932,17 @@ mod tests {
         let result = SectionResult {
             id: "task1".to_string(),
             section_type: SectionType::Goal,
-            replaced: false,
-            ordinal: None,
+            replaced: true,
+            ordinal: Some(3),
         };
         let debug_str = format!("{:?}", result);
-        assert!(debug_str.contains("SectionResult"));
+        assert!(
+            debug_str.contains("SectionResult")
+                && debug_str.contains("id: \"task1\"")
+                && debug_str.contains("Goal")
+                && debug_str.contains("replaced: true")
+                && debug_str.contains("ordinal: Some(3)"),
+            "Debug output should contain SectionResult and all field values"
+        );
     }
 }

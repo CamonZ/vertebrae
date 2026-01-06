@@ -950,27 +950,43 @@ mod tests {
     #[test]
     fn test_ref_command_debug() {
         let cmd = RefCommand {
-            id: "test".to_string(),
-            file_spec: "src/main.rs".to_string(),
-            name: None,
-            description: None,
+            id: "test123".to_string(),
+            file_spec: "src/main.rs:10-20".to_string(),
+            name: Some("test_fn".to_string()),
+            description: Some("Test description".to_string()),
         };
         let debug_str = format!("{:?}", cmd);
-        assert!(debug_str.contains("RefCommand"));
+        assert!(
+            debug_str.contains("RefCommand")
+                && debug_str.contains("id: \"test123\"")
+                && debug_str.contains("src/main.rs:10-20")
+                && debug_str.contains("test_fn")
+                && debug_str.contains("Test description"),
+            "Debug output should contain RefCommand and all field values"
+        );
     }
 
     #[test]
     fn test_ref_result_debug() {
         let result = RefResult {
             id: "task1".to_string(),
-            path: "src/main.rs".to_string(),
-            line_start: None,
-            line_end: None,
-            name: None,
-            warning: None,
+            path: "src/lib.rs".to_string(),
+            line_start: Some(10),
+            line_end: Some(20),
+            name: Some("my_func".to_string()),
+            warning: Some("file not found".to_string()),
         };
         let debug_str = format!("{:?}", result);
-        assert!(debug_str.contains("RefResult"));
+        assert!(
+            debug_str.contains("RefResult")
+                && debug_str.contains("id: \"task1\"")
+                && debug_str.contains("src/lib.rs")
+                && debug_str.contains("line_start: Some(10)")
+                && debug_str.contains("line_end: Some(20)")
+                && debug_str.contains("my_func")
+                && debug_str.contains("file not found"),
+            "Debug output should contain RefResult and all field values"
+        );
     }
 
     #[test]
@@ -984,6 +1000,12 @@ mod tests {
         assert_eq!(parsed, cloned);
 
         let debug_str = format!("{:?}", parsed);
-        assert!(debug_str.contains("ParsedFileRef"));
+        assert!(
+            debug_str.contains("ParsedFileRef")
+                && debug_str.contains("src/main.rs")
+                && debug_str.contains("line_start: Some(45)")
+                && debug_str.contains("line_end: Some(67)"),
+            "Debug output should contain ParsedFileRef and all field values"
+        );
     }
 }

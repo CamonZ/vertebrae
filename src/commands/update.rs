@@ -994,15 +994,24 @@ mod tests {
     #[test]
     fn test_update_command_debug() {
         let cmd = UpdateCommand {
-            id: "test".to_string(),
-            title: Some("Title".to_string()),
-            priority: None,
-            add_tags: vec![],
-            remove_tags: vec![],
-            parent: None,
+            id: "test123".to_string(),
+            title: Some("New Title".to_string()),
+            priority: Some(Priority::High),
+            add_tags: vec!["urgent".to_string()],
+            remove_tags: vec!["old".to_string()],
+            parent: Some("parent456".to_string()),
         };
         let debug_str = format!("{:?}", cmd);
-        assert!(debug_str.contains("UpdateCommand"));
+        assert!(
+            debug_str.contains("UpdateCommand")
+                && debug_str.contains("id: \"test123\"")
+                && debug_str.contains("New Title")
+                && debug_str.contains("High")
+                && debug_str.contains("urgent")
+                && debug_str.contains("old")
+                && debug_str.contains("parent456"),
+            "Debug output should contain UpdateCommand and all field values"
+        );
     }
 
     #[tokio::test]
