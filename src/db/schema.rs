@@ -16,7 +16,7 @@ mod sql {
         DEFINE FIELD title ON task TYPE string;
 
         DEFINE FIELD level ON task TYPE string
-            ASSERT $value IN ["epic", "ticket", "task", "subtask"];
+            ASSERT $value IN ["epic", "ticket", "task"];
 
         DEFINE FIELD status ON task TYPE string
             ASSERT $value IN ["todo", "in_progress", "done", "blocked"];
@@ -186,7 +186,7 @@ mod tests {
                 r#"
                 CREATE task SET
                     title = "Minimal Task",
-                    level = "subtask",
+                    level = "task",
                     status = "done"
             "#,
             )
@@ -488,7 +488,7 @@ mod tests {
         let (client, temp_dir) = setup_test_db().await;
         init_schema(&client).await.unwrap();
 
-        for level in ["epic", "ticket", "task", "subtask"] {
+        for level in ["epic", "ticket", "task"] {
             let query = format!(
                 r#"CREATE task SET title = "Test {}", level = "{}", status = "todo""#,
                 level, level

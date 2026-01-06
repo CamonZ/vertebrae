@@ -916,15 +916,13 @@ mod tests {
     async fn test_cascade_delete_deep_hierarchy() {
         let (db, temp_dir) = setup_test_db().await;
 
-        // Create a deeper hierarchy: level1 -> level2 -> level3 -> level4
+        // Create a 3-level hierarchy: level1 -> level2 -> level3
         create_task(&db, "level1", "Level 1", "epic", "todo").await;
         create_task(&db, "level2", "Level 2", "ticket", "todo").await;
         create_task(&db, "level3", "Level 3", "task", "todo").await;
-        create_task(&db, "level4", "Level 4", "subtask", "todo").await;
 
         create_child_of(&db, "level2", "level1").await;
         create_child_of(&db, "level3", "level2").await;
-        create_child_of(&db, "level4", "level3").await;
 
         let cmd = DeleteCommand {
             id: "level1".to_string(),
@@ -934,12 +932,11 @@ mod tests {
 
         let result = cmd.execute(&db).await;
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), "Deleted 4 tasks (including children)");
+        assert_eq!(result.unwrap(), "Deleted 3 tasks (including children)");
 
         assert!(!task_exists(&db, "level1").await);
         assert!(!task_exists(&db, "level2").await);
         assert!(!task_exists(&db, "level3").await);
-        assert!(!task_exists(&db, "level4").await);
 
         cleanup(&temp_dir);
     }

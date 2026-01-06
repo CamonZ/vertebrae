@@ -13,14 +13,13 @@ use surrealdb::sql::Thing;
 /// Task hierarchy level
 ///
 /// Represents the granularity of a task in the hierarchy:
-/// Epic > Ticket > Task > Subtask
+/// Epic > Ticket > Task
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Level {
     Epic,
     Ticket,
     Task,
-    Subtask,
 }
 
 impl Level {
@@ -30,7 +29,6 @@ impl Level {
             Level::Epic => "epic",
             Level::Ticket => "ticket",
             Level::Task => "task",
-            Level::Subtask => "subtask",
         }
     }
 }
@@ -266,7 +264,7 @@ pub struct Task {
     /// Task title
     pub title: String,
 
-    /// Hierarchy level (epic, ticket, task, subtask)
+    /// Hierarchy level (epic, ticket, task)
     pub level: Level,
 
     /// Current status
@@ -375,7 +373,6 @@ mod tests {
         assert_eq!(Level::Epic.as_str(), "epic");
         assert_eq!(Level::Ticket.as_str(), "ticket");
         assert_eq!(Level::Task.as_str(), "task");
-        assert_eq!(Level::Subtask.as_str(), "subtask");
     }
 
     #[test]
@@ -383,7 +380,6 @@ mod tests {
         assert_eq!(format!("{}", Level::Epic), "epic");
         assert_eq!(format!("{}", Level::Ticket), "ticket");
         assert_eq!(format!("{}", Level::Task), "task");
-        assert_eq!(format!("{}", Level::Subtask), "subtask");
     }
 
     #[test]
@@ -391,10 +387,6 @@ mod tests {
         assert_eq!(serde_json::to_string(&Level::Epic).unwrap(), "\"epic\"");
         assert_eq!(serde_json::to_string(&Level::Ticket).unwrap(), "\"ticket\"");
         assert_eq!(serde_json::to_string(&Level::Task).unwrap(), "\"task\"");
-        assert_eq!(
-            serde_json::to_string(&Level::Subtask).unwrap(),
-            "\"subtask\""
-        );
     }
 
     #[test]
@@ -410,10 +402,6 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<Level>("\"task\"").unwrap(),
             Level::Task
-        );
-        assert_eq!(
-            serde_json::from_str::<Level>("\"subtask\"").unwrap(),
-            Level::Subtask
         );
     }
 
@@ -892,10 +880,10 @@ mod tests {
 
     #[test]
     fn test_task_serialize_minimal() {
-        let task = Task::new("Minimal", Level::Subtask);
+        let task = Task::new("Minimal", Level::Task);
         let value = serde_json::to_value(&task).unwrap();
         assert_eq!(value["title"], "Minimal");
-        assert_eq!(value["level"], "subtask");
+        assert_eq!(value["level"], "task");
         assert_eq!(value["status"], "todo");
         assert!(value.get("priority").is_none());
         assert!(value.get("id").is_none());
