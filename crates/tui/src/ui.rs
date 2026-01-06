@@ -13,6 +13,7 @@ use ratatui::{
 use crate::app::{ActiveTab, App};
 use crate::details::render_details_view;
 use crate::navigation::render_nav_panel;
+use crate::tree_view::render_tree_view;
 
 /// Tab titles for the right panel.
 const TAB_TITLES: [&str; 3] = ["Details", "Tree", "Timeline"];
@@ -120,12 +121,7 @@ fn draw_tab_content(frame: &mut Frame, area: Rect, app: &App) {
             render_details_view(frame, area, app.selected_task_details());
         }
         ActiveTab::Tree => {
-            draw_placeholder_content(
-                frame,
-                area,
-                " Tree ",
-                "Task tree hierarchy will be shown here.",
-            );
+            render_tree_view(frame, area, app.tree_roots(), Some("No tasks found"));
         }
         ActiveTab::Timeline => {
             draw_placeholder_content(
