@@ -7,6 +7,7 @@ pub mod block;
 pub mod delete;
 pub mod done;
 pub mod list;
+pub mod section;
 pub mod show;
 pub mod start;
 pub mod update;
@@ -16,6 +17,7 @@ pub use block::BlockCommand;
 pub use delete::DeleteCommand;
 pub use done::DoneCommand;
 pub use list::ListCommand;
+pub use section::SectionCommand;
 pub use show::ShowCommand;
 pub use start::StartCommand;
 pub use update::UpdateCommand;
@@ -37,6 +39,8 @@ pub enum Command {
     Done(DoneCommand),
     /// List tasks with optional filters
     List(ListCommand),
+    /// Add a typed content section to a task
+    Section(SectionCommand),
     /// Show full details of a task
     Show(ShowCommand),
     /// Start working on a task (transition to in_progress)
@@ -93,6 +97,10 @@ impl Command {
             Command::List(cmd) => {
                 let tasks = cmd.execute(db).await?;
                 Ok(CommandResult::Table(format_task_table(&tasks)))
+            }
+            Command::Section(cmd) => {
+                let result = cmd.execute(db).await?;
+                Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Show(cmd) => {
                 let detail = cmd.execute(db).await?;
