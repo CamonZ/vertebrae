@@ -1096,24 +1096,38 @@ mod tests {
     #[test]
     fn test_unsection_command_debug() {
         let cmd = UnsectionCommand {
-            id: "test".to_string(),
+            id: "test123".to_string(),
             section_type: Some(SectionType::Goal),
-            index: None,
-            all: false,
+            index: Some(2),
+            all: true,
         };
         let debug_str = format!("{:?}", cmd);
-        assert!(debug_str.contains("UnsectionCommand"));
+        assert!(
+            debug_str.contains("UnsectionCommand")
+                && debug_str.contains("id: \"test123\"")
+                && debug_str.contains("Goal")
+                && debug_str.contains("index: Some(2)")
+                && debug_str.contains("all: true"),
+            "Debug output should contain UnsectionCommand and all field values"
+        );
     }
 
     #[test]
     fn test_unsection_result_debug() {
         let result = UnsectionResult {
             id: "task1".to_string(),
-            removed_count: 1,
+            removed_count: 3,
             section_type: Some(SectionType::Goal),
-            removed_all: false,
+            removed_all: true,
         };
         let debug_str = format!("{:?}", result);
-        assert!(debug_str.contains("UnsectionResult"));
+        assert!(
+            debug_str.contains("UnsectionResult")
+                && debug_str.contains("id: \"task1\"")
+                && debug_str.contains("removed_count: 3")
+                && debug_str.contains("Goal")
+                && debug_str.contains("removed_all: true"),
+            "Debug output should contain UnsectionResult and all field values"
+        );
     }
 }

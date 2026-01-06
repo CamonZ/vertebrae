@@ -528,7 +528,10 @@ mod tests {
     fn test_command_show_debug() {
         let cli = TestCli::try_parse_from(["test", "show", "test123"]).unwrap();
         let debug_str = format!("{:?}", cli.command);
-        assert!(debug_str.contains("Show"));
+        assert!(
+            debug_str.contains("Show") && debug_str.contains("test123"),
+            "Debug output should contain Show variant and id field value"
+        );
     }
 
     #[test]
@@ -688,7 +691,10 @@ mod tests {
     fn test_command_update_debug() {
         let cli = TestCli::try_parse_from(["test", "update", "test123"]).unwrap();
         let debug_str = format!("{:?}", cli.command);
-        assert!(debug_str.contains("Update"));
+        assert!(
+            debug_str.contains("Update") && debug_str.contains("test123"),
+            "Debug output should contain Update variant and id field value"
+        );
     }
 
     #[test]
@@ -769,7 +775,10 @@ mod tests {
     fn test_command_delete_debug() {
         let cli = TestCli::try_parse_from(["test", "delete", "test123"]).unwrap();
         let debug_str = format!("{:?}", cli.command);
-        assert!(debug_str.contains("Delete"));
+        assert!(
+            debug_str.contains("Delete") && debug_str.contains("test123"),
+            "Debug output should contain Delete variant and id field value"
+        );
     }
 
     #[test]
@@ -794,7 +803,10 @@ mod tests {
     fn test_command_start_debug() {
         let cli = TestCli::try_parse_from(["test", "start", "test123"]).unwrap();
         let debug_str = format!("{:?}", cli.command);
-        assert!(debug_str.contains("Start"));
+        assert!(
+            debug_str.contains("Start") && debug_str.contains("test123"),
+            "Debug output should contain Start variant and id field value"
+        );
     }
 
     #[test]
@@ -819,7 +831,10 @@ mod tests {
     fn test_command_done_debug() {
         let cli = TestCli::try_parse_from(["test", "done", "test123"]).unwrap();
         let debug_str = format!("{:?}", cli.command);
-        assert!(debug_str.contains("Done"));
+        assert!(
+            debug_str.contains("Done") && debug_str.contains("test123"),
+            "Debug output should contain Done variant and id field value"
+        );
     }
 
     #[test]
@@ -871,7 +886,10 @@ mod tests {
     fn test_command_block_debug() {
         let cli = TestCli::try_parse_from(["test", "block", "test123"]).unwrap();
         let debug_str = format!("{:?}", cli.command);
-        assert!(debug_str.contains("Block"));
+        assert!(
+            debug_str.contains("Block") && debug_str.contains("test123"),
+            "Debug output should contain Block variant and id field value"
+        );
     }
 
     #[test]
@@ -929,6 +947,9 @@ mod tests {
     fn test_command_sections_debug() {
         let cli = TestCli::try_parse_from(["test", "sections", "test123"]).unwrap();
         let debug_str = format!("{:?}", cli.command);
-        assert!(debug_str.contains("Sections"));
+        assert!(
+            debug_str.contains("Sections") && debug_str.contains("test123"),
+            "Debug output should contain Sections variant and id field value"
+        );
     }
 }

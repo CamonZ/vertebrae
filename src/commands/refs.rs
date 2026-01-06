@@ -538,21 +538,29 @@ mod tests {
     #[test]
     fn test_refs_command_debug() {
         let cmd = RefsCommand {
-            id: "test".to_string(),
+            id: "test123".to_string(),
         };
         let debug_str = format!("{:?}", cmd);
-        assert!(debug_str.contains("RefsCommand"));
+        assert!(
+            debug_str.contains("RefsCommand") && debug_str.contains("id: \"test123\""),
+            "Debug output should contain RefsCommand and id field value"
+        );
     }
 
     #[test]
     fn test_refs_result_debug() {
         let result = RefsResult {
             id: "task1".to_string(),
-            title: "Test".to_string(),
+            title: "Test Task Title".to_string(),
             refs: vec![],
         };
         let debug_str = format!("{:?}", result);
-        assert!(debug_str.contains("RefsResult"));
+        assert!(
+            debug_str.contains("RefsResult")
+                && debug_str.contains("id: \"task1\"")
+                && debug_str.contains("Test Task Title"),
+            "Debug output should contain RefsResult and all field values"
+        );
     }
 
     #[tokio::test]
