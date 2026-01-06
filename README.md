@@ -1,5 +1,7 @@
 # Vertebrae
 
+[![CI](https://github.com/CamonZ/vertebrae/actions/workflows/ci.yml/badge.svg)](https://github.com/CamonZ/vertebrae/actions/workflows/ci.yml)
+
 A task management CLI tool written in Rust with dependency tracking and hierarchical organization.
 
 ## Features
@@ -17,7 +19,7 @@ A task management CLI tool written in Rust with dependency tracking and hierarch
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/vertebrae.git
+git clone https://github.com/CamonZ/vertebrae.git
 cd vertebrae
 
 # Build and install
