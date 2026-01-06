@@ -1,0 +1,13 @@
+[package]
+name = "vertebrae"
+version = "0.1.0"
+edition = "2024"
+description = "A task management CLI tool"
+license = "MIT"
+
+[[bin]]
+name = "vtb"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
