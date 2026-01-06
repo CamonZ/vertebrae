@@ -11,7 +11,9 @@ pub mod schema;
 pub use error::{DbError, DbResult};
 #[allow(unused_imports)]
 pub use models::{CodeRef, Level, Priority, Section, SectionType, Status, Task};
-pub use repository::{RelationshipRepository, TaskRepository, TaskUpdate};
+pub use repository::{
+    BlockerNode, GraphQueries, RelationshipRepository, TaskRepository, TaskUpdate,
+};
 
 use std::path::{Path, PathBuf};
 use surrealdb::Surreal;
