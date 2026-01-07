@@ -21,5 +21,5 @@ pub use data::{
 pub use details::{TaskDetails, TaskRelationships, render_details_view};
 pub use error::{TuiError, TuiResult};
 pub use navigation::{FlatNode, TreeNode, TreeState, flatten_tree, render_nav_panel};
-pub use timeline::{TimelineTask, render_timeline_view};
+pub use timeline::{DependencyEdge, TimelineTask, compute_dependency_groups, render_timeline_view};
 pub use tree_view::render_tree_view;

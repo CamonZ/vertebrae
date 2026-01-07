@@ -13,7 +13,7 @@ use vertebrae_db::{
 use crate::details::{TaskDetails, TaskRelationships};
 use crate::error::TuiResult;
 use crate::navigation::TreeNode;
-use crate::timeline::TimelineTask;
+use crate::timeline::{DependencyEdge, TimelineTask, compute_dependency_groups};
 
 // Re-export needed for TimelineTaskRow deserialization
 use surrealdb;
@@ -284,10 +284,18 @@ struct TimelineTaskRow {
     completed_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
+/// Row type for dependency edge query
+#[derive(Debug, serde::Deserialize)]
+struct DependencyEdgeRow {
+    in_id: surrealdb::sql::Thing,
+    out_id: surrealdb::sql::Thing,
+}
+
 /// Load all tasks that have been started for the timeline view.
 ///
 /// Only returns tasks where `started_at` is set. Tasks are sorted by
-/// their start time (oldest first).
+/// their start time (oldest first). Tasks in the same dependency chain
+/// are assigned the same color group.
 ///
 /// # Arguments
 ///
@@ -308,6 +316,31 @@ pub async fn load_timeline_tasks(db: &Database) -> TuiResult<Vec<TimelineTask>> 
     let mut result = db.client().query(query).await?;
     let rows: Vec<TimelineTaskRow> = result.take(0)?;
 
+    if rows.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Collect task IDs for dependency group computation
+    let task_ids: Vec<String> = rows.iter().map(|r| r.id.id.to_string()).collect();
+
+    // Query all dependency edges
+    // The depends_on edge goes: dependent -> depends_on -> blocker
+    let edge_query = "SELECT in.id AS in_id, out.id AS out_id FROM depends_on";
+    let mut edge_result = db.client().query(edge_query).await?;
+    let edge_rows: Vec<DependencyEdgeRow> = edge_result.take(0)?;
+
+    // Convert to DependencyEdge format
+    let edges: Vec<DependencyEdge> = edge_rows
+        .into_iter()
+        .map(|e| DependencyEdge {
+            from_id: e.in_id.id.to_string(),
+            to_id: e.out_id.id.to_string(),
+        })
+        .collect();
+
+    // Compute dependency groups using Union-Find
+    let dependency_groups = compute_dependency_groups(&task_ids, &edges);
+
     let mut timeline_tasks = Vec::new();
 
     for row in rows {
@@ -318,6 +351,9 @@ pub async fn load_timeline_tasks(db: &Database) -> TuiResult<Vec<TimelineTask>> 
         let dependencies = rel_repo.get_dependencies(&id).await?;
         let has_dependencies = !dependencies.is_empty();
 
+        // Get dependency group for this task
+        let dependency_group = dependency_groups.get(&id).copied();
+
         timeline_tasks.push(TimelineTask {
             id,
             title: row.title,
@@ -325,6 +361,7 @@ pub async fn load_timeline_tasks(db: &Database) -> TuiResult<Vec<TimelineTask>> 
             started_at: row.started_at,
             completed_at: row.completed_at,
             has_dependencies,
+            dependency_group,
         });
     }
 
@@ -814,6 +851,62 @@ mod tests {
         assert!(
             details.progress.is_none(),
             "Leaf task should not have progress displayed"
+        );
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_load_timeline_tasks_assigns_dependency_groups() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        let rel_repo = RelationshipRepository::new(db.client());
+
+        // Create three tasks: blocker and dependent in a chain, isolated is alone
+        create_task_with_parent(&db, "blocker", "Blocker", Level::Task, None).await;
+        create_task_with_parent(&db, "dependent", "Dependent", Level::Task, None).await;
+        create_task_with_parent(&db, "isolated", "Isolated", Level::Task, None).await;
+
+        // Set timestamps
+        let query1 = "UPDATE task:blocker SET started_at = time::now() - 2h, status = 'done'";
+        let query2 = "UPDATE task:dependent SET started_at = time::now(), status = 'in_progress'";
+        let query3 = "UPDATE task:isolated SET started_at = time::now() - 1h, status = 'done'";
+        db.client().query(query1).await.unwrap();
+        db.client().query(query2).await.unwrap();
+        db.client().query(query3).await.unwrap();
+
+        // Create dependency: dependent -> blocker
+        rel_repo
+            .create_depends_on("dependent", "blocker")
+            .await
+            .unwrap();
+
+        let timeline_tasks = load_timeline_tasks(&db).await.unwrap();
+        assert_eq!(timeline_tasks.len(), 3);
+
+        // Find tasks by id
+        let blocker_task = timeline_tasks.iter().find(|t| t.id == "blocker").unwrap();
+        let dependent_task = timeline_tasks.iter().find(|t| t.id == "dependent").unwrap();
+        let isolated_task = timeline_tasks.iter().find(|t| t.id == "isolated").unwrap();
+
+        // Blocker and dependent should be in the same group
+        assert!(
+            blocker_task.dependency_group.is_some(),
+            "Blocker should have a dependency group"
+        );
+        assert!(
+            dependent_task.dependency_group.is_some(),
+            "Dependent should have a dependency group"
+        );
+        assert_eq!(
+            blocker_task.dependency_group, dependent_task.dependency_group,
+            "Blocker and dependent should be in same group"
+        );
+
+        // Isolated should have no group
+        assert!(
+            isolated_task.dependency_group.is_none(),
+            "Isolated task should not have a dependency group"
         );
 
         cleanup(&temp_dir);
