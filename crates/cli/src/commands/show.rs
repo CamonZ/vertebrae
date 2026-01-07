@@ -37,6 +37,8 @@ pub struct TaskDetail {
     pub created_at: Option<String>,
     /// Last update timestamp
     pub updated_at: Option<String>,
+    /// Completed timestamp
+    pub completed_at: Option<String>,
     /// Whether this task needs human review
     pub needs_human_review: Option<bool>,
     /// Embedded sections
@@ -69,6 +71,8 @@ struct TaskRow {
     created_at: Option<surrealdb::sql::Datetime>,
     #[serde(default)]
     updated_at: Option<surrealdb::sql::Datetime>,
+    #[serde(default)]
+    completed_at: Option<surrealdb::sql::Datetime>,
     #[serde(default)]
     needs_human_review: Option<bool>,
     #[serde(default)]
@@ -208,6 +212,7 @@ impl ShowCommand {
             tags: task.tags,
             created_at: task.created_at.map(|dt| dt.to_string()),
             updated_at: task.updated_at.map(|dt| dt.to_string()),
+            completed_at: task.completed_at.map(|dt| dt.to_string()),
             needs_human_review: task.needs_human_review,
             sections,
             code_refs,
@@ -330,7 +335,7 @@ impl std::fmt::Display for TaskDetail {
         )?;
         writeln!(
             f,
-            "Tags:     {}",
+            "Tags:     {}\n",
             if self.tags.is_empty() {
                 "(none)".to_string()
             } else {
@@ -342,15 +347,24 @@ impl std::fmt::Display for TaskDetail {
             Some(false) => "False",
             None => "False",
         };
-        writeln!(f, "Human Review: {}", review_status)?;
+        writeln!(f, "Human Review: {}\n\n", review_status)?;
 
         // Timestamps
-        if let Some(ref created) = self.created_at {
-            writeln!(f, "Created:  {}", format_timestamp(created))?;
-        }
-        if let Some(ref updated) = self.updated_at {
-            writeln!(f, "Updated:  {}", format_timestamp(updated))?;
-        }
+        writeln!(
+            f,
+            "Started At:   {}",
+            format_timestamp(self.created_at.as_deref())
+        )?;
+        writeln!(
+            f,
+            "Updated At:   {}",
+            format_timestamp(self.updated_at.as_deref())
+        )?;
+        writeln!(
+            f,
+            "Completed At: {}",
+            format_timestamp(self.completed_at.as_deref())
+        )?;
         writeln!(f)?;
 
         // Description section (if present)
@@ -561,13 +575,18 @@ fn format_section_group(
 }
 
 /// Format a timestamp for readable display
-fn format_timestamp(ts: &str) -> String {
-    // Try to parse and format nicely, otherwise return as-is
-    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(ts) {
-        dt.format("%Y-%m-%d %H:%M").to_string()
-    } else {
-        // Try parsing SurrealDB format
-        ts.replace('T', " ").replace('Z', "")
+fn format_timestamp(ts: Option<&str>) -> String {
+    match ts {
+        Some(s) => {
+            // Try to parse and format nicely, otherwise return as-is
+            if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(s) {
+                dt.format("%Y-%m-%d %H:%M").to_string()
+            } else {
+                // Try parsing SurrealDB format
+                s.replace('T', " ").replace('Z', "")
+            }
+        }
+        None => String::new(),
     }
 }
 
@@ -1100,11 +1119,17 @@ mod tests {
     #[test]
     fn test_format_timestamp() {
         // RFC3339 format
-        assert_eq!(format_timestamp("2024-01-15T10:30:00Z"), "2024-01-15 10:30");
+        assert_eq!(
+            format_timestamp(Some("2024-01-15T10:30:00Z")),
+            "2024-01-15 10:30"
+        );
 
         // Fallback format
-        let result = format_timestamp("2024-01-15T10:30:00Z");
+        let result = format_timestamp(Some("2024-01-15T10:30:00Z"));
         assert!(result.contains("2024"));
+
+        // None format
+        assert_eq!(format_timestamp(None), "");
     }
 
     #[test]
@@ -1131,6 +1156,7 @@ mod tests {
             tags: vec!["backend".to_string()],
             created_at: Some("2024-01-15T10:30:00Z".to_string()),
             updated_at: Some("2024-01-15T11:00:00Z".to_string()),
+            completed_at: None,
             needs_human_review: Some(false),
             sections: vec![
                 Section::new(SectionType::Goal, "The goal"),
@@ -1180,6 +1206,7 @@ mod tests {
             tags: vec![],
             created_at: None,
             updated_at: None,
+            completed_at: None,
             needs_human_review: Some(false),
             sections: vec![],
             code_refs: vec![],
@@ -1216,6 +1243,7 @@ mod tests {
             tags: vec![],
             created_at: None,
             updated_at: None,
+            completed_at: None,
             needs_human_review: Some(true),
             sections: vec![],
             code_refs: vec![],
@@ -1242,6 +1270,7 @@ mod tests {
             tags: vec![],
             created_at: None,
             updated_at: None,
+            completed_at: None,
             needs_human_review: Some(false),
             sections: vec![
                 Section::with_order(SectionType::Step, "First step", 1),
@@ -1285,6 +1314,7 @@ mod tests {
             tags: vec!["backend".to_string()],
             created_at: None,
             updated_at: None,
+            completed_at: None,
             needs_human_review: Some(false),
             sections: vec![],
             code_refs: vec![],
