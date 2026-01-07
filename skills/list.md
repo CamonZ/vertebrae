@@ -1,3 +1,7 @@
+---
+description: List and filter tasks
+---
+
 # /list
 
 List and filter tasks.

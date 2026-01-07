@@ -1,3 +1,7 @@
+---
+description: Mark a step as complete within a task
+---
+
 # /step-done
 
 Mark a step as complete within a task.

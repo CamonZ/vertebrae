@@ -1,3 +1,7 @@
+---
+description: Display full details of a task including sections, refs, and relationships
+---
+
 # /vtb-show
 
 Display full details of a task including sections, refs, and relationships.

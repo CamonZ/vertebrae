@@ -1,3 +1,7 @@
+---
+description: Show the full dependency chain blocking a task
+---
+
 # /blockers
 
 Show the full dependency chain blocking a task.

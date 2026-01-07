@@ -1,3 +1,7 @@
+---
+description: Create an implementation plan for a complex task using vertebrae
+---
+
 # /plan
 
 Create an implementation plan for a complex task using vertebrae.

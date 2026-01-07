@@ -1,3 +1,7 @@
+---
+description: Complete current task and move to the next one
+---
+
 # /next
 
 Complete current task and move to the next one.
