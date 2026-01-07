@@ -144,8 +144,12 @@ impl InitCommand {
         let db_path = base_path.join(".vtb/data");
         let db_created = self.create_dir_if_not_exists(&db_path)?;
 
-        let skills_dir_created = self.create_dir_if_not_exists(&self.skills_target)?;
-        let skills_copied = self.copy_skills()?;
+        // Resolve skills paths relative to project root
+        let skills_source = base_path.join(&self.skills_source);
+        let skills_target = base_path.join(&self.skills_target);
+
+        let skills_dir_created = self.create_dir_if_not_exists(&skills_target)?;
+        let skills_copied = self.copy_skills(&skills_source, &skills_target)?;
 
         Ok(InitResult {
             db_path,
@@ -174,14 +178,14 @@ impl InitCommand {
     /// Copy skill files from source to target directory.
     ///
     /// Returns the number of files copied.
-    fn copy_skills(&self) -> Result<usize, InitError> {
+    fn copy_skills(&self, skills_source: &Path, skills_target: &Path) -> Result<usize, InitError> {
         // If source directory doesn't exist, return 0 (not an error)
-        if !self.skills_source.exists() {
+        if !skills_source.exists() {
             return Ok(0);
         }
 
-        let entries = fs::read_dir(&self.skills_source).map_err(|e| InitError::ReadDir {
-            path: self.skills_source.clone(),
+        let entries = fs::read_dir(skills_source).map_err(|e| InitError::ReadDir {
+            path: skills_source.to_path_buf(),
             reason: e.to_string(),
         })?;
 
@@ -189,7 +193,7 @@ impl InitCommand {
 
         for entry in entries {
             let entry = entry.map_err(|e| InitError::ReadDir {
-                path: self.skills_source.clone(),
+                path: skills_source.to_path_buf(),
                 reason: e.to_string(),
             })?;
 
@@ -206,7 +210,7 @@ impl InitCommand {
                 None => continue,
             };
 
-            let target_path = self.skills_target.join(file_name);
+            let target_path = skills_target.join(file_name);
 
             fs::copy(&path, &target_path).map_err(|e| InitError::CopyFile {
                 source: path.clone(),
@@ -307,7 +311,7 @@ mod tests {
             skills_target: skills_target.clone(),
         };
 
-        let result = cmd.copy_skills();
+        let result = cmd.copy_skills(&skills_source, &skills_target);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 2);
 
@@ -327,15 +331,16 @@ mod tests {
         let temp_dir = create_temp_dir("nosource");
         fs::create_dir_all(&temp_dir).unwrap();
 
+        let skills_source = temp_dir.join("nonexistent");
         let skills_target = temp_dir.join(".claude/skills");
         fs::create_dir_all(&skills_target).unwrap();
 
         let cmd = InitCommand {
-            skills_source: temp_dir.join("nonexistent"),
-            skills_target,
+            skills_source: skills_source.clone(),
+            skills_target: skills_target.clone(),
         };
 
-        let result = cmd.copy_skills();
+        let result = cmd.copy_skills(&skills_source, &skills_target);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 0);
 
@@ -357,11 +362,11 @@ mod tests {
         fs::create_dir_all(&skills_target).unwrap();
 
         let cmd = InitCommand {
-            skills_source,
-            skills_target,
+            skills_source: skills_source.clone(),
+            skills_target: skills_target.clone(),
         };
 
-        let result = cmd.copy_skills();
+        let result = cmd.copy_skills(&skills_source, &skills_target);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 1); // Only the file, not the subdir
 
