@@ -100,6 +100,10 @@ pub struct App {
     timeline_tasks: Vec<TimelineTask>,
     /// Scroll offset for content panel (used in Details, Tree, and Timeline views).
     content_scroll_offset: usize,
+    /// Horizontal scroll offset for timeline view (percentage of total timeline width).
+    timeline_horizontal_offset: u16,
+    /// Selected task index in the timeline view.
+    selected_timeline_index: usize,
 }
 
 impl App {
@@ -149,6 +153,8 @@ impl App {
             details_dirty: false,
             timeline_tasks,
             content_scroll_offset: 0,
+            timeline_horizontal_offset: 0,
+            selected_timeline_index: 0,
         })
     }
 
@@ -217,6 +223,16 @@ impl App {
         self.content_scroll_offset
     }
 
+    /// Get the timeline horizontal scroll offset.
+    pub fn timeline_horizontal_offset(&self) -> u16 {
+        self.timeline_horizontal_offset
+    }
+
+    /// Get the selected timeline task index.
+    pub fn selected_timeline_index(&self) -> usize {
+        self.selected_timeline_index
+    }
+
     /// Set the tree roots and refresh the visible nodes.
     pub fn set_tree_roots(&mut self, roots: Vec<TreeNode>) {
         self.tree_roots = roots;
@@ -262,6 +278,41 @@ impl App {
     /// Scroll content up (decrease offset).
     pub fn scroll_content_up(&mut self) {
         self.content_scroll_offset = self.content_scroll_offset.saturating_sub(1);
+    }
+
+    /// Scroll timeline left (decrease horizontal offset).
+    ///
+    /// Scrolls by approximately 10% of the timeline width.
+    pub fn scroll_timeline_left(&mut self) {
+        self.timeline_horizontal_offset = self.timeline_horizontal_offset.saturating_sub(10);
+    }
+
+    /// Scroll timeline right (increase horizontal offset).
+    ///
+    /// Scrolls by approximately 10% of the timeline width.
+    /// Maximum offset is clamped to 100 (100% scrolled = end of timeline visible).
+    pub fn scroll_timeline_right(&mut self) {
+        self.timeline_horizontal_offset = (self.timeline_horizontal_offset + 10).min(100);
+    }
+
+    /// Select the next timeline task (move selection down).
+    pub fn select_next_timeline_task(&mut self) {
+        let max_tasks = self.timeline_tasks.len();
+        if max_tasks > 0 && self.selected_timeline_index < max_tasks - 1 {
+            self.selected_timeline_index += 1;
+        }
+    }
+
+    /// Select the previous timeline task (move selection up).
+    pub fn select_previous_timeline_task(&mut self) {
+        if self.selected_timeline_index > 0 {
+            self.selected_timeline_index -= 1;
+        }
+    }
+
+    /// Get the currently selected timeline task, if any.
+    pub fn selected_timeline_task(&self) -> Option<&TimelineTask> {
+        self.timeline_tasks.get(self.selected_timeline_index)
     }
 
     /// Move selection down in the navigation list.
@@ -373,21 +424,13 @@ impl App {
             return;
         }
 
-        // Panel switching: h/Left goes to nav, l/Right goes to content
-        if is_left(key) || is_h(key) {
-            self.focus_navigation();
-            return;
-        }
-
-        if is_right(key) || is_l(key) {
-            self.focus_content();
-            return;
-        }
-
-        // Context-sensitive keys based on focused panel
+        // Context-sensitive keys based on focused panel and active tab
         match self.focused_panel {
             FocusedPanel::Navigation => {
-                if is_down(key) {
+                // h/l switch panels from navigation
+                if is_right(key) || is_l(key) {
+                    self.focus_content();
+                } else if is_down(key) {
                     self.select_next();
                 } else if is_up(key) {
                     self.select_previous();
@@ -396,12 +439,38 @@ impl App {
                 }
             }
             FocusedPanel::Content => {
-                if is_down(key) {
-                    self.scroll_content_down();
-                } else if is_up(key) {
-                    self.scroll_content_up();
+                match self.active_tab {
+                    ActiveTab::Timeline => {
+                        // Timeline has its own navigation:
+                        // - j/k (down/up) for vertical task selection
+                        // - h/l (left/right) for horizontal timeline scrolling
+                        // - When at left edge (offset 0), h switches back to navigation
+                        if is_down(key) {
+                            self.select_next_timeline_task();
+                        } else if is_up(key) {
+                            self.select_previous_timeline_task();
+                        } else if is_h(key) || is_left(key) {
+                            if self.timeline_horizontal_offset == 0 {
+                                // At left edge, go back to navigation
+                                self.focus_navigation();
+                            } else {
+                                self.scroll_timeline_left();
+                            }
+                        } else if is_l(key) || is_right(key) {
+                            self.scroll_timeline_right();
+                        }
+                    }
+                    ActiveTab::Details | ActiveTab::Tree => {
+                        // h/l switch panels from Details/Tree views
+                        if is_left(key) || is_h(key) {
+                            self.focus_navigation();
+                        } else if is_down(key) {
+                            self.scroll_content_down();
+                        } else if is_up(key) {
+                            self.scroll_content_up();
+                        }
+                    }
                 }
-                // Enter in content panel could be used for future interactions
             }
         }
     }
@@ -678,5 +747,144 @@ mod tests {
     fn test_focused_panel_is_content() {
         assert!(FocusedPanel::Content.is_content());
         assert!(!FocusedPanel::Navigation.is_content());
+    }
+
+    // ========================================
+    // Timeline scrolling and selection tests
+    // ========================================
+
+    /// Helper struct for testing timeline-related App behavior
+    struct TimelineTestApp {
+        timeline_horizontal_offset: u16,
+        selected_timeline_index: usize,
+        timeline_tasks_count: usize,
+    }
+
+    impl TimelineTestApp {
+        fn new(task_count: usize) -> Self {
+            Self {
+                timeline_horizontal_offset: 0,
+                selected_timeline_index: 0,
+                timeline_tasks_count: task_count,
+            }
+        }
+
+        fn scroll_timeline_left(&mut self) {
+            self.timeline_horizontal_offset = self.timeline_horizontal_offset.saturating_sub(10);
+        }
+
+        fn scroll_timeline_right(&mut self) {
+            self.timeline_horizontal_offset = (self.timeline_horizontal_offset + 10).min(100);
+        }
+
+        fn select_next_timeline_task(&mut self) {
+            if self.timeline_tasks_count > 0
+                && self.selected_timeline_index < self.timeline_tasks_count - 1
+            {
+                self.selected_timeline_index += 1;
+            }
+        }
+
+        fn select_previous_timeline_task(&mut self) {
+            if self.selected_timeline_index > 0 {
+                self.selected_timeline_index -= 1;
+            }
+        }
+    }
+
+    #[test]
+    fn test_scroll_timeline_left_decreases_offset() {
+        let mut app = TimelineTestApp::new(3);
+        app.timeline_horizontal_offset = 50;
+
+        app.scroll_timeline_left();
+        assert_eq!(app.timeline_horizontal_offset, 40);
+    }
+
+    #[test]
+    fn test_scroll_timeline_left_cannot_go_below_zero() {
+        let mut app = TimelineTestApp::new(3);
+        app.timeline_horizontal_offset = 5;
+
+        app.scroll_timeline_left();
+        assert_eq!(app.timeline_horizontal_offset, 0);
+
+        // Try scrolling again when at 0
+        app.scroll_timeline_left();
+        assert_eq!(app.timeline_horizontal_offset, 0);
+    }
+
+    #[test]
+    fn test_scroll_timeline_right_increases_offset() {
+        let mut app = TimelineTestApp::new(3);
+
+        app.scroll_timeline_right();
+        assert_eq!(app.timeline_horizontal_offset, 10);
+
+        app.scroll_timeline_right();
+        assert_eq!(app.timeline_horizontal_offset, 20);
+    }
+
+    #[test]
+    fn test_scroll_timeline_right_cannot_exceed_100() {
+        let mut app = TimelineTestApp::new(3);
+        app.timeline_horizontal_offset = 95;
+
+        app.scroll_timeline_right();
+        assert_eq!(app.timeline_horizontal_offset, 100);
+
+        // Try scrolling again at max
+        app.scroll_timeline_right();
+        assert_eq!(app.timeline_horizontal_offset, 100);
+    }
+
+    #[test]
+    fn test_select_next_timeline_task_increments_index() {
+        let mut app = TimelineTestApp::new(5);
+
+        app.select_next_timeline_task();
+        assert_eq!(app.selected_timeline_index, 1);
+
+        app.select_next_timeline_task();
+        assert_eq!(app.selected_timeline_index, 2);
+    }
+
+    #[test]
+    fn test_select_next_timeline_task_clamps_at_end() {
+        let mut app = TimelineTestApp::new(3);
+        app.selected_timeline_index = 2; // Last task
+
+        app.select_next_timeline_task();
+        assert_eq!(app.selected_timeline_index, 2); // Should not change
+    }
+
+    #[test]
+    fn test_select_previous_timeline_task_decrements_index() {
+        let mut app = TimelineTestApp::new(5);
+        app.selected_timeline_index = 3;
+
+        app.select_previous_timeline_task();
+        assert_eq!(app.selected_timeline_index, 2);
+    }
+
+    #[test]
+    fn test_select_previous_timeline_task_clamps_at_zero() {
+        let mut app = TimelineTestApp::new(3);
+        app.selected_timeline_index = 0;
+
+        app.select_previous_timeline_task();
+        assert_eq!(app.selected_timeline_index, 0); // Should not change
+    }
+
+    #[test]
+    fn test_select_timeline_task_on_empty_list() {
+        let mut app = TimelineTestApp::new(0);
+
+        // Should not panic or change index
+        app.select_next_timeline_task();
+        assert_eq!(app.selected_timeline_index, 0);
+
+        app.select_previous_timeline_task();
+        assert_eq!(app.selected_timeline_index, 0);
     }
 }
