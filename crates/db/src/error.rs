@@ -30,7 +30,7 @@ pub enum DbError {
     Schema(#[source] Box<surrealdb::Error>),
 
     /// Error executing a query
-    #[error("Query execution failed: {0}")]
+    #[error("Query execution failed")]
     Query(#[source] Box<surrealdb::Error>),
 
     /// Error with database path (invalid or inaccessible)
@@ -56,6 +56,21 @@ pub enum DbError {
 impl From<surrealdb::Error> for DbError {
     fn from(err: surrealdb::Error) -> Self {
         DbError::Query(Box::new(err))
+    }
+}
+
+impl DbError {
+    /// Get the full error message including nested SurrealDB error details.
+    ///
+    /// This is useful for displaying detailed error information to users.
+    pub fn full_message(&self) -> String {
+        match self {
+            DbError::Query(err) => {
+                // Format the error with all its details
+                format!("Query execution failed: {}", err)
+            }
+            other => other.to_string(),
+        }
     }
 }
 

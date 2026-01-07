@@ -9,6 +9,7 @@ use serde::Deserialize;
 use serde_json;
 use surrealdb::Surreal;
 use surrealdb::engine::local::Db;
+use tracing::{debug, trace};
 
 /// Repository for task CRUD operations
 ///
@@ -200,6 +201,8 @@ impl<'a> TaskRepository<'a> {
     ///
     /// Returns `DbError::Query` if the database operation fails.
     pub async fn create(&self, id: &str, task: &Task) -> DbResult<()> {
+        debug!("Creating task: {} with title: {}", id, task.title);
+        trace!("Task data: {:?}", task);
         let priority_str = match &task.priority {
             Some(p) => format!("\"{}\"", p.as_str()),
             None => "NONE".to_string(),
@@ -248,11 +251,16 @@ impl<'a> TaskRepository<'a> {
     ///
     /// `Some(Task)` if found, `None` otherwise.
     pub async fn get(&self, id: &str) -> DbResult<Option<Task>> {
-        let task: Option<Task> = self
-            .client
-            .select(("task", id))
-            .await
-            .map_err(|e| DbError::Query(Box::new(e)))?;
+        debug!("Fetching task: {}", id);
+        let task: Option<Task> = self.client.select(("task", id)).await.map_err(|e| {
+            debug!("Failed to fetch task: {}: {}", id, e);
+            DbError::Query(Box::new(e))
+        })?;
+        if task.is_some() {
+            debug!("Successfully fetched task: {}", id);
+        } else {
+            debug!("Task not found: {}", id);
+        }
         Ok(task)
     }
 
@@ -322,7 +330,11 @@ impl<'a> TaskRepository<'a> {
     ///
     /// Returns `DbError::Query` if the database operation fails.
     pub async fn update(&self, id: &str, updates: &TaskUpdate) -> DbResult<()> {
+        debug!("Updating task: {}", id);
+        trace!("Updates: {:?}", updates);
+
         if !updates.has_updates() {
+            debug!("No updates specified for task: {}", id);
             return Ok(());
         }
 
@@ -381,7 +393,15 @@ impl<'a> TaskRepository<'a> {
         if !field_updates.is_empty() {
             field_updates.push("updated_at = time::now()".to_string());
             let query = format!("UPDATE task:{} SET {}", id, field_updates.join(", "));
-            self.client.query(&query).await?;
+            debug!("Executing field updates for task: {}", id);
+            trace!("Query: {}", query);
+            match self.client.query(&query).await {
+                Ok(_) => debug!("Field updates succeeded for task: {}", id),
+                Err(e) => {
+                    debug!("Field updates failed for task: {}: {}", id, e);
+                    return Err(DbError::Query(Box::new(e)));
+                }
+            }
         }
 
         // Handle tag updates
@@ -400,9 +420,21 @@ impl<'a> TaskRepository<'a> {
         add_tags: &[String],
         remove_tags: &[String],
     ) -> DbResult<()> {
+        debug!("Applying tag updates to task: {}", id);
+        trace!(
+            "Adding tags: {:?}, Removing tags: {:?}",
+            add_tags, remove_tags
+        );
+
         // Fetch current tags
         let query = format!("SELECT id, tags FROM task:{}", id);
-        let mut result = self.client.query(&query).await?;
+        let mut result = match self.client.query(&query).await {
+            Ok(r) => r,
+            Err(e) => {
+                debug!("Failed to fetch tags for task: {}: {}", id, e);
+                return Err(DbError::Query(Box::new(e)));
+            }
+        };
         let task: Option<TaskTagsRow> = result.take(0)?;
 
         let mut current_tags: Vec<String> = task.map(|t| t.tags).unwrap_or_default();
@@ -452,9 +484,18 @@ impl<'a> TaskRepository<'a> {
     ///
     /// Returns `DbError::Query` if the database operation fails.
     pub async fn delete(&self, id: &str) -> DbResult<()> {
+        debug!("Deleting task: {}", id);
         let query = format!("DELETE task:{}", id);
-        self.client.query(&query).await?;
-        Ok(())
+        match self.client.query(&query).await {
+            Ok(_) => {
+                debug!("Successfully deleted task: {}", id);
+                Ok(())
+            }
+            Err(e) => {
+                debug!("Failed to delete task: {}: {}", id, e);
+                Err(DbError::Query(Box::new(e)))
+            }
+        }
     }
 }
 
@@ -809,5 +850,62 @@ mod tests {
         assert!(update.add_tags.is_empty());
         assert!(update.remove_tags.is_empty());
         assert!(!update.has_updates());
+    }
+
+    #[tokio::test]
+    async fn test_update_needs_human_review_on_task_without_field() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = TaskRepository::new(db.client());
+
+        // Create a task WITHOUT setting needs_human_review (should be null)
+        let task = Task::new("Review Test", Level::Task);
+        repo.create("nhr1", &task).await.unwrap();
+
+        // Verify the field is null initially
+        let retrieved = repo.get("nhr1").await.unwrap().unwrap();
+        assert_eq!(
+            retrieved.needs_human_review, None,
+            "Initially needs_human_review should be None"
+        );
+
+        // Update the task to set needs_human_review to true
+        let updates = TaskUpdate::new().with_needs_human_review(true);
+        repo.update("nhr1", &updates).await.unwrap();
+
+        // Verify the update was successful
+        let updated = repo.get("nhr1").await.unwrap().unwrap();
+        assert_eq!(
+            updated.needs_human_review,
+            Some(true),
+            "needs_human_review should be true after update"
+        );
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_update_needs_human_review_toggle() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = TaskRepository::new(db.client());
+
+        // Create a task with needs_human_review = false
+        let task = Task::new("Toggle Test", Level::Task).with_needs_human_review(false);
+        repo.create("nhr2", &task).await.unwrap();
+
+        // Update to true
+        let updates = TaskUpdate::new().with_needs_human_review(true);
+        repo.update("nhr2", &updates).await.unwrap();
+
+        let retrieved = repo.get("nhr2").await.unwrap().unwrap();
+        assert_eq!(retrieved.needs_human_review, Some(true));
+
+        // Update back to false
+        let updates = TaskUpdate::new().with_needs_human_review(false);
+        repo.update("nhr2", &updates).await.unwrap();
+
+        let retrieved = repo.get("nhr2").await.unwrap().unwrap();
+        assert_eq!(retrieved.needs_human_review, Some(false));
+
+        cleanup(&temp_dir);
     }
 }
