@@ -208,6 +208,65 @@ pub mod test_utils {
 
         Ok(client)
     }
+
+    /// Helper to create a task in a test database
+    ///
+    /// Inserts a task with the specified properties into the database.
+    /// Use this to set up test data quickly.
+    pub async fn create_task_in_db(
+        db: &Surreal<Db>,
+        id: &str,
+        title: &str,
+        level: &str,
+        status: &str,
+    ) -> DbResult<()> {
+        let query = format!(
+            r#"CREATE task:{} SET
+                title = "{}",
+                level = "{}",
+                status = "{}",
+                priority = NONE,
+                tags = [],
+                created_at = time::now(),
+                updated_at = time::now()"#,
+            id, title, level, status
+        );
+        db.query(&query).await?;
+        Ok(())
+    }
+
+    /// Helper to fetch a task from a test database
+    ///
+    /// Retrieves a task by its ID to verify state during tests.
+    pub async fn fetch_task_from_db(db: &Surreal<Db>, id: &str) -> DbResult<Option<Task>> {
+        let query = format!("SELECT * FROM task:{}", id);
+        let mut result = db.query(&query).await?;
+        let task: Option<Task> = result.take(0)?;
+        Ok(task)
+    }
+
+    /// Helper to get task status from a test database
+    ///
+    /// Quickly retrieve just the status of a task for assertions.
+    pub async fn get_task_status(db: &Surreal<Db>, id: &str) -> DbResult<Option<String>> {
+        let query = format!("SELECT status FROM task:{}", id);
+        let mut result = db.query(&query).await?;
+        #[derive(serde::Deserialize)]
+        struct StatusRow {
+            status: String,
+        }
+        let row: Option<StatusRow> = result.take(0)?;
+        Ok(row.map(|r| r.status))
+    }
+
+    /// Helper to query all tasks from a test database
+    ///
+    /// Retrieve all tasks for testing list operations and filters.
+    pub async fn list_all_tasks(db: &Surreal<Db>) -> DbResult<Vec<Task>> {
+        let mut result = db.query("SELECT * FROM task").await?;
+        let tasks: Vec<Task> = result.take(0)?;
+        Ok(tasks)
+    }
 }
 
 #[cfg(test)]
