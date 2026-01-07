@@ -1,12 +1,12 @@
 //! Done command for transitioning tasks to done status
 //!
 //! Implements the `vtb done` command to mark a task as complete.
-//! Provides soft enforcement by warning about incomplete children without blocking.
+//! Enforces parent completion validation - tasks with incomplete children cannot be marked done.
 //! Reports tasks that were blocked by this one and are now unblocked.
 
 use clap::Args;
 use serde::Deserialize;
-use vertebrae_db::{Database, DbError, Status};
+use vertebrae_db::{Database, DbError, GraphQueries, Status};
 
 /// Mark a task as complete (transition to done)
 #[derive(Debug, Args)]
@@ -24,14 +24,6 @@ struct TaskStatusRow {
     status: String,
 }
 
-/// Incomplete child task info
-#[derive(Debug, Deserialize)]
-struct IncompleteChild {
-    id: surrealdb::sql::Thing,
-    title: String,
-    status: String,
-}
-
 /// Unblocked task info (tasks that depended on the completed task)
 #[derive(Debug, Deserialize)]
 struct UnblockedTask {
@@ -46,23 +38,12 @@ pub struct DoneResult {
     pub id: String,
     /// Whether the task was already done
     pub already_done: bool,
-    /// List of incomplete children (warnings)
-    pub incomplete_children: Vec<(String, String, String)>, // (id, title, status)
     /// List of tasks that are now unblocked
     pub unblocked_tasks: Vec<(String, String)>, // (id, title)
 }
 
 impl std::fmt::Display for DoneResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Show warnings about incomplete children first
-        if !self.incomplete_children.is_empty() {
-            writeln!(f, "Warning: Task has incomplete children:")?;
-            for (id, title, status) in &self.incomplete_children {
-                writeln!(f, "  - {} ({}) [{}]", id, title, status)?;
-            }
-            writeln!(f)?;
-        }
-
         if self.already_done {
             write!(f, "Task '{}' is already done", self.id)?;
         } else {
@@ -87,7 +68,8 @@ impl DoneCommand {
     /// Execute the done command.
     ///
     /// Transitions a task to `done` status from any status.
-    /// Warns if the task has incomplete children but still proceeds (soft enforcement).
+    /// Enforces parent completion validation - returns an error if the task has
+    /// incomplete descendants (children, grandchildren, etc.).
     /// Reports tasks that were blocked by this one and are now unblocked.
     ///
     /// # Arguments
@@ -98,6 +80,7 @@ impl DoneCommand {
     ///
     /// Returns `DbError` if:
     /// - The task with the given ID does not exist
+    /// - The task has incomplete descendants (IncompleteChildren error)
     /// - Database operations fail
     pub async fn execute(&self, db: &Database) -> Result<DoneResult, DbError> {
         // Normalize ID to lowercase for case-insensitive lookup
@@ -114,13 +97,20 @@ impl DoneCommand {
             return Ok(DoneResult {
                 id,
                 already_done: true,
-                incomplete_children: vec![],
                 unblocked_tasks: vec![],
             });
         }
 
-        // Check for incomplete children (soft enforcement - warn only)
-        let incomplete_children = self.fetch_incomplete_children(db, &id).await?;
+        // Check for incomplete descendants (hard enforcement - error if any exist)
+        let graph = GraphQueries::new(db.client());
+        let incomplete_descendants = graph.get_incomplete_descendants(&id).await?;
+
+        if !incomplete_descendants.is_empty() {
+            return Err(DbError::IncompleteChildren {
+                task_id: id,
+                children: incomplete_descendants,
+            });
+        }
 
         // Find tasks that depend on this one and will become unblocked
         let unblocked_tasks = self.find_unblocked_tasks(db, &id).await?;
@@ -131,10 +121,6 @@ impl DoneCommand {
         Ok(DoneResult {
             id,
             already_done: false,
-            incomplete_children: incomplete_children
-                .into_iter()
-                .map(|child| (child.id.id.to_string(), child.title, child.status))
-                .collect(),
             unblocked_tasks: unblocked_tasks
                 .into_iter()
                 .map(|task| (task.id.id.to_string(), task.title))
@@ -152,30 +138,6 @@ impl DoneCommand {
             path: std::path::PathBuf::from(&self.id),
             reason: format!("Task '{}' not found", self.id),
         })
-    }
-
-    /// Fetch incomplete children of a task.
-    ///
-    /// Returns children tasks that are not yet done.
-    async fn fetch_incomplete_children(
-        &self,
-        db: &Database,
-        id: &str,
-    ) -> Result<Vec<IncompleteChild>, DbError> {
-        // Query tasks that are children of this task where status != 'done'
-        // The child_of relation goes from child -> parent, so we need to find
-        // tasks that have a child_of relation pointing to this task
-        let query = format!(
-            "SELECT id, title, status FROM task \
-             WHERE ->child_of->task CONTAINS task:{} \
-             AND status != 'done'",
-            id
-        );
-
-        let mut result = db.client().query(&query).await?;
-        let children: Vec<IncompleteChild> = result.take(0)?;
-
-        Ok(children)
     }
 
     /// Find tasks that depend on the completed task and will become unblocked.
@@ -401,7 +363,6 @@ mod tests {
         let done_result = result.unwrap();
         assert_eq!(done_result.id, "task1");
         assert!(!done_result.already_done);
-        assert!(done_result.incomplete_children.is_empty());
         assert!(done_result.unblocked_tasks.is_empty());
 
         // Verify status changed
@@ -504,7 +465,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_done_with_incomplete_children_warns() {
+    async fn test_done_with_incomplete_children_fails() {
         let (db, temp_dir) = setup_test_db().await;
 
         // Create parent task
@@ -519,23 +480,28 @@ mod tests {
         };
 
         let result = cmd.execute(&db).await;
-        assert!(result.is_ok(), "Done should succeed with warnings");
 
-        let done_result = result.unwrap();
-        assert!(!done_result.already_done);
-        assert!(!done_result.incomplete_children.is_empty());
-        assert_eq!(done_result.incomplete_children.len(), 1);
-        assert_eq!(done_result.incomplete_children[0].0, "child1");
+        // Should fail with IncompleteChildren error
+        match result {
+            Err(DbError::IncompleteChildren { task_id, children }) => {
+                assert_eq!(task_id, "parent");
+                assert_eq!(children.len(), 1);
+                assert_eq!(children[0].id, "child1");
+                assert_eq!(children[0].status, "todo");
+            }
+            Err(other) => panic!("Expected IncompleteChildren error, got {:?}", other),
+            Ok(_) => panic!("Expected error, but got success"),
+        }
 
-        // Task should still be marked done despite incomplete children
+        // Task should NOT be marked done
         let status = get_task_status(&db, "parent").await;
-        assert_eq!(status, "done");
+        assert_eq!(status, "in_progress");
 
         cleanup(&temp_dir);
     }
 
     #[tokio::test]
-    async fn test_done_with_complete_children_no_warning() {
+    async fn test_done_with_complete_children_succeeds() {
         let (db, temp_dir) = setup_test_db().await;
 
         // Create parent task
@@ -550,16 +516,20 @@ mod tests {
         };
 
         let result = cmd.execute(&db).await;
-        assert!(result.is_ok());
+        assert!(result.is_ok(), "Should succeed when all children are done");
 
         let done_result = result.unwrap();
-        assert!(done_result.incomplete_children.is_empty());
+        assert!(!done_result.already_done);
+
+        // Parent should be marked done
+        let status = get_task_status(&db, "parent").await;
+        assert_eq!(status, "done");
 
         cleanup(&temp_dir);
     }
 
     #[tokio::test]
-    async fn test_done_with_multiple_incomplete_children() {
+    async fn test_done_with_multiple_incomplete_children_fails() {
         let (db, temp_dir) = setup_test_db().await;
 
         // Create parent task
@@ -578,31 +548,106 @@ mod tests {
         };
 
         let result = cmd.execute(&db).await;
-        assert!(result.is_ok());
 
-        let done_result = result.unwrap();
-        // Only child1 and child2 are incomplete (child3 is done)
-        assert_eq!(done_result.incomplete_children.len(), 2);
+        // Should fail with IncompleteChildren error
+        match result {
+            Err(DbError::IncompleteChildren { task_id, children }) => {
+                assert_eq!(task_id, "parent");
+                // Only child1 and child2 are incomplete (child3 is done)
+                assert_eq!(children.len(), 2);
 
-        // Verify specific incomplete children
-        use std::collections::HashSet;
-        let incomplete_ids: HashSet<_> = done_result
-            .incomplete_children
-            .iter()
-            .map(|(id, _, _)| id.as_str())
-            .collect();
+                // Verify specific incomplete children
+                use std::collections::HashSet;
+                let incomplete_ids: HashSet<_> = children.iter().map(|c| c.id.as_str()).collect();
+                assert!(
+                    incomplete_ids.contains("child1"),
+                    "Should contain child1 (status=todo)"
+                );
+                assert!(
+                    incomplete_ids.contains("child2"),
+                    "Should contain child2 (status=blocked)"
+                );
+                assert!(
+                    !incomplete_ids.contains("child3"),
+                    "Should not contain child3 (status=done)"
+                );
+            }
+            Err(other) => panic!("Expected IncompleteChildren error, got {:?}", other),
+            Ok(_) => panic!("Expected error, but got success"),
+        }
+
+        // Task should NOT be marked done
+        let status = get_task_status(&db, "parent").await;
+        assert_eq!(status, "in_progress");
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_done_with_nested_incomplete_descendants_fails() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        // Create epic -> ticket -> task (nested hierarchy)
+        create_task(&db, "epic", "Epic", "epic", "in_progress").await;
+        create_task(&db, "ticket", "Ticket", "ticket", "done").await;
+        create_task(&db, "task1", "Task 1", "task", "todo").await; // incomplete grandchild
+
+        create_child_of(&db, "ticket", "epic").await;
+        create_child_of(&db, "task1", "ticket").await;
+
+        let cmd = DoneCommand {
+            id: "epic".to_string(),
+        };
+
+        let result = cmd.execute(&db).await;
+
+        // Should fail because task1 (grandchild) is incomplete
+        match result {
+            Err(DbError::IncompleteChildren { task_id, children }) => {
+                assert_eq!(task_id, "epic");
+                // task1 should be in the incomplete list (recursive check)
+                let incomplete_ids: Vec<_> = children.iter().map(|c| c.id.as_str()).collect();
+                assert!(
+                    incomplete_ids.contains(&"task1"),
+                    "Should contain nested incomplete grandchild task1"
+                );
+            }
+            Err(other) => panic!("Expected IncompleteChildren error, got {:?}", other),
+            Ok(_) => panic!("Expected error, but got success"),
+        }
+
+        // Epic should NOT be marked done
+        let status = get_task_status(&db, "epic").await;
+        assert_eq!(status, "in_progress");
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_done_with_all_nested_descendants_complete_succeeds() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        // Create epic -> ticket -> task (nested hierarchy, all complete)
+        create_task(&db, "epic", "Epic", "epic", "in_progress").await;
+        create_task(&db, "ticket", "Ticket", "ticket", "done").await;
+        create_task(&db, "task1", "Task 1", "task", "done").await;
+
+        create_child_of(&db, "ticket", "epic").await;
+        create_child_of(&db, "task1", "ticket").await;
+
+        let cmd = DoneCommand {
+            id: "epic".to_string(),
+        };
+
+        let result = cmd.execute(&db).await;
         assert!(
-            incomplete_ids.contains("child1"),
-            "Should contain child1 (status=todo)"
+            result.is_ok(),
+            "Should succeed when all descendants are done"
         );
-        assert!(
-            incomplete_ids.contains("child2"),
-            "Should contain child2 (status=blocked)"
-        );
-        assert!(
-            !incomplete_ids.contains("child3"),
-            "Should not contain child3 (status=done)"
-        );
+
+        // Epic should be marked done
+        let status = get_task_status(&db, "epic").await;
+        assert_eq!(status, "done");
 
         cleanup(&temp_dir);
     }
@@ -779,7 +824,6 @@ mod tests {
         let result = DoneResult {
             id: "task1".to_string(),
             already_done: false,
-            incomplete_children: vec![],
             unblocked_tasks: vec![],
         };
 
@@ -792,7 +836,6 @@ mod tests {
         let result = DoneResult {
             id: "task1".to_string(),
             already_done: true,
-            incomplete_children: vec![],
             unblocked_tasks: vec![],
         };
 
@@ -801,41 +844,10 @@ mod tests {
     }
 
     #[test]
-    fn test_done_result_display_with_children() {
-        let result = DoneResult {
-            id: "task1".to_string(),
-            already_done: false,
-            incomplete_children: vec![
-                (
-                    "child1".to_string(),
-                    "First Child".to_string(),
-                    "todo".to_string(),
-                ),
-                (
-                    "child2".to_string(),
-                    "Second Child".to_string(),
-                    "blocked".to_string(),
-                ),
-            ],
-            unblocked_tasks: vec![],
-        };
-
-        let output = format!("{}", result);
-        assert!(output.contains("Warning: Task has incomplete children"));
-        assert!(output.contains("child1"));
-        assert!(output.contains("First Child"));
-        assert!(output.contains("todo"));
-        assert!(output.contains("child2"));
-        assert!(output.contains("blocked"));
-        assert!(output.contains("Completed task: task1"));
-    }
-
-    #[test]
     fn test_done_result_display_with_unblocked() {
         let result = DoneResult {
             id: "task1".to_string(),
             already_done: false,
-            incomplete_children: vec![],
             unblocked_tasks: vec![
                 ("dep1".to_string(), "Dependent 1".to_string()),
                 ("dep2".to_string(), "Dependent 2".to_string()),
@@ -849,27 +861,6 @@ mod tests {
         assert!(output.contains("Dependent 1"));
         assert!(output.contains("dep2"));
         assert!(output.contains("Dependent 2"));
-    }
-
-    #[test]
-    fn test_done_result_display_with_all() {
-        let result = DoneResult {
-            id: "task1".to_string(),
-            already_done: false,
-            incomplete_children: vec![(
-                "child1".to_string(),
-                "Child".to_string(),
-                "todo".to_string(),
-            )],
-            unblocked_tasks: vec![("dep1".to_string(), "Dependent".to_string())],
-        };
-
-        let output = format!("{}", result);
-        assert!(output.contains("Warning: Task has incomplete children"));
-        assert!(output.contains("child1"));
-        assert!(output.contains("Completed task: task1"));
-        assert!(output.contains("Unblocked tasks:"));
-        assert!(output.contains("dep1"));
     }
 
     #[test]
@@ -974,7 +965,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_done_sets_completed_at_with_incomplete_children() {
+    async fn test_done_with_incomplete_children_does_not_set_completed_at() {
         let (db, temp_dir) = setup_test_db().await;
 
         // Create parent task
@@ -988,21 +979,23 @@ mod tests {
         };
 
         let result = cmd.execute(&db).await;
-        assert!(result.is_ok());
-        let done_result = result.unwrap();
 
-        // Task should have warnings about incomplete children
+        // Should fail with IncompleteChildren error
         assert!(
-            !done_result.incomplete_children.is_empty(),
-            "Should warn about incomplete children"
+            matches!(result, Err(DbError::IncompleteChildren { .. })),
+            "Should fail with IncompleteChildren error"
         );
 
-        // But completed_at should still be set (soft enforcement)
+        // completed_at should NOT be set (hard enforcement - task not completed)
         let completed_at = get_completed_at(&db, "parent").await;
         assert!(
-            completed_at.is_some(),
-            "completed_at should be set even with incomplete children"
+            completed_at.is_none(),
+            "completed_at should NOT be set when task has incomplete children"
         );
+
+        // Status should remain unchanged
+        let status = get_task_status(&db, "parent").await;
+        assert_eq!(status, "in_progress", "Status should remain in_progress");
 
         cleanup(&temp_dir);
     }
