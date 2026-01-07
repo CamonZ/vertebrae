@@ -22,6 +22,9 @@ pub struct TaskSummary {
     /// Tags for categorization
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Whether this task needs human review
+    #[serde(default)]
+    pub needs_human_review: Option<bool>,
 }
 
 /// List tasks with optional filters
@@ -107,6 +110,8 @@ struct TaskRow {
     priority: Option<String>,
     #[serde(default)]
     tags: Vec<String>,
+    #[serde(default)]
+    needs_human_review: Option<bool>,
 }
 
 impl From<TaskRow> for TaskSummary {
@@ -118,6 +123,7 @@ impl From<TaskRow> for TaskSummary {
             status: row.status,
             priority: row.priority,
             tags: row.tags,
+            needs_human_review: row.needs_human_review,
         }
     }
 }
@@ -203,10 +209,11 @@ impl ListCommand {
 
         // Build the query
         let query = if conditions.is_empty() {
-            "SELECT id, title, level, status, priority, tags FROM task".to_string()
+            "SELECT id, title, level, status, priority, tags, needs_human_review FROM task"
+                .to_string()
         } else {
             format!(
-                "SELECT id, title, level, status, priority, tags FROM task WHERE {}",
+                "SELECT id, title, level, status, priority, tags, needs_human_review FROM task WHERE {}",
                 conditions.join(" AND ")
             )
         };
@@ -226,7 +233,7 @@ impl ListCommand {
         // Use graph traversal to find children
         // SELECT <-child_of<-task.* FROM task:parent_id gets all tasks that are children of parent_id
         let query = format!(
-            "SELECT id, title, level, status, priority, tags FROM task WHERE ->child_of->task CONTAINS task:{}",
+            "SELECT id, title, level, status, priority, tags, needs_human_review FROM task WHERE ->child_of->task CONTAINS task:{}",
             parent_id
         );
 
@@ -293,7 +300,7 @@ impl ListCommand {
         }
 
         let query = format!(
-            "SELECT id, title, level, status, priority, tags FROM task WHERE {}",
+            "SELECT id, title, level, status, priority, tags, needs_human_review FROM task WHERE {}",
             conditions.join(" AND ")
         );
 
@@ -942,6 +949,7 @@ mod tests {
                 status: "todo".to_string(),
                 priority: Some("high".to_string()),
                 tags: vec!["backend".to_string()],
+                needs_human_review: None,
             },
             TaskSummary {
                 id: "2".to_string(),
@@ -950,6 +958,7 @@ mod tests {
                 status: "done".to_string(),
                 priority: Some("low".to_string()),
                 tags: vec!["frontend".to_string()],
+                needs_human_review: None,
             },
         ];
 
@@ -978,6 +987,7 @@ mod tests {
             status: "in_progress".to_string(),
             priority: Some("medium".to_string()),
             tags: vec!["test".to_string()],
+            needs_human_review: Some(true),
         };
 
         let summary = TaskSummary::from(row);
@@ -988,6 +998,7 @@ mod tests {
         assert_eq!(summary.status, "in_progress");
         assert_eq!(summary.priority, Some("medium".to_string()));
         assert_eq!(summary.tags, vec!["test".to_string()]);
+        assert_eq!(summary.needs_human_review, Some(true));
     }
 
     #[test]
@@ -999,6 +1010,7 @@ mod tests {
             status: "todo".to_string(),
             priority: Some("high".to_string()),
             tags: vec!["backend".to_string(), "urgent".to_string()],
+            needs_human_review: Some(true),
         };
 
         let cloned = summary.clone();
@@ -1008,6 +1020,7 @@ mod tests {
         assert_eq!(summary.status, cloned.status);
         assert_eq!(summary.priority, cloned.priority);
         assert_eq!(summary.tags, cloned.tags);
+        assert_eq!(summary.needs_human_review, cloned.needs_human_review);
     }
 
     #[test]
@@ -1019,6 +1032,7 @@ mod tests {
             status: "in_progress".to_string(),
             priority: Some("high".to_string()),
             tags: vec!["backend".to_string()],
+            needs_human_review: Some(true),
         };
 
         let debug_str = format!("{:?}", summary);
@@ -1029,7 +1043,8 @@ mod tests {
                 && debug_str.contains("level: \"ticket\"")
                 && debug_str.contains("status: \"in_progress\"")
                 && debug_str.contains("high")
-                && debug_str.contains("backend"),
+                && debug_str.contains("backend")
+                && debug_str.contains("needs_human_review"),
             "Debug output should contain TaskSummary and all field values"
         );
     }

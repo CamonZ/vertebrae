@@ -113,6 +113,8 @@ struct RelatedTaskRow {
     priority: Option<String>,
     #[serde(default)]
     tags: Vec<String>,
+    #[serde(default)]
+    needs_human_review: Option<bool>,
 }
 
 impl From<RelatedTaskRow> for TaskSummary {
@@ -124,6 +126,7 @@ impl From<RelatedTaskRow> for TaskSummary {
             status: row.status,
             priority: row.priority,
             tags: row.tags,
+            needs_human_review: row.needs_human_review,
         }
     }
 }
@@ -233,7 +236,7 @@ impl ShowCommand {
     async fn fetch_parent(&self, db: &Database, id: &str) -> Result<Option<TaskSummary>, DbError> {
         // SELECT ->child_of->task.* FROM task:<id> gets the parent
         let query = format!(
-            "SELECT id, title, level, status, priority, tags \
+            "SELECT id, title, level, status, priority, tags, needs_human_review \
              FROM task WHERE <-child_of<-task CONTAINS task:{}",
             id
         );
@@ -248,7 +251,7 @@ impl ShowCommand {
     async fn fetch_children(&self, db: &Database, id: &str) -> Result<Vec<TaskSummary>, DbError> {
         // SELECT <-child_of<-task.* FROM task:<id> gets children
         let query = format!(
-            "SELECT id, title, level, status, priority, tags \
+            "SELECT id, title, level, status, priority, tags, needs_human_review \
              FROM task WHERE ->child_of->task CONTAINS task:{}",
             id
         );
@@ -263,7 +266,7 @@ impl ShowCommand {
     async fn fetch_blocked_by(&self, db: &Database, id: &str) -> Result<Vec<TaskSummary>, DbError> {
         // SELECT ->depends_on->task.* FROM task:<id> gets dependencies
         let query = format!(
-            "SELECT id, title, level, status, priority, tags \
+            "SELECT id, title, level, status, priority, tags, needs_human_review \
              FROM task WHERE <-depends_on<-task CONTAINS task:{}",
             id
         );
@@ -278,7 +281,7 @@ impl ShowCommand {
     async fn fetch_blocks(&self, db: &Database, id: &str) -> Result<Vec<TaskSummary>, DbError> {
         // SELECT <-depends_on<-task.* FROM task:<id> gets tasks that depend on this
         let query = format!(
-            "SELECT id, title, level, status, priority, tags \
+            "SELECT id, title, level, status, priority, tags, needs_human_review \
              FROM task WHERE ->depends_on->task CONTAINS task:{}",
             id
         );
@@ -334,9 +337,12 @@ impl std::fmt::Display for TaskDetail {
                 self.tags.join(", ")
             }
         )?;
-        if self.needs_human_review == Some(true) {
-            writeln!(f, "Review:   NEEDS HUMAN REVIEW")?;
-        }
+        let review_status = match self.needs_human_review {
+            Some(true) => "True",
+            Some(false) => "False",
+            None => "False",
+        };
+        writeln!(f, "Human Review: {}", review_status)?;
 
         // Timestamps
         if let Some(ref created) = self.created_at {
@@ -1138,6 +1144,7 @@ mod tests {
                 status: "todo".to_string(),
                 priority: None,
                 tags: vec![],
+                needs_human_review: None,
             }),
             children: vec![],
             blocked_by: vec![],
@@ -1220,7 +1227,7 @@ mod tests {
 
         let output = format!("{}", detail);
 
-        assert!(output.contains("Review:   NEEDS HUMAN REVIEW"));
+        assert!(output.contains("Human Review: True"));
     }
 
     #[test]
@@ -1288,6 +1295,7 @@ mod tests {
                 status: "todo".to_string(),
                 priority: None,
                 tags: vec![],
+                needs_human_review: None,
             }),
             children: vec![],
             blocked_by: vec![],

@@ -25,10 +25,12 @@ fn truncate(s: &str, max_width: usize) -> String {
 ///
 /// Produces output in the format:
 /// ```text
-/// ID      Level   Status       Priority  Title                     Tags
-/// ------  ------  -----------  --------  ------------------------  ----------
-/// a1b2c3  epic    in_progress  high      Authentication system     backend
+/// ID      Level   Status       Priority  Title                     Tags        [R]
+/// ------  ------  -----------  --------  ------------------------  ----------  ---
+/// a1b2c3  epic    in_progress  high      Authentication system     backend     [R]
 /// ```
+///
+/// The [R] column indicates tasks that need human review.
 ///
 /// # Arguments
 ///
@@ -43,7 +45,7 @@ pub fn format_task_table(tasks: &[TaskSummary]) -> String {
     }
 
     // Column headers
-    let headers = ["ID", "Level", "Status", "Priority", "Title", "Tags"];
+    let headers = ["ID", "Level", "Status", "Priority", "Title", "Tags", "[R]"];
 
     // Calculate column widths based on content
     let id_width = tasks
@@ -88,28 +90,34 @@ pub fn format_task_table(tasks: &[TaskSummary]) -> String {
         .unwrap_or(0)
         .max(headers[5].len());
 
+    // Review column is fixed width (3 chars for "[R]")
+    let review_width = headers[6].len();
+
     let mut output = String::new();
 
     // Header row
     output.push_str(&format!(
-        "{:<id_w$}  {:<level_w$}  {:<status_w$}  {:<priority_w$}  {:<title_w$}  {:<tags_w$}\n",
+        "{:<id_w$}  {:<level_w$}  {:<status_w$}  {:<priority_w$}  {:<title_w$}  {:<tags_w$}  {:<review_w$}\n",
         headers[0],
         headers[1],
         headers[2],
         headers[3],
         headers[4],
         headers[5],
+        headers[6],
         id_w = id_width,
         level_w = level_width,
         status_w = status_width,
         priority_w = priority_width,
         title_w = title_width,
         tags_w = tags_width,
+        review_w = review_width,
     ));
 
     // Separator row using Unicode box-drawing character
     output.push_str(&format!(
-        "{:->id_w$}  {:->level_w$}  {:->status_w$}  {:->priority_w$}  {:->title_w$}  {:->tags_w$}\n",
+        "{:->id_w$}  {:->level_w$}  {:->status_w$}  {:->priority_w$}  {:->title_w$}  {:->tags_w$}  {:->review_w$}\n",
+        "",
         "",
         "",
         "",
@@ -122,6 +130,7 @@ pub fn format_task_table(tasks: &[TaskSummary]) -> String {
         priority_w = priority_width,
         title_w = title_width,
         tags_w = tags_width,
+        review_w = review_width,
     ));
 
     // Data rows
@@ -129,21 +138,24 @@ pub fn format_task_table(tasks: &[TaskSummary]) -> String {
         let priority_display = task.priority.as_deref().unwrap_or("-");
         let title_display = truncate(&task.title, MAX_TITLE_WIDTH);
         let tags_display = truncate(&format_tags(&task.tags), MAX_TAGS_WIDTH);
+        let review_display = format_review_status(task.needs_human_review);
 
         output.push_str(&format!(
-            "{:<id_w$}  {:<level_w$}  {:<status_w$}  {:<priority_w$}  {:<title_w$}  {:<tags_w$}\n",
+            "{:<id_w$}  {:<level_w$}  {:<status_w$}  {:<priority_w$}  {:<title_w$}  {:<tags_w$}  {:<review_w$}\n",
             task.id,
             task.level,
             task.status,
             priority_display,
             title_display,
             tags_display,
+            review_display,
             id_w = id_width,
             level_w = level_width,
             status_w = status_width,
             priority_w = priority_width,
             title_w = title_width,
             tags_w = tags_width,
+            review_w = review_width,
         ));
     }
 
@@ -151,6 +163,16 @@ pub fn format_task_table(tasks: &[TaskSummary]) -> String {
     output.pop();
 
     output
+}
+
+/// Format the review status indicator.
+///
+/// Returns "[R]" if needs_human_review is true, otherwise returns an empty string.
+fn format_review_status(needs_human_review: Option<bool>) -> &'static str {
+    match needs_human_review {
+        Some(true) => "[R]",
+        _ => "",
+    }
 }
 
 /// Format tags as a comma-separated string.
@@ -182,6 +204,7 @@ mod tests {
             status: "todo".to_string(),
             priority: Some("high".to_string()),
             tags: vec!["backend".to_string()],
+            needs_human_review: None,
         }];
 
         let result = format_task_table(&tasks);
@@ -194,7 +217,7 @@ mod tests {
         let header_parts: Vec<&str> = lines[0].split_whitespace().collect();
         assert_eq!(
             header_parts,
-            vec!["ID", "Level", "Status", "Priority", "Title", "Tags"]
+            vec!["ID", "Level", "Status", "Priority", "Title", "Tags", "[R]"]
         );
 
         // Verify separator line contains dashes
@@ -221,6 +244,7 @@ mod tests {
                 status: "in_progress".to_string(),
                 priority: Some("critical".to_string()),
                 tags: vec!["urgent".to_string(), "backend".to_string()],
+                needs_human_review: Some(true),
             },
             TaskSummary {
                 id: "d4e5f6".to_string(),
@@ -229,6 +253,7 @@ mod tests {
                 status: "todo".to_string(),
                 priority: None,
                 tags: vec![],
+                needs_human_review: None,
             },
         ];
 
@@ -263,6 +288,7 @@ mod tests {
             status: "todo".to_string(),
             priority: None,
             tags: vec![],
+            needs_human_review: None,
         }];
 
         let result = format_task_table(&tasks);
@@ -282,6 +308,7 @@ mod tests {
             status: "todo".to_string(),
             priority: Some("low".to_string()),
             tags: vec![],
+            needs_human_review: None,
         }];
 
         let result = format_task_table(&tasks);
@@ -348,6 +375,7 @@ mod tests {
             status: "todo".to_string(),
             priority: None,
             tags: vec![],
+            needs_human_review: None,
         }];
 
         let result = format_task_table(&tasks);
@@ -388,6 +416,7 @@ mod tests {
             status: "todo".to_string(),
             priority: None,
             tags: tags_input.clone(),
+            needs_human_review: None,
         }];
 
         let result = format_task_table(&tasks);
@@ -413,6 +442,7 @@ mod tests {
                 status: "todo".to_string(),
                 priority: Some("high".to_string()),
                 tags: vec!["x".to_string()],
+                needs_human_review: None,
             },
             TaskSummary {
                 id: "abcdef".to_string(),
@@ -421,6 +451,7 @@ mod tests {
                 status: "in_progress".to_string(),
                 priority: Some("critical".to_string()),
                 tags: vec!["backend".to_string(), "api".to_string()],
+                needs_human_review: Some(true),
             },
         ];
 
@@ -466,6 +497,7 @@ mod tests {
                 status: status.to_string(),
                 priority: None,
                 tags: vec![],
+                needs_human_review: None,
             }];
 
             let result = format_task_table(&tasks);
@@ -485,6 +517,7 @@ mod tests {
                 status: "todo".to_string(),
                 priority: None,
                 tags: vec![],
+                needs_human_review: None,
             }];
 
             let result = format_task_table(&tasks);
@@ -504,10 +537,68 @@ mod tests {
                 status: "todo".to_string(),
                 priority: Some(priority.to_string()),
                 tags: vec![],
+                needs_human_review: None,
             }];
 
             let result = format_task_table(&tasks);
             assert!(result.contains(priority));
         }
+    }
+
+    #[test]
+    fn test_format_review_status() {
+        // Test the format_review_status function
+        assert_eq!(format_review_status(Some(true)), "[R]");
+        assert_eq!(format_review_status(Some(false)), "");
+        assert_eq!(format_review_status(None), "");
+    }
+
+    #[test]
+    fn test_format_task_with_review_indicator() {
+        let tasks = vec![TaskSummary {
+            id: "abc123".to_string(),
+            title: "Needs Review".to_string(),
+            level: "task".to_string(),
+            status: "todo".to_string(),
+            priority: None,
+            tags: vec![],
+            needs_human_review: Some(true),
+        }];
+
+        let result = format_task_table(&tasks);
+
+        // Verify [R] indicator appears in data row
+        assert!(
+            result.contains("[R]"),
+            "Output should contain [R] indicator for task needing review"
+        );
+    }
+
+    #[test]
+    fn test_format_task_without_review_indicator() {
+        let tasks = vec![TaskSummary {
+            id: "abc123".to_string(),
+            title: "No Review".to_string(),
+            level: "task".to_string(),
+            status: "todo".to_string(),
+            priority: None,
+            tags: vec![],
+            needs_human_review: Some(false),
+        }];
+
+        let result = format_task_table(&tasks);
+        let lines: Vec<&str> = result.lines().collect();
+
+        // The header has [R], but data row should not have [R] indicator
+        // Check that line 2 (data row) does NOT end with [R]
+        let data_row = lines[2];
+        let data_parts: Vec<&str> = data_row.split_whitespace().collect();
+
+        // Data parts should not contain [R] as the last element
+        let has_review_indicator = data_parts.last().map_or(false, |&s| s == "[R]");
+        assert!(
+            !has_review_indicator,
+            "Data row should not have [R] indicator when needs_human_review is false"
+        );
     }
 }
