@@ -375,74 +375,22 @@ impl std::fmt::Display for TaskDetail {
             writeln!(f)?;
         }
 
-        // Desired Behavior sections
-        let positive_sections: Vec<&Section> = self
-            .sections
-            .iter()
-            .filter(|s| is_positive_space(&s.section_type))
-            .collect();
+        // Render each section type with its own heading
+        // Define section types in display order with their labels
+        let section_configs: &[(SectionType, &str)] = &[
+            (SectionType::Goal, "Goal"),
+            (SectionType::Context, "Context"),
+            (SectionType::CurrentBehavior, "Current Behavior"),
+            (SectionType::DesiredBehavior, "Desired Behavior"),
+            (SectionType::Step, "Steps"),
+            (SectionType::TestingCriterion, "Testing Criteria"),
+            (SectionType::AntiPattern, "Anti-Patterns"),
+            (SectionType::FailureTest, "Failure Tests"),
+            (SectionType::Constraint, "Constraints"),
+        ];
 
-        if !positive_sections.is_empty() {
-            writeln!(f, "Desired Behavior")?;
-            writeln!(f, "{}", "-".repeat(40))?;
-
-            // Group by section type for display
-            format_section_group(f, &positive_sections, SectionType::Goal, "Goal")?;
-            format_section_group(f, &positive_sections, SectionType::Context, "Context")?;
-            format_section_group(
-                f,
-                &positive_sections,
-                SectionType::CurrentBehavior,
-                "Current Behavior",
-            )?;
-            format_section_group(
-                f,
-                &positive_sections,
-                SectionType::DesiredBehavior,
-                "Desired Behavior",
-            )?;
-            format_section_group(f, &positive_sections, SectionType::Step, "Steps")?;
-            format_section_group(
-                f,
-                &positive_sections,
-                SectionType::TestingCriterion,
-                "Testing Criteria",
-            )?;
-
-            writeln!(f)?;
-        }
-
-        // Undesired Behavior sections
-        let negative_sections: Vec<&Section> = self
-            .sections
-            .iter()
-            .filter(|s| !is_positive_space(&s.section_type))
-            .collect();
-
-        if !negative_sections.is_empty() {
-            writeln!(f, "Undesired Behavior")?;
-            writeln!(f, "{}", "-".repeat(40))?;
-
-            format_section_group(
-                f,
-                &negative_sections,
-                SectionType::AntiPattern,
-                "Anti-Patterns",
-            )?;
-            format_section_group(
-                f,
-                &negative_sections,
-                SectionType::FailureTest,
-                "Failure Tests",
-            )?;
-            format_section_group(
-                f,
-                &negative_sections,
-                SectionType::Constraint,
-                "Constraints",
-            )?;
-
-            writeln!(f)?;
+        for (section_type, label) in section_configs {
+            format_section_with_heading(f, &self.sections, section_type.clone(), label)?;
         }
 
         // Relationships section
@@ -508,27 +456,14 @@ impl std::fmt::Display for TaskDetail {
     }
 }
 
-/// Check if a section type belongs to positive space
-fn is_positive_space(section_type: &SectionType) -> bool {
-    matches!(
-        section_type,
-        SectionType::Goal
-            | SectionType::Context
-            | SectionType::CurrentBehavior
-            | SectionType::DesiredBehavior
-            | SectionType::Step
-            | SectionType::TestingCriterion
-    )
-}
-
-/// Format a group of sections by type
-fn format_section_group(
+/// Format sections of a specific type with their own heading
+fn format_section_with_heading(
     f: &mut std::fmt::Formatter<'_>,
-    sections: &[&Section],
+    sections: &[Section],
     section_type: SectionType,
     label: &str,
 ) -> std::fmt::Result {
-    let matching: Vec<&&Section> = sections
+    let matching: Vec<&Section> = sections
         .iter()
         .filter(|s| s.section_type == section_type)
         .collect();
@@ -538,8 +473,12 @@ fn format_section_group(
     }
 
     // Sort by order if available
-    let mut sorted: Vec<_> = matching.into_iter().collect();
+    let mut sorted: Vec<_> = matching;
     sorted.sort_by_key(|s| s.order.unwrap_or(u32::MAX));
+
+    // Write the heading
+    writeln!(f, "{}", label)?;
+    writeln!(f, "{}", "-".repeat(40))?;
 
     // For steps, show with checkboxes
     let is_step = section_type == SectionType::Step;
@@ -551,12 +490,11 @@ fn format_section_group(
             } else {
                 "[ ]"
             };
-            writeln!(f, "{}: {} {}", label, checkbox, sorted[0].content)?;
+            writeln!(f, "{} {}", checkbox, sorted[0].content)?;
         } else {
-            writeln!(f, "{}: {}", label, sorted[0].content)?;
+            writeln!(f, "{}", sorted[0].content)?;
         }
     } else {
-        writeln!(f, "{}:", label)?;
         for (i, section) in sorted.iter().enumerate() {
             if is_step {
                 let checkbox = if section.done.unwrap_or(false) {
@@ -564,12 +502,14 @@ fn format_section_group(
                 } else {
                     "[ ]"
                 };
-                writeln!(f, "  {}. {} {}", i + 1, checkbox, section.content)?;
+                writeln!(f, "{}. {} {}", i + 1, checkbox, section.content)?;
             } else {
-                writeln!(f, "  {}. {}", i + 1, section.content)?;
+                writeln!(f, "{}. {}", i + 1, section.content)?;
             }
         }
     }
+
+    writeln!(f)?;
 
     Ok(())
 }
@@ -1103,20 +1043,6 @@ mod tests {
     }
 
     #[test]
-    fn test_is_positive_space() {
-        assert!(is_positive_space(&SectionType::Goal));
-        assert!(is_positive_space(&SectionType::Context));
-        assert!(is_positive_space(&SectionType::CurrentBehavior));
-        assert!(is_positive_space(&SectionType::DesiredBehavior));
-        assert!(is_positive_space(&SectionType::Step));
-        assert!(is_positive_space(&SectionType::TestingCriterion));
-
-        assert!(!is_positive_space(&SectionType::AntiPattern));
-        assert!(!is_positive_space(&SectionType::FailureTest));
-        assert!(!is_positive_space(&SectionType::Constraint));
-    }
-
-    #[test]
     fn test_format_timestamp() {
         // RFC3339 format
         assert_eq!(
@@ -1186,10 +1112,11 @@ mod tests {
         assert!(output.contains("Tags:     backend"));
         assert!(output.contains("Description"));
         assert!(output.contains("A detailed description"));
-        assert!(output.contains("Desired Behavior"));
-        assert!(output.contains("Goal: The goal"));
-        assert!(output.contains("Undesired Behavior"));
-        assert!(output.contains("Anti-Patterns: Don't do this"));
+        // Each section type now has its own heading
+        assert!(output.contains("Goal\n"));
+        assert!(output.contains("The goal"));
+        assert!(output.contains("Anti-Patterns\n"));
+        assert!(output.contains("Don't do this"));
         assert!(output.contains("Parent: parent - Parent"));
         assert!(output.contains("src/main.rs:42"));
     }
@@ -1223,8 +1150,10 @@ mod tests {
         assert!(output.contains("Tags:     (none)"));
         // Should not contain sections or relationships
         assert!(!output.contains("Description"));
-        assert!(!output.contains("Desired Behavior"));
-        assert!(!output.contains("Undesired Behavior"));
+        // No section type headings should appear when there are no sections
+        assert!(!output.contains("Goal\n"));
+        assert!(!output.contains("Steps\n"));
+        assert!(!output.contains("Anti-Patterns\n"));
         assert!(!output.contains("Relationships"));
         assert!(!output.contains("Code References"));
         // Without needs_human_review flag set, it should not show review line
@@ -1285,7 +1214,8 @@ mod tests {
 
         let output = format!("{}", detail);
 
-        assert!(output.contains("Steps:"));
+        // Steps has its own heading followed by dashes
+        assert!(output.contains("Steps\n"));
         assert!(output.contains("1. [ ] First step"));
         assert!(output.contains("2. [ ] Second step"));
     }
