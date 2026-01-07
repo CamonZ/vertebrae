@@ -158,6 +158,8 @@ fn draw_tab_content(frame: &mut Frame, area: Rect, app: &App, is_focused: bool) 
                 Some("No started tasks found"),
                 is_focused,
                 scroll_offset,
+                app.timeline_horizontal_offset(),
+                app.selected_timeline_index(),
             );
         }
     }

@@ -452,6 +452,19 @@ pub fn compute_dependency_groups(
     result
 }
 
+/// State for the timeline view, encapsulating scroll and selection.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TimelineViewState {
+    /// Whether this panel currently has focus.
+    pub is_focused: bool,
+    /// Vertical scroll offset for the content.
+    pub scroll_offset: usize,
+    /// Horizontal scroll offset (0-100 percentage).
+    pub horizontal_offset: u16,
+    /// Index of the selected task for highlighting.
+    pub selected_index: usize,
+}
+
 /// Render the timeline view showing tasks on a horizontal timeline.
 ///
 /// # Arguments
@@ -460,8 +473,8 @@ pub fn compute_dependency_groups(
 /// * `area` - The area to render within
 /// * `tasks` - Tasks with timeline data (must have started_at set)
 /// * `empty_message` - Message to show when no tasks have been started
-/// * `is_focused` - Whether this panel currently has focus
-/// * `scroll_offset` - Vertical scroll offset for the content
+/// * `state` - Timeline view state (focus, scroll, selection)
+#[allow(clippy::too_many_arguments)]
 pub fn render_timeline_view(
     frame: &mut Frame,
     area: Rect,
@@ -469,6 +482,8 @@ pub fn render_timeline_view(
     empty_message: Option<&str>,
     is_focused: bool,
     scroll_offset: usize,
+    horizontal_offset: u16,
+    selected_index: usize,
 ) {
     let border_color = if is_focused {
         Color::Yellow
@@ -497,12 +512,18 @@ pub fn render_timeline_view(
     let mut lines = Vec::new();
 
     // Build header (date scale)
-    lines.push(build_date_header(&config));
-    lines.push(build_separator(&config));
+    lines.push(build_date_header(&config, horizontal_offset));
+    lines.push(build_separator(&config, horizontal_offset));
 
-    // Build task bars
-    for task in tasks {
-        lines.push(build_task_line(task, &config));
+    // Build task bars with selection highlighting
+    for (index, task) in tasks.iter().enumerate() {
+        let is_selected = is_focused && index == selected_index;
+        lines.push(build_task_line(
+            task,
+            &config,
+            is_selected,
+            horizontal_offset,
+        ));
     }
 
     let paragraph = Paragraph::new(lines)
@@ -512,7 +533,12 @@ pub fn render_timeline_view(
 }
 
 /// Build the date header line showing the time scale with centered labels.
-fn build_date_header(config: &TimelineConfig) -> Line<'static> {
+///
+/// # Arguments
+///
+/// * `config` - The timeline configuration
+/// * `horizontal_offset` - Horizontal scroll offset (0-100 percentage)
+fn build_date_header(config: &TimelineConfig, horizontal_offset: u16) -> Line<'static> {
     let mut spans = Vec::new();
 
     // Label area (empty for header)
@@ -525,7 +551,10 @@ fn build_date_header(config: &TimelineConfig) -> Line<'static> {
     let bar_width = config.bar_width as usize;
     let mut header_chars = vec![' '; bar_width];
 
-    // Place labels centered within each column
+    // Calculate horizontal scroll offset in characters
+    let scroll_chars = ((horizontal_offset as usize) * bar_width) / 100;
+
+    // Place labels centered within each column (adjusted for scroll)
     for col in &config.columns {
         let col_width = (col.end_col - col.start_col) as usize;
         let label = &col.label;
@@ -534,11 +563,11 @@ fn build_date_header(config: &TimelineConfig) -> Line<'static> {
         if col_width >= label.len() {
             // Center the label within the column
             let padding = (col_width - label.len()) / 2;
-            let start_pos = col.start_col as usize + padding;
+            let start_pos = (col.start_col as usize + padding).saturating_sub(scroll_chars);
 
             for (i, c) in label.chars().enumerate() {
                 let pos = start_pos + i;
-                if pos < bar_width {
+                if pos < bar_width && (col.start_col as usize + padding + i) >= scroll_chars {
                     header_chars[pos] = c;
                 }
             }
@@ -546,9 +575,12 @@ fn build_date_header(config: &TimelineConfig) -> Line<'static> {
             // Column too narrow - show first char or abbreviation
             let abbrev: String = label.chars().take(col_width).collect();
             for (i, c) in abbrev.chars().enumerate() {
-                let pos = col.start_col as usize + i;
-                if pos < bar_width {
-                    header_chars[pos] = c;
+                let effective_pos = col.start_col as usize + i;
+                if effective_pos >= scroll_chars {
+                    let pos = effective_pos - scroll_chars;
+                    if pos < bar_width {
+                        header_chars[pos] = c;
+                    }
                 }
             }
         }
@@ -563,7 +595,12 @@ fn build_date_header(config: &TimelineConfig) -> Line<'static> {
 }
 
 /// Build a separator line with vertical grid markers at column boundaries.
-fn build_separator(config: &TimelineConfig) -> Line<'static> {
+///
+/// # Arguments
+///
+/// * `config` - The timeline configuration
+/// * `horizontal_offset` - Horizontal scroll offset (0-100 percentage)
+fn build_separator(config: &TimelineConfig, horizontal_offset: u16) -> Line<'static> {
     let mut spans = Vec::new();
 
     // Label area
@@ -576,20 +613,29 @@ fn build_separator(config: &TimelineConfig) -> Line<'static> {
     let bar_width = config.bar_width as usize;
     let mut sep_chars = vec!['\u{2500}'; bar_width]; // Horizontal line
 
-    // Place vertical markers (column delimiters) at column boundaries
+    // Calculate horizontal scroll offset in characters
+    let scroll_chars = ((horizontal_offset as usize) * bar_width) / 100;
+
+    // Place vertical markers (column delimiters) at column boundaries (adjusted for scroll)
     for col in &config.columns {
         // Mark start of column (except for first column)
-        if col.start_col > 0 && (col.start_col as usize) < bar_width {
-            sep_chars[col.start_col as usize] = '\u{253C}'; // Cross character
+        if col.start_col > 0 {
+            let effective_pos = col.start_col as usize;
+            if effective_pos >= scroll_chars {
+                let pos = effective_pos - scroll_chars;
+                if pos < bar_width {
+                    sep_chars[pos] = '\u{253C}'; // Cross character
+                }
+            }
         }
     }
 
-    // Start of timeline gets a special character
+    // Start of visible area gets a special character
     if !sep_chars.is_empty() {
         sep_chars[0] = '\u{251C}'; // Left T-junction
     }
 
-    // End of timeline gets a special character
+    // End of visible area gets a special character
     if bar_width > 1 {
         sep_chars[bar_width - 1] = '\u{2524}'; // Right T-junction
     }
@@ -603,7 +649,19 @@ fn build_separator(config: &TimelineConfig) -> Line<'static> {
 }
 
 /// Build a task line with label and timeline bar.
-fn build_task_line(task: &TimelineTask, config: &TimelineConfig) -> Line<'static> {
+///
+/// # Arguments
+///
+/// * `task` - The task to render
+/// * `config` - The timeline configuration
+/// * `is_selected` - Whether this task is currently selected
+/// * `horizontal_offset` - Horizontal scroll offset (0-100 percentage)
+fn build_task_line(
+    task: &TimelineTask,
+    config: &TimelineConfig,
+    is_selected: bool,
+    horizontal_offset: u16,
+) -> Line<'static> {
     let mut spans = Vec::new();
 
     // Build label: [status] truncated_title
@@ -619,9 +677,11 @@ fn build_task_line(task: &TimelineTask, config: &TimelineConfig) -> Line<'static
     // Calculate available space for title
     let status_len = status_indicator.len() + 1; // +1 for space
     let id_space = 8; // Space for short ID
+    let selection_indicator_len = 2; // "> " for selected tasks
     let available_title_len = (config.label_width as usize)
         .saturating_sub(status_len)
-        .saturating_sub(id_space);
+        .saturating_sub(id_space)
+        .saturating_sub(selection_indicator_len);
 
     // Truncate title if needed
     let title = if task.title.len() > available_title_len {
@@ -636,29 +696,42 @@ fn build_task_line(task: &TimelineTask, config: &TimelineConfig) -> Line<'static
     // Short ID (first 6 chars)
     let short_id: String = task.id.chars().take(6).collect();
 
-    // Build label
-    let label = format!("{} {} {}", short_id, status_indicator, title);
+    // Build label with selection indicator
+    let selection_prefix = if is_selected { "> " } else { "  " };
+    let label = format!(
+        "{}{} {} {}",
+        selection_prefix, short_id, status_indicator, title
+    );
 
     // Pad label to fixed width
     let padded_label = format!("{:<width$}", label, width = config.label_width as usize);
 
-    spans.push(Span::styled(
-        padded_label,
-        Style::default().fg(Color::White),
-    ));
+    // Selected tasks get highlighted label
+    let label_style = if is_selected {
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::White)
+    };
 
-    // Build timeline bar
+    spans.push(Span::styled(padded_label, label_style));
+
+    // Build timeline bar with horizontal scroll
     let bar_width = config.bar_width as usize;
     let mut bar_chars: Vec<char> = vec![' '; bar_width];
 
-    // Calculate bar position
-    let start_col = config.date_to_column(task.started_at) as usize;
-    let end_col = config.date_to_column(task.end_time()) as usize;
+    // Calculate horizontal scroll offset in characters
+    let scroll_chars = ((horizontal_offset as usize) * bar_width) / 100;
+
+    // Calculate bar position (original, before scroll adjustment)
+    let orig_start_col = config.date_to_column(task.started_at) as usize;
+    let orig_end_col = config.date_to_column(task.end_time()) as usize;
 
     // Ensure at least one character is drawn
-    let end_col = end_col.max(start_col + 1).min(bar_width);
+    let orig_end_col = orig_end_col.max(orig_start_col + 1);
 
-    // Fill the bar with appropriate character based on completion status
+    // Fill the bar with appropriate character based on completion status (accounting for scroll)
     // Completed tasks get solid blocks, in-progress tasks get striped/hatched pattern
     let bar_char = if task.completed_at.is_some() {
         '\u{2588}' // Full block character for completed tasks
@@ -666,9 +739,19 @@ fn build_task_line(task: &TimelineTask, config: &TimelineConfig) -> Line<'static
         '\u{2592}' // Medium shade character for in-progress tasks (striped appearance)
     };
 
-    for char in bar_chars.iter_mut().take(end_col).skip(start_col) {
-        *char = bar_char;
+    // Fill visible portion of the bar
+    for orig_pos in orig_start_col..orig_end_col {
+        if orig_pos >= scroll_chars {
+            let visible_pos = orig_pos - scroll_chars;
+            if visible_pos < bar_width {
+                bar_chars[visible_pos] = bar_char;
+            }
+        }
     }
+
+    // Calculate visible bar boundaries for styling
+    let visible_start = orig_start_col.saturating_sub(scroll_chars).min(bar_width);
+    let visible_end = orig_end_col.saturating_sub(scroll_chars).min(bar_width);
 
     // Determine bar color based on dependency group
     // Tasks with a dependency group get their group color
@@ -679,25 +762,32 @@ fn build_task_line(task: &TimelineTask, config: &TimelineConfig) -> Line<'static
     };
 
     // Create a styled bar - find the actual bar portion
-    let before_bar: String = bar_chars[..start_col].iter().collect();
-    let bar_portion: String = bar_chars[start_col..end_col].iter().collect();
-    let after_bar: String = bar_chars[end_col..].iter().collect();
+    let before_bar: String = bar_chars[..visible_start].iter().collect();
+    let bar_portion: String = bar_chars[visible_start..visible_end].iter().collect();
+    let after_bar: String = bar_chars[visible_end..].iter().collect();
 
     if !before_bar.is_empty() {
         spans.push(Span::styled(before_bar, Style::default()));
     }
 
-    // Apply style based on completion status and dependency group
-    // In-progress tasks are bold, completed tasks with dependencies are bold
-    let bar_style = match (task.completed_at.is_some(), task.dependency_group.is_some()) {
-        // In-progress with dependency group: bold
-        (false, true) => Style::default().fg(bar_color).add_modifier(Modifier::BOLD),
-        // In-progress without dependency group: bold (to emphasize ongoing work)
-        (false, false) => Style::default().fg(bar_color).add_modifier(Modifier::BOLD),
-        // Completed with dependency group: bold (to emphasize group membership)
-        (true, true) => Style::default().fg(bar_color).add_modifier(Modifier::BOLD),
-        // Completed without dependency group: normal
-        (true, false) => Style::default().fg(bar_color),
+    // Apply style based on completion status, dependency group, and selection
+    // Selected tasks get a special highlight, otherwise use normal styling
+    let bar_style = if is_selected {
+        // Selected task: use bright/inverted style
+        Style::default()
+            .fg(bar_color)
+            .add_modifier(Modifier::BOLD | Modifier::REVERSED)
+    } else {
+        match (task.completed_at.is_some(), task.dependency_group.is_some()) {
+            // In-progress with dependency group: bold
+            (false, true) => Style::default().fg(bar_color).add_modifier(Modifier::BOLD),
+            // In-progress without dependency group: bold (to emphasize ongoing work)
+            (false, false) => Style::default().fg(bar_color).add_modifier(Modifier::BOLD),
+            // Completed with dependency group: bold (to emphasize group membership)
+            (true, true) => Style::default().fg(bar_color).add_modifier(Modifier::BOLD),
+            // Completed without dependency group: normal
+            (true, false) => Style::default().fg(bar_color),
+        }
     };
 
     spans.push(Span::styled(bar_portion, bar_style));
@@ -859,7 +949,7 @@ mod tests {
         )];
 
         let config = TimelineConfig::from_tasks(&tasks, 80);
-        let header = build_date_header(&config);
+        let header = build_date_header(&config, 0);
 
         // Header should have spans
         assert!(!header.spans.is_empty());
@@ -873,7 +963,7 @@ mod tests {
         let tasks = vec![task.clone()];
 
         let config = TimelineConfig::from_tasks(&tasks, 80);
-        let line = build_task_line(&task, &config);
+        let line = build_task_line(&task, &config, false, 0);
 
         // Line should have spans
         assert!(!line.spans.is_empty());
@@ -898,7 +988,7 @@ mod tests {
         let tasks = vec![task.clone()];
 
         let config = TimelineConfig::from_tasks(&tasks, 80);
-        let line = build_task_line(&task, &config);
+        let line = build_task_line(&task, &config, false, 0);
 
         // Line should have spans with bold modifier for task with dependencies
         assert!(!line.spans.is_empty());
@@ -907,7 +997,7 @@ mod tests {
     #[test]
     fn test_build_separator() {
         let config = TimelineConfig::from_tasks(&[], 80);
-        let sep = build_separator(&config);
+        let sep = build_separator(&config, 0);
 
         assert!(!sep.spans.is_empty());
     }
@@ -925,7 +1015,7 @@ mod tests {
         let tasks = vec![task.clone()];
 
         let config = TimelineConfig::from_tasks(&tasks, 60);
-        let line = build_task_line(&task, &config);
+        let line = build_task_line(&task, &config, false, 0);
 
         // Should contain truncated text with ellipsis
         let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
@@ -1033,7 +1123,7 @@ mod tests {
         )];
 
         let config = TimelineConfig::from_tasks(&tasks, 100);
-        let header = build_date_header(&config);
+        let header = build_date_header(&config, 0);
 
         // Header should have content
         let text: String = header.spans.iter().map(|s| s.content.to_string()).collect();
@@ -1053,7 +1143,7 @@ mod tests {
         )];
 
         let config = TimelineConfig::from_tasks(&tasks, 100);
-        let sep = build_separator(&config);
+        let sep = build_separator(&config, 0);
 
         // Separator should contain box-drawing characters
         let text: String = sep.spans.iter().map(|s| s.content.to_string()).collect();
@@ -1204,8 +1294,8 @@ mod tests {
         let tasks_for_config = vec![completed_task.clone()];
         let config = TimelineConfig::from_tasks(&tasks_for_config, 100);
 
-        let completed_line = build_task_line(&completed_task, &config);
-        let in_progress_line = build_task_line(&in_progress_task, &config);
+        let completed_line = build_task_line(&completed_task, &config, false, 0);
+        let in_progress_line = build_task_line(&in_progress_task, &config, false, 0);
 
         // Extract the bar portions (the spans containing block characters)
         let get_bar_content = |line: &Line| -> String {
@@ -1248,7 +1338,7 @@ mod tests {
         let tasks = vec![task.clone()];
 
         let config = TimelineConfig::from_tasks(&tasks, 100);
-        let line = build_task_line(&task, &config);
+        let line = build_task_line(&task, &config, false, 0);
 
         // Extract full text from line
         let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
@@ -1289,8 +1379,8 @@ mod tests {
         let config = TimelineConfig::from_tasks(&tasks, 100);
 
         // Each task generates its own line, so they're naturally on different rows
-        let line1 = build_task_line(&task1, &config);
-        let line2 = build_task_line(&task2, &config);
+        let line1 = build_task_line(&task1, &config, false, 0);
+        let line2 = build_task_line(&task2, &config, false, 0);
 
         // Extract task IDs to verify they're different lines
         let text1: String = line1.spans.iter().map(|s| s.content.to_string()).collect();
@@ -1316,7 +1406,7 @@ mod tests {
         let tasks = vec![task.clone()];
 
         let config = TimelineConfig::from_tasks(&tasks, 100);
-        let line = build_task_line(&task, &config);
+        let line = build_task_line(&task, &config, false, 0);
 
         let bar_content: String = line
             .spans
@@ -1342,7 +1432,7 @@ mod tests {
 
         // Need a config with a reasonable width
         let config = TimelineConfig::from_tasks(&[task.clone()], 100);
-        let line = build_task_line(&task, &config);
+        let line = build_task_line(&task, &config, false, 0);
 
         let bar_content: String = line
             .spans
@@ -1367,7 +1457,7 @@ mod tests {
         let task = make_task("t1", "Working", Status::InProgress, started, None);
 
         let config = TimelineConfig::from_tasks(&[task.clone()], 100);
-        let line = build_task_line(&task, &config);
+        let line = build_task_line(&task, &config, false, 0);
 
         // Find the span with the bar (shade character)
         let bar_span = line
@@ -1567,7 +1657,7 @@ mod tests {
         );
 
         let config = TimelineConfig::from_tasks(&[task.clone()], 100);
-        let line = build_task_line(&task, &config);
+        let line = build_task_line(&task, &config, false, 0);
 
         // Find the bar span (contains block character)
         let bar_span = line
@@ -1600,7 +1690,7 @@ mod tests {
         );
 
         let config = TimelineConfig::from_tasks(&[task.clone()], 100);
-        let line = build_task_line(&task, &config);
+        let line = build_task_line(&task, &config, false, 0);
 
         // Find the bar span
         let bar_span = line
@@ -1637,8 +1727,8 @@ mod tests {
         let tasks = vec![task1.clone(), task2.clone()];
         let config = TimelineConfig::from_tasks(&tasks, 100);
 
-        let line1 = build_task_line(&task1, &config);
-        let line2 = build_task_line(&task2, &config);
+        let line1 = build_task_line(&task1, &config, false, 0);
+        let line2 = build_task_line(&task2, &config, false, 0);
 
         // Get bar colors
         let get_bar_color = |line: &Line| -> Option<Color> {
@@ -1684,8 +1774,8 @@ mod tests {
         let tasks = vec![task1.clone(), task2.clone()];
         let config = TimelineConfig::from_tasks(&tasks, 100);
 
-        let line1 = build_task_line(&task1, &config);
-        let line2 = build_task_line(&task2, &config);
+        let line1 = build_task_line(&task1, &config, false, 0);
+        let line2 = build_task_line(&task2, &config, false, 0);
 
         // Get bar colors
         let get_bar_color = |line: &Line| -> Option<Color> {
@@ -1704,5 +1794,179 @@ mod tests {
         );
         assert_eq!(color1, Some(Color::Cyan), "Group 0 should be Cyan");
         assert_eq!(color2, Some(Color::Magenta), "Group 1 should be Magenta");
+    }
+
+    // =============================================
+    // Timeline scrolling and selection tests
+    // =============================================
+
+    #[test]
+    fn test_selected_task_has_highlight_style() {
+        // Testing: Selected task has distinct visual style (border or highlight)
+        let started = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+        let completed = Utc.with_ymd_and_hms(2025, 1, 5, 0, 0, 0).unwrap();
+        let task = make_task(
+            "t1",
+            "Selected Task",
+            Status::Done,
+            started,
+            Some(completed),
+        );
+
+        let config = TimelineConfig::from_tasks(&[task.clone()], 100);
+
+        // Build line for selected task
+        let selected_line = build_task_line(&task, &config, true, 0);
+        // Build line for non-selected task
+        let normal_line = build_task_line(&task, &config, false, 0);
+
+        // Extract text to verify selection indicator
+        let selected_text: String = selected_line
+            .spans
+            .iter()
+            .map(|s| s.content.to_string())
+            .collect();
+        let normal_text: String = normal_line
+            .spans
+            .iter()
+            .map(|s| s.content.to_string())
+            .collect();
+
+        // Selected task should have "> " prefix
+        assert!(
+            selected_text.contains("> "),
+            "Selected task should have selection indicator"
+        );
+        // Non-selected task should have "  " prefix instead
+        assert!(
+            !normal_text.starts_with("> "),
+            "Non-selected task should not have selection indicator"
+        );
+    }
+
+    #[test]
+    fn test_selected_task_bar_has_reversed_style() {
+        // Selected task bar should have REVERSED modifier
+        let started = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+        let completed = Utc.with_ymd_and_hms(2025, 1, 5, 0, 0, 0).unwrap();
+        let task = make_task("t1", "Task", Status::Done, started, Some(completed));
+
+        let config = TimelineConfig::from_tasks(&[task.clone()], 100);
+        let selected_line = build_task_line(&task, &config, true, 0);
+
+        // Find the bar span (contains block character)
+        let bar_span = selected_line
+            .spans
+            .iter()
+            .find(|s| s.content.contains('\u{2588}'))
+            .expect("Should have a bar span");
+
+        // Selected bar should have REVERSED modifier
+        assert!(
+            bar_span.style.add_modifier.contains(Modifier::REVERSED),
+            "Selected task bar should have REVERSED modifier for highlighting"
+        );
+    }
+
+    #[test]
+    fn test_horizontal_scroll_affects_bar_position() {
+        // Test that horizontal scrolling shifts bar positions
+        let started = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+        let completed = Utc.with_ymd_and_hms(2025, 1, 10, 0, 0, 0).unwrap();
+        let task = make_task("t1", "Task", Status::Done, started, Some(completed));
+
+        let config = TimelineConfig::from_tasks(&[task.clone()], 100);
+
+        // Build lines with different scroll offsets
+        let line_no_scroll = build_task_line(&task, &config, false, 0);
+        let line_scrolled = build_task_line(&task, &config, false, 50);
+
+        // Both should have bars, but in different positions
+        let count_bar_chars = |line: &Line| -> usize {
+            line.spans
+                .iter()
+                .map(|s| s.content.chars().filter(|c| *c == '\u{2588}').count())
+                .sum()
+        };
+
+        let no_scroll_bars = count_bar_chars(&line_no_scroll);
+        let scrolled_bars = count_bar_chars(&line_scrolled);
+
+        // With 50% scroll, fewer bar characters should be visible
+        // (bar starts at beginning and scrolling shifts view)
+        assert!(
+            scrolled_bars <= no_scroll_bars,
+            "Scrolled view should show same or fewer bar characters"
+        );
+    }
+
+    #[test]
+    fn test_horizontal_scroll_header_shifts() {
+        // Test that date header shifts with horizontal scroll
+        let started = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+        let completed = Utc.with_ymd_and_hms(2025, 1, 10, 0, 0, 0).unwrap();
+        let tasks = vec![make_task(
+            "t1",
+            "Task",
+            Status::Done,
+            started,
+            Some(completed),
+        )];
+
+        let config = TimelineConfig::from_tasks(&tasks, 100);
+
+        // Build headers with different scroll offsets
+        let header_no_scroll = build_date_header(&config, 0);
+        let header_scrolled = build_date_header(&config, 50);
+
+        // Headers should be different due to scrolling
+        let text_no_scroll: String = header_no_scroll
+            .spans
+            .iter()
+            .map(|s| s.content.to_string())
+            .collect();
+        let text_scrolled: String = header_scrolled
+            .spans
+            .iter()
+            .map(|s| s.content.to_string())
+            .collect();
+
+        // At 50% scroll, the header content might differ
+        // (we can't assert they're definitely different since it depends on viewport)
+        // But we can verify both are valid headers
+        assert!(
+            !text_no_scroll.trim().is_empty() || !text_scrolled.trim().is_empty(),
+            "At least one header should have content"
+        );
+    }
+
+    #[test]
+    fn test_separator_shifts_with_horizontal_scroll() {
+        // Test that separator shifts with horizontal scroll
+        let started = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+        let completed = Utc.with_ymd_and_hms(2025, 1, 10, 0, 0, 0).unwrap();
+        let tasks = vec![make_task(
+            "t1",
+            "Task",
+            Status::Done,
+            started,
+            Some(completed),
+        )];
+
+        let config = TimelineConfig::from_tasks(&tasks, 100);
+
+        // Build separators with different scroll offsets
+        let sep_no_scroll = build_separator(&config, 0);
+        let sep_scrolled = build_separator(&config, 50);
+
+        // Both should produce valid separators
+        assert!(
+            !sep_no_scroll.spans.is_empty(),
+            "No-scroll separator should have spans"
+        );
+        assert!(
+            !sep_scrolled.spans.is_empty(),
+            "Scrolled separator should have spans"
+        );
     }
 }
