@@ -23,6 +23,8 @@ pub struct TaskDetail {
     pub id: String,
     /// Task title
     pub title: String,
+    /// Optional description
+    pub description: Option<String>,
     /// Hierarchy level
     pub level: String,
     /// Current status
@@ -54,6 +56,8 @@ pub struct TaskDetail {
 struct TaskRow {
     id: surrealdb::sql::Thing,
     title: String,
+    #[serde(default)]
+    description: Option<String>,
     level: String,
     status: String,
     priority: Option<String>,
@@ -190,6 +194,7 @@ impl ShowCommand {
         Ok(TaskDetail {
             id: task.id.id.to_string(),
             title: task.title,
+            description: task.description,
             level: task.level,
             status: task.status,
             priority: task.priority,
@@ -208,7 +213,7 @@ impl ShowCommand {
     /// Fetch the main task by ID.
     async fn fetch_task(&self, db: &Database, id: &str) -> Result<TaskRow, DbError> {
         let query = format!(
-            "SELECT id, title, level, status, priority, tags, \
+            "SELECT id, title, description, level, status, priority, tags, \
              created_at, updated_at, sections, refs FROM task:{}",
             id
         );
@@ -336,6 +341,14 @@ impl std::fmt::Display for TaskDetail {
             writeln!(f, "Updated:  {}", format_timestamp(updated))?;
         }
         writeln!(f)?;
+
+        // Description section (if present)
+        if let Some(ref description) = self.description {
+            writeln!(f, "Description")?;
+            writeln!(f, "{}", "-".repeat(40))?;
+            writeln!(f, "{}", description)?;
+            writeln!(f)?;
+        }
 
         // Desired Behavior sections
         let positive_sections: Vec<&Section> = self
@@ -1100,6 +1113,7 @@ mod tests {
         let detail = TaskDetail {
             id: "abc123".to_string(),
             title: "Test Task".to_string(),
+            description: Some("A detailed description".to_string()),
             level: "task".to_string(),
             status: "todo".to_string(),
             priority: Some("high".to_string()),
@@ -1131,6 +1145,8 @@ mod tests {
         assert!(output.contains("Status:   todo"));
         assert!(output.contains("Priority: high"));
         assert!(output.contains("Tags:     backend"));
+        assert!(output.contains("Description"));
+        assert!(output.contains("A detailed description"));
         assert!(output.contains("Desired Behavior"));
         assert!(output.contains("Goal: The goal"));
         assert!(output.contains("Undesired Behavior"));
@@ -1144,6 +1160,7 @@ mod tests {
         let detail = TaskDetail {
             id: "abc123".to_string(),
             title: "Minimal Task".to_string(),
+            description: None,
             level: "task".to_string(),
             status: "todo".to_string(),
             priority: None,
@@ -1164,6 +1181,7 @@ mod tests {
         assert!(output.contains("Priority: (none)"));
         assert!(output.contains("Tags:     (none)"));
         // Should not contain sections or relationships
+        assert!(!output.contains("Description"));
         assert!(!output.contains("Desired Behavior"));
         assert!(!output.contains("Undesired Behavior"));
         assert!(!output.contains("Relationships"));
@@ -1175,6 +1193,7 @@ mod tests {
         let detail = TaskDetail {
             id: "abc123".to_string(),
             title: "Task with Steps".to_string(),
+            description: None,
             level: "task".to_string(),
             status: "todo".to_string(),
             priority: None,
@@ -1216,6 +1235,7 @@ mod tests {
         let detail = TaskDetail {
             id: "abc123".to_string(),
             title: "Test Task Title".to_string(),
+            description: Some("Debug description".to_string()),
             level: "ticket".to_string(),
             status: "in_progress".to_string(),
             priority: Some("high".to_string()),
