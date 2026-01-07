@@ -156,6 +156,60 @@ pub fn find_project_root() -> Option<PathBuf> {
     }
 }
 
+/// Test utilities for creating isolated test databases
+#[cfg(test)]
+pub mod test_utils {
+    use super::*;
+    use std::env;
+
+    /// Create an isolated SurrealDB database for testing
+    ///
+    /// Provides isolated database instances for unit tests with unique temporary directories.
+    /// Each test gets its own RocksDB database in a separate temp directory,
+    /// allowing tests to run concurrently without interference.
+    /// Each call creates a new independent database.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// #[tokio::test]
+    /// async fn test_something() {
+    ///     let db = test_utils::create_test_db().await.unwrap();
+    ///     // Use db for testing
+    /// }
+    /// ```
+    pub async fn create_test_db() -> DbResult<Surreal<Db>> {
+        // Create unique temp directory for this test
+        let temp_dir = env::temp_dir().join(format!(
+            "vtb-test-{}-{:?}-{}",
+            std::process::id(),
+            std::thread::current().id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+
+        let client = Surreal::new::<RocksDb>(temp_dir.to_str().unwrap())
+            .await
+            .map_err(|e| DbError::Connection {
+                path: temp_dir.clone(),
+                source: Box::new(e),
+            })?;
+
+        // Initialize schema
+        client
+            .use_ns("vertebrae")
+            .use_db("main")
+            .await
+            .map_err(|e| DbError::Schema(Box::new(e)))?;
+
+        schema::init_schema(&client).await?;
+
+        Ok(client)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
