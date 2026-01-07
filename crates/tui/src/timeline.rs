@@ -3,6 +3,9 @@
 //! Provides a Gantt-like horizontal timeline showing tasks based on their
 //! started_at and completed_at timestamps. Only shows tasks that have been
 //! started (have a started_at timestamp).
+//!
+//! Tasks are color-coded by dependency group - tasks in the same dependency
+//! chain share the same color, making it easy to visualize related work.
 
 use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, Utc};
 use ratatui::{
@@ -12,6 +15,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
+use std::collections::{HashMap, HashSet};
 use vertebrae_db::Status;
 
 /// Zoom level for the timeline display.
@@ -53,6 +57,10 @@ pub struct TimelineTask {
     pub completed_at: Option<DateTime<Utc>>,
     /// Whether this task has dependencies (blocked by other tasks).
     pub has_dependencies: bool,
+    /// The dependency group this task belongs to (for color coding).
+    /// Tasks with the same group_id are in the same dependency chain.
+    /// None means the task has no dependencies (isolated task).
+    pub dependency_group: Option<usize>,
 }
 
 impl TimelineTask {
@@ -319,6 +327,131 @@ impl TimelineConfig {
     }
 }
 
+/// Color palette for dependency groups.
+///
+/// 8 distinct colors that are distinguishable on both light and dark terminals.
+/// Colors are chosen to be visually distinct from each other and from the
+/// status colors (green=done, yellow=in_progress, red=blocked).
+const DEPENDENCY_GROUP_COLORS: [Color; 8] = [
+    Color::Cyan,        // Group 0
+    Color::Magenta,     // Group 1
+    Color::Blue,        // Group 2
+    Color::LightRed,    // Group 3
+    Color::LightGreen,  // Group 4
+    Color::LightBlue,   // Group 5
+    Color::LightYellow, // Group 6
+    Color::White,       // Group 7
+];
+
+/// Get the color for a dependency group.
+///
+/// Colors cycle through the palette if there are more groups than colors.
+fn get_dependency_group_color(group_id: usize) -> Color {
+    DEPENDENCY_GROUP_COLORS[group_id % DEPENDENCY_GROUP_COLORS.len()]
+}
+
+/// Dependency edge type for building the dependency graph.
+#[derive(Debug, Clone)]
+pub struct DependencyEdge {
+    /// Task that depends on another.
+    pub from_id: String,
+    /// Task that is depended on.
+    pub to_id: String,
+}
+
+/// Compute connected components in the dependency graph using Union-Find.
+///
+/// Returns a map from task_id to group_id where tasks in the same
+/// dependency chain have the same group_id.
+pub fn compute_dependency_groups(
+    task_ids: &[String],
+    edges: &[DependencyEdge],
+) -> HashMap<String, usize> {
+    if task_ids.is_empty() {
+        return HashMap::new();
+    }
+
+    // Build index maps for Union-Find
+    let id_to_index: HashMap<&str, usize> = task_ids
+        .iter()
+        .enumerate()
+        .map(|(i, id)| (id.as_str(), i))
+        .collect();
+
+    // Initialize Union-Find parent array
+    let mut parent: Vec<usize> = (0..task_ids.len()).collect();
+    let mut rank: Vec<usize> = vec![0; task_ids.len()];
+
+    // Find with path compression
+    fn find(parent: &mut [usize], i: usize) -> usize {
+        if parent[i] != i {
+            parent[i] = find(parent, parent[i]);
+        }
+        parent[i]
+    }
+
+    // Union by rank
+    fn union(parent: &mut [usize], rank: &mut [usize], x: usize, y: usize) {
+        let root_x = find(parent, x);
+        let root_y = find(parent, y);
+
+        if root_x != root_y {
+            if rank[root_x] < rank[root_y] {
+                parent[root_x] = root_y;
+            } else if rank[root_x] > rank[root_y] {
+                parent[root_y] = root_x;
+            } else {
+                parent[root_y] = root_x;
+                rank[root_x] += 1;
+            }
+        }
+    }
+
+    // Process edges to union connected tasks
+    for edge in edges {
+        if let (Some(&from_idx), Some(&to_idx)) = (
+            id_to_index.get(edge.from_id.as_str()),
+            id_to_index.get(edge.to_id.as_str()),
+        ) {
+            union(&mut parent, &mut rank, from_idx, to_idx);
+        }
+    }
+
+    // Find all unique roots and assign group IDs
+    let mut root_to_group: HashMap<usize, usize> = HashMap::new();
+    let mut next_group_id = 0usize;
+
+    // Collect tasks that have dependencies (are in edges)
+    let mut tasks_with_deps: HashSet<usize> = HashSet::new();
+    for edge in edges {
+        if let Some(&idx) = id_to_index.get(edge.from_id.as_str()) {
+            tasks_with_deps.insert(idx);
+        }
+        if let Some(&idx) = id_to_index.get(edge.to_id.as_str()) {
+            tasks_with_deps.insert(idx);
+        }
+    }
+
+    // Build result map - only include tasks that are part of dependency chains
+    let mut result: HashMap<String, usize> = HashMap::new();
+
+    for (i, task_id) in task_ids.iter().enumerate() {
+        // Only assign groups to tasks that are part of dependency relationships
+        if tasks_with_deps.contains(&i) {
+            let root = find(&mut parent, i);
+            let group_id = *root_to_group.entry(root).or_insert_with(|| {
+                let id = next_group_id;
+                next_group_id += 1;
+                id
+            });
+            result.insert(task_id.clone(), group_id);
+        }
+        // Tasks without dependencies don't get a group (None)
+    }
+
+    result
+}
+
 /// Render the timeline view showing tasks on a horizontal timeline.
 ///
 /// # Arguments
@@ -537,17 +670,12 @@ fn build_task_line(task: &TimelineTask, config: &TimelineConfig) -> Line<'static
         *char = bar_char;
     }
 
-    // Apply styling based on status and dependencies
-    let bar_color = if task.has_dependencies {
-        // Use a slightly different shade for tasks with dependencies
-        match task.status {
-            Status::Done => Color::Green,
-            Status::InProgress => Color::Yellow,
-            Status::Blocked => Color::Red,
-            Status::Todo => Color::DarkGray,
-        }
-    } else {
-        status_color
+    // Determine bar color based on dependency group
+    // Tasks with a dependency group get their group color
+    // Tasks without dependencies use status-based colors
+    let bar_color = match task.dependency_group {
+        Some(group_id) => get_dependency_group_color(group_id),
+        None => status_color,
     };
 
     // Create a styled bar - find the actual bar portion
@@ -559,16 +687,16 @@ fn build_task_line(task: &TimelineTask, config: &TimelineConfig) -> Line<'static
         spans.push(Span::styled(before_bar, Style::default()));
     }
 
-    // Apply style based on completion status and dependencies
-    // In-progress tasks are bold and bright, completed tasks are normal
-    let bar_style = match (task.completed_at.is_some(), task.has_dependencies) {
-        // In-progress with dependencies: bold
+    // Apply style based on completion status and dependency group
+    // In-progress tasks are bold, completed tasks with dependencies are bold
+    let bar_style = match (task.completed_at.is_some(), task.dependency_group.is_some()) {
+        // In-progress with dependency group: bold
         (false, true) => Style::default().fg(bar_color).add_modifier(Modifier::BOLD),
-        // In-progress without dependencies: bold (to emphasize ongoing work)
+        // In-progress without dependency group: bold (to emphasize ongoing work)
         (false, false) => Style::default().fg(bar_color).add_modifier(Modifier::BOLD),
-        // Completed with dependencies: bold (as before)
+        // Completed with dependency group: bold (to emphasize group membership)
         (true, true) => Style::default().fg(bar_color).add_modifier(Modifier::BOLD),
-        // Completed without dependencies: normal
+        // Completed without dependency group: normal
         (true, false) => Style::default().fg(bar_color),
     };
 
@@ -610,6 +738,26 @@ mod tests {
             started_at,
             completed_at,
             has_dependencies: false,
+            dependency_group: None,
+        }
+    }
+
+    fn make_task_with_group(
+        id: &str,
+        title: &str,
+        status: Status,
+        started_at: DateTime<Utc>,
+        completed_at: Option<DateTime<Utc>>,
+        group: Option<usize>,
+    ) -> TimelineTask {
+        TimelineTask {
+            id: id.to_string(),
+            title: title.to_string(),
+            status,
+            started_at,
+            completed_at,
+            has_dependencies: group.is_some(),
+            dependency_group: group,
         }
     }
 
@@ -739,8 +887,14 @@ mod tests {
     fn test_build_task_line_with_dependencies() {
         let started = Utc.with_ymd_and_hms(2025, 1, 1, 10, 0, 0).unwrap();
         let completed = Utc.with_ymd_and_hms(2025, 1, 5, 12, 0, 0).unwrap();
-        let mut task = make_task("task123", "My Task", Status::Done, started, Some(completed));
-        task.has_dependencies = true;
+        let task = make_task_with_group(
+            "task123",
+            "My Task",
+            Status::Done,
+            started,
+            Some(completed),
+            Some(0),
+        );
         let tasks = vec![task.clone()];
 
         let config = TimelineConfig::from_tasks(&tasks, 80);
@@ -1226,5 +1380,329 @@ mod tests {
             bar_span.style.add_modifier.contains(Modifier::BOLD),
             "In-progress task bar should be bold"
         );
+    }
+
+    // =============================================
+    // Dependency color coding tests
+    // =============================================
+
+    #[test]
+    fn test_dependency_group_color_palette_has_8_colors() {
+        // Testing Criterion: Color palette must have at least 8 distinct colors
+        assert_eq!(
+            DEPENDENCY_GROUP_COLORS.len(),
+            8,
+            "Color palette should have exactly 8 colors"
+        );
+    }
+
+    #[test]
+    fn test_dependency_group_colors_cycle() {
+        // Colors should cycle for groups beyond palette size
+        let color_0 = get_dependency_group_color(0);
+        let color_8 = get_dependency_group_color(8);
+        assert_eq!(color_0, color_8, "Colors should cycle after palette size");
+    }
+
+    #[test]
+    fn test_compute_dependency_groups_empty() {
+        // Empty inputs should return empty map
+        let groups = compute_dependency_groups(&[], &[]);
+        assert!(groups.is_empty());
+    }
+
+    #[test]
+    fn test_compute_dependency_groups_no_edges() {
+        // Tasks with no edges should have no groups (isolated tasks)
+        let task_ids = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        let groups = compute_dependency_groups(&task_ids, &[]);
+
+        assert!(
+            groups.is_empty(),
+            "Tasks without dependencies should not have groups"
+        );
+    }
+
+    #[test]
+    fn test_compute_dependency_groups_simple_chain() {
+        // A -> B (A depends on B) should be in same group
+        let task_ids = vec!["a".to_string(), "b".to_string()];
+        let edges = vec![DependencyEdge {
+            from_id: "a".to_string(),
+            to_id: "b".to_string(),
+        }];
+
+        let groups = compute_dependency_groups(&task_ids, &edges);
+
+        assert_eq!(groups.len(), 2, "Both tasks should have groups");
+        assert_eq!(
+            groups.get("a"),
+            groups.get("b"),
+            "Tasks A and B should be in the same group"
+        );
+    }
+
+    #[test]
+    fn test_compute_dependency_groups_two_chains() {
+        // A -> B and C -> D should be in different groups
+        let task_ids = vec![
+            "a".to_string(),
+            "b".to_string(),
+            "c".to_string(),
+            "d".to_string(),
+        ];
+        let edges = vec![
+            DependencyEdge {
+                from_id: "a".to_string(),
+                to_id: "b".to_string(),
+            },
+            DependencyEdge {
+                from_id: "c".to_string(),
+                to_id: "d".to_string(),
+            },
+        ];
+
+        let groups = compute_dependency_groups(&task_ids, &edges);
+
+        assert_eq!(groups.len(), 4, "All 4 tasks should have groups");
+        assert_eq!(
+            groups.get("a"),
+            groups.get("b"),
+            "A and B should be in same group"
+        );
+        assert_eq!(
+            groups.get("c"),
+            groups.get("d"),
+            "C and D should be in same group"
+        );
+        assert_ne!(
+            groups.get("a"),
+            groups.get("c"),
+            "A-B and C-D should be in different groups"
+        );
+    }
+
+    #[test]
+    fn test_compute_dependency_groups_transitive() {
+        // A -> B -> C (transitive chain) should all be in same group
+        let task_ids = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        let edges = vec![
+            DependencyEdge {
+                from_id: "a".to_string(),
+                to_id: "b".to_string(),
+            },
+            DependencyEdge {
+                from_id: "b".to_string(),
+                to_id: "c".to_string(),
+            },
+        ];
+
+        let groups = compute_dependency_groups(&task_ids, &edges);
+
+        let group_a = groups.get("a").unwrap();
+        let group_b = groups.get("b").unwrap();
+        let group_c = groups.get("c").unwrap();
+
+        assert_eq!(group_a, group_b, "A and B should be in same group");
+        assert_eq!(group_b, group_c, "B and C should be in same group");
+    }
+
+    #[test]
+    fn test_compute_dependency_groups_isolated_task() {
+        // A -> B with C isolated: A,B get group, C gets nothing
+        let task_ids = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        let edges = vec![DependencyEdge {
+            from_id: "a".to_string(),
+            to_id: "b".to_string(),
+        }];
+
+        let groups = compute_dependency_groups(&task_ids, &edges);
+
+        assert!(groups.contains_key("a"), "A should have a group");
+        assert!(groups.contains_key("b"), "B should have a group");
+        assert!(
+            !groups.contains_key("c"),
+            "C should not have a group (isolated)"
+        );
+    }
+
+    #[test]
+    fn test_compute_dependency_groups_deterministic() {
+        // Same input should produce same output (deterministic)
+        let task_ids = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        let edges = vec![
+            DependencyEdge {
+                from_id: "a".to_string(),
+                to_id: "b".to_string(),
+            },
+            DependencyEdge {
+                from_id: "b".to_string(),
+                to_id: "c".to_string(),
+            },
+        ];
+
+        let groups1 = compute_dependency_groups(&task_ids, &edges);
+        let groups2 = compute_dependency_groups(&task_ids, &edges.clone());
+
+        assert_eq!(
+            groups1, groups2,
+            "Same input should produce same groups (deterministic)"
+        );
+    }
+
+    #[test]
+    fn test_task_with_dependency_group_uses_group_color() {
+        // Task with dependency_group should use group color, not status color
+        let started = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+        let completed = Utc.with_ymd_and_hms(2025, 1, 5, 0, 0, 0).unwrap();
+
+        // Task in group 0 (Cyan)
+        let task = make_task_with_group(
+            "t1",
+            "Task in Group",
+            Status::Done,
+            started,
+            Some(completed),
+            Some(0),
+        );
+
+        let config = TimelineConfig::from_tasks(&[task.clone()], 100);
+        let line = build_task_line(&task, &config);
+
+        // Find the bar span (contains block character)
+        let bar_span = line
+            .spans
+            .iter()
+            .find(|s| s.content.contains('\u{2588}'))
+            .expect("Should have a bar span");
+
+        // Should use Cyan (group 0 color), not Green (status color for Done)
+        assert_eq!(
+            bar_span.style.fg,
+            Some(Color::Cyan),
+            "Task in group 0 should use Cyan color"
+        );
+    }
+
+    #[test]
+    fn test_task_without_dependency_group_uses_status_color() {
+        // Task without dependency_group should use status color
+        let started = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+        let completed = Utc.with_ymd_and_hms(2025, 1, 5, 0, 0, 0).unwrap();
+
+        // Task without group
+        let task = make_task(
+            "t1",
+            "Isolated Task",
+            Status::Done,
+            started,
+            Some(completed),
+        );
+
+        let config = TimelineConfig::from_tasks(&[task.clone()], 100);
+        let line = build_task_line(&task, &config);
+
+        // Find the bar span
+        let bar_span = line
+            .spans
+            .iter()
+            .find(|s| s.content.contains('\u{2588}'))
+            .expect("Should have a bar span");
+
+        // Should use Green (status color for Done), not a group color
+        assert_eq!(
+            bar_span.style.fg,
+            Some(Color::Green),
+            "Task without group should use status color (Green for Done)"
+        );
+    }
+
+    #[test]
+    fn test_tasks_in_same_group_have_same_color() {
+        // Two tasks in the same dependency group should have the same color
+        let started = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+        let completed = Utc.with_ymd_and_hms(2025, 1, 5, 0, 0, 0).unwrap();
+
+        let task1 = make_task_with_group(
+            "t1",
+            "Task 1",
+            Status::Done,
+            started,
+            Some(completed),
+            Some(1),
+        );
+        let task2 =
+            make_task_with_group("t2", "Task 2", Status::InProgress, started, None, Some(1));
+
+        let tasks = vec![task1.clone(), task2.clone()];
+        let config = TimelineConfig::from_tasks(&tasks, 100);
+
+        let line1 = build_task_line(&task1, &config);
+        let line2 = build_task_line(&task2, &config);
+
+        // Get bar colors
+        let get_bar_color = |line: &Line| -> Option<Color> {
+            line.spans
+                .iter()
+                .find(|s| s.content.contains('\u{2588}') || s.content.contains('\u{2592}'))
+                .and_then(|s| s.style.fg)
+        };
+
+        let color1 = get_bar_color(&line1);
+        let color2 = get_bar_color(&line2);
+
+        assert_eq!(
+            color1, color2,
+            "Tasks in same dependency group should have same color"
+        );
+        assert_eq!(color1, Some(Color::Magenta), "Group 1 should be Magenta");
+    }
+
+    #[test]
+    fn test_tasks_in_different_groups_have_different_colors() {
+        // Tasks in different dependency groups should have different colors
+        let started = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+        let completed = Utc.with_ymd_and_hms(2025, 1, 5, 0, 0, 0).unwrap();
+
+        let task1 = make_task_with_group(
+            "t1",
+            "Task in Group 0",
+            Status::Done,
+            started,
+            Some(completed),
+            Some(0),
+        );
+        let task2 = make_task_with_group(
+            "t2",
+            "Task in Group 1",
+            Status::Done,
+            started,
+            Some(completed),
+            Some(1),
+        );
+
+        let tasks = vec![task1.clone(), task2.clone()];
+        let config = TimelineConfig::from_tasks(&tasks, 100);
+
+        let line1 = build_task_line(&task1, &config);
+        let line2 = build_task_line(&task2, &config);
+
+        // Get bar colors
+        let get_bar_color = |line: &Line| -> Option<Color> {
+            line.spans
+                .iter()
+                .find(|s| s.content.contains('\u{2588}'))
+                .and_then(|s| s.style.fg)
+        };
+
+        let color1 = get_bar_color(&line1);
+        let color2 = get_bar_color(&line2);
+
+        assert_ne!(
+            color1, color2,
+            "Tasks in different groups should have different colors"
+        );
+        assert_eq!(color1, Some(Color::Cyan), "Group 0 should be Cyan");
+        assert_eq!(color2, Some(Color::Magenta), "Group 1 should be Magenta");
     }
 }
