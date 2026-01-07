@@ -525,9 +525,16 @@ fn build_task_line(task: &TimelineTask, config: &TimelineConfig) -> Line<'static
     // Ensure at least one character is drawn
     let end_col = end_col.max(start_col + 1).min(bar_width);
 
-    // Fill the bar
+    // Fill the bar with appropriate character based on completion status
+    // Completed tasks get solid blocks, in-progress tasks get striped/hatched pattern
+    let bar_char = if task.completed_at.is_some() {
+        '\u{2588}' // Full block character for completed tasks
+    } else {
+        '\u{2592}' // Medium shade character for in-progress tasks (striped appearance)
+    };
+
     for char in bar_chars.iter_mut().take(end_col).skip(start_col) {
-        *char = '\u{2588}'; // Full block character
+        *char = bar_char;
     }
 
     // Apply styling based on status and dependencies
@@ -552,10 +559,17 @@ fn build_task_line(task: &TimelineTask, config: &TimelineConfig) -> Line<'static
         spans.push(Span::styled(before_bar, Style::default()));
     }
 
-    let bar_style = if task.has_dependencies {
-        Style::default().fg(bar_color).add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(bar_color)
+    // Apply style based on completion status and dependencies
+    // In-progress tasks are bold and bright, completed tasks are normal
+    let bar_style = match (task.completed_at.is_some(), task.has_dependencies) {
+        // In-progress with dependencies: bold
+        (false, true) => Style::default().fg(bar_color).add_modifier(Modifier::BOLD),
+        // In-progress without dependencies: bold (to emphasize ongoing work)
+        (false, false) => Style::default().fg(bar_color).add_modifier(Modifier::BOLD),
+        // Completed with dependencies: bold (as before)
+        (true, true) => Style::default().fg(bar_color).add_modifier(Modifier::BOLD),
+        // Completed without dependencies: normal
+        (true, false) => Style::default().fg(bar_color),
     };
 
     spans.push(Span::styled(bar_portion, bar_style));
@@ -948,5 +962,269 @@ mod tests {
 
         // Should still have some columns even with narrow width
         assert!(!config.columns.is_empty());
+    }
+
+    // =============================================
+    // Task bar rendering tests (Testing Criteria)
+    // =============================================
+
+    #[test]
+    fn test_task_bar_at_range_start_begins_at_column_zero() {
+        // Testing Criterion 1: Task with started_at=range_start has bar starting at x=0
+        let started = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+        let completed = Utc.with_ymd_and_hms(2025, 1, 5, 0, 0, 0).unwrap();
+        let task = make_task("t1", "Task", Status::Done, started, Some(completed));
+        let tasks = vec![task.clone()];
+
+        let config = TimelineConfig::from_tasks(&tasks, 100);
+
+        // Task started at range_start should have bar starting at column 0
+        let start_col = config.date_to_column(task.started_at);
+        assert_eq!(
+            start_col, 0,
+            "Task starting at range_start should have bar at x=0"
+        );
+    }
+
+    #[test]
+    fn test_task_bar_at_range_midpoint_begins_at_half_width() {
+        // Testing Criterion 2: Task with started_at=range_midpoint has bar starting at x=width/2
+        let range_start = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+        let range_end = Utc.with_ymd_and_hms(2025, 1, 11, 0, 0, 0).unwrap(); // 10 days
+        let midpoint = Utc.with_ymd_and_hms(2025, 1, 6, 0, 0, 0).unwrap(); // day 5 of 10
+
+        // Create two tasks: one at start, one at midpoint
+        let task_start = make_task(
+            "t1",
+            "Start Task",
+            Status::Done,
+            range_start,
+            Some(range_end),
+        );
+        let task_mid = make_task("t2", "Mid Task", Status::Done, midpoint, Some(range_end));
+        let tasks = vec![task_start, task_mid.clone()];
+
+        let config = TimelineConfig::from_tasks(&tasks, 100);
+
+        // Task at midpoint should have bar starting at approximately width/2
+        let mid_col = config.date_to_column(task_mid.started_at);
+        let expected_mid = config.bar_width / 2;
+
+        // Allow some tolerance for rounding
+        let tolerance = 5u16;
+        assert!(
+            mid_col >= expected_mid.saturating_sub(tolerance)
+                && mid_col <= expected_mid.saturating_add(tolerance),
+            "Task at midpoint should start near x=width/2. Got {} expected ~{}",
+            mid_col,
+            expected_mid
+        );
+    }
+
+    #[test]
+    fn test_in_progress_task_extends_to_current_time() {
+        // Testing Criterion 3: Task without completed_at has bar extending to current time position
+        let started = Utc::now() - Duration::hours(2);
+        let task = make_task("t1", "In Progress Task", Status::InProgress, started, None);
+
+        // end_time() should return approximately now for in-progress tasks
+        let end = task.end_time();
+        let now = Utc::now();
+
+        assert!(
+            end <= now && end >= now - Duration::seconds(5),
+            "In-progress task end_time should be approximately now"
+        );
+    }
+
+    #[test]
+    fn test_in_progress_task_has_distinct_bar_style() {
+        // Testing Criterion 4: Task without completed_at has visually distinct style from completed tasks
+        let started = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+        let completed = Utc.with_ymd_and_hms(2025, 1, 5, 0, 0, 0).unwrap();
+
+        let completed_task = make_task("t1", "Done Task", Status::Done, started, Some(completed));
+        let in_progress_task =
+            make_task("t2", "In Progress Task", Status::InProgress, started, None);
+
+        let tasks_for_config = vec![completed_task.clone()];
+        let config = TimelineConfig::from_tasks(&tasks_for_config, 100);
+
+        let completed_line = build_task_line(&completed_task, &config);
+        let in_progress_line = build_task_line(&in_progress_task, &config);
+
+        // Extract the bar portions (the spans containing block characters)
+        let get_bar_content = |line: &Line| -> String {
+            line.spans
+                .iter()
+                .filter(|s| {
+                    s.content.contains('\u{2588}') || // Full block
+                    s.content.contains('\u{2592}') // Medium shade
+                })
+                .map(|s| s.content.to_string())
+                .collect()
+        };
+
+        let completed_bar = get_bar_content(&completed_line);
+        let in_progress_bar = get_bar_content(&in_progress_line);
+
+        // Completed should use full block, in-progress should use shade
+        assert!(
+            completed_bar.contains('\u{2588}'),
+            "Completed task should use full block character"
+        );
+        assert!(
+            in_progress_bar.contains('\u{2592}'),
+            "In-progress task should use medium shade character for distinct appearance"
+        );
+    }
+
+    #[test]
+    fn test_task_id_visible_and_exact() {
+        // Testing Criterion 5: Task ID is visible and matches the task exactly
+        let started = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+        let completed = Utc.with_ymd_and_hms(2025, 1, 5, 0, 0, 0).unwrap();
+        let task = make_task(
+            "abc123def456",
+            "Test Task",
+            Status::Done,
+            started,
+            Some(completed),
+        );
+        let tasks = vec![task.clone()];
+
+        let config = TimelineConfig::from_tasks(&tasks, 100);
+        let line = build_task_line(&task, &config);
+
+        // Extract full text from line
+        let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
+
+        // Should contain first 6 chars of task ID (short ID format)
+        let short_id: String = task.id.chars().take(6).collect();
+        assert!(
+            text.contains(&short_id),
+            "Task line should contain task ID '{}'. Got: {}",
+            short_id,
+            text
+        );
+    }
+
+    #[test]
+    fn test_overlapping_tasks_on_different_rows() {
+        // Testing Criterion 6: Two overlapping tasks render on different rows (no visual overlap)
+        let started = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+        let completed = Utc.with_ymd_and_hms(2025, 1, 10, 0, 0, 0).unwrap();
+
+        // Create two tasks that overlap in time
+        let task1 = make_task(
+            "task1",
+            "First Task",
+            Status::Done,
+            started,
+            Some(completed),
+        );
+        let task2 = make_task(
+            "task2",
+            "Second Task",
+            Status::Done,
+            started + Duration::days(2),
+            Some(completed),
+        );
+
+        let tasks = vec![task1.clone(), task2.clone()];
+        let config = TimelineConfig::from_tasks(&tasks, 100);
+
+        // Each task generates its own line, so they're naturally on different rows
+        let line1 = build_task_line(&task1, &config);
+        let line2 = build_task_line(&task2, &config);
+
+        // Extract task IDs to verify they're different lines
+        let text1: String = line1.spans.iter().map(|s| s.content.to_string()).collect();
+        let text2: String = line2.spans.iter().map(|s| s.content.to_string()).collect();
+
+        // Each line should contain its respective task ID
+        assert!(text1.contains("task1"), "Line 1 should contain task1 ID");
+        assert!(text2.contains("task2"), "Line 2 should contain task2 ID");
+
+        // Lines should be different (different tasks on different rows)
+        assert_ne!(
+            text1, text2,
+            "Overlapping tasks should be on different rows"
+        );
+    }
+
+    #[test]
+    fn test_completed_task_uses_solid_block_character() {
+        // Verify completed tasks use full block character
+        let started = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+        let completed = Utc.with_ymd_and_hms(2025, 1, 5, 0, 0, 0).unwrap();
+        let task = make_task("t1", "Done", Status::Done, started, Some(completed));
+        let tasks = vec![task.clone()];
+
+        let config = TimelineConfig::from_tasks(&tasks, 100);
+        let line = build_task_line(&task, &config);
+
+        let bar_content: String = line
+            .spans
+            .iter()
+            .map(|s| s.content.to_string())
+            .collect::<String>();
+
+        assert!(
+            bar_content.contains('\u{2588}'),
+            "Completed task should use full block character (U+2588)"
+        );
+        assert!(
+            !bar_content.contains('\u{2592}'),
+            "Completed task should NOT use medium shade character"
+        );
+    }
+
+    #[test]
+    fn test_in_progress_task_uses_shade_character() {
+        // Verify in-progress tasks use shade character for visual distinction
+        let started = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+        let task = make_task("t1", "Working", Status::InProgress, started, None);
+
+        // Need a config with a reasonable width
+        let config = TimelineConfig::from_tasks(&[task.clone()], 100);
+        let line = build_task_line(&task, &config);
+
+        let bar_content: String = line
+            .spans
+            .iter()
+            .map(|s| s.content.to_string())
+            .collect::<String>();
+
+        assert!(
+            bar_content.contains('\u{2592}'),
+            "In-progress task should use medium shade character (U+2592)"
+        );
+        assert!(
+            !bar_content.contains('\u{2588}'),
+            "In-progress task should NOT use full block character"
+        );
+    }
+
+    #[test]
+    fn test_in_progress_task_has_bold_style() {
+        // In-progress tasks should have bold modifier for emphasis
+        let started = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+        let task = make_task("t1", "Working", Status::InProgress, started, None);
+
+        let config = TimelineConfig::from_tasks(&[task.clone()], 100);
+        let line = build_task_line(&task, &config);
+
+        // Find the span with the bar (shade character)
+        let bar_span = line
+            .spans
+            .iter()
+            .find(|s| s.content.contains('\u{2592}'))
+            .expect("Should have a bar span");
+
+        assert!(
+            bar_span.style.add_modifier.contains(Modifier::BOLD),
+            "In-progress task bar should be bold"
+        );
     }
 }
