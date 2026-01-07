@@ -13,6 +13,7 @@ pub mod list;
 pub mod path;
 pub mod r#ref;
 pub mod refs;
+pub mod review;
 pub mod section;
 pub mod sections;
 pub mod show;
@@ -34,6 +35,7 @@ pub use list::ListCommand;
 pub use path::PathCommand;
 pub use r#ref::RefCommand;
 pub use refs::RefsCommand;
+pub use review::ReviewCommand;
 pub use section::SectionCommand;
 pub use sections::SectionsCommand;
 pub use show::ShowCommand;
@@ -73,6 +75,8 @@ pub enum Command {
     Ref(RefCommand),
     /// List all code references for a task
     Refs(RefsCommand),
+    /// Toggle or set the needs_human_review flag on a task
+    Review(ReviewCommand),
     /// Add a typed content section to a task
     Section(SectionCommand),
     /// List all sections for a task
@@ -170,6 +174,10 @@ impl Command {
             Command::Refs(cmd) => {
                 let result = cmd.execute(db).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
+            }
+            Command::Review(cmd) => {
+                let result = cmd.execute(db).await?;
+                Ok(CommandResult::Message(result))
             }
             Command::Section(cmd) => {
                 let result = cmd.execute(db).await?;

@@ -37,6 +37,8 @@ pub struct TaskDetail {
     pub created_at: Option<String>,
     /// Last update timestamp
     pub updated_at: Option<String>,
+    /// Whether this task needs human review
+    pub needs_human_review: bool,
     /// Embedded sections
     pub sections: Vec<Section>,
     /// Embedded code references
@@ -67,6 +69,8 @@ struct TaskRow {
     created_at: Option<surrealdb::sql::Datetime>,
     #[serde(default)]
     updated_at: Option<surrealdb::sql::Datetime>,
+    #[serde(default)]
+    needs_human_review: bool,
     #[serde(default)]
     sections: Vec<SectionRow>,
     #[serde(default, rename = "refs")]
@@ -201,6 +205,7 @@ impl ShowCommand {
             tags: task.tags,
             created_at: task.created_at.map(|dt| dt.to_string()),
             updated_at: task.updated_at.map(|dt| dt.to_string()),
+            needs_human_review: task.needs_human_review,
             sections,
             code_refs,
             parent,
@@ -214,7 +219,7 @@ impl ShowCommand {
     async fn fetch_task(&self, db: &Database, id: &str) -> Result<TaskRow, DbError> {
         let query = format!(
             "SELECT id, title, description, level, status, priority, tags, \
-             created_at, updated_at, sections, refs FROM task:{}",
+             created_at, updated_at, needs_human_review, sections, refs FROM task:{}",
             id
         );
 
@@ -332,6 +337,9 @@ impl std::fmt::Display for TaskDetail {
                 self.tags.join(", ")
             }
         )?;
+        if self.needs_human_review {
+            writeln!(f, "Review:   NEEDS HUMAN REVIEW")?;
+        }
 
         // Timestamps
         if let Some(ref created) = self.created_at {
@@ -1120,6 +1128,7 @@ mod tests {
             tags: vec!["backend".to_string()],
             created_at: Some("2024-01-15T10:30:00Z".to_string()),
             updated_at: Some("2024-01-15T11:00:00Z".to_string()),
+            needs_human_review: false,
             sections: vec![
                 Section::new(SectionType::Goal, "The goal"),
                 Section::new(SectionType::AntiPattern, "Don't do this"),
@@ -1167,6 +1176,7 @@ mod tests {
             tags: vec![],
             created_at: None,
             updated_at: None,
+            needs_human_review: false,
             sections: vec![],
             code_refs: vec![],
             parent: None,
@@ -1186,6 +1196,34 @@ mod tests {
         assert!(!output.contains("Undesired Behavior"));
         assert!(!output.contains("Relationships"));
         assert!(!output.contains("Code References"));
+        // Without needs_human_review flag set, it should not show review line
+        assert!(!output.contains("NEEDS HUMAN REVIEW"));
+    }
+
+    #[test]
+    fn test_task_detail_display_with_needs_review() {
+        let detail = TaskDetail {
+            id: "abc123".to_string(),
+            title: "Review Task".to_string(),
+            description: None,
+            level: "task".to_string(),
+            status: "todo".to_string(),
+            priority: None,
+            tags: vec![],
+            created_at: None,
+            updated_at: None,
+            needs_human_review: true,
+            sections: vec![],
+            code_refs: vec![],
+            parent: None,
+            children: vec![],
+            blocked_by: vec![],
+            blocks: vec![],
+        };
+
+        let output = format!("{}", detail);
+
+        assert!(output.contains("Review:   NEEDS HUMAN REVIEW"));
     }
 
     #[test]
@@ -1200,6 +1238,7 @@ mod tests {
             tags: vec![],
             created_at: None,
             updated_at: None,
+            needs_human_review: false,
             sections: vec![
                 Section::with_order(SectionType::Step, "First step", 1),
                 Section::with_order(SectionType::Step, "Second step", 2),
@@ -1242,6 +1281,7 @@ mod tests {
             tags: vec!["backend".to_string()],
             created_at: None,
             updated_at: None,
+            needs_human_review: false,
             sections: vec![],
             code_refs: vec![],
             parent: Some(TaskSummary {

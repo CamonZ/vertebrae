@@ -346,6 +346,10 @@ pub struct Task {
     /// Embedded code references
     #[serde(default, rename = "refs")]
     pub code_refs: Vec<CodeRef>,
+
+    /// Whether this task needs human review before completion
+    #[serde(default)]
+    pub needs_human_review: bool,
 }
 
 impl Task {
@@ -365,6 +369,7 @@ impl Task {
             completed_at: None,
             sections: Vec::new(),
             code_refs: Vec::new(),
+            needs_human_review: false,
         }
     }
 
@@ -409,6 +414,12 @@ impl Task {
         self.code_refs.push(code_ref);
         self
     }
+
+    /// Mark this task as needing human review
+    pub fn with_needs_human_review(mut self, needs_review: bool) -> Self {
+        self.needs_human_review = needs_review;
+        self
+    }
 }
 
 impl PartialEq for Task {
@@ -421,6 +432,7 @@ impl PartialEq for Task {
             && self.tags == other.tags
             && self.sections == other.sections
             && self.code_refs == other.code_refs
+            && self.needs_human_review == other.needs_human_review
     }
 }
 
