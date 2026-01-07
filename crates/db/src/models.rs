@@ -349,7 +349,7 @@ pub struct Task {
 
     /// Whether this task needs human review before completion
     #[serde(default)]
-    pub needs_human_review: bool,
+    pub needs_human_review: Option<bool>,
 }
 
 impl Task {
@@ -369,7 +369,7 @@ impl Task {
             completed_at: None,
             sections: Vec::new(),
             code_refs: Vec::new(),
-            needs_human_review: false,
+            needs_human_review: None,
         }
     }
 
@@ -417,7 +417,7 @@ impl Task {
 
     /// Mark this task as needing human review
     pub fn with_needs_human_review(mut self, needs_review: bool) -> Self {
-        self.needs_human_review = needs_review;
+        self.needs_human_review = Some(needs_review);
         self
     }
 }

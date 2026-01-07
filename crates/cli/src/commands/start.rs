@@ -5,7 +5,7 @@
 
 use clap::Args;
 use serde::Deserialize;
-use vertebrae_db::{Database, DbError, Status};
+use vertebrae_db::{Database, DbError, Status, TaskUpdate};
 
 /// Start working on a task (transition to in_progress)
 #[derive(Debug, Args)]
@@ -129,11 +129,13 @@ impl StartCommand {
 
     /// Fetch the task by ID and return its status.
     async fn fetch_task(&self, db: &Database, id: &str) -> Result<TaskStatusRow, DbError> {
-        let query = format!("SELECT id, status FROM task:{}", id);
-        let mut result = db.client().query(&query).await?;
-        let task: Option<TaskStatusRow> = result.take(0)?;
+        let task = db.tasks().get(id).await?;
 
-        task.ok_or_else(|| DbError::InvalidPath {
+        task.map(|t| TaskStatusRow {
+            id: surrealdb::sql::thing(&format!("task:{}", id)).expect("valid task ID format"),
+            status: t.status.as_str().to_string(),
+        })
+        .ok_or_else(|| DbError::InvalidPath {
             path: std::path::PathBuf::from(&self.id),
             reason: format!("Task '{}' not found", self.id),
         })
@@ -161,22 +163,18 @@ impl StartCommand {
         Ok(deps)
     }
 
-    /// Update the task status to in_progress and refresh updated_at.
+    /// Update the task status to in_progress and set started_at if not already set.
     ///
     /// Also sets started_at to the current time if it hasn't been set before.
     /// This ensures that re-starting a blocked task preserves the original start time.
     async fn update_status(&self, db: &Database, id: &str) -> Result<(), DbError> {
-        // Set started_at only if it's currently NULL (first time starting)
-        // This preserves the original start time when restarting a blocked task
-        // Uses null coalescing operator (??) to keep existing value or set new one
-        let query = format!(
-            "UPDATE task:{} SET \
-                status = 'in_progress', \
-                updated_at = time::now(), \
-                started_at = started_at ?? time::now()",
-            id
-        );
-        db.client().query(&query).await?;
+        // Update status to in_progress and conditionally set started_at
+        // set_started_at_if_null uses null-coalescing (started_at ?? time::now())
+        // to preserve existing start times when restarting a blocked task
+        let updates = TaskUpdate::new()
+            .with_status(Status::InProgress)
+            .set_started_at_if_null();
+        db.tasks().update(id, &updates).await?;
         Ok(())
     }
 }
@@ -240,15 +238,8 @@ mod tests {
 
     /// Helper to get task status from database
     async fn get_task_status(db: &Database, id: &str) -> String {
-        #[derive(Deserialize)]
-        struct StatusRow {
-            status: String,
-        }
-
-        let query = format!("SELECT status FROM task:{}", id);
-        let mut result = db.client().query(&query).await.unwrap();
-        let row: Option<StatusRow> = result.take(0).unwrap();
-        row.unwrap().status
+        let task = db.tasks().get(id).await.unwrap().unwrap();
+        task.status.as_str().to_string()
     }
 
     /// Helper to check if updated_at was set
@@ -620,16 +611,9 @@ mod tests {
     }
 
     /// Helper to get started_at timestamp from database
-    async fn get_started_at(db: &Database, id: &str) -> Option<surrealdb::sql::Datetime> {
-        #[derive(Deserialize)]
-        struct TimestampRow {
-            started_at: Option<surrealdb::sql::Datetime>,
-        }
-
-        let query = format!("SELECT started_at FROM task:{}", id);
-        let mut result = db.client().query(&query).await.unwrap();
-        let row: Option<TimestampRow> = result.take(0).unwrap();
-        row.and_then(|r| r.started_at)
+    async fn get_started_at(db: &Database, id: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+        let task = db.tasks().get(id).await.unwrap().unwrap();
+        task.started_at
     }
 
     /// Helper to create a task with a pre-set started_at timestamp
@@ -684,7 +668,7 @@ mod tests {
         assert!(started_at.is_some(), "started_at should be set after start");
 
         // Verify started_at is within 1 second of command execution time
-        let started_at_ts = started_at.unwrap().0;
+        let started_at_ts = started_at.unwrap();
         let before_ts = chrono::DateTime::<chrono::Utc>::from(before_start);
         let after_ts = chrono::DateTime::<chrono::Utc>::from(after_start);
 
@@ -796,7 +780,7 @@ mod tests {
             original_started_at.is_some(),
             "Task should have started_at set"
         );
-        let original_ts = original_started_at.unwrap().0;
+        let original_ts = original_started_at.unwrap();
 
         let cmd = StartCommand {
             id: "task1".to_string(),
@@ -812,7 +796,7 @@ mod tests {
         let after_started_at = get_started_at(&db, "task1").await;
         assert!(after_started_at.is_some(), "started_at should still be set");
 
-        let after_ts = after_started_at.unwrap().0;
+        let after_ts = after_started_at.unwrap();
         assert_eq!(
             original_ts, after_ts,
             "started_at should preserve the original value when restarting blocked task. \

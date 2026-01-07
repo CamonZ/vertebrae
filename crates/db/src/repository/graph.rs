@@ -715,6 +715,75 @@ impl<'a> GraphQueries<'a> {
         Ok(blockers.into_iter().map(|r| r.id.id.to_string()).collect())
     }
 
+    /// Get all tasks that depend on the given task and will become unblocked when it's done.
+    ///
+    /// A task becomes unblocked when ALL its dependencies are done.
+    /// This method finds tasks that depend on the current task and checks
+    /// if completing this task will make them fully unblocked (i.e., all other dependencies are already done).
+    ///
+    /// # Arguments
+    ///
+    /// * `task_id` - The ID of the task that is being completed
+    ///
+    /// # Returns
+    ///
+    /// A vector of (task_id, title) tuples for tasks that will become unblocked.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // If task1 is a blocker for task2 and task3, but task3 has other blockers:
+    /// let unblocked = graph.get_unblocked_tasks("task1").await?;
+    /// // Returns only task2, not task3 (since task3 has other incomplete dependencies)
+    /// ```
+    pub async fn get_unblocked_tasks(&self, task_id: &str) -> DbResult<Vec<(String, String)>> {
+        // Find all tasks that depend on this task
+        let dependents_query = format!(
+            "SELECT id, title FROM task WHERE ->depends_on->task CONTAINS task:{}",
+            task_id
+        );
+
+        #[derive(Debug, Deserialize)]
+        struct DependentRow {
+            id: surrealdb::sql::Thing,
+            title: String,
+        }
+
+        let mut result = self.client.query(&dependents_query).await?;
+        let dependents: Vec<DependentRow> = result.take(0)?;
+
+        // For each dependent, check if this is their only incomplete dependency
+        let mut unblocked = Vec::new();
+
+        for dependent in dependents {
+            let dep_id = dependent.id.id.to_string();
+
+            // Count incomplete dependencies for this task (excluding the current task which we're completing)
+            let count_query = format!(
+                "SELECT count() as cnt FROM task \
+                 WHERE <-depends_on<-task CONTAINS task:{} \
+                 AND id != task:{} \
+                 AND status != 'done'",
+                dep_id, task_id
+            );
+
+            #[derive(Debug, Deserialize)]
+            struct CountResult {
+                cnt: i64,
+            }
+
+            let mut count_result = self.client.query(&count_query).await?;
+            let count: Option<CountResult> = count_result.take(0)?;
+
+            // If no other incomplete dependencies, this task will be unblocked
+            if count.is_none() || count.is_some_and(|c| c.cnt == 0) {
+                unblocked.push((dep_id, dependent.title));
+            }
+        }
+
+        Ok(unblocked)
+    }
+
     // ========================================
     // Progress Aggregation
     // ========================================

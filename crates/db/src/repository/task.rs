@@ -3,9 +3,10 @@
 //! Provides a repository pattern implementation for task operations,
 //! encapsulating SurrealDB queries and providing a clean API.
 
-use crate::error::DbResult;
-use crate::models::{Priority, Status, Task};
+use crate::error::{DbError, DbResult};
+use crate::models::{CodeRef, Priority, Section, Status, Task};
 use serde::Deserialize;
+use serde_json;
 use surrealdb::Surreal;
 use surrealdb::engine::local::Db;
 
@@ -28,6 +29,22 @@ pub struct TaskUpdate {
     pub add_tags: Vec<String>,
     /// Tags to remove
     pub remove_tags: Vec<String>,
+    /// Code references to set (replaces entire refs array)
+    pub refs: Option<Vec<CodeRef>>,
+    /// Whether to clear refs
+    pub clear_refs: bool,
+    /// Human review flag (if Some)
+    pub needs_human_review: Option<bool>,
+    /// Sections to set (replaces entire sections array)
+    pub sections: Option<Vec<Section>>,
+    /// Whether to clear sections
+    pub clear_sections: bool,
+    /// Whether to set started_at to current time
+    pub set_started_at: bool,
+    /// Whether to conditionally set started_at only if currently NULL (null-coalescing)
+    pub set_started_at_if_null: bool,
+    /// New status (if Some)
+    pub status: Option<Status>,
 }
 
 impl TaskUpdate {
@@ -66,12 +83,69 @@ impl TaskUpdate {
         self
     }
 
+    /// Set code references
+    pub fn with_refs(mut self, refs: Vec<CodeRef>) -> Self {
+        self.refs = Some(refs);
+        self
+    }
+
+    /// Clear code references
+    pub fn clear_refs(mut self) -> Self {
+        self.clear_refs = true;
+        self
+    }
+
+    /// Set the human review flag
+    pub fn with_needs_human_review(mut self, value: bool) -> Self {
+        self.needs_human_review = Some(value);
+        self
+    }
+
+    /// Set sections
+    pub fn with_sections(mut self, sections: Vec<Section>) -> Self {
+        self.sections = Some(sections);
+        self
+    }
+
+    /// Clear sections
+    pub fn clear_sections(mut self) -> Self {
+        self.clear_sections = true;
+        self
+    }
+
+    /// Set started_at to current time
+    pub fn set_started_at(mut self) -> Self {
+        self.set_started_at = true;
+        self
+    }
+
+    /// Set started_at to current time only if currently NULL (null-coalescing)
+    /// This preserves existing start times when re-starting a task
+    pub fn set_started_at_if_null(mut self) -> Self {
+        self.set_started_at_if_null = true;
+        self
+    }
+
+    /// Set the task status
+    pub fn with_status(mut self, status: Status) -> Self {
+        self.status = Some(status);
+        self
+    }
+
     /// Check if any updates are specified
     pub fn has_updates(&self) -> bool {
         self.title.is_some()
             || self.priority.is_some()
             || !self.add_tags.is_empty()
             || !self.remove_tags.is_empty()
+            || self.refs.is_some()
+            || self.clear_refs
+            || self.needs_human_review.is_some()
+            || self.sections.is_some()
+            || self.clear_sections
+            || self.set_started_at
+            || self.set_started_at_if_null
+            || self.status.is_some()
     }
 }
 
@@ -107,10 +181,12 @@ impl<'a> TaskRepository<'a> {
     ///
     /// `true` if the task exists, `false` otherwise.
     pub async fn exists(&self, id: &str) -> DbResult<bool> {
-        let query = format!("SELECT id FROM task:{} LIMIT 1", id);
-        let mut result = self.client.query(&query).await?;
-        let tasks: Vec<IdOnly> = result.take(0)?;
-        Ok(!tasks.is_empty())
+        let task: Option<IdOnly> = self
+            .client
+            .select(("task", id))
+            .await
+            .map_err(|e| DbError::Query(Box::new(e)))?;
+        Ok(task.is_some())
     }
 
     /// Create a new task with the specified ID.
@@ -172,14 +248,11 @@ impl<'a> TaskRepository<'a> {
     ///
     /// `Some(Task)` if found, `None` otherwise.
     pub async fn get(&self, id: &str) -> DbResult<Option<Task>> {
-        let query = format!(
-            "SELECT id, title, level, status, priority, tags, \
-             created_at, updated_at, sections, refs FROM task:{}",
-            id
-        );
-
-        let mut result = self.client.query(&query).await?;
-        let task: Option<Task> = result.take(0)?;
+        let task: Option<Task> = self
+            .client
+            .select(("task", id))
+            .await
+            .map_err(|e| DbError::Query(Box::new(e)))?;
         Ok(task)
     }
 
@@ -198,6 +271,26 @@ impl<'a> TaskRepository<'a> {
             "UPDATE task:{} SET status = '{}', updated_at = time::now()",
             id,
             status.as_str()
+        );
+        self.client.query(&query).await?;
+        Ok(())
+    }
+
+    /// Mark a task as done with completed_at timestamp.
+    ///
+    /// Updates the status to 'done' and sets both updated_at and completed_at timestamps.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The task ID to mark as done
+    ///
+    /// # Errors
+    ///
+    /// Returns `DbError::Query` if the database operation fails.
+    pub async fn mark_done(&self, id: &str) -> DbResult<()> {
+        let query = format!(
+            "UPDATE task:{} SET status = 'done', updated_at = time::now(), completed_at = time::now()",
+            id
         );
         self.client.query(&query).await?;
         Ok(())
@@ -233,7 +326,7 @@ impl<'a> TaskRepository<'a> {
             return Ok(());
         }
 
-        // Apply field updates (title, priority)
+        // Apply field updates (title, priority, refs, needs_human_review, started_at)
         let mut field_updates = Vec::new();
 
         if let Some(title) = &updates.title {
@@ -248,7 +341,45 @@ impl<'a> TaskRepository<'a> {
             }
         }
 
+        if updates.clear_refs {
+            field_updates.push("refs = []".to_string());
+        } else if let Some(refs) = &updates.refs {
+            let refs_json = serde_json::to_string(refs).map_err(|e| DbError::InvalidPath {
+                path: std::path::PathBuf::from(id),
+                reason: format!("Failed to serialize refs: {}", e),
+            })?;
+            field_updates.push(format!("refs = {}", refs_json));
+        }
+
+        if let Some(needs_review) = updates.needs_human_review {
+            field_updates.push(format!("needs_human_review = {}", needs_review));
+        }
+
+        if updates.set_started_at {
+            field_updates.push("started_at = time::now()".to_string());
+        }
+
+        if updates.set_started_at_if_null {
+            field_updates.push("started_at = started_at ?? time::now()".to_string());
+        }
+
+        if let Some(status) = &updates.status {
+            field_updates.push(format!("status = '{}'", status.as_str()));
+        }
+
+        if updates.clear_sections {
+            field_updates.push("sections = []".to_string());
+        } else if let Some(sections) = &updates.sections {
+            let sections_json =
+                serde_json::to_string(sections).map_err(|e| DbError::InvalidPath {
+                    path: std::path::PathBuf::from(id),
+                    reason: format!("Failed to serialize sections: {}", e),
+                })?;
+            field_updates.push(format!("sections = {}", sections_json));
+        }
+
         if !field_updates.is_empty() {
+            field_updates.push("updated_at = time::now()".to_string());
             let query = format!("UPDATE task:{} SET {}", id, field_updates.join(", "));
             self.client.query(&query).await?;
         }

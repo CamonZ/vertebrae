@@ -6,8 +6,7 @@
 //! section types.
 
 use clap::Args;
-use serde::Deserialize;
-use vertebrae_db::{Database, DbError, SectionType};
+use vertebrae_db::{Database, DbError, Section, SectionType, TaskUpdate};
 
 /// Add a typed content section to a task
 #[derive(Debug, Args)]
@@ -83,26 +82,6 @@ impl std::fmt::Display for SectionResult {
     }
 }
 
-/// Result from querying a task's sections
-#[derive(Debug, Deserialize)]
-struct TaskSectionsRow {
-    #[allow(dead_code)]
-    id: surrealdb::sql::Thing,
-    #[serde(default)]
-    sections: Vec<SectionRow>,
-}
-
-/// Section row from database
-#[derive(Debug, Deserialize, Clone)]
-struct SectionRow {
-    #[serde(rename = "type", default)]
-    section_type: Option<String>,
-    #[serde(default)]
-    content: Option<String>,
-    #[serde(default)]
-    order: Option<u32>,
-}
-
 impl SectionCommand {
     /// Execute the section command.
     ///
@@ -135,29 +114,43 @@ impl SectionCommand {
         }
 
         // Fetch task and verify it exists
-        let task = self.fetch_task_sections(db, &id).await?;
+        let sections = self.fetch_task_sections(db, &id).await?;
 
         // Determine if this is a single-instance or multi-instance type
         let is_single_instance = is_single_instance_type(&self.section_type);
 
-        let (replaced, ordinal) = if is_single_instance {
+        let (replaced, ordinal, new_sections) = if is_single_instance {
             // Single-instance: filter out existing sections of this type, then add new one
-            self.replace_section(db, &id, &task.sections).await?;
-            (
-                task.sections
-                    .iter()
-                    .any(|s| s.section_type.as_deref() == Some(self.section_type.as_str())),
-                None,
-            )
+            let had_existing = sections.iter().any(|s| s.section_type == self.section_type);
+            let mut new_sections: Vec<Section> = sections
+                .into_iter()
+                .filter(|s| s.section_type != self.section_type)
+                .collect();
+            new_sections.push(Section {
+                section_type: self.section_type.clone(),
+                content: self.content.clone(),
+                order: None,
+                done: None,
+                done_at: None,
+            });
+            (had_existing, None, new_sections)
         } else {
             // Multi-instance: calculate ordinal and append
-            let ordinal = self.calculate_ordinal(&task.sections);
-            self.append_section(db, &id, ordinal).await?;
-            (false, Some(ordinal))
+            let ordinal = self.calculate_ordinal(&sections);
+            let mut new_sections = sections;
+            new_sections.push(Section {
+                section_type: self.section_type.clone(),
+                content: self.content.clone(),
+                order: Some(ordinal),
+                done: None,
+                done_at: None,
+            });
+            (false, Some(ordinal), new_sections)
         };
 
-        // Update timestamp
-        self.update_timestamp(db, &id).await?;
+        // Update sections and timestamp using repository
+        let updates = TaskUpdate::new().with_sections(new_sections);
+        db.tasks().update(&id, &updates).await?;
 
         Ok(SectionResult {
             id,
@@ -168,104 +161,27 @@ impl SectionCommand {
     }
 
     /// Fetch the task by ID and return its sections.
-    async fn fetch_task_sections(
-        &self,
-        db: &Database,
-        id: &str,
-    ) -> Result<TaskSectionsRow, DbError> {
-        let query = format!("SELECT id, sections FROM task:{}", id);
-        let mut result = db.client().query(&query).await?;
-        let task: Option<TaskSectionsRow> = result.take(0)?;
+    async fn fetch_task_sections(&self, db: &Database, id: &str) -> Result<Vec<Section>, DbError> {
+        let task = db.tasks().get(id).await?;
 
-        task.ok_or_else(|| DbError::InvalidPath {
-            path: std::path::PathBuf::from(&self.id),
-            reason: format!("Task '{}' not found", self.id),
-        })
+        task.map(|t| t.sections)
+            .ok_or_else(|| DbError::InvalidPath {
+                path: std::path::PathBuf::from(&self.id),
+                reason: format!("Task '{}' not found", self.id),
+            })
     }
 
     /// Calculate the ordinal for a multi-instance section type.
     ///
     /// Returns max ordinal + 1 for sections of this type, or 0 if none exist.
-    fn calculate_ordinal(&self, sections: &[SectionRow]) -> u32 {
-        let type_str = self.section_type.as_str();
+    fn calculate_ordinal(&self, sections: &[Section]) -> u32 {
         sections
             .iter()
-            .filter(|s| s.section_type.as_deref() == Some(type_str))
+            .filter(|s| s.section_type == self.section_type)
             .filter_map(|s| s.order)
             .max()
             .map(|max| max + 1)
             .unwrap_or(0)
-    }
-
-    /// Replace a single-instance section by filtering out existing ones and adding the new one.
-    async fn replace_section(
-        &self,
-        db: &Database,
-        id: &str,
-        existing_sections: &[SectionRow],
-    ) -> Result<(), DbError> {
-        let type_str = self.section_type.as_str();
-
-        // Filter out sections of this type, keeping all others
-        let mut new_sections: Vec<String> = existing_sections
-            .iter()
-            .filter(|s| s.section_type.as_deref() != Some(type_str))
-            .filter_map(|s| {
-                let section_type = s.section_type.as_ref()?;
-                let content = s.content.as_ref()?;
-                let escaped_content = content.replace('\\', "\\\\").replace('"', "\\\"");
-                if let Some(order) = s.order {
-                    Some(format!(
-                        r#"{{ "type": "{}", "content": "{}", "order": {} }}"#,
-                        section_type, escaped_content, order
-                    ))
-                } else {
-                    Some(format!(
-                        r#"{{ "type": "{}", "content": "{}" }}"#,
-                        section_type, escaped_content
-                    ))
-                }
-            })
-            .collect();
-
-        // Add the new section
-        let escaped_content = self.content.replace('\\', "\\\\").replace('"', "\\\"");
-        new_sections.push(format!(
-            r#"{{ "type": "{}", "content": "{}" }}"#,
-            type_str, escaped_content
-        ));
-
-        let sections_array = format!("[{}]", new_sections.join(", "));
-        let query = format!("UPDATE task:{} SET sections = {}", id, sections_array);
-        db.client().query(&query).await?;
-
-        Ok(())
-    }
-
-    /// Append a multi-instance section with the given ordinal.
-    async fn append_section(&self, db: &Database, id: &str, ordinal: u32) -> Result<(), DbError> {
-        let type_str = self.section_type.as_str();
-        let escaped_content = self.content.replace('\\', "\\\\").replace('"', "\\\"");
-
-        let section_obj = format!(
-            r#"{{ "type": "{}", "content": "{}", "order": {} }}"#,
-            type_str, escaped_content, ordinal
-        );
-
-        let query = format!(
-            "UPDATE task:{} SET sections = array::append(sections, {})",
-            id, section_obj
-        );
-        db.client().query(&query).await?;
-
-        Ok(())
-    }
-
-    /// Update the task's updated_at timestamp.
-    async fn update_timestamp(&self, db: &Database, id: &str) -> Result<(), DbError> {
-        let query = format!("UPDATE task:{} SET updated_at = time::now()", id);
-        db.client().query(&query).await?;
-        Ok(())
     }
 }
 
@@ -322,31 +238,16 @@ mod tests {
     }
 
     /// Helper to get sections from a task
-    async fn get_sections(db: &Database, id: &str) -> Vec<SectionRow> {
-        let query = format!("SELECT sections FROM task:{}", id);
-        let mut result = db.client().query(&query).await.unwrap();
-
-        #[derive(Deserialize)]
-        struct Row {
-            #[serde(default)]
-            sections: Vec<SectionRow>,
-        }
-
-        let row: Option<Row> = result.take(0).unwrap();
-        row.map(|r| r.sections).unwrap_or_default()
+    async fn get_sections(db: &Database, id: &str) -> Vec<Section> {
+        let task = db.tasks().get(id).await.unwrap().unwrap();
+        task.sections
     }
 
     /// Helper to get updated_at timestamp
-    async fn get_updated_at(db: &Database, id: &str) -> surrealdb::sql::Datetime {
-        #[derive(Deserialize)]
-        struct TimestampRow {
-            updated_at: surrealdb::sql::Datetime,
-        }
-
-        let query = format!("SELECT updated_at FROM task:{}", id);
-        let mut result = db.client().query(&query).await.unwrap();
-        let row: Option<TimestampRow> = result.take(0).unwrap();
-        row.unwrap().updated_at
+    async fn get_updated_at(db: &Database, id: &str) -> chrono::DateTime<chrono::Utc> {
+        let task = db.tasks().get(id).await.unwrap().unwrap();
+        task.updated_at
+            .expect("Task should have updated_at timestamp")
     }
 
     /// Clean up test database
@@ -446,11 +347,8 @@ mod tests {
         // Verify section was added
         let sections = get_sections(&db, "task1").await;
         assert_eq!(sections.len(), 1);
-        assert_eq!(sections[0].section_type.as_deref(), Some("goal"));
-        assert_eq!(
-            sections[0].content.as_deref(),
-            Some("Implement authentication")
-        );
+        assert_eq!(sections[0].section_type, SectionType::Goal);
+        assert_eq!(sections[0].content, "Implement authentication");
 
         cleanup(&temp_dir);
     }
@@ -518,21 +416,33 @@ mod tests {
         let sections = get_sections(&db, "task1").await;
         assert_eq!(sections.len(), 3);
 
-        // Verify specific step contents and ordinals
-        use std::collections::HashSet;
-        let step_contents: HashSet<_> = sections
-            .iter()
-            .filter_map(|s| s.content.as_deref())
-            .collect();
-        assert!(step_contents.contains("Step 1"), "Should contain Step 1");
-        assert!(step_contents.contains("Step 2"), "Should contain Step 2");
-        assert!(step_contents.contains("Step 3"), "Should contain Step 3");
+        // Verify specific step contents
+        assert!(
+            sections.iter().any(|s| s.content == "Step 1"),
+            "Should contain Step 1"
+        );
+        assert!(
+            sections.iter().any(|s| s.content == "Step 2"),
+            "Should contain Step 2"
+        );
+        assert!(
+            sections.iter().any(|s| s.content == "Step 3"),
+            "Should contain Step 3"
+        );
 
         // Verify ordinals are 0, 1, 2
-        let ordinals: HashSet<_> = sections.iter().filter_map(|s| s.order).collect();
-        assert!(ordinals.contains(&0), "Should have ordinal 0");
-        assert!(ordinals.contains(&1), "Should have ordinal 1");
-        assert!(ordinals.contains(&2), "Should have ordinal 2");
+        assert!(
+            sections.iter().any(|s| s.order == Some(0)),
+            "Should have ordinal 0"
+        );
+        assert!(
+            sections.iter().any(|s| s.order == Some(1)),
+            "Should have ordinal 1"
+        );
+        assert!(
+            sections.iter().any(|s| s.order == Some(2)),
+            "Should have ordinal 2"
+        );
 
         cleanup(&temp_dir);
     }
@@ -564,7 +474,7 @@ mod tests {
         // Verify only one goal exists with new content
         let sections = get_sections(&db, "task1").await;
         assert_eq!(sections.len(), 1);
-        assert_eq!(sections[0].content.as_deref(), Some("Updated goal"));
+        assert_eq!(sections[0].content, "Updated goal");
 
         cleanup(&temp_dir);
     }
@@ -607,45 +517,54 @@ mod tests {
         assert_eq!(sections.len(), 9);
 
         // Verify all section types are present
-        use std::collections::HashSet;
-        let section_type_names: HashSet<_> = sections
-            .iter()
-            .filter_map(|s| s.section_type.as_deref())
-            .collect();
         assert!(
-            section_type_names.contains("goal"),
+            sections.iter().any(|s| s.section_type == SectionType::Goal),
             "Should contain goal section"
         );
         assert!(
-            section_type_names.contains("context"),
+            sections
+                .iter()
+                .any(|s| s.section_type == SectionType::Context),
             "Should contain context section"
         );
         assert!(
-            section_type_names.contains("current_behavior"),
+            sections
+                .iter()
+                .any(|s| s.section_type == SectionType::CurrentBehavior),
             "Should contain current_behavior section"
         );
         assert!(
-            section_type_names.contains("desired_behavior"),
+            sections
+                .iter()
+                .any(|s| s.section_type == SectionType::DesiredBehavior),
             "Should contain desired_behavior section"
         );
         assert!(
-            section_type_names.contains("step"),
+            sections.iter().any(|s| s.section_type == SectionType::Step),
             "Should contain step section"
         );
         assert!(
-            section_type_names.contains("testing_criterion"),
+            sections
+                .iter()
+                .any(|s| s.section_type == SectionType::TestingCriterion),
             "Should contain testing_criterion section"
         );
         assert!(
-            section_type_names.contains("anti_pattern"),
+            sections
+                .iter()
+                .any(|s| s.section_type == SectionType::AntiPattern),
             "Should contain anti_pattern section"
         );
         assert!(
-            section_type_names.contains("failure_test"),
+            sections
+                .iter()
+                .any(|s| s.section_type == SectionType::FailureTest),
             "Should contain failure_test section"
         );
         assert!(
-            section_type_names.contains("constraint"),
+            sections
+                .iter()
+                .any(|s| s.section_type == SectionType::Constraint),
             "Should contain constraint section"
         );
 
@@ -836,18 +755,18 @@ mod tests {
 
         let goal = sections
             .iter()
-            .find(|s| s.section_type.as_deref() == Some("goal"));
+            .find(|s| s.section_type == SectionType::Goal);
         assert!(goal.is_some());
-        assert_eq!(goal.unwrap().content.as_deref(), Some("New goal"));
+        assert_eq!(goal.unwrap().content, "New goal");
 
         let context = sections
             .iter()
-            .find(|s| s.section_type.as_deref() == Some("context"));
+            .find(|s| s.section_type == SectionType::Context);
         assert!(context.is_some());
 
         let step = sections
             .iter()
-            .find(|s| s.section_type.as_deref() == Some("step"));
+            .find(|s| s.section_type == SectionType::Step);
         assert!(step.is_some());
 
         cleanup(&temp_dir);

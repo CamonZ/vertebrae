@@ -4,8 +4,7 @@
 //! Supports removing by file path or removing all references.
 
 use clap::Args;
-use serde::Deserialize;
-use vertebrae_db::{Database, DbError};
+use vertebrae_db::{CodeRef, Database, DbError, TaskUpdate};
 
 /// Remove code references from a task
 #[derive(Debug, Args)]
@@ -64,30 +63,6 @@ impl std::fmt::Display for UnrefResult {
     }
 }
 
-/// Result from querying a task's refs
-#[derive(Debug, Deserialize)]
-struct TaskRefsRow {
-    #[allow(dead_code)]
-    id: surrealdb::sql::Thing,
-    #[serde(default, rename = "refs")]
-    code_refs: Vec<CodeRefRow>,
-}
-
-/// Code reference row from database
-#[derive(Debug, Deserialize, Clone)]
-struct CodeRefRow {
-    #[serde(default)]
-    path: Option<String>,
-    #[serde(default)]
-    line_start: Option<u32>,
-    #[serde(default)]
-    line_end: Option<u32>,
-    #[serde(default)]
-    name: Option<String>,
-    #[serde(default)]
-    description: Option<String>,
-}
-
 impl UnrefCommand {
     /// Execute the unref command.
     ///
@@ -107,16 +82,15 @@ impl UnrefCommand {
         let id = self.id.to_lowercase();
 
         // Fetch task and verify it exists
-        let task = self.fetch_task_refs(db, &id).await?;
+        let code_refs = self.fetch_task_refs(db, &id).await?;
 
-        let original_count = task.code_refs.len();
+        let original_count = code_refs.len();
 
         if self.all {
-            // Remove all references
-            self.clear_refs(db, &id).await?;
-
+            // Remove all references using repository
             if original_count > 0 {
-                self.update_timestamp(db, &id).await?;
+                let updates = TaskUpdate::new().clear_refs();
+                db.tasks().update(&id, &updates).await?;
             }
 
             Ok(UnrefResult {
@@ -127,18 +101,17 @@ impl UnrefCommand {
             })
         } else if let Some(ref file) = self.file {
             // Remove references matching the file path
-            let remaining_refs: Vec<&CodeRefRow> = task
-                .code_refs
-                .iter()
-                .filter(|r| r.path.as_deref() != Some(file.as_str()))
+            let remaining_refs: Vec<CodeRef> = code_refs
+                .into_iter()
+                .filter(|r| r.path.as_str() != file.as_str())
                 .collect();
 
             let removed_count = original_count - remaining_refs.len();
 
             if removed_count > 0 {
-                // Update refs to only include remaining ones
-                self.replace_refs(db, &id, &remaining_refs).await?;
-                self.update_timestamp(db, &id).await?;
+                // Update refs to only include remaining ones using repository
+                let updates = TaskUpdate::new().with_refs(remaining_refs);
+                db.tasks().update(&id, &updates).await?;
             }
 
             Ok(UnrefResult {
@@ -158,77 +131,15 @@ impl UnrefCommand {
         }
     }
 
-    /// Fetch the task by ID and return its refs (mainly to verify task exists).
-    async fn fetch_task_refs(&self, db: &Database, id: &str) -> Result<TaskRefsRow, DbError> {
-        let query = format!("SELECT id, refs FROM task:{}", id);
-        let mut result = db.client().query(&query).await?;
-        let task: Option<TaskRefsRow> = result.take(0)?;
+    /// Fetch the task by ID and return its code refs (mainly to verify task exists).
+    async fn fetch_task_refs(&self, db: &Database, id: &str) -> Result<Vec<CodeRef>, DbError> {
+        let task = db.tasks().get(id).await?;
 
-        task.ok_or_else(|| DbError::InvalidPath {
-            path: std::path::PathBuf::from(&self.id),
-            reason: format!("Task '{}' not found", self.id),
-        })
-    }
-
-    /// Clear all refs from a task.
-    async fn clear_refs(&self, db: &Database, id: &str) -> Result<(), DbError> {
-        let query = format!("UPDATE task:{} SET refs = []", id);
-        db.client().query(&query).await?;
-        Ok(())
-    }
-
-    /// Replace refs with a filtered set.
-    async fn replace_refs(
-        &self,
-        db: &Database,
-        id: &str,
-        refs: &[&CodeRefRow],
-    ) -> Result<(), DbError> {
-        // Build the refs array
-        let refs_json: Vec<String> = refs
-            .iter()
-            .map(|r| {
-                let mut parts = Vec::new();
-
-                if let Some(ref path) = r.path {
-                    let escaped = path.replace('\\', "\\\\").replace('"', "\\\"");
-                    parts.push(format!(r#""path": "{}""#, escaped));
-                }
-
-                if let Some(start) = r.line_start {
-                    parts.push(format!(r#""line_start": {}"#, start));
-                }
-
-                if let Some(end) = r.line_end {
-                    parts.push(format!(r#""line_end": {}"#, end));
-                }
-
-                if let Some(ref name) = r.name {
-                    let escaped = name.replace('\\', "\\\\").replace('"', "\\\"");
-                    parts.push(format!(r#""name": "{}""#, escaped));
-                }
-
-                if let Some(ref desc) = r.description {
-                    let escaped = desc.replace('\\', "\\\\").replace('"', "\\\"");
-                    parts.push(format!(r#""description": "{}""#, escaped));
-                }
-
-                format!("{{ {} }}", parts.join(", "))
+        task.map(|t| t.code_refs)
+            .ok_or_else(|| DbError::InvalidPath {
+                path: std::path::PathBuf::from(&self.id),
+                reason: format!("Task '{}' not found", self.id),
             })
-            .collect();
-
-        let refs_array = format!("[{}]", refs_json.join(", "));
-        let query = format!("UPDATE task:{} SET refs = {}", id, refs_array);
-        db.client().query(&query).await?;
-
-        Ok(())
-    }
-
-    /// Update the task's updated_at timestamp.
-    async fn update_timestamp(&self, db: &Database, id: &str) -> Result<(), DbError> {
-        let query = format!("UPDATE task:{} SET updated_at = time::now()", id);
-        db.client().query(&query).await?;
-        Ok(())
     }
 }
 
@@ -311,31 +222,16 @@ mod tests {
     }
 
     /// Helper to get refs from a task
-    async fn get_refs(db: &Database, id: &str) -> Vec<CodeRefRow> {
-        let query = format!("SELECT refs FROM task:{}", id);
-        let mut result = db.client().query(&query).await.unwrap();
-
-        #[derive(Deserialize)]
-        struct Row {
-            #[serde(default, rename = "refs")]
-            code_refs: Vec<CodeRefRow>,
-        }
-
-        let row: Option<Row> = result.take(0).unwrap();
-        row.map(|r| r.code_refs).unwrap_or_default()
+    async fn get_refs(db: &Database, id: &str) -> Vec<CodeRef> {
+        let task = db.tasks().get(id).await.unwrap().unwrap();
+        task.code_refs
     }
 
     /// Helper to get updated_at timestamp
-    async fn get_updated_at(db: &Database, id: &str) -> surrealdb::sql::Datetime {
-        #[derive(Deserialize)]
-        struct TimestampRow {
-            updated_at: surrealdb::sql::Datetime,
-        }
-
-        let query = format!("SELECT updated_at FROM task:{}", id);
-        let mut result = db.client().query(&query).await.unwrap();
-        let row: Option<TimestampRow> = result.take(0).unwrap();
-        row.unwrap().updated_at
+    async fn get_updated_at(db: &Database, id: &str) -> chrono::DateTime<chrono::Utc> {
+        let task = db.tasks().get(id).await.unwrap().unwrap();
+        task.updated_at
+            .expect("Task should have updated_at timestamp")
     }
 
     /// Clean up test database
@@ -381,7 +277,7 @@ mod tests {
         // Verify refs
         let refs = get_refs(&db, "task1").await;
         assert_eq!(refs.len(), 1);
-        assert_eq!(refs[0].path.as_deref(), Some("src/other.ex"));
+        assert_eq!(refs[0].path.as_str(), "src/other.ex");
 
         cleanup(&temp_dir);
     }
@@ -630,7 +526,7 @@ mod tests {
         // Verify remaining ref preserves all fields
         let refs = get_refs(&db, "task1").await;
         assert_eq!(refs.len(), 1);
-        assert_eq!(refs[0].path.as_deref(), Some("src/other.ex"));
+        assert_eq!(refs[0].path.as_str(), "src/other.ex");
         assert_eq!(refs[0].line_start, Some(30));
         assert_eq!(refs[0].line_end, Some(40));
         assert_eq!(refs[0].name.as_deref(), Some("fn2"));

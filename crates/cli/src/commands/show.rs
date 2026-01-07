@@ -38,7 +38,7 @@ pub struct TaskDetail {
     /// Last update timestamp
     pub updated_at: Option<String>,
     /// Whether this task needs human review
-    pub needs_human_review: bool,
+    pub needs_human_review: Option<bool>,
     /// Embedded sections
     pub sections: Vec<Section>,
     /// Embedded code references
@@ -70,7 +70,7 @@ struct TaskRow {
     #[serde(default)]
     updated_at: Option<surrealdb::sql::Datetime>,
     #[serde(default)]
-    needs_human_review: bool,
+    needs_human_review: Option<bool>,
     #[serde(default)]
     sections: Vec<SectionRow>,
     #[serde(default, rename = "refs")]
@@ -217,14 +217,11 @@ impl ShowCommand {
 
     /// Fetch the main task by ID.
     async fn fetch_task(&self, db: &Database, id: &str) -> Result<TaskRow, DbError> {
-        let query = format!(
-            "SELECT id, title, description, level, status, priority, tags, \
-             created_at, updated_at, needs_human_review, sections, refs FROM task:{}",
-            id
-        );
-
-        let mut result = db.client().query(&query).await?;
-        let task: Option<TaskRow> = result.take(0)?;
+        let task: Option<TaskRow> = db
+            .client()
+            .select(("task", id))
+            .await
+            .map_err(|e| DbError::Query(Box::new(e)))?;
 
         task.ok_or_else(|| DbError::InvalidPath {
             path: std::path::PathBuf::from(&self.id),
@@ -337,7 +334,7 @@ impl std::fmt::Display for TaskDetail {
                 self.tags.join(", ")
             }
         )?;
-        if self.needs_human_review {
+        if self.needs_human_review == Some(true) {
             writeln!(f, "Review:   NEEDS HUMAN REVIEW")?;
         }
 
@@ -1128,7 +1125,7 @@ mod tests {
             tags: vec!["backend".to_string()],
             created_at: Some("2024-01-15T10:30:00Z".to_string()),
             updated_at: Some("2024-01-15T11:00:00Z".to_string()),
-            needs_human_review: false,
+            needs_human_review: Some(false),
             sections: vec![
                 Section::new(SectionType::Goal, "The goal"),
                 Section::new(SectionType::AntiPattern, "Don't do this"),
@@ -1176,7 +1173,7 @@ mod tests {
             tags: vec![],
             created_at: None,
             updated_at: None,
-            needs_human_review: false,
+            needs_human_review: Some(false),
             sections: vec![],
             code_refs: vec![],
             parent: None,
@@ -1212,7 +1209,7 @@ mod tests {
             tags: vec![],
             created_at: None,
             updated_at: None,
-            needs_human_review: true,
+            needs_human_review: Some(true),
             sections: vec![],
             code_refs: vec![],
             parent: None,
@@ -1238,7 +1235,7 @@ mod tests {
             tags: vec![],
             created_at: None,
             updated_at: None,
-            needs_human_review: false,
+            needs_human_review: Some(false),
             sections: vec![
                 Section::with_order(SectionType::Step, "First step", 1),
                 Section::with_order(SectionType::Step, "Second step", 2),
@@ -1281,7 +1278,7 @@ mod tests {
             tags: vec!["backend".to_string()],
             created_at: None,
             updated_at: None,
-            needs_human_review: false,
+            needs_human_review: Some(false),
             sections: vec![],
             code_refs: vec![],
             parent: Some(TaskSummary {
