@@ -200,17 +200,33 @@ fn flatten_node(result: &mut Vec<FlatNode>, node: &TreeNode, depth: usize, state
 }
 
 /// Render the navigation panel with task tree.
+///
+/// # Arguments
+///
+/// * `frame` - The frame to render to
+/// * `area` - The area to render within
+/// * `nodes` - The flattened list of visible nodes
+/// * `selected_index` - Index of the currently selected node
+/// * `empty_message` - Message to show when there are no nodes
+/// * `is_focused` - Whether this panel currently has focus
 pub fn render_nav_panel(
     frame: &mut Frame,
     area: Rect,
     nodes: &[FlatNode],
     selected_index: usize,
     empty_message: Option<&str>,
+    is_focused: bool,
 ) {
+    let border_color = if is_focused {
+        Color::Yellow
+    } else {
+        Color::Cyan
+    };
+
     let block = Block::default()
         .title(" Navigation ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan));
+        .border_style(Style::default().fg(border_color));
 
     if nodes.is_empty() {
         // Show empty message

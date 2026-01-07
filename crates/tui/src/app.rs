@@ -16,7 +16,9 @@ use vertebrae_db::Database;
 use crate::data::{load_full_tree, load_task_details, load_timeline_tasks};
 use crate::details::TaskDetails;
 use crate::error::TuiResult;
-use crate::event::{is_down, is_enter, is_quit, is_tab, is_up, poll_key};
+use crate::event::{
+    is_down, is_enter, is_h, is_l, is_left, is_quit, is_right, is_tab, is_up, poll_key,
+};
 use crate::navigation::{FlatNode, TreeNode, TreeState, flatten_tree};
 use crate::timeline::TimelineTask;
 use crate::ui;
@@ -50,6 +52,28 @@ impl ActiveTab {
     }
 }
 
+/// The currently focused panel (navigation or content).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FocusedPanel {
+    /// The navigation panel on the left.
+    #[default]
+    Navigation,
+    /// The content panel on the right.
+    Content,
+}
+
+impl FocusedPanel {
+    /// Check if this is the navigation panel.
+    pub fn is_navigation(self) -> bool {
+        matches!(self, Self::Navigation)
+    }
+
+    /// Check if this is the content panel.
+    pub fn is_content(self) -> bool {
+        matches!(self, Self::Content)
+    }
+}
+
 /// Main application state.
 pub struct App {
     /// Database connection.
@@ -58,6 +82,8 @@ pub struct App {
     selected_index: usize,
     /// The active tab in the right panel.
     active_tab: ActiveTab,
+    /// The currently focused panel (navigation or content).
+    focused_panel: FocusedPanel,
     /// Whether the application is still running.
     running: bool,
     /// Tree state for tracking expanded nodes.
@@ -72,6 +98,8 @@ pub struct App {
     details_dirty: bool,
     /// Cached timeline tasks for the timeline view.
     timeline_tasks: Vec<TimelineTask>,
+    /// Scroll offset for content panel (used in Details, Tree, and Timeline views).
+    content_scroll_offset: usize,
 }
 
 impl App {
@@ -112,6 +140,7 @@ impl App {
             db,
             selected_index: 0,
             active_tab: ActiveTab::default(),
+            focused_panel: FocusedPanel::default(),
             running: true,
             tree_state,
             tree_roots,
@@ -119,6 +148,7 @@ impl App {
             selected_task_details,
             details_dirty: false,
             timeline_tasks,
+            content_scroll_offset: 0,
         })
     }
 
@@ -177,6 +207,16 @@ impl App {
         &self.timeline_tasks
     }
 
+    /// Get the currently focused panel.
+    pub fn focused_panel(&self) -> FocusedPanel {
+        self.focused_panel
+    }
+
+    /// Get the content scroll offset.
+    pub fn content_scroll_offset(&self) -> usize {
+        self.content_scroll_offset
+    }
+
     /// Set the tree roots and refresh the visible nodes.
     pub fn set_tree_roots(&mut self, roots: Vec<TreeNode>) {
         self.tree_roots = roots;
@@ -200,6 +240,28 @@ impl App {
     /// Cycle to the next tab.
     pub fn next_tab(&mut self) {
         self.active_tab = self.active_tab.next();
+        // Reset content scroll when switching tabs
+        self.content_scroll_offset = 0;
+    }
+
+    /// Focus the navigation panel.
+    pub fn focus_navigation(&mut self) {
+        self.focused_panel = FocusedPanel::Navigation;
+    }
+
+    /// Focus the content panel.
+    pub fn focus_content(&mut self) {
+        self.focused_panel = FocusedPanel::Content;
+    }
+
+    /// Scroll content down (increase offset).
+    pub fn scroll_content_down(&mut self) {
+        self.content_scroll_offset = self.content_scroll_offset.saturating_add(1);
+    }
+
+    /// Scroll content up (decrease offset).
+    pub fn scroll_content_up(&mut self) {
+        self.content_scroll_offset = self.content_scroll_offset.saturating_sub(1);
     }
 
     /// Move selection down in the navigation list.
@@ -300,16 +362,47 @@ impl App {
 
     /// Handle a keyboard event.
     fn handle_key(&mut self, key: &crossterm::event::KeyEvent) {
+        // Global keys work regardless of focus
         if is_quit(key) {
             self.quit();
-        } else if is_tab(key) {
+            return;
+        }
+
+        if is_tab(key) {
             self.next_tab();
-        } else if is_down(key) {
-            self.select_next();
-        } else if is_up(key) {
-            self.select_previous();
-        } else if is_enter(key) {
-            self.toggle_selected();
+            return;
+        }
+
+        // Panel switching: h/Left goes to nav, l/Right goes to content
+        if is_left(key) || is_h(key) {
+            self.focus_navigation();
+            return;
+        }
+
+        if is_right(key) || is_l(key) {
+            self.focus_content();
+            return;
+        }
+
+        // Context-sensitive keys based on focused panel
+        match self.focused_panel {
+            FocusedPanel::Navigation => {
+                if is_down(key) {
+                    self.select_next();
+                } else if is_up(key) {
+                    self.select_previous();
+                } else if is_enter(key) {
+                    self.toggle_selected();
+                }
+            }
+            FocusedPanel::Content => {
+                if is_down(key) {
+                    self.scroll_content_down();
+                } else if is_up(key) {
+                    self.scroll_content_up();
+                }
+                // Enter in content panel could be used for future interactions
+            }
         }
     }
 }
@@ -564,5 +657,26 @@ mod tests {
         // Should not panic with empty list
         app.select_previous();
         assert_eq!(app.selected_index, 0);
+    }
+
+    // ========================================
+    // FocusedPanel tests
+    // ========================================
+
+    #[test]
+    fn test_focused_panel_default() {
+        assert_eq!(FocusedPanel::default(), FocusedPanel::Navigation);
+    }
+
+    #[test]
+    fn test_focused_panel_is_navigation() {
+        assert!(FocusedPanel::Navigation.is_navigation());
+        assert!(!FocusedPanel::Content.is_navigation());
+    }
+
+    #[test]
+    fn test_focused_panel_is_content() {
+        assert!(FocusedPanel::Content.is_content());
+        assert!(!FocusedPanel::Navigation.is_content());
     }
 }

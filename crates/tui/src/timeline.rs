@@ -124,16 +124,26 @@ impl TimelineConfig {
 /// * `area` - The area to render within
 /// * `tasks` - Tasks with timeline data (must have started_at set)
 /// * `empty_message` - Message to show when no tasks have been started
+/// * `is_focused` - Whether this panel currently has focus
+/// * `scroll_offset` - Vertical scroll offset for the content
 pub fn render_timeline_view(
     frame: &mut Frame,
     area: Rect,
     tasks: &[TimelineTask],
     empty_message: Option<&str>,
+    is_focused: bool,
+    scroll_offset: usize,
 ) {
+    let border_color = if is_focused {
+        Color::Yellow
+    } else {
+        Color::Cyan
+    };
+
     let block = Block::default()
         .title(" Timeline ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan));
+        .border_style(Style::default().fg(border_color));
 
     if tasks.is_empty() {
         let message = empty_message.unwrap_or("No started tasks found");
@@ -159,7 +169,9 @@ pub fn render_timeline_view(
         lines.push(build_task_line(task, &config));
     }
 
-    let paragraph = Paragraph::new(lines).block(block);
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .scroll((scroll_offset as u16, 0));
     frame.render_widget(paragraph, area);
 }
 
