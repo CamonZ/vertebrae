@@ -1,3 +1,7 @@
+---
+description: Check current task state and progress
+---
+
 # /status
 
 Check current task state and progress.

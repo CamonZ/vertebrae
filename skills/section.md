@@ -1,3 +1,7 @@
+---
+description: Add structured content to tasks
+---
+
 # /section
 
 Add structured content to tasks.

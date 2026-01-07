@@ -1,3 +1,7 @@
+---
+description: Manage task dependencies
+---
+
 # /depend
 
 Manage task dependencies.

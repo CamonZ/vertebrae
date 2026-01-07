@@ -1,3 +1,7 @@
+---
+description: Remove tasks from the database
+---
+
 # /delete
 
 Remove tasks from the database.
