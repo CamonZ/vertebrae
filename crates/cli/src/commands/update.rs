@@ -257,6 +257,7 @@ impl UpdateCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use std::env;
 
     /// Helper to create a test database
@@ -760,6 +761,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_update_self_parent_fails() {
         let (db, temp_dir) = setup_test_db().await;
 
