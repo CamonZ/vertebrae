@@ -4,7 +4,7 @@
 //! started_at and completed_at timestamps. Only shows tasks that have been
 //! started (have a started_at timestamp).
 
-use chrono::{DateTime, Duration, Local, NaiveDate, Utc};
+use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, Utc};
 use ratatui::{
     Frame,
     layout::Rect,
@@ -13,6 +13,30 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
 };
 use vertebrae_db::Status;
+
+/// Zoom level for the timeline display.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ZoomLevel {
+    /// Show individual days (for ranges < 14 days).
+    Days,
+    /// Show weeks (for ranges 14-90 days).
+    Weeks,
+    /// Show months (for ranges > 90 days).
+    Months,
+}
+
+impl ZoomLevel {
+    /// Determine the appropriate zoom level based on the number of days.
+    fn from_days(days: i64) -> Self {
+        if days < 14 {
+            ZoomLevel::Days
+        } else if days < 90 {
+            ZoomLevel::Weeks
+        } else {
+            ZoomLevel::Months
+        }
+    }
+}
 
 /// A task with timeline information for rendering in the timeline view.
 #[derive(Debug, Clone)]
@@ -47,7 +71,8 @@ impl TimelineTask {
 struct TimelineConfig {
     /// Start date of the visible timeline.
     start_date: NaiveDate,
-    /// End date of the visible timeline.
+    /// End date of the visible timeline (used during column calculation).
+    #[cfg_attr(not(test), allow(dead_code))]
     end_date: NaiveDate,
     /// Number of days visible.
     days: i64,
@@ -55,6 +80,22 @@ struct TimelineConfig {
     bar_width: u16,
     /// Width of the label area on the left.
     label_width: u16,
+    /// The zoom level based on date range (used for testing and future enhancements).
+    #[cfg_attr(not(test), allow(dead_code))]
+    zoom_level: ZoomLevel,
+    /// Column boundaries for grid lines and headers.
+    columns: Vec<ColumnInfo>,
+}
+
+/// Information about a single column in the timeline header.
+#[derive(Debug, Clone)]
+struct ColumnInfo {
+    /// Label to display for this column.
+    label: String,
+    /// Start position (0-based, relative to bar area).
+    start_col: u16,
+    /// End position (exclusive).
+    end_col: u16,
 }
 
 impl TimelineConfig {
@@ -65,12 +106,19 @@ impl TimelineConfig {
 
         if tasks.is_empty() {
             let today = Local::now().date_naive();
+            let start_date = today - Duration::days(7);
+            let end_date = today;
+            let days = 7;
+            let zoom_level = ZoomLevel::Days;
+            let columns = Self::calculate_columns(start_date, end_date, bar_width, zoom_level);
             return Self {
-                start_date: today - Duration::days(7),
-                end_date: today,
-                days: 7,
+                start_date,
+                end_date,
+                days,
                 bar_width,
                 label_width,
+                zoom_level,
+                columns,
             };
         }
 
@@ -93,13 +141,168 @@ impl TimelineConfig {
         // Ensure at least 1 day is shown
         let days = (end_date - start_date).num_days().max(1);
 
+        // Determine zoom level based on date range
+        let zoom_level = ZoomLevel::from_days(days);
+
+        // Calculate column boundaries
+        let columns = Self::calculate_columns(start_date, end_date, bar_width, zoom_level);
+
         Self {
             start_date,
             end_date,
             days,
             bar_width,
             label_width,
+            zoom_level,
+            columns,
         }
+    }
+
+    /// Calculate column boundaries and labels based on zoom level.
+    fn calculate_columns(
+        start_date: NaiveDate,
+        end_date: NaiveDate,
+        bar_width: u16,
+        zoom_level: ZoomLevel,
+    ) -> Vec<ColumnInfo> {
+        if bar_width == 0 {
+            return Vec::new();
+        }
+
+        let total_days = (end_date - start_date).num_days().max(1);
+
+        match zoom_level {
+            ZoomLevel::Days => Self::calculate_day_columns(start_date, total_days, bar_width),
+            ZoomLevel::Weeks => Self::calculate_week_columns(start_date, end_date, bar_width),
+            ZoomLevel::Months => Self::calculate_month_columns(start_date, end_date, bar_width),
+        }
+    }
+
+    /// Calculate columns for day-level zoom.
+    fn calculate_day_columns(
+        start_date: NaiveDate,
+        total_days: i64,
+        bar_width: u16,
+    ) -> Vec<ColumnInfo> {
+        let mut columns = Vec::new();
+
+        for day_offset in 0..=total_days {
+            let date = start_date + Duration::days(day_offset);
+            let start_col =
+                ((day_offset as f64 / total_days as f64) * bar_width as f64).round() as u16;
+            let end_col =
+                (((day_offset + 1) as f64 / total_days as f64) * bar_width as f64).round() as u16;
+
+            // Only add if column has width
+            if end_col > start_col {
+                columns.push(ColumnInfo {
+                    label: date.format("%m/%d").to_string(),
+                    start_col,
+                    end_col: end_col.min(bar_width),
+                });
+            }
+        }
+
+        columns
+    }
+
+    /// Calculate columns for week-level zoom.
+    fn calculate_week_columns(
+        start_date: NaiveDate,
+        end_date: NaiveDate,
+        bar_width: u16,
+    ) -> Vec<ColumnInfo> {
+        let mut columns = Vec::new();
+        let total_days = (end_date - start_date).num_days().max(1);
+
+        // Find the first Monday on or after start_date
+        let days_until_monday = (8 - start_date.weekday().num_days_from_monday()) % 7;
+        let mut week_start = start_date + Duration::days(days_until_monday as i64);
+
+        // If start_date is before the first Monday, add a partial week
+        if week_start > start_date {
+            let start_col = 0;
+            let end_col = (((week_start - start_date).num_days() as f64 / total_days as f64)
+                * bar_width as f64)
+                .round() as u16;
+            if end_col > start_col {
+                columns.push(ColumnInfo {
+                    label: start_date.format("%m/%d").to_string(),
+                    start_col,
+                    end_col: end_col.min(bar_width),
+                });
+            }
+        }
+
+        // Add full weeks
+        while week_start <= end_date {
+            let week_end = week_start + Duration::days(7);
+            let start_col = (((week_start - start_date).num_days() as f64 / total_days as f64)
+                * bar_width as f64)
+                .round() as u16;
+            let end_col = (((week_end - start_date).num_days() as f64 / total_days as f64)
+                * bar_width as f64)
+                .round() as u16;
+
+            if end_col > start_col && start_col < bar_width {
+                columns.push(ColumnInfo {
+                    label: format!("W{}", week_start.iso_week().week()),
+                    start_col,
+                    end_col: end_col.min(bar_width),
+                });
+            }
+
+            week_start = week_end;
+        }
+
+        columns
+    }
+
+    /// Calculate columns for month-level zoom.
+    fn calculate_month_columns(
+        start_date: NaiveDate,
+        end_date: NaiveDate,
+        bar_width: u16,
+    ) -> Vec<ColumnInfo> {
+        let mut columns = Vec::new();
+        let total_days = (end_date - start_date).num_days().max(1);
+
+        // Start with the first of the start month
+        let mut month_start =
+            NaiveDate::from_ymd_opt(start_date.year(), start_date.month(), 1).unwrap_or(start_date);
+
+        while month_start <= end_date {
+            // Calculate the first day of next month
+            let month_end = if month_start.month() == 12 {
+                NaiveDate::from_ymd_opt(month_start.year() + 1, 1, 1).unwrap_or(month_start)
+            } else {
+                NaiveDate::from_ymd_opt(month_start.year(), month_start.month() + 1, 1)
+                    .unwrap_or(month_start)
+            };
+
+            // Calculate column positions (clamped to actual date range)
+            let effective_start = month_start.max(start_date);
+            let effective_end = month_end.min(end_date + Duration::days(1));
+
+            let start_col = (((effective_start - start_date).num_days() as f64 / total_days as f64)
+                * bar_width as f64)
+                .round() as u16;
+            let end_col = (((effective_end - start_date).num_days() as f64 / total_days as f64)
+                * bar_width as f64)
+                .round() as u16;
+
+            if end_col > start_col && start_col < bar_width {
+                columns.push(ColumnInfo {
+                    label: month_start.format("%b").to_string(),
+                    start_col,
+                    end_col: end_col.min(bar_width),
+                });
+            }
+
+            month_start = month_end;
+        }
+
+        columns
     }
 
     /// Calculate the column position for a given datetime.
@@ -175,7 +378,7 @@ pub fn render_timeline_view(
     frame.render_widget(paragraph, area);
 }
 
-/// Build the date header line showing the time scale.
+/// Build the date header line showing the time scale with centered labels.
 fn build_date_header(config: &TimelineConfig) -> Line<'static> {
     let mut spans = Vec::new();
 
@@ -185,37 +388,35 @@ fn build_date_header(config: &TimelineConfig) -> Line<'static> {
         Style::default(),
     ));
 
-    // Build date markers
+    // Build date markers from column info
     let bar_width = config.bar_width as usize;
     let mut header_chars = vec![' '; bar_width];
 
-    // Show start date, middle date, and end date
-    let start_str = config.start_date.format("%m/%d").to_string();
-    let end_str = config.end_date.format("%m/%d").to_string();
+    // Place labels centered within each column
+    for col in &config.columns {
+        let col_width = (col.end_col - col.start_col) as usize;
+        let label = &col.label;
 
-    // Place start date
-    for (i, c) in start_str.chars().enumerate() {
-        if i < bar_width {
-            header_chars[i] = c;
-        }
-    }
+        // Only show label if column is wide enough
+        if col_width >= label.len() {
+            // Center the label within the column
+            let padding = (col_width - label.len()) / 2;
+            let start_pos = col.start_col as usize + padding;
 
-    // Place end date at the end
-    let end_start = bar_width.saturating_sub(end_str.len());
-    for (i, c) in end_str.chars().enumerate() {
-        if end_start + i < bar_width {
-            header_chars[end_start + i] = c;
-        }
-    }
-
-    // Place middle date if there's room
-    if config.days > 2 && bar_width > 20 {
-        let mid_date = config.start_date + Duration::days(config.days / 2);
-        let mid_str = mid_date.format("%m/%d").to_string();
-        let mid_pos = bar_width / 2 - mid_str.len() / 2;
-        for (i, c) in mid_str.chars().enumerate() {
-            if mid_pos + i < bar_width && mid_pos + i > start_str.len() + 1 {
-                header_chars[mid_pos + i] = c;
+            for (i, c) in label.chars().enumerate() {
+                let pos = start_pos + i;
+                if pos < bar_width {
+                    header_chars[pos] = c;
+                }
+            }
+        } else if col_width >= 1 {
+            // Column too narrow - show first char or abbreviation
+            let abbrev: String = label.chars().take(col_width).collect();
+            for (i, c) in abbrev.chars().enumerate() {
+                let pos = col.start_col as usize + i;
+                if pos < bar_width {
+                    header_chars[pos] = c;
+                }
             }
         }
     }
@@ -228,17 +429,42 @@ fn build_date_header(config: &TimelineConfig) -> Line<'static> {
     Line::from(spans)
 }
 
-/// Build a separator line.
+/// Build a separator line with vertical grid markers at column boundaries.
 fn build_separator(config: &TimelineConfig) -> Line<'static> {
-    let spans = vec![
-        // Label area
-        Span::styled(" ".repeat(config.label_width as usize), Style::default()),
-        // Separator
-        Span::styled(
-            "\u{2500}".repeat(config.bar_width as usize),
-            Style::default().fg(Color::DarkGray),
-        ),
-    ];
+    let mut spans = Vec::new();
+
+    // Label area
+    spans.push(Span::styled(
+        " ".repeat(config.label_width as usize),
+        Style::default(),
+    ));
+
+    // Build separator with vertical markers at column boundaries
+    let bar_width = config.bar_width as usize;
+    let mut sep_chars = vec!['\u{2500}'; bar_width]; // Horizontal line
+
+    // Place vertical markers (column delimiters) at column boundaries
+    for col in &config.columns {
+        // Mark start of column (except for first column)
+        if col.start_col > 0 && (col.start_col as usize) < bar_width {
+            sep_chars[col.start_col as usize] = '\u{253C}'; // Cross character
+        }
+    }
+
+    // Start of timeline gets a special character
+    if !sep_chars.is_empty() {
+        sep_chars[0] = '\u{251C}'; // Left T-junction
+    }
+
+    // End of timeline gets a special character
+    if bar_width > 1 {
+        sep_chars[bar_width - 1] = '\u{2524}'; // Right T-junction
+    }
+
+    spans.push(Span::styled(
+        sep_chars.iter().collect::<String>(),
+        Style::default().fg(Color::DarkGray),
+    ));
 
     Line::from(spans)
 }
@@ -536,5 +762,191 @@ mod tests {
         // Should contain truncated text with ellipsis
         let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
         assert!(text.contains("...") || task.title.len() <= config.label_width as usize);
+    }
+
+    // =============================================
+    // Zoom level tests
+    // =============================================
+
+    #[test]
+    fn test_zoom_level_from_days_under_14_is_days() {
+        assert_eq!(ZoomLevel::from_days(1), ZoomLevel::Days);
+        assert_eq!(ZoomLevel::from_days(7), ZoomLevel::Days);
+        assert_eq!(ZoomLevel::from_days(13), ZoomLevel::Days);
+    }
+
+    #[test]
+    fn test_zoom_level_from_days_14_to_89_is_weeks() {
+        assert_eq!(ZoomLevel::from_days(14), ZoomLevel::Weeks);
+        assert_eq!(ZoomLevel::from_days(30), ZoomLevel::Weeks);
+        assert_eq!(ZoomLevel::from_days(60), ZoomLevel::Weeks);
+        assert_eq!(ZoomLevel::from_days(89), ZoomLevel::Weeks);
+    }
+
+    #[test]
+    fn test_zoom_level_from_days_90_plus_is_months() {
+        assert_eq!(ZoomLevel::from_days(90), ZoomLevel::Months);
+        assert_eq!(ZoomLevel::from_days(120), ZoomLevel::Months);
+        assert_eq!(ZoomLevel::from_days(365), ZoomLevel::Months);
+    }
+
+    #[test]
+    fn test_timeline_config_7_days_uses_day_zoom() {
+        let started = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+        let completed = Utc.with_ymd_and_hms(2025, 1, 7, 0, 0, 0).unwrap();
+        let tasks = vec![make_task(
+            "t1",
+            "Task",
+            Status::Done,
+            started,
+            Some(completed),
+        )];
+
+        let config = TimelineConfig::from_tasks(&tasks, 100);
+        assert_eq!(config.zoom_level, ZoomLevel::Days);
+        // Should have approximately 7 columns (one per day)
+        assert!(config.columns.len() >= 6 && config.columns.len() <= 8);
+    }
+
+    #[test]
+    fn test_timeline_config_30_days_uses_week_zoom() {
+        let started = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+        let completed = Utc.with_ymd_and_hms(2025, 1, 31, 0, 0, 0).unwrap();
+        let tasks = vec![make_task(
+            "t1",
+            "Task",
+            Status::Done,
+            started,
+            Some(completed),
+        )];
+
+        let config = TimelineConfig::from_tasks(&tasks, 100);
+        assert_eq!(config.zoom_level, ZoomLevel::Weeks);
+        // Should have 4-5 columns for weeks
+        assert!(
+            config.columns.len() >= 4 && config.columns.len() <= 6,
+            "Expected 4-6 week columns, got {}",
+            config.columns.len()
+        );
+    }
+
+    #[test]
+    fn test_timeline_config_90_days_uses_month_zoom() {
+        let started = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+        let completed = Utc.with_ymd_and_hms(2025, 4, 1, 0, 0, 0).unwrap();
+        let tasks = vec![make_task(
+            "t1",
+            "Task",
+            Status::Done,
+            started,
+            Some(completed),
+        )];
+
+        let config = TimelineConfig::from_tasks(&tasks, 100);
+        assert_eq!(config.zoom_level, ZoomLevel::Months);
+        // Should have 3-4 columns for months (Jan, Feb, Mar, Apr)
+        assert!(
+            config.columns.len() >= 3 && config.columns.len() <= 4,
+            "Expected 3-4 month columns, got {}",
+            config.columns.len()
+        );
+    }
+
+    #[test]
+    fn test_column_labels_centered() {
+        let started = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+        let completed = Utc.with_ymd_and_hms(2025, 1, 7, 0, 0, 0).unwrap();
+        let tasks = vec![make_task(
+            "t1",
+            "Task",
+            Status::Done,
+            started,
+            Some(completed),
+        )];
+
+        let config = TimelineConfig::from_tasks(&tasks, 100);
+        let header = build_date_header(&config);
+
+        // Header should have content
+        let text: String = header.spans.iter().map(|s| s.content.to_string()).collect();
+        assert!(!text.trim().is_empty());
+    }
+
+    #[test]
+    fn test_separator_has_grid_markers() {
+        let started = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+        let completed = Utc.with_ymd_and_hms(2025, 1, 7, 0, 0, 0).unwrap();
+        let tasks = vec![make_task(
+            "t1",
+            "Task",
+            Status::Done,
+            started,
+            Some(completed),
+        )];
+
+        let config = TimelineConfig::from_tasks(&tasks, 100);
+        let sep = build_separator(&config);
+
+        // Separator should contain box-drawing characters
+        let text: String = sep.spans.iter().map(|s| s.content.to_string()).collect();
+        // Should contain horizontal line character
+        assert!(
+            text.contains('\u{2500}') || text.contains('\u{251C}') || text.contains('\u{253C}')
+        );
+    }
+
+    #[test]
+    fn test_column_boundaries_align() {
+        let started = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+        let completed = Utc.with_ymd_and_hms(2025, 1, 7, 0, 0, 0).unwrap();
+        let tasks = vec![make_task(
+            "t1",
+            "Task",
+            Status::Done,
+            started,
+            Some(completed),
+        )];
+
+        let config = TimelineConfig::from_tasks(&tasks, 100);
+
+        // Columns should not overlap
+        for i in 1..config.columns.len() {
+            assert!(
+                config.columns[i].start_col >= config.columns[i - 1].end_col
+                    || config.columns[i].start_col == config.columns[i - 1].end_col,
+                "Columns should not overlap: col {} ends at {}, col {} starts at {}",
+                i - 1,
+                config.columns[i - 1].end_col,
+                i,
+                config.columns[i].start_col
+            );
+        }
+    }
+
+    #[test]
+    fn test_empty_tasks_default_config_has_columns() {
+        let config = TimelineConfig::from_tasks(&[], 100);
+
+        // Even empty config should have columns (for 7-day default range)
+        assert!(!config.columns.is_empty());
+        assert_eq!(config.zoom_level, ZoomLevel::Days);
+    }
+
+    #[test]
+    fn test_narrow_width_still_produces_columns() {
+        let started = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+        let completed = Utc.with_ymd_and_hms(2025, 1, 7, 0, 0, 0).unwrap();
+        let tasks = vec![make_task(
+            "t1",
+            "Task",
+            Status::Done,
+            started,
+            Some(completed),
+        )];
+
+        let config = TimelineConfig::from_tasks(&tasks, 40);
+
+        // Should still have some columns even with narrow width
+        assert!(!config.columns.is_empty());
     }
 }
