@@ -90,6 +90,52 @@ pub fn is_enter(key: &KeyEvent) -> bool {
     )
 }
 
+/// Check if the key event is the Left arrow key.
+pub fn is_left(key: &KeyEvent) -> bool {
+    matches!(
+        key,
+        KeyEvent {
+            code: KeyCode::Left,
+            ..
+        }
+    )
+}
+
+/// Check if the key event is the Right arrow key.
+pub fn is_right(key: &KeyEvent) -> bool {
+    matches!(
+        key,
+        KeyEvent {
+            code: KeyCode::Right,
+            ..
+        }
+    )
+}
+
+/// Check if the key event is the h key (vim-style left).
+pub fn is_h(key: &KeyEvent) -> bool {
+    matches!(
+        key,
+        KeyEvent {
+            code: KeyCode::Char('h'),
+            modifiers: KeyModifiers::NONE,
+            ..
+        }
+    )
+}
+
+/// Check if the key event is the l key (vim-style right).
+pub fn is_l(key: &KeyEvent) -> bool {
+    matches!(
+        key,
+        KeyEvent {
+            code: KeyCode::Char('l'),
+            modifiers: KeyModifiers::NONE,
+            ..
+        }
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,5 +202,41 @@ mod tests {
     fn test_is_enter() {
         let key = make_key(KeyCode::Enter, KeyModifiers::NONE);
         assert!(is_enter(&key));
+    }
+
+    #[test]
+    fn test_is_left() {
+        let key = make_key(KeyCode::Left, KeyModifiers::NONE);
+        assert!(is_left(&key));
+    }
+
+    #[test]
+    fn test_is_right() {
+        let key = make_key(KeyCode::Right, KeyModifiers::NONE);
+        assert!(is_right(&key));
+    }
+
+    #[test]
+    fn test_is_h() {
+        let key = make_key(KeyCode::Char('h'), KeyModifiers::NONE);
+        assert!(is_h(&key));
+    }
+
+    #[test]
+    fn test_is_l() {
+        let key = make_key(KeyCode::Char('l'), KeyModifiers::NONE);
+        assert!(is_l(&key));
+    }
+
+    #[test]
+    fn test_is_h_with_modifier_is_false() {
+        let key = make_key(KeyCode::Char('h'), KeyModifiers::CONTROL);
+        assert!(!is_h(&key));
+    }
+
+    #[test]
+    fn test_is_l_with_modifier_is_false() {
+        let key = make_key(KeyCode::Char('l'), KeyModifiers::CONTROL);
+        assert!(!is_l(&key));
     }
 }

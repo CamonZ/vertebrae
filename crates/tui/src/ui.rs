@@ -20,7 +20,8 @@ use crate::tree_view::render_tree_view;
 const TAB_TITLES: [&str; 3] = ["Details", "Tree", "Timeline"];
 
 /// Legend text for keyboard shortcuts.
-const LEGEND: &str = " [j/k] Navigate  [Tab] Switch view  [Enter] Select  [q] Quit ";
+const LEGEND: &str =
+    " [j/k] Navigate  [h/l] Switch panel  [Tab] Switch view  [Enter] Select  [q] Quit ";
 
 /// Draw the entire UI.
 pub fn draw(frame: &mut Frame, app: &App) {
@@ -67,17 +68,21 @@ fn create_main_layout(area: Rect) -> Vec<Rect> {
 
 /// Draw the left navigation panel using the tree widget.
 fn draw_nav_panel(frame: &mut Frame, area: Rect, app: &App) {
+    let is_focused = app.focused_panel().is_navigation();
     render_nav_panel(
         frame,
         area,
         app.visible_nodes(),
         app.selected_index(),
         Some("No tasks found"),
+        is_focused,
     );
 }
 
 /// Draw the right content area with tabs and content.
 fn draw_content_area(frame: &mut Frame, area: Rect, app: &App) {
+    let is_focused = app.focused_panel().is_content();
+
     // Split into tabs header and content
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -87,22 +92,28 @@ fn draw_content_area(frame: &mut Frame, area: Rect, app: &App) {
         ])
         .split(area);
 
-    // Draw tabs
-    draw_tabs(frame, chunks[0], app.active_tab());
+    // Draw tabs with focus indicator
+    draw_tabs(frame, chunks[0], app.active_tab(), is_focused);
 
-    // Draw content based on active tab
-    draw_tab_content(frame, chunks[1], app);
+    // Draw content based on active tab with scroll offset
+    draw_tab_content(frame, chunks[1], app, is_focused);
 }
 
 /// Draw the tab bar.
-fn draw_tabs(frame: &mut Frame, area: Rect, active: ActiveTab) {
+fn draw_tabs(frame: &mut Frame, area: Rect, active: ActiveTab, is_focused: bool) {
     let titles: Vec<Line> = TAB_TITLES.iter().map(|t| Line::from(*t)).collect();
+
+    let border_color = if is_focused {
+        Color::Yellow
+    } else {
+        Color::Cyan
+    };
 
     let tabs = Tabs::new(titles)
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Cyan)),
+                .border_style(Style::default().fg(border_color)),
         )
         .select(active.index())
         .style(Style::default().fg(Color::White))
@@ -116,13 +127,28 @@ fn draw_tabs(frame: &mut Frame, area: Rect, active: ActiveTab) {
 }
 
 /// Draw the content for the active tab.
-fn draw_tab_content(frame: &mut Frame, area: Rect, app: &App) {
+fn draw_tab_content(frame: &mut Frame, area: Rect, app: &App, is_focused: bool) {
+    let scroll_offset = app.content_scroll_offset();
+
     match app.active_tab() {
         ActiveTab::Details => {
-            render_details_view(frame, area, app.selected_task_details());
+            render_details_view(
+                frame,
+                area,
+                app.selected_task_details(),
+                is_focused,
+                scroll_offset,
+            );
         }
         ActiveTab::Tree => {
-            render_tree_view(frame, area, app.tree_roots(), Some("No tasks found"));
+            render_tree_view(
+                frame,
+                area,
+                app.tree_roots(),
+                Some("No tasks found"),
+                is_focused,
+                scroll_offset,
+            );
         }
         ActiveTab::Timeline => {
             render_timeline_view(
@@ -130,6 +156,8 @@ fn draw_tab_content(frame: &mut Frame, area: Rect, app: &App) {
                 area,
                 app.timeline_tasks(),
                 Some("No started tasks found"),
+                is_focused,
+                scroll_offset,
             );
         }
     }

@@ -47,16 +47,26 @@ mod level_icons {
 /// * `area` - The area to render within
 /// * `tree_roots` - The root nodes of the task tree
 /// * `empty_message` - Message to show when no tasks exist
+/// * `is_focused` - Whether this panel currently has focus
+/// * `scroll_offset` - Vertical scroll offset for the content
 pub fn render_tree_view(
     frame: &mut Frame,
     area: Rect,
     tree_roots: &[TreeNode],
     empty_message: Option<&str>,
+    is_focused: bool,
+    scroll_offset: usize,
 ) {
+    let border_color = if is_focused {
+        Color::Yellow
+    } else {
+        Color::Cyan
+    };
+
     let block = Block::default()
         .title(" Tree ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan));
+        .border_style(Style::default().fg(border_color));
 
     if tree_roots.is_empty() {
         let message = empty_message.unwrap_or("No tasks found");
@@ -72,7 +82,8 @@ pub fn render_tree_view(
 
     let paragraph = Paragraph::new(lines)
         .block(block)
-        .wrap(Wrap { trim: false });
+        .wrap(Wrap { trim: false })
+        .scroll((scroll_offset as u16, 0));
 
     frame.render_widget(paragraph, area);
 }

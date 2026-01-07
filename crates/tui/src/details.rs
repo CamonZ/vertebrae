@@ -40,18 +40,39 @@ pub struct TaskDetails {
 /// Render the details view for a task.
 ///
 /// If `task` is `None`, displays "No task selected" message.
-pub fn render_details_view(frame: &mut Frame, area: Rect, task: Option<&TaskDetails>) {
+///
+/// # Arguments
+///
+/// * `frame` - The frame to render to
+/// * `area` - The area to render within
+/// * `task` - The task details to display, or None
+/// * `is_focused` - Whether this panel currently has focus
+/// * `scroll_offset` - Vertical scroll offset for the content
+pub fn render_details_view(
+    frame: &mut Frame,
+    area: Rect,
+    task: Option<&TaskDetails>,
+    is_focused: bool,
+    scroll_offset: usize,
+) {
+    let border_color = if is_focused {
+        Color::Yellow
+    } else {
+        Color::Cyan
+    };
+
     let block = Block::default()
         .title(" Details ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan));
+        .border_style(Style::default().fg(border_color));
 
     match task {
         Some(details) => {
             let lines = build_details_lines(details);
             let paragraph = Paragraph::new(lines)
                 .block(block)
-                .wrap(Wrap { trim: false });
+                .wrap(Wrap { trim: false })
+                .scroll((scroll_offset as u16, 0));
             frame.render_widget(paragraph, area);
         }
         None => {
