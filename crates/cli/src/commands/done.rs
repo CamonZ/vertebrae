@@ -199,12 +199,32 @@ impl DoneCommand {
 
     /// Update the task status to done and refresh updated_at and completed_at.
     async fn update_status(&self, db: &Database, id: &str) -> Result<(), DbError> {
+        // First update the status
         let query = format!(
             "UPDATE task:{} SET status = 'done', updated_at = time::now(), completed_at = time::now()",
             id
         );
         db.client().query(&query).await?;
-        Ok(())
+
+        // Verify the update actually persisted by querying the status
+        let verify_query = format!("SELECT id, status FROM task:{}", id);
+        let mut result = db.client().query(&verify_query).await?;
+        let task_status: Option<TaskStatusRow> = result.take(0)?;
+
+        match task_status {
+            Some(row) if row.status == "done" => Ok(()),
+            Some(row) => Err(DbError::InvalidPath {
+                path: std::path::PathBuf::from(id),
+                reason: format!(
+                    "Failed to update task '{}': status is '{}', expected 'done'",
+                    id, row.status
+                ),
+            }),
+            None => Err(DbError::InvalidPath {
+                path: std::path::PathBuf::from(id),
+                reason: format!("Task '{}' not found after update", id),
+            }),
+        }
     }
 }
 
