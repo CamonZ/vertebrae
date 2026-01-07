@@ -36,6 +36,10 @@ pub struct AddCommand {
     /// Dependency task ID (can be specified multiple times)
     #[arg(long = "depends-on")]
     pub depends_on: Vec<String>,
+
+    /// Mark task as needing human review before completion
+    #[arg(long = "needs-review")]
+    pub needs_review: bool,
 }
 
 /// Parse a level string into a Level enum
@@ -129,6 +133,10 @@ impl AddCommand {
             task = task.with_tags(self.tags.clone());
         }
 
+        if self.needs_review {
+            task = task.with_needs_human_review(true);
+        }
+
         // Store the task in the database
         self.create_task(db, &id, &task).await?;
 
@@ -213,13 +221,15 @@ impl AddCommand {
                 level = "{}",
                 status = "{}",
                 priority = {},
-                tags = {}"#,
+                tags = {},
+                needs_human_review = {}"#,
             id,
             description_str,
             task.level.as_str(),
             task.status.as_str(),
             priority_str,
-            tags_str
+            tags_str,
+            task.needs_human_review
         );
 
         let mut query_builder = db.client().query(&query).bind(("title", title));
@@ -393,6 +403,7 @@ mod tests {
             tags: vec![],
             parent: None,
             depends_on: vec![],
+            needs_review: false,
         };
 
         let id = cmd.execute(&db).await.expect("Add should succeed");
@@ -421,6 +432,7 @@ mod tests {
             tags: vec![],
             parent: None,
             depends_on: vec![],
+            needs_review: false,
         };
 
         let id = cmd.execute(&db).await.expect("Add should succeed");
@@ -445,6 +457,7 @@ mod tests {
             tags: vec![],
             parent: None,
             depends_on: vec![],
+            needs_review: false,
         };
 
         let id = cmd.execute(&db).await.expect("Add should succeed");
@@ -469,6 +482,7 @@ mod tests {
             tags: vec!["backend".to_string(), "urgent".to_string()],
             parent: None,
             depends_on: vec![],
+            needs_review: false,
         };
 
         let id = cmd.execute(&db).await.expect("Add should succeed");
@@ -495,6 +509,7 @@ mod tests {
             tags: vec![],
             parent: None,
             depends_on: vec![],
+            needs_review: false,
         };
 
         let result = cmd.execute(&db).await;
@@ -525,6 +540,7 @@ mod tests {
             tags: vec![],
             parent: None,
             depends_on: vec![],
+            needs_review: false,
         };
 
         let result = cmd.execute(&db).await;
@@ -555,6 +571,7 @@ mod tests {
             tags: vec![],
             parent: Some("nonexistent".to_string()),
             depends_on: vec![],
+            needs_review: false,
         };
 
         let result = cmd.execute(&db).await;
@@ -590,6 +607,7 @@ mod tests {
             tags: vec![],
             parent: None,
             depends_on: vec!["nonexistent".to_string()],
+            needs_review: false,
         };
 
         let result = cmd.execute(&db).await;
@@ -626,6 +644,7 @@ mod tests {
             tags: vec![],
             parent: None,
             depends_on: vec![],
+            needs_review: false,
         };
 
         let parent_id = parent_cmd.execute(&db).await.unwrap();
@@ -639,6 +658,7 @@ mod tests {
             tags: vec![],
             parent: Some(parent_id.clone()),
             depends_on: vec![],
+            needs_review: false,
         };
 
         let child_id = child_cmd.execute(&db).await.unwrap();
@@ -674,6 +694,7 @@ mod tests {
             tags: vec![],
             parent: None,
             depends_on: vec![],
+            needs_review: false,
         };
 
         let dep_id = dep_cmd.execute(&db).await.unwrap();
@@ -687,6 +708,7 @@ mod tests {
             tags: vec![],
             parent: None,
             depends_on: vec![dep_id.clone()],
+            needs_review: false,
         };
 
         let task_id = task_cmd.execute(&db).await.unwrap();
@@ -722,6 +744,7 @@ mod tests {
             tags: vec![],
             parent: None,
             depends_on: vec![],
+            needs_review: false,
         };
         let dep1_id = dep1_cmd.execute(&db).await.unwrap();
 
@@ -733,6 +756,7 @@ mod tests {
             tags: vec![],
             parent: None,
             depends_on: vec![],
+            needs_review: false,
         };
         let dep2_id = dep2_cmd.execute(&db).await.unwrap();
 
@@ -745,6 +769,7 @@ mod tests {
             tags: vec![],
             parent: None,
             depends_on: vec![dep1_id.clone(), dep2_id.clone()],
+            needs_review: false,
         };
 
         let task_id = task_cmd.execute(&db).await.unwrap();
@@ -786,6 +811,7 @@ mod tests {
             tags: vec![],
             parent: None,
             depends_on: vec![],
+            needs_review: false,
         };
         let parent_id = parent_cmd
             .execute(&db)
@@ -801,6 +827,7 @@ mod tests {
             tags: vec![],
             parent: None,
             depends_on: vec![],
+            needs_review: false,
         };
         let dep_id = dep_cmd
             .execute(&db)
@@ -816,6 +843,7 @@ mod tests {
             tags: vec!["urgent".to_string(), "backend".to_string()],
             parent: Some(parent_id.clone()),
             depends_on: vec![dep_id.clone()],
+            needs_review: false,
         };
 
         let task_id = cmd.execute(&db).await.expect("Task should be created");
@@ -860,6 +888,7 @@ mod tests {
             tags: vec![],
             parent: None,
             depends_on: vec![],
+            needs_review: false,
         };
 
         let result = cmd.execute(&db).await.unwrap();
@@ -881,6 +910,7 @@ mod tests {
             tags: vec![],
             parent: None,
             depends_on: vec![],
+            needs_review: false,
         };
 
         let exists = cmd.task_exists(&db, "xxxxxx").await.unwrap();
@@ -902,6 +932,7 @@ mod tests {
             tags: vec![],
             parent: None,
             depends_on: vec![],
+            needs_review: false,
         };
 
         let id = cmd.execute(&db).await.unwrap();
@@ -925,6 +956,7 @@ mod tests {
             tags: vec![],
             parent: None,
             depends_on: vec![],
+            needs_review: false,
         };
 
         let id = cmd.execute(&db).await.unwrap();
@@ -959,6 +991,7 @@ mod tests {
             tags: vec![],
             parent: None,
             depends_on: vec![],
+            needs_review: false,
         };
 
         let id = cmd.execute(&db).await.unwrap();
@@ -996,11 +1029,90 @@ mod tests {
                 tags: vec![],
                 parent: None,
                 depends_on: vec![],
+                needs_review: false,
             };
 
             let id = cmd.execute(&db).await.unwrap();
             assert!(ids.insert(id), "Duplicate ID generated");
         }
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_add_task_with_needs_review() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        let cmd = AddCommand {
+            title: "Task needing review".to_string(),
+            level: None,
+            description: None,
+            priority: None,
+            tags: vec![],
+            parent: None,
+            depends_on: vec![],
+            needs_review: true,
+        };
+
+        let id = cmd.execute(&db).await.expect("Add should succeed");
+
+        // Verify needs_human_review was persisted correctly
+        #[derive(Debug, serde::Deserialize)]
+        struct ReviewRow {
+            #[serde(default)]
+            needs_human_review: bool,
+        }
+
+        let mut result = db
+            .client()
+            .query(format!("SELECT needs_human_review FROM task:{}", id))
+            .await
+            .unwrap();
+
+        let row: Option<ReviewRow> = result.take(0).unwrap();
+        assert!(
+            row.unwrap().needs_human_review,
+            "needs_human_review should be true"
+        );
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_add_task_default_needs_review_is_false() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        let cmd = AddCommand {
+            title: "Task without review flag".to_string(),
+            level: None,
+            description: None,
+            priority: None,
+            tags: vec![],
+            parent: None,
+            depends_on: vec![],
+            needs_review: false,
+        };
+
+        let id = cmd.execute(&db).await.expect("Add should succeed");
+
+        // Verify needs_human_review defaults to false
+        #[derive(Debug, serde::Deserialize)]
+        struct ReviewRow {
+            #[serde(default)]
+            needs_human_review: bool,
+        }
+
+        let mut result = db
+            .client()
+            .query(format!("SELECT needs_human_review FROM task:{}", id))
+            .await
+            .unwrap();
+
+        let row: Option<ReviewRow> = result.take(0).unwrap();
+        assert!(
+            !row.unwrap().needs_human_review,
+            "needs_human_review should be false by default"
+        );
 
         cleanup(&temp_dir);
     }

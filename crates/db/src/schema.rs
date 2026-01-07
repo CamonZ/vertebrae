@@ -39,6 +39,8 @@ mod sql {
         DEFINE FIELD sections ON task FLEXIBLE TYPE array<object> DEFAULT [];
 
         DEFINE FIELD refs ON task FLEXIBLE TYPE array<object> DEFAULT [];
+
+        DEFINE FIELD needs_human_review ON task TYPE bool DEFAULT false;
     "#;
 
     /// Define the child_of relation table for hierarchy edges
