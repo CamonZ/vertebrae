@@ -117,6 +117,10 @@ impl AddCommand {
         let level = self.level.clone().unwrap_or(Level::Task);
         let mut task = Task::new(self.title.clone(), level).with_status(Status::Todo);
 
+        if let Some(description) = &self.description {
+            task = task.with_description(description.clone());
+        }
+
         if let Some(priority) = &self.priority {
             task = task.with_priority(priority.clone());
         }
@@ -181,6 +185,11 @@ impl AddCommand {
             None => "NONE".to_string(),
         };
 
+        let description_str = match &task.description {
+            Some(_) => "$description".to_string(),
+            None => "NONE".to_string(),
+        };
+
         let tags_str = if task.tags.is_empty() {
             "[]".to_string()
         } else {
@@ -200,18 +209,26 @@ impl AddCommand {
         let query = format!(
             r#"CREATE task:{} SET
                 title = $title,
+                description = {},
                 level = "{}",
                 status = "{}",
                 priority = {},
                 tags = {}"#,
             id,
+            description_str,
             task.level.as_str(),
             task.status.as_str(),
             priority_str,
             tags_str
         );
 
-        db.client().query(&query).bind(("title", title)).await?;
+        let mut query_builder = db.client().query(&query).bind(("title", title));
+
+        if let Some(description) = &task.description {
+            query_builder = query_builder.bind(("description", description.clone()));
+        }
+
+        query_builder.await?;
 
         Ok(())
     }

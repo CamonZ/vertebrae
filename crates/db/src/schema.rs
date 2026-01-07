@@ -15,6 +15,8 @@ mod sql {
 
         DEFINE FIELD title ON task TYPE string;
 
+        DEFINE FIELD description ON task TYPE option<string>;
+
         DEFINE FIELD level ON task TYPE string
             ASSERT $value IN ["epic", "ticket", "task"];
 

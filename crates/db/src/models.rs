@@ -305,6 +305,10 @@ pub struct Task {
     /// Task title
     pub title: String,
 
+    /// Optional description providing more context about the task
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+
     /// Hierarchy level (epic, ticket, task)
     pub level: Level,
 
@@ -350,6 +354,7 @@ impl Task {
         Self {
             id: None,
             title: title.into(),
+            description: None,
             level,
             status: Status::Todo,
             priority: None,
@@ -361,6 +366,12 @@ impl Task {
             sections: Vec::new(),
             code_refs: Vec::new(),
         }
+    }
+
+    /// Set the description of this task
+    pub fn with_description(mut self, description: impl Into<String>) -> Self {
+        self.description = Some(description.into());
+        self
     }
 
     /// Set the status of this task
@@ -403,6 +414,7 @@ impl Task {
 impl PartialEq for Task {
     fn eq(&self, other: &Self) -> bool {
         self.title == other.title
+            && self.description == other.description
             && self.level == other.level
             && self.status == other.status
             && self.priority == other.priority
