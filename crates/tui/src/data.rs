@@ -5,10 +5,7 @@
 
 use std::collections::HashMap;
 
-use vertebrae_db::{
-    Database, GraphQueries, Level, RelationshipRepository, TaskFilter, TaskLister, TaskRepository,
-    TaskSummary,
-};
+use vertebrae_db::{Database, Level, TaskFilter, TaskSummary};
 
 use crate::details::{TaskDetails, TaskRelationships};
 use crate::error::TuiResult;
@@ -20,7 +17,7 @@ use surrealdb;
 
 /// Load all root tasks (epics with no parent) from the database.
 pub async fn load_root_tasks(db: &Database) -> TuiResult<Vec<TaskSummary>> {
-    let lister = TaskLister::new(db.client());
+    let lister = db.list_tasks();
     let filter = TaskFilter::new()
         .root_only()
         .with_level(Level::Epic)
@@ -32,7 +29,7 @@ pub async fn load_root_tasks(db: &Database) -> TuiResult<Vec<TaskSummary>> {
 
 /// Load children of a specific task.
 pub async fn load_children(db: &Database, parent_id: &str) -> TuiResult<Vec<TaskSummary>> {
-    let lister = TaskLister::new(db.client());
+    let lister = db.list_tasks();
     let filter = TaskFilter::new().children_of(parent_id).include_done();
 
     let tasks = lister.list(&filter).await?;
@@ -50,7 +47,7 @@ fn task_to_node(task: &TaskSummary) -> TreeNode {
 /// For large databases, consider using lazy loading instead.
 pub async fn load_full_tree(db: &Database) -> TuiResult<Vec<TreeNode>> {
     // Load all tasks at once (more efficient than multiple queries)
-    let lister = TaskLister::new(db.client());
+    let lister = db.list_tasks();
     let filter = TaskFilter::new().include_done();
     let all_tasks = lister.list(&filter).await?;
 
@@ -125,7 +122,7 @@ async fn build_tree_node_with_progress(
         node = node.with_children(children);
 
         // Load progress for nodes with children
-        let graph = GraphQueries::new(db.client());
+        let graph = db.graph();
         let progress = graph.get_progress(&task.id).await?;
         node = node.with_progress(progress);
     }
@@ -140,7 +137,7 @@ async fn build_tree_node_with_progress(
 /// a node is expanded.
 pub async fn load_root_epics_lazy(db: &Database) -> TuiResult<Vec<TreeNode>> {
     let roots = load_root_tasks(db).await?;
-    let graph = GraphQueries::new(db.client());
+    let graph = db.graph();
 
     let mut nodes = Vec::with_capacity(roots.len());
 
@@ -171,7 +168,7 @@ pub async fn load_root_epics_lazy(db: &Database) -> TuiResult<Vec<TreeNode>> {
 /// its children from the database.
 pub async fn load_node_children(db: &Database, node_id: &str) -> TuiResult<Vec<TreeNode>> {
     let children = load_children(db, node_id).await?;
-    let graph = GraphQueries::new(db.client());
+    let graph = db.graph();
 
     let mut nodes = Vec::with_capacity(children.len());
 
@@ -208,9 +205,9 @@ pub async fn load_node_children(db: &Database, node_id: &str) -> TuiResult<Vec<T
 ///
 /// `Some(TaskDetails)` if the task exists, `None` otherwise.
 pub async fn load_task_details(db: &Database, task_id: &str) -> TuiResult<Option<TaskDetails>> {
-    let task_repo = TaskRepository::new(db.client());
-    let rel_repo = RelationshipRepository::new(db.client());
-    let graph = GraphQueries::new(db.client());
+    let task_repo = db.tasks();
+    let rel_repo = db.relationships();
+    let graph = db.graph();
 
     // Load the task
     let task = match task_repo.get(task_id).await? {
@@ -305,7 +302,7 @@ struct DependencyEdgeRow {
 ///
 /// A vector of `TimelineTask` objects for tasks that have been started.
 pub async fn load_timeline_tasks(db: &Database) -> TuiResult<Vec<TimelineTask>> {
-    let rel_repo = RelationshipRepository::new(db.client());
+    let rel_repo = db.relationships();
 
     // Query tasks with started_at directly from the database
     // The TaskRepository.get() doesn't include started_at/completed_at
@@ -313,7 +310,7 @@ pub async fn load_timeline_tasks(db: &Database) -> TuiResult<Vec<TimelineTask>> 
     let query = "SELECT id, title, status, started_at, completed_at \
                  FROM task WHERE started_at != NONE";
 
-    let mut result = db.client().query(query).await?;
+    let mut result = db.query(query).await?;
     let rows: Vec<TimelineTaskRow> = result.take(0)?;
 
     if rows.is_empty() {
@@ -326,7 +323,7 @@ pub async fn load_timeline_tasks(db: &Database) -> TuiResult<Vec<TimelineTask>> 
     // Query all dependency edges
     // The depends_on edge goes: dependent -> depends_on -> blocker
     let edge_query = "SELECT in.id AS in_id, out.id AS out_id FROM depends_on";
-    let mut edge_result = db.client().query(edge_query).await?;
+    let mut edge_result = db.query(edge_query).await?;
     let edge_rows: Vec<DependencyEdgeRow> = edge_result.take(0)?;
 
     // Convert to DependencyEdge format
@@ -408,13 +405,13 @@ mod tests {
         level: Level,
         parent_id: Option<&str>,
     ) {
-        let repo = TaskRepository::new(db.client());
+        let repo = db.tasks();
         let task = Task::new(title, level);
         repo.create(id, &task).await.unwrap();
 
         if let Some(parent) = parent_id {
             let query = format!("RELATE task:{} -> child_of -> task:{}", id, parent);
-            db.client().query(&query).await.unwrap();
+            db.query(&query).await.unwrap();
         }
     }
 
@@ -632,7 +629,7 @@ mod tests {
         create_task_with_parent(&db, "dependent", "Dependent Task", Level::Task, None).await;
 
         // Create relationships: dependent -> task1 -> blocker
-        let rel_repo = RelationshipRepository::new(db.client());
+        let rel_repo = db.relationships();
         rel_repo
             .create_depends_on("task1", "blocker")
             .await
@@ -691,7 +688,7 @@ mod tests {
             "UPDATE task:{} SET started_at = time::now(), status = 'in_progress'",
             id
         );
-        db.client().query(&query).await.unwrap();
+        db.query(&query).await.unwrap();
     }
 
     #[tokio::test]
@@ -723,7 +720,7 @@ mod tests {
 
         // Set started_at and completed_at using raw SQL
         let query = "UPDATE task:done1 SET started_at = time::now() - 2h, completed_at = time::now(), status = 'done'";
-        db.client().query(query).await.unwrap();
+        db.query(query).await.unwrap();
 
         let timeline_tasks = load_timeline_tasks(&db).await.unwrap();
         assert_eq!(timeline_tasks.len(), 1);
@@ -748,9 +745,9 @@ mod tests {
         let query2 = "UPDATE task:task2 SET started_at = time::now() - 3h, status = 'in_progress'";
         let query3 = "UPDATE task:task3 SET started_at = time::now() - 2h, status = 'done'";
 
-        db.client().query(query1).await.unwrap();
-        db.client().query(query2).await.unwrap();
-        db.client().query(query3).await.unwrap();
+        db.query(query1).await.unwrap();
+        db.query(query2).await.unwrap();
+        db.query(query3).await.unwrap();
 
         let timeline_tasks = load_timeline_tasks(&db).await.unwrap();
         assert_eq!(timeline_tasks.len(), 3);
@@ -767,7 +764,7 @@ mod tests {
     async fn test_load_timeline_tasks_with_dependencies() {
         let (db, temp_dir) = setup_test_db().await;
 
-        let rel_repo = RelationshipRepository::new(db.client());
+        let rel_repo = db.relationships();
 
         // Create two tasks
         create_task_with_parent(&db, "blocker", "Blocker", Level::Task, None).await;
@@ -776,8 +773,8 @@ mod tests {
         // Set timestamps using raw SQL
         let query1 = "UPDATE task:blocker SET started_at = time::now() - 2h, status = 'done'";
         let query2 = "UPDATE task:dependent SET started_at = time::now(), status = 'in_progress'";
-        db.client().query(query1).await.unwrap();
-        db.client().query(query2).await.unwrap();
+        db.query(query1).await.unwrap();
+        db.query(query2).await.unwrap();
 
         // Create dependency relationship
         rel_repo
@@ -816,7 +813,7 @@ mod tests {
 
         // Mark one ticket as done
         let query = "UPDATE task:ticket1 SET status = 'done'";
-        db.client().query(query).await.unwrap();
+        db.query(query).await.unwrap();
 
         let details = load_task_details(&db, "epic1").await.unwrap();
         assert!(details.is_some());
@@ -860,7 +857,7 @@ mod tests {
     async fn test_load_timeline_tasks_assigns_dependency_groups() {
         let (db, temp_dir) = setup_test_db().await;
 
-        let rel_repo = RelationshipRepository::new(db.client());
+        let rel_repo = db.relationships();
 
         // Create three tasks: blocker and dependent in a chain, isolated is alone
         create_task_with_parent(&db, "blocker", "Blocker", Level::Task, None).await;
@@ -871,9 +868,9 @@ mod tests {
         let query1 = "UPDATE task:blocker SET started_at = time::now() - 2h, status = 'done'";
         let query2 = "UPDATE task:dependent SET started_at = time::now(), status = 'in_progress'";
         let query3 = "UPDATE task:isolated SET started_at = time::now() - 1h, status = 'done'";
-        db.client().query(query1).await.unwrap();
-        db.client().query(query2).await.unwrap();
-        db.client().query(query3).await.unwrap();
+        db.query(query1).await.unwrap();
+        db.query(query2).await.unwrap();
+        db.query(query3).await.unwrap();
 
         // Create dependency: dependent -> blocker
         rel_repo

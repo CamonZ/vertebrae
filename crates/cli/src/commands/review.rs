@@ -4,7 +4,7 @@
 
 use clap::Args;
 use serde::Deserialize;
-use vertebrae_db::{Database, DbError};
+use vertebrae_db::{Database, DbError, TaskUpdate};
 
 /// Toggle the needs_human_review flag on a task
 #[derive(Debug, Args)]
@@ -21,10 +21,8 @@ pub struct ReviewCommand {
 /// Result from querying a task's review flag
 #[derive(Debug, Deserialize)]
 struct ReviewFlagRow {
-    #[allow(dead_code)]
-    id: surrealdb::sql::Thing,
     #[serde(default)]
-    needs_human_review: bool,
+    needs_human_review: Option<bool>,
 }
 
 impl ReviewCommand {
@@ -55,11 +53,8 @@ impl ReviewCommand {
             None => !current, // Toggle
         };
 
-        // Update the flag
+        // Update the flag and timestamp
         self.update_flag(db, &id, new_value).await?;
-
-        // Update timestamp
-        self.update_timestamp(db, &id).await?;
 
         let action = if new_value {
             "marked as needing review"
@@ -72,12 +67,14 @@ impl ReviewCommand {
 
     /// Get the current needs_human_review flag value.
     async fn get_current_flag(&self, db: &Database, id: &str) -> Result<bool, DbError> {
-        let query = format!("SELECT id, needs_human_review FROM task:{}", id);
-        let mut result = db.client().query(&query).await?;
-        let row: Option<ReviewFlagRow> = result.take(0)?;
+        let row: Option<ReviewFlagRow> = db
+            .client()
+            .select(("task", id))
+            .await
+            .map_err(|e| DbError::Query(Box::new(e)))?;
 
         match row {
-            Some(r) => Ok(r.needs_human_review),
+            Some(r) => Ok(r.needs_human_review.unwrap_or(false)),
             None => Err(DbError::InvalidPath {
                 path: std::path::PathBuf::from(&self.id),
                 reason: format!("Task '{}' not found", self.id),
@@ -85,17 +82,10 @@ impl ReviewCommand {
         }
     }
 
-    /// Update the needs_human_review flag.
+    /// Update the needs_human_review flag and timestamp.
     async fn update_flag(&self, db: &Database, id: &str, value: bool) -> Result<(), DbError> {
-        let query = format!("UPDATE task:{} SET needs_human_review = {}", id, value);
-        db.client().query(&query).await?;
-        Ok(())
-    }
-
-    /// Update the updated_at timestamp.
-    async fn update_timestamp(&self, db: &Database, id: &str) -> Result<(), DbError> {
-        let query = format!("UPDATE task:{} SET updated_at = time::now()", id);
-        db.client().query(&query).await?;
+        let updates = TaskUpdate::new().with_needs_human_review(value);
+        db.tasks().update(id, &updates).await?;
         Ok(())
     }
 }
@@ -138,17 +128,8 @@ mod tests {
 
     /// Helper to get the needs_human_review flag
     async fn get_review_flag(db: &Database, id: &str) -> bool {
-        let query = format!("SELECT needs_human_review FROM task:{}", id);
-        let mut result = db.client().query(&query).await.unwrap();
-
-        #[derive(Debug, Deserialize)]
-        struct FlagRow {
-            #[serde(default)]
-            needs_human_review: bool,
-        }
-
-        let row: Option<FlagRow> = result.take(0).unwrap();
-        row.map(|r| r.needs_human_review).unwrap_or(false)
+        let task = db.tasks().get(id).await.unwrap().unwrap();
+        task.needs_human_review.unwrap_or(false)
     }
 
     /// Clean up test database

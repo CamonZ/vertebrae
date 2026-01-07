@@ -229,7 +229,7 @@ impl AddCommand {
             task.status.as_str(),
             priority_str,
             tags_str,
-            task.needs_human_review
+            task.needs_human_review.unwrap_or(false)
         );
 
         let mut query_builder = db.client().query(&query).bind(("title", title));

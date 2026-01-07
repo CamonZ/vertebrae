@@ -85,12 +85,51 @@ impl Database {
         Ok(())
     }
 
+    /// Get a task repository for CRUD operations on tasks.
+    pub fn tasks(&self) -> TaskRepository<'_> {
+        TaskRepository::new(&self.client)
+    }
+
+    /// Get a graph queries instance for hierarchy and dependency operations.
+    pub fn graph(&self) -> GraphQueries<'_> {
+        GraphQueries::new(&self.client)
+    }
+
+    /// Get a relationship repository for managing task relationships.
+    pub fn relationships(&self) -> RelationshipRepository<'_> {
+        RelationshipRepository::new(&self.client)
+    }
+
+    /// Get a task lister for filtering and listing tasks.
+    pub fn list_tasks(&self) -> TaskLister<'_> {
+        TaskLister::new(&self.client)
+    }
+
     /// Get a reference to the underlying SurrealDB client.
     ///
-    /// Use this for executing queries against the database.
-    #[allow(dead_code)] // Will be used by future features
+    /// INTERNAL USE ONLY - For schema initialization and tests only.
+    /// Commands should use repository accessors (`db.tasks()`, `db.graph()`, etc.) instead.
+    /// Test helpers may use this method to set up test data.
+    #[allow(dead_code)] // Used by schema initialization and tests
     pub fn client(&self) -> &Surreal<Db> {
         &self.client
+    }
+
+    /// Execute a raw database query (for specialized use cases only).
+    ///
+    /// This method should only be used for queries that don't fit the repository pattern.
+    /// Most operations should use repository accessors instead.
+    /// The TUI may use this for specialized data loading that requires raw queries.
+    ///
+    /// # Arguments
+    ///
+    /// * `query` - The SurrealDB query string
+    ///
+    /// # Returns
+    ///
+    /// The raw query result from SurrealDB
+    pub async fn query(&self, query: &str) -> surrealdb::Result<surrealdb::Response> {
+        self.client.query(query).await
     }
 
     /// Get the path where the database is stored.

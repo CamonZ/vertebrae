@@ -6,7 +6,7 @@
 
 use clap::Args;
 use serde::Deserialize;
-use vertebrae_db::{Database, DbError, GraphQueries, Status};
+use vertebrae_db::{Database, DbError, Status};
 
 /// Mark a task as complete (transition to done)
 #[derive(Debug, Args)]
@@ -19,8 +19,6 @@ pub struct DoneCommand {
 /// Result from querying a task's status
 #[derive(Debug, Deserialize)]
 struct TaskStatusRow {
-    #[allow(dead_code)]
-    id: surrealdb::sql::Thing,
     status: String,
 }
 
@@ -102,8 +100,7 @@ impl DoneCommand {
         }
 
         // Check for incomplete descendants (hard enforcement - error if any exist)
-        let graph = GraphQueries::new(db.client());
-        let incomplete_descendants = graph.get_incomplete_descendants(&id).await?;
+        let incomplete_descendants = db.graph().get_incomplete_descendants(&id).await?;
 
         if !incomplete_descendants.is_empty() {
             return Err(DbError::IncompleteChildren {
@@ -130,86 +127,52 @@ impl DoneCommand {
 
     /// Fetch the task by ID and return its status.
     async fn fetch_task(&self, db: &Database, id: &str) -> Result<TaskStatusRow, DbError> {
-        let query = format!("SELECT id, status FROM task:{}", id);
-        let mut result = db.client().query(&query).await?;
-        let task: Option<TaskStatusRow> = result.take(0)?;
-
-        task.ok_or_else(|| DbError::InvalidPath {
-            path: std::path::PathBuf::from(&self.id),
-            reason: format!("Task '{}' not found", self.id),
-        })
+        db.tasks()
+            .get(id)
+            .await?
+            .ok_or_else(|| DbError::InvalidPath {
+                path: std::path::PathBuf::from(&self.id),
+                reason: format!("Task '{}' not found", self.id),
+            })
+            .map(|task| TaskStatusRow {
+                status: task.status.as_str().to_string(),
+            })
     }
 
     /// Find tasks that depend on the completed task and will become unblocked.
     ///
     /// A task becomes unblocked when ALL its dependencies are done.
-    /// This method finds tasks that depend on the current task and checks
-    /// if completing this task will make them fully unblocked.
     async fn find_unblocked_tasks(
         &self,
         db: &Database,
         id: &str,
     ) -> Result<Vec<UnblockedTask>, DbError> {
-        // Find all tasks that depend on this task
-        // The depends_on relation goes from dependent -> dependency
-        // So we need tasks that have depends_on pointing to this task
-        // We use a two-step approach:
-        // 1. Get all tasks that depend on this task
-        // 2. For each, check if all other dependencies are done
+        // Use the graph repository to find unblocked tasks
+        let unblocked_tuples = db.graph().get_unblocked_tasks(id).await?;
 
-        let dependents_query = format!(
-            "SELECT id, title FROM task WHERE ->depends_on->task CONTAINS task:{}",
-            id
-        );
-
-        let mut result = db.client().query(&dependents_query).await?;
-        let dependents: Vec<UnblockedTask> = result.take(0)?;
-
-        // For each dependent, check if this is their only incomplete dependency
-        let mut unblocked = Vec::new();
-
-        for dependent in dependents {
-            let dep_id = &dependent.id.id.to_string();
-
-            // Count incomplete dependencies for this task (excluding the current task which we're completing)
-            let count_query = format!(
-                "SELECT count() as cnt FROM task \
-                 WHERE <-depends_on<-task CONTAINS task:{} \
-                 AND id != task:{} \
-                 AND status != 'done'",
-                dep_id, id
-            );
-
-            #[derive(Debug, Deserialize)]
-            struct CountResult {
-                cnt: i64,
-            }
-
-            let mut count_result = db.client().query(&count_query).await?;
-            let count: Option<CountResult> = count_result.take(0)?;
-
-            // If no other incomplete dependencies, this task will be unblocked
-            if count.is_none() || count.is_some_and(|c| c.cnt == 0) {
-                unblocked.push(dependent);
-            }
-        }
+        // Convert from (String, String) tuples to UnblockedTask structs
+        let unblocked = unblocked_tuples
+            .into_iter()
+            .map(|(task_id, title)| {
+                let thing = surrealdb::sql::thing(&format!("task:{}", task_id))
+                    .expect("Valid task thing format");
+                UnblockedTask { id: thing, title }
+            })
+            .collect();
 
         Ok(unblocked)
     }
 
     /// Update the task status to done and refresh updated_at and completed_at.
     async fn update_status(&self, db: &Database, id: &str) -> Result<(), DbError> {
-        // First update the status
-        let query = format!(
-            "UPDATE task:{} SET status = 'done', updated_at = time::now(), completed_at = time::now()",
-            id
-        );
-        db.client().query(&query).await?;
+        // Use TaskRepository to mark the task as done
+        db.tasks().mark_done(id).await?;
 
-        // Verify the update actually persisted by querying the status
-        let verify_query = format!("SELECT id, status FROM task:{}", id);
-        let mut result = db.client().query(&verify_query).await?;
-        let task_status: Option<TaskStatusRow> = result.take(0)?;
+        // Verify the update actually persisted
+        let task_status: Option<TaskStatusRow> =
+            db.tasks().get(id).await?.map(|task| TaskStatusRow {
+                status: task.status.as_str().to_string(),
+            });
 
         match task_status {
             Some(row) if row.status == "done" => Ok(()),
@@ -296,54 +259,42 @@ mod tests {
 
     /// Helper to get task status from database
     async fn get_task_status(db: &Database, id: &str) -> String {
-        #[derive(Deserialize)]
-        struct StatusRow {
-            status: String,
-        }
-
-        let query = format!("SELECT status FROM task:{}", id);
-        let mut result = db.client().query(&query).await.unwrap();
-        let row: Option<StatusRow> = result.take(0).unwrap();
-        row.unwrap().status
+        db.tasks()
+            .get(id)
+            .await
+            .unwrap()
+            .unwrap()
+            .status
+            .as_str()
+            .to_string()
     }
 
     /// Helper to check if updated_at was set
     async fn has_updated_at(db: &Database, id: &str) -> bool {
-        #[derive(Deserialize)]
-        struct TimestampRow {
-            updated_at: Option<surrealdb::sql::Datetime>,
-        }
-
-        let query = format!("SELECT updated_at FROM task:{}", id);
-        let mut result = db.client().query(&query).await.unwrap();
-        let row: Option<TimestampRow> = result.take(0).unwrap();
-        row.map(|r| r.updated_at.is_some()).unwrap_or(false)
+        db.tasks()
+            .get(id)
+            .await
+            .unwrap()
+            .map(|task| task.updated_at.is_some())
+            .unwrap_or(false)
     }
 
     /// Helper to get completed_at timestamp
-    async fn get_completed_at(db: &Database, id: &str) -> Option<surrealdb::sql::Datetime> {
-        #[derive(Deserialize)]
-        struct TimestampRow {
-            completed_at: Option<surrealdb::sql::Datetime>,
-        }
-
-        let query = format!("SELECT completed_at FROM task:{}", id);
-        let mut result = db.client().query(&query).await.unwrap();
-        let row: Option<TimestampRow> = result.take(0).unwrap();
-        row.and_then(|r| r.completed_at)
+    async fn get_completed_at(db: &Database, id: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+        db.tasks()
+            .get(id)
+            .await
+            .unwrap()
+            .and_then(|task| task.completed_at)
     }
 
     /// Helper to get started_at timestamp
-    async fn get_started_at(db: &Database, id: &str) -> Option<surrealdb::sql::Datetime> {
-        #[derive(Deserialize)]
-        struct TimestampRow {
-            started_at: Option<surrealdb::sql::Datetime>,
-        }
-
-        let query = format!("SELECT started_at FROM task:{}", id);
-        let mut result = db.client().query(&query).await.unwrap();
-        let row: Option<TimestampRow> = result.take(0).unwrap();
-        row.and_then(|r| r.started_at)
+    async fn get_started_at(db: &Database, id: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+        db.tasks()
+            .get(id)
+            .await
+            .unwrap()
+            .and_then(|task| task.started_at)
     }
 
     /// Helper to set started_at timestamp for a task
@@ -928,7 +879,7 @@ mod tests {
         );
 
         // Verify completed_at is within 1 second of command execution
-        let completed_timestamp = completed_at.unwrap().0.timestamp() as u64;
+        let completed_timestamp = completed_at.unwrap().timestamp() as u64;
         assert!(
             completed_timestamp >= before && completed_timestamp <= after + 1,
             "completed_at ({}) should be within execution window ({} - {})",
@@ -1045,8 +996,8 @@ mod tests {
         assert!(started_at.is_some(), "started_at should be set");
         assert!(completed_at.is_some(), "completed_at should be set");
 
-        let started_timestamp = started_at.unwrap().0.timestamp();
-        let completed_timestamp = completed_at.unwrap().0.timestamp();
+        let started_timestamp = started_at.unwrap().timestamp();
+        let completed_timestamp = completed_at.unwrap().timestamp();
 
         assert!(
             completed_timestamp >= started_timestamp,
