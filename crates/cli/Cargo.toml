@@ -21,6 +21,8 @@ dirs = "5"
 sha2 = "0.10"
 rand = "0.9"
 vertebrae-db = { path = "../db" }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
 [dev-dependencies]
 serial_test = "3"

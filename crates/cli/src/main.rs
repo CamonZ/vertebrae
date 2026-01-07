@@ -1,6 +1,7 @@
 use clap::Parser;
 use std::path::PathBuf;
 use std::process;
+use tracing_subscriber::EnvFilter;
 
 mod commands;
 mod id;
@@ -52,10 +53,31 @@ fn resolve_db_path(cli_db: Option<PathBuf>) -> DbResult<PathBuf> {
 
 use vertebrae_db::DbResult;
 
+/// Initialize logging based on DEBUGGING environment variable
+///
+/// Examples:
+/// - `DEBUGGING=trace` - show all trace logs
+/// - `DEBUGGING=debug` - show debug and above
+/// - `DEBUGGING=info` - show info and above
+/// - `DEBUGGING=warn` - show warn and above
+/// - `DEBUGGING=error` - show error only
+fn init_logging() {
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"));
+
+    tracing_subscriber::fmt()
+        .with_env_filter(env_filter)
+        .with_target(true)
+        .with_level(true)
+        .init();
+}
+
 #[tokio::main]
 async fn main() {
+    init_logging();
+
     if let Err(e) = run_app().await {
-        eprintln!("Error: {}", e);
+        eprintln!("An unexpected error occurred");
+        tracing::error!("Error: {}", e.full_message());
         process::exit(1);
     }
 }
