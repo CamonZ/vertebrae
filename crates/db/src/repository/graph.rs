@@ -625,6 +625,71 @@ impl<'a> GraphQueries<'a> {
         Ok(!incomplete.is_empty())
     }
 
+    /// Get all incomplete descendants of a task with their information.
+    ///
+    /// Recursively finds all descendants (children, grandchildren, etc.) that are
+    /// not in "done" status. This is used for parent completion validation.
+    ///
+    /// # Arguments
+    ///
+    /// * `task_id` - The ID of the task to check
+    ///
+    /// # Returns
+    ///
+    /// A vector of `IncompleteChildInfo` structs containing task details.
+    /// Returns an empty vector if all descendants are complete.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Check if an epic can be marked as done
+    /// let incomplete = graph.get_incomplete_descendants("epic1").await?;
+    /// if !incomplete.is_empty() {
+    ///     // Cannot complete - has incomplete children
+    ///     for child in &incomplete {
+    ///         println!("  - {} ({}) [{}]", child.id, child.title, child.status);
+    ///     }
+    /// }
+    /// ```
+    pub async fn get_incomplete_descendants(
+        &self,
+        task_id: &str,
+    ) -> DbResult<Vec<crate::error::IncompleteChildInfo>> {
+        // First get all descendants
+        let descendants = self.get_all_descendants(task_id).await?;
+
+        if descendants.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // Build the query to get incomplete descendants with their info
+        let ids_quoted: Vec<String> = descendants
+            .iter()
+            .map(|id| format!("task:{}", id))
+            .collect();
+        let ids_str = ids_quoted.join(", ");
+
+        let query = format!(
+            r#"SELECT id, title, status, level FROM task
+               WHERE id IN [{}]
+               AND status != "done""#,
+            ids_str
+        );
+
+        let mut result = self.client.query(&query).await?;
+        let incomplete: Vec<TaskInfoRow> = result.take(0)?;
+
+        Ok(incomplete
+            .into_iter()
+            .map(|row| crate::error::IncompleteChildInfo {
+                id: row.id.id.to_string(),
+                title: row.title,
+                status: row.status,
+                level: row.level,
+            })
+            .collect())
+    }
+
     /// Get all incomplete blockers for a task.
     ///
     /// Returns the IDs of tasks that block this task and are not done.
@@ -1372,6 +1437,154 @@ mod tests {
         let blockers = graph.get_incomplete_blockers("task1").await.unwrap();
         assert_eq!(blockers.len(), 1);
         assert!(blockers.contains(&"blocker2".to_string()));
+
+        cleanup(&temp_dir);
+    }
+
+    // ========================================
+    // get_incomplete_descendants tests
+    // ========================================
+
+    #[tokio::test]
+    async fn test_get_incomplete_descendants_no_children() {
+        let (db, temp_dir) = setup_test_db().await;
+        let graph = GraphQueries::new(db.client());
+
+        create_task(&db, "task1", "Task 1", "task", "todo").await;
+
+        let incomplete = graph.get_incomplete_descendants("task1").await.unwrap();
+        assert!(incomplete.is_empty());
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_get_incomplete_descendants_all_complete() {
+        let (db, temp_dir) = setup_test_db().await;
+        let graph = GraphQueries::new(db.client());
+
+        create_task(&db, "parent", "Parent", "ticket", "in_progress").await;
+        create_task(&db, "child1", "Child 1", "task", "done").await;
+        create_task(&db, "child2", "Child 2", "task", "done").await;
+
+        create_child_of(&db, "child1", "parent").await;
+        create_child_of(&db, "child2", "parent").await;
+
+        let incomplete = graph.get_incomplete_descendants("parent").await.unwrap();
+        assert!(incomplete.is_empty());
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_get_incomplete_descendants_some_incomplete() {
+        let (db, temp_dir) = setup_test_db().await;
+        let graph = GraphQueries::new(db.client());
+
+        create_task(&db, "parent", "Parent", "ticket", "in_progress").await;
+        create_task(&db, "child1", "Child 1", "task", "done").await;
+        create_task(&db, "child2", "Child 2", "task", "todo").await;
+        create_task(&db, "child3", "Child 3", "task", "blocked").await;
+
+        create_child_of(&db, "child1", "parent").await;
+        create_child_of(&db, "child2", "parent").await;
+        create_child_of(&db, "child3", "parent").await;
+
+        let incomplete = graph.get_incomplete_descendants("parent").await.unwrap();
+        assert_eq!(incomplete.len(), 2);
+
+        let incomplete_ids: HashSet<_> = incomplete.iter().map(|c| c.id.as_str()).collect();
+        assert!(incomplete_ids.contains("child2"));
+        assert!(incomplete_ids.contains("child3"));
+        assert!(!incomplete_ids.contains("child1"));
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_get_incomplete_descendants_nested_hierarchy() {
+        let (db, temp_dir) = setup_test_db().await;
+        let graph = GraphQueries::new(db.client());
+
+        // Epic -> Ticket -> Tasks (nested hierarchy)
+        create_task(&db, "epic", "Epic", "epic", "in_progress").await;
+        create_task(&db, "ticket", "Ticket", "ticket", "in_progress").await;
+        create_task(&db, "task1", "Task 1", "task", "done").await;
+        create_task(&db, "task2", "Task 2", "task", "todo").await;
+
+        create_child_of(&db, "ticket", "epic").await;
+        create_child_of(&db, "task1", "ticket").await;
+        create_child_of(&db, "task2", "ticket").await;
+
+        // Epic should see both ticket and task2 as incomplete
+        let incomplete = graph.get_incomplete_descendants("epic").await.unwrap();
+        assert_eq!(incomplete.len(), 2);
+
+        let incomplete_ids: HashSet<_> = incomplete.iter().map(|c| c.id.as_str()).collect();
+        assert!(
+            incomplete_ids.contains("ticket"),
+            "ticket should be incomplete"
+        );
+        assert!(
+            incomplete_ids.contains("task2"),
+            "task2 should be incomplete"
+        );
+        assert!(
+            !incomplete_ids.contains("task1"),
+            "task1 should not be in incomplete list"
+        );
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_get_incomplete_descendants_returns_correct_info() {
+        let (db, temp_dir) = setup_test_db().await;
+        let graph = GraphQueries::new(db.client());
+
+        create_task(&db, "parent", "Parent Epic", "epic", "in_progress").await;
+        create_task(&db, "child", "Incomplete Child", "ticket", "blocked").await;
+
+        create_child_of(&db, "child", "parent").await;
+
+        let incomplete = graph.get_incomplete_descendants("parent").await.unwrap();
+        assert_eq!(incomplete.len(), 1);
+
+        let child = &incomplete[0];
+        assert_eq!(child.id, "child");
+        assert_eq!(child.title, "Incomplete Child");
+        assert_eq!(child.status, "blocked");
+        assert_eq!(child.level, "ticket");
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_get_incomplete_descendants_deep_nesting() {
+        let (db, temp_dir) = setup_test_db().await;
+        let graph = GraphQueries::new(db.client());
+
+        // Create a 4-level deep hierarchy
+        create_task(&db, "epic", "Epic", "epic", "in_progress").await;
+        create_task(&db, "ticket1", "Ticket 1", "ticket", "done").await;
+        create_task(&db, "ticket2", "Ticket 2", "ticket", "in_progress").await;
+        create_task(&db, "task1", "Task 1", "task", "done").await;
+        create_task(&db, "task2", "Task 2", "task", "todo").await;
+
+        create_child_of(&db, "ticket1", "epic").await;
+        create_child_of(&db, "ticket2", "epic").await;
+        create_child_of(&db, "task1", "ticket2").await;
+        create_child_of(&db, "task2", "ticket2").await;
+
+        // Epic should see ticket2 and task2 as incomplete (ticket1 and task1 are done)
+        let incomplete = graph.get_incomplete_descendants("epic").await.unwrap();
+        assert_eq!(incomplete.len(), 2);
+
+        let incomplete_ids: HashSet<_> = incomplete.iter().map(|c| c.id.as_str()).collect();
+        assert!(incomplete_ids.contains("ticket2"));
+        assert!(incomplete_ids.contains("task2"));
+        assert!(!incomplete_ids.contains("ticket1"));
+        assert!(!incomplete_ids.contains("task1"));
 
         cleanup(&temp_dir);
     }

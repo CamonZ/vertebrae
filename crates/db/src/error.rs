@@ -1,6 +1,19 @@
 use std::path::PathBuf;
 use thiserror::Error;
 
+/// Information about an incomplete child task blocking completion
+#[derive(Debug, Clone)]
+pub struct IncompleteChildInfo {
+    /// Task ID
+    pub id: String,
+    /// Task title
+    pub title: String,
+    /// Current status
+    pub status: String,
+    /// Hierarchy level (epic, ticket, task)
+    pub level: String,
+}
+
 /// Database error types for Vertebrae
 #[derive(Error, Debug)]
 pub enum DbError {
@@ -30,6 +43,13 @@ pub enum DbError {
         path: PathBuf,
         #[source]
         source: std::io::Error,
+    },
+
+    /// Error when trying to complete a task with incomplete children
+    #[error("Cannot complete task '{task_id}': has incomplete children")]
+    IncompleteChildren {
+        task_id: String,
+        children: Vec<IncompleteChildInfo>,
     },
 }
 
@@ -98,5 +118,85 @@ mod tests {
             reason: "test".to_string(),
         });
         assert!(err_result.is_err());
+    }
+
+    #[test]
+    fn test_incomplete_children_error_display() {
+        let err = DbError::IncompleteChildren {
+            task_id: "epic123".to_string(),
+            children: vec![IncompleteChildInfo {
+                id: "task1".to_string(),
+                title: "Incomplete Task".to_string(),
+                status: "todo".to_string(),
+                level: "task".to_string(),
+            }],
+        };
+        assert_eq!(
+            err.to_string(),
+            "Cannot complete task 'epic123': has incomplete children"
+        );
+    }
+
+    #[test]
+    fn test_incomplete_children_error_debug() {
+        let err = DbError::IncompleteChildren {
+            task_id: "epic123".to_string(),
+            children: vec![
+                IncompleteChildInfo {
+                    id: "task1".to_string(),
+                    title: "Incomplete Task".to_string(),
+                    status: "todo".to_string(),
+                    level: "task".to_string(),
+                },
+                IncompleteChildInfo {
+                    id: "task2".to_string(),
+                    title: "Another Task".to_string(),
+                    status: "blocked".to_string(),
+                    level: "task".to_string(),
+                },
+            ],
+        };
+        let debug_str = format!("{:?}", err);
+        assert!(
+            debug_str.contains("IncompleteChildren")
+                && debug_str.contains("epic123")
+                && debug_str.contains("task1")
+                && debug_str.contains("task2"),
+            "Debug output should contain IncompleteChildren and task IDs"
+        );
+    }
+
+    #[test]
+    fn test_incomplete_child_info_clone() {
+        let info = IncompleteChildInfo {
+            id: "test1".to_string(),
+            title: "Test Task".to_string(),
+            status: "todo".to_string(),
+            level: "task".to_string(),
+        };
+        let cloned = info.clone();
+        assert_eq!(info.id, cloned.id);
+        assert_eq!(info.title, cloned.title);
+        assert_eq!(info.status, cloned.status);
+        assert_eq!(info.level, cloned.level);
+    }
+
+    #[test]
+    fn test_incomplete_child_info_debug() {
+        let info = IncompleteChildInfo {
+            id: "test1".to_string(),
+            title: "Test Task".to_string(),
+            status: "todo".to_string(),
+            level: "task".to_string(),
+        };
+        let debug_str = format!("{:?}", info);
+        assert!(
+            debug_str.contains("IncompleteChildInfo")
+                && debug_str.contains("test1")
+                && debug_str.contains("Test Task")
+                && debug_str.contains("todo")
+                && debug_str.contains("task"),
+            "Debug output should contain all field values"
+        );
     }
 }
