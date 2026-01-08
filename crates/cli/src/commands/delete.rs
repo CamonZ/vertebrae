@@ -131,9 +131,8 @@ impl DeleteCommand {
         let mut result = db.client().query(&query).await?;
         let task: Option<TaskInfo> = result.take(0)?;
 
-        task.ok_or_else(|| DbError::InvalidPath {
-            path: std::path::PathBuf::from(&self.id),
-            reason: format!("Task '{}' not found", self.id),
+        task.ok_or_else(|| DbError::NotFound {
+            task_id: self.id.clone(),
         })
     }
 
@@ -489,19 +488,14 @@ mod tests {
 
         let result = cmd.execute(&db).await;
         match result {
-            Err(DbError::InvalidPath { reason, .. }) => {
-                assert!(
-                    reason.contains("not found"),
-                    "Expected 'not found' in error, got: {}",
-                    reason
-                );
-                assert!(
-                    reason.contains("nonexistent"),
-                    "Expected task ID 'nonexistent' in error, got: {}",
-                    reason
+            Err(DbError::NotFound { task_id }) => {
+                assert_eq!(
+                    task_id, "nonexistent",
+                    "Expected task_id 'nonexistent', got: {}",
+                    task_id
                 );
             }
-            Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
+            Err(other) => panic!("Expected NotFound error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
 

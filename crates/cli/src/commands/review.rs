@@ -67,17 +67,22 @@ impl ReviewCommand {
 
     /// Get the current needs_human_review flag value.
     async fn get_current_flag(&self, db: &Database, id: &str) -> Result<bool, DbError> {
-        let row: Option<ReviewFlagRow> = db
+        // Use raw query instead of .select() to handle both numeric and string IDs.
+        // .select(("task", id)) creates a string ID, but tasks created with
+        // CREATE task:123 have numeric IDs, causing a mismatch.
+        let query = format!("SELECT needs_human_review FROM task:{}", id);
+        let mut result = db
             .client()
-            .select(("task", id))
+            .query(&query)
             .await
             .map_err(|e| DbError::Query(Box::new(e)))?;
 
+        let row: Option<ReviewFlagRow> = result.take(0).map_err(|e| DbError::Query(Box::new(e)))?;
+
         match row {
             Some(r) => Ok(r.needs_human_review.unwrap_or(false)),
-            None => Err(DbError::InvalidPath {
-                path: std::path::PathBuf::from(&self.id),
-                reason: format!("Task '{}' not found", self.id),
+            None => Err(DbError::NotFound {
+                task_id: self.id.clone(),
             }),
         }
     }
@@ -230,14 +235,14 @@ mod tests {
 
         let result = cmd.execute(&db).await;
         match result {
-            Err(DbError::InvalidPath { reason, .. }) => {
-                assert!(
-                    reason.contains("not found"),
-                    "Expected 'not found' in error, got: {}",
-                    reason
+            Err(DbError::NotFound { task_id }) => {
+                assert_eq!(
+                    task_id, "nonexistent",
+                    "Expected task_id 'nonexistent', got: {}",
+                    task_id
                 );
             }
-            Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
+            Err(other) => panic!("Expected NotFound error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
 

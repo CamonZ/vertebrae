@@ -37,6 +37,10 @@ pub enum DbError {
     #[error("Invalid database path: {path} - {reason}")]
     InvalidPath { path: PathBuf, reason: String },
 
+    /// Error when a requested task was not found
+    #[error("Task '{task_id}' not found")]
+    NotFound { task_id: String },
+
     /// Error creating database directory
     #[error("Failed to create database directory at {path}: {source}")]
     CreateDirectory {
@@ -253,6 +257,26 @@ mod tests {
                 && debug_str.contains("done")
                 && debug_str.contains("todo"),
             "Debug output should contain InvalidStatusTransition and relevant fields"
+        );
+    }
+
+    #[test]
+    fn test_not_found_error_display() {
+        let err = DbError::NotFound {
+            task_id: "abc123".to_string(),
+        };
+        assert_eq!(err.to_string(), "Task 'abc123' not found");
+    }
+
+    #[test]
+    fn test_not_found_error_debug() {
+        let err = DbError::NotFound {
+            task_id: "xyz789".to_string(),
+        };
+        let debug_str = format!("{:?}", err);
+        assert!(
+            debug_str.contains("NotFound") && debug_str.contains("xyz789"),
+            "Debug output should contain NotFound and task_id"
         );
     }
 }
