@@ -119,7 +119,7 @@ impl AddCommand {
 
         // Create the task
         let level = self.level.clone().unwrap_or(Level::Task);
-        let mut task = Task::new(self.title.clone(), level).with_status(Status::Todo);
+        let mut task = Task::new(self.title.clone(), level).with_status(Status::Backlog);
 
         if let Some(description) = &self.description {
             task = task.with_description(description.clone());
@@ -413,7 +413,7 @@ mod tests {
         let task = get_task(&db, &id).await.expect("Task should exist in DB");
         assert_eq!(task.title, "My first task");
         assert_eq!(task.level, "task"); // Default level
-        assert_eq!(task.status, "todo"); // Default status
+        assert_eq!(task.status, "backlog"); // Default status
         assert!(task.priority.is_none());
         assert!(task.tags.is_empty());
 
@@ -855,7 +855,7 @@ mod tests {
             .expect("Task should exist in DB");
         assert_eq!(task.title, "Complete task");
         assert_eq!(task.level, "ticket");
-        assert_eq!(task.status, "todo");
+        assert_eq!(task.status, "backlog");
         assert_eq!(task.priority, Some("critical".to_string()));
         assert_eq!(task.tags.len(), 2);
         assert!(task.tags.contains(&"urgent".to_string()));
@@ -980,7 +980,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_default_status_is_todo() {
+    async fn test_default_status_is_backlog() {
         let (db, temp_dir) = setup_test_db().await;
 
         let cmd = AddCommand {
@@ -1009,7 +1009,7 @@ mod tests {
         }
 
         let row: Option<StatusRow> = result.take(0).unwrap();
-        assert_eq!(row.unwrap().status, "todo");
+        assert_eq!(row.unwrap().status, "backlog");
 
         cleanup(&temp_dir);
     }
