@@ -759,11 +759,13 @@ impl<'a> GraphQueries<'a> {
             let dep_id = dependent.id.id.to_string();
 
             // Count incomplete dependencies for this task (excluding the current task which we're completing)
+            // GROUP ALL ensures we get a single aggregated count instead of one row per match
             let count_query = format!(
                 "SELECT count() as cnt FROM task \
                  WHERE <-depends_on<-task CONTAINS task:{} \
                  AND id != task:{} \
-                 AND status != 'done'",
+                 AND status != 'done' \
+                 GROUP ALL",
                 dep_id, task_id
             );
 
