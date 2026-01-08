@@ -21,6 +21,7 @@ pub mod sections;
 pub mod show;
 pub mod start;
 pub mod step_done;
+pub mod submit;
 pub mod undepend;
 pub mod unref;
 pub mod unsection;
@@ -45,6 +46,7 @@ pub use sections::SectionsCommand;
 pub use show::ShowCommand;
 pub use start::StartCommand;
 pub use step_done::StepDoneCommand;
+pub use submit::SubmitCommand;
 pub use undepend::UndependCommand;
 pub use unref::UnrefCommand;
 pub use unsection::UnsectionCommand;
@@ -102,6 +104,8 @@ pub enum Command {
     /// Mark a step as done within a task
     #[command(name = "step-done")]
     StepDone(StepDoneCommand),
+    /// Submit a task for review (transition to pending_review)
+    Submit(SubmitCommand),
     /// Update an existing task
     Update(UpdateCommand),
 }
@@ -224,6 +228,10 @@ impl Command {
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::StepDone(cmd) => {
+                let result = cmd.execute(db).await?;
+                Ok(CommandResult::Message(format!("{}", result)))
+            }
+            Command::Submit(cmd) => {
                 let result = cmd.execute(db).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
