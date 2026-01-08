@@ -6,7 +6,7 @@
 use clap::Args;
 use serde::Deserialize;
 use std::io::BufRead;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use vertebrae_db::{Database, DbError, Task};
 
 /// Import database from JSONL format
@@ -32,7 +32,7 @@ pub enum ImportRecord {
         id: String,
         /// The task data
         #[serde(flatten)]
-        task: Task,
+        task: Box<Task>,
     },
     /// A parent-child relationship
     #[serde(rename = "child_of")]
@@ -111,7 +111,7 @@ impl ImportCommand {
                     // If not skipping, we'll overwrite - delete first
                     db.tasks().delete(id).await?;
                 }
-                db.tasks().create(id, task).await?;
+                db.tasks().create(id, task.as_ref()).await?;
                 tasks_imported += 1;
             }
         }
@@ -168,12 +168,12 @@ impl ImportCommand {
     fn parse_lines<R: BufRead>(
         &self,
         reader: R,
-        path: &PathBuf,
+        path: &Path,
     ) -> Result<Vec<ImportRecord>, DbError> {
         let mut records = Vec::new();
         for (line_num, line) in reader.lines().enumerate() {
             let line = line.map_err(|e| DbError::InvalidPath {
-                path: path.clone(),
+                path: path.to_path_buf(),
                 reason: format!("Error reading line {}: {}", line_num + 1, e),
             })?;
 
@@ -184,7 +184,7 @@ impl ImportCommand {
 
             let record: ImportRecord =
                 serde_json::from_str(&line).map_err(|e| DbError::InvalidPath {
-                    path: path.clone(),
+                    path: path.to_path_buf(),
                     reason: format!("Error parsing line {}: {}", line_num + 1, e),
                 })?;
             records.push(record);

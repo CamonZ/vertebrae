@@ -1,6 +1,6 @@
 //! Database module for Vertebrae
 //!
-//! Provides SurrealDB connection management with embedded RocksDB backend,
+//! Provides SurrealDB connection management with embedded SurrealKV backend,
 //! schema initialization, and data models for task management.
 
 pub mod error;
@@ -19,7 +19,7 @@ pub use repository::{
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use surrealdb::Surreal;
-use surrealdb::engine::local::{Db, RocksDb};
+use surrealdb::engine::local::{Db, SurrealKv};
 
 /// Default database path relative to project root or current working directory
 pub const DEFAULT_DB_PATH: &str = ".vtb/data";
@@ -51,9 +51,9 @@ impl Database {
         // Validate and create the database directory
         let path = Self::prepare_path(path)?;
 
-        // Connect to the database using RocksDB backend
+        // Connect to the database using SurrealKV backend
         let client =
-            Surreal::new::<RocksDb>(path.clone())
+            Surreal::new::<SurrealKv>(path.clone())
                 .await
                 .map_err(|e| DbError::Connection {
                     path: path.clone(),
@@ -204,7 +204,7 @@ pub mod test_utils {
     /// Create an isolated SurrealDB database for testing
     ///
     /// Provides isolated database instances for unit tests with unique temporary directories.
-    /// Each test gets its own RocksDB database in a separate temp directory,
+    /// Each test gets its own SurrealKV database in a separate temp directory,
     /// allowing tests to run concurrently without interference.
     /// Each call creates a new independent database.
     ///
@@ -229,7 +229,7 @@ pub mod test_utils {
                 .as_nanos()
         ));
 
-        let client = Surreal::new::<RocksDb>(temp_dir.to_str().unwrap())
+        let client = Surreal::new::<SurrealKv>(temp_dir.to_str().unwrap())
             .await
             .map_err(|e| DbError::Connection {
                 path: temp_dir.clone(),

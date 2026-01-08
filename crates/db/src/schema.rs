@@ -95,7 +95,7 @@ pub async fn init_schema(client: &Surreal<Db>) -> Result<(), DbError> {
 mod tests {
     use super::*;
     use std::env;
-    use surrealdb::engine::local::RocksDb;
+    use surrealdb::engine::local::SurrealKv;
 
     /// Helper to create a test database
     async fn setup_test_db() -> (Surreal<Db>, std::path::PathBuf) {
@@ -113,7 +113,7 @@ mod tests {
         std::fs::create_dir_all(&temp_dir).unwrap();
 
         // Connect to database
-        let client = Surreal::new::<RocksDb>(temp_dir.clone()).await.unwrap();
+        let client = Surreal::new::<SurrealKv>(temp_dir.clone()).await.unwrap();
 
         // Select namespace and database
         client.use_ns("vertebrae").use_db("test").await.unwrap();

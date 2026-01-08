@@ -28,7 +28,7 @@ pub enum ExportRecord {
         id: String,
         /// The task data
         #[serde(flatten)]
-        task: Task,
+        task: Box<Task>,
     },
     /// A parent-child relationship
     #[serde(rename = "child_of")]
@@ -90,7 +90,10 @@ impl ExportCommand {
         let tasks = db.tasks().export_all().await?;
         let task_count = tasks.len();
         for (id, task) in tasks {
-            records.push(ExportRecord::Task { id, task });
+            records.push(ExportRecord::Task {
+                id,
+                task: Box::new(task),
+            });
         }
 
         // Export child_of relationships using repository
@@ -168,7 +171,7 @@ mod tests {
 
         let record = ExportRecord::Task {
             id: "abc123".to_string(),
-            task,
+            task: Box::new(task),
         };
 
         let json = serde_json::to_string(&record).unwrap();
