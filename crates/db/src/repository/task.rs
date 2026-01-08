@@ -583,6 +583,33 @@ impl<'a> TaskRepository<'a> {
             }
         }
     }
+
+    /// Export all tasks from the database.
+    ///
+    /// Returns all tasks with their IDs for backup or migration purposes.
+    ///
+    /// # Returns
+    ///
+    /// A vector of (task_id, Task) tuples.
+    pub async fn export_all(&self) -> DbResult<Vec<(String, Task)>> {
+        debug!("Exporting all tasks");
+
+        #[derive(Debug, Deserialize)]
+        struct TaskWithId {
+            id: surrealdb::sql::Thing,
+            #[serde(flatten)]
+            task: Task,
+        }
+
+        let mut result = self.client.query("SELECT * FROM task").await?;
+        let tasks: Vec<TaskWithId> = result.take(0)?;
+
+        debug!("Exported {} tasks", tasks.len());
+        Ok(tasks
+            .into_iter()
+            .map(|t| (t.id.id.to_raw(), t.task))
+            .collect())
+    }
 }
 
 #[cfg(test)]

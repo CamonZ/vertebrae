@@ -167,6 +167,15 @@ vertebrae/
 - Binary name is `vtb` (short for vertebrae)
 - Follows Rust 2024 edition conventions
 
+### Database Layer Architecture
+
+- **Commands must only use repository methods** - Never execute raw queries in the command layer
+- Use `db.tasks()` for task CRUD operations via `TaskRepository`
+- Use `db.graph()` for hierarchy and dependency operations via `GraphQueries`
+- Use `db.relationships()` for managing task relationships via `RelationshipRepository`
+- Use `db.list_tasks()` for filtering and listing via `TaskLister`
+- If a command needs new database functionality, add it to the appropriate repository first
+
 ### Code Quality
 
 - All code must be formatted with `cargo fmt`

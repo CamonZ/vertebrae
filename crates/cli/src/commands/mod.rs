@@ -7,6 +7,8 @@ pub mod blockers;
 pub mod delete;
 pub mod depend;
 pub mod done;
+pub mod export;
+pub mod import;
 pub mod init;
 pub mod list;
 pub mod path;
@@ -29,6 +31,8 @@ pub use blockers::BlockersCommand;
 pub use delete::DeleteCommand;
 pub use depend::DependCommand;
 pub use done::DoneCommand;
+pub use export::ExportCommand;
+pub use import::ImportCommand;
 pub use init::InitCommand;
 pub use list::ListCommand;
 pub use path::PathCommand;
@@ -65,6 +69,10 @@ pub enum Command {
     Depend(DependCommand),
     /// Mark a task as complete (transition to done)
     Done(DoneCommand),
+    /// Export all tasks and relationships to JSONL format
+    Export(ExportCommand),
+    /// Import tasks and relationships from JSONL format
+    Import(ImportCommand),
     /// Initialize vertebrae in the current project
     Init(InitCommand),
     /// List tasks with optional filters
@@ -148,6 +156,14 @@ impl Command {
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Done(cmd) => {
+                let result = cmd.execute(db).await?;
+                Ok(CommandResult::Message(format!("{}", result)))
+            }
+            Command::Export(cmd) => {
+                let result = cmd.execute(db).await?;
+                Ok(CommandResult::Message(format!("{}", result)))
+            }
+            Command::Import(cmd) => {
                 let result = cmd.execute(db).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }

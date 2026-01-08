@@ -269,6 +269,58 @@ impl<'a> RelationshipRepository<'a> {
     }
 
     // ========================================
+    // Export methods
+    // ========================================
+
+    /// Export all child_of relationships.
+    ///
+    /// Returns a vector of (child_id, parent_id) tuples.
+    ///
+    /// # Returns
+    ///
+    /// All child_of relationships in the database.
+    pub async fn export_all_child_of(&self) -> DbResult<Vec<(String, String)>> {
+        #[derive(Debug, Deserialize)]
+        struct Relation {
+            r#in: surrealdb::sql::Thing,
+            out: surrealdb::sql::Thing,
+        }
+
+        let mut result = self.client.query("SELECT in, out FROM child_of").await?;
+        let relations: Vec<Relation> = result.take(0)?;
+
+        // child_of: child -> parent (in is child, out is parent)
+        Ok(relations
+            .into_iter()
+            .map(|r| (r.r#in.id.to_raw(), r.out.id.to_raw()))
+            .collect())
+    }
+
+    /// Export all depends_on relationships.
+    ///
+    /// Returns a vector of (task_id, blocker_id) tuples.
+    ///
+    /// # Returns
+    ///
+    /// All depends_on relationships in the database.
+    pub async fn export_all_depends_on(&self) -> DbResult<Vec<(String, String)>> {
+        #[derive(Debug, Deserialize)]
+        struct Relation {
+            r#in: surrealdb::sql::Thing,
+            out: surrealdb::sql::Thing,
+        }
+
+        let mut result = self.client.query("SELECT in, out FROM depends_on").await?;
+        let relations: Vec<Relation> = result.take(0)?;
+
+        // depends_on: task -> blocker (in is task, out is blocker)
+        Ok(relations
+            .into_iter()
+            .map(|r| (r.r#in.id.to_raw(), r.out.id.to_raw()))
+            .collect())
+    }
+
+    // ========================================
     // Cleanup methods
     // ========================================
 
