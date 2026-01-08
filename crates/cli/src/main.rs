@@ -76,8 +76,7 @@ async fn main() {
     init_logging();
 
     if let Err(e) = run_app().await {
-        eprintln!("An unexpected error occurred");
-        tracing::error!("Error: {}", e.full_message());
+        eprintln!("error: {}", e.full_message());
         process::exit(1);
     }
 }

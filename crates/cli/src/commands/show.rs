@@ -225,15 +225,20 @@ impl ShowCommand {
 
     /// Fetch the main task by ID.
     async fn fetch_task(&self, db: &Database, id: &str) -> Result<TaskRow, DbError> {
-        let task: Option<TaskRow> = db
+        // Use raw query instead of .select() to handle both numeric and string IDs.
+        // .select(("task", id)) creates a string ID, but tasks created with
+        // CREATE task:123 have numeric IDs, causing a mismatch.
+        let query = format!("SELECT * FROM task:{}", id);
+        let mut result = db
             .client()
-            .select(("task", id))
+            .query(&query)
             .await
             .map_err(|e| DbError::Query(Box::new(e)))?;
 
-        task.ok_or_else(|| DbError::InvalidPath {
-            path: std::path::PathBuf::from(&self.id),
-            reason: format!("Task '{}' not found", self.id),
+        let task: Option<TaskRow> = result.take(0).map_err(|e| DbError::Query(Box::new(e)))?;
+
+        task.ok_or_else(|| DbError::NotFound {
+            task_id: self.id.clone(),
         })
     }
 
@@ -671,19 +676,14 @@ mod tests {
 
         let result = cmd.execute(&db).await;
         match result {
-            Err(DbError::InvalidPath { reason, .. }) => {
-                assert!(
-                    reason.contains("not found"),
-                    "Expected 'not found' in error, got: {}",
-                    reason
-                );
-                assert!(
-                    reason.contains("nonexistent"),
-                    "Expected task ID 'nonexistent' in error, got: {}",
-                    reason
+            Err(DbError::NotFound { task_id }) => {
+                assert_eq!(
+                    task_id, "nonexistent",
+                    "Expected task_id 'nonexistent', got: {}",
+                    task_id
                 );
             }
-            Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
+            Err(other) => panic!("Expected NotFound error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
 

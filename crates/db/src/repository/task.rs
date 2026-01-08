@@ -182,11 +182,16 @@ impl<'a> TaskRepository<'a> {
     ///
     /// `true` if the task exists, `false` otherwise.
     pub async fn exists(&self, id: &str) -> DbResult<bool> {
-        let task: Option<IdOnly> = self
+        // Use raw query instead of .select() to handle both numeric and string IDs.
+        // .select(("task", id)) creates a string ID, but tasks created with
+        // CREATE task:123 have numeric IDs, causing a mismatch.
+        let query = format!("SELECT id FROM task:{}", id);
+        let mut result = self
             .client
-            .select(("task", id))
+            .query(&query)
             .await
             .map_err(|e| DbError::Query(Box::new(e)))?;
+        let task: Option<IdOnly> = result.take(0)?;
         Ok(task.is_some())
     }
 
@@ -252,10 +257,15 @@ impl<'a> TaskRepository<'a> {
     /// `Some(Task)` if found, `None` otherwise.
     pub async fn get(&self, id: &str) -> DbResult<Option<Task>> {
         debug!("Fetching task: {}", id);
-        let task: Option<Task> = self.client.select(("task", id)).await.map_err(|e| {
+        // Use raw query instead of .select() to handle both numeric and string IDs
+        // .select(("task", id)) creates a string ID, but tasks created with
+        // CREATE task:123 have numeric IDs, causing a mismatch.
+        let query = format!("SELECT * FROM task:{}", id);
+        let mut result = self.client.query(&query).await.map_err(|e| {
             debug!("Failed to fetch task: {}: {}", id, e);
             DbError::Query(Box::new(e))
         })?;
+        let task: Option<Task> = result.take(0)?;
         if task.is_some() {
             debug!("Successfully fetched task: {}", id);
         } else {
