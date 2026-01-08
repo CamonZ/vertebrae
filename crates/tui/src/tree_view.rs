@@ -190,8 +190,10 @@ fn build_node_line(prefix: &str, node: &TreeNode) -> Line<'static> {
     let (status_icon, status_color) = match node.status {
         Status::Done => ("[x]", Color::Green),
         Status::InProgress => ("[>]", Color::Yellow),
-        Status::Blocked => ("[!]", Color::Red),
-        Status::Todo => ("[ ]", Color::DarkGray),
+        Status::PendingReview => ("[?]", Color::Cyan),
+        Status::Backlog => ("[.]", Color::DarkGray),
+        Status::Rejected => ("[-]", Color::Red),
+        Status::Todo => ("[ ]", Color::Gray),
     };
 
     spans.push(Span::styled(
@@ -332,12 +334,30 @@ mod tests {
     }
 
     #[test]
-    fn test_build_node_line_status_blocked() {
-        let node = TreeNode::new("task1", "Task", Level::Task).with_status(Status::Blocked);
+    fn test_build_node_line_status_rejected() {
+        let node = TreeNode::new("task1", "Task", Level::Task).with_status(Status::Rejected);
         let line = build_node_line("", &node);
 
         let line_text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
-        assert!(line_text.contains("[!]"));
+        assert!(line_text.contains("[-]"));
+    }
+
+    #[test]
+    fn test_build_node_line_status_pending_review() {
+        let node = TreeNode::new("task1", "Task", Level::Task).with_status(Status::PendingReview);
+        let line = build_node_line("", &node);
+
+        let line_text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
+        assert!(line_text.contains("[?]"));
+    }
+
+    #[test]
+    fn test_build_node_line_status_backlog() {
+        let node = TreeNode::new("task1", "Task", Level::Task).with_status(Status::Backlog);
+        let line = build_node_line("", &node);
+
+        let line_text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
+        assert!(line_text.contains("[.]"));
     }
 
     #[test]
@@ -418,12 +438,17 @@ mod tests {
                 .with_children(vec![
                     TreeNode::new("t1", "Done Task", Level::Ticket).with_status(Status::Done),
                     TreeNode::new("t2", "Todo Task", Level::Ticket).with_status(Status::Todo),
-                    TreeNode::new("t3", "Blocked Task", Level::Ticket).with_status(Status::Blocked),
+                    TreeNode::new("t3", "Rejected Task", Level::Ticket)
+                        .with_status(Status::Rejected),
+                    TreeNode::new("t4", "Pending Review Task", Level::Ticket)
+                        .with_status(Status::PendingReview),
+                    TreeNode::new("t5", "Backlog Task", Level::Ticket).with_status(Status::Backlog),
                 ]),
         ];
 
         let lines = build_tree_lines(&roots);
-        assert_eq!(lines.len(), 4);
+        // 1 epic + 5 children = 6 lines
+        assert_eq!(lines.len(), 6);
     }
 
     // ========================================

@@ -3,7 +3,6 @@
 //! This module contains all subcommand implementations for the vtb CLI.
 
 pub mod add;
-pub mod block;
 pub mod blockers;
 pub mod delete;
 pub mod depend;
@@ -13,6 +12,7 @@ pub mod list;
 pub mod path;
 pub mod r#ref;
 pub mod refs;
+pub mod reject;
 pub mod review;
 pub mod section;
 pub mod sections;
@@ -25,7 +25,6 @@ pub mod unsection;
 pub mod update;
 
 pub use add::AddCommand;
-pub use block::BlockCommand;
 pub use blockers::BlockersCommand;
 pub use delete::DeleteCommand;
 pub use depend::DependCommand;
@@ -35,6 +34,7 @@ pub use list::ListCommand;
 pub use path::PathCommand;
 pub use r#ref::RefCommand;
 pub use refs::RefsCommand;
+pub use reject::RejectCommand;
 pub use review::ReviewCommand;
 pub use section::SectionCommand;
 pub use sections::SectionsCommand;
@@ -55,10 +55,10 @@ use vertebrae_db::{Database, DbError};
 pub enum Command {
     /// Create a new task
     Add(AddCommand),
-    /// Mark a task as blocked (with optional reason)
-    Block(BlockCommand),
     /// Show all tasks blocking a given task (recursive)
     Blockers(BlockersCommand),
+    /// Reject a task (transition from todo to rejected)
+    Reject(RejectCommand),
     /// Delete a task (with optional cascade)
     Delete(DeleteCommand),
     /// Create a dependency relationship between tasks
@@ -131,7 +131,7 @@ impl Command {
                 let id = cmd.execute(db).await?;
                 Ok(CommandResult::Message(format!("Created task: {}", id)))
             }
-            Command::Block(cmd) => {
+            Command::Reject(cmd) => {
                 let result = cmd.execute(db).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
@@ -433,12 +433,12 @@ mod tests {
 
     #[test]
     fn test_command_list_with_status() {
-        let cli = TestCli::try_parse_from(["test", "list", "--status", "blocked"]);
+        let cli = TestCli::try_parse_from(["test", "list", "--status", "backlog"]);
         assert!(cli.is_ok());
         match cli.unwrap().command {
             Command::List(cmd) => {
                 assert_eq!(cmd.statuses.len(), 1);
-                assert_eq!(cmd.statuses[0].as_str(), "blocked");
+                assert_eq!(cmd.statuses[0].as_str(), "backlog");
             }
             _ => panic!("Expected List command"),
         }
@@ -867,57 +867,56 @@ mod tests {
     }
 
     #[test]
-    fn test_command_block_parses() {
-        let cli = TestCli::try_parse_from(["test", "block", "abc123"]);
+    fn test_command_reject_parses() {
+        let cli = TestCli::try_parse_from(["test", "reject", "abc123"]);
         assert!(cli.is_ok());
         match cli.unwrap().command {
-            Command::Block(cmd) => {
+            Command::Reject(cmd) => {
                 assert_eq!(cmd.id, "abc123");
                 assert!(cmd.reason.is_none());
             }
-            _ => panic!("Expected Block command"),
+            _ => panic!("Expected Reject command"),
         }
     }
 
     #[test]
-    fn test_command_block_requires_id() {
-        let result = TestCli::try_parse_from(["test", "block"]);
+    fn test_command_reject_requires_id() {
+        let result = TestCli::try_parse_from(["test", "reject"]);
         assert!(result.is_err());
     }
 
     #[test]
-    fn test_command_block_with_reason() {
-        let cli =
-            TestCli::try_parse_from(["test", "block", "abc123", "--reason", "Waiting for API"]);
+    fn test_command_reject_with_reason() {
+        let cli = TestCli::try_parse_from(["test", "reject", "abc123", "--reason", "Out of scope"]);
         assert!(cli.is_ok());
         match cli.unwrap().command {
-            Command::Block(cmd) => {
+            Command::Reject(cmd) => {
                 assert_eq!(cmd.id, "abc123");
-                assert_eq!(cmd.reason, Some("Waiting for API".to_string()));
+                assert_eq!(cmd.reason, Some("Out of scope".to_string()));
             }
-            _ => panic!("Expected Block command"),
+            _ => panic!("Expected Reject command"),
         }
     }
 
     #[test]
-    fn test_command_block_with_short_reason() {
-        let cli = TestCli::try_parse_from(["test", "block", "abc123", "-r", "Short reason"]);
+    fn test_command_reject_with_short_reason() {
+        let cli = TestCli::try_parse_from(["test", "reject", "abc123", "-r", "Short reason"]);
         assert!(cli.is_ok());
         match cli.unwrap().command {
-            Command::Block(cmd) => {
+            Command::Reject(cmd) => {
                 assert_eq!(cmd.reason, Some("Short reason".to_string()));
             }
-            _ => panic!("Expected Block command"),
+            _ => panic!("Expected Reject command"),
         }
     }
 
     #[test]
-    fn test_command_block_debug() {
-        let cli = TestCli::try_parse_from(["test", "block", "test123"]).unwrap();
+    fn test_command_reject_debug() {
+        let cli = TestCli::try_parse_from(["test", "reject", "test123"]).unwrap();
         let debug_str = format!("{:?}", cli.command);
         assert!(
-            debug_str.contains("Block") && debug_str.contains("test123"),
-            "Debug output should contain Block variant and id field value"
+            debug_str.contains("Reject") && debug_str.contains("test123"),
+            "Debug output should contain Reject variant and id field value"
         );
     }
 

@@ -170,8 +170,10 @@ fn build_header_section(details: &TaskDetails) -> Vec<Line<'static>> {
     let status_style = match task.status {
         Status::Todo => Style::default().fg(Color::White),
         Status::InProgress => Style::default().fg(Color::Yellow),
+        Status::PendingReview => Style::default().fg(Color::Cyan),
         Status::Done => Style::default().fg(Color::Green),
-        Status::Blocked => Style::default().fg(Color::Red),
+        Status::Backlog => Style::default().fg(Color::DarkGray),
+        Status::Rejected => Style::default().fg(Color::Red),
     };
 
     let badges_line = Line::from(vec![

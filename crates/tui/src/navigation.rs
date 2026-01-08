@@ -270,7 +270,9 @@ fn render_node_line(node: &FlatNode, is_selected: bool) -> Line<'static> {
     let status_indicator = match node.status {
         Status::Done => "[x]",
         Status::InProgress => "[>]",
-        Status::Blocked => "[!]",
+        Status::PendingReview => "[?]",
+        Status::Backlog => "[.]",
+        Status::Rejected => "[-]",
         Status::Todo => "[ ]",
     };
 
@@ -320,7 +322,9 @@ fn status_color(status: &Status) -> Color {
     match status {
         Status::Done => Color::Green,
         Status::InProgress => Color::Yellow,
-        Status::Blocked => Color::Red,
+        Status::PendingReview => Color::Cyan,
+        Status::Backlog => Color::DarkGray,
+        Status::Rejected => Color::Red,
         Status::Todo => Color::White,
     }
 }
@@ -695,7 +699,9 @@ mod tests {
     fn test_status_color() {
         assert_eq!(status_color(&Status::Done), Color::Green);
         assert_eq!(status_color(&Status::InProgress), Color::Yellow);
-        assert_eq!(status_color(&Status::Blocked), Color::Red);
+        assert_eq!(status_color(&Status::PendingReview), Color::Cyan);
+        assert_eq!(status_color(&Status::Backlog), Color::DarkGray);
+        assert_eq!(status_color(&Status::Rejected), Color::Red);
         assert_eq!(status_color(&Status::Todo), Color::White);
     }
 }

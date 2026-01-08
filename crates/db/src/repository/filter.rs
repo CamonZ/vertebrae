@@ -63,13 +63,7 @@ fn parse_level(s: &str) -> Level {
 
 /// Parse a status string into a Status enum
 fn parse_status(s: &str) -> Status {
-    match s {
-        "todo" => Status::Todo,
-        "in_progress" => Status::InProgress,
-        "done" => Status::Done,
-        "blocked" => Status::Blocked,
-        _ => Status::Todo,
-    }
+    Status::parse(s).unwrap_or(Status::Todo)
 }
 
 /// Parse a priority string into a Priority enum
@@ -677,10 +671,12 @@ mod tests {
 
     #[test]
     fn test_parse_status() {
+        assert_eq!(parse_status("backlog"), Status::Backlog);
         assert_eq!(parse_status("todo"), Status::Todo);
         assert_eq!(parse_status("in_progress"), Status::InProgress);
+        assert_eq!(parse_status("pending_review"), Status::PendingReview);
         assert_eq!(parse_status("done"), Status::Done);
-        assert_eq!(parse_status("blocked"), Status::Blocked);
+        assert_eq!(parse_status("rejected"), Status::Rejected);
         assert_eq!(parse_status("unknown"), Status::Todo); // default
     }
 
@@ -785,15 +781,15 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
 
         create_task(&db, "task1", "Task 1", "task", "todo", None, &[]).await;
-        create_task(&db, "task2", "Task 2", "task", "blocked", None, &[]).await;
+        create_task(&db, "task2", "Task 2", "task", "backlog", None, &[]).await;
         create_task(&db, "task3", "Task 3", "task", "in_progress", None, &[]).await;
 
         let lister = TaskLister::new(db.client());
-        let filter = TaskFilter::new().with_status(Status::Blocked);
+        let filter = TaskFilter::new().with_status(Status::Backlog);
         let result = lister.list(&filter).await.unwrap();
 
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].status, Status::Blocked);
+        assert_eq!(result[0].status, Status::Backlog);
 
         cleanup(&temp_dir);
     }

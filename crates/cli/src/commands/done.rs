@@ -193,14 +193,7 @@ impl DoneCommand {
 
 /// Parse a status string into Status enum
 fn parse_status(s: &str) -> Status {
-    match s {
-        "todo" => Status::Todo,
-        "in_progress" => Status::InProgress,
-        "done" => Status::Done,
-        "blocked" => Status::Blocked,
-        // Default to Todo if unknown (should not happen with schema validation)
-        _ => Status::Todo,
-    }
+    Status::parse(s).unwrap_or(Status::Todo)
 }
 
 #[cfg(test)]
@@ -310,19 +303,22 @@ mod tests {
 
     #[test]
     fn test_parse_status() {
+        assert_eq!(parse_status("backlog"), Status::Backlog);
         assert_eq!(parse_status("todo"), Status::Todo);
         assert_eq!(parse_status("in_progress"), Status::InProgress);
+        assert_eq!(parse_status("pending_review"), Status::PendingReview);
         assert_eq!(parse_status("done"), Status::Done);
-        assert_eq!(parse_status("blocked"), Status::Blocked);
+        assert_eq!(parse_status("rejected"), Status::Rejected);
         // Unknown defaults to Todo
         assert_eq!(parse_status("unknown"), Status::Todo);
     }
 
     #[tokio::test]
-    async fn test_done_todo_task() {
+    async fn test_done_pending_review_task() {
         let (db, temp_dir) = setup_test_db().await;
 
-        create_task(&db, "task1", "Test Task", "task", "todo").await;
+        // Done can only be reached from pending_review
+        create_task(&db, "task1", "Test Task", "task", "pending_review").await;
 
         let cmd = DoneCommand {
             id: "task1".to_string(),
@@ -344,9 +340,41 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_done_in_progress_task() {
+    async fn test_done_todo_task_fails() {
         let (db, temp_dir) = setup_test_db().await;
 
+        // todo -> done is not a valid transition
+        create_task(&db, "task1", "Todo Task", "task", "todo").await;
+
+        let cmd = DoneCommand {
+            id: "task1".to_string(),
+        };
+
+        let result = cmd.execute(&db).await;
+        match result {
+            Err(DbError::InvalidStatusTransition { message, .. }) => {
+                assert!(
+                    message.contains("todo"),
+                    "Error should mention todo status: {}",
+                    message
+                );
+            }
+            Err(other) => panic!("Expected InvalidStatusTransition error, got {:?}", other),
+            Ok(_) => panic!("Expected error, got success"),
+        }
+
+        // Status should remain todo
+        let status = get_task_status(&db, "task1").await;
+        assert_eq!(status, "todo");
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_done_in_progress_task_fails() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        // in_progress -> done is not a valid transition (must go through pending_review)
         create_task(&db, "task1", "In Progress Task", "task", "in_progress").await;
 
         let cmd = DoneCommand {
@@ -354,31 +382,52 @@ mod tests {
         };
 
         let result = cmd.execute(&db).await;
-        assert!(result.is_ok(), "Done failed: {:?}", result.err());
+        match result {
+            Err(DbError::InvalidStatusTransition { message, .. }) => {
+                assert!(
+                    message.contains("in_progress"),
+                    "Error should mention in_progress status: {}",
+                    message
+                );
+            }
+            Err(other) => panic!("Expected InvalidStatusTransition error, got {:?}", other),
+            Ok(_) => panic!("Expected error, got success"),
+        }
 
-        // Verify status changed
+        // Status should remain in_progress
         let status = get_task_status(&db, "task1").await;
-        assert_eq!(status, "done");
+        assert_eq!(status, "in_progress");
 
         cleanup(&temp_dir);
     }
 
     #[tokio::test]
-    async fn test_done_blocked_task() {
+    async fn test_done_backlog_task_fails() {
         let (db, temp_dir) = setup_test_db().await;
 
-        create_task(&db, "task1", "Blocked Task", "task", "blocked").await;
+        // backlog -> done is not a valid transition
+        create_task(&db, "task1", "Backlog Task", "task", "backlog").await;
 
         let cmd = DoneCommand {
             id: "task1".to_string(),
         };
 
         let result = cmd.execute(&db).await;
-        assert!(result.is_ok(), "Done failed: {:?}", result.err());
+        match result {
+            Err(DbError::InvalidStatusTransition { message, .. }) => {
+                assert!(
+                    message.contains("backlog"),
+                    "Error should mention backlog status: {}",
+                    message
+                );
+            }
+            Err(other) => panic!("Expected InvalidStatusTransition error, got {:?}", other),
+            Ok(_) => panic!("Expected error, got success"),
+        }
 
-        // Verify status changed - can complete from any status
+        // Status should remain backlog
         let status = get_task_status(&db, "task1").await;
-        assert_eq!(status, "done");
+        assert_eq!(status, "backlog");
 
         cleanup(&temp_dir);
     }
@@ -439,8 +488,8 @@ mod tests {
     async fn test_done_with_incomplete_children_fails() {
         let (db, temp_dir) = setup_test_db().await;
 
-        // Create parent task
-        create_task(&db, "parent", "Parent Task", "ticket", "in_progress").await;
+        // Create parent task (in pending_review - only valid source for done)
+        create_task(&db, "parent", "Parent Task", "ticket", "pending_review").await;
         // Create child task (not done)
         create_task(&db, "child1", "Child Task 1", "task", "todo").await;
         // Create child relationship
@@ -466,7 +515,7 @@ mod tests {
 
         // Task should NOT be marked done
         let status = get_task_status(&db, "parent").await;
-        assert_eq!(status, "in_progress");
+        assert_eq!(status, "pending_review");
 
         cleanup(&temp_dir);
     }
@@ -475,8 +524,8 @@ mod tests {
     async fn test_done_with_complete_children_succeeds() {
         let (db, temp_dir) = setup_test_db().await;
 
-        // Create parent task
-        create_task(&db, "parent", "Parent Task", "ticket", "in_progress").await;
+        // Create parent task (in pending_review - only valid source for done)
+        create_task(&db, "parent", "Parent Task", "ticket", "pending_review").await;
         // Create child task (done)
         create_task(&db, "child1", "Child Task 1", "task", "done").await;
         // Create child relationship
@@ -487,7 +536,11 @@ mod tests {
         };
 
         let result = cmd.execute(&db).await;
-        assert!(result.is_ok(), "Should succeed when all children are done");
+        assert!(
+            result.is_ok(),
+            "Should succeed when all children are done: {:?}",
+            result.err()
+        );
 
         let done_result = result.unwrap();
         assert!(!done_result.already_done);
@@ -503,11 +556,11 @@ mod tests {
     async fn test_done_with_multiple_incomplete_children_fails() {
         let (db, temp_dir) = setup_test_db().await;
 
-        // Create parent task
-        create_task(&db, "parent", "Parent Task", "epic", "in_progress").await;
+        // Create parent task (in pending_review)
+        create_task(&db, "parent", "Parent Task", "epic", "pending_review").await;
         // Create multiple child tasks
         create_task(&db, "child1", "Child 1", "ticket", "todo").await;
-        create_task(&db, "child2", "Child 2", "ticket", "blocked").await;
+        create_task(&db, "child2", "Child 2", "ticket", "backlog").await;
         create_task(&db, "child3", "Child 3", "ticket", "done").await;
         // Create child relationships
         create_child_of(&db, "child1", "parent").await;
@@ -536,7 +589,7 @@ mod tests {
                 );
                 assert!(
                     incomplete_ids.contains("child2"),
-                    "Should contain child2 (status=blocked)"
+                    "Should contain child2 (status=backlog)"
                 );
                 assert!(
                     !incomplete_ids.contains("child3"),
@@ -549,7 +602,7 @@ mod tests {
 
         // Task should NOT be marked done
         let status = get_task_status(&db, "parent").await;
-        assert_eq!(status, "in_progress");
+        assert_eq!(status, "pending_review");
 
         cleanup(&temp_dir);
     }
@@ -559,7 +612,7 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
 
         // Create epic -> ticket -> task (nested hierarchy)
-        create_task(&db, "epic", "Epic", "epic", "in_progress").await;
+        create_task(&db, "epic", "Epic", "epic", "pending_review").await;
         create_task(&db, "ticket", "Ticket", "ticket", "done").await;
         create_task(&db, "task1", "Task 1", "task", "todo").await; // incomplete grandchild
 
@@ -589,7 +642,7 @@ mod tests {
 
         // Epic should NOT be marked done
         let status = get_task_status(&db, "epic").await;
-        assert_eq!(status, "in_progress");
+        assert_eq!(status, "pending_review");
 
         cleanup(&temp_dir);
     }
@@ -599,7 +652,7 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
 
         // Create epic -> ticket -> task (nested hierarchy, all complete)
-        create_task(&db, "epic", "Epic", "epic", "in_progress").await;
+        create_task(&db, "epic", "Epic", "epic", "pending_review").await;
         create_task(&db, "ticket", "Ticket", "ticket", "done").await;
         create_task(&db, "task1", "Task 1", "task", "done").await;
 
@@ -613,7 +666,8 @@ mod tests {
         let result = cmd.execute(&db).await;
         assert!(
             result.is_ok(),
-            "Should succeed when all descendants are done"
+            "Should succeed when all descendants are done: {:?}",
+            result.err()
         );
 
         // Epic should be marked done
@@ -627,10 +681,10 @@ mod tests {
     async fn test_done_unblocks_dependent_task() {
         let (db, temp_dir) = setup_test_db().await;
 
-        // Create blocker task
-        create_task(&db, "blocker", "Blocker Task", "task", "in_progress").await;
+        // Create blocker task (in pending_review - only valid source for done)
+        create_task(&db, "blocker", "Blocker Task", "task", "pending_review").await;
         // Create dependent task
-        create_task(&db, "dependent", "Dependent Task", "task", "blocked").await;
+        create_task(&db, "dependent", "Dependent Task", "task", "backlog").await;
         // Create dependency relationship
         create_depends_on(&db, "dependent", "blocker").await;
 
@@ -639,7 +693,7 @@ mod tests {
         };
 
         let result = cmd.execute(&db).await;
-        assert!(result.is_ok());
+        assert!(result.is_ok(), "Done should succeed: {:?}", result.err());
 
         let done_result = result.unwrap();
         assert!(!done_result.unblocked_tasks.is_empty());
@@ -658,10 +712,10 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
 
         // Create two blocker tasks
-        create_task(&db, "blocker1", "Blocker 1", "task", "in_progress").await;
+        create_task(&db, "blocker1", "Blocker 1", "task", "pending_review").await;
         create_task(&db, "blocker2", "Blocker 2", "task", "todo").await;
         // Create dependent task with two dependencies
-        create_task(&db, "dependent", "Dependent Task", "task", "blocked").await;
+        create_task(&db, "dependent", "Dependent Task", "task", "backlog").await;
         create_depends_on(&db, "dependent", "blocker1").await;
         create_depends_on(&db, "dependent", "blocker2").await;
 
@@ -671,7 +725,7 @@ mod tests {
         };
 
         let result = cmd.execute(&db).await;
-        assert!(result.is_ok());
+        assert!(result.is_ok(), "Done should succeed: {:?}", result.err());
 
         let done_result = result.unwrap();
         // Dependent should NOT be in unblocked list since blocker2 is still incomplete
@@ -686,9 +740,9 @@ mod tests {
 
         // Create two blocker tasks, one already done
         create_task(&db, "blocker1", "Blocker 1", "task", "done").await;
-        create_task(&db, "blocker2", "Blocker 2", "task", "in_progress").await;
+        create_task(&db, "blocker2", "Blocker 2", "task", "pending_review").await;
         // Create dependent task with two dependencies
-        create_task(&db, "dependent", "Dependent Task", "task", "blocked").await;
+        create_task(&db, "dependent", "Dependent Task", "task", "backlog").await;
         create_depends_on(&db, "dependent", "blocker1").await;
         create_depends_on(&db, "dependent", "blocker2").await;
 
@@ -698,7 +752,7 @@ mod tests {
         };
 
         let result = cmd.execute(&db).await;
-        assert!(result.is_ok());
+        assert!(result.is_ok(), "Done should succeed: {:?}", result.err());
 
         let done_result = result.unwrap();
         assert_eq!(done_result.unblocked_tasks.len(), 1);
@@ -711,10 +765,10 @@ mod tests {
     async fn test_done_unblocks_multiple_tasks() {
         let (db, temp_dir) = setup_test_db().await;
 
-        // Create blocker task
-        create_task(&db, "blocker", "Blocker Task", "task", "in_progress").await;
+        // Create blocker task (in pending_review - only valid source for done)
+        create_task(&db, "blocker", "Blocker Task", "task", "pending_review").await;
         // Create multiple dependent tasks
-        create_task(&db, "dep1", "Dependent 1", "task", "blocked").await;
+        create_task(&db, "dep1", "Dependent 1", "task", "backlog").await;
         create_task(&db, "dep2", "Dependent 2", "task", "todo").await;
         create_depends_on(&db, "dep1", "blocker").await;
         create_depends_on(&db, "dep2", "blocker").await;
@@ -724,7 +778,7 @@ mod tests {
         };
 
         let result = cmd.execute(&db).await;
-        assert!(result.is_ok());
+        assert!(result.is_ok(), "Done should succeed: {:?}", result.err());
 
         let done_result = result.unwrap();
         assert_eq!(done_result.unblocked_tasks.len(), 2);
@@ -756,14 +810,15 @@ mod tests {
     async fn test_done_updates_timestamp() {
         let (db, temp_dir) = setup_test_db().await;
 
-        create_task(&db, "task1", "Test Task", "task", "todo").await;
+        // Use pending_review - only valid source for done
+        create_task(&db, "task1", "Test Task", "task", "pending_review").await;
 
         let cmd = DoneCommand {
             id: "task1".to_string(),
         };
 
         let result = cmd.execute(&db).await;
-        assert!(result.is_ok());
+        assert!(result.is_ok(), "Done should succeed: {:?}", result.err());
 
         // Verify updated_at was set
         assert!(has_updated_at(&db, "task1").await);
@@ -775,14 +830,19 @@ mod tests {
     async fn test_done_case_insensitive_id() {
         let (db, temp_dir) = setup_test_db().await;
 
-        create_task(&db, "task1", "Test Task", "task", "todo").await;
+        // Use pending_review - only valid source for done
+        create_task(&db, "task1", "Test Task", "task", "pending_review").await;
 
         let cmd = DoneCommand {
             id: "TASK1".to_string(), // Uppercase
         };
 
         let result = cmd.execute(&db).await;
-        assert!(result.is_ok(), "Case-insensitive lookup should work");
+        assert!(
+            result.is_ok(),
+            "Case-insensitive lookup should work: {:?}",
+            result.err()
+        );
 
         let status = get_task_status(&db, "task1").await;
         assert_eq!(status, "done");
@@ -850,7 +910,8 @@ mod tests {
     async fn test_done_sets_completed_at() {
         let (db, temp_dir) = setup_test_db().await;
 
-        create_task(&db, "task1", "Test Task", "task", "todo").await;
+        // Use pending_review - only valid source for done
+        create_task(&db, "task1", "Test Task", "task", "pending_review").await;
 
         // Record time before execution
         let before = std::time::SystemTime::now()
@@ -939,8 +1000,8 @@ mod tests {
     async fn test_done_with_incomplete_children_does_not_set_completed_at() {
         let (db, temp_dir) = setup_test_db().await;
 
-        // Create parent task
-        create_task(&db, "parent", "Parent Task", "ticket", "in_progress").await;
+        // Create parent task (in pending_review - only valid source for done)
+        create_task(&db, "parent", "Parent Task", "ticket", "pending_review").await;
         // Create incomplete child task
         create_task(&db, "child1", "Child Task", "task", "todo").await;
         create_child_of(&db, "child1", "parent").await;
@@ -966,7 +1027,10 @@ mod tests {
 
         // Status should remain unchanged
         let status = get_task_status(&db, "parent").await;
-        assert_eq!(status, "in_progress", "Status should remain in_progress");
+        assert_eq!(
+            status, "pending_review",
+            "Status should remain pending_review"
+        );
 
         cleanup(&temp_dir);
     }
@@ -975,7 +1039,8 @@ mod tests {
     async fn test_done_completed_at_after_started_at() {
         let (db, temp_dir) = setup_test_db().await;
 
-        create_task(&db, "task1", "Test Task", "task", "in_progress").await;
+        // Use pending_review - only valid source for done
+        create_task(&db, "task1", "Test Task", "task", "pending_review").await;
 
         // Set started_at before marking done
         set_started_at(&db, "task1").await;
@@ -988,7 +1053,7 @@ mod tests {
         };
 
         let result = cmd.execute(&db).await;
-        assert!(result.is_ok());
+        assert!(result.is_ok(), "Done should succeed: {:?}", result.err());
 
         let started_at = get_started_at(&db, "task1").await;
         let completed_at = get_completed_at(&db, "task1").await;
@@ -1013,13 +1078,14 @@ mod tests {
     async fn test_done_completed_at_persists_in_database() {
         let (db, temp_dir) = setup_test_db().await;
 
-        create_task(&db, "task1", "Persist Test", "task", "todo").await;
+        // Use pending_review - only valid source for done
+        create_task(&db, "task1", "Persist Test", "task", "pending_review").await;
 
         let cmd = DoneCommand {
             id: "task1".to_string(),
         };
         let result = cmd.execute(&db).await;
-        assert!(result.is_ok());
+        assert!(result.is_ok(), "Done should succeed: {:?}", result.err());
 
         // Verify completed_at is persisted in database (query it fresh)
         let completed_at = get_completed_at(&db, "task1").await;

@@ -763,7 +763,7 @@ mod tests {
             "child2",
             "Child 2",
             "ticket",
-            "blocked",
+            "backlog",
             Some("medium"),
             &["backend"],
         )
@@ -792,7 +792,7 @@ mod tests {
         let child2 = detail.children.iter().find(|c| c.id == "child2").unwrap();
         assert_eq!(child2.title, "Child 2");
         assert_eq!(child2.level, "ticket");
-        assert_eq!(child2.status, "blocked");
+        assert_eq!(child2.status, "backlog");
         assert_eq!(child2.priority, Some("medium".to_string()));
         assert_eq!(child2.tags, vec!["backend"]);
 
@@ -813,7 +813,7 @@ mod tests {
             &["blocker", "core"],
         )
         .await;
-        create_task(&db, "task1", "Main Task", "task", "blocked", None, &[]).await;
+        create_task(&db, "task1", "Main Task", "task", "backlog", None, &[]).await;
         create_depends_on(&db, "task1", "dep1").await;
 
         let cmd = ShowCommand {
@@ -842,8 +842,17 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
 
         create_task(&db, "blocker", "Blocker Task", "task", "todo", None, &[]).await;
-        create_task(&db, "blocked", "Blocked Task", "task", "blocked", None, &[]).await;
-        create_depends_on(&db, "blocked", "blocker").await;
+        create_task(
+            &db,
+            "dependent",
+            "Dependent Task",
+            "task",
+            "backlog",
+            None,
+            &[],
+        )
+        .await;
+        create_depends_on(&db, "dependent", "blocker").await;
 
         let cmd = ShowCommand {
             id: "blocker".to_string(),
@@ -854,7 +863,7 @@ mod tests {
 
         let detail = result.unwrap();
         assert_eq!(detail.blocks.len(), 1);
-        assert_eq!(detail.blocks[0].id, "blocked");
+        assert_eq!(detail.blocks[0].id, "dependent");
 
         cleanup(&temp_dir);
     }

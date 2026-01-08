@@ -631,11 +631,11 @@ mod tests {
 
         // Create tasks with dependencies
         create_task(&db, "blocker", "Blocker Task", "task", "done").await;
-        create_task(&db, "blocked", "Blocked Task", "task", "blocked").await;
-        create_depends_on(&db, "blocked", "blocker").await;
+        create_task(&db, "dependent", "Dependent Task", "task", "backlog").await;
+        create_depends_on(&db, "dependent", "blocker").await;
 
         // Verify dependency exists
-        assert!(depends_on_exists(&db, "blocked", "blocker").await);
+        assert!(depends_on_exists(&db, "dependent", "blocker").await);
 
         let cmd = DeleteCommand {
             id: "blocker".to_string(),
@@ -649,11 +649,11 @@ mod tests {
         // Blocker should be deleted
         assert!(!task_exists(&db, "blocker").await);
 
-        // Blocked task should still exist
-        assert!(task_exists(&db, "blocked").await);
+        // Dependent task should still exist
+        assert!(task_exists(&db, "dependent").await);
 
         // Dependency edge should be cleaned up
-        assert!(!depends_on_exists(&db, "blocked", "blocker").await);
+        assert!(!depends_on_exists(&db, "dependent", "blocker").await);
 
         cleanup(&temp_dir);
     }
@@ -827,10 +827,10 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
 
         create_task(&db, "blocker", "Blocker", "task", "todo").await;
-        create_task(&db, "blocked1", "Blocked 1", "task", "blocked").await;
-        create_task(&db, "blocked2", "Blocked 2", "task", "blocked").await;
-        create_depends_on(&db, "blocked1", "blocker").await;
-        create_depends_on(&db, "blocked2", "blocker").await;
+        create_task(&db, "dependent1", "Dependent 1", "task", "backlog").await;
+        create_task(&db, "dependent2", "Dependent 2", "task", "backlog").await;
+        create_depends_on(&db, "dependent1", "blocker").await;
+        create_depends_on(&db, "dependent2", "blocker").await;
 
         let cmd = DeleteCommand {
             id: "blocker".to_string(),
@@ -838,16 +838,22 @@ mod tests {
             force: true,
         };
 
-        let blocked = cmd.fetch_blocked_tasks(&db, "blocker").await;
-        assert!(blocked.is_ok());
-        let blocked = blocked.unwrap();
-        assert_eq!(blocked.len(), 2);
+        let dependents = cmd.fetch_blocked_tasks(&db, "blocker").await;
+        assert!(dependents.is_ok());
+        let dependents = dependents.unwrap();
+        assert_eq!(dependents.len(), 2);
 
-        // Verify specific blocked tasks
+        // Verify specific dependent tasks
         use std::collections::HashSet;
-        let blocked_ids: HashSet<_> = blocked.iter().map(|id| id.as_str()).collect();
-        assert!(blocked_ids.contains("blocked1"), "Should contain blocked1");
-        assert!(blocked_ids.contains("blocked2"), "Should contain blocked2");
+        let dependent_ids: HashSet<_> = dependents.iter().map(|id| id.as_str()).collect();
+        assert!(
+            dependent_ids.contains("dependent1"),
+            "Should contain dependent1"
+        );
+        assert!(
+            dependent_ids.contains("dependent2"),
+            "Should contain dependent2"
+        );
 
         cleanup(&temp_dir);
     }

@@ -332,7 +332,7 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
 
         create_task(&db, "blocker1", "Blocker Task", "task", "todo").await;
-        create_task(&db, "task1", "Blocked Task", "task", "blocked").await;
+        create_task(&db, "task1", "Dependent Task", "task", "backlog").await;
         create_depends_on(&db, "task1", "blocker1").await;
 
         let cmd = BlockersCommand {
@@ -358,7 +358,7 @@ mod tests {
         // Create chain: task1 -> blocker1 -> blocker2
         create_task(&db, "blocker2", "Root Blocker", "task", "todo").await;
         create_task(&db, "blocker1", "Intermediate Blocker", "task", "todo").await;
-        create_task(&db, "task1", "Final Task", "task", "blocked").await;
+        create_task(&db, "task1", "Final Task", "task", "backlog").await;
 
         create_depends_on(&db, "task1", "blocker1").await;
         create_depends_on(&db, "blocker1", "blocker2").await;
@@ -387,7 +387,7 @@ mod tests {
 
         create_task(&db, "blocker1", "Blocker 1", "task", "todo").await;
         create_task(&db, "blocker2", "Blocker 2", "task", "in_progress").await;
-        create_task(&db, "task1", "Blocked Task", "task", "blocked").await;
+        create_task(&db, "task1", "Dependent Task", "task", "backlog").await;
 
         create_depends_on(&db, "task1", "blocker1").await;
         create_depends_on(&db, "task1", "blocker2").await;
@@ -425,7 +425,7 @@ mod tests {
         create_task(&db, "blocker3", "Deep Blocker", "task", "todo").await;
         create_task(&db, "blocker2", "Mid Blocker", "task", "todo").await;
         create_task(&db, "blocker1", "Direct Blocker", "task", "todo").await;
-        create_task(&db, "task1", "Main Task", "task", "blocked").await;
+        create_task(&db, "task1", "Main Task", "task", "backlog").await;
 
         create_depends_on(&db, "task1", "blocker1").await;
         create_depends_on(&db, "blocker1", "blocker2").await;
@@ -469,7 +469,7 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
 
         create_task(&db, "blocker1", "Blocker", "task", "todo").await;
-        create_task(&db, "task1", "Main Task", "task", "blocked").await;
+        create_task(&db, "task1", "Main Task", "task", "backlog").await;
         create_depends_on(&db, "task1", "blocker1").await;
 
         // Depth 0 should show no blockers
@@ -543,7 +543,7 @@ mod tests {
         create_task(&db, "shared", "Shared Blocker", "task", "todo").await;
         create_task(&db, "blocker1", "Blocker 1", "task", "todo").await;
         create_task(&db, "blocker2", "Blocker 2", "task", "todo").await;
-        create_task(&db, "task1", "Main Task", "task", "blocked").await;
+        create_task(&db, "task1", "Main Task", "task", "backlog").await;
 
         create_depends_on(&db, "task1", "blocker1").await;
         create_depends_on(&db, "task1", "blocker2").await;
@@ -582,7 +582,7 @@ mod tests {
 
         create_task(&db, "done_blocker", "Done Blocker", "ticket", "done").await;
         create_task(&db, "todo_blocker", "Todo Blocker", "task", "todo").await;
-        create_task(&db, "task1", "Main Task", "task", "blocked").await;
+        create_task(&db, "task1", "Main Task", "task", "backlog").await;
 
         create_depends_on(&db, "task1", "done_blocker").await;
         create_depends_on(&db, "task1", "todo_blocker").await;
