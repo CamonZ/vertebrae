@@ -22,6 +22,7 @@ pub mod show;
 pub mod start;
 pub mod step_done;
 pub mod submit;
+pub mod triage;
 pub mod undepend;
 pub mod unref;
 pub mod unsection;
@@ -47,6 +48,7 @@ pub use show::ShowCommand;
 pub use start::StartCommand;
 pub use step_done::StepDoneCommand;
 pub use submit::SubmitCommand;
+pub use triage::TriageCommand;
 pub use undepend::UndependCommand;
 pub use unref::UnrefCommand;
 pub use unsection::UnsectionCommand;
@@ -106,6 +108,8 @@ pub enum Command {
     StepDone(StepDoneCommand),
     /// Submit a task for review (transition to pending_review)
     Submit(SubmitCommand),
+    /// Triage a task (transition from backlog to todo)
+    Triage(TriageCommand),
     /// Update an existing task
     Update(UpdateCommand),
 }
@@ -232,6 +236,10 @@ impl Command {
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Submit(cmd) => {
+                let result = cmd.execute(db).await?;
+                Ok(CommandResult::Message(format!("{}", result)))
+            }
+            Command::Triage(cmd) => {
                 let result = cmd.execute(db).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
