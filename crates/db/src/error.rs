@@ -51,6 +51,15 @@ pub enum DbError {
         task_id: String,
         children: Vec<IncompleteChildInfo>,
     },
+
+    /// Error when attempting an invalid status transition
+    #[error("{message}")]
+    InvalidStatusTransition {
+        task_id: String,
+        from_status: String,
+        to_status: String,
+        message: String,
+    },
 }
 
 impl From<surrealdb::Error> for DbError {
@@ -212,6 +221,38 @@ mod tests {
                 && debug_str.contains("todo")
                 && debug_str.contains("task"),
             "Debug output should contain all field values"
+        );
+    }
+
+    #[test]
+    fn test_invalid_status_transition_error_display() {
+        let err = DbError::InvalidStatusTransition {
+            task_id: "task123".to_string(),
+            from_status: "todo".to_string(),
+            to_status: "done".to_string(),
+            message: "Invalid status transition from 'todo' to 'done'. Valid transitions from 'todo' are: in_progress, rejected".to_string(),
+        };
+        assert_eq!(
+            err.to_string(),
+            "Invalid status transition from 'todo' to 'done'. Valid transitions from 'todo' are: in_progress, rejected"
+        );
+    }
+
+    #[test]
+    fn test_invalid_status_transition_error_debug() {
+        let err = DbError::InvalidStatusTransition {
+            task_id: "task123".to_string(),
+            from_status: "done".to_string(),
+            to_status: "todo".to_string(),
+            message: "Cannot transition from 'done': this is a final state".to_string(),
+        };
+        let debug_str = format!("{:?}", err);
+        assert!(
+            debug_str.contains("InvalidStatusTransition")
+                && debug_str.contains("task123")
+                && debug_str.contains("done")
+                && debug_str.contains("todo"),
+            "Debug output should contain InvalidStatusTransition and relevant fields"
         );
     }
 }

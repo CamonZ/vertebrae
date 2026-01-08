@@ -87,29 +87,18 @@ impl StartCommand {
         // Parse the current status
         let current_status = parse_status(&task.status);
 
-        // Handle different status cases
-        match current_status {
-            Status::Done => {
-                return Err(DbError::InvalidPath {
-                    path: std::path::PathBuf::from(&self.id),
-                    reason: format!(
-                        "Cannot start task '{}': task is already done. Use a different command to reopen.",
-                        self.id
-                    ),
-                });
-            }
-            Status::InProgress => {
-                // Already in progress - return warning, no-op
-                return Ok(StartResult {
-                    id,
-                    already_in_progress: true,
-                    incomplete_deps: vec![],
-                });
-            }
-            Status::Todo | Status::Blocked => {
-                // Valid transitions - continue
-            }
+        // Handle already in_progress case (no-op)
+        if current_status == Status::InProgress {
+            return Ok(StartResult {
+                id,
+                already_in_progress: true,
+                incomplete_deps: vec![],
+            });
         }
+
+        // Validate the status transition using centralized validation
+        db.tasks()
+            .validate_status_transition(&id, &current_status, &Status::InProgress)?;
 
         // Check for incomplete dependencies (soft enforcement - warn only)
         let incomplete_deps = self.fetch_incomplete_dependencies(db, &id).await?;
@@ -181,14 +170,7 @@ impl StartCommand {
 
 /// Parse a status string into Status enum
 fn parse_status(s: &str) -> Status {
-    match s {
-        "todo" => Status::Todo,
-        "in_progress" => Status::InProgress,
-        "done" => Status::Done,
-        "blocked" => Status::Blocked,
-        // Default to Todo if unknown (should not happen with schema validation)
-        _ => Status::Todo,
-    }
+    Status::parse(s).unwrap_or(Status::Todo)
 }
 
 #[cfg(test)]
@@ -262,10 +244,12 @@ mod tests {
 
     #[test]
     fn test_parse_status() {
+        assert_eq!(parse_status("backlog"), Status::Backlog);
         assert_eq!(parse_status("todo"), Status::Todo);
         assert_eq!(parse_status("in_progress"), Status::InProgress);
+        assert_eq!(parse_status("pending_review"), Status::PendingReview);
         assert_eq!(parse_status("done"), Status::Done);
-        assert_eq!(parse_status("blocked"), Status::Blocked);
+        assert_eq!(parse_status("rejected"), Status::Rejected);
         // Unknown defaults to Todo
         assert_eq!(parse_status("unknown"), Status::Todo);
     }
@@ -296,21 +280,37 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_start_blocked_task() {
+    async fn test_start_backlog_task_fails() {
         let (db, temp_dir) = setup_test_db().await;
 
-        create_task(&db, "task1", "Blocked Task", "task", "blocked").await;
+        create_task(&db, "task1", "Backlog Task", "task", "backlog").await;
 
         let cmd = StartCommand {
             id: "task1".to_string(),
         };
 
         let result = cmd.execute(&db).await;
-        assert!(result.is_ok(), "Start failed: {:?}", result.err());
+        // Should fail - backlog cannot transition directly to in_progress
+        match result {
+            Err(DbError::InvalidStatusTransition { message, .. }) => {
+                assert!(
+                    message.contains("backlog"),
+                    "Error should mention backlog status: {}",
+                    message
+                );
+                assert!(
+                    message.contains("in_progress"),
+                    "Error should mention in_progress status: {}",
+                    message
+                );
+            }
+            Err(other) => panic!("Expected InvalidStatusTransition error, got {:?}", other),
+            Ok(_) => panic!("Expected error, got success"),
+        }
 
-        // Verify status changed
+        // Status should remain backlog
         let status = get_task_status(&db, "task1").await;
-        assert_eq!(status, "in_progress");
+        assert_eq!(status, "backlog");
 
         cleanup(&temp_dir);
     }
@@ -350,20 +350,84 @@ mod tests {
 
         let result = cmd.execute(&db).await;
         match result {
-            Err(DbError::InvalidPath { reason, .. }) => {
+            Err(DbError::InvalidStatusTransition { message, .. }) => {
                 assert!(
-                    reason.contains("already done"),
-                    "Expected 'already done' in error, got: {}",
-                    reason
+                    message.contains("final state"),
+                    "Expected 'final state' in error, got: {}",
+                    message
                 );
             }
-            Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
+            Err(other) => panic!("Expected InvalidStatusTransition error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
 
         // Status should remain done
         let status = get_task_status(&db, "task1").await;
         assert_eq!(status, "done");
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_start_rejected_task_fails() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        create_task(&db, "task1", "Rejected Task", "task", "rejected").await;
+
+        let cmd = StartCommand {
+            id: "task1".to_string(),
+        };
+
+        let result = cmd.execute(&db).await;
+        match result {
+            Err(DbError::InvalidStatusTransition { message, .. }) => {
+                assert!(
+                    message.contains("final state"),
+                    "Expected 'final state' in error, got: {}",
+                    message
+                );
+            }
+            Err(other) => panic!("Expected InvalidStatusTransition error, got {:?}", other),
+            Ok(_) => panic!("Expected error, got success"),
+        }
+
+        // Status should remain rejected
+        let status = get_task_status(&db, "task1").await;
+        assert_eq!(status, "rejected");
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_start_pending_review_task_fails() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        create_task(
+            &db,
+            "task1",
+            "Pending Review Task",
+            "task",
+            "pending_review",
+        )
+        .await;
+
+        let cmd = StartCommand {
+            id: "task1".to_string(),
+        };
+
+        let result = cmd.execute(&db).await;
+        // pending_review can transition to in_progress (back for rework), so this should succeed
+        // Actually, looking at the workflow: pending_review -> in_progress, done
+        // So starting a pending_review task should transition it back to in_progress
+        assert!(
+            result.is_ok(),
+            "Start from pending_review should succeed: {:?}",
+            result.err()
+        );
+
+        // Verify status changed
+        let status = get_task_status(&db, "task1").await;
+        assert_eq!(status, "in_progress");
 
         cleanup(&temp_dir);
     }
@@ -463,7 +527,7 @@ mod tests {
 
         // Create multiple dependency tasks
         create_task(&db, "dep1", "First Dep", "task", "todo").await;
-        create_task(&db, "dep2", "Second Dep", "task", "blocked").await;
+        create_task(&db, "dep2", "Second Dep", "task", "backlog").await;
         create_task(&db, "dep3", "Third Dep", "task", "done").await;
         // Create main task
         create_task(&db, "task1", "Main Task", "task", "todo").await;
@@ -496,7 +560,7 @@ mod tests {
         );
         assert!(
             incomplete_ids.contains("dep2"),
-            "Should contain dep2 (status=blocked)"
+            "Should contain dep2 (status=backlog)"
         );
         assert!(
             !incomplete_ids.contains("dep3"),
@@ -583,7 +647,7 @@ mod tests {
                 (
                     "dep2".to_string(),
                     "Second Dep".to_string(),
-                    "blocked".to_string(),
+                    "backlog".to_string(),
                 ),
             ],
         };
@@ -594,7 +658,7 @@ mod tests {
         assert!(output.contains("First Dep"));
         assert!(output.contains("todo"));
         assert!(output.contains("dep2"));
-        assert!(output.contains("blocked"));
+        assert!(output.contains("backlog"));
         assert!(output.contains("Started task: task1"));
     }
 
@@ -759,17 +823,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_restart_blocked_task_preserves_started_at() {
+    async fn test_restart_pending_review_task_preserves_started_at() {
         let (db, temp_dir) = setup_test_db().await;
 
-        // Create a blocked task with an existing started_at (was started before, then blocked)
+        // Create a pending_review task with an existing started_at (was started before, sent for review)
         let past_time = "d'2025-06-15T12:30:00Z'";
         create_task_with_started_at(
             &db,
             "task1",
             "Previously Started Task",
             "task",
-            "blocked",
+            "pending_review",
             past_time,
         )
         .await;
@@ -799,7 +863,7 @@ mod tests {
         let after_ts = after_started_at.unwrap();
         assert_eq!(
             original_ts, after_ts,
-            "started_at should preserve the original value when restarting blocked task. \
+            "started_at should preserve the original value when restarting pending_review task. \
              Original: {}, After: {}",
             original_ts, after_ts
         );
@@ -808,11 +872,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_start_blocked_task_without_started_at_sets_it() {
+    async fn test_start_pending_review_task_without_started_at_sets_it() {
         let (db, temp_dir) = setup_test_db().await;
 
-        // Create a blocked task WITHOUT started_at (edge case: blocked before ever being started)
-        create_task(&db, "task1", "Never Started Task", "task", "blocked").await;
+        // Create a pending_review task WITHOUT started_at (edge case)
+        create_task(&db, "task1", "Review Task", "task", "pending_review").await;
 
         // Verify started_at is initially NULL
         let initial_started_at = get_started_at(&db, "task1").await;
@@ -831,7 +895,7 @@ mod tests {
         let started_at = get_started_at(&db, "task1").await;
         assert!(
             started_at.is_some(),
-            "started_at should be set when starting a blocked task for the first time"
+            "started_at should be set when starting a pending_review task for rework"
         );
 
         cleanup(&temp_dir);

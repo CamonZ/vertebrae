@@ -953,7 +953,7 @@ mod tests {
         let graph = GraphQueries::new(db.client());
 
         create_task(&db, "blocker1", "Blocker Task", "task", "todo").await;
-        create_task(&db, "task1", "Blocked Task", "task", "blocked").await;
+        create_task(&db, "task1", "Blocked Task", "task", "backlog").await;
         create_depends_on(&db, "task1", "blocker1").await;
 
         let blockers = graph.get_blockers("task1", None).await.unwrap();
@@ -975,7 +975,7 @@ mod tests {
         // Create chain: task1 -> blocker1 -> blocker2
         create_task(&db, "blocker2", "Root Blocker", "task", "todo").await;
         create_task(&db, "blocker1", "Intermediate Blocker", "task", "todo").await;
-        create_task(&db, "task1", "Final Task", "task", "blocked").await;
+        create_task(&db, "task1", "Final Task", "task", "backlog").await;
 
         create_depends_on(&db, "task1", "blocker1").await;
         create_depends_on(&db, "blocker1", "blocker2").await;
@@ -998,7 +998,7 @@ mod tests {
         create_task(&db, "blocker3", "Deep Blocker", "task", "todo").await;
         create_task(&db, "blocker2", "Mid Blocker", "task", "todo").await;
         create_task(&db, "blocker1", "Direct Blocker", "task", "todo").await;
-        create_task(&db, "task1", "Main Task", "task", "blocked").await;
+        create_task(&db, "task1", "Main Task", "task", "backlog").await;
 
         create_depends_on(&db, "task1", "blocker1").await;
         create_depends_on(&db, "blocker1", "blocker2").await;
@@ -1025,7 +1025,7 @@ mod tests {
         let graph = GraphQueries::new(db.client());
 
         create_task(&db, "blocker1", "Blocker", "task", "todo").await;
-        create_task(&db, "task1", "Main Task", "task", "blocked").await;
+        create_task(&db, "task1", "Main Task", "task", "backlog").await;
         create_depends_on(&db, "task1", "blocker1").await;
 
         // Depth 0 should show no blockers
@@ -1042,7 +1042,7 @@ mod tests {
 
         create_task(&db, "blocker1", "Blocker 1", "task", "todo").await;
         create_task(&db, "blocker2", "Blocker 2", "task", "in_progress").await;
-        create_task(&db, "task1", "Blocked Task", "task", "blocked").await;
+        create_task(&db, "task1", "Blocked Task", "task", "backlog").await;
 
         create_depends_on(&db, "task1", "blocker1").await;
         create_depends_on(&db, "task1", "blocker2").await;
@@ -1498,7 +1498,7 @@ mod tests {
 
         create_task(&db, "blocker1", "Blocker 1", "task", "done").await;
         create_task(&db, "blocker2", "Blocker 2", "task", "in_progress").await;
-        create_task(&db, "task1", "Task 1", "task", "blocked").await;
+        create_task(&db, "task1", "Task 1", "task", "backlog").await;
 
         create_depends_on(&db, "task1", "blocker1").await;
         create_depends_on(&db, "task1", "blocker2").await;
@@ -1553,7 +1553,7 @@ mod tests {
         create_task(&db, "parent", "Parent", "ticket", "in_progress").await;
         create_task(&db, "child1", "Child 1", "task", "done").await;
         create_task(&db, "child2", "Child 2", "task", "todo").await;
-        create_task(&db, "child3", "Child 3", "task", "blocked").await;
+        create_task(&db, "child3", "Child 3", "task", "backlog").await;
 
         create_child_of(&db, "child1", "parent").await;
         create_child_of(&db, "child2", "parent").await;
@@ -1612,7 +1612,7 @@ mod tests {
         let graph = GraphQueries::new(db.client());
 
         create_task(&db, "parent", "Parent Epic", "epic", "in_progress").await;
-        create_task(&db, "child", "Incomplete Child", "ticket", "blocked").await;
+        create_task(&db, "child", "Incomplete Child", "ticket", "backlog").await;
 
         create_child_of(&db, "child", "parent").await;
 
@@ -1622,7 +1622,7 @@ mod tests {
         let child = &incomplete[0];
         assert_eq!(child.id, "child");
         assert_eq!(child.title, "Incomplete Child");
-        assert_eq!(child.status, "blocked");
+        assert_eq!(child.status, "backlog");
         assert_eq!(child.level, "ticket");
 
         cleanup(&temp_dir);
@@ -1908,7 +1908,7 @@ mod tests {
 
         create_task(&db, "epic1", "Epic 1", "epic", "todo").await;
         create_task(&db, "ticket1", "Ticket 1", "ticket", "todo").await;
-        create_task(&db, "ticket2", "Ticket 2", "ticket", "blocked").await;
+        create_task(&db, "ticket2", "Ticket 2", "ticket", "backlog").await;
 
         create_child_of(&db, "ticket1", "epic1").await;
         create_child_of(&db, "ticket2", "epic1").await;

@@ -74,16 +74,12 @@ fn parse_level(s: &str) -> Result<Level, String> {
 
 /// Parse a status string into a Status enum
 fn parse_status(s: &str) -> Result<Status, String> {
-    match s.to_lowercase().as_str() {
-        "todo" => Ok(Status::Todo),
-        "in_progress" => Ok(Status::InProgress),
-        "done" => Ok(Status::Done),
-        "blocked" => Ok(Status::Blocked),
-        _ => Err(format!(
-            "invalid status '{}'. Valid values: todo, in_progress, done, blocked",
+    Status::parse(&s.to_lowercase()).ok_or_else(|| {
+        format!(
+            "invalid status '{}'. Valid values: backlog, todo, in_progress, pending_review, done, rejected",
             s
-        )),
-    }
+        )
+    })
 }
 
 /// Parse a priority string into a Priority enum
@@ -453,10 +449,15 @@ mod tests {
 
     #[test]
     fn test_parse_status_valid() {
+        assert_eq!(parse_status("backlog").unwrap(), Status::Backlog);
         assert_eq!(parse_status("todo").unwrap(), Status::Todo);
         assert_eq!(parse_status("in_progress").unwrap(), Status::InProgress);
+        assert_eq!(
+            parse_status("pending_review").unwrap(),
+            Status::PendingReview
+        );
         assert_eq!(parse_status("done").unwrap(), Status::Done);
-        assert_eq!(parse_status("blocked").unwrap(), Status::Blocked);
+        assert_eq!(parse_status("rejected").unwrap(), Status::Rejected);
     }
 
     #[test]
@@ -464,6 +465,10 @@ mod tests {
         assert_eq!(parse_status("TODO").unwrap(), Status::Todo);
         assert_eq!(parse_status("In_Progress").unwrap(), Status::InProgress);
         assert_eq!(parse_status("DONE").unwrap(), Status::Done);
+        assert_eq!(
+            parse_status("PENDING_REVIEW").unwrap(),
+            Status::PendingReview
+        );
     }
 
     #[test]
@@ -636,12 +641,12 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
 
         create_task(&db, "task1", "Task 1", "task", "todo", None, &[]).await;
-        create_task(&db, "task2", "Task 2", "task", "blocked", None, &[]).await;
+        create_task(&db, "task2", "Task 2", "task", "backlog", None, &[]).await;
         create_task(&db, "task3", "Task 3", "task", "in_progress", None, &[]).await;
 
         let cmd = ListCommand {
             levels: vec![],
-            statuses: vec![Status::Blocked],
+            statuses: vec![Status::Backlog],
             priorities: vec![],
             tags: vec![],
             root: false,
@@ -652,7 +657,7 @@ mod tests {
         let result = cmd.execute(&db).await.unwrap();
 
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].status, "blocked");
+        assert_eq!(result[0].status, "backlog");
 
         cleanup(&temp_dir);
     }

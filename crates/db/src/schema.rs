@@ -21,7 +21,7 @@ mod sql {
             ASSERT $value IN ["epic", "ticket", "task"];
 
         DEFINE FIELD status ON task TYPE string
-            ASSERT $value IN ["todo", "in_progress", "done", "blocked"];
+            ASSERT $value IN ["backlog", "todo", "in_progress", "pending_review", "done", "rejected"];
 
         DEFINE FIELD priority ON task TYPE option<string>
             ASSERT $value IN [NONE, "low", "medium", "high", "critical"];
@@ -362,7 +362,7 @@ mod tests {
                 CREATE task:second SET
                     title = "Second Task",
                     level = "task",
-                    status = "blocked";
+                    status = "backlog";
             "#,
             )
             .await
@@ -513,9 +513,16 @@ mod tests {
         let (client, temp_dir) = setup_test_db().await;
         init_schema(&client).await.unwrap();
 
-        for (i, status) in ["todo", "in_progress", "done", "blocked"]
-            .iter()
-            .enumerate()
+        for (i, status) in [
+            "backlog",
+            "todo",
+            "in_progress",
+            "pending_review",
+            "done",
+            "rejected",
+        ]
+        .iter()
+        .enumerate()
         {
             let query = format!(
                 r#"CREATE task SET title = "Test {}", level = "task", status = "{}""#,

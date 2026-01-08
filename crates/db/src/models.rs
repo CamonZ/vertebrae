@@ -42,23 +42,110 @@ impl std::fmt::Display for Level {
 /// Task status
 ///
 /// Represents the current state of a task in its lifecycle.
+/// Tasks follow a strict workflow with these allowed transitions:
+/// - backlog -> todo
+/// - todo -> in_progress, rejected
+/// - in_progress -> pending_review
+/// - pending_review -> in_progress, done
+/// - rejected, done -> no transitions (final states)
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Status {
+    Backlog,
     Todo,
     InProgress,
+    PendingReview,
     Done,
-    Blocked,
+    Rejected,
 }
 
 impl Status {
     /// Returns the string representation used in the database
     pub fn as_str(&self) -> &'static str {
         match self {
+            Status::Backlog => "backlog",
             Status::Todo => "todo",
             Status::InProgress => "in_progress",
+            Status::PendingReview => "pending_review",
             Status::Done => "done",
-            Status::Blocked => "blocked",
+            Status::Rejected => "rejected",
+        }
+    }
+
+    /// Returns the list of valid target states this status can transition to.
+    ///
+    /// The workflow transitions are:
+    /// - backlog -> todo
+    /// - todo -> in_progress, rejected
+    /// - in_progress -> pending_review
+    /// - pending_review -> in_progress, done
+    /// - rejected, done -> no transitions (final states)
+    pub fn valid_transitions(&self) -> &'static [Status] {
+        match self {
+            Status::Backlog => &[Status::Todo],
+            Status::Todo => &[Status::InProgress, Status::Rejected],
+            Status::InProgress => &[Status::PendingReview],
+            Status::PendingReview => &[Status::InProgress, Status::Done],
+            Status::Done => &[],
+            Status::Rejected => &[],
+        }
+    }
+
+    /// Check if transitioning from this status to the target status is valid.
+    ///
+    /// Returns `true` if the transition is allowed, `false` otherwise.
+    pub fn can_transition_to(&self, target: &Status) -> bool {
+        self.valid_transitions().contains(target)
+    }
+
+    /// Attempt to validate a transition from this status to the target status.
+    ///
+    /// Returns `Ok(())` if the transition is valid, or an error message describing
+    /// why the transition is invalid.
+    pub fn validate_transition(&self, target: &Status) -> Result<(), String> {
+        if self == target {
+            return Ok(()); // No-op transition to same status is always valid
+        }
+
+        if self.can_transition_to(target) {
+            Ok(())
+        } else {
+            let valid_targets = self.valid_transitions();
+            if valid_targets.is_empty() {
+                Err(format!(
+                    "Cannot transition from '{}': this is a final state with no allowed transitions",
+                    self.as_str()
+                ))
+            } else {
+                let valid_list: Vec<&str> = valid_targets.iter().map(|s| s.as_str()).collect();
+                Err(format!(
+                    "Invalid status transition from '{}' to '{}'. Valid transitions from '{}' are: {}",
+                    self.as_str(),
+                    target.as_str(),
+                    self.as_str(),
+                    valid_list.join(", ")
+                ))
+            }
+        }
+    }
+
+    /// Returns true if this status is a final state (no further transitions allowed)
+    pub fn is_final(&self) -> bool {
+        matches!(self, Status::Done | Status::Rejected)
+    }
+
+    /// Parse a status string into a Status enum.
+    ///
+    /// Returns `None` if the string doesn't match any known status.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "backlog" => Some(Status::Backlog),
+            "todo" => Some(Status::Todo),
+            "in_progress" => Some(Status::InProgress),
+            "pending_review" => Some(Status::PendingReview),
+            "done" => Some(Status::Done),
+            "rejected" => Some(Status::Rejected),
+            _ => None,
         }
     }
 }
@@ -491,36 +578,52 @@ mod tests {
     // Status enum tests
     #[test]
     fn test_status_as_str() {
+        assert_eq!(Status::Backlog.as_str(), "backlog");
         assert_eq!(Status::Todo.as_str(), "todo");
         assert_eq!(Status::InProgress.as_str(), "in_progress");
+        assert_eq!(Status::PendingReview.as_str(), "pending_review");
         assert_eq!(Status::Done.as_str(), "done");
-        assert_eq!(Status::Blocked.as_str(), "blocked");
+        assert_eq!(Status::Rejected.as_str(), "rejected");
     }
 
     #[test]
     fn test_status_display() {
+        assert_eq!(format!("{}", Status::Backlog), "backlog");
         assert_eq!(format!("{}", Status::Todo), "todo");
         assert_eq!(format!("{}", Status::InProgress), "in_progress");
+        assert_eq!(format!("{}", Status::PendingReview), "pending_review");
         assert_eq!(format!("{}", Status::Done), "done");
-        assert_eq!(format!("{}", Status::Blocked), "blocked");
+        assert_eq!(format!("{}", Status::Rejected), "rejected");
     }
 
     #[test]
     fn test_status_serialize() {
+        assert_eq!(
+            serde_json::to_string(&Status::Backlog).unwrap(),
+            "\"backlog\""
+        );
         assert_eq!(serde_json::to_string(&Status::Todo).unwrap(), "\"todo\"");
         assert_eq!(
             serde_json::to_string(&Status::InProgress).unwrap(),
             "\"in_progress\""
         );
+        assert_eq!(
+            serde_json::to_string(&Status::PendingReview).unwrap(),
+            "\"pending_review\""
+        );
         assert_eq!(serde_json::to_string(&Status::Done).unwrap(), "\"done\"");
         assert_eq!(
-            serde_json::to_string(&Status::Blocked).unwrap(),
-            "\"blocked\""
+            serde_json::to_string(&Status::Rejected).unwrap(),
+            "\"rejected\""
         );
     }
 
     #[test]
     fn test_status_deserialize() {
+        assert_eq!(
+            serde_json::from_str::<Status>("\"backlog\"").unwrap(),
+            Status::Backlog
+        );
         assert_eq!(
             serde_json::from_str::<Status>("\"todo\"").unwrap(),
             Status::Todo
@@ -530,12 +633,16 @@ mod tests {
             Status::InProgress
         );
         assert_eq!(
+            serde_json::from_str::<Status>("\"pending_review\"").unwrap(),
+            Status::PendingReview
+        );
+        assert_eq!(
             serde_json::from_str::<Status>("\"done\"").unwrap(),
             Status::Done
         );
         assert_eq!(
-            serde_json::from_str::<Status>("\"blocked\"").unwrap(),
-            Status::Blocked
+            serde_json::from_str::<Status>("\"rejected\"").unwrap(),
+            Status::Rejected
         );
     }
 
@@ -544,6 +651,165 @@ mod tests {
         let status = Status::InProgress;
         let cloned = status.clone();
         assert_eq!(status, cloned);
+    }
+
+    // Status transition tests
+    #[test]
+    fn test_status_valid_transitions() {
+        // backlog -> todo
+        assert_eq!(Status::Backlog.valid_transitions(), &[Status::Todo]);
+
+        // todo -> in_progress, rejected
+        assert_eq!(
+            Status::Todo.valid_transitions(),
+            &[Status::InProgress, Status::Rejected]
+        );
+
+        // in_progress -> pending_review
+        assert_eq!(
+            Status::InProgress.valid_transitions(),
+            &[Status::PendingReview]
+        );
+
+        // pending_review -> in_progress, done
+        assert_eq!(
+            Status::PendingReview.valid_transitions(),
+            &[Status::InProgress, Status::Done]
+        );
+
+        // done -> no transitions (final state)
+        assert!(Status::Done.valid_transitions().is_empty());
+
+        // rejected -> no transitions (final state)
+        assert!(Status::Rejected.valid_transitions().is_empty());
+    }
+
+    #[test]
+    fn test_status_can_transition_to_valid() {
+        assert!(Status::Backlog.can_transition_to(&Status::Todo));
+        assert!(Status::Todo.can_transition_to(&Status::InProgress));
+        assert!(Status::Todo.can_transition_to(&Status::Rejected));
+        assert!(Status::InProgress.can_transition_to(&Status::PendingReview));
+        assert!(Status::PendingReview.can_transition_to(&Status::InProgress));
+        assert!(Status::PendingReview.can_transition_to(&Status::Done));
+    }
+
+    #[test]
+    fn test_status_can_transition_to_invalid() {
+        // Backlog cannot go directly to in_progress
+        assert!(!Status::Backlog.can_transition_to(&Status::InProgress));
+        assert!(!Status::Backlog.can_transition_to(&Status::Done));
+
+        // Todo cannot go directly to done
+        assert!(!Status::Todo.can_transition_to(&Status::Done));
+        assert!(!Status::Todo.can_transition_to(&Status::PendingReview));
+
+        // InProgress cannot go directly to done
+        assert!(!Status::InProgress.can_transition_to(&Status::Done));
+        assert!(!Status::InProgress.can_transition_to(&Status::Todo));
+
+        // Done cannot transition anywhere
+        assert!(!Status::Done.can_transition_to(&Status::Todo));
+        assert!(!Status::Done.can_transition_to(&Status::InProgress));
+
+        // Rejected cannot transition anywhere
+        assert!(!Status::Rejected.can_transition_to(&Status::Todo));
+        assert!(!Status::Rejected.can_transition_to(&Status::InProgress));
+    }
+
+    #[test]
+    fn test_status_validate_transition_valid() {
+        assert!(Status::Backlog.validate_transition(&Status::Todo).is_ok());
+        assert!(
+            Status::Todo
+                .validate_transition(&Status::InProgress)
+                .is_ok()
+        );
+        assert!(Status::Todo.validate_transition(&Status::Rejected).is_ok());
+        assert!(
+            Status::InProgress
+                .validate_transition(&Status::PendingReview)
+                .is_ok()
+        );
+        assert!(
+            Status::PendingReview
+                .validate_transition(&Status::InProgress)
+                .is_ok()
+        );
+        assert!(
+            Status::PendingReview
+                .validate_transition(&Status::Done)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn test_status_validate_transition_same_status() {
+        // Transitioning to the same status should be valid (no-op)
+        assert!(
+            Status::Backlog
+                .validate_transition(&Status::Backlog)
+                .is_ok()
+        );
+        assert!(Status::Todo.validate_transition(&Status::Todo).is_ok());
+        assert!(
+            Status::InProgress
+                .validate_transition(&Status::InProgress)
+                .is_ok()
+        );
+        assert!(
+            Status::PendingReview
+                .validate_transition(&Status::PendingReview)
+                .is_ok()
+        );
+        assert!(Status::Done.validate_transition(&Status::Done).is_ok());
+        assert!(
+            Status::Rejected
+                .validate_transition(&Status::Rejected)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn test_status_validate_transition_invalid() {
+        // Invalid transition with available targets
+        let result = Status::Todo.validate_transition(&Status::Done);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("Invalid status transition"));
+        assert!(err.contains("todo"));
+        assert!(err.contains("done"));
+        assert!(err.contains("in_progress"));
+        assert!(err.contains("rejected"));
+
+        // Final state with no targets
+        let result = Status::Done.validate_transition(&Status::Todo);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("final state"));
+        assert!(err.contains("no allowed transitions"));
+    }
+
+    #[test]
+    fn test_status_is_final() {
+        assert!(!Status::Backlog.is_final());
+        assert!(!Status::Todo.is_final());
+        assert!(!Status::InProgress.is_final());
+        assert!(!Status::PendingReview.is_final());
+        assert!(Status::Done.is_final());
+        assert!(Status::Rejected.is_final());
+    }
+
+    #[test]
+    fn test_status_from_str() {
+        assert_eq!(Status::parse("backlog"), Some(Status::Backlog));
+        assert_eq!(Status::parse("todo"), Some(Status::Todo));
+        assert_eq!(Status::parse("in_progress"), Some(Status::InProgress));
+        assert_eq!(Status::parse("pending_review"), Some(Status::PendingReview));
+        assert_eq!(Status::parse("done"), Some(Status::Done));
+        assert_eq!(Status::parse("rejected"), Some(Status::Rejected));
+        assert_eq!(Status::parse("unknown"), None);
+        assert_eq!(Status::parse(""), None);
     }
 
     // Priority enum tests
@@ -1137,7 +1403,7 @@ mod tests {
         let json = r#"{
             "title": "Deserialized Task",
             "level": "epic",
-            "status": "blocked",
+            "status": "backlog",
             "priority": "low",
             "tags": ["a", "b"],
             "sections": [],
@@ -1147,7 +1413,7 @@ mod tests {
         let task: Task = serde_json::from_str(json).unwrap();
         assert_eq!(task.title, "Deserialized Task");
         assert_eq!(task.level, Level::Epic);
-        assert_eq!(task.status, Status::Blocked);
+        assert_eq!(task.status, Status::Backlog);
         assert_eq!(task.priority, Some(Priority::Low));
         assert_eq!(task.tags, vec!["a", "b"]);
     }

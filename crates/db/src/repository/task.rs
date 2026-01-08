@@ -264,7 +264,36 @@ impl<'a> TaskRepository<'a> {
         Ok(task)
     }
 
-    /// Update the status of a task.
+    /// Update the status of a task with workflow validation.
+    ///
+    /// Validates the transition before updating. Use `update_status_unchecked` for
+    /// internal operations that need to bypass validation.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The task ID to update
+    /// * `status` - The new status
+    ///
+    /// # Errors
+    ///
+    /// Returns `DbError::InvalidStatusTransition` if the transition is not allowed.
+    /// Returns `DbError::Query` if the database operation fails.
+    pub async fn update_status(&self, id: &str, status: Status) -> DbResult<()> {
+        // Fetch current task to get current status
+        let task = self.get(id).await?;
+        if let Some(task) = task {
+            // Validate the transition
+            self.validate_status_transition(id, &task.status, &status)?;
+        }
+
+        // Execute the update
+        self.update_status_unchecked(id, status).await
+    }
+
+    /// Update the status of a task without workflow validation.
+    ///
+    /// This should only be used for internal operations where validation
+    /// has already been performed or is not needed.
     ///
     /// # Arguments
     ///
@@ -274,7 +303,7 @@ impl<'a> TaskRepository<'a> {
     /// # Errors
     ///
     /// Returns `DbError::Query` if the database operation fails.
-    pub async fn update_status(&self, id: &str, status: Status) -> DbResult<()> {
+    pub async fn update_status_unchecked(&self, id: &str, status: Status) -> DbResult<()> {
         let query = format!(
             "UPDATE task:{} SET status = '{}', updated_at = time::now()",
             id,
@@ -284,9 +313,55 @@ impl<'a> TaskRepository<'a> {
         Ok(())
     }
 
-    /// Mark a task as done with completed_at timestamp.
+    /// Validate a status transition for a task.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The task ID (for error messages)
+    /// * `from` - The current status
+    /// * `to` - The target status
+    ///
+    /// # Errors
+    ///
+    /// Returns `DbError::InvalidStatusTransition` if the transition is not allowed.
+    pub fn validate_status_transition(&self, id: &str, from: &Status, to: &Status) -> DbResult<()> {
+        from.validate_transition(to)
+            .map_err(|message| DbError::InvalidStatusTransition {
+                task_id: id.to_string(),
+                from_status: from.as_str().to_string(),
+                to_status: to.as_str().to_string(),
+                message,
+            })
+    }
+
+    /// Mark a task as done with completed_at timestamp and workflow validation.
     ///
     /// Updates the status to 'done' and sets both updated_at and completed_at timestamps.
+    /// Validates that the transition is allowed before executing.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The task ID to mark as done
+    ///
+    /// # Errors
+    ///
+    /// Returns `DbError::InvalidStatusTransition` if the transition is not allowed.
+    /// Returns `DbError::Query` if the database operation fails.
+    pub async fn mark_done(&self, id: &str) -> DbResult<()> {
+        // Fetch current task to validate transition
+        let task = self.get(id).await?;
+        if let Some(task) = &task {
+            self.validate_status_transition(id, &task.status, &Status::Done)?;
+        }
+
+        // Execute the update
+        self.mark_done_unchecked(id).await
+    }
+
+    /// Mark a task as done without workflow validation.
+    ///
+    /// This should only be used for internal operations where validation
+    /// has already been performed or is not needed.
     ///
     /// # Arguments
     ///
@@ -295,7 +370,7 @@ impl<'a> TaskRepository<'a> {
     /// # Errors
     ///
     /// Returns `DbError::Query` if the database operation fails.
-    pub async fn mark_done(&self, id: &str) -> DbResult<()> {
+    pub async fn mark_done_unchecked(&self, id: &str) -> DbResult<()> {
         let query = format!(
             "UPDATE task:{} SET status = 'done', updated_at = time::now(), completed_at = time::now()",
             id
@@ -319,7 +394,9 @@ impl<'a> TaskRepository<'a> {
         Ok(())
     }
 
-    /// Apply partial updates to a task.
+    /// Apply partial updates to a task with workflow validation.
+    ///
+    /// If a status update is included, validates the transition before applying.
     ///
     /// # Arguments
     ///
@@ -328,6 +405,7 @@ impl<'a> TaskRepository<'a> {
     ///
     /// # Errors
     ///
+    /// Returns `DbError::InvalidStatusTransition` if a status transition is not allowed.
     /// Returns `DbError::Query` if the database operation fails.
     pub async fn update(&self, id: &str, updates: &TaskUpdate) -> DbResult<()> {
         debug!("Updating task: {}", id);
@@ -336,6 +414,14 @@ impl<'a> TaskRepository<'a> {
         if !updates.has_updates() {
             debug!("No updates specified for task: {}", id);
             return Ok(());
+        }
+
+        // Validate status transition if status is being updated
+        if let Some(new_status) = &updates.status {
+            let task = self.get(id).await?;
+            if let Some(task) = task {
+                self.validate_status_transition(id, &task.status, new_status)?;
+            }
         }
 
         // Apply field updates (title, priority, refs, needs_human_review, started_at)
