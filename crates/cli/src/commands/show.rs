@@ -90,6 +90,8 @@ struct SectionRow {
     content: Option<String>,
     #[serde(default)]
     order: Option<u32>,
+    #[serde(default)]
+    refs: Vec<CodeRefRow>,
 }
 
 /// Code reference row from database
@@ -171,11 +173,38 @@ impl ShowCommand {
                 let section_type_str = s.section_type?;
                 let content = s.content?;
                 let section_type = parse_section_type(&section_type_str);
-                Some(if let Some(order) = s.order {
+
+                // Convert section refs
+                let section_refs: Vec<CodeRef> = s
+                    .refs
+                    .into_iter()
+                    .filter_map(|r| {
+                        let path = r.path?;
+                        let mut code_ref =
+                            if let (Some(start), Some(end)) = (r.line_start, r.line_end) {
+                                CodeRef::range(path, start, end)
+                            } else if let Some(line) = r.line_start {
+                                CodeRef::line(path, line)
+                            } else {
+                                CodeRef::file(path)
+                            };
+                        if let Some(name) = r.name {
+                            code_ref = code_ref.with_name(name);
+                        }
+                        if let Some(desc) = r.description {
+                            code_ref = code_ref.with_description(desc);
+                        }
+                        Some(code_ref)
+                    })
+                    .collect();
+
+                let mut section = if let Some(order) = s.order {
                     Section::with_order(section_type, content, order)
                 } else {
                     Section::new(section_type, content)
-                })
+                };
+                section.refs = section_refs;
+                Some(section)
             })
             .collect();
 
@@ -487,6 +516,8 @@ fn format_section_with_heading(
 
     // For steps, show with checkboxes
     let is_step = section_type == SectionType::Step;
+    // For testing criteria, show inline refs
+    let is_testing_criterion = section_type == SectionType::TestingCriterion;
 
     if sorted.len() == 1 {
         if is_step {
@@ -499,6 +530,12 @@ fn format_section_with_heading(
         } else {
             writeln!(f, "{}", sorted[0].content)?;
         }
+        // Show refs for single testing criterion
+        if is_testing_criterion && !sorted[0].refs.is_empty() {
+            for code_ref in &sorted[0].refs {
+                writeln!(f, "   -> {}", format_code_ref_location(code_ref))?;
+            }
+        }
     } else {
         for (i, section) in sorted.iter().enumerate() {
             if is_step {
@@ -510,6 +547,12 @@ fn format_section_with_heading(
                 writeln!(f, "{}. {} {}", i + 1, checkbox, section.content)?;
             } else {
                 writeln!(f, "{}. {}", i + 1, section.content)?;
+            }
+            // Show refs inline for each testing criterion
+            if is_testing_criterion && !section.refs.is_empty() {
+                for code_ref in &section.refs {
+                    writeln!(f, "   -> {}", format_code_ref_location(code_ref))?;
+                }
             }
         }
     }
@@ -911,17 +954,20 @@ mod tests {
                 section_type: Some("goal".to_string()),
                 content: Some("The goal".to_string()),
                 order: None,
+                refs: vec![],
             },
             SectionRow {
                 section_type: Some("step".to_string()),
                 content: Some("Step 1".to_string()),
                 order: Some(1),
+                refs: vec![],
             },
             // Invalid row without required fields - should be filtered out
             SectionRow {
                 section_type: None,
                 content: Some("No type".to_string()),
                 order: None,
+                refs: vec![],
             },
         ];
 

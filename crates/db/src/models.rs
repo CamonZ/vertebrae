@@ -251,6 +251,10 @@ pub struct Section {
     /// When this section was marked as done (only for steps)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub done_at: Option<DateTime<Utc>>,
+
+    /// Code references attached to this section (only for testing_criterion)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub refs: Vec<CodeRef>,
 }
 
 impl Section {
@@ -262,6 +266,7 @@ impl Section {
             order: None,
             done: None,
             done_at: None,
+            refs: Vec::new(),
         }
     }
 
@@ -273,6 +278,7 @@ impl Section {
             order: Some(order),
             done: None,
             done_at: None,
+            refs: Vec::new(),
         }
     }
 
@@ -292,6 +298,18 @@ impl Section {
         self.done = Some(true);
         self.done_at = Some(Utc::now());
     }
+
+    /// Add a code reference to this section
+    pub fn with_ref(mut self, code_ref: CodeRef) -> Self {
+        self.refs.push(code_ref);
+        self
+    }
+
+    /// Add multiple code references to this section
+    pub fn with_refs(mut self, code_refs: impl IntoIterator<Item = CodeRef>) -> Self {
+        self.refs.extend(code_refs);
+        self
+    }
 }
 
 impl PartialEq for Section {
@@ -300,6 +318,7 @@ impl PartialEq for Section {
             && self.content == other.content
             && self.order == other.order
             && self.done == other.done
+            && self.refs == other.refs
         // Ignore done_at in equality comparison (similar to how Task ignores timestamps)
     }
 }
