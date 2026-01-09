@@ -15,10 +15,10 @@ Complete current task and move to the next one.
 
 ```bash
 # Mark current task done (shows unblocked tasks)
-vtb done <task-id>
+vtb transition-to <task-id> done
 
 # Start the next task
-vtb start <next-task-id>
+vtb transition-to <next-task-id> in_progress
 
 # If unsure what to work on, check blockers of your goal
 vtb blockers <goal-task-id>

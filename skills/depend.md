@@ -30,6 +30,6 @@ vtb path <from-task> <to-task>
 ```
 
 ## Why dependencies matter
-- Prevents starting work before prerequisites are done
-- `vtb done` shows what tasks are unblocked
+- Prevents transitioning to in_progress before prerequisites are done
+- `vtb transition-to <id> done` shows what tasks are unblocked
 - `vtb blockers` visualizes the full dependency tree

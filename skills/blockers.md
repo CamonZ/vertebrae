@@ -28,6 +28,6 @@ Total: 3 blocking items
 ```
 
 ## When to use
-- Understanding why a task can't start
+- Understanding why a task can't transition to in_progress
 - Planning work order
 - Finding the critical path

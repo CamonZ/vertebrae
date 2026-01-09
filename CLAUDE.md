@@ -19,7 +19,7 @@ A task management CLI tool written in Rust.
 - Sections capture implementation details (steps, constraints, testing criteria)
 - Code refs link tasks to actual source locations
 - User can see your plan and progress at any time
-- `vtb done` automatically shows what's unblocked next
+- `vtb transition-to <id> done` automatically shows what's unblocked next
 
 ### When to use vtb (ALWAYS for non-trivial work)
 
@@ -38,10 +38,10 @@ A task management CLI tool written in Rust.
 5. **Set dependencies** → `vtb depend <task> --on <blocker>` to enforce order
 6. **Add details** → `vtb section` for steps, constraints, testing criteria
 7. **Link code** → `vtb ref` to relevant source locations
-8. **Execute** → `vtb start`, do work, `vtb done`, **commit**, repeat
+8. **Execute** → `vtb transition-to <id> in_progress`, do work, `vtb transition-to <id> done`, **commit**, repeat
 9. **Track progress** → `vtb list`, `vtb blockers`, `vtb show`
 
-**IMPORTANT: Commit after each `vtb done`** - Each completed ticket should have its own commit. This ensures:
+**IMPORTANT: Commit after each `vtb transition-to <id> done`** - Each completed ticket should have its own commit. This ensures:
 - Atomic, traceable changes linked to tickets
 - Easy rollback if needed
 - Clear git history matching task progression
@@ -64,8 +64,8 @@ vtb section <task> step "Do this first"          # Add implementation step
 vtb section <task> constraint "Must handle X"    # Add constraint
 vtb section <task> testing_criterion "Verify Y"  # Add test criteria
 vtb ref <task> "src/file.rs:L42" --name "func"   # Link to code
-vtb start <task>                                 # Begin work
-vtb done <task>                                  # Complete (shows unblocked)
+vtb transition-to <task> in_progress             # Begin work
+vtb transition-to <task> done                    # Complete (shows unblocked)
 vtb blockers <task>                              # Show dependency chain
 vtb show <task>                                  # Full task details
 vtb list --status in_progress                    # What's active

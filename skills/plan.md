@@ -61,5 +61,5 @@ epic           Large initiative
 
 8. Start the first unblocked task:
    ```bash
-   vtb start <task-id>
+   vtb transition-to <task-id> in_progress
    ```

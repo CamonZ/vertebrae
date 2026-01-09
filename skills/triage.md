@@ -14,7 +14,7 @@ Move a ticket from backlog to todo, ensuring it's properly defined.
 ## Command
 
 ```bash
-vtb triage <task-id>
+vtb transition-to <task-id> todo
 ```
 
 ## Required sections (must have)
@@ -75,8 +75,8 @@ vtb show <task-id>
 vtb section <task-id> testing_criterion "..."
 vtb section <task-id> step "..."
 
-# 4. Triage when ready
-vtb triage <task-id>
+# 4. Triage when ready (transition from backlog to todo)
+vtb transition-to <task-id> todo
 
 # 5. Now it appears in "ready to work"
 vtb ready
