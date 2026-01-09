@@ -160,8 +160,17 @@ fn format_section_group(
             | SectionType::DesiredBehavior
     );
 
+    // Check if this is a testing criterion (show refs inline)
+    let is_testing_criterion = section_type == SectionType::TestingCriterion;
+
     if sorted.len() == 1 && !is_multi_instance {
         writeln!(f, "{}: {}", label, sorted[0].content)?;
+        // Show refs for single testing criterion
+        if is_testing_criterion && !sorted[0].refs.is_empty() {
+            for code_ref in &sorted[0].refs {
+                writeln!(f, "     -> {}", format_code_ref_location(code_ref))?;
+            }
+        }
     } else {
         writeln!(f, "{}:", label)?;
         for section in sorted {
@@ -170,10 +179,31 @@ fn format_section_group(
             } else {
                 writeln!(f, "  - {}", section.content)?;
             }
+            // Show refs inline for each testing criterion
+            if is_testing_criterion && !section.refs.is_empty() {
+                for code_ref in &section.refs {
+                    writeln!(f, "      -> {}", format_code_ref_location(code_ref))?;
+                }
+            }
         }
     }
 
     Ok(())
+}
+
+/// Format a code reference location in file:line format
+fn format_code_ref_location(code_ref: &vertebrae_db::CodeRef) -> String {
+    let location = match (code_ref.line_start, code_ref.line_end) {
+        (Some(start), Some(end)) => format!("{}:L{}-{}", code_ref.path, start, end),
+        (Some(line), None) => format!("{}:L{}", code_ref.path, line),
+        _ => code_ref.path.clone(),
+    };
+
+    if let Some(ref name) = code_ref.name {
+        format!("{} [{}]", location, name)
+    } else {
+        location
+    }
 }
 
 /// Result from querying a task's sections
@@ -194,6 +224,23 @@ struct SectionRow {
     content: Option<String>,
     #[serde(default)]
     order: Option<u32>,
+    #[serde(default)]
+    refs: Vec<CodeRefRow>,
+}
+
+/// Code reference row from database
+#[derive(Debug, Clone, Deserialize)]
+struct CodeRefRow {
+    #[serde(default)]
+    path: Option<String>,
+    #[serde(default)]
+    line_start: Option<u32>,
+    #[serde(default)]
+    line_end: Option<u32>,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
 }
 
 impl SectionsCommand {
@@ -226,11 +273,38 @@ impl SectionsCommand {
                 let section_type_str = s.section_type?;
                 let content = s.content?;
                 let section_type = self.parse_section_type_from_db(&section_type_str);
-                Some(if let Some(order) = s.order {
+
+                // Convert section refs
+                let section_refs: Vec<vertebrae_db::CodeRef> = s
+                    .refs
+                    .into_iter()
+                    .filter_map(|r| {
+                        let path = r.path?;
+                        let mut code_ref =
+                            if let (Some(start), Some(end)) = (r.line_start, r.line_end) {
+                                vertebrae_db::CodeRef::range(path, start, end)
+                            } else if let Some(line) = r.line_start {
+                                vertebrae_db::CodeRef::line(path, line)
+                            } else {
+                                vertebrae_db::CodeRef::file(path)
+                            };
+                        if let Some(name) = r.name {
+                            code_ref = code_ref.with_name(name);
+                        }
+                        if let Some(desc) = r.description {
+                            code_ref = code_ref.with_description(desc);
+                        }
+                        Some(code_ref)
+                    })
+                    .collect();
+
+                let mut section = if let Some(order) = s.order {
                     Section::with_order(section_type, content, order)
                 } else {
                     Section::new(section_type, content)
-                })
+                };
+                section.refs = section_refs;
+                Some(section)
             })
             .collect();
 

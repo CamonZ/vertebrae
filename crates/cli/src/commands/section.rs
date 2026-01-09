@@ -132,6 +132,7 @@ impl SectionCommand {
                 order: None,
                 done: None,
                 done_at: None,
+                refs: Vec::new(),
             });
             (had_existing, None, new_sections)
         } else {
@@ -144,6 +145,7 @@ impl SectionCommand {
                 order: Some(ordinal),
                 done: None,
                 done_at: None,
+                refs: Vec::new(),
             });
             (false, Some(ordinal), new_sections)
         };

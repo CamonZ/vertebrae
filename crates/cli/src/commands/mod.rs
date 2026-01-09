@@ -4,6 +4,7 @@
 
 pub mod add;
 pub mod blockers;
+pub mod criterion_ref;
 pub mod delete;
 pub mod depend;
 pub mod done;
@@ -30,6 +31,7 @@ pub mod update;
 
 pub use add::AddCommand;
 pub use blockers::BlockersCommand;
+pub use criterion_ref::CriterionRefCommand;
 pub use delete::DeleteCommand;
 pub use depend::DependCommand;
 pub use done::DoneCommand;
@@ -65,6 +67,9 @@ pub enum Command {
     Add(AddCommand),
     /// Show all tasks blocking a given task (recursive)
     Blockers(BlockersCommand),
+    /// Add a code reference to a testing criterion
+    #[command(name = "criterion-ref")]
+    CriterionRef(CriterionRefCommand),
     /// Reject a task (transition from todo to rejected)
     Reject(RejectCommand),
     /// Delete a task (with optional cascade)
@@ -152,6 +157,10 @@ impl Command {
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Blockers(cmd) => {
+                let result = cmd.execute(db).await?;
+                Ok(CommandResult::Message(format!("{}", result)))
+            }
+            Command::CriterionRef(cmd) => {
                 let result = cmd.execute(db).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
