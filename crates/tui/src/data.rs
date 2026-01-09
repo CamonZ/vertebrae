@@ -492,6 +492,7 @@ mod tests {
             status: Status::InProgress,
             priority: None,
             tags: vec![],
+            needs_human_review: None,
         };
 
         let node = task_to_node(&summary);

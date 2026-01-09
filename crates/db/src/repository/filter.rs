@@ -24,6 +24,8 @@ pub struct TaskSummary {
     pub priority: Option<Priority>,
     /// Tags for categorization
     pub tags: Vec<String>,
+    /// Whether this task needs human review
+    pub needs_human_review: Option<bool>,
 }
 
 /// Internal row type for deserializing from SurrealDB
@@ -36,6 +38,8 @@ struct TaskRow {
     priority: Option<String>,
     #[serde(default)]
     tags: Vec<String>,
+    #[serde(default)]
+    needs_human_review: Option<bool>,
 }
 
 impl TaskRow {
@@ -48,6 +52,7 @@ impl TaskRow {
             status: parse_status(&self.status),
             priority: self.priority.as_deref().map(parse_priority),
             tags: self.tags,
+            needs_human_review: self.needs_human_review,
         }
     }
 }
@@ -101,6 +106,8 @@ pub struct TaskFilter {
     pub children_of: Option<String>,
     /// Include done items (excluded by default)
     pub include_done: bool,
+    /// Search text in title and description (case-insensitive)
+    pub search: Option<String>,
 }
 
 impl TaskFilter {
@@ -175,6 +182,12 @@ impl TaskFilter {
         self
     }
 
+    /// Set search text (case-insensitive search in title and description)
+    pub fn with_search(mut self, search: impl Into<String>) -> Self {
+        self.search = Some(search.into());
+        self
+    }
+
     /// Check if this filter has any structural constraints (root or children_of)
     #[allow(dead_code)] // Useful for future optimizations and tests
     fn has_structural_filter(&self) -> bool {
@@ -229,10 +242,11 @@ impl<'a> TaskLister<'a> {
         let conditions = self.build_filter_conditions(filter);
 
         let query = if conditions.is_empty() {
-            "SELECT id, title, level, status, priority, tags FROM task".to_string()
+            "SELECT id, title, level, status, priority, tags, needs_human_review FROM task"
+                .to_string()
         } else {
             format!(
-                "SELECT id, title, level, status, priority, tags FROM task WHERE {}",
+                "SELECT id, title, level, status, priority, tags, needs_human_review FROM task WHERE {}",
                 conditions.join(" AND ")
             )
         };
@@ -249,10 +263,17 @@ impl<'a> TaskLister<'a> {
         parent_id: &str,
         filter: &TaskFilter,
     ) -> DbResult<Vec<TaskSummary>> {
-        // Use graph traversal to find children
+        // Build query with graph traversal condition plus search filter at SQL level
+        let mut conditions = vec![format!("->child_of->task CONTAINS task:{}", parent_id)];
+
+        // Add search filter at SQL level (since description is not in TaskSummary)
+        if let Some(ref search) = filter.search {
+            conditions.push(Self::build_search_condition(search));
+        }
+
         let query = format!(
-            "SELECT id, title, level, status, priority, tags FROM task WHERE ->child_of->task CONTAINS task:{}",
-            parent_id
+            "SELECT id, title, level, status, priority, tags, needs_human_review FROM task WHERE {}",
+            conditions.join(" AND ")
         );
 
         let mut result = self.client.query(&query).await?;
@@ -260,7 +281,7 @@ impl<'a> TaskLister<'a> {
 
         let tasks: Vec<TaskSummary> = rows.into_iter().map(|r| r.into_summary()).collect();
 
-        // Apply post-filters
+        // Apply post-filters for other criteria
         Ok(self.apply_post_filters(tasks, filter))
     }
 
@@ -272,7 +293,7 @@ impl<'a> TaskLister<'a> {
         conditions.extend(self.build_filter_conditions(filter));
 
         let query = format!(
-            "SELECT id, title, level, status, priority, tags FROM task WHERE {}",
+            "SELECT id, title, level, status, priority, tags, needs_human_review FROM task WHERE {}",
             conditions.join(" AND ")
         );
 
@@ -331,7 +352,37 @@ impl<'a> TaskLister<'a> {
             conditions.push(format!("({})", tag_conditions.join(" OR ")));
         }
 
+        // Search filter (case-insensitive, searches title and description)
+        if let Some(ref search) = filter.search {
+            conditions.push(Self::build_search_condition(search));
+        }
+
         conditions
+    }
+
+    /// Escape special characters in search string for safe SQL inclusion.
+    ///
+    /// Escapes characters that could be used for SQL injection or break string literals.
+    fn escape_search_string(s: &str) -> String {
+        s.replace('\\', "\\\\") // Escape backslashes first
+            .replace('"', "\\\"") // Escape double quotes
+            .replace('\'', "\\'") // Escape single quotes
+    }
+
+    /// Build search condition for case-insensitive title and description search.
+    ///
+    /// Returns a condition that matches if the search query appears in either
+    /// the title or description (case-insensitive). Description can be null,
+    /// so we handle that case by defaulting to empty string.
+    fn build_search_condition(search: &str) -> String {
+        let escaped = Self::escape_search_string(search);
+        let lower_search = escaped.to_lowercase();
+        // Use string::lowercase for case-insensitive matching
+        // Handle null description by using IFNULL (or description ?? "" in SurrealQL)
+        format!(
+            "(string::lowercase(title) CONTAINS \"{}\" OR string::lowercase(description ?? \"\") CONTAINS \"{}\")",
+            lower_search, lower_search
+        )
     }
 
     /// Apply post-query filters (used for children query where we can't use all SQL filters)
@@ -611,6 +662,7 @@ mod tests {
             status: Status::Todo,
             priority: Some(Priority::High),
             tags: vec!["backend".to_string()],
+            needs_human_review: Some(true),
         };
 
         let cloned = summary.clone();
@@ -626,6 +678,7 @@ mod tests {
             status: Status::InProgress,
             priority: Some(Priority::High),
             tags: vec!["backend".to_string()],
+            needs_human_review: None,
         };
 
         let debug_str = format!("{:?}", summary);
@@ -643,6 +696,7 @@ mod tests {
             status: Status::Todo,
             priority: None,
             tags: vec![],
+            needs_human_review: None,
         };
 
         let summary2 = TaskSummary {
@@ -652,6 +706,7 @@ mod tests {
             status: Status::Todo,
             priority: None,
             tags: vec![],
+            needs_human_review: None,
         };
 
         assert_eq!(summary1, summary2);
@@ -1097,6 +1152,271 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].id, "child1");
+
+        cleanup(&temp_dir);
+    }
+
+    // ========================================
+    // Search functionality tests
+    // ========================================
+
+    #[test]
+    fn test_escape_search_string_plain_text() {
+        let result = TaskLister::escape_search_string("simple text");
+        assert_eq!(result, "simple text");
+    }
+
+    #[test]
+    fn test_escape_search_string_with_quotes() {
+        let result = TaskLister::escape_search_string("text with \"quotes\"");
+        assert_eq!(result, "text with \\\"quotes\\\"");
+    }
+
+    #[test]
+    fn test_escape_search_string_with_backslash() {
+        let result = TaskLister::escape_search_string("path\\to\\file");
+        assert_eq!(result, "path\\\\to\\\\file");
+    }
+
+    #[test]
+    fn test_escape_search_string_with_single_quotes() {
+        let result = TaskLister::escape_search_string("it's a test");
+        assert_eq!(result, "it\\'s a test");
+    }
+
+    #[test]
+    fn test_escape_search_string_mixed_special_chars() {
+        let result = TaskLister::escape_search_string("\"test\" \\ 'value'");
+        assert_eq!(result, "\\\"test\\\" \\\\ \\'value\\'");
+    }
+
+    #[test]
+    fn test_build_search_condition_lowercase() {
+        let condition = TaskLister::build_search_condition("Test");
+        // The search term should be lowercased
+        assert!(condition.contains("test"));
+        assert!(!condition.contains("Test"));
+    }
+
+    #[test]
+    fn test_build_search_condition_escapes_special_chars() {
+        let condition = TaskLister::build_search_condition("test\"query");
+        assert!(condition.contains("test\\\"query"));
+    }
+
+    #[test]
+    fn test_build_search_condition_checks_title_and_description() {
+        let condition = TaskLister::build_search_condition("search");
+        assert!(condition.contains("string::lowercase(title)"));
+        assert!(condition.contains("string::lowercase(description ?? \"\")"));
+    }
+
+    #[test]
+    fn test_task_filter_with_search() {
+        let filter = TaskFilter::new().with_search("test query");
+        assert_eq!(filter.search, Some("test query".to_string()));
+    }
+
+    #[test]
+    fn test_task_filter_with_search_string() {
+        let search = String::from("another query");
+        let filter = TaskFilter::new().with_search(search);
+        assert_eq!(filter.search, Some("another query".to_string()));
+    }
+
+    /// Helper to create a task with description
+    async fn create_task_with_description(
+        db: &Database,
+        id: &str,
+        title: &str,
+        description: &str,
+        level: &str,
+        status: &str,
+    ) {
+        let query = format!(
+            r#"CREATE task:{} SET
+                title = "{}",
+                description = "{}",
+                level = "{}",
+                status = "{}",
+                priority = NONE,
+                tags = []"#,
+            id, title, description, level, status
+        );
+        db.client().query(&query).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_list_with_search_finds_by_title() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        create_task(
+            &db,
+            "task1",
+            "Authentication feature",
+            "task",
+            "todo",
+            None,
+            &[],
+        )
+        .await;
+        create_task(
+            &db,
+            "task2",
+            "Database migration",
+            "task",
+            "todo",
+            None,
+            &[],
+        )
+        .await;
+        create_task(&db, "task3", "API endpoint", "task", "todo", None, &[]).await;
+
+        let lister = TaskLister::new(db.client());
+        let filter = TaskFilter::new().with_search("auth");
+        let result = lister.list(&filter).await.unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].id, "task1");
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_list_with_search_finds_by_description() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        create_task_with_description(
+            &db,
+            "task1",
+            "Feature A",
+            "Implement user authentication system",
+            "task",
+            "todo",
+        )
+        .await;
+        create_task_with_description(
+            &db,
+            "task2",
+            "Feature B",
+            "Add database caching",
+            "task",
+            "todo",
+        )
+        .await;
+
+        let lister = TaskLister::new(db.client());
+        let filter = TaskFilter::new().with_search("authentication");
+        let result = lister.list(&filter).await.unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].id, "task1");
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_list_with_search_is_case_insensitive() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        create_task(
+            &db,
+            "task1",
+            "AUTHENTICATION Feature",
+            "task",
+            "todo",
+            None,
+            &[],
+        )
+        .await;
+        create_task(&db, "task2", "Other task", "task", "todo", None, &[]).await;
+
+        let lister = TaskLister::new(db.client());
+
+        // Search with lowercase should find uppercase title
+        let filter = TaskFilter::new().with_search("authentication");
+        let result = lister.list(&filter).await.unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].id, "task1");
+
+        // Search with uppercase should also find
+        let filter2 = TaskFilter::new().with_search("AUTHENTICATION");
+        let result2 = lister.list(&filter2).await.unwrap();
+        assert_eq!(result2.len(), 1);
+        assert_eq!(result2[0].id, "task1");
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_list_with_search_combined_with_level() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        create_task(&db, "epic1", "Auth epic", "epic", "todo", None, &[]).await;
+        create_task(&db, "task1", "Auth task", "task", "todo", None, &[]).await;
+
+        let lister = TaskLister::new(db.client());
+        let filter = TaskFilter::new()
+            .with_search("auth")
+            .with_level(Level::Epic);
+        let result = lister.list(&filter).await.unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].id, "epic1");
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_list_with_search_and_root_only() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        create_task(&db, "parent1", "Auth Parent", "epic", "todo", None, &[]).await;
+        create_task(&db, "child1", "Auth Child", "task", "todo", None, &[]).await;
+        create_child_of(&db, "child1", "parent1").await;
+
+        let lister = TaskLister::new(db.client());
+        let filter = TaskFilter::new().with_search("auth").root_only();
+        let result = lister.list(&filter).await.unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].id, "parent1");
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_list_with_search_and_children_of() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        create_task(&db, "parent1", "Parent", "epic", "todo", None, &[]).await;
+        create_task(&db, "child1", "Auth Child", "task", "todo", None, &[]).await;
+        create_task(&db, "child2", "Other Child", "task", "todo", None, &[]).await;
+        create_child_of(&db, "child1", "parent1").await;
+        create_child_of(&db, "child2", "parent1").await;
+
+        let lister = TaskLister::new(db.client());
+        let filter = TaskFilter::new().with_search("auth").children_of("parent1");
+        let result = lister.list(&filter).await.unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].id, "child1");
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_list_with_search_no_matches() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        create_task(&db, "task1", "Task A", "task", "todo", None, &[]).await;
+        create_task(&db, "task2", "Task B", "task", "todo", None, &[]).await;
+
+        let lister = TaskLister::new(db.client());
+        let filter = TaskFilter::new().with_search("nonexistent");
+        let result = lister.list(&filter).await.unwrap();
+
+        assert!(result.is_empty());
 
         cleanup(&temp_dir);
     }

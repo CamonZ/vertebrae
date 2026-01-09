@@ -760,6 +760,192 @@ mod queries {
 }
 
 // =============================================================================
+// SEARCH TESTS
+// =============================================================================
+
+mod search {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_search_finds_task_by_title_substring() {
+        let ctx = TestContext::new().await;
+
+        create_task(&ctx.db, "task1", "Authentication feature", "task", "todo").await;
+        create_task(&ctx.db, "task2", "Database migration", "task", "todo").await;
+        create_task(&ctx.db, "task3", "API endpoint", "task", "todo").await;
+
+        let cmd = list_cmd_with_search("auth");
+        let result = cmd.execute(&ctx.db).await.unwrap();
+
+        assert_eq!(
+            result.len(),
+            1,
+            "Should find exactly one task containing 'auth'"
+        );
+        assert_eq!(result[0].id, "task1");
+        assert_eq!(result[0].title, "Authentication feature");
+    }
+
+    #[tokio::test]
+    async fn test_search_finds_task_by_description_substring() {
+        let ctx = TestContext::new().await;
+
+        create_task_with_description(
+            &ctx.db,
+            "task1",
+            "Feature A",
+            "task",
+            "todo",
+            "Implement user authentication system",
+        )
+        .await;
+        create_task_with_description(
+            &ctx.db,
+            "task2",
+            "Feature B",
+            "task",
+            "todo",
+            "Add database caching",
+        )
+        .await;
+
+        let cmd = list_cmd_with_search("authentication");
+        let result = cmd.execute(&ctx.db).await.unwrap();
+
+        assert_eq!(
+            result.len(),
+            1,
+            "Should find exactly one task with 'authentication' in description"
+        );
+        assert_eq!(result[0].id, "task1");
+    }
+
+    #[tokio::test]
+    async fn test_search_is_case_insensitive() {
+        let ctx = TestContext::new().await;
+
+        create_task(&ctx.db, "task1", "AUTHENTICATION Feature", "task", "todo").await;
+        create_task(&ctx.db, "task2", "Other task", "task", "todo").await;
+
+        // Search with lowercase should find uppercase title
+        let cmd = list_cmd_with_search("authentication");
+        let result = cmd.execute(&ctx.db).await.unwrap();
+
+        assert_eq!(result.len(), 1, "Search should be case-insensitive");
+        assert_eq!(result[0].id, "task1");
+
+        // Search with uppercase should also find
+        let cmd2 = list_cmd_with_search("AUTHENTICATION");
+        let result2 = cmd2.execute(&ctx.db).await.unwrap();
+
+        assert_eq!(
+            result2.len(),
+            1,
+            "Uppercase search should also find lowercase matches"
+        );
+        assert_eq!(result2[0].id, "task1");
+    }
+
+    #[tokio::test]
+    async fn test_search_combined_with_status_returns_intersection() {
+        let ctx = TestContext::new().await;
+
+        create_task(&ctx.db, "task1", "Auth task", "task", "todo").await;
+        create_task(&ctx.db, "task2", "Auth in progress", "task", "in_progress").await;
+        create_task(&ctx.db, "task3", "Other task", "task", "todo").await;
+
+        // Search for "auth" AND status=in_progress
+        let mut cmd = list_cmd_with_search("auth");
+        cmd.statuses = vec![Status::InProgress];
+        let result = cmd.execute(&ctx.db).await.unwrap();
+
+        assert_eq!(
+            result.len(),
+            1,
+            "Should return intersection of search and status filter"
+        );
+        assert_eq!(result[0].id, "task2");
+    }
+
+    #[tokio::test]
+    async fn test_search_with_no_matches_returns_empty() {
+        let ctx = TestContext::new().await;
+
+        create_task(&ctx.db, "task1", "Task A", "task", "todo").await;
+        create_task(&ctx.db, "task2", "Task B", "task", "todo").await;
+
+        let cmd = list_cmd_with_search("nonexistent");
+        let result = cmd.execute(&ctx.db).await.unwrap();
+
+        assert!(
+            result.is_empty(),
+            "Search with no matches should return empty list"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_tag_behavior_unchanged_or_semantics() {
+        let ctx = TestContext::new().await;
+
+        create_task_with_tags(&ctx.db, "task1", "Task 1", "task", "todo", &["backend"]).await;
+        create_task_with_tags(&ctx.db, "task2", "Task 2", "task", "todo", &["frontend"]).await;
+        create_task_with_tags(
+            &ctx.db,
+            "task3",
+            "Task 3",
+            "task",
+            "todo",
+            &["backend", "api"],
+        )
+        .await;
+        create_task_with_tags(&ctx.db, "task4", "Task 4", "task", "todo", &["other"]).await;
+
+        // Filter by multiple tags (OR semantics)
+        let mut cmd = list_cmd();
+        cmd.tags = vec!["backend".to_string(), "frontend".to_string()];
+        let result = cmd.execute(&ctx.db).await.unwrap();
+
+        assert_eq!(result.len(), 3, "Tag filter should use OR semantics");
+
+        let ids: std::collections::HashSet<_> = result.iter().map(|t| t.id.as_str()).collect();
+        assert!(
+            ids.contains("task1"),
+            "Should contain task with 'backend' tag"
+        );
+        assert!(
+            ids.contains("task2"),
+            "Should contain task with 'frontend' tag"
+        );
+        assert!(
+            ids.contains("task3"),
+            "Should contain task with 'backend' tag (also has 'api')"
+        );
+        assert!(
+            !ids.contains("task4"),
+            "Should NOT contain task with only 'other' tag"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_search_empty_returns_error() {
+        let ctx = TestContext::new().await;
+
+        create_task(&ctx.db, "task1", "Task 1", "task", "todo").await;
+
+        let cmd = list_cmd_with_search("");
+        let result = cmd.execute(&ctx.db).await;
+
+        assert!(result.is_err(), "Empty search should return error");
+        match result {
+            Err(DbError::ValidationError { message }) => {
+                assert_eq!(message, "Search query cannot be empty");
+            }
+            _ => panic!("Expected ValidationError"),
+        }
+    }
+}
+
+// =============================================================================
 // ERROR CASE TESTS
 // =============================================================================
 

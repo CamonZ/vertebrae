@@ -64,6 +64,10 @@ pub enum DbError {
         to_status: String,
         message: String,
     },
+
+    /// Error for invalid input or validation failure
+    #[error("{message}")]
+    ValidationError { message: String },
 }
 
 impl From<surrealdb::Error> for DbError {
@@ -277,6 +281,26 @@ mod tests {
         assert!(
             debug_str.contains("NotFound") && debug_str.contains("xyz789"),
             "Debug output should contain NotFound and task_id"
+        );
+    }
+
+    #[test]
+    fn test_validation_error_display() {
+        let err = DbError::ValidationError {
+            message: "Search query cannot be empty".to_string(),
+        };
+        assert_eq!(err.to_string(), "Search query cannot be empty");
+    }
+
+    #[test]
+    fn test_validation_error_debug() {
+        let err = DbError::ValidationError {
+            message: "Invalid input value".to_string(),
+        };
+        let debug_str = format!("{:?}", err);
+        assert!(
+            debug_str.contains("ValidationError") && debug_str.contains("Invalid input value"),
+            "Debug output should contain ValidationError and message"
         );
     }
 }

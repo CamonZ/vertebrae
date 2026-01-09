@@ -3,11 +3,10 @@
 //! Implements the `vtb list` command to display tasks with filtering options.
 
 use clap::Args;
-use serde::Deserialize;
-use vertebrae_db::{Database, DbError, Level, Priority, Status};
+use vertebrae_db::{Database, DbError, Level, Priority, Status, TaskFilter};
 
 /// A summary of a task for display in the list
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct TaskSummary {
     /// The task ID (extracted from SurrealDB Thing)
     pub id: String,
@@ -20,10 +19,8 @@ pub struct TaskSummary {
     /// Optional priority
     pub priority: Option<String>,
     /// Tags for categorization
-    #[serde(default)]
     pub tags: Vec<String>,
     /// Whether this task needs human review
-    #[serde(default)]
     pub needs_human_review: Option<bool>,
 }
 
@@ -57,6 +54,10 @@ pub struct ListCommand {
     /// Include done items (excluded by default)
     #[arg(long)]
     pub all: bool,
+
+    /// Search text in title and description (case-insensitive)
+    #[arg(long)]
+    pub search: Option<String>,
 }
 
 /// Parse a level string into a Level enum
@@ -96,30 +97,17 @@ fn parse_priority(s: &str) -> Result<Priority, String> {
     }
 }
 
-/// Result from querying tasks - handles SurrealDB Thing id format
-#[derive(Debug, Deserialize)]
-struct TaskRow {
-    id: surrealdb::sql::Thing,
-    title: String,
-    level: String,
-    status: String,
-    priority: Option<String>,
-    #[serde(default)]
-    tags: Vec<String>,
-    #[serde(default)]
-    needs_human_review: Option<bool>,
-}
-
-impl From<TaskRow> for TaskSummary {
-    fn from(row: TaskRow) -> Self {
+/// Convert repository TaskSummary to CLI TaskSummary
+impl From<vertebrae_db::TaskSummary> for TaskSummary {
+    fn from(summary: vertebrae_db::TaskSummary) -> Self {
         TaskSummary {
-            id: row.id.id.to_string(),
-            title: row.title,
-            level: row.level,
-            status: row.status,
-            priority: row.priority,
-            tags: row.tags,
-            needs_human_review: row.needs_human_review,
+            id: summary.id,
+            title: summary.title,
+            level: summary.level.as_str().to_string(),
+            status: summary.status.as_str().to_string(),
+            priority: summary.priority.map(|p| p.as_str().to_string()),
+            tags: summary.tags,
+            needs_human_review: summary.needs_human_review,
         }
     }
 }
@@ -128,7 +116,8 @@ impl ListCommand {
     /// Execute the list command.
     ///
     /// Queries tasks from the database with the specified filters and returns
-    /// a list of task summaries.
+    /// a list of task summaries. Uses the repository pattern to delegate
+    /// query building to the database layer.
     ///
     /// # Arguments
     ///
@@ -139,216 +128,74 @@ impl ListCommand {
     /// Returns `DbError` if:
     /// - Database query fails
     /// - Invalid filter values are provided
+    /// - Search query is empty
     pub async fn execute(&self, db: &Database) -> Result<Vec<TaskSummary>, DbError> {
-        // Handle --children filter separately (uses graph traversal)
-        if let Some(parent_id) = &self.children {
-            return self.query_children(db, parent_id).await;
+        // Validate search query is not empty
+        if let Some(ref search) = self.search
+            && search.trim().is_empty()
+        {
+            return Err(DbError::ValidationError {
+                message: "Search query cannot be empty".to_string(),
+            });
         }
 
-        // Handle --root filter separately
+        // Build the TaskFilter from command options
+        let filter = self.build_filter();
+
+        // Use the repository to execute the query
+        let results = db.list_tasks().list(&filter).await?;
+
+        // Convert repository TaskSummary to CLI TaskSummary
+        Ok(results.into_iter().map(TaskSummary::from).collect())
+    }
+
+    /// Build a TaskFilter from the command options.
+    ///
+    /// Converts the CLI arguments into a TaskFilter that can be passed
+    /// to the repository layer.
+    fn build_filter(&self) -> TaskFilter {
+        let mut filter = TaskFilter::new();
+
+        // Add level filters
+        if !self.levels.is_empty() {
+            filter = filter.with_levels(self.levels.clone());
+        }
+
+        // Add status filters
+        if !self.statuses.is_empty() {
+            filter = filter.with_statuses(self.statuses.clone());
+        }
+
+        // Add priority filters
+        if !self.priorities.is_empty() {
+            filter = filter.with_priorities(self.priorities.clone());
+        }
+
+        // Add tag filters
+        if !self.tags.is_empty() {
+            filter = filter.with_tags(self.tags.clone());
+        }
+
+        // Set structural filters
         if self.root {
-            return self.query_root_tasks(db).await;
+            filter = filter.root_only();
         }
 
-        // Build and execute the standard query
-        self.query_tasks(db).await
-    }
-
-    /// Query tasks with standard filters
-    async fn query_tasks(&self, db: &Database) -> Result<Vec<TaskSummary>, DbError> {
-        let mut conditions: Vec<String> = Vec::new();
-
-        // Default: exclude done status unless --all is specified
-        if !self.all && self.statuses.is_empty() {
-            conditions.push("status != \"done\"".to_string());
+        if let Some(ref parent_id) = self.children {
+            filter = filter.children_of(parent_id);
         }
 
-        // Level filter (OR within type)
-        if !self.levels.is_empty() {
-            let level_conditions: Vec<String> = self
-                .levels
-                .iter()
-                .map(|l| format!("level = \"{}\"", l.as_str()))
-                .collect();
-            conditions.push(format!("({})", level_conditions.join(" OR ")));
+        // Include done items if --all is specified
+        if self.all {
+            filter = filter.include_done();
         }
 
-        // Status filter (OR within type)
-        if !self.statuses.is_empty() {
-            let status_conditions: Vec<String> = self
-                .statuses
-                .iter()
-                .map(|s| format!("status = \"{}\"", s.as_str()))
-                .collect();
-            conditions.push(format!("({})", status_conditions.join(" OR ")));
+        // Add search filter
+        if let Some(ref search) = self.search {
+            filter = filter.with_search(search);
         }
 
-        // Priority filter (OR within type)
-        if !self.priorities.is_empty() {
-            let priority_conditions: Vec<String> = self
-                .priorities
-                .iter()
-                .map(|p| format!("priority = \"{}\"", p.as_str()))
-                .collect();
-            conditions.push(format!("({})", priority_conditions.join(" OR ")));
-        }
-
-        // Tag filter (OR within type - task must have at least one matching tag)
-        if !self.tags.is_empty() {
-            let tag_conditions: Vec<String> = self
-                .tags
-                .iter()
-                .map(|t| format!("\"{}\" IN tags", t.replace('\"', "\\\"")))
-                .collect();
-            conditions.push(format!("({})", tag_conditions.join(" OR ")));
-        }
-
-        // Build the query
-        let query = if conditions.is_empty() {
-            "SELECT id, title, level, status, priority, tags, needs_human_review FROM task"
-                .to_string()
-        } else {
-            format!(
-                "SELECT id, title, level, status, priority, tags, needs_human_review FROM task WHERE {}",
-                conditions.join(" AND ")
-            )
-        };
-
-        let mut result = db.client().query(&query).await?;
-        let rows: Vec<TaskRow> = result.take(0)?;
-
-        Ok(rows.into_iter().map(TaskSummary::from).collect())
-    }
-
-    /// Query children of a specific task using graph traversal
-    async fn query_children(
-        &self,
-        db: &Database,
-        parent_id: &str,
-    ) -> Result<Vec<TaskSummary>, DbError> {
-        // Use graph traversal to find children
-        // SELECT <-child_of<-task.* FROM task:parent_id gets all tasks that are children of parent_id
-        let query = format!(
-            "SELECT id, title, level, status, priority, tags, needs_human_review FROM task WHERE ->child_of->task CONTAINS task:{}",
-            parent_id
-        );
-
-        let mut result = db.client().query(&query).await?;
-        let rows: Vec<TaskRow> = result.take(0)?;
-
-        let mut tasks: Vec<TaskSummary> = rows.into_iter().map(TaskSummary::from).collect();
-
-        // Apply additional filters if specified
-        tasks = self.apply_post_filters(tasks);
-
-        Ok(tasks)
-    }
-
-    /// Query root tasks (tasks with no parent)
-    async fn query_root_tasks(&self, db: &Database) -> Result<Vec<TaskSummary>, DbError> {
-        // Root tasks are those that have no outgoing child_of edges
-        // (i.e., they are not children of any other task)
-        let mut conditions: Vec<String> = vec!["array::len(->child_of->task) = 0".to_string()];
-
-        // Default: exclude done status unless --all is specified
-        if !self.all && self.statuses.is_empty() {
-            conditions.push("status != \"done\"".to_string());
-        }
-
-        // Level filter
-        if !self.levels.is_empty() {
-            let level_conditions: Vec<String> = self
-                .levels
-                .iter()
-                .map(|l| format!("level = \"{}\"", l.as_str()))
-                .collect();
-            conditions.push(format!("({})", level_conditions.join(" OR ")));
-        }
-
-        // Status filter
-        if !self.statuses.is_empty() {
-            let status_conditions: Vec<String> = self
-                .statuses
-                .iter()
-                .map(|s| format!("status = \"{}\"", s.as_str()))
-                .collect();
-            conditions.push(format!("({})", status_conditions.join(" OR ")));
-        }
-
-        // Priority filter
-        if !self.priorities.is_empty() {
-            let priority_conditions: Vec<String> = self
-                .priorities
-                .iter()
-                .map(|p| format!("priority = \"{}\"", p.as_str()))
-                .collect();
-            conditions.push(format!("({})", priority_conditions.join(" OR ")));
-        }
-
-        // Tag filter
-        if !self.tags.is_empty() {
-            let tag_conditions: Vec<String> = self
-                .tags
-                .iter()
-                .map(|t| format!("\"{}\" IN tags", t.replace('\"', "\\\"")))
-                .collect();
-            conditions.push(format!("({})", tag_conditions.join(" OR ")));
-        }
-
-        let query = format!(
-            "SELECT id, title, level, status, priority, tags, needs_human_review FROM task WHERE {}",
-            conditions.join(" AND ")
-        );
-
-        let mut result = db.client().query(&query).await?;
-        let rows: Vec<TaskRow> = result.take(0)?;
-
-        Ok(rows.into_iter().map(TaskSummary::from).collect())
-    }
-
-    /// Apply post-query filters (used for children query)
-    fn apply_post_filters(&self, tasks: Vec<TaskSummary>) -> Vec<TaskSummary> {
-        tasks
-            .into_iter()
-            .filter(|task| {
-                // Filter by done status unless --all
-                if !self.all && self.statuses.is_empty() && task.status == "done" {
-                    return false;
-                }
-
-                // Filter by level if specified
-                if !self.levels.is_empty() && !self.levels.iter().any(|l| l.as_str() == task.level)
-                {
-                    return false;
-                }
-
-                // Filter by status if specified
-                if !self.statuses.is_empty()
-                    && !self.statuses.iter().any(|s| s.as_str() == task.status)
-                {
-                    return false;
-                }
-
-                // Filter by priority if specified
-                if !self.priorities.is_empty() {
-                    match &task.priority {
-                        Some(p) => {
-                            if !self.priorities.iter().any(|pr| pr.as_str() == p) {
-                                return false;
-                            }
-                        }
-                        None => return false,
-                    }
-                }
-
-                // Filter by tags if specified
-                if !self.tags.is_empty() && !self.tags.iter().any(|t| task.tags.contains(t)) {
-                    return false;
-                }
-
-                true
-            })
-            .collect()
+        filter
     }
 }
 
@@ -517,6 +364,7 @@ mod tests {
             root: false,
             children: None,
             all: false,
+            search: None,
         };
 
         let result = cmd.execute(&db).await.unwrap();
@@ -551,6 +399,7 @@ mod tests {
             root: false,
             children: None,
             all: true,
+            search: None,
         };
 
         let result = cmd.execute(&db).await.unwrap();
@@ -586,6 +435,7 @@ mod tests {
             root: false,
             children: None,
             all: false,
+            search: None,
         };
 
         let result = cmd.execute(&db).await.unwrap();
@@ -612,6 +462,7 @@ mod tests {
             root: false,
             children: None,
             all: false,
+            search: None,
         };
 
         let result = cmd.execute(&db).await.unwrap();
@@ -652,6 +503,7 @@ mod tests {
             root: false,
             children: None,
             all: false,
+            search: None,
         };
 
         let result = cmd.execute(&db).await.unwrap();
@@ -678,6 +530,7 @@ mod tests {
             root: false,
             children: None,
             all: false,
+            search: None,
         };
 
         let result = cmd.execute(&db).await.unwrap();
@@ -713,6 +566,7 @@ mod tests {
             root: false,
             children: None,
             all: false,
+            search: None,
         };
 
         let result = cmd.execute(&db).await.unwrap();
@@ -763,6 +617,7 @@ mod tests {
             root: true,
             children: None,
             all: false,
+            search: None,
         };
 
         let result = cmd.execute(&db).await.unwrap();
@@ -798,6 +653,7 @@ mod tests {
             root: false,
             children: Some("parent1".to_string()),
             all: false,
+            search: None,
         };
 
         let result = cmd.execute(&db).await.unwrap();
@@ -824,6 +680,7 @@ mod tests {
             root: false,
             children: Some("nonexistent".to_string()),
             all: false,
+            search: None,
         };
 
         let result = cmd.execute(&db).await.unwrap();
@@ -846,6 +703,7 @@ mod tests {
             root: false,
             children: None,
             all: false,
+            search: None,
         };
 
         let result = cmd.execute(&db).await.unwrap();
@@ -908,6 +766,7 @@ mod tests {
             root: false,
             children: None,
             all: false,
+            search: None,
         };
 
         let result = cmd.execute(&db).await.unwrap();
@@ -934,6 +793,7 @@ mod tests {
             root: true,
             children: None,
             all: false,
+            search: None,
         };
 
         let result = cmd.execute(&db).await.unwrap();
@@ -944,58 +804,91 @@ mod tests {
         cleanup(&temp_dir);
     }
 
-    #[tokio::test]
-    async fn test_apply_post_filters() {
-        let tasks = vec![
-            TaskSummary {
-                id: "1".to_string(),
-                title: "Task 1".to_string(),
-                level: "epic".to_string(),
-                status: "todo".to_string(),
-                priority: Some("high".to_string()),
-                tags: vec!["backend".to_string()],
-                needs_human_review: None,
-            },
-            TaskSummary {
-                id: "2".to_string(),
-                title: "Task 2".to_string(),
-                level: "ticket".to_string(),
-                status: "done".to_string(),
-                priority: Some("low".to_string()),
-                tags: vec!["frontend".to_string()],
-                needs_human_review: None,
-            },
-        ];
-
+    #[test]
+    fn test_build_filter_with_all_options() {
         let cmd = ListCommand {
-            levels: vec![Level::Epic],
+            levels: vec![Level::Epic, Level::Ticket],
+            statuses: vec![Status::Todo, Status::InProgress],
+            priorities: vec![Priority::High],
+            tags: vec!["backend".to_string(), "api".to_string()],
+            root: true,
+            children: None,
+            all: true,
+            search: Some("test query".to_string()),
+        };
+
+        let filter = cmd.build_filter();
+
+        assert_eq!(filter.levels.len(), 2);
+        assert_eq!(filter.statuses.len(), 2);
+        assert_eq!(filter.priorities.len(), 1);
+        assert_eq!(filter.tags.len(), 2);
+        assert!(filter.root_only);
+        assert!(filter.children_of.is_none());
+        assert!(filter.include_done);
+        assert_eq!(filter.search, Some("test query".to_string()));
+    }
+
+    #[test]
+    fn test_build_filter_with_children() {
+        let cmd = ListCommand {
+            levels: vec![],
+            statuses: vec![],
+            priorities: vec![],
+            tags: vec![],
+            root: false,
+            children: Some("parent123".to_string()),
+            all: false,
+            search: None,
+        };
+
+        let filter = cmd.build_filter();
+
+        assert!(!filter.root_only);
+        assert_eq!(filter.children_of, Some("parent123".to_string()));
+        assert!(!filter.include_done);
+        assert!(filter.search.is_none());
+    }
+
+    #[test]
+    fn test_build_filter_empty() {
+        let cmd = ListCommand {
+            levels: vec![],
             statuses: vec![],
             priorities: vec![],
             tags: vec![],
             root: false,
             children: None,
             all: false,
+            search: None,
         };
 
-        let filtered = cmd.apply_post_filters(tasks);
+        let filter = cmd.build_filter();
 
-        assert_eq!(filtered.len(), 1);
-        assert_eq!(filtered[0].level, "epic");
+        assert!(filter.levels.is_empty());
+        assert!(filter.statuses.is_empty());
+        assert!(filter.priorities.is_empty());
+        assert!(filter.tags.is_empty());
+        assert!(!filter.root_only);
+        assert!(filter.children_of.is_none());
+        assert!(!filter.include_done);
+        assert!(filter.search.is_none());
     }
 
-    #[tokio::test]
-    async fn test_task_summary_from_task_row() {
-        let row = TaskRow {
-            id: surrealdb::sql::Thing::from(("task", "abc123")),
+    #[test]
+    fn test_task_summary_from_db_task_summary() {
+        // Test conversion from repository TaskSummary to CLI TaskSummary
+        let db_summary = vertebrae_db::TaskSummary {
+            id: "abc123".to_string(),
             title: "Test Task".to_string(),
-            level: "ticket".to_string(),
-            status: "in_progress".to_string(),
-            priority: Some("medium".to_string()),
+            level: Level::Ticket,
+            status: Status::InProgress,
+            priority: Some(Priority::Medium),
             tags: vec!["test".to_string()],
             needs_human_review: Some(true),
         };
 
-        let summary = TaskSummary::from(row);
+        let summary = TaskSummary::from(db_summary);
 
         assert_eq!(summary.id, "abc123");
         assert_eq!(summary.title, "Test Task");
@@ -1064,6 +957,7 @@ mod tests {
             root: true,
             children: Some("parent123".to_string()),
             all: true,
+            search: Some("test query".to_string()),
         };
 
         let debug_str = format!("{:?}", cmd);
@@ -1075,8 +969,492 @@ mod tests {
                 && debug_str.contains("backend")
                 && debug_str.contains("root: true")
                 && debug_str.contains("parent123")
-                && debug_str.contains("all: true"),
+                && debug_str.contains("all: true")
+                && debug_str.contains("search")
+                && debug_str.contains("test query"),
             "Debug output should contain ListCommand and all field values"
         );
+    }
+
+    // ========================================
+    // Search functionality tests
+    // ========================================
+    // Note: Unit tests for escape_search_string and build_search_condition
+    // have been moved to the repository layer (crates/db/src/repository/filter.rs)
+    // since the search SQL building is now handled there.
+
+    /// Helper to create a task with description
+    async fn create_task_with_description(
+        db: &Database,
+        id: &str,
+        title: &str,
+        description: &str,
+        level: &str,
+        status: &str,
+    ) {
+        let query = format!(
+            r#"CREATE task:{} SET
+                title = "{}",
+                description = "{}",
+                level = "{}",
+                status = "{}",
+                priority = NONE,
+                tags = []"#,
+            id, title, description, level, status
+        );
+        db.client().query(&query).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_search_finds_task_by_title() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        create_task(
+            &db,
+            "task1",
+            "Authentication feature",
+            "task",
+            "todo",
+            None,
+            &[],
+        )
+        .await;
+        create_task(
+            &db,
+            "task2",
+            "Database migration",
+            "task",
+            "todo",
+            None,
+            &[],
+        )
+        .await;
+        create_task(&db, "task3", "API endpoint", "task", "todo", None, &[]).await;
+
+        let cmd = ListCommand {
+            levels: vec![],
+            statuses: vec![],
+            priorities: vec![],
+            tags: vec![],
+            root: false,
+            children: None,
+            all: false,
+            search: Some("auth".to_string()),
+        };
+
+        let result = cmd.execute(&db).await.unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].id, "task1");
+        assert_eq!(result[0].title, "Authentication feature");
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_search_finds_task_by_description() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        create_task_with_description(
+            &db,
+            "task1",
+            "Feature A",
+            "Implement user authentication system",
+            "task",
+            "todo",
+        )
+        .await;
+        create_task_with_description(
+            &db,
+            "task2",
+            "Feature B",
+            "Add database caching",
+            "task",
+            "todo",
+        )
+        .await;
+
+        let cmd = ListCommand {
+            levels: vec![],
+            statuses: vec![],
+            priorities: vec![],
+            tags: vec![],
+            root: false,
+            children: None,
+            all: false,
+            search: Some("authentication".to_string()),
+        };
+
+        let result = cmd.execute(&db).await.unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].id, "task1");
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_search_is_case_insensitive() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        create_task(
+            &db,
+            "task1",
+            "AUTHENTICATION Feature",
+            "task",
+            "todo",
+            None,
+            &[],
+        )
+        .await;
+        create_task(&db, "task2", "Other task", "task", "todo", None, &[]).await;
+
+        // Search with lowercase should find uppercase title
+        let cmd = ListCommand {
+            levels: vec![],
+            statuses: vec![],
+            priorities: vec![],
+            tags: vec![],
+            root: false,
+            children: None,
+            all: false,
+            search: Some("authentication".to_string()),
+        };
+
+        let result = cmd.execute(&db).await.unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].id, "task1");
+
+        // Search with uppercase should also find
+        let cmd2 = ListCommand {
+            levels: vec![],
+            statuses: vec![],
+            priorities: vec![],
+            tags: vec![],
+            root: false,
+            children: None,
+            all: false,
+            search: Some("AUTHENTICATION".to_string()),
+        };
+
+        let result2 = cmd2.execute(&db).await.unwrap();
+
+        assert_eq!(result2.len(), 1);
+        assert_eq!(result2[0].id, "task1");
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_search_with_no_matches_returns_empty() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        create_task(&db, "task1", "Task A", "task", "todo", None, &[]).await;
+        create_task(&db, "task2", "Task B", "task", "todo", None, &[]).await;
+
+        let cmd = ListCommand {
+            levels: vec![],
+            statuses: vec![],
+            priorities: vec![],
+            tags: vec![],
+            root: false,
+            children: None,
+            all: false,
+            search: Some("nonexistent".to_string()),
+        };
+
+        let result = cmd.execute(&db).await.unwrap();
+
+        assert!(result.is_empty());
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_search_combined_with_status_filter() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        create_task(&db, "task1", "Auth task todo", "task", "todo", None, &[]).await;
+        create_task(
+            &db,
+            "task2",
+            "Auth task in_progress",
+            "task",
+            "in_progress",
+            None,
+            &[],
+        )
+        .await;
+        create_task(&db, "task3", "Other task", "task", "todo", None, &[]).await;
+
+        // Search for "auth" but only in_progress status
+        let cmd = ListCommand {
+            levels: vec![],
+            statuses: vec![Status::InProgress],
+            priorities: vec![],
+            tags: vec![],
+            root: false,
+            children: None,
+            all: false,
+            search: Some("auth".to_string()),
+        };
+
+        let result = cmd.execute(&db).await.unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].id, "task2");
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_search_combined_with_level_filter() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        create_task(&db, "epic1", "Auth epic", "epic", "todo", None, &[]).await;
+        create_task(&db, "task1", "Auth task", "task", "todo", None, &[]).await;
+        create_task(&db, "task2", "Other task", "task", "todo", None, &[]).await;
+
+        // Search for "auth" but only epic level
+        let cmd = ListCommand {
+            levels: vec![Level::Epic],
+            statuses: vec![],
+            priorities: vec![],
+            tags: vec![],
+            root: false,
+            children: None,
+            all: false,
+            search: Some("auth".to_string()),
+        };
+
+        let result = cmd.execute(&db).await.unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].id, "epic1");
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_search_empty_string_returns_error() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        create_task(&db, "task1", "Task 1", "task", "todo", None, &[]).await;
+
+        let cmd = ListCommand {
+            levels: vec![],
+            statuses: vec![],
+            priorities: vec![],
+            tags: vec![],
+            root: false,
+            children: None,
+            all: false,
+            search: Some("".to_string()),
+        };
+
+        let result = cmd.execute(&db).await;
+
+        assert!(result.is_err());
+        match result {
+            Err(DbError::ValidationError { message }) => {
+                assert_eq!(message, "Search query cannot be empty");
+            }
+            _ => panic!("Expected ValidationError"),
+        }
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_search_whitespace_only_returns_error() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        create_task(&db, "task1", "Task 1", "task", "todo", None, &[]).await;
+
+        let cmd = ListCommand {
+            levels: vec![],
+            statuses: vec![],
+            priorities: vec![],
+            tags: vec![],
+            root: false,
+            children: None,
+            all: false,
+            search: Some("   ".to_string()),
+        };
+
+        let result = cmd.execute(&db).await;
+
+        assert!(result.is_err());
+        match result {
+            Err(DbError::ValidationError { message }) => {
+                assert_eq!(message, "Search query cannot be empty");
+            }
+            _ => panic!("Expected ValidationError"),
+        }
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_search_with_root_flag() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        create_task(&db, "parent1", "Auth Parent", "epic", "todo", None, &[]).await;
+        create_task(&db, "child1", "Auth Child", "task", "todo", None, &[]).await;
+        create_task(&db, "other1", "Other Parent", "epic", "todo", None, &[]).await;
+        create_child_of(&db, "child1", "parent1").await;
+
+        // Search for "auth" with root flag - should only return root task
+        let cmd = ListCommand {
+            levels: vec![],
+            statuses: vec![],
+            priorities: vec![],
+            tags: vec![],
+            root: true,
+            children: None,
+            all: false,
+            search: Some("auth".to_string()),
+        };
+
+        let result = cmd.execute(&db).await.unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].id, "parent1");
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_search_with_children_flag() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        create_task(&db, "parent1", "Parent", "epic", "todo", None, &[]).await;
+        create_task(&db, "child1", "Auth Child", "task", "todo", None, &[]).await;
+        create_task(&db, "child2", "Other Child", "task", "todo", None, &[]).await;
+        create_child_of(&db, "child1", "parent1").await;
+        create_child_of(&db, "child2", "parent1").await;
+
+        // Search for "auth" among children of parent1
+        let cmd = ListCommand {
+            levels: vec![],
+            statuses: vec![],
+            priorities: vec![],
+            tags: vec![],
+            root: false,
+            children: Some("parent1".to_string()),
+            all: false,
+            search: Some("auth".to_string()),
+        };
+
+        let result = cmd.execute(&db).await.unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].id, "child1");
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_search_with_special_characters() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        create_task(&db, "task1", "Test task", "task", "todo", None, &[]).await;
+
+        // Search with quotes - should not cause SQL injection
+        let cmd = ListCommand {
+            levels: vec![],
+            statuses: vec![],
+            priorities: vec![],
+            tags: vec![],
+            root: false,
+            children: None,
+            all: false,
+            search: Some("test\" OR 1=1 --".to_string()),
+        };
+
+        let result = cmd.execute(&db).await.unwrap();
+
+        // Should return empty (no SQL injection)
+        assert!(result.is_empty());
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_search_with_null_description() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        // Create task without description
+        create_task(&db, "task1", "Auth Feature", "task", "todo", None, &[]).await;
+        // Create task with description
+        create_task_with_description(&db, "task2", "Other", "auth in description", "task", "todo")
+            .await;
+
+        let cmd = ListCommand {
+            levels: vec![],
+            statuses: vec![],
+            priorities: vec![],
+            tags: vec![],
+            root: false,
+            children: None,
+            all: false,
+            search: Some("auth".to_string()),
+        };
+
+        let result = cmd.execute(&db).await.unwrap();
+
+        // Should find both tasks (one in title, one in description)
+        assert_eq!(result.len(), 2);
+
+        let ids: std::collections::HashSet<_> = result.iter().map(|t| t.id.as_str()).collect();
+        assert!(ids.contains("task1"));
+        assert!(ids.contains("task2"));
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_tag_or_semantics_preserved() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        create_task(&db, "task1", "Task 1", "task", "todo", None, &["backend"]).await;
+        create_task(&db, "task2", "Task 2", "task", "todo", None, &["frontend"]).await;
+        create_task(
+            &db,
+            "task3",
+            "Task 3",
+            "task",
+            "todo",
+            None,
+            &["backend", "api"],
+        )
+        .await;
+        create_task(&db, "task4", "Task 4", "task", "todo", None, &["other"]).await;
+
+        // Filter by multiple tags (OR semantics)
+        let cmd = ListCommand {
+            levels: vec![],
+            statuses: vec![],
+            priorities: vec![],
+            tags: vec!["backend".to_string(), "frontend".to_string()],
+            root: false,
+            children: None,
+            all: false,
+            search: None,
+        };
+
+        let result = cmd.execute(&db).await.unwrap();
+
+        // Should find 3 tasks (task1, task2, task3 - any with backend OR frontend)
+        assert_eq!(result.len(), 3);
+
+        let ids: std::collections::HashSet<_> = result.iter().map(|t| t.id.as_str()).collect();
+        assert!(ids.contains("task1"));
+        assert!(ids.contains("task2"));
+        assert!(ids.contains("task3"));
+        assert!(!ids.contains("task4"));
+
+        cleanup(&temp_dir);
     }
 }
