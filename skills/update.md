@@ -26,10 +26,17 @@ vtb update <task-id> --level ticket
 ```
 
 ## Note
-For status changes, use the dedicated commands:
-- `vtb start` - Set to in_progress
-- `vtb done` - Set to done
-- `vtb block` - Set to blocked
+For status changes, use the unified transition command:
+```bash
+vtb transition-to <task-id> <status>
+```
+
+Available statuses: `todo`, `in_progress`, `pending_review`, `done`, `rejected`
+
+Examples:
+- `vtb transition-to <id> in_progress` - Start working
+- `vtb transition-to <id> done` - Complete task
+- `vtb transition-to <id> rejected --reason "reason"` - Reject task
 
 ## Important
-NEVER use update for status changes
+NEVER use update for status changes - use `transition-to` instead

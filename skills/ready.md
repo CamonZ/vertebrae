@@ -50,8 +50,8 @@ A parent has "work started" if any child is in: `in_progress`, `pending_review`,
 vtb ready
 
 # Then start work on an item
-vtb start <task-id>
+vtb transition-to <task-id> in_progress
 
-# Or triage a backlog item
-vtb triage <task-id>
+# Or triage a backlog item to make it available for work
+vtb transition-to <task-id> todo
 ```

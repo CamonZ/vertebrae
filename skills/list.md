@@ -18,10 +18,12 @@ vtb list --tag backend            # By tag
 ```
 
 ## Statuses
-- `todo` - Not started
+- `backlog` - Not yet triaged
+- `todo` - Ready to work on
 - `in_progress` - Currently working
+- `pending_review` - Submitted for review
 - `done` - Completed
-- `blocked` - Waiting on something
+- `rejected` - Rejected (with reason)
 
 ## Output columns
 - ID, Level, Status, Priority, Title, Tags
