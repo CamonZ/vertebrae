@@ -24,6 +24,7 @@ pub mod show;
 pub mod start;
 pub mod step_done;
 pub mod submit;
+pub mod transition_to;
 pub mod triage;
 pub mod undepend;
 pub mod unref;
@@ -52,6 +53,7 @@ pub use show::ShowCommand;
 pub use start::StartCommand;
 pub use step_done::StepDoneCommand;
 pub use submit::SubmitCommand;
+pub use transition_to::TransitionToCommand;
 pub use triage::TriageCommand;
 pub use undepend::UndependCommand;
 pub use unref::UnrefCommand;
@@ -117,6 +119,9 @@ pub enum Command {
     StepDone(StepDoneCommand),
     /// Submit a task for review (transition to pending_review)
     Submit(SubmitCommand),
+    /// Transition a task to a specific status
+    #[command(name = "transition-to")]
+    TransitionTo(TransitionToCommand),
     /// Triage a task (transition from backlog to todo)
     Triage(TriageCommand),
     /// Update an existing task
@@ -253,6 +258,10 @@ impl Command {
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Submit(cmd) => {
+                let result = cmd.execute(db).await?;
+                Ok(CommandResult::Message(format!("{}", result)))
+            }
+            Command::TransitionTo(cmd) => {
                 let result = cmd.execute(db).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
@@ -1027,6 +1036,97 @@ mod tests {
         assert!(
             debug_str.contains("Sections") && debug_str.contains("test123"),
             "Debug output should contain Sections variant and id field value"
+        );
+    }
+
+    #[test]
+    fn test_command_transition_to_parses() {
+        let cli = TestCli::try_parse_from(["test", "transition-to", "abc123", "todo"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::TransitionTo(cmd) => {
+                assert_eq!(cmd.id, "abc123");
+                assert_eq!(cmd.target, transition_to::TargetStatus::Todo);
+            }
+            _ => panic!("Expected TransitionTo command"),
+        }
+    }
+
+    #[test]
+    fn test_command_transition_to_requires_id() {
+        let result = TestCli::try_parse_from(["test", "transition-to"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_command_transition_to_requires_target() {
+        let result = TestCli::try_parse_from(["test", "transition-to", "abc123"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_command_transition_to_all_targets() {
+        // Test all valid target values
+        let targets = ["todo", "in_progress", "pending_review", "done", "rejected"];
+        for target in targets {
+            let cli = TestCli::try_parse_from(["test", "transition-to", "abc123", target]);
+            assert!(cli.is_ok(), "Failed to parse target: {}", target);
+        }
+    }
+
+    #[test]
+    fn test_command_transition_to_invalid_target() {
+        let result = TestCli::try_parse_from(["test", "transition-to", "abc123", "invalid"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_command_transition_to_with_reason() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "transition-to",
+            "abc123",
+            "rejected",
+            "--reason",
+            "Out of scope",
+        ]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::TransitionTo(cmd) => {
+                assert_eq!(cmd.id, "abc123");
+                assert_eq!(cmd.target, transition_to::TargetStatus::Rejected);
+                assert_eq!(cmd.reason, Some("Out of scope".to_string()));
+            }
+            _ => panic!("Expected TransitionTo command"),
+        }
+    }
+
+    #[test]
+    fn test_command_transition_to_with_short_reason() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "transition-to",
+            "abc123",
+            "rejected",
+            "-r",
+            "Reason",
+        ]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::TransitionTo(cmd) => {
+                assert_eq!(cmd.reason, Some("Reason".to_string()));
+            }
+            _ => panic!("Expected TransitionTo command"),
+        }
+    }
+
+    #[test]
+    fn test_command_transition_to_debug() {
+        let cli = TestCli::try_parse_from(["test", "transition-to", "test123", "todo"]).unwrap();
+        let debug_str = format!("{:?}", cli.command);
+        assert!(
+            debug_str.contains("TransitionTo") && debug_str.contains("test123"),
+            "Debug output should contain TransitionTo variant and id field value"
         );
     }
 
