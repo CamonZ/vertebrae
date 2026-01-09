@@ -3,11 +3,7 @@ use std::path::PathBuf;
 use std::process;
 use tracing_subscriber::EnvFilter;
 
-mod commands;
-mod id;
-mod output;
-
-use commands::Command;
+use vertebrae_cli::commands::Command;
 use vertebrae_db::{Database, DbError};
 
 /// Environment variable name for the database path

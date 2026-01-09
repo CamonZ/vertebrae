@@ -5,6 +5,10 @@ edition = "2024"
 description = "CLI for Vertebrae task management"
 license = "MIT"
 
+[lib]
+name = "vertebrae_cli"
+path = "src/lib.rs"
+
 [[bin]]
 name = "vtb"
 path = "src/main.rs"
