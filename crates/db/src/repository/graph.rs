@@ -715,6 +715,38 @@ impl<'a> GraphQueries<'a> {
         Ok(blockers.into_iter().map(|r| r.id.id.to_string()).collect())
     }
 
+    /// Get all incomplete dependencies for a task with their details.
+    ///
+    /// Returns tasks that this task depends on (blockers) which are not yet done,
+    /// including their ID, title, and status.
+    ///
+    /// # Arguments
+    ///
+    /// * `task_id` - The ID of the task to check
+    ///
+    /// # Returns
+    ///
+    /// A vector of (id, title, status) tuples for incomplete dependencies.
+    pub async fn get_incomplete_dependencies_info(
+        &self,
+        task_id: &str,
+    ) -> DbResult<Vec<(String, String, String)>> {
+        let query = format!(
+            r#"SELECT id, title, level, status FROM task
+               WHERE <-depends_on<-task CONTAINS task:{}
+               AND status != "done""#,
+            task_id
+        );
+
+        let mut result = self.client.query(&query).await?;
+        let deps: Vec<TaskInfoRow> = result.take(0)?;
+
+        Ok(deps
+            .into_iter()
+            .map(|r| (r.id.id.to_string(), r.title, r.status))
+            .collect())
+    }
+
     /// Get all tasks that depend on the given task and will become unblocked when it's done.
     ///
     /// A task becomes unblocked when ALL its dependencies are done.

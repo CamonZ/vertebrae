@@ -404,6 +404,36 @@ impl<'a> TaskRepository<'a> {
         Ok(())
     }
 
+    /// Add a section to a task without replacing existing sections.
+    ///
+    /// Appends a new section to the task's sections array.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The task ID to update
+    /// * `section_type` - The type of section to add
+    /// * `content` - The content of the section
+    ///
+    /// # Errors
+    ///
+    /// Returns `DbError::Query` if the database operation fails.
+    pub async fn add_section(
+        &self,
+        id: &str,
+        section_type: crate::models::SectionType,
+        content: &str,
+    ) -> DbResult<()> {
+        let escaped_content = content.replace('"', "\\\"");
+        let query = format!(
+            r#"UPDATE task:{} SET sections = array::concat(sections, [{{ type: "{}", content: "{}" }}]), updated_at = time::now()"#,
+            id,
+            section_type.as_str(),
+            escaped_content
+        );
+        self.client.query(&query).await?;
+        Ok(())
+    }
+
     /// Apply partial updates to a task with workflow validation.
     ///
     /// If a status update is included, validates the transition before applying.
