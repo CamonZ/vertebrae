@@ -241,6 +241,21 @@ pub fn list_cmd() -> ListCommand {
         root: false,
         children: None,
         all: false,
+        search: None,
+    }
+}
+
+/// Create a list command with a search query.
+pub fn list_cmd_with_search(search: &str) -> ListCommand {
+    ListCommand {
+        levels: vec![],
+        statuses: vec![],
+        priorities: vec![],
+        tags: vec![],
+        root: false,
+        children: None,
+        all: false,
+        search: Some(search.to_string()),
     }
 }
 
@@ -288,6 +303,39 @@ pub async fn create_task_with_description(
             sections = [],
             refs = []"#,
         id, title, level, status, description
+    );
+    db.client().query(&query).await.unwrap();
+}
+
+/// Helper to create a task with tags.
+pub async fn create_task_with_tags(
+    db: &Database,
+    id: &str,
+    title: &str,
+    level: &str,
+    status: &str,
+    tags: &[&str],
+) {
+    let tags_str = if tags.is_empty() {
+        "[]".to_string()
+    } else {
+        format!(
+            "[{}]",
+            tags.iter()
+                .map(|t| format!("\"{}\"", t))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    let query = format!(
+        r#"CREATE task:{} SET
+            title = "{}",
+            level = "{}",
+            status = "{}",
+            tags = {},
+            sections = [],
+            refs = []"#,
+        id, title, level, status, tags_str
     );
     db.client().query(&query).await.unwrap();
 }
