@@ -5,8 +5,8 @@
 
 use std::path::PathBuf;
 use vertebrae_cli::commands::{
-    AddCommand, DeleteCommand, DependCommand, DoneCommand, ExportCommand, ListCommand, RefCommand,
-    RejectCommand, SectionCommand, StartCommand, SubmitCommand, TriageCommand,
+    AddCommand, DeleteCommand, DependCommand, ExportCommand, ListCommand, RefCommand,
+    SectionCommand, TransitionToCommand, transition_to::TargetStatus,
 };
 use vertebrae_db::{Database, DbError, Level, SectionType};
 
@@ -143,39 +143,57 @@ pub async fn execute_add(db: &Database, cmd: AddCommand) -> Result<String, DbErr
     cmd.execute(db).await
 }
 
-/// Create a triage command.
-pub fn triage_cmd(id: &str) -> TriageCommand {
-    TriageCommand { id: id.to_string() }
-}
-
-/// Create a start command.
-pub fn start_cmd(id: &str) -> StartCommand {
-    StartCommand { id: id.to_string() }
-}
-
-/// Create a submit command.
-pub fn submit_cmd(id: &str) -> SubmitCommand {
-    SubmitCommand { id: id.to_string() }
-}
-
-/// Create a done command.
-pub fn done_cmd(id: &str) -> DoneCommand {
-    DoneCommand { id: id.to_string() }
-}
-
-/// Create a reject command.
-pub fn reject_cmd(id: &str) -> RejectCommand {
-    RejectCommand {
+/// Create a transition-to command for triage (backlog -> todo).
+pub fn triage_cmd(id: &str) -> TransitionToCommand {
+    TransitionToCommand {
         id: id.to_string(),
+        target: TargetStatus::Todo,
         reason: None,
     }
 }
 
-/// Create a reject command with reason.
-#[allow(dead_code)]
-pub fn reject_cmd_with_reason(id: &str, reason: &str) -> RejectCommand {
-    RejectCommand {
+/// Create a transition-to command for start (todo -> in_progress).
+pub fn start_cmd(id: &str) -> TransitionToCommand {
+    TransitionToCommand {
         id: id.to_string(),
+        target: TargetStatus::InProgress,
+        reason: None,
+    }
+}
+
+/// Create a transition-to command for submit (in_progress -> pending_review).
+pub fn submit_cmd(id: &str) -> TransitionToCommand {
+    TransitionToCommand {
+        id: id.to_string(),
+        target: TargetStatus::PendingReview,
+        reason: None,
+    }
+}
+
+/// Create a transition-to command for done (pending_review -> done).
+pub fn done_cmd(id: &str) -> TransitionToCommand {
+    TransitionToCommand {
+        id: id.to_string(),
+        target: TargetStatus::Done,
+        reason: None,
+    }
+}
+
+/// Create a transition-to command for reject (todo -> rejected).
+pub fn reject_cmd(id: &str) -> TransitionToCommand {
+    TransitionToCommand {
+        id: id.to_string(),
+        target: TargetStatus::Rejected,
+        reason: None,
+    }
+}
+
+/// Create a transition-to command for reject with reason.
+#[allow(dead_code)]
+pub fn reject_cmd_with_reason(id: &str, reason: &str) -> TransitionToCommand {
+    TransitionToCommand {
+        id: id.to_string(),
+        target: TargetStatus::Rejected,
         reason: Some(reason.to_string()),
     }
 }

@@ -7,7 +7,6 @@ pub mod blockers;
 pub mod criterion_ref;
 pub mod delete;
 pub mod depend;
-pub mod done;
 pub mod export;
 pub mod import;
 pub mod init;
@@ -16,16 +15,12 @@ pub mod path;
 pub mod ready;
 pub mod r#ref;
 pub mod refs;
-pub mod reject;
 pub mod review;
 pub mod section;
 pub mod sections;
 pub mod show;
-pub mod start;
 pub mod step_done;
-pub mod submit;
 pub mod transition_to;
-pub mod triage;
 pub mod undepend;
 pub mod unref;
 pub mod unsection;
@@ -36,7 +31,6 @@ pub use blockers::BlockersCommand;
 pub use criterion_ref::CriterionRefCommand;
 pub use delete::DeleteCommand;
 pub use depend::DependCommand;
-pub use done::DoneCommand;
 pub use export::ExportCommand;
 pub use import::ImportCommand;
 pub use init::InitCommand;
@@ -45,16 +39,12 @@ pub use path::PathCommand;
 pub use ready::ReadyCommand;
 pub use r#ref::RefCommand;
 pub use refs::RefsCommand;
-pub use reject::RejectCommand;
 pub use review::ReviewCommand;
 pub use section::SectionCommand;
 pub use sections::SectionsCommand;
 pub use show::ShowCommand;
-pub use start::StartCommand;
 pub use step_done::StepDoneCommand;
-pub use submit::SubmitCommand;
 pub use transition_to::TransitionToCommand;
-pub use triage::TriageCommand;
 pub use undepend::UndependCommand;
 pub use unref::UnrefCommand;
 pub use unsection::UnsectionCommand;
@@ -74,14 +64,10 @@ pub enum Command {
     /// Add a code reference to a testing criterion
     #[command(name = "criterion-ref")]
     CriterionRef(CriterionRefCommand),
-    /// Reject a task (transition from todo to rejected)
-    Reject(RejectCommand),
     /// Delete a task (with optional cascade)
     Delete(DeleteCommand),
     /// Create a dependency relationship between tasks
     Depend(DependCommand),
-    /// Mark a task as complete (transition to done)
-    Done(DoneCommand),
     /// Export all tasks and relationships to JSONL format
     Export(ExportCommand),
     /// Import tasks and relationships from JSONL format
@@ -112,18 +98,12 @@ pub enum Command {
     Unref(UnrefCommand),
     /// Remove sections from a task
     Unsection(UnsectionCommand),
-    /// Start working on a task (transition to in_progress)
-    Start(StartCommand),
     /// Mark a step as done within a task
     #[command(name = "step-done")]
     StepDone(StepDoneCommand),
-    /// Submit a task for review (transition to pending_review)
-    Submit(SubmitCommand),
     /// Transition a task to a specific status
     #[command(name = "transition-to")]
     TransitionTo(TransitionToCommand),
-    /// Triage a task (transition from backlog to todo)
-    Triage(TriageCommand),
     /// Update an existing task
     Update(UpdateCommand),
 }
@@ -161,10 +141,6 @@ impl Command {
                 let id = cmd.execute(db).await?;
                 Ok(CommandResult::Message(format!("Created task: {}", id)))
             }
-            Command::Reject(cmd) => {
-                let result = cmd.execute(db).await?;
-                Ok(CommandResult::Message(format!("{}", result)))
-            }
             Command::Blockers(cmd) => {
                 let result = cmd.execute(db).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
@@ -178,10 +154,6 @@ impl Command {
                 Ok(CommandResult::Message(message))
             }
             Command::Depend(cmd) => {
-                let result = cmd.execute(db).await?;
-                Ok(CommandResult::Message(format!("{}", result)))
-            }
-            Command::Done(cmd) => {
                 let result = cmd.execute(db).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
@@ -249,23 +221,11 @@ impl Command {
                 let result = cmd.execute(db).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
-            Command::Start(cmd) => {
-                let result = cmd.execute(db).await?;
-                Ok(CommandResult::Message(format!("{}", result)))
-            }
             Command::StepDone(cmd) => {
                 let result = cmd.execute(db).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
-            Command::Submit(cmd) => {
-                let result = cmd.execute(db).await?;
-                Ok(CommandResult::Message(format!("{}", result)))
-            }
             Command::TransitionTo(cmd) => {
-                let result = cmd.execute(db).await?;
-                Ok(CommandResult::Message(format!("{}", result)))
-            }
-            Command::Triage(cmd) => {
                 let result = cmd.execute(db).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
@@ -865,116 +825,6 @@ mod tests {
         assert!(
             debug_str.contains("Delete") && debug_str.contains("test123"),
             "Debug output should contain Delete variant and id field value"
-        );
-    }
-
-    #[test]
-    fn test_command_start_parses() {
-        let cli = TestCli::try_parse_from(["test", "start", "abc123"]);
-        assert!(cli.is_ok());
-        match cli.unwrap().command {
-            Command::Start(cmd) => {
-                assert_eq!(cmd.id, "abc123");
-            }
-            _ => panic!("Expected Start command"),
-        }
-    }
-
-    #[test]
-    fn test_command_start_requires_id() {
-        let result = TestCli::try_parse_from(["test", "start"]);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_command_start_debug() {
-        let cli = TestCli::try_parse_from(["test", "start", "test123"]).unwrap();
-        let debug_str = format!("{:?}", cli.command);
-        assert!(
-            debug_str.contains("Start") && debug_str.contains("test123"),
-            "Debug output should contain Start variant and id field value"
-        );
-    }
-
-    #[test]
-    fn test_command_done_parses() {
-        let cli = TestCli::try_parse_from(["test", "done", "abc123"]);
-        assert!(cli.is_ok());
-        match cli.unwrap().command {
-            Command::Done(cmd) => {
-                assert_eq!(cmd.id, "abc123");
-            }
-            _ => panic!("Expected Done command"),
-        }
-    }
-
-    #[test]
-    fn test_command_done_requires_id() {
-        let result = TestCli::try_parse_from(["test", "done"]);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_command_done_debug() {
-        let cli = TestCli::try_parse_from(["test", "done", "test123"]).unwrap();
-        let debug_str = format!("{:?}", cli.command);
-        assert!(
-            debug_str.contains("Done") && debug_str.contains("test123"),
-            "Debug output should contain Done variant and id field value"
-        );
-    }
-
-    #[test]
-    fn test_command_reject_parses() {
-        let cli = TestCli::try_parse_from(["test", "reject", "abc123"]);
-        assert!(cli.is_ok());
-        match cli.unwrap().command {
-            Command::Reject(cmd) => {
-                assert_eq!(cmd.id, "abc123");
-                assert!(cmd.reason.is_none());
-            }
-            _ => panic!("Expected Reject command"),
-        }
-    }
-
-    #[test]
-    fn test_command_reject_requires_id() {
-        let result = TestCli::try_parse_from(["test", "reject"]);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_command_reject_with_reason() {
-        let cli = TestCli::try_parse_from(["test", "reject", "abc123", "--reason", "Out of scope"]);
-        assert!(cli.is_ok());
-        match cli.unwrap().command {
-            Command::Reject(cmd) => {
-                assert_eq!(cmd.id, "abc123");
-                assert_eq!(cmd.reason, Some("Out of scope".to_string()));
-            }
-            _ => panic!("Expected Reject command"),
-        }
-    }
-
-    #[test]
-    fn test_command_reject_with_short_reason() {
-        let cli = TestCli::try_parse_from(["test", "reject", "abc123", "-r", "Short reason"]);
-        assert!(cli.is_ok());
-        match cli.unwrap().command {
-            Command::Reject(cmd) => {
-                assert_eq!(cmd.reason, Some("Short reason".to_string()));
-            }
-            _ => panic!("Expected Reject command"),
-        }
-    }
-
-    #[test]
-    fn test_command_reject_debug() {
-        let cli = TestCli::try_parse_from(["test", "reject", "test123"]).unwrap();
-        let debug_str = format!("{:?}", cli.command);
-        assert!(
-            debug_str.contains("Reject") && debug_str.contains("test123"),
-            "Debug output should contain Reject variant and id field value"
         );
     }
 

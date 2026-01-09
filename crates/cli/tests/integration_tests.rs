@@ -115,7 +115,10 @@ mod lifecycle {
         create_task(&ctx.db, "task1", "Todo Task", "task", "todo").await;
 
         let result = triage_cmd("task1").execute(&ctx.db).await.unwrap();
-        assert!(result.already_todo, "Triage should report already_todo");
+        assert!(
+            result.already_in_target,
+            "Triage should report already_in_target"
+        );
 
         // Status should remain unchanged
         assert_eq!(
@@ -165,7 +168,7 @@ mod lifecycle {
 
         let start_result = result.unwrap();
         assert!(
-            start_result.already_in_progress,
+            start_result.already_in_target,
             "Should indicate already started"
         );
     }
