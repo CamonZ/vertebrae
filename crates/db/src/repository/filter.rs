@@ -388,6 +388,230 @@ impl<'a> TaskLister<'a> {
         )
     }
 
+    /// List ready items for work or triage at a given status.
+    ///
+    /// Returns highest-level unblocked items that:
+    /// 1. Have the specified status (todo or backlog)
+    /// 2. Are not blocked by incomplete dependencies
+    /// 3. Have no work started (no children in in_progress/pending_review/done)
+    /// 4. Have no parent in the same status (show only highest entry point)
+    ///
+    /// For items with hierarchies, only shows the highest-level entry point.
+    ///
+    /// # Arguments
+    ///
+    /// * `status` - The status to filter by (typically Todo or Backlog)
+    ///
+    /// # Returns
+    ///
+    /// A vector of task summaries representing entry points for work/triage.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let lister = TaskLister::new(db.client());
+    /// let todo_ready = lister.list_ready(Status::Todo).await?;
+    /// let backlog_ready = lister.list_ready(Status::Backlog).await?;
+    /// ```
+    pub async fn list_ready(&self, status: Status) -> DbResult<Vec<TaskSummary>> {
+        let status_str = status.as_str();
+
+        // OPTIMIZED: Batch fetch all data in 3 queries instead of N*M queries
+        //
+        // Query 1: All tasks with id, status, parent info
+        // Query 2: All child_of relationships (for building hierarchy)
+        // Query 3: All incomplete blockers
+        //
+        // Then filter entirely in Rust using in-memory data structures
+
+        // Query 1: Get ALL tasks with their parent info in one query
+        let all_tasks_query = r#"
+            SELECT
+                id,
+                title,
+                level,
+                status,
+                priority,
+                tags,
+                needs_human_review,
+                created_at,
+                (->child_of->task)[0].id AS parent_id,
+                (->child_of->task)[0].status AS parent_status
+            FROM task
+            ORDER BY created_at DESC
+        "#;
+
+        #[derive(Debug, Deserialize)]
+        struct TaskWithParent {
+            id: surrealdb::sql::Thing,
+            title: String,
+            level: String,
+            status: String,
+            priority: Option<String>,
+            #[serde(default)]
+            tags: Vec<String>,
+            #[serde(default)]
+            needs_human_review: Option<bool>,
+            #[allow(dead_code)]
+            created_at: surrealdb::sql::Datetime,
+            parent_id: Option<surrealdb::sql::Thing>,
+            parent_status: Option<String>,
+        }
+
+        let mut result = self.client.query(all_tasks_query).await?;
+        let all_tasks: Vec<TaskWithParent> = result.take(0)?;
+
+        // Query 2: Get all child_of relationships to build parent->children map
+        let children_query = "SELECT in.id AS child_id, out.id AS parent_id FROM child_of";
+
+        #[derive(Debug, Deserialize)]
+        struct ChildOfRow {
+            child_id: surrealdb::sql::Thing,
+            parent_id: surrealdb::sql::Thing,
+        }
+
+        let mut result = self.client.query(children_query).await?;
+        let child_of_rows: Vec<ChildOfRow> = result.take(0)?;
+
+        // Query 3: Get all incomplete blockers (depends_on where blocker is not done)
+        let blockers_query = r#"
+            SELECT in.id AS dependent_id, out.id AS blocker_id
+            FROM depends_on
+            WHERE out.status != "done"
+        "#;
+
+        #[derive(Debug, Deserialize)]
+        struct BlockerRow {
+            dependent_id: surrealdb::sql::Thing,
+            #[allow(dead_code)]
+            blocker_id: surrealdb::sql::Thing,
+        }
+
+        let mut result = self.client.query(blockers_query).await?;
+        let blocker_rows: Vec<BlockerRow> = result.take(0)?;
+
+        // Build in-memory data structures
+        use std::collections::{HashMap, HashSet};
+
+        // Set of tasks that have incomplete blockers
+        let blocked_tasks: HashSet<String> = blocker_rows
+            .iter()
+            .map(|r| r.dependent_id.id.to_string())
+            .collect();
+
+        // Map of parent_id -> [child_ids]
+        let mut children_map: HashMap<String, Vec<String>> = HashMap::new();
+        for row in &child_of_rows {
+            let parent_id = row.parent_id.id.to_string();
+            let child_id = row.child_id.id.to_string();
+            children_map.entry(parent_id).or_default().push(child_id);
+        }
+
+        // Map of task_id -> status (for checking work started)
+        let task_statuses: HashMap<String, String> = all_tasks
+            .iter()
+            .map(|t| (t.id.id.to_string(), t.status.clone()))
+            .collect();
+
+        // Helper: Check if any descendant has work started (BFS in memory)
+        let has_work_started_in_descendants = |task_id: &str| -> bool {
+            let work_started_statuses = ["in_progress", "pending_review", "done"];
+            let mut to_check = vec![task_id.to_string()];
+            let mut checked = HashSet::new();
+
+            while let Some(current) = to_check.pop() {
+                if checked.contains(&current) {
+                    continue;
+                }
+                checked.insert(current.clone());
+
+                if let Some(children) = children_map.get(&current) {
+                    for child_id in children {
+                        if let Some(child_status) = task_statuses.get(child_id)
+                            && work_started_statuses.contains(&child_status.as_str())
+                        {
+                            return true;
+                        }
+                        to_check.push(child_id.clone());
+                    }
+                }
+            }
+            false
+        };
+
+        // Helper: Check if task is entry point
+        let is_entry_point = |task: &TaskWithParent| -> bool {
+            match (&task.parent_id, &task.parent_status) {
+                (None, _) | (_, None) => true, // No parent = entry point
+                (Some(parent_id), Some(parent_status)) => {
+                    if parent_status != status_str {
+                        // Parent has different status = this is an entry point
+                        true
+                    } else {
+                        // Parent has same status - check if parent has work started
+                        // If parent has work started, it's not a valid entry point,
+                        // so this child becomes an entry point
+                        let parent_id_str = parent_id.id.to_string();
+                        has_work_started_in_descendants(&parent_id_str)
+                    }
+                }
+            }
+        };
+
+        // Filter tasks
+        let mut ready_tasks: Vec<TaskSummary> = all_tasks
+            .into_iter()
+            .filter(|task| {
+                let task_id = task.id.id.to_string();
+
+                // Must have target status
+                if task.status != status_str {
+                    return false;
+                }
+
+                // Check 1: Must be entry point
+                if !is_entry_point(task) {
+                    return false;
+                }
+
+                // Check 2: No incomplete blockers
+                if blocked_tasks.contains(&task_id) {
+                    return false;
+                }
+
+                // Check 3: No work started in descendants
+                if has_work_started_in_descendants(&task_id) {
+                    return false;
+                }
+
+                true
+            })
+            .map(|task| TaskSummary {
+                id: task.id.id.to_string(),
+                title: task.title,
+                level: parse_level(&task.level),
+                status: parse_status(&task.status),
+                priority: task.priority.map(|p| parse_priority(&p)),
+                tags: task.tags,
+                needs_human_review: task.needs_human_review,
+            })
+            .collect();
+
+        // Sort by level priority: epic > ticket > task
+        ready_tasks.sort_by(|a, b| {
+            let level_priority = |level: &Level| -> u8 {
+                match level {
+                    Level::Epic => 0,
+                    Level::Ticket => 1,
+                    Level::Task => 2,
+                }
+            };
+            level_priority(&a.level).cmp(&level_priority(&b.level))
+        });
+
+        Ok(ready_tasks)
+    }
+
     /// Apply post-query filters (used for children query where we can't use all SQL filters)
     fn apply_post_filters(&self, tasks: Vec<TaskSummary>, filter: &TaskFilter) -> Vec<TaskSummary> {
         tasks
