@@ -105,6 +105,27 @@ impl Database {
         TaskLister::new(&self.client)
     }
 
+    /// List ready items for work or triage at a given status.
+    ///
+    /// Returns highest-level unblocked items that:
+    /// 1. Have the specified status (todo or backlog)
+    /// 2. Are not blocked by incomplete dependencies
+    /// 3. Have no work started (no children in in_progress/pending_review/done)
+    /// 4. Have no parent in the same status (show only highest entry point)
+    ///
+    /// For items with hierarchies, only shows the highest-level entry point.
+    ///
+    /// # Arguments
+    ///
+    /// * `status` - The status to filter by (typically Todo or Backlog)
+    ///
+    /// # Returns
+    ///
+    /// A vector of task summaries representing entry points for work/triage.
+    pub async fn list_ready_items(&self, status: Status) -> DbResult<Vec<TaskSummary>> {
+        self.list_tasks().list_ready(status).await
+    }
+
     /// Get a reference to the underlying SurrealDB client.
     ///
     /// INTERNAL USE ONLY - For schema initialization and tests only.

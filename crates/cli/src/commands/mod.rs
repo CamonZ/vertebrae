@@ -13,6 +13,7 @@ pub mod import;
 pub mod init;
 pub mod list;
 pub mod path;
+pub mod ready;
 pub mod r#ref;
 pub mod refs;
 pub mod reject;
@@ -40,6 +41,7 @@ pub use import::ImportCommand;
 pub use init::InitCommand;
 pub use list::ListCommand;
 pub use path::PathCommand;
+pub use ready::ReadyCommand;
 pub use r#ref::RefCommand;
 pub use refs::RefsCommand;
 pub use reject::RejectCommand;
@@ -88,6 +90,8 @@ pub enum Command {
     List(ListCommand),
     /// Find the dependency path between two tasks
     Path(PathCommand),
+    /// Show highest-level actionable items (entry points for work/triage)
+    Ready(ReadyCommand),
     /// Add a code reference to a task
     Ref(RefCommand),
     /// List all code references for a task
@@ -197,6 +201,10 @@ impl Command {
                 Ok(CommandResult::Table(format_task_table(&tasks)))
             }
             Command::Path(cmd) => {
+                let result = cmd.execute(db).await?;
+                Ok(CommandResult::Message(format!("{}", result)))
+            }
+            Command::Ready(cmd) => {
                 let result = cmd.execute(db).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
