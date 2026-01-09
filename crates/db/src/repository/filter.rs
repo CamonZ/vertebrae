@@ -40,6 +40,9 @@ struct TaskRow {
     tags: Vec<String>,
     #[serde(default)]
     needs_human_review: Option<bool>,
+    /// Created timestamp - used by SQL ORDER BY for sorting, must be selected to match query
+    #[allow(dead_code)]
+    created_at: surrealdb::sql::Datetime,
 }
 
 impl TaskRow {
@@ -242,11 +245,11 @@ impl<'a> TaskLister<'a> {
         let conditions = self.build_filter_conditions(filter);
 
         let query = if conditions.is_empty() {
-            "SELECT id, title, level, status, priority, tags, needs_human_review FROM task"
+            "SELECT id, title, level, status, priority, tags, needs_human_review, created_at FROM task ORDER BY created_at DESC"
                 .to_string()
         } else {
             format!(
-                "SELECT id, title, level, status, priority, tags, needs_human_review FROM task WHERE {}",
+                "SELECT id, title, level, status, priority, tags, needs_human_review, created_at FROM task WHERE {} ORDER BY created_at DESC",
                 conditions.join(" AND ")
             )
         };
@@ -272,7 +275,7 @@ impl<'a> TaskLister<'a> {
         }
 
         let query = format!(
-            "SELECT id, title, level, status, priority, tags, needs_human_review FROM task WHERE {}",
+            "SELECT id, title, level, status, priority, tags, needs_human_review, created_at FROM task WHERE {} ORDER BY created_at DESC",
             conditions.join(" AND ")
         );
 
@@ -281,7 +284,7 @@ impl<'a> TaskLister<'a> {
 
         let tasks: Vec<TaskSummary> = rows.into_iter().map(|r| r.into_summary()).collect();
 
-        // Apply post-filters for other criteria
+        // Apply post-filters for other criteria (preserves sort order from SQL)
         Ok(self.apply_post_filters(tasks, filter))
     }
 
@@ -293,7 +296,7 @@ impl<'a> TaskLister<'a> {
         conditions.extend(self.build_filter_conditions(filter));
 
         let query = format!(
-            "SELECT id, title, level, status, priority, tags, needs_human_review FROM task WHERE {}",
+            "SELECT id, title, level, status, priority, tags, needs_human_review, created_at FROM task WHERE {} ORDER BY created_at DESC",
             conditions.join(" AND ")
         );
 
@@ -1417,6 +1420,368 @@ mod tests {
         let result = lister.list(&filter).await.unwrap();
 
         assert!(result.is_empty());
+
+        cleanup(&temp_dir);
+    }
+
+    // ========================================
+    // Sorting tests - tasks returned in reverse creation order (newest first)
+    // ========================================
+
+    /// Helper to create a task with a specific created_at timestamp
+    async fn create_task_with_timestamp(
+        db: &Database,
+        id: &str,
+        title: &str,
+        level: &str,
+        status: &str,
+        timestamp: &str,
+    ) {
+        let query = format!(
+            r#"CREATE task:{} SET
+                title = "{}",
+                level = "{}",
+                status = "{}",
+                priority = NONE,
+                tags = [],
+                created_at = d'{}'"#,
+            id, title, level, status, timestamp
+        );
+        db.client().query(&query).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_list_standard_query_returns_newest_first() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        // Create tasks with explicit timestamps (oldest first)
+        create_task_with_timestamp(
+            &db,
+            "task_oldest",
+            "Oldest Task",
+            "task",
+            "todo",
+            "2024-01-01T00:00:00Z",
+        )
+        .await;
+        create_task_with_timestamp(
+            &db,
+            "task_middle",
+            "Middle Task",
+            "task",
+            "todo",
+            "2024-01-02T00:00:00Z",
+        )
+        .await;
+        create_task_with_timestamp(
+            &db,
+            "task_newest",
+            "Newest Task",
+            "task",
+            "todo",
+            "2024-01-03T00:00:00Z",
+        )
+        .await;
+
+        let lister = TaskLister::new(db.client());
+        let filter = TaskFilter::new();
+        let result = lister.list(&filter).await.unwrap();
+
+        // Assert exact order: newest first
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0].id, "task_newest", "First task should be newest");
+        assert_eq!(result[1].id, "task_middle", "Second task should be middle");
+        assert_eq!(result[2].id, "task_oldest", "Third task should be oldest");
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_list_root_query_returns_newest_first() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        // Create root tasks (no parent) with explicit timestamps
+        create_task_with_timestamp(
+            &db,
+            "root_oldest",
+            "Oldest Root",
+            "epic",
+            "todo",
+            "2024-01-01T00:00:00Z",
+        )
+        .await;
+        create_task_with_timestamp(
+            &db,
+            "root_middle",
+            "Middle Root",
+            "epic",
+            "todo",
+            "2024-01-02T00:00:00Z",
+        )
+        .await;
+        create_task_with_timestamp(
+            &db,
+            "root_newest",
+            "Newest Root",
+            "epic",
+            "todo",
+            "2024-01-03T00:00:00Z",
+        )
+        .await;
+
+        let lister = TaskLister::new(db.client());
+        let filter = TaskFilter::new().root_only();
+        let result = lister.list(&filter).await.unwrap();
+
+        // Assert exact order: newest first
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0].id, "root_newest", "First root should be newest");
+        assert_eq!(result[1].id, "root_middle", "Second root should be middle");
+        assert_eq!(result[2].id, "root_oldest", "Third root should be oldest");
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_list_children_query_returns_newest_first() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        // Create parent task
+        create_task_with_timestamp(
+            &db,
+            "parent",
+            "Parent Epic",
+            "epic",
+            "todo",
+            "2024-01-01T00:00:00Z",
+        )
+        .await;
+
+        // Create child tasks with explicit timestamps
+        create_task_with_timestamp(
+            &db,
+            "child_oldest",
+            "Oldest Child",
+            "ticket",
+            "todo",
+            "2024-01-02T00:00:00Z",
+        )
+        .await;
+        create_task_with_timestamp(
+            &db,
+            "child_middle",
+            "Middle Child",
+            "ticket",
+            "todo",
+            "2024-01-03T00:00:00Z",
+        )
+        .await;
+        create_task_with_timestamp(
+            &db,
+            "child_newest",
+            "Newest Child",
+            "ticket",
+            "todo",
+            "2024-01-04T00:00:00Z",
+        )
+        .await;
+
+        // Create parent-child relationships
+        create_child_of(&db, "child_oldest", "parent").await;
+        create_child_of(&db, "child_middle", "parent").await;
+        create_child_of(&db, "child_newest", "parent").await;
+
+        let lister = TaskLister::new(db.client());
+        let filter = TaskFilter::new().children_of("parent");
+        let result = lister.list(&filter).await.unwrap();
+
+        // Assert exact order: newest first
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0].id, "child_newest", "First child should be newest");
+        assert_eq!(
+            result[1].id, "child_middle",
+            "Second child should be middle"
+        );
+        assert_eq!(result[2].id, "child_oldest", "Third child should be oldest");
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_list_with_filter_maintains_newest_first_order() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        // Create tasks with different statuses and timestamps
+        create_task_with_timestamp(
+            &db,
+            "task_old_todo",
+            "Old Todo",
+            "task",
+            "todo",
+            "2024-01-01T00:00:00Z",
+        )
+        .await;
+        create_task_with_timestamp(
+            &db,
+            "task_new_todo",
+            "New Todo",
+            "task",
+            "todo",
+            "2024-01-03T00:00:00Z",
+        )
+        .await;
+        create_task_with_timestamp(
+            &db,
+            "task_in_progress",
+            "In Progress",
+            "task",
+            "in_progress",
+            "2024-01-02T00:00:00Z",
+        )
+        .await;
+
+        let lister = TaskLister::new(db.client());
+        let filter = TaskFilter::new().with_status(Status::Todo);
+        let result = lister.list(&filter).await.unwrap();
+
+        // Assert exact order: newest todo first
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].id, "task_new_todo", "Newer todo should be first");
+        assert_eq!(result[1].id, "task_old_todo", "Older todo should be second");
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_list_empty_result_returns_empty_without_error() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        // No tasks created - database is empty
+        let lister = TaskLister::new(db.client());
+        let filter = TaskFilter::new();
+        let result = lister.list(&filter).await.unwrap();
+
+        assert!(result.is_empty(), "Empty database should return empty list");
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_list_single_task_returns_without_error() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        create_task_with_timestamp(
+            &db,
+            "only_task",
+            "Only Task",
+            "task",
+            "todo",
+            "2024-01-01T00:00:00Z",
+        )
+        .await;
+
+        let lister = TaskLister::new(db.client());
+        let filter = TaskFilter::new();
+        let result = lister.list(&filter).await.unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].id, "only_task");
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_list_tasks_with_identical_timestamps_stable_ordering() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        // Create tasks with identical timestamps
+        let same_time = "2024-01-01T12:00:00Z";
+        create_task_with_timestamp(&db, "task_a", "Task A", "task", "todo", same_time).await;
+        create_task_with_timestamp(&db, "task_b", "Task B", "task", "todo", same_time).await;
+        create_task_with_timestamp(&db, "task_c", "Task C", "task", "todo", same_time).await;
+
+        let lister = TaskLister::new(db.client());
+        let filter = TaskFilter::new();
+
+        // Run multiple times to verify stable ordering
+        let result1 = lister.list(&filter).await.unwrap();
+        let result2 = lister.list(&filter).await.unwrap();
+
+        assert_eq!(result1.len(), 3);
+        assert_eq!(result2.len(), 3);
+
+        // Verify order is stable across calls
+        assert_eq!(result1[0].id, result2[0].id, "Order should be stable");
+        assert_eq!(result1[1].id, result2[1].id, "Order should be stable");
+        assert_eq!(result1[2].id, result2[2].id, "Order should be stable");
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_list_children_with_filter_maintains_order() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        // Create parent
+        create_task_with_timestamp(
+            &db,
+            "parent",
+            "Parent",
+            "epic",
+            "todo",
+            "2024-01-01T00:00:00Z",
+        )
+        .await;
+
+        // Create children with different levels and timestamps
+        create_task_with_timestamp(
+            &db,
+            "child_ticket_old",
+            "Old Ticket",
+            "ticket",
+            "todo",
+            "2024-01-02T00:00:00Z",
+        )
+        .await;
+        create_task_with_timestamp(
+            &db,
+            "child_ticket_new",
+            "New Ticket",
+            "ticket",
+            "todo",
+            "2024-01-04T00:00:00Z",
+        )
+        .await;
+        create_task_with_timestamp(
+            &db,
+            "child_task",
+            "Task Child",
+            "task",
+            "todo",
+            "2024-01-03T00:00:00Z",
+        )
+        .await;
+
+        create_child_of(&db, "child_ticket_old", "parent").await;
+        create_child_of(&db, "child_ticket_new", "parent").await;
+        create_child_of(&db, "child_task", "parent").await;
+
+        let lister = TaskLister::new(db.client());
+        let filter = TaskFilter::new()
+            .children_of("parent")
+            .with_level(Level::Ticket);
+        let result = lister.list(&filter).await.unwrap();
+
+        // Should only return tickets, newest first
+        assert_eq!(result.len(), 2);
+        assert_eq!(
+            result[0].id, "child_ticket_new",
+            "Newer ticket should be first"
+        );
+        assert_eq!(
+            result[1].id, "child_ticket_old",
+            "Older ticket should be second"
+        );
 
         cleanup(&temp_dir);
     }
