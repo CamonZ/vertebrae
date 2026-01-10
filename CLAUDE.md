@@ -97,6 +97,49 @@ cargo run -- <args>
 cargo run --bin vtb -- <args>
 ```
 
+## GUI Development
+
+The GUI is a Tauri + React application located in `crates/gui/`.
+
+### Quick Start
+
+```bash
+cd crates/gui
+
+# Install dependencies (first time only)
+npm install
+
+# Start development mode (hot reload enabled)
+npm run tauri:dev
+```
+
+### Available Scripts
+
+```bash
+# Development
+npm run dev              # Start Vite dev server only (port 1420)
+npm run tauri:dev        # Start Tauri + Vite with hot reload
+
+# Building
+npm run build            # Build frontend (TypeScript + Vite)
+npm run tauri:build      # Build production Tauri app
+
+# Code Quality
+npm run lint             # Run ESLint
+npm run format           # Format with Prettier
+
+# Utilities
+npm run tauri            # Run any Tauri CLI command
+npm run generate:types   # Generate TypeScript types from Rust
+```
+
+### Development Workflow
+
+1. Run `npm run tauri:dev` to start the development environment
+2. Edit React components in `src/` - changes hot reload automatically
+3. Edit Rust backend in `src-tauri/src/` - Tauri rebuilds automatically
+4. Run `npm run generate:types` after changing Rust command signatures
+
 ## Test Commands
 
 ```bash
