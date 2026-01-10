@@ -63,6 +63,28 @@
   --transition-slow: 300ms;
 }
 
+/* Dark mode overrides - applied when .dark class is on html element */
+.dark {
+  /* Background colors */
+  --color-bg-primary: #0f172a;
+  --color-bg-secondary: #1e293b;
+  --color-bg-tertiary: #334155;
+
+  /* Text colors */
+  --color-text-primary: #f8fafc;
+  --color-text-secondary: #cbd5e1;
+  --color-text-muted: #64748b;
+
+  /* Border colors */
+  --color-border: #334155;
+  --color-border-focus: #60a5fa;
+
+  /* Shadows - darker for dark mode */
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.3);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.4);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.4);
+}
+
 /* Base styles */
 body {
   font-family: var(--font-sans);

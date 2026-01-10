@@ -1,8 +1,12 @@
 import { createBrowserRouter, Navigate, Outlet } from "react-router-dom";
 import { AppShell } from "./components";
+import { useTheme } from "./hooks";
 import { TasksPage, WorkflowsPage, WorkflowDetailPage } from "./pages";
 
 function RootLayout() {
+  // Initialize theme management at the app root
+  useTheme();
+
   return (
     <AppShell title="Vertebrae" subtitle="Task Management">
       <Outlet />

@@ -1,3 +1,5 @@
+import { ThemeToggle } from './ThemeToggle';
+
 interface HeaderProps {
   title: string;
   subtitle?: string;
@@ -19,6 +21,7 @@ export function Header({ title, subtitle }: HeaderProps) {
       </div>
 
       <div className="titlebar-button flex items-center gap-2">
+        <ThemeToggle />
         <button
           type="button"
           className="flex h-8 w-8 items-center justify-center rounded-md text-text-secondary transition-colors hover:bg-bg-tertiary hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-border-focus"
