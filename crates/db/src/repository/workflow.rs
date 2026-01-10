@@ -609,6 +609,110 @@ impl<'a> WorkflowRepository<'a> {
         }
     }
 
+    /// Get the skills for a task's current workflow step.
+    ///
+    /// Retrieves the task, looks up its assigned workflow and current step,
+    /// and returns the list of skills configured for that step.
+    ///
+    /// # Arguments
+    ///
+    /// * `task_id` - The task ID to get current step skills for
+    ///
+    /// # Returns
+    ///
+    /// A vector of skill names for the task's current workflow step.
+    /// Returns an empty vector if the task has no workflow assigned.
+    ///
+    /// # Errors
+    ///
+    /// Returns `DbError::NotFound` if the task doesn't exist.
+    /// Returns `DbError::ValidationError` if the workflow or step is invalid.
+    pub async fn get_current_step_skills(&self, task_id: &str) -> DbResult<Vec<String>> {
+        debug!("Getting current step skills for task '{}'", task_id);
+
+        // Query the task to get workflow_id and current_step
+        #[derive(Debug, Deserialize)]
+        struct TaskWorkflowInfo {
+            workflow_id: Option<surrealdb::sql::Thing>,
+            current_step: Option<usize>,
+        }
+
+        let query = format!(
+            "SELECT workflow_id, current_step FROM task:{} LIMIT 1",
+            task_id
+        );
+        let mut result = self
+            .client
+            .query(&query)
+            .await
+            .map_err(|e| DbError::Query(Box::new(e)))?;
+        let task_info: Option<TaskWorkflowInfo> = result.take(0)?;
+
+        let task_info = match task_info {
+            Some(info) => info,
+            None => {
+                return Err(DbError::NotFound {
+                    entity: "task".to_string(),
+                    id: task_id.to_string(),
+                });
+            }
+        };
+
+        // If task has no workflow, return empty skills list
+        let workflow_id = match task_info.workflow_id {
+            Some(wf_id) => wf_id.id.to_raw(),
+            None => {
+                debug!(
+                    "Task '{}' has no workflow assigned, returning empty skills",
+                    task_id
+                );
+                return Ok(Vec::new());
+            }
+        };
+
+        let current_step = task_info.current_step.unwrap_or(0);
+
+        // Get the workflow
+        let workflow = self.get(&workflow_id).await?;
+        let workflow = match workflow {
+            Some(w) => w,
+            None => {
+                return Err(DbError::ValidationError {
+                    message: format!(
+                        "Task '{}' references non-existent workflow '{}'",
+                        task_id, workflow_id
+                    ),
+                });
+            }
+        };
+
+        // Get the step at current_step index (sorted by order)
+        let ordered_steps = workflow.ordered_steps();
+        let step = ordered_steps.get(current_step);
+
+        match step {
+            Some(s) => {
+                debug!(
+                    "Found {} skills for task '{}' at step '{}' (index {})",
+                    s.skills.len(),
+                    task_id,
+                    s.name,
+                    current_step
+                );
+                Ok(s.skills.clone())
+            }
+            None => Err(DbError::ValidationError {
+                message: format!(
+                    "Task '{}' has invalid current_step {} (workflow '{}' has {} steps)",
+                    task_id,
+                    current_step,
+                    workflow_id,
+                    ordered_steps.len()
+                ),
+            }),
+        }
+    }
+
     /// Create the default workflow if it doesn't already exist.
     ///
     /// The default workflow matches the standard task status flow:
@@ -1886,6 +1990,177 @@ mod tests {
             DbError::NotFound { entity, .. } => assert_eq!(entity, "step"),
             e => panic!("Expected NotFound error, got: {:?}", e),
         }
+
+        cleanup(&temp_dir);
+    }
+
+    // ========================================
+    // get_current_step_skills tests
+    // ========================================
+
+    #[tokio::test]
+    async fn test_get_current_step_skills() {
+        use crate::models::{Level, Task};
+        use crate::repository::TaskRepository;
+
+        let (db, temp_dir) = setup_test_db().await;
+        let workflow_repo = WorkflowRepository::new(db.client());
+        let task_repo = TaskRepository::new(db.client());
+
+        // Create a workflow with steps that have skills
+        let workflow = Workflow::new("Test Workflow")
+            .with_step(WorkflowStep::new("step1", "agent1", 0).with_skills(["skill1", "skill2"]))
+            .with_step(WorkflowStep::new("step2", "agent2", 1).with_skill("skill3"));
+        workflow_repo.create("test_wf", &workflow).await.unwrap();
+
+        // Create a task and assign it to the workflow
+        let task = Task::new("Test Task", Level::Task);
+        task_repo.create("test_task", &task).await.unwrap();
+
+        let workflow_thing = surrealdb::sql::Thing::from(("workflow", "test_wf"));
+        task_repo
+            .assign_workflow("test_task", &workflow_thing)
+            .await
+            .unwrap();
+
+        // Get skills for current step (should be step 0)
+        let skills = workflow_repo
+            .get_current_step_skills("test_task")
+            .await
+            .unwrap();
+        assert_eq!(skills.len(), 2);
+        assert!(skills.contains(&"skill1".to_string()));
+        assert!(skills.contains(&"skill2".to_string()));
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_get_current_step_skills_at_different_step() {
+        use crate::models::{Level, Task};
+        use crate::repository::TaskRepository;
+
+        let (db, temp_dir) = setup_test_db().await;
+        let workflow_repo = WorkflowRepository::new(db.client());
+        let task_repo = TaskRepository::new(db.client());
+
+        // Create a workflow with multiple steps
+        let workflow = Workflow::new("Multi-step Workflow")
+            .with_step(WorkflowStep::new("backlog", "agent", 0))
+            .with_step(WorkflowStep::new("todo", "agent", 1).with_skill("todo-skill"))
+            .with_step(
+                WorkflowStep::new("in_progress", "agent", 2).with_skills(["work1", "work2"]),
+            );
+        workflow_repo
+            .create("multi_step_wf", &workflow)
+            .await
+            .unwrap();
+
+        // Create a task and assign it
+        let task = Task::new("Multi-step Task", Level::Task);
+        task_repo.create("multi_task", &task).await.unwrap();
+
+        let workflow_thing = surrealdb::sql::Thing::from(("workflow", "multi_step_wf"));
+        task_repo
+            .assign_workflow("multi_task", &workflow_thing)
+            .await
+            .unwrap();
+
+        // Advance to step 2 (in_progress)
+        task_repo
+            .update_current_step("multi_task", 2)
+            .await
+            .unwrap();
+
+        // Get skills for current step (should be step 2 skills)
+        let skills = workflow_repo
+            .get_current_step_skills("multi_task")
+            .await
+            .unwrap();
+        assert_eq!(skills.len(), 2);
+        assert!(skills.contains(&"work1".to_string()));
+        assert!(skills.contains(&"work2".to_string()));
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_get_current_step_skills_no_workflow_returns_empty() {
+        use crate::models::{Level, Task};
+        use crate::repository::TaskRepository;
+
+        let (db, temp_dir) = setup_test_db().await;
+        let workflow_repo = WorkflowRepository::new(db.client());
+        let task_repo = TaskRepository::new(db.client());
+
+        // Create a task without workflow assignment
+        let task = Task::new("Unassigned Task", Level::Task);
+        task_repo.create("unassigned", &task).await.unwrap();
+
+        // Should return empty skills, not error
+        let skills = workflow_repo
+            .get_current_step_skills("unassigned")
+            .await
+            .unwrap();
+        assert!(skills.is_empty());
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_get_current_step_skills_nonexistent_task_fails() {
+        let (db, temp_dir) = setup_test_db().await;
+        let workflow_repo = WorkflowRepository::new(db.client());
+
+        let result = workflow_repo.get_current_step_skills("nonexistent").await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DbError::NotFound { entity, id } => {
+                assert_eq!(entity, "task");
+                assert_eq!(id, "nonexistent");
+            }
+            e => panic!("Expected NotFound error, got: {:?}", e),
+        }
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_get_current_step_skills_step_has_no_skills() {
+        use crate::models::{Level, Task};
+        use crate::repository::TaskRepository;
+
+        let (db, temp_dir) = setup_test_db().await;
+        let workflow_repo = WorkflowRepository::new(db.client());
+        let task_repo = TaskRepository::new(db.client());
+
+        // Create workflow where step has no skills
+        let workflow = Workflow::new("No Skills Workflow").with_step(WorkflowStep::new(
+            "empty_step",
+            "agent",
+            0,
+        ));
+        workflow_repo
+            .create("no_skills_wf", &workflow)
+            .await
+            .unwrap();
+
+        // Create task and assign
+        let task = Task::new("Empty Skills Task", Level::Task);
+        task_repo.create("empty_skills_task", &task).await.unwrap();
+
+        let workflow_thing = surrealdb::sql::Thing::from(("workflow", "no_skills_wf"));
+        task_repo
+            .assign_workflow("empty_skills_task", &workflow_thing)
+            .await
+            .unwrap();
+
+        // Should return empty skills
+        let skills = workflow_repo
+            .get_current_step_skills("empty_skills_task")
+            .await
+            .unwrap();
+        assert!(skills.is_empty());
 
         cleanup(&temp_dir);
     }
