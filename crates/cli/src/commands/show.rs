@@ -16,6 +16,25 @@ pub struct ShowCommand {
     pub id: String,
 }
 
+/// Workflow assignment information
+#[derive(Debug)]
+pub struct WorkflowInfo {
+    /// Workflow ID
+    pub id: String,
+    /// Workflow name
+    pub name: String,
+    /// Current step name
+    pub current_step_name: String,
+    /// Current step index (0-based)
+    pub current_step_index: usize,
+    /// Total number of steps
+    pub total_steps: usize,
+    /// Previous step name (if any)
+    pub prev_step_name: Option<String>,
+    /// Next step name (if any)
+    pub next_step_name: Option<String>,
+}
+
 /// Detailed view of a task with all relationships
 #[derive(Debug)]
 pub struct TaskDetail {
@@ -41,6 +60,8 @@ pub struct TaskDetail {
     pub completed_at: Option<String>,
     /// Whether this task needs human review
     pub needs_human_review: Option<bool>,
+    /// Workflow assignment information
+    pub workflow: Option<WorkflowInfo>,
     /// Embedded sections
     pub sections: Vec<Section>,
     /// Embedded code references
@@ -75,6 +96,10 @@ struct TaskRow {
     completed_at: Option<surrealdb::sql::Datetime>,
     #[serde(default)]
     needs_human_review: Option<bool>,
+    #[serde(default)]
+    workflow_id: Option<surrealdb::sql::Thing>,
+    #[serde(default)]
+    current_step: Option<usize>,
     #[serde(default)]
     sections: Vec<SectionRow>,
     #[serde(default, rename = "refs")]
@@ -165,6 +190,11 @@ impl ShowCommand {
         let blocked_by = self.fetch_blocked_by(db, &id).await?;
         let blocks = self.fetch_blocks(db, &id).await?;
 
+        // Fetch workflow info if task is assigned to a workflow
+        let workflow = self
+            .fetch_workflow_info(db, task.workflow_id.as_ref(), task.current_step)
+            .await?;
+
         // Convert sections - filter out any without required fields
         let sections: Vec<Section> = task
             .sections
@@ -243,6 +273,7 @@ impl ShowCommand {
             updated_at: task.updated_at.map(|dt| dt.to_string()),
             completed_at: task.completed_at.map(|dt| dt.to_string()),
             needs_human_review: task.needs_human_review,
+            workflow,
             sections,
             code_refs,
             parent,
@@ -330,6 +361,73 @@ impl ShowCommand {
 
         Ok(blocking.into_iter().map(TaskSummary::from).collect())
     }
+
+    /// Fetch workflow information for a task assigned to a workflow.
+    async fn fetch_workflow_info(
+        &self,
+        db: &Database,
+        workflow_id: Option<&surrealdb::sql::Thing>,
+        current_step: Option<usize>,
+    ) -> Result<Option<WorkflowInfo>, DbError> {
+        let (workflow_id, step_index) = match (workflow_id, current_step) {
+            (Some(wf_id), Some(step)) => (wf_id, step),
+            _ => return Ok(None),
+        };
+
+        // Fetch the workflow
+        let workflow = db.workflows().get(&workflow_id.id.to_raw()).await?;
+
+        let workflow = match workflow {
+            Some(w) => w,
+            None => {
+                // Workflow doesn't exist anymore - return minimal info
+                return Ok(Some(WorkflowInfo {
+                    id: workflow_id.id.to_raw(),
+                    name: "(deleted workflow)".to_string(),
+                    current_step_name: format!("Step {}", step_index + 1),
+                    current_step_index: step_index,
+                    total_steps: 0,
+                    prev_step_name: None,
+                    next_step_name: None,
+                }));
+            }
+        };
+
+        // Get ordered steps
+        let steps = workflow.ordered_steps();
+        let total_steps = steps.len();
+
+        // Get current step name
+        let current_step_name = if step_index < steps.len() {
+            steps[step_index].name.clone()
+        } else {
+            format!("Step {}", step_index + 1)
+        };
+
+        // Get previous step name
+        let prev_step_name = if step_index > 0 && step_index <= steps.len() {
+            Some(steps[step_index - 1].name.clone())
+        } else {
+            None
+        };
+
+        // Get next step name
+        let next_step_name = if step_index + 1 < steps.len() {
+            Some(steps[step_index + 1].name.clone())
+        } else {
+            None
+        };
+
+        Ok(Some(WorkflowInfo {
+            id: workflow_id.id.to_raw(),
+            name: workflow.name,
+            current_step_name,
+            current_step_index: step_index,
+            total_steps,
+            prev_step_name,
+            next_step_name,
+        }))
+    }
 }
 
 /// Parse a section type string into SectionType enum
@@ -400,6 +498,27 @@ impl std::fmt::Display for TaskDetail {
             format_timestamp(self.completed_at.as_deref())
         )?;
         writeln!(f)?;
+
+        // Workflow section (if assigned)
+        if let Some(ref wf) = self.workflow {
+            writeln!(f, "Workflow")?;
+            writeln!(f, "{}", "-".repeat(40))?;
+            writeln!(f, "Name:     {}", wf.name)?;
+            writeln!(
+                f,
+                "Step:     {}/{} - {}",
+                wf.current_step_index + 1,
+                wf.total_steps,
+                wf.current_step_name
+            )?;
+            if let Some(ref prev) = wf.prev_step_name {
+                writeln!(f, "Previous: {}", prev)?;
+            }
+            if let Some(ref next) = wf.next_step_name {
+                writeln!(f, "Next:     {}", next)?;
+            }
+            writeln!(f)?;
+        }
 
         // Description section (if present)
         if let Some(ref description) = self.description {
@@ -1104,6 +1223,7 @@ mod tests {
             updated_at: Some("2024-01-15T11:00:00Z".to_string()),
             completed_at: None,
             needs_human_review: Some(false),
+            workflow: None,
             sections: vec![
                 Section::new(SectionType::Goal, "The goal"),
                 Section::new(SectionType::AntiPattern, "Don't do this"),
@@ -1155,6 +1275,7 @@ mod tests {
             updated_at: None,
             completed_at: None,
             needs_human_review: Some(false),
+            workflow: None,
             sections: vec![],
             code_refs: vec![],
             parent: None,
@@ -1194,6 +1315,7 @@ mod tests {
             updated_at: None,
             completed_at: None,
             needs_human_review: Some(true),
+            workflow: None,
             sections: vec![],
             code_refs: vec![],
             parent: None,
@@ -1221,6 +1343,7 @@ mod tests {
             updated_at: None,
             completed_at: None,
             needs_human_review: Some(false),
+            workflow: None,
             sections: vec![
                 Section::with_order(SectionType::Step, "First step", 1),
                 Section::with_order(SectionType::Step, "Second step", 2),
@@ -1266,6 +1389,7 @@ mod tests {
             updated_at: None,
             completed_at: None,
             needs_human_review: Some(false),
+            workflow: None,
             sections: vec![],
             code_refs: vec![],
             parent: Some(TaskSummary {
@@ -1292,6 +1416,104 @@ mod tests {
                 && debug_str.contains("backend")
                 && debug_str.contains("parent1"),
             "Debug output should contain TaskDetail and all field values"
+        );
+    }
+
+    #[test]
+    fn test_task_detail_display_with_workflow() {
+        let detail = TaskDetail {
+            id: "abc123".to_string(),
+            title: "Workflow Task".to_string(),
+            description: None,
+            level: "task".to_string(),
+            status: "in_progress".to_string(),
+            priority: None,
+            tags: vec![],
+            created_at: None,
+            updated_at: None,
+            completed_at: None,
+            needs_human_review: None,
+            workflow: Some(WorkflowInfo {
+                id: "wf123".to_string(),
+                name: "Code Review".to_string(),
+                current_step_name: "Review".to_string(),
+                current_step_index: 1,
+                total_steps: 3,
+                prev_step_name: Some("Triage".to_string()),
+                next_step_name: Some("Merge".to_string()),
+            }),
+            sections: vec![],
+            code_refs: vec![],
+            parent: None,
+            children: vec![],
+            blocked_by: vec![],
+            blocks: vec![],
+        };
+
+        let output = format!("{}", detail);
+
+        assert!(output.contains("Workflow"));
+        assert!(output.contains("Name:     Code Review"));
+        assert!(output.contains("Step:     2/3 - Review"));
+        assert!(output.contains("Previous: Triage"));
+        assert!(output.contains("Next:     Merge"));
+    }
+
+    #[test]
+    fn test_task_detail_display_with_workflow_first_step() {
+        let detail = TaskDetail {
+            id: "abc123".to_string(),
+            title: "Workflow Task".to_string(),
+            description: None,
+            level: "task".to_string(),
+            status: "in_progress".to_string(),
+            priority: None,
+            tags: vec![],
+            created_at: None,
+            updated_at: None,
+            completed_at: None,
+            needs_human_review: None,
+            workflow: Some(WorkflowInfo {
+                id: "wf123".to_string(),
+                name: "Simple Workflow".to_string(),
+                current_step_name: "First Step".to_string(),
+                current_step_index: 0,
+                total_steps: 2,
+                prev_step_name: None,
+                next_step_name: Some("Second Step".to_string()),
+            }),
+            sections: vec![],
+            code_refs: vec![],
+            parent: None,
+            children: vec![],
+            blocked_by: vec![],
+            blocks: vec![],
+        };
+
+        let output = format!("{}", detail);
+
+        assert!(output.contains("Step:     1/2 - First Step"));
+        assert!(!output.contains("Previous:"));
+        assert!(output.contains("Next:     Second Step"));
+    }
+
+    #[test]
+    fn test_workflow_info_debug() {
+        let info = WorkflowInfo {
+            id: "wf123".to_string(),
+            name: "Test Workflow".to_string(),
+            current_step_name: "Step One".to_string(),
+            current_step_index: 0,
+            total_steps: 2,
+            prev_step_name: None,
+            next_step_name: Some("Step Two".to_string()),
+        };
+        let debug_str = format!("{:?}", info);
+        assert!(
+            debug_str.contains("WorkflowInfo")
+                && debug_str.contains("wf123")
+                && debug_str.contains("Test Workflow"),
+            "Debug output should contain WorkflowInfo and field values"
         );
     }
 }
