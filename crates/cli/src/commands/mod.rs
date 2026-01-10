@@ -25,6 +25,7 @@ pub mod undepend;
 pub mod unref;
 pub mod unsection;
 pub mod update;
+pub mod workflow;
 
 pub use add::AddCommand;
 pub use blockers::BlockersCommand;
@@ -49,6 +50,7 @@ pub use undepend::UndependCommand;
 pub use unref::UnrefCommand;
 pub use unsection::UnsectionCommand;
 pub use update::UpdateCommand;
+pub use workflow::WorkflowCommand;
 
 use crate::output::format_task_table;
 use clap::Subcommand;
@@ -106,6 +108,9 @@ pub enum Command {
     TransitionTo(TransitionToCommand),
     /// Update an existing task
     Update(UpdateCommand),
+    /// Workflow management commands
+    #[command(subcommand)]
+    Workflow(WorkflowCommand),
 }
 
 /// Result of executing a command
@@ -232,6 +237,13 @@ impl Command {
             Command::Update(cmd) => {
                 let id = cmd.execute(db).await?;
                 Ok(CommandResult::Message(format!("Updated task: {}", id)))
+            }
+            Command::Workflow(cmd) => {
+                let result = cmd.execute(db).await?;
+                Ok(CommandResult::Message(format!(
+                    "Created workflow: {}",
+                    result
+                )))
             }
         }
     }
@@ -1024,6 +1036,169 @@ mod tests {
         assert!(
             debug_str.contains("Init"),
             "Debug output should contain Init variant"
+        );
+    }
+
+    #[test]
+    fn test_command_workflow_add_parses() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "workflow",
+            "add",
+            "My Workflow",
+            "--step",
+            "review:code-reviewer",
+        ]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Workflow(WorkflowCommand::Add(cmd)) => {
+                assert_eq!(cmd.name, "My Workflow");
+                assert_eq!(cmd.steps.len(), 1);
+                assert_eq!(cmd.steps[0].name, "review");
+                assert_eq!(cmd.steps[0].agent_template, "code-reviewer");
+            }
+            _ => panic!("Expected Workflow Add command"),
+        }
+    }
+
+    #[test]
+    fn test_command_workflow_add_with_description() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "workflow",
+            "add",
+            "My Workflow",
+            "--description",
+            "A test workflow",
+            "--step",
+            "review:code-reviewer",
+        ]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Workflow(WorkflowCommand::Add(cmd)) => {
+                assert_eq!(cmd.name, "My Workflow");
+                assert_eq!(cmd.description, Some("A test workflow".to_string()));
+            }
+            _ => panic!("Expected Workflow Add command"),
+        }
+    }
+
+    #[test]
+    fn test_command_workflow_add_with_short_description() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "workflow",
+            "add",
+            "My Workflow",
+            "-d",
+            "Short desc",
+            "--step",
+            "review:code-reviewer",
+        ]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Workflow(WorkflowCommand::Add(cmd)) => {
+                assert_eq!(cmd.description, Some("Short desc".to_string()));
+            }
+            _ => panic!("Expected Workflow Add command"),
+        }
+    }
+
+    #[test]
+    fn test_command_workflow_add_with_multiple_steps() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "workflow",
+            "add",
+            "Multi-step Workflow",
+            "--step",
+            "review:code-reviewer",
+            "--step",
+            "test:tester",
+            "--step",
+            "deploy:deployer",
+        ]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Workflow(WorkflowCommand::Add(cmd)) => {
+                assert_eq!(cmd.name, "Multi-step Workflow");
+                assert_eq!(cmd.steps.len(), 3);
+                assert_eq!(cmd.steps[0].name, "review");
+                assert_eq!(cmd.steps[0].agent_template, "code-reviewer");
+                assert_eq!(cmd.steps[1].name, "test");
+                assert_eq!(cmd.steps[1].agent_template, "tester");
+                assert_eq!(cmd.steps[2].name, "deploy");
+                assert_eq!(cmd.steps[2].agent_template, "deployer");
+            }
+            _ => panic!("Expected Workflow Add command"),
+        }
+    }
+
+    #[test]
+    fn test_command_workflow_add_with_short_step_flag() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "workflow",
+            "add",
+            "Workflow",
+            "-s",
+            "review:code-reviewer",
+        ]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Workflow(WorkflowCommand::Add(cmd)) => {
+                assert_eq!(cmd.steps.len(), 1);
+                assert_eq!(cmd.steps[0].name, "review");
+            }
+            _ => panic!("Expected Workflow Add command"),
+        }
+    }
+
+    #[test]
+    fn test_command_workflow_add_requires_name() {
+        let result = TestCli::try_parse_from(["test", "workflow", "add"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_command_workflow_add_invalid_step_format() {
+        let result = TestCli::try_parse_from([
+            "test",
+            "workflow",
+            "add",
+            "Workflow",
+            "--step",
+            "invalid-step-format",
+        ]);
+        assert!(result.is_err());
+        match result {
+            Err(e) => {
+                let err = e.to_string();
+                assert!(
+                    err.contains("name:agent_template"),
+                    "Error should mention expected format, got: {}",
+                    err
+                );
+            }
+            Ok(_) => panic!("Expected error for invalid step format"),
+        }
+    }
+
+    #[test]
+    fn test_command_workflow_add_debug() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "workflow",
+            "add",
+            "Test Workflow",
+            "--step",
+            "step1:agent1",
+        ])
+        .unwrap();
+        let debug_str = format!("{:?}", cli.command);
+        assert!(
+            debug_str.contains("Workflow") && debug_str.contains("Test Workflow"),
+            "Debug output should contain Workflow variant and name field value"
         );
     }
 }
