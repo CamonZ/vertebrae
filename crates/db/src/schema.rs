@@ -52,11 +52,28 @@ mod sql {
     pub const DEFINE_DEPENDS_ON_RELATION: &str = r#"
         DEFINE TABLE IF NOT EXISTS depends_on TYPE RELATION IN task OUT task;
     "#;
+
+    /// Define the workflow table with all fields
+    pub const DEFINE_WORKFLOW_TABLE: &str = r#"
+        DEFINE TABLE IF NOT EXISTS workflow SCHEMAFULL;
+
+        DEFINE FIELD name ON workflow TYPE string;
+
+        DEFINE FIELD description ON workflow TYPE option<string>;
+
+        DEFINE FIELD steps ON workflow FLEXIBLE TYPE array<object> DEFAULT [];
+
+        DEFINE FIELD metadata ON workflow FLEXIBLE TYPE object DEFAULT {};
+
+        DEFINE FIELD created_at ON workflow TYPE datetime DEFAULT time::now();
+
+        DEFINE FIELD updated_at ON workflow TYPE datetime DEFAULT time::now();
+    "#;
 }
 
 /// Initialize the database schema.
 ///
-/// Creates the task table, child_of relation, and depends_on relation
+/// Creates the task table, workflow table, child_of relation, and depends_on relation
 /// with all required fields and constraints.
 ///
 /// This function is idempotent - it can be called multiple times safely
@@ -85,6 +102,12 @@ pub async fn init_schema(client: &Surreal<Db>) -> Result<(), DbError> {
     // Define the depends_on relation for dependencies
     client
         .query(sql::DEFINE_DEPENDS_ON_RELATION)
+        .await
+        .map_err(|e| DbError::Schema(Box::new(e)))?;
+
+    // Define the workflow table
+    client
+        .query(sql::DEFINE_WORKFLOW_TABLE)
         .await
         .map_err(|e| DbError::Schema(Box::new(e)))?;
 
@@ -821,6 +844,374 @@ mod tests {
             .unwrap();
         let row: Option<DatetimeRow> = result.take(0).unwrap();
         assert!(row.is_some(), "started_at should be set after update");
+
+        cleanup(&temp_dir);
+    }
+
+    // Workflow schema tests
+    #[test]
+    fn test_workflow_sql_constant_defined() {
+        assert!(!sql::DEFINE_WORKFLOW_TABLE.is_empty());
+    }
+
+    #[test]
+    fn test_workflow_sql_contains_expected_definitions() {
+        assert!(sql::DEFINE_WORKFLOW_TABLE.contains("DEFINE TABLE"));
+        assert!(sql::DEFINE_WORKFLOW_TABLE.contains("workflow"));
+        assert!(sql::DEFINE_WORKFLOW_TABLE.contains("SCHEMAFULL"));
+        assert!(sql::DEFINE_WORKFLOW_TABLE.contains("name"));
+        assert!(sql::DEFINE_WORKFLOW_TABLE.contains("description"));
+        assert!(sql::DEFINE_WORKFLOW_TABLE.contains("steps"));
+        assert!(sql::DEFINE_WORKFLOW_TABLE.contains("metadata"));
+        assert!(sql::DEFINE_WORKFLOW_TABLE.contains("created_at"));
+        assert!(sql::DEFINE_WORKFLOW_TABLE.contains("updated_at"));
+    }
+
+    #[tokio::test]
+    async fn test_workflow_table_accepts_valid_data() {
+        let (client, temp_dir) = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // Insert a valid workflow
+        let result = client
+            .query(
+                r#"
+                CREATE workflow SET
+                    name = "Test Workflow",
+                    description = "A test workflow",
+                    steps = [
+                        { name: "Step 1", agent_template: "agent1", skills: ["skill1"], order: 0 },
+                        { name: "Step 2", agent_template: "agent2", skills: [], order: 1 }
+                    ],
+                    metadata = { version: "1.0", env: "test" }
+            "#,
+            )
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "Valid workflow insert failed: {:?}",
+            result.err()
+        );
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_workflow_table_accepts_minimal_data() {
+        let (client, temp_dir) = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // Insert with only required fields
+        let result = client
+            .query(
+                r#"
+                CREATE workflow SET
+                    name = "Minimal Workflow"
+            "#,
+            )
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "Minimal workflow insert failed: {:?}",
+            result.err()
+        );
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_workflow_default_values() {
+        let (client, temp_dir) = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // Insert minimal workflow and check defaults
+        client
+            .query(
+                r#"
+                CREATE workflow:defaults SET
+                    name = "Default Test"
+            "#,
+            )
+            .await
+            .unwrap();
+
+        // Query the workflow to verify defaults
+        #[derive(Debug, serde::Deserialize)]
+        struct WorkflowRow {
+            steps: Vec<serde_json::Value>,
+            metadata: serde_json::Value,
+            created_at: String,
+            updated_at: String,
+        }
+
+        let mut result = client
+            .query("SELECT steps, metadata, created_at, updated_at FROM workflow:defaults")
+            .await
+            .unwrap();
+
+        let workflow: Option<WorkflowRow> = result.take(0).unwrap();
+        let workflow = workflow.expect("Workflow should exist");
+
+        // Check that arrays and objects defaulted to empty
+        assert!(workflow.steps.is_empty(), "steps should default to empty");
+        assert!(
+            workflow.metadata.as_object().map_or(true, |m| m.is_empty()),
+            "metadata should default to empty object"
+        );
+
+        // Check that timestamps were set (not empty)
+        assert!(!workflow.created_at.is_empty(), "created_at should be set");
+        assert!(!workflow.updated_at.is_empty(), "updated_at should be set");
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_workflow_steps_maintain_insertion_order() {
+        let (client, temp_dir) = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // Insert workflow with ordered steps
+        client
+            .query(
+                r#"
+                CREATE workflow:ordered SET
+                    name = "Ordered Workflow",
+                    steps = [
+                        { name: "First", agent_template: "a", skills: [], order: 0 },
+                        { name: "Second", agent_template: "b", skills: [], order: 1 },
+                        { name: "Third", agent_template: "c", skills: [], order: 2 }
+                    ]
+            "#,
+            )
+            .await
+            .unwrap();
+
+        // Query and verify step order is maintained
+        #[derive(Debug, serde::Deserialize)]
+        struct StepInfo {
+            name: String,
+            order: u32,
+        }
+
+        #[derive(Debug, serde::Deserialize)]
+        struct WorkflowSteps {
+            steps: Vec<StepInfo>,
+        }
+
+        let mut result = client
+            .query("SELECT steps FROM workflow:ordered")
+            .await
+            .unwrap();
+
+        let workflow: Option<WorkflowSteps> = result.take(0).unwrap();
+        let workflow = workflow.expect("Workflow should exist");
+
+        assert_eq!(workflow.steps.len(), 3);
+        // Verify insertion order is preserved
+        assert_eq!(workflow.steps[0].name, "First");
+        assert_eq!(workflow.steps[0].order, 0);
+        assert_eq!(workflow.steps[1].name, "Second");
+        assert_eq!(workflow.steps[1].order, 1);
+        assert_eq!(workflow.steps[2].name, "Third");
+        assert_eq!(workflow.steps[2].order, 2);
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_workflow_can_be_created_and_retrieved() {
+        let (client, temp_dir) = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // Create a complete workflow
+        client
+            .query(
+                r#"
+                CREATE workflow:complete SET
+                    name = "Complete Workflow",
+                    description = "A fully populated workflow",
+                    steps = [
+                        { name: "Lint", agent_template: "linter", skills: ["eslint", "prettier"], order: 0 },
+                        { name: "Test", agent_template: "tester", skills: ["jest"], order: 1 },
+                        { name: "Build", agent_template: "builder", skills: ["webpack"], order: 2 }
+                    ],
+                    metadata = { version: "2.0", team: "platform", environment: "ci" }
+            "#,
+            )
+            .await
+            .unwrap();
+
+        // Retrieve and verify all fields
+        #[derive(Debug, serde::Deserialize)]
+        struct WorkflowFull {
+            name: String,
+            description: Option<String>,
+            steps: Vec<serde_json::Value>,
+            metadata: serde_json::Value,
+        }
+
+        let mut result = client
+            .query("SELECT name, description, steps, metadata FROM workflow:complete")
+            .await
+            .unwrap();
+
+        let workflow: Option<WorkflowFull> = result.take(0).unwrap();
+        let workflow = workflow.expect("Workflow should exist");
+
+        assert_eq!(workflow.name, "Complete Workflow");
+        assert_eq!(
+            workflow.description,
+            Some("A fully populated workflow".to_string())
+        );
+        assert_eq!(workflow.steps.len(), 3);
+
+        // Verify metadata
+        let metadata = workflow.metadata.as_object().unwrap();
+        assert_eq!(metadata.get("version").unwrap().as_str().unwrap(), "2.0");
+        assert_eq!(metadata.get("team").unwrap().as_str().unwrap(), "platform");
+        assert_eq!(metadata.get("environment").unwrap().as_str().unwrap(), "ci");
+
+        // Verify first step structure
+        let first_step = &workflow.steps[0];
+        assert_eq!(first_step["name"].as_str().unwrap(), "Lint");
+        assert_eq!(first_step["agent_template"].as_str().unwrap(), "linter");
+        assert_eq!(first_step["order"].as_u64().unwrap(), 0);
+        let skills = first_step["skills"].as_array().unwrap();
+        assert_eq!(skills.len(), 2);
+        assert_eq!(skills[0].as_str().unwrap(), "eslint");
+        assert_eq!(skills[1].as_str().unwrap(), "prettier");
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_workflow_update_preserves_data() {
+        let (client, temp_dir) = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // Create initial workflow
+        client
+            .query(
+                r#"
+                CREATE workflow:update_test SET
+                    name = "Initial Name",
+                    description = "Initial description",
+                    steps = [
+                        { name: "Step 1", agent_template: "agent1", skills: [], order: 0 }
+                    ]
+            "#,
+            )
+            .await
+            .unwrap();
+
+        // Update the workflow
+        client
+            .query(
+                r#"
+                UPDATE workflow:update_test SET
+                    name = "Updated Name",
+                    steps = [
+                        { name: "Step 1", agent_template: "agent1", skills: [], order: 0 },
+                        { name: "Step 2", agent_template: "agent2", skills: ["new_skill"], order: 1 }
+                    ],
+                    updated_at = time::now()
+            "#,
+            )
+            .await
+            .unwrap();
+
+        // Verify the update
+        #[derive(Debug, serde::Deserialize)]
+        struct WorkflowCheck {
+            name: String,
+            description: Option<String>,
+            steps: Vec<serde_json::Value>,
+        }
+
+        let mut result = client
+            .query("SELECT name, description, steps FROM workflow:update_test")
+            .await
+            .unwrap();
+
+        let workflow: Option<WorkflowCheck> = result.take(0).unwrap();
+        let workflow = workflow.expect("Workflow should exist");
+
+        assert_eq!(workflow.name, "Updated Name");
+        // Description should be preserved
+        assert_eq!(
+            workflow.description,
+            Some("Initial description".to_string())
+        );
+        // Steps should be updated
+        assert_eq!(workflow.steps.len(), 2);
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_workflow_with_empty_steps() {
+        let (client, temp_dir) = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // Create workflow with explicit empty steps
+        let result = client
+            .query(
+                r#"
+                CREATE workflow:empty_steps SET
+                    name = "Empty Steps Workflow",
+                    steps = []
+            "#,
+            )
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "Workflow with empty steps should succeed: {:?}",
+            result.err()
+        );
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_workflow_with_null_description() {
+        let (client, temp_dir) = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // Create workflow with explicit null description
+        let result = client
+            .query(
+                r#"
+                CREATE workflow:null_desc SET
+                    name = "No Description",
+                    description = NONE
+            "#,
+            )
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "Workflow with null description should succeed: {:?}",
+            result.err()
+        );
+
+        // Verify description is null
+        #[derive(Debug, serde::Deserialize)]
+        struct DescRow {
+            description: Option<String>,
+        }
+
+        let mut query_result = client
+            .query("SELECT description FROM workflow:null_desc")
+            .await
+            .unwrap();
+
+        let row: Option<DescRow> = query_result.take(0).unwrap();
+        let row = row.expect("Workflow should exist");
+        assert!(row.description.is_none(), "description should be null");
 
         cleanup(&temp_dir);
     }

@@ -544,6 +544,142 @@ impl PartialEq for Task {
 
 impl Eq for Task {}
 
+/// A step within a workflow
+///
+/// Workflow steps define the individual actions that make up a workflow,
+/// each with an agent template and associated skills. Steps are executed
+/// in order based on their `order` field.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkflowStep {
+    /// Display name for this step
+    pub name: String,
+
+    /// The agent template to use for this step
+    pub agent_template: String,
+
+    /// Skills available for this step
+    #[serde(default)]
+    pub skills: Vec<String>,
+
+    /// Ordering index for sequential execution (0-based)
+    pub order: u32,
+}
+
+impl WorkflowStep {
+    /// Create a new workflow step with the given name and agent template
+    pub fn new(name: impl Into<String>, agent_template: impl Into<String>, order: u32) -> Self {
+        Self {
+            name: name.into(),
+            agent_template: agent_template.into(),
+            skills: Vec::new(),
+            order,
+        }
+    }
+
+    /// Add a skill to this step
+    pub fn with_skill(mut self, skill: impl Into<String>) -> Self {
+        self.skills.push(skill.into());
+        self
+    }
+
+    /// Add multiple skills to this step
+    pub fn with_skills(mut self, skills: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.skills.extend(skills.into_iter().map(|s| s.into()));
+        self
+    }
+}
+
+/// A workflow definition
+///
+/// Workflows define a sequence of steps to be executed by agents.
+/// Each workflow has a name, description, and an ordered list of steps.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Workflow {
+    /// Unique identifier (SurrealDB record ID)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<Thing>,
+
+    /// Workflow name
+    pub name: String,
+
+    /// Optional description of the workflow
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+
+    /// Ordered list of workflow steps
+    #[serde(default)]
+    pub steps: Vec<WorkflowStep>,
+
+    /// Additional metadata as key-value pairs
+    #[serde(default)]
+    pub metadata: std::collections::HashMap<String, String>,
+
+    /// Creation timestamp
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<DateTime<Utc>>,
+
+    /// Last update timestamp
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<DateTime<Utc>>,
+}
+
+impl Workflow {
+    /// Create a new workflow with the given name
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            id: None,
+            name: name.into(),
+            description: None,
+            steps: Vec::new(),
+            metadata: std::collections::HashMap::new(),
+            created_at: None,
+            updated_at: None,
+        }
+    }
+
+    /// Set the description of this workflow
+    pub fn with_description(mut self, description: impl Into<String>) -> Self {
+        self.description = Some(description.into());
+        self
+    }
+
+    /// Add a step to this workflow
+    pub fn with_step(mut self, step: WorkflowStep) -> Self {
+        self.steps.push(step);
+        self
+    }
+
+    /// Add multiple steps to this workflow
+    pub fn with_steps(mut self, steps: impl IntoIterator<Item = WorkflowStep>) -> Self {
+        self.steps.extend(steps);
+        self
+    }
+
+    /// Add a metadata key-value pair
+    pub fn with_metadata(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.metadata.insert(key.into(), value.into());
+        self
+    }
+
+    /// Get steps in order (sorted by order field)
+    pub fn ordered_steps(&self) -> Vec<&WorkflowStep> {
+        let mut steps: Vec<_> = self.steps.iter().collect();
+        steps.sort_by_key(|s| s.order);
+        steps
+    }
+}
+
+impl PartialEq for Workflow {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+            && self.description == other.description
+            && self.steps == other.steps
+            && self.metadata == other.metadata
+    }
+}
+
+impl Eq for Workflow {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1665,5 +1801,301 @@ mod tests {
         // This is a compile-time check - if it compiles, the types are correct
         let _started: Option<DateTime<Utc>> = task.started_at;
         let _completed: Option<DateTime<Utc>> = task.completed_at;
+    }
+
+    // WorkflowStep tests
+    #[test]
+    fn test_workflow_step_new() {
+        let step = WorkflowStep::new("Review Code", "code-reviewer", 0);
+        assert_eq!(step.name, "Review Code");
+        assert_eq!(step.agent_template, "code-reviewer");
+        assert_eq!(step.order, 0);
+        assert!(step.skills.is_empty());
+    }
+
+    #[test]
+    fn test_workflow_step_with_skill() {
+        let step = WorkflowStep::new("Build", "builder", 1).with_skill("cargo-build");
+        assert_eq!(step.skills, vec!["cargo-build"]);
+    }
+
+    #[test]
+    fn test_workflow_step_with_skills() {
+        let step =
+            WorkflowStep::new("Test", "tester", 2).with_skills(["unit-test", "integration-test"]);
+        assert_eq!(step.skills.len(), 2);
+        assert!(step.skills.contains(&"unit-test".to_string()));
+        assert!(step.skills.contains(&"integration-test".to_string()));
+    }
+
+    #[test]
+    fn test_workflow_step_serialize() {
+        let step = WorkflowStep::new("Deploy", "deployer", 3).with_skill("docker-deploy");
+        let value = serde_json::to_value(&step).unwrap();
+        assert_eq!(value["name"], "Deploy");
+        assert_eq!(value["agent_template"], "deployer");
+        assert_eq!(value["order"], 3);
+        assert_eq!(value["skills"], serde_json::json!(["docker-deploy"]));
+    }
+
+    #[test]
+    fn test_workflow_step_deserialize() {
+        let json = r#"{
+            "name": "Analyze",
+            "agent_template": "analyzer",
+            "skills": ["static-analysis", "security-scan"],
+            "order": 0
+        }"#;
+        let step: WorkflowStep = serde_json::from_str(json).unwrap();
+        assert_eq!(step.name, "Analyze");
+        assert_eq!(step.agent_template, "analyzer");
+        assert_eq!(step.order, 0);
+        assert_eq!(step.skills.len(), 2);
+    }
+
+    #[test]
+    fn test_workflow_step_deserialize_without_skills() {
+        let json = r#"{
+            "name": "Simple Step",
+            "agent_template": "simple",
+            "order": 1
+        }"#;
+        let step: WorkflowStep = serde_json::from_str(json).unwrap();
+        assert_eq!(step.name, "Simple Step");
+        assert!(step.skills.is_empty(), "skills should default to empty");
+    }
+
+    #[test]
+    fn test_workflow_step_clone_and_eq() {
+        let step = WorkflowStep::new("Clone Test", "cloner", 0).with_skill("skill1");
+        let cloned = step.clone();
+        assert_eq!(step, cloned);
+    }
+
+    // Workflow tests
+    #[test]
+    fn test_workflow_new() {
+        let workflow = Workflow::new("CI Pipeline");
+        assert!(workflow.id.is_none());
+        assert_eq!(workflow.name, "CI Pipeline");
+        assert!(workflow.description.is_none());
+        assert!(workflow.steps.is_empty());
+        assert!(workflow.metadata.is_empty());
+        assert!(workflow.created_at.is_none());
+        assert!(workflow.updated_at.is_none());
+    }
+
+    #[test]
+    fn test_workflow_with_description() {
+        let workflow =
+            Workflow::new("Build Pipeline").with_description("Builds and tests the project");
+        assert_eq!(
+            workflow.description,
+            Some("Builds and tests the project".to_string())
+        );
+    }
+
+    #[test]
+    fn test_workflow_with_step() {
+        let workflow =
+            Workflow::new("Single Step").with_step(WorkflowStep::new("Only Step", "executor", 0));
+        assert_eq!(workflow.steps.len(), 1);
+        assert_eq!(workflow.steps[0].name, "Only Step");
+    }
+
+    #[test]
+    fn test_workflow_with_steps() {
+        let steps = vec![
+            WorkflowStep::new("Step 1", "agent1", 0),
+            WorkflowStep::new("Step 2", "agent2", 1),
+            WorkflowStep::new("Step 3", "agent3", 2),
+        ];
+        let workflow = Workflow::new("Multi Step").with_steps(steps);
+        assert_eq!(workflow.steps.len(), 3);
+    }
+
+    #[test]
+    fn test_workflow_with_metadata() {
+        let workflow = Workflow::new("Metadata Test")
+            .with_metadata("version", "1.0")
+            .with_metadata("owner", "team-a");
+        assert_eq!(workflow.metadata.get("version"), Some(&"1.0".to_string()));
+        assert_eq!(workflow.metadata.get("owner"), Some(&"team-a".to_string()));
+    }
+
+    #[test]
+    fn test_workflow_ordered_steps() {
+        // Add steps out of order
+        let workflow = Workflow::new("Unordered")
+            .with_step(WorkflowStep::new("Third", "c", 2))
+            .with_step(WorkflowStep::new("First", "a", 0))
+            .with_step(WorkflowStep::new("Second", "b", 1));
+
+        let ordered = workflow.ordered_steps();
+        assert_eq!(ordered.len(), 3);
+        assert_eq!(ordered[0].name, "First");
+        assert_eq!(ordered[1].name, "Second");
+        assert_eq!(ordered[2].name, "Third");
+    }
+
+    #[test]
+    fn test_workflow_steps_maintain_insertion_order_in_vec() {
+        // Verify that steps vector maintains insertion order
+        let workflow = Workflow::new("Insertion Order")
+            .with_step(WorkflowStep::new("First Added", "a", 0))
+            .with_step(WorkflowStep::new("Second Added", "b", 1))
+            .with_step(WorkflowStep::new("Third Added", "c", 2));
+
+        // Direct access should maintain insertion order
+        assert_eq!(workflow.steps[0].name, "First Added");
+        assert_eq!(workflow.steps[1].name, "Second Added");
+        assert_eq!(workflow.steps[2].name, "Third Added");
+    }
+
+    #[test]
+    fn test_workflow_serialize() {
+        let workflow = Workflow::new("Serialize Test")
+            .with_description("Test workflow")
+            .with_step(WorkflowStep::new("Step A", "agent_a", 0))
+            .with_metadata("key", "value");
+
+        let value = serde_json::to_value(&workflow).unwrap();
+        assert_eq!(value["name"], "Serialize Test");
+        assert_eq!(value["description"], "Test workflow");
+        assert!(value["steps"].is_array());
+        assert_eq!(value["steps"].as_array().unwrap().len(), 1);
+        assert_eq!(value["metadata"]["key"], "value");
+    }
+
+    #[test]
+    fn test_workflow_serialize_minimal() {
+        let workflow = Workflow::new("Minimal");
+        let value = serde_json::to_value(&workflow).unwrap();
+        assert_eq!(value["name"], "Minimal");
+        assert!(value.get("id").is_none());
+        assert!(value.get("description").is_none());
+        assert!(value.get("created_at").is_none());
+        assert!(value.get("updated_at").is_none());
+    }
+
+    #[test]
+    fn test_workflow_deserialize() {
+        let json = r#"{
+            "name": "Deserialized Workflow",
+            "description": "A test workflow",
+            "steps": [
+                {"name": "Step 1", "agent_template": "agent1", "skills": [], "order": 0},
+                {"name": "Step 2", "agent_template": "agent2", "skills": ["skill1"], "order": 1}
+            ],
+            "metadata": {"env": "production"}
+        }"#;
+
+        let workflow: Workflow = serde_json::from_str(json).unwrap();
+        assert_eq!(workflow.name, "Deserialized Workflow");
+        assert_eq!(workflow.description, Some("A test workflow".to_string()));
+        assert_eq!(workflow.steps.len(), 2);
+        assert_eq!(workflow.steps[0].name, "Step 1");
+        assert_eq!(workflow.steps[1].skills, vec!["skill1"]);
+        assert_eq!(
+            workflow.metadata.get("env"),
+            Some(&"production".to_string())
+        );
+    }
+
+    #[test]
+    fn test_workflow_deserialize_minimal() {
+        let json = r#"{"name": "Minimal"}"#;
+        let workflow: Workflow = serde_json::from_str(json).unwrap();
+        assert_eq!(workflow.name, "Minimal");
+        assert!(workflow.description.is_none());
+        assert!(workflow.steps.is_empty());
+        assert!(workflow.metadata.is_empty());
+    }
+
+    #[test]
+    fn test_workflow_clone_and_eq() {
+        let workflow = Workflow::new("Clone Test")
+            .with_description("Test")
+            .with_step(WorkflowStep::new("S1", "a", 0))
+            .with_metadata("k", "v");
+        let cloned = workflow.clone();
+        assert_eq!(workflow, cloned);
+    }
+
+    #[test]
+    fn test_workflow_eq_ignores_timestamps() {
+        let workflow1 = Workflow::new("Test");
+        let mut workflow2 = Workflow::new("Test");
+        workflow2.created_at = Some(Utc::now());
+        workflow2.updated_at = Some(Utc::now());
+        // Workflows should be equal even with different timestamps
+        assert_eq!(workflow1, workflow2);
+    }
+
+    #[test]
+    fn test_workflow_builder_chain() {
+        let workflow = Workflow::new("Full Pipeline")
+            .with_description("Complete CI/CD pipeline")
+            .with_step(WorkflowStep::new("Lint", "linter", 0).with_skills(["eslint", "prettier"]))
+            .with_step(WorkflowStep::new("Test", "tester", 1).with_skill("jest"))
+            .with_step(WorkflowStep::new("Build", "builder", 2).with_skill("webpack"))
+            .with_step(WorkflowStep::new("Deploy", "deployer", 3).with_skills(["docker", "k8s"]))
+            .with_metadata("version", "2.0")
+            .with_metadata("team", "platform");
+
+        assert_eq!(workflow.name, "Full Pipeline");
+        assert!(workflow.description.is_some());
+        assert_eq!(workflow.steps.len(), 4);
+        assert_eq!(workflow.metadata.len(), 2);
+
+        // Verify step ordering via ordered_steps
+        let ordered = workflow.ordered_steps();
+        assert_eq!(ordered[0].name, "Lint");
+        assert_eq!(ordered[1].name, "Test");
+        assert_eq!(ordered[2].name, "Build");
+        assert_eq!(ordered[3].name, "Deploy");
+    }
+
+    #[test]
+    fn test_workflow_step_order_determines_sequence() {
+        // Test that order field, not insertion order, determines sequence
+        let workflow = Workflow::new("Order Test")
+            .with_step(WorkflowStep::new("Last", "x", 99))
+            .with_step(WorkflowStep::new("First", "y", 0))
+            .with_step(WorkflowStep::new("Middle", "z", 50));
+
+        let ordered = workflow.ordered_steps();
+        assert_eq!(ordered[0].name, "First");
+        assert_eq!(ordered[0].order, 0);
+        assert_eq!(ordered[1].name, "Middle");
+        assert_eq!(ordered[1].order, 50);
+        assert_eq!(ordered[2].name, "Last");
+        assert_eq!(ordered[2].order, 99);
+    }
+
+    #[test]
+    fn test_workflow_serialize_deserialize_roundtrip() {
+        let original = Workflow::new("Roundtrip Test")
+            .with_description("Test roundtrip serialization")
+            .with_step(WorkflowStep::new("Step A", "agent_a", 0).with_skills(["skill1", "skill2"]))
+            .with_step(WorkflowStep::new("Step B", "agent_b", 1))
+            .with_metadata("key1", "value1")
+            .with_metadata("key2", "value2");
+
+        let json = serde_json::to_string(&original).unwrap();
+        let deserialized: Workflow = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(original, deserialized);
+    }
+
+    #[test]
+    fn test_workflow_step_serialize_deserialize_roundtrip() {
+        let original =
+            WorkflowStep::new("Roundtrip Step", "template", 5).with_skills(["a", "b", "c"]);
+
+        let json = serde_json::to_string(&original).unwrap();
+        let deserialized: WorkflowStep = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(original, deserialized);
     }
 }

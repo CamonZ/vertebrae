@@ -10,7 +10,9 @@ pub mod schema;
 
 pub use error::{DbError, DbResult, IncompleteChildInfo};
 #[allow(unused_imports)]
-pub use models::{CodeRef, Level, Priority, Section, SectionType, Status, Task};
+pub use models::{
+    CodeRef, Level, Priority, Section, SectionType, Status, Task, Workflow, WorkflowStep,
+};
 pub use repository::{
     BlockerNode, GraphQueries, Progress, RelationshipRepository, SectionRule, TaskFilter,
     TaskLister, TaskRepository, TaskSummary, TaskUpdate, TriageValidationConfig,
