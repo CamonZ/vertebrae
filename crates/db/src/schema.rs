@@ -865,8 +865,8 @@ mod tests {
                     name = "Test Workflow",
                     description = "A test workflow",
                     steps = [
-                        { name: "Step 1", agent_template: "agent1", order: 0 },
-                        { name: "Step 2", agent_template: "agent2", order: 1 }
+                        { name: "Step 1", agent_config: { model: "sonnet" }, order: 0 },
+                        { name: "Step 2", agent_config: { model: "opus" }, order: 1 }
                     ],
                     metadata = { version: "1.0", env: "test" }
             "#,
@@ -959,9 +959,9 @@ mod tests {
                 CREATE workflow:ordered SET
                     name = "Ordered Workflow",
                     steps = [
-                        { name: "First", agent_template: "a", order: 0 },
-                        { name: "Second", agent_template: "b", order: 1 },
-                        { name: "Third", agent_template: "c", order: 2 }
+                        { name: "First", agent_config: { model: "a" }, order: 0 },
+                        { name: "Second", agent_config: { model: "b" }, order: 1 },
+                        { name: "Third", agent_config: { model: "c" }, order: 2 }
                     ]
             "#,
             )
@@ -1011,9 +1011,9 @@ mod tests {
                     name = "Complete Workflow",
                     description = "A fully populated workflow",
                     steps = [
-                        { name: "Lint", agent_template: "linter", order: 0 },
-                        { name: "Test", agent_template: "tester", order: 1 },
-                        { name: "Build", agent_template: "builder", order: 2 }
+                        { name: "Lint", agent_config: { model: "linter" }, order: 0 },
+                        { name: "Test", agent_config: { model: "tester" }, order: 1 },
+                        { name: "Build", agent_config: { model: "builder" }, order: 2 }
                     ],
                     metadata = { version: "2.0", team: "platform", environment: "ci" }
             "#,
@@ -1054,7 +1054,10 @@ mod tests {
         // Verify first step structure
         let first_step = &workflow.steps[0];
         assert_eq!(first_step["name"].as_str().unwrap(), "Lint");
-        assert_eq!(first_step["agent_template"].as_str().unwrap(), "linter");
+        assert_eq!(
+            first_step["agent_config"]["model"].as_str().unwrap(),
+            "linter"
+        );
         assert_eq!(first_step["order"].as_u64().unwrap(), 0);
     }
 
@@ -1071,7 +1074,7 @@ mod tests {
                     name = "Initial Name",
                     description = "Initial description",
                     steps = [
-                        { name: "Step 1", agent_template: "agent1", order: 0 }
+                        { name: "Step 1", agent_config: { model: "agent1" }, order: 0 }
                     ]
             "#,
             )
@@ -1085,8 +1088,8 @@ mod tests {
                 UPDATE workflow:update_test SET
                     name = "Updated Name",
                     steps = [
-                        { name: "Step 1", agent_template: "agent1", order: 0 },
-                        { name: "Step 2", agent_template: "agent2", order: 1 }
+                        { name: "Step 1", agent_config: { model: "agent1" }, order: 0 },
+                        { name: "Step 2", agent_config: { model: "agent2" }, order: 1 }
                     ],
                     updated_at = time::now()
             "#,

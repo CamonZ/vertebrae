@@ -4,7 +4,7 @@
 //! encapsulating SurrealDB queries and providing a clean API.
 
 use crate::error::{DbError, DbResult};
-use crate::models::{Workflow, WorkflowStep};
+use crate::models::{AgentConfig, Workflow, WorkflowStep};
 
 /// The ID of the default workflow that matches the standard status flow.
 ///
@@ -447,11 +447,31 @@ impl<'a> WorkflowRepository<'a> {
                 "Standard task workflow matching the status flow: \
                 backlog -> todo -> in_progress -> pending_review -> done",
             )
-            .with_step(WorkflowStep::new("backlog", "task-agent", 0))
-            .with_step(WorkflowStep::new("todo", "task-agent", 1))
-            .with_step(WorkflowStep::new("in_progress", "task-agent", 2))
-            .with_step(WorkflowStep::new("pending_review", "task-agent", 3))
-            .with_step(WorkflowStep::new("done", "task-agent", 4));
+            .with_step(WorkflowStep::new(
+                "backlog",
+                AgentConfig::new().with_model("task-agent"),
+                0,
+            ))
+            .with_step(WorkflowStep::new(
+                "todo",
+                AgentConfig::new().with_model("task-agent"),
+                1,
+            ))
+            .with_step(WorkflowStep::new(
+                "in_progress",
+                AgentConfig::new().with_model("task-agent"),
+                2,
+            ))
+            .with_step(WorkflowStep::new(
+                "pending_review",
+                AgentConfig::new().with_model("task-agent"),
+                3,
+            ))
+            .with_step(WorkflowStep::new(
+                "done",
+                AgentConfig::new().with_model("task-agent"),
+                4,
+            ));
 
         self.create(DEFAULT_WORKFLOW_ID, &default_workflow).await?;
 
@@ -628,7 +648,11 @@ mod tests {
 
     /// Helper to create a valid workflow with at least one step
     fn valid_workflow(name: &str) -> Workflow {
-        Workflow::new(name).with_step(WorkflowStep::new("default_step", "default_agent", 0))
+        Workflow::new(name).with_step(WorkflowStep::new(
+            "default_step",
+            AgentConfig::new().with_model("default_agent"),
+            0,
+        ))
     }
 
     #[tokio::test]
@@ -677,8 +701,16 @@ mod tests {
 
         let workflow = Workflow::new("Full Workflow")
             .with_description("A complete workflow")
-            .with_step(WorkflowStep::new("Step 1", "agent1", 0))
-            .with_step(WorkflowStep::new("Step 2", "agent2", 1))
+            .with_step(WorkflowStep::new(
+                "Step 1",
+                AgentConfig::new().with_model("agent1"),
+                0,
+            ))
+            .with_step(WorkflowStep::new(
+                "Step 2",
+                AgentConfig::new().with_model("agent2"),
+                1,
+            ))
             .with_metadata("version", "1.0")
             .with_metadata("team", "platform");
 
@@ -823,13 +855,16 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
         let repo = WorkflowRepository::new(db.client());
 
-        let workflow =
-            Workflow::new("Steps Test").with_step(WorkflowStep::new("Original Step", "agent1", 0));
+        let workflow = Workflow::new("Steps Test").with_step(WorkflowStep::new(
+            "Original Step",
+            AgentConfig::new().with_model("agent1"),
+            0,
+        ));
         repo.create("upd4", &workflow).await.unwrap();
 
         let new_steps = vec![
-            WorkflowStep::new("New Step 1", "new_agent1", 0),
-            WorkflowStep::new("New Step 2", "new_agent2", 1),
+            WorkflowStep::new("New Step 1", AgentConfig::new().with_model("new_agent1"), 0),
+            WorkflowStep::new("New Step 2", AgentConfig::new().with_model("new_agent2"), 1),
         ];
         let updates = WorkflowUpdate::new().with_steps(new_steps);
         repo.update("upd4", &updates).await.unwrap();
@@ -962,7 +997,11 @@ mod tests {
         // Create
         let workflow = Workflow::new("CRUD Test")
             .with_description("Initial description")
-            .with_step(WorkflowStep::new("Step 1", "agent1", 0));
+            .with_step(WorkflowStep::new(
+                "Step 1",
+                AgentConfig::new().with_model("agent1"),
+                0,
+            ));
         repo.create("crud1", &workflow).await.unwrap();
 
         // Read
@@ -979,8 +1018,8 @@ mod tests {
             .with_name("Updated CRUD Test")
             .with_description("Updated description")
             .with_steps(vec![
-                WorkflowStep::new("Updated Step 1", "agent1", 0),
-                WorkflowStep::new("New Step 2", "agent2", 1),
+                WorkflowStep::new("Updated Step 1", AgentConfig::new().with_model("agent1"), 0),
+                WorkflowStep::new("New Step 2", AgentConfig::new().with_model("agent2"), 1),
             ]);
         repo.update("crud1", &updates).await.unwrap();
 
@@ -1014,7 +1053,11 @@ mod tests {
         let update = WorkflowUpdate::new()
             .with_name("New Name")
             .with_description("New Description")
-            .with_steps(vec![WorkflowStep::new("Step", "agent", 0)])
+            .with_steps(vec![WorkflowStep::new(
+                "Step",
+                AgentConfig::new().with_model("agent"),
+                0,
+            )])
             .with_metadata(metadata);
 
         assert_eq!(update.name, Some("New Name".to_string()));
@@ -1067,9 +1110,21 @@ mod tests {
         let repo = WorkflowRepository::new(db.client());
 
         let workflow = Workflow::new("Duplicate Steps")
-            .with_step(WorkflowStep::new("review", "agent1", 0))
-            .with_step(WorkflowStep::new("test", "agent2", 1))
-            .with_step(WorkflowStep::new("review", "agent3", 2));
+            .with_step(WorkflowStep::new(
+                "review",
+                AgentConfig::new().with_model("agent1"),
+                0,
+            ))
+            .with_step(WorkflowStep::new(
+                "test",
+                AgentConfig::new().with_model("agent2"),
+                1,
+            ))
+            .with_step(WorkflowStep::new(
+                "review",
+                AgentConfig::new().with_model("agent3"),
+                2,
+            ));
 
         let result = repo.create("test1", &workflow).await;
 
@@ -1115,9 +1170,9 @@ mod tests {
         repo.create("test1", &workflow).await.unwrap();
 
         let new_steps = vec![
-            WorkflowStep::new("build", "agent1", 0),
-            WorkflowStep::new("deploy", "agent2", 1),
-            WorkflowStep::new("build", "agent3", 2), // duplicate
+            WorkflowStep::new("build", AgentConfig::new().with_model("agent1"), 0),
+            WorkflowStep::new("deploy", AgentConfig::new().with_model("agent2"), 1),
+            WorkflowStep::new("build", AgentConfig::new().with_model("agent3"), 2), // duplicate
         ];
         let updates = WorkflowUpdate::new().with_steps(new_steps);
         let result = repo.update("test1", &updates).await;

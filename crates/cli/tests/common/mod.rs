@@ -14,7 +14,7 @@ use vertebrae_cli::commands::{
         WorkflowShowCommand, WorkflowUnassignCommand, WorkflowUpdateCommand,
     },
 };
-use vertebrae_db::{Database, DbError, Level, SectionType};
+use vertebrae_db::{AgentConfig, Database, DbError, Level, SectionType};
 
 /// Test context containing an isolated database and temp directory
 pub struct TestContext {
@@ -330,13 +330,13 @@ pub fn export_cmd(output: Option<PathBuf>) -> ExportCommand {
 // =============================================================================
 
 /// Create a workflow add command with a single step.
-pub fn workflow_add_cmd(name: &str, step_name: &str, agent_template: &str) -> WorkflowAddCommand {
+pub fn workflow_add_cmd(name: &str, step_name: &str, model: &str) -> WorkflowAddCommand {
     WorkflowAddCommand {
         name: name.to_string(),
         description: None,
         steps: vec![ParsedStep {
             name: step_name.to_string(),
-            agent_template: agent_template.to_string(),
+            agent_config: AgentConfig::new().with_model(model),
         }],
         on_done: None,
         on_reject: None,
@@ -355,9 +355,9 @@ pub fn workflow_add_cmd_with_description(
         description: Some(description.to_string()),
         steps: steps
             .into_iter()
-            .map(|(name, agent)| ParsedStep {
+            .map(|(name, model)| ParsedStep {
                 name: name.to_string(),
-                agent_template: agent.to_string(),
+                agent_config: AgentConfig::new().with_model(model),
             })
             .collect(),
         on_done: None,
@@ -373,9 +373,9 @@ pub fn workflow_add_cmd_multi_step(name: &str, steps: Vec<(&str, &str)>) -> Work
         description: None,
         steps: steps
             .into_iter()
-            .map(|(name, agent)| ParsedStep {
+            .map(|(name, model)| ParsedStep {
                 name: name.to_string(),
-                agent_template: agent.to_string(),
+                agent_config: AgentConfig::new().with_model(model),
             })
             .collect(),
         on_done: None,
@@ -396,9 +396,9 @@ pub fn workflow_add_cmd_with_chaining(
         description: None,
         steps: steps
             .into_iter()
-            .map(|(name, agent)| ParsedStep {
+            .map(|(name, model)| ParsedStep {
                 name: name.to_string(),
-                agent_template: agent.to_string(),
+                agent_config: AgentConfig::new().with_model(model),
             })
             .collect(),
         on_done: on_done.map(String::from),

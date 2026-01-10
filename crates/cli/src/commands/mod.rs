@@ -1093,7 +1093,10 @@ mod tests {
                 assert_eq!(cmd.name, "My Workflow");
                 assert_eq!(cmd.steps.len(), 1);
                 assert_eq!(cmd.steps[0].name, "review");
-                assert_eq!(cmd.steps[0].agent_template, "code-reviewer");
+                assert_eq!(
+                    cmd.steps[0].agent_config.model,
+                    Some("code-reviewer".to_string())
+                );
             }
             _ => panic!("Expected Workflow Add command"),
         }
@@ -1162,11 +1165,17 @@ mod tests {
                 assert_eq!(cmd.name, "Multi-step Workflow");
                 assert_eq!(cmd.steps.len(), 3);
                 assert_eq!(cmd.steps[0].name, "review");
-                assert_eq!(cmd.steps[0].agent_template, "code-reviewer");
+                assert_eq!(
+                    cmd.steps[0].agent_config.model,
+                    Some("code-reviewer".to_string())
+                );
                 assert_eq!(cmd.steps[1].name, "test");
-                assert_eq!(cmd.steps[1].agent_template, "tester");
+                assert_eq!(cmd.steps[1].agent_config.model, Some("tester".to_string()));
                 assert_eq!(cmd.steps[2].name, "deploy");
-                assert_eq!(cmd.steps[2].agent_template, "deployer");
+                assert_eq!(
+                    cmd.steps[2].agent_config.model,
+                    Some("deployer".to_string())
+                );
             }
             _ => panic!("Expected Workflow Add command"),
         }
@@ -1213,7 +1222,7 @@ mod tests {
             Err(e) => {
                 let err = e.to_string();
                 assert!(
-                    err.contains("name:agent_template"),
+                    err.contains("name:model"),
                     "Error should mention expected format, got: {}",
                     err
                 );

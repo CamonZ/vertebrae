@@ -593,26 +593,26 @@ impl Eq for Task {}
 /// A step within a workflow
 ///
 /// Workflow steps define the individual actions that make up a workflow,
-/// each with an agent template. Steps are executed in order based on their
+/// each with its own agent configuration. Steps are executed in order based on their
 /// `order` field.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkflowStep {
     /// Display name for this step
     pub name: String,
 
-    /// The agent template to use for this step
-    pub agent_template: String,
+    /// The agent configuration to use for this step
+    pub agent_config: AgentConfig,
 
     /// Ordering index for sequential execution (0-based)
     pub order: u32,
 }
 
 impl WorkflowStep {
-    /// Create a new workflow step with the given name and agent template
-    pub fn new(name: impl Into<String>, agent_template: impl Into<String>, order: u32) -> Self {
+    /// Create a new workflow step with the given name and agent configuration
+    pub fn new(name: impl Into<String>, agent_config: AgentConfig, order: u32) -> Self {
         Self {
             name: name.into(),
-            agent_template: agent_template.into(),
+            agent_config,
             order,
         }
     }
@@ -2611,18 +2611,20 @@ mod tests {
     // WorkflowStep tests
     #[test]
     fn test_workflow_step_new() {
-        let step = WorkflowStep::new("Review Code", "code-reviewer", 0);
+        let agent_config = AgentConfig::new().with_model("code-reviewer");
+        let step = WorkflowStep::new("Review Code", agent_config, 0);
         assert_eq!(step.name, "Review Code");
-        assert_eq!(step.agent_template, "code-reviewer");
+        assert_eq!(step.agent_config.model, Some("code-reviewer".to_string()));
         assert_eq!(step.order, 0);
     }
 
     #[test]
     fn test_workflow_step_serialize() {
-        let step = WorkflowStep::new("Deploy", "deployer", 3);
+        let agent_config = AgentConfig::new().with_model("deployer");
+        let step = WorkflowStep::new("Deploy", agent_config, 3);
         let value = serde_json::to_value(&step).unwrap();
         assert_eq!(value["name"], "Deploy");
-        assert_eq!(value["agent_template"], "deployer");
+        assert_eq!(value["agent_config"]["model"], "deployer");
         assert_eq!(value["order"], 3);
     }
 
@@ -2630,18 +2632,19 @@ mod tests {
     fn test_workflow_step_deserialize() {
         let json = r#"{
             "name": "Analyze",
-            "agent_template": "analyzer",
+            "agent_config": { "model": "analyzer" },
             "order": 0
         }"#;
         let step: WorkflowStep = serde_json::from_str(json).unwrap();
         assert_eq!(step.name, "Analyze");
-        assert_eq!(step.agent_template, "analyzer");
+        assert_eq!(step.agent_config.model, Some("analyzer".to_string()));
         assert_eq!(step.order, 0);
     }
 
     #[test]
     fn test_workflow_step_clone_and_eq() {
-        let step = WorkflowStep::new("Clone Test", "cloner", 0);
+        let agent_config = AgentConfig::new().with_model("cloner");
+        let step = WorkflowStep::new("Clone Test", agent_config, 0);
         let cloned = step.clone();
         assert_eq!(step, cloned);
     }
@@ -2671,8 +2674,9 @@ mod tests {
 
     #[test]
     fn test_workflow_with_step() {
+        let agent_config = AgentConfig::new().with_model("executor");
         let workflow =
-            Workflow::new("Single Step").with_step(WorkflowStep::new("Only Step", "executor", 0));
+            Workflow::new("Single Step").with_step(WorkflowStep::new("Only Step", agent_config, 0));
         assert_eq!(workflow.steps.len(), 1);
         assert_eq!(workflow.steps[0].name, "Only Step");
     }
@@ -2680,9 +2684,9 @@ mod tests {
     #[test]
     fn test_workflow_with_steps() {
         let steps = vec![
-            WorkflowStep::new("Step 1", "agent1", 0),
-            WorkflowStep::new("Step 2", "agent2", 1),
-            WorkflowStep::new("Step 3", "agent3", 2),
+            WorkflowStep::new("Step 1", AgentConfig::new().with_model("agent1"), 0),
+            WorkflowStep::new("Step 2", AgentConfig::new().with_model("agent2"), 1),
+            WorkflowStep::new("Step 3", AgentConfig::new().with_model("agent3"), 2),
         ];
         let workflow = Workflow::new("Multi Step").with_steps(steps);
         assert_eq!(workflow.steps.len(), 3);
@@ -2701,9 +2705,21 @@ mod tests {
     fn test_workflow_ordered_steps() {
         // Add steps out of order
         let workflow = Workflow::new("Unordered")
-            .with_step(WorkflowStep::new("Third", "c", 2))
-            .with_step(WorkflowStep::new("First", "a", 0))
-            .with_step(WorkflowStep::new("Second", "b", 1));
+            .with_step(WorkflowStep::new(
+                "Third",
+                AgentConfig::new().with_model("c"),
+                2,
+            ))
+            .with_step(WorkflowStep::new(
+                "First",
+                AgentConfig::new().with_model("a"),
+                0,
+            ))
+            .with_step(WorkflowStep::new(
+                "Second",
+                AgentConfig::new().with_model("b"),
+                1,
+            ));
 
         let ordered = workflow.ordered_steps();
         assert_eq!(ordered.len(), 3);
@@ -2716,9 +2732,21 @@ mod tests {
     fn test_workflow_steps_maintain_insertion_order_in_vec() {
         // Verify that steps vector maintains insertion order
         let workflow = Workflow::new("Insertion Order")
-            .with_step(WorkflowStep::new("First Added", "a", 0))
-            .with_step(WorkflowStep::new("Second Added", "b", 1))
-            .with_step(WorkflowStep::new("Third Added", "c", 2));
+            .with_step(WorkflowStep::new(
+                "First Added",
+                AgentConfig::new().with_model("a"),
+                0,
+            ))
+            .with_step(WorkflowStep::new(
+                "Second Added",
+                AgentConfig::new().with_model("b"),
+                1,
+            ))
+            .with_step(WorkflowStep::new(
+                "Third Added",
+                AgentConfig::new().with_model("c"),
+                2,
+            ));
 
         // Direct access should maintain insertion order
         assert_eq!(workflow.steps[0].name, "First Added");
@@ -2730,7 +2758,11 @@ mod tests {
     fn test_workflow_serialize() {
         let workflow = Workflow::new("Serialize Test")
             .with_description("Test workflow")
-            .with_step(WorkflowStep::new("Step A", "agent_a", 0))
+            .with_step(WorkflowStep::new(
+                "Step A",
+                AgentConfig::new().with_model("agent_a"),
+                0,
+            ))
             .with_metadata("key", "value");
 
         let value = serde_json::to_value(&workflow).unwrap();
@@ -2758,8 +2790,8 @@ mod tests {
             "name": "Deserialized Workflow",
             "description": "A test workflow",
             "steps": [
-                {"name": "Step 1", "agent_template": "agent1", "order": 0},
-                {"name": "Step 2", "agent_template": "agent2", "order": 1}
+                {"name": "Step 1", "agent_config": {"model": "agent1"}, "order": 0},
+                {"name": "Step 2", "agent_config": {"model": "agent2"}, "order": 1}
             ],
             "metadata": {"env": "production"}
         }"#;
@@ -2790,7 +2822,11 @@ mod tests {
     fn test_workflow_clone_and_eq() {
         let workflow = Workflow::new("Clone Test")
             .with_description("Test")
-            .with_step(WorkflowStep::new("S1", "a", 0))
+            .with_step(WorkflowStep::new(
+                "S1",
+                AgentConfig::new().with_model("a"),
+                0,
+            ))
             .with_metadata("k", "v");
         let cloned = workflow.clone();
         assert_eq!(workflow, cloned);
@@ -2810,10 +2846,26 @@ mod tests {
     fn test_workflow_builder_chain() {
         let workflow = Workflow::new("Full Pipeline")
             .with_description("Complete CI/CD pipeline")
-            .with_step(WorkflowStep::new("Lint", "linter", 0))
-            .with_step(WorkflowStep::new("Test", "tester", 1))
-            .with_step(WorkflowStep::new("Build", "builder", 2))
-            .with_step(WorkflowStep::new("Deploy", "deployer", 3))
+            .with_step(WorkflowStep::new(
+                "Lint",
+                AgentConfig::new().with_model("linter"),
+                0,
+            ))
+            .with_step(WorkflowStep::new(
+                "Test",
+                AgentConfig::new().with_model("tester"),
+                1,
+            ))
+            .with_step(WorkflowStep::new(
+                "Build",
+                AgentConfig::new().with_model("builder"),
+                2,
+            ))
+            .with_step(WorkflowStep::new(
+                "Deploy",
+                AgentConfig::new().with_model("deployer"),
+                3,
+            ))
             .with_metadata("version", "2.0")
             .with_metadata("team", "platform");
 
@@ -2834,9 +2886,21 @@ mod tests {
     fn test_workflow_step_order_determines_sequence() {
         // Test that order field, not insertion order, determines sequence
         let workflow = Workflow::new("Order Test")
-            .with_step(WorkflowStep::new("Last", "x", 99))
-            .with_step(WorkflowStep::new("First", "y", 0))
-            .with_step(WorkflowStep::new("Middle", "z", 50));
+            .with_step(WorkflowStep::new(
+                "Last",
+                AgentConfig::new().with_model("x"),
+                99,
+            ))
+            .with_step(WorkflowStep::new(
+                "First",
+                AgentConfig::new().with_model("y"),
+                0,
+            ))
+            .with_step(WorkflowStep::new(
+                "Middle",
+                AgentConfig::new().with_model("z"),
+                50,
+            ));
 
         let ordered = workflow.ordered_steps();
         assert_eq!(ordered[0].name, "First");
@@ -2851,8 +2915,16 @@ mod tests {
     fn test_workflow_serialize_deserialize_roundtrip() {
         let original = Workflow::new("Roundtrip Test")
             .with_description("Test roundtrip serialization")
-            .with_step(WorkflowStep::new("Step A", "agent_a", 0))
-            .with_step(WorkflowStep::new("Step B", "agent_b", 1))
+            .with_step(WorkflowStep::new(
+                "Step A",
+                AgentConfig::new().with_model("agent_a"),
+                0,
+            ))
+            .with_step(WorkflowStep::new(
+                "Step B",
+                AgentConfig::new().with_model("agent_b"),
+                1,
+            ))
             .with_metadata("key1", "value1")
             .with_metadata("key2", "value2");
 
@@ -2864,7 +2936,11 @@ mod tests {
 
     #[test]
     fn test_workflow_step_serialize_deserialize_roundtrip() {
-        let original = WorkflowStep::new("Roundtrip Step", "template", 5);
+        let original = WorkflowStep::new(
+            "Roundtrip Step",
+            AgentConfig::new().with_model("template"),
+            5,
+        );
 
         let json = serde_json::to_string(&original).unwrap();
         let deserialized: WorkflowStep = serde_json::from_str(&json).unwrap();
@@ -2878,8 +2954,11 @@ mod tests {
 
     #[test]
     fn test_workflow_validate_valid() {
-        let workflow =
-            Workflow::new("Valid Workflow").with_step(WorkflowStep::new("step1", "agent1", 0));
+        let workflow = Workflow::new("Valid Workflow").with_step(WorkflowStep::new(
+            "step1",
+            AgentConfig::new().with_model("agent1"),
+            0,
+        ));
 
         assert!(workflow.validate().is_ok());
     }
@@ -2887,9 +2966,21 @@ mod tests {
     #[test]
     fn test_workflow_validate_multiple_steps() {
         let workflow = Workflow::new("Multi-step")
-            .with_step(WorkflowStep::new("step1", "agent1", 0))
-            .with_step(WorkflowStep::new("step2", "agent2", 1))
-            .with_step(WorkflowStep::new("step3", "agent3", 2));
+            .with_step(WorkflowStep::new(
+                "step1",
+                AgentConfig::new().with_model("agent1"),
+                0,
+            ))
+            .with_step(WorkflowStep::new(
+                "step2",
+                AgentConfig::new().with_model("agent2"),
+                1,
+            ))
+            .with_step(WorkflowStep::new(
+                "step3",
+                AgentConfig::new().with_model("agent3"),
+                2,
+            ));
 
         assert!(workflow.validate().is_ok());
     }
@@ -2906,9 +2997,21 @@ mod tests {
     #[test]
     fn test_workflow_validate_duplicate_step_names_fails() {
         let workflow = Workflow::new("Duplicate Steps")
-            .with_step(WorkflowStep::new("review", "agent1", 0))
-            .with_step(WorkflowStep::new("test", "agent2", 1))
-            .with_step(WorkflowStep::new("review", "agent3", 2)); // duplicate name
+            .with_step(WorkflowStep::new(
+                "review",
+                AgentConfig::new().with_model("agent1"),
+                0,
+            ))
+            .with_step(WorkflowStep::new(
+                "test",
+                AgentConfig::new().with_model("agent2"),
+                1,
+            ))
+            .with_step(WorkflowStep::new(
+                "review",
+                AgentConfig::new().with_model("agent3"),
+                2,
+            )); // duplicate name
 
         let result = workflow.validate();
         assert!(result.is_err());
@@ -2922,8 +3025,16 @@ mod tests {
     fn test_workflow_validate_case_sensitive_step_names() {
         // Step names are case-sensitive, so "Review" and "review" are different
         let workflow = Workflow::new("Case Sensitive")
-            .with_step(WorkflowStep::new("Review", "agent1", 0))
-            .with_step(WorkflowStep::new("review", "agent2", 1));
+            .with_step(WorkflowStep::new(
+                "Review",
+                AgentConfig::new().with_model("agent1"),
+                0,
+            ))
+            .with_step(WorkflowStep::new(
+                "review",
+                AgentConfig::new().with_model("agent2"),
+                1,
+            ));
 
         assert!(workflow.validate().is_ok());
     }

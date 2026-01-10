@@ -1854,7 +1854,10 @@ mod workflows {
         assert!(workflow.description.is_none());
         assert_eq!(workflow.steps.len(), 1);
         assert_eq!(workflow.steps[0].name, "review");
-        assert_eq!(workflow.steps[0].agent_template, "code-reviewer");
+        assert_eq!(
+            workflow.steps[0].agent_config.model,
+            Some("code-reviewer".to_string())
+        );
         assert_eq!(workflow.steps[0].order, 0);
     }
 

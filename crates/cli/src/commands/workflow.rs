@@ -6,8 +6,8 @@ use crate::id::IdGenerator;
 use clap::{Args, Subcommand};
 use surrealdb::sql::Thing;
 use vertebrae_db::{
-    Database, DbError, ExecutionStatus, MigrationResult, StepExecution, Workflow, WorkflowStep,
-    WorkflowUpdate,
+    AgentConfig, Database, DbError, ExecutionStatus, MigrationResult, StepExecution, Workflow,
+    WorkflowStep, WorkflowUpdate,
 };
 
 /// Workflow management commands
@@ -75,7 +75,7 @@ pub struct WorkflowAddCommand {
     #[arg(short, long)]
     pub description: Option<String>,
 
-    /// Workflow steps in 'name:agent_template' format (can be specified multiple times)
+    /// Workflow steps in 'name:model' format (can be specified multiple times)
     #[arg(short, long = "step", value_parser = parse_step)]
     pub steps: Vec<ParsedStep>,
 
@@ -93,34 +93,34 @@ pub struct WorkflowAddCommand {
 pub struct ParsedStep {
     /// Name of the step
     pub name: String,
-    /// Agent template for the step
-    pub agent_template: String,
+    /// Agent configuration for the step
+    pub agent_config: AgentConfig,
 }
 
-/// Parse a step string in 'name:agent_template' format
+/// Parse a step string in 'name:model' format
 fn parse_step(s: &str) -> Result<ParsedStep, String> {
     let parts: Vec<&str> = s.splitn(2, ':').collect();
     if parts.len() != 2 {
         return Err(format!(
-            "invalid step format '{}'. Expected 'name:agent_template' format (e.g., 'review:code-reviewer')",
+            "invalid step format '{}'. Expected 'name:model' format (e.g., 'review:sonnet')",
             s
         ));
     }
 
     let name = parts[0].trim();
-    let agent_template = parts[1].trim();
+    let model = parts[1].trim();
 
     if name.is_empty() {
         return Err("step name cannot be empty".to_string());
     }
 
-    if agent_template.is_empty() {
-        return Err("agent template cannot be empty".to_string());
+    if model.is_empty() {
+        return Err("model cannot be empty".to_string());
     }
 
     Ok(ParsedStep {
         name: name.to_string(),
-        agent_template: agent_template.to_string(),
+        agent_config: AgentConfig::new().with_model(model),
     })
 }
 
@@ -152,8 +152,7 @@ impl WorkflowAddCommand {
         if self.steps.is_empty() {
             return Err(DbError::InvalidPath {
                 path: std::path::PathBuf::from("steps"),
-                reason: "at least one step is required (use --step 'name:agent_template')"
-                    .to_string(),
+                reason: "at least one step is required (use --step 'name:model')".to_string(),
             });
         }
 
@@ -171,7 +170,7 @@ impl WorkflowAddCommand {
         for (order, parsed_step) in self.steps.iter().enumerate() {
             let step = WorkflowStep::new(
                 parsed_step.name.clone(),
-                parsed_step.agent_template.clone(),
+                parsed_step.agent_config.clone(),
                 order as u32,
             );
             workflow = workflow.with_step(step);
@@ -340,12 +339,13 @@ impl std::fmt::Display for WorkflowDetail {
             sorted_steps.sort_by_key(|s| s.order);
 
             for step in &sorted_steps {
+                let model_display = step.agent_config.model.as_deref().unwrap_or("default");
                 writeln!(
                     f,
-                    "{}. {} (agent: {})",
+                    "{}. {} (model: {})",
                     step.order + 1,
                     step.name,
-                    step.agent_template
+                    model_display
                 )?;
             }
         }
@@ -1313,71 +1313,74 @@ mod tests {
     // Step parsing tests
     #[test]
     fn test_parse_step_valid() {
-        let result = parse_step("review:code-reviewer");
+        let result = parse_step("review:sonnet");
         assert!(result.is_ok());
         let step = result.unwrap();
         assert_eq!(step.name, "review");
-        assert_eq!(step.agent_template, "code-reviewer");
+        assert_eq!(step.agent_config.model, Some("sonnet".to_string()));
     }
 
     #[test]
     fn test_parse_step_with_spaces() {
-        let result = parse_step(" review : code-reviewer ");
+        let result = parse_step(" review : sonnet ");
         assert!(result.is_ok());
         let step = result.unwrap();
         assert_eq!(step.name, "review");
-        assert_eq!(step.agent_template, "code-reviewer");
+        assert_eq!(step.agent_config.model, Some("sonnet".to_string()));
     }
 
     #[test]
     fn test_parse_step_with_multiple_colons() {
         // Should only split on the first colon
-        let result = parse_step("review:code:reviewer:template");
+        let result = parse_step("review:model:with:colons");
         assert!(result.is_ok());
         let step = result.unwrap();
         assert_eq!(step.name, "review");
-        assert_eq!(step.agent_template, "code:reviewer:template");
+        assert_eq!(
+            step.agent_config.model,
+            Some("model:with:colons".to_string())
+        );
     }
 
     #[test]
     fn test_parse_step_missing_colon() {
-        let result = parse_step("review-code-reviewer");
+        let result = parse_step("review-sonnet");
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.contains("invalid step format"));
-        assert!(err.contains("name:agent_template"));
+        assert!(err.contains("name:model"));
     }
 
     #[test]
     fn test_parse_step_empty_name() {
-        let result = parse_step(":code-reviewer");
+        let result = parse_step(":sonnet");
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.contains("name cannot be empty"));
     }
 
     #[test]
-    fn test_parse_step_empty_agent_template() {
+    fn test_parse_step_empty_model() {
         let result = parse_step("review:");
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(err.contains("agent template cannot be empty"));
+        assert!(err.contains("model cannot be empty"));
     }
 
     #[test]
     fn test_parse_step_whitespace_only_name() {
-        let result = parse_step("   :code-reviewer");
+        let result = parse_step("   :sonnet");
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.contains("name cannot be empty"));
     }
 
     #[test]
-    fn test_parse_step_whitespace_only_agent_template() {
+    fn test_parse_step_whitespace_only_model() {
         let result = parse_step("review:   ");
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert!(err.contains("agent template cannot be empty"));
+        assert!(err.contains("model cannot be empty"));
     }
 
     /// Extract the workflow ID from "Created workflow: {id}" message
@@ -1397,7 +1400,7 @@ mod tests {
             description: None,
             steps: vec![ParsedStep {
                 name: "step1".to_string(),
-                agent_template: "agent1".to_string(),
+                agent_config: AgentConfig::new().with_model("agent1"),
             }],
             on_done: None,
             on_reject: None,
@@ -1419,7 +1422,10 @@ mod tests {
         assert!(workflow.description.is_none());
         assert_eq!(workflow.steps.len(), 1);
         assert_eq!(workflow.steps[0].name, "step1");
-        assert_eq!(workflow.steps[0].agent_template, "agent1");
+        assert_eq!(
+            workflow.steps[0].agent_config.model,
+            Some("agent1".to_string())
+        );
         assert_eq!(workflow.steps[0].order, 0);
     }
 
@@ -1432,7 +1438,7 @@ mod tests {
             description: Some("A workflow with a description".to_string()),
             steps: vec![ParsedStep {
                 name: "step1".to_string(),
-                agent_template: "agent1".to_string(),
+                agent_config: AgentConfig::new().with_model("agent1"),
             }],
             on_done: None,
             on_reject: None,
@@ -1459,15 +1465,15 @@ mod tests {
             steps: vec![
                 ParsedStep {
                     name: "review".to_string(),
-                    agent_template: "code-reviewer".to_string(),
+                    agent_config: AgentConfig::new().with_model("code-reviewer"),
                 },
                 ParsedStep {
                     name: "test".to_string(),
-                    agent_template: "tester".to_string(),
+                    agent_config: AgentConfig::new().with_model("tester"),
                 },
                 ParsedStep {
                     name: "deploy".to_string(),
-                    agent_template: "deployer".to_string(),
+                    agent_config: AgentConfig::new().with_model("deployer"),
                 },
             ],
             on_done: None,
@@ -1498,7 +1504,7 @@ mod tests {
             description: None,
             steps: vec![ParsedStep {
                 name: "step1".to_string(),
-                agent_template: "agent1".to_string(),
+                agent_config: AgentConfig::new().with_model("agent1"),
             }],
             on_done: None,
             on_reject: None,
@@ -1527,7 +1533,7 @@ mod tests {
             description: None,
             steps: vec![ParsedStep {
                 name: "step1".to_string(),
-                agent_template: "agent1".to_string(),
+                agent_config: AgentConfig::new().with_model("agent1"),
             }],
             on_done: None,
             on_reject: None,
@@ -1582,7 +1588,7 @@ mod tests {
             description: None,
             steps: vec![ParsedStep {
                 name: "step1".to_string(),
-                agent_template: "agent1".to_string(),
+                agent_config: AgentConfig::new().with_model("agent1"),
             }],
             on_done: None,
             on_reject: None,
@@ -1606,7 +1612,7 @@ mod tests {
                 description: None,
                 steps: vec![ParsedStep {
                     name: "step1".to_string(),
-                    agent_template: "agent1".to_string(),
+                    agent_config: AgentConfig::new().with_model("agent1"),
                 }],
                 on_done: None,
                 on_reject: None,
@@ -1627,7 +1633,7 @@ mod tests {
             description: None,
             steps: vec![ParsedStep {
                 name: "step1".to_string(),
-                agent_template: "agent1".to_string(),
+                agent_config: AgentConfig::new().with_model("agent1"),
             }],
             on_done: None,
             on_reject: None,
@@ -1646,7 +1652,7 @@ mod tests {
             description: None,
             steps: vec![ParsedStep {
                 name: "step1".to_string(),
-                agent_template: "agent1".to_string(),
+                agent_config: AgentConfig::new().with_model("agent1"),
             }],
             on_done: None,
             on_reject: None,
@@ -1693,7 +1699,7 @@ mod tests {
             description: None,
             steps: vec![ParsedStep {
                 name: "step1".to_string(),
-                agent_template: "agent1".to_string(),
+                agent_config: AgentConfig::new().with_model("agent1"),
             }],
             on_done: None,
             on_reject: None,
@@ -1708,15 +1714,15 @@ mod tests {
             steps: vec![
                 ParsedStep {
                     name: "review".to_string(),
-                    agent_template: "reviewer".to_string(),
+                    agent_config: AgentConfig::new().with_model("reviewer"),
                 },
                 ParsedStep {
                     name: "test".to_string(),
-                    agent_template: "tester".to_string(),
+                    agent_config: AgentConfig::new().with_model("tester"),
                 },
                 ParsedStep {
                     name: "deploy".to_string(),
-                    agent_template: "deployer".to_string(),
+                    agent_config: AgentConfig::new().with_model("deployer"),
                 },
             ],
             on_done: None,
@@ -1759,7 +1765,7 @@ mod tests {
             description: Some("Test description".to_string()),
             steps: vec![ParsedStep {
                 name: "step1".to_string(),
-                agent_template: "agent1".to_string(),
+                agent_config: AgentConfig::new().with_model("agent1"),
             }],
             on_done: None,
             on_reject: None,
@@ -1795,15 +1801,15 @@ mod tests {
             steps: vec![
                 ParsedStep {
                     name: "review".to_string(),
-                    agent_template: "code-reviewer".to_string(),
+                    agent_config: AgentConfig::new().with_model("code-reviewer"),
                 },
                 ParsedStep {
                     name: "test".to_string(),
-                    agent_template: "tester".to_string(),
+                    agent_config: AgentConfig::new().with_model("tester"),
                 },
                 ParsedStep {
                     name: "deploy".to_string(),
-                    agent_template: "deployer".to_string(),
+                    agent_config: AgentConfig::new().with_model("deployer"),
                 },
             ],
             on_done: None,
@@ -1834,15 +1840,15 @@ mod tests {
         // Verify steps are shown in order
         assert!(result.contains("Steps (3 total)"), "Should show step count");
         assert!(
-            result.contains("1. review (agent: code-reviewer)"),
+            result.contains("1. review (model: code-reviewer)"),
             "Should show step 1"
         );
         assert!(
-            result.contains("2. test (agent: tester)"),
+            result.contains("2. test (model: tester)"),
             "Should show step 2"
         );
         assert!(
-            result.contains("3. deploy (agent: deployer)"),
+            result.contains("3. deploy (model: deployer)"),
             "Should show step 3"
         );
     }
@@ -1877,7 +1883,7 @@ mod tests {
             description: None,
             steps: vec![ParsedStep {
                 name: "step1".to_string(),
-                agent_template: "agent1".to_string(),
+                agent_config: AgentConfig::new().with_model("agent1"),
             }],
             on_done: None,
             on_reject: None,
@@ -1910,7 +1916,7 @@ mod tests {
             description: None,
             steps: vec![ParsedStep {
                 name: "step1".to_string(),
-                agent_template: "agent1".to_string(),
+                agent_config: AgentConfig::new().with_model("agent1"),
             }],
             on_done: None,
             on_reject: None,
@@ -1969,8 +1975,8 @@ mod tests {
             name: "Full Workflow".to_string(),
             description: Some("A complete workflow".to_string()),
             steps: vec![
-                WorkflowStep::new("step1", "agent1", 0),
-                WorkflowStep::new("step2", "agent2", 1),
+                WorkflowStep::new("step1", AgentConfig::new().with_model("agent1"), 0),
+                WorkflowStep::new("step2", AgentConfig::new().with_model("agent2"), 1),
             ],
             metadata: std::collections::HashMap::new(),
             on_done_workflow: None,
@@ -1985,8 +1991,8 @@ mod tests {
         assert!(output.contains("Description"));
         assert!(output.contains("A complete workflow"));
         assert!(output.contains("Steps (2 total)"));
-        assert!(output.contains("1. step1 (agent: agent1)"));
-        assert!(output.contains("2. step2 (agent: agent2)"));
+        assert!(output.contains("1. step1 (model: agent1)"));
+        assert!(output.contains("2. step2 (model: agent2)"));
     }
 
     #[test]
@@ -1999,7 +2005,11 @@ mod tests {
             id: "abc123".to_string(),
             name: "Metadata Workflow".to_string(),
             description: None,
-            steps: vec![WorkflowStep::new("step1", "agent1", 0)],
+            steps: vec![WorkflowStep::new(
+                "step1",
+                AgentConfig::new().with_model("agent1"),
+                0,
+            )],
             metadata,
             on_done_workflow: None,
             on_reject_workflow: None,
@@ -2125,7 +2135,7 @@ mod tests {
             description: None,
             steps: vec![ParsedStep {
                 name: "step1".to_string(),
-                agent_template: "agent1".to_string(),
+                agent_config: AgentConfig::new().with_model("agent1"),
             }],
             on_done: None,
             on_reject: None,
@@ -2162,7 +2172,7 @@ mod tests {
             description: None,
             steps: vec![ParsedStep {
                 name: "step1".to_string(),
-                agent_template: "agent1".to_string(),
+                agent_config: AgentConfig::new().with_model("agent1"),
             }],
             on_done: None,
             on_reject: None,
@@ -2199,7 +2209,7 @@ mod tests {
             description: Some("Original description".to_string()),
             steps: vec![ParsedStep {
                 name: "step1".to_string(),
-                agent_template: "agent1".to_string(),
+                agent_config: AgentConfig::new().with_model("agent1"),
             }],
             on_done: None,
             on_reject: None,
@@ -2262,7 +2272,7 @@ mod tests {
             description: None,
             steps: vec![ParsedStep {
                 name: "step1".to_string(),
-                agent_template: "agent1".to_string(),
+                agent_config: AgentConfig::new().with_model("agent1"),
             }],
             on_done: None,
             on_reject: None,
@@ -2306,7 +2316,7 @@ mod tests {
             description: None,
             steps: vec![ParsedStep {
                 name: "step1".to_string(),
-                agent_template: "agent1".to_string(),
+                agent_config: AgentConfig::new().with_model("agent1"),
             }],
             on_done: None,
             on_reject: None,
@@ -2350,7 +2360,7 @@ mod tests {
             description: None,
             steps: vec![ParsedStep {
                 name: "step1".to_string(),
-                agent_template: "agent1".to_string(),
+                agent_config: AgentConfig::new().with_model("agent1"),
             }],
             on_done: None,
             on_reject: None,
@@ -2413,7 +2423,7 @@ mod tests {
             description: None,
             steps: vec![ParsedStep {
                 name: "step1".to_string(),
-                agent_template: "agent1".to_string(),
+                agent_config: AgentConfig::new().with_model("agent1"),
             }],
             on_done: None,
             on_reject: None,
@@ -2462,7 +2472,7 @@ mod tests {
             description: None,
             steps: vec![ParsedStep {
                 name: "step1".to_string(),
-                agent_template: "agent1".to_string(),
+                agent_config: AgentConfig::new().with_model("agent1"),
             }],
             on_done: None,
             on_reject: None,
@@ -2516,11 +2526,11 @@ mod tests {
             steps: vec![
                 ParsedStep {
                     name: "review".to_string(),
-                    agent_template: "reviewer".to_string(),
+                    agent_config: AgentConfig::new().with_model("reviewer"),
                 },
                 ParsedStep {
                     name: "test".to_string(),
-                    agent_template: "tester".to_string(),
+                    agent_config: AgentConfig::new().with_model("tester"),
                 },
             ],
             on_done: None,
@@ -2567,7 +2577,7 @@ mod tests {
             description: None,
             steps: vec![ParsedStep {
                 name: "step1".to_string(),
-                agent_template: "agent1".to_string(),
+                agent_config: AgentConfig::new().with_model("agent1"),
             }],
             on_done: None,
             on_reject: None,
@@ -2626,7 +2636,7 @@ mod tests {
             description: None,
             steps: vec![ParsedStep {
                 name: "step1".to_string(),
-                agent_template: "agent1".to_string(),
+                agent_config: AgentConfig::new().with_model("agent1"),
             }],
             on_done: None,
             on_reject: None,
@@ -2675,7 +2685,7 @@ mod tests {
             description: None,
             steps: vec![ParsedStep {
                 name: "step1".to_string(),
-                agent_template: "agent1".to_string(),
+                agent_config: AgentConfig::new().with_model("agent1"),
             }],
             on_done: None,
             on_reject: None,
@@ -2775,15 +2785,15 @@ mod tests {
             steps: vec![
                 ParsedStep {
                     name: "step1".to_string(),
-                    agent_template: "agent1".to_string(),
+                    agent_config: AgentConfig::new().with_model("agent1"),
                 },
                 ParsedStep {
                     name: "step2".to_string(),
-                    agent_template: "agent2".to_string(),
+                    agent_config: AgentConfig::new().with_model("agent2"),
                 },
                 ParsedStep {
                     name: "step3".to_string(),
-                    agent_template: "agent3".to_string(),
+                    agent_config: AgentConfig::new().with_model("agent3"),
                 },
             ],
             on_done: None,
@@ -2828,11 +2838,11 @@ mod tests {
             steps: vec![
                 ParsedStep {
                     name: "first".to_string(),
-                    agent_template: "agent1".to_string(),
+                    agent_config: AgentConfig::new().with_model("agent1"),
                 },
                 ParsedStep {
                     name: "last".to_string(),
-                    agent_template: "agent2".to_string(),
+                    agent_config: AgentConfig::new().with_model("agent2"),
                 },
             ],
             on_done: None,
@@ -2941,15 +2951,15 @@ mod tests {
             steps: vec![
                 ParsedStep {
                     name: "step1".to_string(),
-                    agent_template: "agent1".to_string(),
+                    agent_config: AgentConfig::new().with_model("agent1"),
                 },
                 ParsedStep {
                     name: "step2".to_string(),
-                    agent_template: "agent2".to_string(),
+                    agent_config: AgentConfig::new().with_model("agent2"),
                 },
                 ParsedStep {
                     name: "step3".to_string(),
-                    agent_template: "agent3".to_string(),
+                    agent_config: AgentConfig::new().with_model("agent3"),
                 },
             ],
             on_done: None,
@@ -3001,11 +3011,11 @@ mod tests {
             steps: vec![
                 ParsedStep {
                     name: "first".to_string(),
-                    agent_template: "agent1".to_string(),
+                    agent_config: AgentConfig::new().with_model("agent1"),
                 },
                 ParsedStep {
                     name: "second".to_string(),
-                    agent_template: "agent2".to_string(),
+                    agent_config: AgentConfig::new().with_model("agent2"),
                 },
             ],
             on_done: None,
@@ -3111,7 +3121,7 @@ mod tests {
             description: None,
             steps: vec![ParsedStep {
                 name: "review".to_string(),
-                agent_template: "reviewer".to_string(),
+                agent_config: AgentConfig::new().with_model("reviewer"),
             }],
             on_done: None,
             on_reject: None,
@@ -3125,7 +3135,7 @@ mod tests {
             description: None,
             steps: vec![ParsedStep {
                 name: "process".to_string(),
-                agent_template: "processor".to_string(),
+                agent_config: AgentConfig::new().with_model("processor"),
             }],
             on_done: Some(second_workflow_id.clone()),
             on_reject: None,
@@ -3184,7 +3194,7 @@ mod tests {
             description: None,
             steps: vec![ParsedStep {
                 name: "recovery".to_string(),
-                agent_template: "recovery-agent".to_string(),
+                agent_config: AgentConfig::new().with_model("recovery-agent"),
             }],
             on_done: None,
             on_reject: None,
@@ -3198,7 +3208,7 @@ mod tests {
             description: None,
             steps: vec![ParsedStep {
                 name: "main".to_string(),
-                agent_template: "main-agent".to_string(),
+                agent_config: AgentConfig::new().with_model("main-agent"),
             }],
             on_done: None,
             on_reject: Some(recovery_workflow_id.clone()),
@@ -3256,7 +3266,7 @@ mod tests {
             description: None,
             steps: vec![ParsedStep {
                 name: "test".to_string(),
-                agent_template: "test-agent".to_string(),
+                agent_config: AgentConfig::new().with_model("test-agent"),
             }],
             on_done: None,
             on_reject: None,
@@ -3345,7 +3355,7 @@ mod tests {
             description: None,
             steps: vec![ParsedStep {
                 name: "done".to_string(),
-                agent_template: "done-agent".to_string(),
+                agent_config: AgentConfig::new().with_model("done-agent"),
             }],
             on_done: None,
             on_reject: None,
@@ -3358,7 +3368,7 @@ mod tests {
             description: None,
             steps: vec![ParsedStep {
                 name: "reject".to_string(),
-                agent_template: "reject-agent".to_string(),
+                agent_config: AgentConfig::new().with_model("reject-agent"),
             }],
             on_done: None,
             on_reject: None,
@@ -3372,7 +3382,7 @@ mod tests {
             description: None,
             steps: vec![ParsedStep {
                 name: "main".to_string(),
-                agent_template: "main-agent".to_string(),
+                agent_config: AgentConfig::new().with_model("main-agent"),
             }],
             on_done: Some(done_id.clone()),
             on_reject: Some(reject_id.clone()),
