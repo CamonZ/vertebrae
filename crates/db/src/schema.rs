@@ -77,12 +77,30 @@ mod sql {
 
         DEFINE FIELD updated_at ON workflow TYPE datetime DEFAULT time::now();
     "#;
+
+    /// Define the step_execution table for tracking workflow step execution history
+    pub const DEFINE_STEP_EXECUTION_TABLE: &str = r#"
+        DEFINE TABLE IF NOT EXISTS step_execution SCHEMAFULL;
+
+        DEFINE FIELD task_id ON step_execution TYPE record<task>;
+
+        DEFINE FIELD workflow_id ON step_execution TYPE record<workflow>;
+
+        DEFINE FIELD step_name ON step_execution TYPE string;
+
+        DEFINE FIELD started_at ON step_execution TYPE datetime DEFAULT time::now();
+
+        DEFINE FIELD completed_at ON step_execution TYPE option<datetime>;
+
+        DEFINE FIELD status ON step_execution TYPE string
+            ASSERT $value IN ["in_progress", "completed", "failed"];
+    "#;
 }
 
 /// Initialize the database schema.
 ///
-/// Creates the task table, workflow table, child_of relation, and depends_on relation
-/// with all required fields and constraints.
+/// Creates the task table, workflow table, step_execution table, child_of relation,
+/// and depends_on relation with all required fields and constraints.
 ///
 /// This function is idempotent - it can be called multiple times safely
 /// as it uses `IF NOT EXISTS` clauses.
@@ -116,6 +134,12 @@ pub async fn init_schema(client: &Surreal<Db>) -> Result<(), DbError> {
     // Define the workflow table
     client
         .query(sql::DEFINE_WORKFLOW_TABLE)
+        .await
+        .map_err(|e| DbError::Schema(Box::new(e)))?;
+
+    // Define the step_execution table for tracking workflow execution history
+    client
+        .query(sql::DEFINE_STEP_EXECUTION_TABLE)
         .await
         .map_err(|e| DbError::Schema(Box::new(e)))?;
 
@@ -779,6 +803,7 @@ mod tests {
 
         // Verify the update persisted
         #[derive(Debug, serde::Deserialize)]
+        #[allow(dead_code)]
         struct DatetimeRow {
             started_at: surrealdb::sql::Datetime,
         }
@@ -896,7 +921,7 @@ mod tests {
         // Check that arrays and objects defaulted to empty
         assert!(workflow.steps.is_empty(), "steps should default to empty");
         assert!(
-            workflow.metadata.as_object().map_or(true, |m| m.is_empty()),
+            workflow.metadata.as_object().is_none_or(|m| m.is_empty()),
             "metadata should default to empty object"
         );
 
@@ -1141,5 +1166,317 @@ mod tests {
         let row: Option<DescRow> = query_result.take(0).unwrap();
         let row = row.expect("Workflow should exist");
         assert!(row.description.is_none(), "description should be null");
+    }
+
+    // ========================================
+    // Step Execution schema tests
+    // ========================================
+
+    #[test]
+    fn test_step_execution_sql_constant_defined() {
+        assert!(!sql::DEFINE_STEP_EXECUTION_TABLE.is_empty());
+    }
+
+    #[test]
+    fn test_step_execution_sql_contains_expected_definitions() {
+        assert!(sql::DEFINE_STEP_EXECUTION_TABLE.contains("DEFINE TABLE"));
+        assert!(sql::DEFINE_STEP_EXECUTION_TABLE.contains("step_execution"));
+        assert!(sql::DEFINE_STEP_EXECUTION_TABLE.contains("SCHEMAFULL"));
+        assert!(sql::DEFINE_STEP_EXECUTION_TABLE.contains("task_id"));
+        assert!(sql::DEFINE_STEP_EXECUTION_TABLE.contains("workflow_id"));
+        assert!(sql::DEFINE_STEP_EXECUTION_TABLE.contains("step_name"));
+        assert!(sql::DEFINE_STEP_EXECUTION_TABLE.contains("started_at"));
+        assert!(sql::DEFINE_STEP_EXECUTION_TABLE.contains("completed_at"));
+        assert!(sql::DEFINE_STEP_EXECUTION_TABLE.contains("status"));
+        // Verify status constraints
+        assert!(sql::DEFINE_STEP_EXECUTION_TABLE.contains("in_progress"));
+        assert!(sql::DEFINE_STEP_EXECUTION_TABLE.contains("completed"));
+        assert!(sql::DEFINE_STEP_EXECUTION_TABLE.contains("failed"));
+    }
+
+    #[tokio::test]
+    async fn test_step_execution_table_accepts_valid_data() {
+        let client = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // First create a task and workflow to reference
+        client
+            .query(
+                r#"
+                CREATE task:exec_test SET
+                    title = "Test Task",
+                    level = "task",
+                    status = "in_progress";
+                CREATE workflow:exec_wf SET
+                    name = "Test Workflow"
+            "#,
+            )
+            .await
+            .unwrap();
+
+        // Insert a valid step execution
+        let result = client
+            .query(
+                r#"
+                CREATE step_execution SET
+                    task_id = task:exec_test,
+                    workflow_id = workflow:exec_wf,
+                    step_name = "review",
+                    status = "in_progress"
+            "#,
+            )
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "Valid step_execution insert failed: {:?}",
+            result.err()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_step_execution_all_valid_statuses() {
+        let client = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // Create task and workflow
+        client
+            .query(
+                r#"
+                CREATE task:status_test SET
+                    title = "Status Test Task",
+                    level = "task",
+                    status = "in_progress";
+                CREATE workflow:status_wf SET
+                    name = "Status Workflow"
+            "#,
+            )
+            .await
+            .unwrap();
+
+        for (i, status) in ["in_progress", "completed", "failed"].iter().enumerate() {
+            let query = format!(
+                r#"CREATE step_execution:status_{} SET
+                    task_id = task:status_test,
+                    workflow_id = workflow:status_wf,
+                    step_name = "step_{}",
+                    status = "{}""#,
+                i, i, status
+            );
+            let result = client.query(&query).await;
+            assert!(
+                result.is_ok(),
+                "Status '{}' should be valid: {:?}",
+                status,
+                result.err()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_step_execution_rejects_invalid_status() {
+        let client = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // Create task and workflow
+        client
+            .query(
+                r#"
+                CREATE task:invalid_status SET
+                    title = "Invalid Status Test",
+                    level = "task",
+                    status = "todo";
+                CREATE workflow:invalid_wf SET
+                    name = "Invalid Status Workflow"
+            "#,
+            )
+            .await
+            .unwrap();
+
+        // Try to insert with invalid status
+        let mut response = client
+            .query(
+                r#"
+                CREATE step_execution SET
+                    task_id = task:invalid_status,
+                    workflow_id = workflow:invalid_wf,
+                    step_name = "bad_step",
+                    status = "invalid_status"
+            "#,
+            )
+            .await
+            .unwrap();
+
+        let check: Result<Option<surrealdb::Value>, _> = response.take(0);
+        assert!(check.is_err(), "Should reject invalid status");
+    }
+
+    #[tokio::test]
+    async fn test_step_execution_with_completed_at() {
+        let client = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // Create task and workflow
+        client
+            .query(
+                r#"
+                CREATE task:completed_exec SET
+                    title = "Completed Execution Task",
+                    level = "task",
+                    status = "done";
+                CREATE workflow:completed_wf SET
+                    name = "Completed Workflow"
+            "#,
+            )
+            .await
+            .unwrap();
+
+        // Create a completed step execution
+        let result = client
+            .query(
+                r#"
+                CREATE step_execution:completed SET
+                    task_id = task:completed_exec,
+                    workflow_id = workflow:completed_wf,
+                    step_name = "build",
+                    started_at = time::now(),
+                    completed_at = time::now(),
+                    status = "completed"
+            "#,
+            )
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "Step execution with completed_at should succeed: {:?}",
+            result.err()
+        );
+
+        // Verify the completed_at is set
+        #[derive(Debug, serde::Deserialize)]
+        struct ExecRow {
+            status: String,
+            completed_at: Option<surrealdb::sql::Datetime>,
+        }
+
+        let mut query_result = client
+            .query("SELECT status, completed_at FROM step_execution:completed")
+            .await
+            .unwrap();
+
+        let row: Option<ExecRow> = query_result.take(0).unwrap();
+        let row = row.expect("Step execution should exist");
+        assert_eq!(row.status, "completed");
+        assert!(row.completed_at.is_some(), "completed_at should be set");
+    }
+
+    #[tokio::test]
+    async fn test_step_execution_default_started_at() {
+        let client = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // Create task and workflow
+        client
+            .query(
+                r#"
+                CREATE task:default_time SET
+                    title = "Default Time Task",
+                    level = "task",
+                    status = "in_progress";
+                CREATE workflow:default_wf SET
+                    name = "Default Time Workflow"
+            "#,
+            )
+            .await
+            .unwrap();
+
+        // Create step execution without explicit started_at
+        client
+            .query(
+                r#"
+                CREATE step_execution:default_time SET
+                    task_id = task:default_time,
+                    workflow_id = workflow:default_wf,
+                    step_name = "test",
+                    status = "in_progress"
+            "#,
+            )
+            .await
+            .unwrap();
+
+        // Verify started_at was set by default
+        #[derive(Debug, serde::Deserialize)]
+        struct TimeRow {
+            started_at: surrealdb::sql::Datetime,
+        }
+
+        let mut result = client
+            .query("SELECT started_at FROM step_execution:default_time")
+            .await
+            .unwrap();
+
+        let row: Option<TimeRow> = result.take(0).unwrap();
+        let row = row.expect("Step execution should exist");
+        // If we can deserialize, started_at was set
+        assert!(
+            row.started_at.0.timestamp() > 0,
+            "started_at should have a valid timestamp"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_step_execution_can_query_by_task() {
+        let client = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // Create task and workflow
+        client
+            .query(
+                r#"
+                CREATE task:query_task SET
+                    title = "Query Test Task",
+                    level = "task",
+                    status = "in_progress";
+                CREATE workflow:query_wf SET
+                    name = "Query Workflow"
+            "#,
+            )
+            .await
+            .unwrap();
+
+        // Create multiple step executions for the same task
+        client
+            .query(
+                r#"
+                CREATE step_execution:exec1 SET
+                    task_id = task:query_task,
+                    workflow_id = workflow:query_wf,
+                    step_name = "step1",
+                    status = "completed";
+                CREATE step_execution:exec2 SET
+                    task_id = task:query_task,
+                    workflow_id = workflow:query_wf,
+                    step_name = "step2",
+                    status = "in_progress"
+            "#,
+            )
+            .await
+            .unwrap();
+
+        // Query executions for the task
+        #[derive(Debug, serde::Deserialize)]
+        #[allow(dead_code)]
+        struct ExecRow {
+            step_name: String,
+            status: String,
+        }
+
+        let mut result = client
+            .query("SELECT step_name, status FROM step_execution WHERE task_id = task:query_task")
+            .await
+            .unwrap();
+
+        let rows: Vec<ExecRow> = result.take(0).unwrap();
+        assert_eq!(rows.len(), 2, "Should have 2 executions for the task");
     }
 }

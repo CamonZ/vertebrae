@@ -158,7 +158,8 @@ mod tests {
     fn test_db_result_type_alias() {
         // Test that DbResult works correctly
         let ok_result: DbResult<i32> = Ok(42);
-        assert_eq!(ok_result.unwrap(), 42);
+        assert!(ok_result.is_ok());
+        assert!(matches!(ok_result, Ok(42)));
 
         let err_result: DbResult<i32> = Err(DbError::InvalidPath {
             path: PathBuf::from("/test"),

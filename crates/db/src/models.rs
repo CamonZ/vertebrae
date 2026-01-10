@@ -776,6 +776,155 @@ impl PartialEq for Workflow {
 
 impl Eq for Workflow {}
 
+/// Execution status for a workflow step
+///
+/// Represents the current state of a step execution in its lifecycle.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionStatus {
+    /// Step execution is currently in progress
+    InProgress,
+    /// Step execution completed successfully
+    Completed,
+    /// Step execution failed
+    Failed,
+}
+
+impl ExecutionStatus {
+    /// Returns the string representation used in the database
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ExecutionStatus::InProgress => "in_progress",
+            ExecutionStatus::Completed => "completed",
+            ExecutionStatus::Failed => "failed",
+        }
+    }
+
+    /// Parse a status string into an ExecutionStatus enum.
+    ///
+    /// Returns `None` if the string doesn't match any known status.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "in_progress" => Some(ExecutionStatus::InProgress),
+            "completed" => Some(ExecutionStatus::Completed),
+            "failed" => Some(ExecutionStatus::Failed),
+            _ => None,
+        }
+    }
+
+    /// Returns true if this status represents a terminal state
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, ExecutionStatus::Completed | ExecutionStatus::Failed)
+    }
+}
+
+impl std::fmt::Display for ExecutionStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+/// A record of a workflow step execution
+///
+/// StepExecution tracks each time a task enters a workflow step,
+/// providing an immutable audit trail of all workflow executions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StepExecution {
+    /// Unique identifier (SurrealDB record ID)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<Thing>,
+
+    /// Reference to the task this execution belongs to
+    pub task_id: Thing,
+
+    /// Reference to the workflow being executed
+    pub workflow_id: Thing,
+
+    /// Name of the step being executed (matches WorkflowStep.name)
+    pub step_name: String,
+
+    /// When this step execution started
+    pub started_at: DateTime<Utc>,
+
+    /// When this step execution completed (if completed)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completed_at: Option<DateTime<Utc>>,
+
+    /// Current status of this step execution
+    pub status: ExecutionStatus,
+}
+
+impl StepExecution {
+    /// Create a new step execution record
+    ///
+    /// The execution starts with `InProgress` status and the current timestamp.
+    pub fn new(task_id: Thing, workflow_id: Thing, step_name: impl Into<String>) -> Self {
+        Self {
+            id: None,
+            task_id,
+            workflow_id,
+            step_name: step_name.into(),
+            started_at: Utc::now(),
+            completed_at: None,
+            status: ExecutionStatus::InProgress,
+        }
+    }
+
+    /// Create a new step execution with a specific start time
+    pub fn with_started_at(mut self, started_at: DateTime<Utc>) -> Self {
+        self.started_at = started_at;
+        self
+    }
+
+    /// Mark this step execution as completed successfully
+    pub fn complete(&mut self) {
+        self.status = ExecutionStatus::Completed;
+        self.completed_at = Some(Utc::now());
+    }
+
+    /// Mark this step execution as completed with a specific timestamp
+    pub fn complete_at(&mut self, completed_at: DateTime<Utc>) {
+        self.status = ExecutionStatus::Completed;
+        self.completed_at = Some(completed_at);
+    }
+
+    /// Mark this step execution as failed
+    pub fn fail(&mut self) {
+        self.status = ExecutionStatus::Failed;
+        self.completed_at = Some(Utc::now());
+    }
+
+    /// Mark this step execution as failed with a specific timestamp
+    pub fn fail_at(&mut self, completed_at: DateTime<Utc>) {
+        self.status = ExecutionStatus::Failed;
+        self.completed_at = Some(completed_at);
+    }
+
+    /// Check if this step execution has finished (completed or failed)
+    pub fn is_finished(&self) -> bool {
+        self.status.is_terminal()
+    }
+
+    /// Get the duration of this step execution if completed
+    ///
+    /// Returns `None` if the step has not completed yet.
+    pub fn duration(&self) -> Option<chrono::Duration> {
+        self.completed_at.map(|end| end - self.started_at)
+    }
+}
+
+impl PartialEq for StepExecution {
+    fn eq(&self, other: &Self) -> bool {
+        self.task_id == other.task_id
+            && self.workflow_id == other.workflow_id
+            && self.step_name == other.step_name
+            && self.status == other.status
+        // Ignore timestamps in equality comparison (similar to how Task ignores timestamps)
+    }
+}
+
+impl Eq for StepExecution {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2350,5 +2499,380 @@ mod tests {
             .with_step(WorkflowStep::new("review", "agent2", 1));
 
         assert!(workflow.validate().is_ok());
+    }
+
+    // ========================================
+    // ExecutionStatus enum tests
+    // ========================================
+
+    #[test]
+    fn test_execution_status_as_str() {
+        assert_eq!(ExecutionStatus::InProgress.as_str(), "in_progress");
+        assert_eq!(ExecutionStatus::Completed.as_str(), "completed");
+        assert_eq!(ExecutionStatus::Failed.as_str(), "failed");
+    }
+
+    #[test]
+    fn test_execution_status_display() {
+        assert_eq!(format!("{}", ExecutionStatus::InProgress), "in_progress");
+        assert_eq!(format!("{}", ExecutionStatus::Completed), "completed");
+        assert_eq!(format!("{}", ExecutionStatus::Failed), "failed");
+    }
+
+    #[test]
+    fn test_execution_status_parse() {
+        assert_eq!(
+            ExecutionStatus::parse("in_progress"),
+            Some(ExecutionStatus::InProgress)
+        );
+        assert_eq!(
+            ExecutionStatus::parse("completed"),
+            Some(ExecutionStatus::Completed)
+        );
+        assert_eq!(
+            ExecutionStatus::parse("failed"),
+            Some(ExecutionStatus::Failed)
+        );
+        assert_eq!(ExecutionStatus::parse("unknown"), None);
+        assert_eq!(ExecutionStatus::parse(""), None);
+    }
+
+    #[test]
+    fn test_execution_status_is_terminal() {
+        assert!(!ExecutionStatus::InProgress.is_terminal());
+        assert!(ExecutionStatus::Completed.is_terminal());
+        assert!(ExecutionStatus::Failed.is_terminal());
+    }
+
+    #[test]
+    fn test_execution_status_serialize() {
+        assert_eq!(
+            serde_json::to_string(&ExecutionStatus::InProgress).unwrap(),
+            "\"in_progress\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ExecutionStatus::Completed).unwrap(),
+            "\"completed\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ExecutionStatus::Failed).unwrap(),
+            "\"failed\""
+        );
+    }
+
+    #[test]
+    fn test_execution_status_deserialize() {
+        assert_eq!(
+            serde_json::from_str::<ExecutionStatus>("\"in_progress\"").unwrap(),
+            ExecutionStatus::InProgress
+        );
+        assert_eq!(
+            serde_json::from_str::<ExecutionStatus>("\"completed\"").unwrap(),
+            ExecutionStatus::Completed
+        );
+        assert_eq!(
+            serde_json::from_str::<ExecutionStatus>("\"failed\"").unwrap(),
+            ExecutionStatus::Failed
+        );
+    }
+
+    #[test]
+    fn test_execution_status_clone_and_eq() {
+        let status = ExecutionStatus::InProgress;
+        let cloned = status.clone();
+        assert_eq!(status, cloned);
+    }
+
+    // ========================================
+    // StepExecution struct tests
+    // ========================================
+
+    #[test]
+    fn test_step_execution_new() {
+        let task_id = Thing::from(("task", "task123"));
+        let workflow_id = Thing::from(("workflow", "wf456"));
+
+        let before = Utc::now();
+        let execution = StepExecution::new(task_id.clone(), workflow_id.clone(), "review");
+        let after = Utc::now();
+
+        assert!(execution.id.is_none());
+        assert_eq!(execution.task_id, task_id);
+        assert_eq!(execution.workflow_id, workflow_id);
+        assert_eq!(execution.step_name, "review");
+        assert!(
+            execution.started_at >= before && execution.started_at <= after,
+            "started_at should be within test execution time"
+        );
+        assert!(execution.completed_at.is_none());
+        assert_eq!(execution.status, ExecutionStatus::InProgress);
+    }
+
+    #[test]
+    fn test_step_execution_with_started_at() {
+        let task_id = Thing::from(("task", "task123"));
+        let workflow_id = Thing::from(("workflow", "wf456"));
+        let custom_time = Utc::now() - chrono::Duration::hours(1);
+
+        let execution =
+            StepExecution::new(task_id, workflow_id, "test").with_started_at(custom_time);
+
+        assert_eq!(execution.started_at, custom_time);
+    }
+
+    #[test]
+    fn test_step_execution_complete() {
+        let task_id = Thing::from(("task", "task123"));
+        let workflow_id = Thing::from(("workflow", "wf456"));
+
+        let mut execution = StepExecution::new(task_id, workflow_id, "build");
+
+        let before = Utc::now();
+        execution.complete();
+        let after = Utc::now();
+
+        assert_eq!(execution.status, ExecutionStatus::Completed);
+        assert!(execution.completed_at.is_some());
+        let completed_at = execution.completed_at.unwrap();
+        assert!(
+            completed_at >= before && completed_at <= after,
+            "completed_at should be within test execution time"
+        );
+    }
+
+    #[test]
+    fn test_step_execution_complete_at() {
+        let task_id = Thing::from(("task", "task123"));
+        let workflow_id = Thing::from(("workflow", "wf456"));
+        let custom_time = Utc::now() - chrono::Duration::minutes(30);
+
+        let mut execution = StepExecution::new(task_id, workflow_id, "deploy");
+        execution.complete_at(custom_time);
+
+        assert_eq!(execution.status, ExecutionStatus::Completed);
+        assert_eq!(execution.completed_at, Some(custom_time));
+    }
+
+    #[test]
+    fn test_step_execution_fail() {
+        let task_id = Thing::from(("task", "task123"));
+        let workflow_id = Thing::from(("workflow", "wf456"));
+
+        let mut execution = StepExecution::new(task_id, workflow_id, "test");
+
+        let before = Utc::now();
+        execution.fail();
+        let after = Utc::now();
+
+        assert_eq!(execution.status, ExecutionStatus::Failed);
+        assert!(execution.completed_at.is_some());
+        let completed_at = execution.completed_at.unwrap();
+        assert!(
+            completed_at >= before && completed_at <= after,
+            "completed_at should be within test execution time"
+        );
+    }
+
+    #[test]
+    fn test_step_execution_fail_at() {
+        let task_id = Thing::from(("task", "task123"));
+        let workflow_id = Thing::from(("workflow", "wf456"));
+        let custom_time = Utc::now() - chrono::Duration::minutes(15);
+
+        let mut execution = StepExecution::new(task_id, workflow_id, "lint");
+        execution.fail_at(custom_time);
+
+        assert_eq!(execution.status, ExecutionStatus::Failed);
+        assert_eq!(execution.completed_at, Some(custom_time));
+    }
+
+    #[test]
+    fn test_step_execution_is_finished() {
+        let task_id = Thing::from(("task", "task123"));
+        let workflow_id = Thing::from(("workflow", "wf456"));
+
+        let mut execution = StepExecution::new(task_id.clone(), workflow_id.clone(), "step");
+        assert!(
+            !execution.is_finished(),
+            "InProgress should not be finished"
+        );
+
+        execution.complete();
+        assert!(execution.is_finished(), "Completed should be finished");
+
+        let mut execution2 = StepExecution::new(task_id, workflow_id, "step2");
+        execution2.fail();
+        assert!(execution2.is_finished(), "Failed should be finished");
+    }
+
+    #[test]
+    fn test_step_execution_duration() {
+        let task_id = Thing::from(("task", "task123"));
+        let workflow_id = Thing::from(("workflow", "wf456"));
+
+        let start_time = Utc::now() - chrono::Duration::hours(1);
+        let end_time = Utc::now();
+
+        let mut execution =
+            StepExecution::new(task_id, workflow_id, "long_step").with_started_at(start_time);
+
+        // Duration should be None before completion
+        assert!(execution.duration().is_none());
+
+        // Complete the execution
+        execution.complete_at(end_time);
+
+        // Duration should now be available
+        let duration = execution.duration();
+        assert!(duration.is_some());
+        // Duration should be approximately 1 hour
+        let dur = duration.unwrap();
+        assert!(
+            dur.num_minutes() >= 59 && dur.num_minutes() <= 61,
+            "Duration should be approximately 1 hour"
+        );
+    }
+
+    #[test]
+    fn test_step_execution_serialize() {
+        let task_id = Thing::from(("task", "task123"));
+        let workflow_id = Thing::from(("workflow", "wf456"));
+
+        let execution = StepExecution::new(task_id, workflow_id, "test_step");
+        let value = serde_json::to_value(&execution).unwrap();
+
+        // Check task_id is serialized (Thing serializes with table:id format)
+        assert!(value.get("task_id").is_some(), "task_id should be present");
+        assert!(
+            value.get("workflow_id").is_some(),
+            "workflow_id should be present"
+        );
+        assert_eq!(value["step_name"], "test_step");
+        assert_eq!(value["status"], "in_progress");
+        assert!(
+            value.get("started_at").is_some(),
+            "started_at should be present"
+        );
+        assert!(
+            value.get("completed_at").is_none(),
+            "completed_at should be omitted when None"
+        );
+        assert!(value.get("id").is_none(), "id should be omitted when None");
+    }
+
+    #[test]
+    fn test_step_execution_serialize_with_completed_at() {
+        let task_id = Thing::from(("task", "task123"));
+        let workflow_id = Thing::from(("workflow", "wf456"));
+
+        let mut execution = StepExecution::new(task_id, workflow_id, "completed_step");
+        execution.complete();
+
+        let value = serde_json::to_value(&execution).unwrap();
+        assert_eq!(value["status"], "completed");
+        assert!(
+            value.get("completed_at").is_some(),
+            "completed_at should be present when set"
+        );
+    }
+
+    #[test]
+    fn test_step_execution_deserialize() {
+        // Thing type requires object format with tb (table) and id fields
+        let json = r#"{
+            "task_id": {"tb": "task", "id": {"String": "task123"}},
+            "workflow_id": {"tb": "workflow", "id": {"String": "wf456"}},
+            "step_name": "review",
+            "started_at": "2025-01-08T12:00:00Z",
+            "status": "in_progress"
+        }"#;
+
+        let execution: StepExecution = serde_json::from_str(json).unwrap();
+        assert_eq!(execution.step_name, "review");
+        assert_eq!(execution.status, ExecutionStatus::InProgress);
+        assert!(execution.completed_at.is_none());
+    }
+
+    #[test]
+    fn test_step_execution_deserialize_with_completed() {
+        // Thing type requires object format with tb (table) and id fields
+        let json = r#"{
+            "task_id": {"tb": "task", "id": {"String": "task123"}},
+            "workflow_id": {"tb": "workflow", "id": {"String": "wf456"}},
+            "step_name": "deploy",
+            "started_at": "2025-01-08T12:00:00Z",
+            "completed_at": "2025-01-08T13:30:00Z",
+            "status": "completed"
+        }"#;
+
+        let execution: StepExecution = serde_json::from_str(json).unwrap();
+        assert_eq!(execution.step_name, "deploy");
+        assert_eq!(execution.status, ExecutionStatus::Completed);
+        assert!(execution.completed_at.is_some());
+    }
+
+    #[test]
+    fn test_step_execution_clone() {
+        let task_id = Thing::from(("task", "task123"));
+        let workflow_id = Thing::from(("workflow", "wf456"));
+
+        let execution = StepExecution::new(task_id, workflow_id, "clone_test");
+        let cloned = execution.clone();
+
+        assert_eq!(execution.task_id, cloned.task_id);
+        assert_eq!(execution.workflow_id, cloned.workflow_id);
+        assert_eq!(execution.step_name, cloned.step_name);
+        assert_eq!(execution.status, cloned.status);
+    }
+
+    #[test]
+    fn test_step_execution_eq_ignores_timestamps() {
+        let task_id = Thing::from(("task", "task123"));
+        let workflow_id = Thing::from(("workflow", "wf456"));
+
+        let execution1 = StepExecution::new(task_id.clone(), workflow_id.clone(), "step");
+        // Create a second execution with a different started_at
+        let execution2 = StepExecution::new(task_id, workflow_id, "step")
+            .with_started_at(Utc::now() - chrono::Duration::days(1));
+
+        // Should be equal because timestamps are ignored in PartialEq
+        assert_eq!(execution1, execution2);
+    }
+
+    #[test]
+    fn test_step_execution_serialize_roundtrip() {
+        let task_id = Thing::from(("task", "task123"));
+        let workflow_id = Thing::from(("workflow", "wf456"));
+
+        let mut original = StepExecution::new(task_id, workflow_id, "roundtrip");
+        original.complete();
+
+        let json = serde_json::to_string(&original).unwrap();
+        let deserialized: StepExecution = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(original, deserialized);
+    }
+
+    #[test]
+    fn test_step_execution_all_statuses_serializable() {
+        let task_id = Thing::from(("task", "t1"));
+        let workflow_id = Thing::from(("workflow", "w1"));
+
+        // Test InProgress
+        let exec_ip = StepExecution::new(task_id.clone(), workflow_id.clone(), "step1");
+        let json_ip = serde_json::to_string(&exec_ip).unwrap();
+        assert!(json_ip.contains("in_progress"));
+
+        // Test Completed
+        let mut exec_c = StepExecution::new(task_id.clone(), workflow_id.clone(), "step2");
+        exec_c.complete();
+        let json_c = serde_json::to_string(&exec_c).unwrap();
+        assert!(json_c.contains("completed"));
+
+        // Test Failed
+        let mut exec_f = StepExecution::new(task_id, workflow_id, "step3");
+        exec_f.fail();
+        let json_f = serde_json::to_string(&exec_f).unwrap();
+        assert!(json_f.contains("failed"));
     }
 }

@@ -1150,7 +1150,7 @@ mod tests {
         repo.update("upd5", &updates).await.unwrap();
 
         let retrieved = repo.get("upd5").await.unwrap().unwrap();
-        assert!(retrieved.metadata.get("old_key").is_none());
+        assert!(!retrieved.metadata.contains_key("old_key"));
         assert_eq!(
             retrieved.metadata.get("new_key"),
             Some(&"new_value".to_string())
