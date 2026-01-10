@@ -4,7 +4,7 @@
 //! This maintains backwards compatibility with the traditional status-based commands.
 
 use clap::Args;
-use vertebrae_db::{Database, DbError, Status, TaskUpdate};
+use vertebrae_db::{Database, DbError, DbResult, Status, TaskUpdate};
 
 /// Submit a task for review (transition from in_progress to pending_review)
 ///
@@ -73,8 +73,7 @@ impl SubmitCommand {
         }
 
         // Validate the status transition
-        db.tasks()
-            .validate_status_transition(&id, &task.status, &Status::PendingReview)?;
+        validate_status_transition(&id, &task.status, &Status::PendingReview)?;
 
         // Update status to pending_review
         let updates = TaskUpdate::new().with_status(Status::PendingReview);
@@ -91,6 +90,17 @@ impl SubmitCommand {
             already_pending: false,
         })
     }
+}
+
+/// Validate a status transition for a task.
+fn validate_status_transition(id: &str, from: &Status, to: &Status) -> DbResult<()> {
+    from.validate_transition(to)
+        .map_err(|message| DbError::InvalidStatusTransition {
+            task_id: id.to_string(),
+            from_status: from.as_str().to_string(),
+            to_status: to.as_str().to_string(),
+            message,
+        })
 }
 
 #[cfg(test)]

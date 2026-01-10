@@ -4,7 +4,7 @@
 //! This maintains backwards compatibility with the traditional status-based commands.
 
 use clap::Args;
-use vertebrae_db::{Database, DbError, Status, TaskUpdate};
+use vertebrae_db::{Database, DbError, DbResult, Status, TaskUpdate};
 
 /// Start a task (transition from todo to in_progress)
 ///
@@ -86,8 +86,7 @@ impl StartCommand {
         }
 
         // Validate the status transition
-        db.tasks()
-            .validate_status_transition(&id, &task.status, &Status::InProgress)?;
+        validate_status_transition(&id, &task.status, &Status::InProgress)?;
 
         // Check for incomplete dependencies (soft enforcement - warn only)
         let incomplete_deps = db.graph().get_incomplete_dependencies_info(&id).await?;
@@ -110,6 +109,17 @@ impl StartCommand {
             incomplete_deps,
         })
     }
+}
+
+/// Validate a status transition for a task.
+fn validate_status_transition(id: &str, from: &Status, to: &Status) -> DbResult<()> {
+    from.validate_transition(to)
+        .map_err(|message| DbError::InvalidStatusTransition {
+            task_id: id.to_string(),
+            from_status: from.as_str().to_string(),
+            to_status: to.as_str().to_string(),
+            message,
+        })
 }
 
 #[cfg(test)]

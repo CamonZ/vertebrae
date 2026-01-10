@@ -5,7 +5,7 @@
 
 use clap::Args;
 use vertebrae_db::{
-    Database, DbError, Status, TaskUpdate, TriageValidationResult, TriageValidator,
+    Database, DbError, DbResult, Status, TaskUpdate, TriageValidationResult, TriageValidator,
 };
 
 /// Triage a task (transition from backlog to todo)
@@ -130,8 +130,7 @@ impl TriageCommand {
         }
 
         // Validate the status transition
-        db.tasks()
-            .validate_status_transition(&id, &task.status, &Status::Todo)?;
+        validate_status_transition(&id, &task.status, &Status::Todo)?;
 
         // If validation is skipped, proceed directly
         if self.skip_validation {
@@ -197,6 +196,17 @@ impl TriageCommand {
             warnings_forced: self.force,
         })
     }
+}
+
+/// Validate a status transition for a task.
+fn validate_status_transition(id: &str, from: &Status, to: &Status) -> DbResult<()> {
+    from.validate_transition(to)
+        .map_err(|message| DbError::InvalidStatusTransition {
+            task_id: id.to_string(),
+            from_status: from.as_str().to_string(),
+            to_status: to.as_str().to_string(),
+            message,
+        })
 }
 
 #[cfg(test)]

@@ -6,7 +6,7 @@
 
 use clap::{Args, ValueEnum};
 use vertebrae_db::{
-    Database, DbError, Status, TaskUpdate, TriageValidationResult, TriageValidator,
+    Database, DbError, DbResult, Status, TaskUpdate, TriageValidationResult, TriageValidator,
 };
 
 /// Target status for the transition-to command
@@ -245,8 +245,7 @@ impl TransitionToCommand {
         }
 
         // Validate the status transition
-        db.tasks()
-            .validate_status_transition(&id, &task.status, &target_status)?;
+        validate_status_transition(&id, &task.status, &target_status)?;
 
         // Execute target-specific logic
         match self.target {
@@ -465,6 +464,17 @@ impl TransitionToCommand {
             .add_section(id, vertebrae_db::SectionType::Constraint, &content)
             .await
     }
+}
+
+/// Validate a status transition for a task.
+fn validate_status_transition(id: &str, from: &Status, to: &Status) -> DbResult<()> {
+    from.validate_transition(to)
+        .map_err(|message| DbError::InvalidStatusTransition {
+            task_id: id.to_string(),
+            from_status: from.as_str().to_string(),
+            to_status: to.as_str().to_string(),
+            message,
+        })
 }
 
 #[cfg(test)]

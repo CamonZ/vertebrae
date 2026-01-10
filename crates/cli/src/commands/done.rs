@@ -4,7 +4,7 @@
 //! This maintains backwards compatibility with the traditional status-based commands.
 
 use clap::Args;
-use vertebrae_db::{Database, DbError, Status};
+use vertebrae_db::{Database, DbError, DbResult, Status};
 
 /// Complete a task (transition from pending_review to done)
 ///
@@ -90,8 +90,7 @@ impl DoneCommand {
         }
 
         // Validate the status transition
-        db.tasks()
-            .validate_status_transition(&id, &task.status, &Status::Done)?;
+        validate_status_transition(&id, &task.status, &Status::Done)?;
 
         // Check for incomplete descendants (hard enforcement - error if any exist)
         let incomplete_descendants = db.graph().get_incomplete_descendants(&id).await?;
@@ -121,6 +120,17 @@ impl DoneCommand {
             unblocked_tasks,
         })
     }
+}
+
+/// Validate a status transition for a task.
+fn validate_status_transition(id: &str, from: &Status, to: &Status) -> DbResult<()> {
+    from.validate_transition(to)
+        .map_err(|message| DbError::InvalidStatusTransition {
+            task_id: id.to_string(),
+            from_status: from.as_str().to_string(),
+            to_status: to.as_str().to_string(),
+            message,
+        })
 }
 
 #[cfg(test)]
