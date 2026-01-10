@@ -8,6 +8,7 @@ pub mod criterion_ref;
 pub mod delete;
 pub mod depend;
 pub mod done;
+pub mod execution;
 pub mod export;
 pub mod import;
 pub mod init;
@@ -37,6 +38,7 @@ pub use criterion_ref::CriterionRefCommand;
 pub use delete::DeleteCommand;
 pub use depend::DependCommand;
 pub use done::DoneCommand;
+pub use execution::ExecutionCommand;
 pub use export::ExportCommand;
 pub use import::ImportCommand;
 pub use init::InitCommand;
@@ -80,6 +82,9 @@ pub enum Command {
     Depend(DependCommand),
     /// Complete a task (transition from pending_review to done)
     Done(DoneCommand),
+    /// Execution history commands
+    #[command(subcommand)]
+    Execution(ExecutionCommand),
     /// Export all tasks and relationships to JSONL format
     Export(ExportCommand),
     /// Import tasks and relationships from JSONL format
@@ -181,6 +186,10 @@ impl Command {
             Command::Done(cmd) => {
                 let result = cmd.execute(db).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
+            }
+            Command::Execution(cmd) => {
+                let result = cmd.execute(db).await?;
+                Ok(CommandResult::Message(result))
             }
             Command::Export(cmd) => {
                 let result = cmd.execute(db).await?;
