@@ -19,6 +19,14 @@ pub enum WorkflowCommand {
     Update(WorkflowUpdateCommand),
     /// Delete a workflow
     Delete(WorkflowDeleteCommand),
+    /// Assign a task to a workflow
+    Assign(WorkflowAssignCommand),
+    /// Remove workflow assignment from a task
+    Unassign(WorkflowUnassignCommand),
+    /// Advance a task to the next workflow step
+    Advance(WorkflowAdvanceCommand),
+    /// Retreat a task to the previous workflow step
+    Retreat(WorkflowRetreatCommand),
 }
 
 impl WorkflowCommand {
@@ -38,6 +46,10 @@ impl WorkflowCommand {
             WorkflowCommand::Show(cmd) => cmd.execute(db).await,
             WorkflowCommand::Update(cmd) => cmd.execute(db).await,
             WorkflowCommand::Delete(cmd) => cmd.execute(db).await,
+            WorkflowCommand::Assign(cmd) => cmd.execute(db).await,
+            WorkflowCommand::Unassign(cmd) => cmd.execute(db).await,
+            WorkflowCommand::Advance(cmd) => cmd.execute(db).await,
+            WorkflowCommand::Retreat(cmd) => cmd.execute(db).await,
         }
     }
 }
@@ -524,6 +536,320 @@ impl WorkflowDeleteCommand {
         db.workflows().delete(&id).await?;
 
         Ok(format!("Deleted workflow: {}", id))
+    }
+}
+
+/// Assign a task to a workflow
+#[derive(Debug, Args)]
+pub struct WorkflowAssignCommand {
+    /// Task ID to assign (case-insensitive)
+    #[arg(required = true)]
+    pub task_id: String,
+
+    /// Workflow ID to assign to (case-insensitive)
+    #[arg(required = true)]
+    pub workflow_id: String,
+}
+
+impl WorkflowAssignCommand {
+    /// Execute the assign workflow command.
+    ///
+    /// Assigns a task to a workflow, setting the current step to the first step (0).
+    ///
+    /// # Arguments
+    ///
+    /// * `db` - Reference to the database connection
+    ///
+    /// # Errors
+    ///
+    /// Returns `DbError::NotFound` if the task or workflow doesn't exist.
+    /// Returns `DbError` if database operations fail.
+    pub async fn execute(&self, db: &Database) -> Result<String, DbError> {
+        // Normalize IDs to lowercase for case-insensitive lookup
+        let task_id = self.task_id.to_lowercase();
+        let workflow_id = self.workflow_id.to_lowercase();
+
+        // Check if task exists
+        let task_exists = db.tasks().exists(&task_id).await?;
+        if !task_exists {
+            return Err(DbError::NotFound {
+                entity: "task".to_string(),
+                id: self.task_id.clone(),
+            });
+        }
+
+        // Check if workflow exists and get its info
+        let workflow = db.workflows().get(&workflow_id).await?;
+        let workflow = match workflow {
+            Some(w) => w,
+            None => {
+                return Err(DbError::NotFound {
+                    entity: "workflow".to_string(),
+                    id: self.workflow_id.clone(),
+                });
+            }
+        };
+
+        // Get the workflow Thing ID for assignment
+        let workflow_thing = workflow.id.clone().ok_or_else(|| DbError::InvalidPath {
+            path: std::path::PathBuf::from(&workflow_id),
+            reason: "workflow has no ID".to_string(),
+        })?;
+
+        // Assign the task to the workflow
+        db.tasks()
+            .assign_workflow(&task_id, &workflow_thing)
+            .await?;
+
+        // Get the first step name for display
+        let first_step_name = workflow
+            .ordered_steps()
+            .first()
+            .map(|s| s.name.clone())
+            .unwrap_or_else(|| "Step 1".to_string());
+
+        Ok(format!(
+            "Assigned task {} to workflow {} at step 1: {}",
+            task_id, workflow_id, first_step_name
+        ))
+    }
+}
+
+/// Remove workflow assignment from a task
+#[derive(Debug, Args)]
+pub struct WorkflowUnassignCommand {
+    /// Task ID to unassign (case-insensitive)
+    #[arg(required = true)]
+    pub task_id: String,
+}
+
+impl WorkflowUnassignCommand {
+    /// Execute the unassign workflow command.
+    ///
+    /// Removes workflow assignment from a task, clearing workflow_id and current_step.
+    ///
+    /// # Arguments
+    ///
+    /// * `db` - Reference to the database connection
+    ///
+    /// # Errors
+    ///
+    /// Returns `DbError::NotFound` if the task doesn't exist.
+    /// Returns `DbError` if database operations fail.
+    pub async fn execute(&self, db: &Database) -> Result<String, DbError> {
+        // Normalize ID to lowercase for case-insensitive lookup
+        let task_id = self.task_id.to_lowercase();
+
+        // Check if task exists
+        let task_exists = db.tasks().exists(&task_id).await?;
+        if !task_exists {
+            return Err(DbError::NotFound {
+                entity: "task".to_string(),
+                id: self.task_id.clone(),
+            });
+        }
+
+        // Unassign the workflow
+        db.tasks().unassign_workflow(&task_id).await?;
+
+        Ok(format!("Unassigned workflow from task {}", task_id))
+    }
+}
+
+/// Advance a task to the next workflow step
+#[derive(Debug, Args)]
+pub struct WorkflowAdvanceCommand {
+    /// Task ID to advance (case-insensitive)
+    #[arg(required = true)]
+    pub task_id: String,
+}
+
+impl WorkflowAdvanceCommand {
+    /// Execute the advance workflow command.
+    ///
+    /// Moves the task to the next step in its assigned workflow.
+    ///
+    /// # Arguments
+    ///
+    /// * `db` - Reference to the database connection
+    ///
+    /// # Errors
+    ///
+    /// Returns `DbError::NotFound` if the task doesn't exist.
+    /// Returns `DbError::Validation` if the task is not assigned to a workflow
+    /// or is already at the last step.
+    pub async fn execute(&self, db: &Database) -> Result<String, DbError> {
+        // Normalize ID to lowercase for case-insensitive lookup
+        let task_id = self.task_id.to_lowercase();
+
+        // Get the task to check workflow assignment
+        let task = db.tasks().get(&task_id).await?;
+        let task = match task {
+            Some(t) => t,
+            None => {
+                return Err(DbError::NotFound {
+                    entity: "task".to_string(),
+                    id: self.task_id.clone(),
+                });
+            }
+        };
+
+        // Check if task is assigned to a workflow
+        let workflow_id = match &task.workflow_id {
+            Some(wf_id) => wf_id,
+            None => {
+                return Err(DbError::ValidationError {
+                    message: format!("Task {} is not assigned to any workflow", task_id),
+                });
+            }
+        };
+
+        let current_step = task.current_step.unwrap_or(0);
+
+        // Get the workflow to check step boundaries
+        let workflow = db.workflows().get(&workflow_id.id.to_raw()).await?;
+        let workflow = match workflow {
+            Some(w) => w,
+            None => {
+                return Err(DbError::ValidationError {
+                    message: format!(
+                        "Task {} is assigned to non-existent workflow {}",
+                        task_id,
+                        workflow_id.id.to_raw()
+                    ),
+                });
+            }
+        };
+
+        let total_steps = workflow.ordered_steps().len();
+
+        // Check if already at last step
+        if current_step + 1 >= total_steps {
+            let current_step_name = workflow
+                .ordered_steps()
+                .get(current_step)
+                .map(|s| s.name.clone())
+                .unwrap_or_else(|| format!("Step {}", current_step + 1));
+            return Err(DbError::ValidationError {
+                message: format!(
+                    "Task {} is already at the last step: {} ({}/{})",
+                    task_id,
+                    current_step_name,
+                    current_step + 1,
+                    total_steps
+                ),
+            });
+        }
+
+        // Advance to next step
+        let new_step = current_step + 1;
+        db.tasks().update_current_step(&task_id, new_step).await?;
+
+        // Get step names for display
+        let new_step_name = workflow
+            .ordered_steps()
+            .get(new_step)
+            .map(|s| s.name.clone())
+            .unwrap_or_else(|| format!("Step {}", new_step + 1));
+
+        Ok(format!(
+            "Advanced task {} to step {}/{}: {}",
+            task_id,
+            new_step + 1,
+            total_steps,
+            new_step_name
+        ))
+    }
+}
+
+/// Retreat a task to the previous workflow step
+#[derive(Debug, Args)]
+pub struct WorkflowRetreatCommand {
+    /// Task ID to retreat (case-insensitive)
+    #[arg(required = true)]
+    pub task_id: String,
+}
+
+impl WorkflowRetreatCommand {
+    /// Execute the retreat workflow command.
+    ///
+    /// Moves the task to the previous step in its assigned workflow.
+    ///
+    /// # Arguments
+    ///
+    /// * `db` - Reference to the database connection
+    ///
+    /// # Errors
+    ///
+    /// Returns `DbError::NotFound` if the task doesn't exist.
+    /// Returns `DbError::Validation` if the task is not assigned to a workflow
+    /// or is already at the first step.
+    pub async fn execute(&self, db: &Database) -> Result<String, DbError> {
+        // Normalize ID to lowercase for case-insensitive lookup
+        let task_id = self.task_id.to_lowercase();
+
+        // Get the task to check workflow assignment
+        let task = db.tasks().get(&task_id).await?;
+        let task = match task {
+            Some(t) => t,
+            None => {
+                return Err(DbError::NotFound {
+                    entity: "task".to_string(),
+                    id: self.task_id.clone(),
+                });
+            }
+        };
+
+        // Check if task is assigned to a workflow
+        let workflow_id = match &task.workflow_id {
+            Some(wf_id) => wf_id,
+            None => {
+                return Err(DbError::ValidationError {
+                    message: format!("Task {} is not assigned to any workflow", task_id),
+                });
+            }
+        };
+
+        let current_step = task.current_step.unwrap_or(0);
+
+        // Check if already at first step
+        if current_step == 0 {
+            // Get the workflow for step name
+            let workflow = db.workflows().get(&workflow_id.id.to_raw()).await?;
+            let step_name = workflow
+                .and_then(|w| w.ordered_steps().first().map(|s| s.name.clone()))
+                .unwrap_or_else(|| "Step 1".to_string());
+            return Err(DbError::ValidationError {
+                message: format!(
+                    "Task {} is already at the first step: {}",
+                    task_id, step_name
+                ),
+            });
+        }
+
+        // Get the workflow for step info
+        let workflow = db.workflows().get(&workflow_id.id.to_raw()).await?;
+        let total_steps = workflow
+            .as_ref()
+            .map(|w| w.ordered_steps().len())
+            .unwrap_or(0);
+
+        // Retreat to previous step
+        let new_step = current_step - 1;
+        db.tasks().update_current_step(&task_id, new_step).await?;
+
+        // Get step name for display
+        let new_step_name = workflow
+            .and_then(|w| w.ordered_steps().get(new_step).map(|s| s.name.clone()))
+            .unwrap_or_else(|| format!("Step {}", new_step + 1));
+
+        Ok(format!(
+            "Retreated task {} to step {}/{}: {}",
+            task_id,
+            new_step + 1,
+            total_steps,
+            new_step_name
+        ))
     }
 }
 
@@ -1644,6 +1970,593 @@ mod tests {
         assert!(
             debug_str.contains("WorkflowDeleteCommand") && debug_str.contains("test123"),
             "Debug output should contain WorkflowDeleteCommand and id"
+        );
+    }
+
+    // ========================================
+    // WorkflowAssignCommand tests
+    // ========================================
+
+    /// Helper to create a test task
+    async fn create_test_task(db: &Database, id: &str, title: &str) {
+        use vertebrae_db::{Level, Task};
+        let task = Task::new(title, Level::Task);
+        db.tasks().create(id, &task).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_assign_workflow_success() {
+        let db = setup_test_db().await;
+
+        // Create a workflow
+        let add_cmd = WorkflowAddCommand {
+            name: "Test Workflow".to_string(),
+            description: None,
+            steps: vec![
+                ParsedStep {
+                    name: "review".to_string(),
+                    agent_template: "reviewer".to_string(),
+                },
+                ParsedStep {
+                    name: "test".to_string(),
+                    agent_template: "tester".to_string(),
+                },
+            ],
+        };
+        let add_result = add_cmd.execute(&db).await.unwrap();
+        let workflow_id = extract_workflow_id(&add_result);
+
+        // Create a task
+        create_test_task(&db, "abc123", "Test Task").await;
+
+        // Assign the task to the workflow
+        let assign_cmd = WorkflowAssignCommand {
+            task_id: "abc123".to_string(),
+            workflow_id: workflow_id.clone(),
+        };
+        let result = assign_cmd.execute(&db).await.unwrap();
+
+        // Verify the output message
+        assert!(
+            result.contains("Assigned task abc123 to workflow"),
+            "Should show assignment message: {}",
+            result
+        );
+        assert!(
+            result.contains("review"),
+            "Should show first step name: {}",
+            result
+        );
+
+        // Verify the task was updated with workflow assignment
+        let task = db.tasks().get("abc123").await.unwrap().unwrap();
+        assert!(task.workflow_id.is_some(), "Task should have workflow_id");
+        assert_eq!(task.current_step, Some(0), "Task should be at step 0");
+    }
+
+    #[tokio::test]
+    async fn test_assign_workflow_task_not_found() {
+        let db = setup_test_db().await;
+
+        // Create a workflow
+        let add_cmd = WorkflowAddCommand {
+            name: "Test Workflow".to_string(),
+            description: None,
+            steps: vec![ParsedStep {
+                name: "step1".to_string(),
+                agent_template: "agent1".to_string(),
+            }],
+        };
+        let add_result = add_cmd.execute(&db).await.unwrap();
+        let workflow_id = extract_workflow_id(&add_result);
+
+        // Try to assign a non-existent task
+        let assign_cmd = WorkflowAssignCommand {
+            task_id: "nonexistent".to_string(),
+            workflow_id: workflow_id.clone(),
+        };
+        let result = assign_cmd.execute(&db).await;
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DbError::NotFound { entity, id } => {
+                assert_eq!(entity, "task");
+                assert_eq!(id, "nonexistent");
+            }
+            e => panic!("Expected NotFound error, got {:?}", e),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_assign_workflow_workflow_not_found() {
+        let db = setup_test_db().await;
+
+        // Create a task
+        create_test_task(&db, "abc123", "Test Task").await;
+
+        // Try to assign to a non-existent workflow
+        let assign_cmd = WorkflowAssignCommand {
+            task_id: "abc123".to_string(),
+            workflow_id: "nonexistent".to_string(),
+        };
+        let result = assign_cmd.execute(&db).await;
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DbError::NotFound { entity, id } => {
+                assert_eq!(entity, "workflow");
+                assert_eq!(id, "nonexistent");
+            }
+            e => panic!("Expected NotFound error, got {:?}", e),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_assign_workflow_case_insensitive() {
+        let db = setup_test_db().await;
+
+        // Create a workflow
+        let add_cmd = WorkflowAddCommand {
+            name: "Test Workflow".to_string(),
+            description: None,
+            steps: vec![ParsedStep {
+                name: "step1".to_string(),
+                agent_template: "agent1".to_string(),
+            }],
+        };
+        let add_result = add_cmd.execute(&db).await.unwrap();
+        let workflow_id = extract_workflow_id(&add_result);
+
+        // Create a task
+        create_test_task(&db, "def456", "Test Task").await;
+
+        // Assign using uppercase IDs
+        let assign_cmd = WorkflowAssignCommand {
+            task_id: "DEF456".to_string(),
+            workflow_id: workflow_id.to_uppercase(),
+        };
+        let result = assign_cmd.execute(&db).await;
+        assert!(result.is_ok(), "Should assign with case-insensitive IDs");
+    }
+
+    #[test]
+    fn test_workflow_assign_command_debug() {
+        let cmd = WorkflowAssignCommand {
+            task_id: "task123".to_string(),
+            workflow_id: "workflow456".to_string(),
+        };
+        let debug_str = format!("{:?}", cmd);
+        assert!(
+            debug_str.contains("WorkflowAssignCommand")
+                && debug_str.contains("task123")
+                && debug_str.contains("workflow456"),
+            "Debug output should contain WorkflowAssignCommand and fields"
+        );
+    }
+
+    // ========================================
+    // WorkflowUnassignCommand tests
+    // ========================================
+
+    #[tokio::test]
+    async fn test_unassign_workflow_success() {
+        let db = setup_test_db().await;
+
+        // Create a workflow
+        let add_cmd = WorkflowAddCommand {
+            name: "Test Workflow".to_string(),
+            description: None,
+            steps: vec![ParsedStep {
+                name: "step1".to_string(),
+                agent_template: "agent1".to_string(),
+            }],
+        };
+        let add_result = add_cmd.execute(&db).await.unwrap();
+        let workflow_id = extract_workflow_id(&add_result);
+
+        // Create a task and assign it
+        create_test_task(&db, "abc123", "Test Task").await;
+        let assign_cmd = WorkflowAssignCommand {
+            task_id: "abc123".to_string(),
+            workflow_id: workflow_id.clone(),
+        };
+        assign_cmd.execute(&db).await.unwrap();
+
+        // Verify task is assigned
+        let task = db.tasks().get("abc123").await.unwrap().unwrap();
+        assert!(task.workflow_id.is_some(), "Task should have workflow_id");
+
+        // Unassign the workflow
+        let unassign_cmd = WorkflowUnassignCommand {
+            task_id: "abc123".to_string(),
+        };
+        let result = unassign_cmd.execute(&db).await.unwrap();
+        assert_eq!(result, "Unassigned workflow from task abc123");
+
+        // Verify task no longer has workflow assignment
+        let task = db.tasks().get("abc123").await.unwrap().unwrap();
+        assert!(
+            task.workflow_id.is_none(),
+            "Task should not have workflow_id after unassign"
+        );
+        assert!(
+            task.current_step.is_none(),
+            "Task should not have current_step after unassign"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_unassign_workflow_task_not_found() {
+        let db = setup_test_db().await;
+
+        let unassign_cmd = WorkflowUnassignCommand {
+            task_id: "nonexistent".to_string(),
+        };
+        let result = unassign_cmd.execute(&db).await;
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DbError::NotFound { entity, id } => {
+                assert_eq!(entity, "task");
+                assert_eq!(id, "nonexistent");
+            }
+            e => panic!("Expected NotFound error, got {:?}", e),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_unassign_workflow_case_insensitive() {
+        let db = setup_test_db().await;
+
+        // Create a task
+        create_test_task(&db, "abc123", "Test Task").await;
+
+        // Unassign using uppercase ID (even though not assigned, it should work)
+        let unassign_cmd = WorkflowUnassignCommand {
+            task_id: "ABC123".to_string(),
+        };
+        let result = unassign_cmd.execute(&db).await;
+        assert!(result.is_ok(), "Should unassign with case-insensitive ID");
+    }
+
+    #[test]
+    fn test_workflow_unassign_command_debug() {
+        let cmd = WorkflowUnassignCommand {
+            task_id: "task123".to_string(),
+        };
+        let debug_str = format!("{:?}", cmd);
+        assert!(
+            debug_str.contains("WorkflowUnassignCommand") && debug_str.contains("task123"),
+            "Debug output should contain WorkflowUnassignCommand and task_id"
+        );
+    }
+
+    // ========================================
+    // WorkflowAdvanceCommand tests
+    // ========================================
+
+    #[tokio::test]
+    async fn test_advance_workflow_success() {
+        let db = setup_test_db().await;
+
+        // Create a workflow with 3 steps
+        let add_cmd = WorkflowAddCommand {
+            name: "Test Workflow".to_string(),
+            description: None,
+            steps: vec![
+                ParsedStep {
+                    name: "step1".to_string(),
+                    agent_template: "agent1".to_string(),
+                },
+                ParsedStep {
+                    name: "step2".to_string(),
+                    agent_template: "agent2".to_string(),
+                },
+                ParsedStep {
+                    name: "step3".to_string(),
+                    agent_template: "agent3".to_string(),
+                },
+            ],
+        };
+        let add_result = add_cmd.execute(&db).await.unwrap();
+        let workflow_id = extract_workflow_id(&add_result);
+
+        // Create a task and assign it
+        create_test_task(&db, "abc123", "Test Task").await;
+        let assign_cmd = WorkflowAssignCommand {
+            task_id: "abc123".to_string(),
+            workflow_id: workflow_id.clone(),
+        };
+        assign_cmd.execute(&db).await.unwrap();
+
+        // Verify task is at step 0
+        let task = db.tasks().get("abc123").await.unwrap().unwrap();
+        assert_eq!(task.current_step, Some(0));
+
+        // Advance to step 1
+        let advance_cmd = WorkflowAdvanceCommand {
+            task_id: "abc123".to_string(),
+        };
+        let result = advance_cmd.execute(&db).await.unwrap();
+        assert!(result.contains("2/3"), "Should show step 2 of 3");
+        assert!(result.contains("step2"), "Should show step2 name");
+
+        // Verify task is at step 1
+        let task = db.tasks().get("abc123").await.unwrap().unwrap();
+        assert_eq!(task.current_step, Some(1));
+    }
+
+    #[tokio::test]
+    async fn test_advance_workflow_at_last_step() {
+        let db = setup_test_db().await;
+
+        // Create a workflow with 2 steps
+        let add_cmd = WorkflowAddCommand {
+            name: "Test Workflow".to_string(),
+            description: None,
+            steps: vec![
+                ParsedStep {
+                    name: "first".to_string(),
+                    agent_template: "agent1".to_string(),
+                },
+                ParsedStep {
+                    name: "last".to_string(),
+                    agent_template: "agent2".to_string(),
+                },
+            ],
+        };
+        let add_result = add_cmd.execute(&db).await.unwrap();
+        let workflow_id = extract_workflow_id(&add_result);
+
+        // Create a task and assign it
+        create_test_task(&db, "abc123", "Test Task").await;
+        let assign_cmd = WorkflowAssignCommand {
+            task_id: "abc123".to_string(),
+            workflow_id: workflow_id.clone(),
+        };
+        assign_cmd.execute(&db).await.unwrap();
+
+        // Advance to last step
+        let advance_cmd = WorkflowAdvanceCommand {
+            task_id: "abc123".to_string(),
+        };
+        advance_cmd.execute(&db).await.unwrap();
+
+        // Try to advance again - should fail
+        let result = advance_cmd.execute(&db).await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DbError::ValidationError { message } => {
+                assert!(
+                    message.contains("already at the last step"),
+                    "Error should mention last step: {}",
+                    message
+                );
+            }
+            e => panic!("Expected ValidationError, got {:?}", e),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_advance_workflow_not_assigned() {
+        let db = setup_test_db().await;
+
+        // Create a task without workflow assignment
+        create_test_task(&db, "abc123", "Test Task").await;
+
+        let advance_cmd = WorkflowAdvanceCommand {
+            task_id: "abc123".to_string(),
+        };
+        let result = advance_cmd.execute(&db).await;
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DbError::ValidationError { message } => {
+                assert!(
+                    message.contains("not assigned to any workflow"),
+                    "Error should mention not assigned: {}",
+                    message
+                );
+            }
+            e => panic!("Expected ValidationError, got {:?}", e),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_advance_workflow_task_not_found() {
+        let db = setup_test_db().await;
+
+        let advance_cmd = WorkflowAdvanceCommand {
+            task_id: "nonexistent".to_string(),
+        };
+        let result = advance_cmd.execute(&db).await;
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DbError::NotFound { entity, id } => {
+                assert_eq!(entity, "task");
+                assert_eq!(id, "nonexistent");
+            }
+            e => panic!("Expected NotFound error, got {:?}", e),
+        }
+    }
+
+    #[test]
+    fn test_workflow_advance_command_debug() {
+        let cmd = WorkflowAdvanceCommand {
+            task_id: "task123".to_string(),
+        };
+        let debug_str = format!("{:?}", cmd);
+        assert!(
+            debug_str.contains("WorkflowAdvanceCommand") && debug_str.contains("task123"),
+            "Debug output should contain WorkflowAdvanceCommand and task_id"
+        );
+    }
+
+    // ========================================
+    // WorkflowRetreatCommand tests
+    // ========================================
+
+    #[tokio::test]
+    async fn test_retreat_workflow_success() {
+        let db = setup_test_db().await;
+
+        // Create a workflow with 3 steps
+        let add_cmd = WorkflowAddCommand {
+            name: "Test Workflow".to_string(),
+            description: None,
+            steps: vec![
+                ParsedStep {
+                    name: "step1".to_string(),
+                    agent_template: "agent1".to_string(),
+                },
+                ParsedStep {
+                    name: "step2".to_string(),
+                    agent_template: "agent2".to_string(),
+                },
+                ParsedStep {
+                    name: "step3".to_string(),
+                    agent_template: "agent3".to_string(),
+                },
+            ],
+        };
+        let add_result = add_cmd.execute(&db).await.unwrap();
+        let workflow_id = extract_workflow_id(&add_result);
+
+        // Create a task and assign it
+        create_test_task(&db, "abc123", "Test Task").await;
+        let assign_cmd = WorkflowAssignCommand {
+            task_id: "abc123".to_string(),
+            workflow_id: workflow_id.clone(),
+        };
+        assign_cmd.execute(&db).await.unwrap();
+
+        // Advance to step 2
+        let advance_cmd = WorkflowAdvanceCommand {
+            task_id: "abc123".to_string(),
+        };
+        advance_cmd.execute(&db).await.unwrap();
+        advance_cmd.execute(&db).await.unwrap();
+
+        // Verify task is at step 2
+        let task = db.tasks().get("abc123").await.unwrap().unwrap();
+        assert_eq!(task.current_step, Some(2));
+
+        // Retreat to step 1
+        let retreat_cmd = WorkflowRetreatCommand {
+            task_id: "abc123".to_string(),
+        };
+        let result = retreat_cmd.execute(&db).await.unwrap();
+        assert!(result.contains("2/3"), "Should show step 2 of 3");
+        assert!(result.contains("step2"), "Should show step2 name");
+
+        // Verify task is at step 1
+        let task = db.tasks().get("abc123").await.unwrap().unwrap();
+        assert_eq!(task.current_step, Some(1));
+    }
+
+    #[tokio::test]
+    async fn test_retreat_workflow_at_first_step() {
+        let db = setup_test_db().await;
+
+        // Create a workflow with 2 steps
+        let add_cmd = WorkflowAddCommand {
+            name: "Test Workflow".to_string(),
+            description: None,
+            steps: vec![
+                ParsedStep {
+                    name: "first".to_string(),
+                    agent_template: "agent1".to_string(),
+                },
+                ParsedStep {
+                    name: "second".to_string(),
+                    agent_template: "agent2".to_string(),
+                },
+            ],
+        };
+        let add_result = add_cmd.execute(&db).await.unwrap();
+        let workflow_id = extract_workflow_id(&add_result);
+
+        // Create a task and assign it (starts at step 0)
+        create_test_task(&db, "abc123", "Test Task").await;
+        let assign_cmd = WorkflowAssignCommand {
+            task_id: "abc123".to_string(),
+            workflow_id: workflow_id.clone(),
+        };
+        assign_cmd.execute(&db).await.unwrap();
+
+        // Try to retreat - should fail
+        let retreat_cmd = WorkflowRetreatCommand {
+            task_id: "abc123".to_string(),
+        };
+        let result = retreat_cmd.execute(&db).await;
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DbError::ValidationError { message } => {
+                assert!(
+                    message.contains("already at the first step"),
+                    "Error should mention first step: {}",
+                    message
+                );
+            }
+            e => panic!("Expected ValidationError, got {:?}", e),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_retreat_workflow_not_assigned() {
+        let db = setup_test_db().await;
+
+        // Create a task without workflow assignment
+        create_test_task(&db, "abc123", "Test Task").await;
+
+        let retreat_cmd = WorkflowRetreatCommand {
+            task_id: "abc123".to_string(),
+        };
+        let result = retreat_cmd.execute(&db).await;
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DbError::ValidationError { message } => {
+                assert!(
+                    message.contains("not assigned to any workflow"),
+                    "Error should mention not assigned: {}",
+                    message
+                );
+            }
+            e => panic!("Expected ValidationError, got {:?}", e),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_retreat_workflow_task_not_found() {
+        let db = setup_test_db().await;
+
+        let retreat_cmd = WorkflowRetreatCommand {
+            task_id: "nonexistent".to_string(),
+        };
+        let result = retreat_cmd.execute(&db).await;
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DbError::NotFound { entity, id } => {
+                assert_eq!(entity, "task");
+                assert_eq!(id, "nonexistent");
+            }
+            e => panic!("Expected NotFound error, got {:?}", e),
+        }
+    }
+
+    #[test]
+    fn test_workflow_retreat_command_debug() {
+        let cmd = WorkflowRetreatCommand {
+            task_id: "task123".to_string(),
+        };
+        let debug_str = format!("{:?}", cmd);
+        assert!(
+            debug_str.contains("WorkflowRetreatCommand") && debug_str.contains("task123"),
+            "Debug output should contain WorkflowRetreatCommand and task_id"
         );
     }
 }
