@@ -865,8 +865,8 @@ mod tests {
                     name = "Test Workflow",
                     description = "A test workflow",
                     steps = [
-                        { name: "Step 1", agent_template: "agent1", skills: ["skill1"], order: 0 },
-                        { name: "Step 2", agent_template: "agent2", skills: [], order: 1 }
+                        { name: "Step 1", agent_template: "agent1", order: 0 },
+                        { name: "Step 2", agent_template: "agent2", order: 1 }
                     ],
                     metadata = { version: "1.0", env: "test" }
             "#,
@@ -959,9 +959,9 @@ mod tests {
                 CREATE workflow:ordered SET
                     name = "Ordered Workflow",
                     steps = [
-                        { name: "First", agent_template: "a", skills: [], order: 0 },
-                        { name: "Second", agent_template: "b", skills: [], order: 1 },
-                        { name: "Third", agent_template: "c", skills: [], order: 2 }
+                        { name: "First", agent_template: "a", order: 0 },
+                        { name: "Second", agent_template: "b", order: 1 },
+                        { name: "Third", agent_template: "c", order: 2 }
                     ]
             "#,
             )
@@ -1011,9 +1011,9 @@ mod tests {
                     name = "Complete Workflow",
                     description = "A fully populated workflow",
                     steps = [
-                        { name: "Lint", agent_template: "linter", skills: ["eslint", "prettier"], order: 0 },
-                        { name: "Test", agent_template: "tester", skills: ["jest"], order: 1 },
-                        { name: "Build", agent_template: "builder", skills: ["webpack"], order: 2 }
+                        { name: "Lint", agent_template: "linter", order: 0 },
+                        { name: "Test", agent_template: "tester", order: 1 },
+                        { name: "Build", agent_template: "builder", order: 2 }
                     ],
                     metadata = { version: "2.0", team: "platform", environment: "ci" }
             "#,
@@ -1056,10 +1056,6 @@ mod tests {
         assert_eq!(first_step["name"].as_str().unwrap(), "Lint");
         assert_eq!(first_step["agent_template"].as_str().unwrap(), "linter");
         assert_eq!(first_step["order"].as_u64().unwrap(), 0);
-        let skills = first_step["skills"].as_array().unwrap();
-        assert_eq!(skills.len(), 2);
-        assert_eq!(skills[0].as_str().unwrap(), "eslint");
-        assert_eq!(skills[1].as_str().unwrap(), "prettier");
     }
 
     #[tokio::test]
@@ -1075,7 +1071,7 @@ mod tests {
                     name = "Initial Name",
                     description = "Initial description",
                     steps = [
-                        { name: "Step 1", agent_template: "agent1", skills: [], order: 0 }
+                        { name: "Step 1", agent_template: "agent1", order: 0 }
                     ]
             "#,
             )
@@ -1089,8 +1085,8 @@ mod tests {
                 UPDATE workflow:update_test SET
                     name = "Updated Name",
                     steps = [
-                        { name: "Step 1", agent_template: "agent1", skills: [], order: 0 },
-                        { name: "Step 2", agent_template: "agent2", skills: ["new_skill"], order: 1 }
+                        { name: "Step 1", agent_template: "agent1", order: 0 },
+                        { name: "Step 2", agent_template: "agent2", order: 1 }
                     ],
                     updated_at = time::now()
             "#,

@@ -593,8 +593,8 @@ impl Eq for Task {}
 /// A step within a workflow
 ///
 /// Workflow steps define the individual actions that make up a workflow,
-/// each with an agent template and associated skills. Steps are executed
-/// in order based on their `order` field.
+/// each with an agent template. Steps are executed in order based on their
+/// `order` field.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkflowStep {
     /// Display name for this step
@@ -602,10 +602,6 @@ pub struct WorkflowStep {
 
     /// The agent template to use for this step
     pub agent_template: String,
-
-    /// Skills available for this step
-    #[serde(default)]
-    pub skills: Vec<String>,
 
     /// Ordering index for sequential execution (0-based)
     pub order: u32,
@@ -617,21 +613,8 @@ impl WorkflowStep {
         Self {
             name: name.into(),
             agent_template: agent_template.into(),
-            skills: Vec::new(),
             order,
         }
-    }
-
-    /// Add a skill to this step
-    pub fn with_skill(mut self, skill: impl Into<String>) -> Self {
-        self.skills.push(skill.into());
-        self
-    }
-
-    /// Add multiple skills to this step
-    pub fn with_skills(mut self, skills: impl IntoIterator<Item = impl Into<String>>) -> Self {
-        self.skills.extend(skills.into_iter().map(|s| s.into()));
-        self
     }
 }
 
@@ -2205,32 +2188,15 @@ mod tests {
         assert_eq!(step.name, "Review Code");
         assert_eq!(step.agent_template, "code-reviewer");
         assert_eq!(step.order, 0);
-        assert!(step.skills.is_empty());
-    }
-
-    #[test]
-    fn test_workflow_step_with_skill() {
-        let step = WorkflowStep::new("Build", "builder", 1).with_skill("cargo-build");
-        assert_eq!(step.skills, vec!["cargo-build"]);
-    }
-
-    #[test]
-    fn test_workflow_step_with_skills() {
-        let step =
-            WorkflowStep::new("Test", "tester", 2).with_skills(["unit-test", "integration-test"]);
-        assert_eq!(step.skills.len(), 2);
-        assert!(step.skills.contains(&"unit-test".to_string()));
-        assert!(step.skills.contains(&"integration-test".to_string()));
     }
 
     #[test]
     fn test_workflow_step_serialize() {
-        let step = WorkflowStep::new("Deploy", "deployer", 3).with_skill("docker-deploy");
+        let step = WorkflowStep::new("Deploy", "deployer", 3);
         let value = serde_json::to_value(&step).unwrap();
         assert_eq!(value["name"], "Deploy");
         assert_eq!(value["agent_template"], "deployer");
         assert_eq!(value["order"], 3);
-        assert_eq!(value["skills"], serde_json::json!(["docker-deploy"]));
     }
 
     #[test]
@@ -2238,31 +2204,17 @@ mod tests {
         let json = r#"{
             "name": "Analyze",
             "agent_template": "analyzer",
-            "skills": ["static-analysis", "security-scan"],
             "order": 0
         }"#;
         let step: WorkflowStep = serde_json::from_str(json).unwrap();
         assert_eq!(step.name, "Analyze");
         assert_eq!(step.agent_template, "analyzer");
         assert_eq!(step.order, 0);
-        assert_eq!(step.skills.len(), 2);
-    }
-
-    #[test]
-    fn test_workflow_step_deserialize_without_skills() {
-        let json = r#"{
-            "name": "Simple Step",
-            "agent_template": "simple",
-            "order": 1
-        }"#;
-        let step: WorkflowStep = serde_json::from_str(json).unwrap();
-        assert_eq!(step.name, "Simple Step");
-        assert!(step.skills.is_empty(), "skills should default to empty");
     }
 
     #[test]
     fn test_workflow_step_clone_and_eq() {
-        let step = WorkflowStep::new("Clone Test", "cloner", 0).with_skill("skill1");
+        let step = WorkflowStep::new("Clone Test", "cloner", 0);
         let cloned = step.clone();
         assert_eq!(step, cloned);
     }
@@ -2379,8 +2331,8 @@ mod tests {
             "name": "Deserialized Workflow",
             "description": "A test workflow",
             "steps": [
-                {"name": "Step 1", "agent_template": "agent1", "skills": [], "order": 0},
-                {"name": "Step 2", "agent_template": "agent2", "skills": ["skill1"], "order": 1}
+                {"name": "Step 1", "agent_template": "agent1", "order": 0},
+                {"name": "Step 2", "agent_template": "agent2", "order": 1}
             ],
             "metadata": {"env": "production"}
         }"#;
@@ -2390,7 +2342,7 @@ mod tests {
         assert_eq!(workflow.description, Some("A test workflow".to_string()));
         assert_eq!(workflow.steps.len(), 2);
         assert_eq!(workflow.steps[0].name, "Step 1");
-        assert_eq!(workflow.steps[1].skills, vec!["skill1"]);
+        assert_eq!(workflow.steps[1].name, "Step 2");
         assert_eq!(
             workflow.metadata.get("env"),
             Some(&"production".to_string())
@@ -2431,10 +2383,10 @@ mod tests {
     fn test_workflow_builder_chain() {
         let workflow = Workflow::new("Full Pipeline")
             .with_description("Complete CI/CD pipeline")
-            .with_step(WorkflowStep::new("Lint", "linter", 0).with_skills(["eslint", "prettier"]))
-            .with_step(WorkflowStep::new("Test", "tester", 1).with_skill("jest"))
-            .with_step(WorkflowStep::new("Build", "builder", 2).with_skill("webpack"))
-            .with_step(WorkflowStep::new("Deploy", "deployer", 3).with_skills(["docker", "k8s"]))
+            .with_step(WorkflowStep::new("Lint", "linter", 0))
+            .with_step(WorkflowStep::new("Test", "tester", 1))
+            .with_step(WorkflowStep::new("Build", "builder", 2))
+            .with_step(WorkflowStep::new("Deploy", "deployer", 3))
             .with_metadata("version", "2.0")
             .with_metadata("team", "platform");
 
@@ -2472,7 +2424,7 @@ mod tests {
     fn test_workflow_serialize_deserialize_roundtrip() {
         let original = Workflow::new("Roundtrip Test")
             .with_description("Test roundtrip serialization")
-            .with_step(WorkflowStep::new("Step A", "agent_a", 0).with_skills(["skill1", "skill2"]))
+            .with_step(WorkflowStep::new("Step A", "agent_a", 0))
             .with_step(WorkflowStep::new("Step B", "agent_b", 1))
             .with_metadata("key1", "value1")
             .with_metadata("key2", "value2");
@@ -2485,8 +2437,7 @@ mod tests {
 
     #[test]
     fn test_workflow_step_serialize_deserialize_roundtrip() {
-        let original =
-            WorkflowStep::new("Roundtrip Step", "template", 5).with_skills(["a", "b", "c"]);
+        let original = WorkflowStep::new("Roundtrip Step", "template", 5);
 
         let json = serde_json::to_string(&original).unwrap();
         let deserialized: WorkflowStep = serde_json::from_str(&json).unwrap();
