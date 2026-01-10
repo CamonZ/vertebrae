@@ -1,8 +1,11 @@
 pub mod commands;
+pub mod events;
 pub mod types;
 
 use specta_typescript::Typescript;
-use tauri_specta::{collect_commands, Builder};
+use tauri_specta::{collect_commands, collect_events, Builder};
+
+use events::{TaskChangedEvent, WorkflowChangedEvent};
 
 /// Example command that will be exported with type definitions.
 /// This serves as a template for future Tauri commands.
@@ -24,17 +27,19 @@ pub fn export_bindings() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Create the tauri-specta builder with all commands registered.
+/// Create the tauri-specta builder with all commands and events registered.
 fn create_builder() -> Builder {
-    Builder::<tauri::Wry>::new().commands(collect_commands![
-        greet,
-        commands::list_tasks,
-        commands::get_task,
-        commands::get_task_hierarchy,
-        commands::list_workflows,
-        commands::get_workflow,
-        commands::get_workflow_with_tasks,
-    ])
+    Builder::<tauri::Wry>::new()
+        .commands(collect_commands![
+            greet,
+            commands::list_tasks,
+            commands::get_task,
+            commands::get_task_hierarchy,
+            commands::list_workflows,
+            commands::get_workflow,
+            commands::get_workflow_with_tasks,
+        ])
+        .events(collect_events![TaskChangedEvent, WorkflowChangedEvent])
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

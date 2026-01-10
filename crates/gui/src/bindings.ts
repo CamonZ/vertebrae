@@ -98,6 +98,13 @@ async getWorkflowWithTasks(id: string) : Promise<Result<WorkflowWithTasks, Comma
 /** user-defined events **/
 
 
+export const events = __makeEvents__<{
+taskChangedEvent: TaskChangedEvent,
+workflowChangedEvent: WorkflowChangedEvent
+}>({
+taskChangedEvent: "task-changed-event",
+workflowChangedEvent: "workflow-changed-event"
+})
 
 /** user-defined constants **/
 
@@ -294,6 +301,15 @@ workflow_id: string | null;
  */
 current_step: number | null }
 /**
+ * The type of change that occurred on a task.
+ */
+export type TaskChangeType = "Created" | "Updated" | "Deleted" | "StatusChanged"
+/**
+ * Event payload for task changes.
+ * Emitted when a task is created, updated, deleted, or its status changes.
+ */
+export type TaskChangedEvent = { task_id: string; change_type: TaskChangeType }
+/**
  * Filter options for listing tasks
  */
 export type TaskFilterOptions = { 
@@ -445,6 +461,15 @@ created_at: string | null;
  * Last update timestamp (ISO 8601 string)
  */
 updated_at: string | null }
+/**
+ * The type of change that occurred on a workflow.
+ */
+export type WorkflowChangeType = "Created" | "Updated" | "Deleted"
+/**
+ * Event payload for workflow changes.
+ * Emitted when a workflow is created, updated, or deleted.
+ */
+export type WorkflowChangedEvent = { workflow_id: string; change_type: WorkflowChangeType }
 /**
  * Workflow step - mirrors db::WorkflowStep
  */
