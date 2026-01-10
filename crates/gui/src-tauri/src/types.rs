@@ -363,3 +363,152 @@ impl From<TaskFilterOptions> for vertebrae_db::TaskFilter {
         filter
     }
 }
+
+// ============================================================================
+// Workflow Types
+// ============================================================================
+
+/// Permission mode for agent sessions - mirrors db::PermissionMode
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum PermissionMode {
+    AcceptEdits,
+    BypassPermissions,
+    Default,
+    Delegate,
+    DontAsk,
+    Plan,
+}
+
+impl From<vertebrae_db::PermissionMode> for PermissionMode {
+    fn from(mode: vertebrae_db::PermissionMode) -> Self {
+        match mode {
+            vertebrae_db::PermissionMode::AcceptEdits => PermissionMode::AcceptEdits,
+            vertebrae_db::PermissionMode::BypassPermissions => PermissionMode::BypassPermissions,
+            vertebrae_db::PermissionMode::Default => PermissionMode::Default,
+            vertebrae_db::PermissionMode::Delegate => PermissionMode::Delegate,
+            vertebrae_db::PermissionMode::DontAsk => PermissionMode::DontAsk,
+            vertebrae_db::PermissionMode::Plan => PermissionMode::Plan,
+        }
+    }
+}
+
+/// Agent configuration for workflow steps - mirrors db::AgentConfig
+#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
+pub struct AgentConfig {
+    /// Model for the current session
+    pub model: Option<String>,
+    /// Fallback model when default model is overloaded
+    pub fallback_model: Option<String>,
+    /// System prompt to use for the session
+    pub system_prompt: Option<String>,
+    /// Append a system prompt to the default system prompt
+    pub append_system_prompt: Option<String>,
+    /// JSON object defining custom agents (serialized as JSON string)
+    pub agents: Option<String>,
+    /// List of available tools from the built-in set
+    pub tools: Vec<String>,
+    /// List of tool names to allow
+    pub allowed_tools: Vec<String>,
+    /// List of tool names to deny
+    pub disallowed_tools: Vec<String>,
+    /// Permission mode to use for the session
+    pub permission_mode: Option<PermissionMode>,
+    /// Maximum dollar amount to spend on API calls
+    pub max_budget_usd: Option<f64>,
+    /// Paths to MCP server configuration files or JSON strings
+    pub mcp_config: Vec<String>,
+    /// Directories to load plugins from
+    pub plugin_dirs: Vec<String>,
+    /// JSON Schema for structured output validation (serialized as JSON string)
+    pub json_schema: Option<String>,
+}
+
+impl From<vertebrae_db::AgentConfig> for AgentConfig {
+    fn from(config: vertebrae_db::AgentConfig) -> Self {
+        AgentConfig {
+            model: config.model,
+            fallback_model: config.fallback_model,
+            system_prompt: config.system_prompt,
+            append_system_prompt: config.append_system_prompt,
+            agents: config.agents.map(|v| v.to_string()),
+            tools: config.tools,
+            allowed_tools: config.allowed_tools,
+            disallowed_tools: config.disallowed_tools,
+            permission_mode: config.permission_mode.map(Into::into),
+            max_budget_usd: config.max_budget_usd,
+            mcp_config: config.mcp_config,
+            plugin_dirs: config.plugin_dirs,
+            json_schema: config.json_schema.map(|v| v.to_string()),
+        }
+    }
+}
+
+/// Workflow step - mirrors db::WorkflowStep
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct WorkflowStep {
+    /// Display name for this step
+    pub name: String,
+    /// The agent configuration to use for this step
+    pub agent_config: AgentConfig,
+    /// Ordering index for sequential execution (0-based)
+    pub order: u32,
+}
+
+impl From<vertebrae_db::WorkflowStep> for WorkflowStep {
+    fn from(step: vertebrae_db::WorkflowStep) -> Self {
+        WorkflowStep {
+            name: step.name,
+            agent_config: step.agent_config.into(),
+            order: step.order,
+        }
+    }
+}
+
+/// Workflow - mirrors db::Workflow
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct Workflow {
+    /// Workflow ID (string form)
+    pub id: Option<String>,
+    /// Workflow name
+    pub name: String,
+    /// Optional description of the workflow
+    pub description: Option<String>,
+    /// Ordered list of workflow steps
+    pub steps: Vec<WorkflowStep>,
+    /// Additional metadata as key-value pairs
+    pub metadata: std::collections::HashMap<String, String>,
+    /// Workflow to assign to task when completing the last step
+    pub on_done_workflow: Option<String>,
+    /// Workflow to assign to task when rejected
+    pub on_reject_workflow: Option<String>,
+    /// Creation timestamp (ISO 8601 string)
+    pub created_at: Option<String>,
+    /// Last update timestamp (ISO 8601 string)
+    pub updated_at: Option<String>,
+}
+
+impl From<vertebrae_db::Workflow> for Workflow {
+    fn from(workflow: vertebrae_db::Workflow) -> Self {
+        Workflow {
+            id: workflow.id.map(|t| t.id.to_string()),
+            name: workflow.name,
+            description: workflow.description,
+            steps: workflow.steps.into_iter().map(Into::into).collect(),
+            metadata: workflow.metadata,
+            on_done_workflow: workflow.on_done_workflow,
+            on_reject_workflow: workflow.on_reject_workflow,
+            created_at: workflow.created_at.map(|dt| dt.to_rfc3339()),
+            updated_at: workflow.updated_at.map(|dt| dt.to_rfc3339()),
+        }
+    }
+}
+
+/// Workflow with its associated tasks
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct WorkflowWithTasks {
+    /// The workflow itself
+    pub workflow: Workflow,
+    /// Tasks associated with this workflow
+    pub tasks: Vec<TaskSummary>,
+}

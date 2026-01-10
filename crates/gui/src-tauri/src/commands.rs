@@ -1,9 +1,12 @@
-//! Tauri commands for task data access
+//! Tauri commands for task and workflow data access
 //!
-//! Implements list_tasks, get_task, and get_task_hierarchy commands
+//! Implements list_tasks, get_task, get_task_hierarchy, and workflow commands
 //! using the vertebrae-db repository pattern.
 
-use crate::types::{TaskFilterOptions, TaskHierarchyNode, TaskSummary, TaskWithRelations};
+use crate::types::{
+    TaskFilterOptions, TaskHierarchyNode, TaskSummary, TaskWithRelations, Workflow,
+    WorkflowWithTasks,
+};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -27,9 +30,15 @@ impl From<vertebrae_db::DbError> for CommandError {
 }
 
 impl CommandError {
-    pub fn not_found(id: &str) -> Self {
+    pub fn task_not_found(id: &str) -> Self {
         CommandError {
             message: format!("Task not found: {}", id),
+        }
+    }
+
+    pub fn workflow_not_found(id: &str) -> Self {
+        CommandError {
+            message: format!("Workflow not found: {}", id),
         }
     }
 }
@@ -63,7 +72,7 @@ pub async fn get_task(
         .tasks()
         .get(&id)
         .await?
-        .ok_or_else(|| CommandError::not_found(&id))?;
+        .ok_or_else(|| CommandError::task_not_found(&id))?;
 
     // Get relations
     let parent_id = state.db.relationships().get_parent(&id).await?;
@@ -96,7 +105,7 @@ pub async fn get_task_hierarchy(
             let node = build_hierarchy_node(&state.db, &id).await?;
             match node {
                 Some(n) => Ok(vec![n]),
-                None => Err(CommandError::not_found(&id)),
+                None => Err(CommandError::task_not_found(&id)),
             }
         }
         None => {
@@ -147,4 +156,85 @@ async fn build_hierarchy_node(
         }
         None => Ok(None),
     }
+}
+
+// ============================================================================
+// Workflow Commands
+// ============================================================================
+
+/// List all workflows
+///
+/// Returns a list of all workflows in the database.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_workflows(state: State<'_, AppState>) -> Result<Vec<Workflow>, CommandError> {
+    let workflows = state.db.workflows().list().await?;
+    Ok(workflows.into_iter().map(Into::into).collect())
+}
+
+/// Get a single workflow by ID
+///
+/// Returns the full workflow details including steps.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_workflow(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<Workflow, CommandError> {
+    let workflow = state
+        .db
+        .workflows()
+        .get(&id)
+        .await?
+        .ok_or_else(|| CommandError::workflow_not_found(&id))?;
+
+    Ok(workflow.into())
+}
+
+/// Get a workflow with its associated tasks
+///
+/// Returns the workflow along with all tasks that reference this workflow.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_workflow_with_tasks(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<WorkflowWithTasks, CommandError> {
+    // Get the workflow
+    let workflow = state
+        .db
+        .workflows()
+        .get(&id)
+        .await?
+        .ok_or_else(|| CommandError::workflow_not_found(&id))?;
+
+    // Get tasks associated with this workflow
+    // Use include_done to get all tasks regardless of status
+    let filter = vertebrae_db::TaskFilter::new().include_done();
+    let all_tasks = state.db.list_tasks().list(&filter).await?;
+
+    // Filter tasks that have this workflow_id
+    // Tasks store workflow_id as Thing, so we need to match the id portion
+    let workflow_id_str = workflow
+        .id
+        .as_ref()
+        .map(|t| t.id.to_string())
+        .unwrap_or_default();
+
+    // We need to get full tasks to check workflow_id since TaskSummary doesn't include it
+    let mut tasks = Vec::new();
+    for summary in all_tasks {
+        if let Ok(Some(task)) = state.db.tasks().get(&summary.id).await {
+            if let Some(ref wf_id) = task.workflow_id {
+                if wf_id.id.to_string() == workflow_id_str {
+                    tasks.push(summary.into());
+                }
+            }
+        }
+    }
+
+    Ok(WorkflowWithTasks {
+        workflow: workflow.into(),
+        tasks,
+    })
 }

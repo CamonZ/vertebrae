@@ -31,6 +31,9 @@ fn create_builder() -> Builder {
         commands::list_tasks,
         commands::get_task,
         commands::get_task_hierarchy,
+        commands::list_workflows,
+        commands::get_workflow,
+        commands::get_workflow_with_tasks,
     ])
 }
 

@@ -53,6 +53,45 @@ async getTaskHierarchy(rootId: string | null) : Promise<Result<TaskHierarchyNode
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+/**
+ * List all workflows
+ * 
+ * Returns a list of all workflows in the database.
+ */
+async listWorkflows() : Promise<Result<Workflow[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_workflows") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Get a single workflow by ID
+ * 
+ * Returns the full workflow details including steps.
+ */
+async getWorkflow(id: string) : Promise<Result<Workflow, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_workflow", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Get a workflow with its associated tasks
+ * 
+ * Returns the workflow along with all tasks that reference this workflow.
+ */
+async getWorkflowWithTasks(id: string) : Promise<Result<WorkflowWithTasks, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_workflow_with_tasks", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -66,6 +105,62 @@ async getTaskHierarchy(rootId: string | null) : Promise<Result<TaskHierarchyNode
 
 /** user-defined types **/
 
+/**
+ * Agent configuration for workflow steps - mirrors db::AgentConfig
+ */
+export type AgentConfig = { 
+/**
+ * Model for the current session
+ */
+model: string | null; 
+/**
+ * Fallback model when default model is overloaded
+ */
+fallback_model: string | null; 
+/**
+ * System prompt to use for the session
+ */
+system_prompt: string | null; 
+/**
+ * Append a system prompt to the default system prompt
+ */
+append_system_prompt: string | null; 
+/**
+ * JSON object defining custom agents (serialized as JSON string)
+ */
+agents: string | null; 
+/**
+ * List of available tools from the built-in set
+ */
+tools: string[]; 
+/**
+ * List of tool names to allow
+ */
+allowed_tools: string[]; 
+/**
+ * List of tool names to deny
+ */
+disallowed_tools: string[]; 
+/**
+ * Permission mode to use for the session
+ */
+permission_mode: PermissionMode | null; 
+/**
+ * Maximum dollar amount to spend on API calls
+ */
+max_budget_usd: number | null; 
+/**
+ * Paths to MCP server configuration files or JSON strings
+ */
+mcp_config: string[]; 
+/**
+ * Directories to load plugins from
+ */
+plugin_dirs: string[]; 
+/**
+ * JSON Schema for structured output validation (serialized as JSON string)
+ */
+json_schema: string | null }
 /**
  * Code reference - file location reference
  */
@@ -94,6 +189,10 @@ description: string | null }
  * Error response type for commands - simple string wrapper with specta support
  */
 export type CommandError = { message: string }
+/**
+ * Permission mode for agent sessions - mirrors db::PermissionMode
+ */
+export type PermissionMode = "accept_edits" | "bypass_permissions" | "default" | "delegate" | "dont_ask" | "plan"
 /**
  * Section content within a task
  */
@@ -306,6 +405,74 @@ depends_on_ids: string[];
  * Task IDs that depend on this task
  */
 dependent_ids: string[] }
+/**
+ * Workflow - mirrors db::Workflow
+ */
+export type Workflow = { 
+/**
+ * Workflow ID (string form)
+ */
+id: string | null; 
+/**
+ * Workflow name
+ */
+name: string; 
+/**
+ * Optional description of the workflow
+ */
+description: string | null; 
+/**
+ * Ordered list of workflow steps
+ */
+steps: WorkflowStep[]; 
+/**
+ * Additional metadata as key-value pairs
+ */
+metadata: Partial<{ [key in string]: string }>; 
+/**
+ * Workflow to assign to task when completing the last step
+ */
+on_done_workflow: string | null; 
+/**
+ * Workflow to assign to task when rejected
+ */
+on_reject_workflow: string | null; 
+/**
+ * Creation timestamp (ISO 8601 string)
+ */
+created_at: string | null; 
+/**
+ * Last update timestamp (ISO 8601 string)
+ */
+updated_at: string | null }
+/**
+ * Workflow step - mirrors db::WorkflowStep
+ */
+export type WorkflowStep = { 
+/**
+ * Display name for this step
+ */
+name: string; 
+/**
+ * The agent configuration to use for this step
+ */
+agent_config: AgentConfig; 
+/**
+ * Ordering index for sequential execution (0-based)
+ */
+order: number }
+/**
+ * Workflow with its associated tasks
+ */
+export type WorkflowWithTasks = { 
+/**
+ * The workflow itself
+ */
+workflow: Workflow; 
+/**
+ * Tasks associated with this workflow
+ */
+tasks: TaskSummary[] }
 
 /** tauri-specta globals **/
 
