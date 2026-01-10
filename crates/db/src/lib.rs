@@ -11,8 +11,8 @@ pub mod schema;
 pub use error::{DbError, DbResult, IncompleteChildInfo};
 #[allow(unused_imports)]
 pub use models::{
-    CodeRef, ExecutionStatus, Level, Priority, Section, SectionType, SessionLog, Status,
-    StepExecution, Task, Workflow, WorkflowStep,
+    AgentConfig, CodeRef, ExecutionStatus, Level, PermissionMode, Priority, Section, SectionType,
+    SessionLog, Status, StepExecution, Task, Workflow, WorkflowStep,
 };
 pub use repository::{
     BlockerNode, GraphQueries, MigrationResult, Progress, RelationshipRepository, SectionRule,

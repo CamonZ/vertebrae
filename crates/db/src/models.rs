@@ -957,6 +957,433 @@ impl PartialEq for SessionLog {
 
 impl Eq for SessionLog {}
 
+/// Permission mode for Claude CLI execution
+///
+/// Defines how permissions are handled during agent execution.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PermissionMode {
+    /// Accept all edit operations automatically
+    AcceptEdits,
+    /// Bypass all permission checks (dangerous - use only in sandboxes)
+    BypassPermissions,
+    /// Default permission handling with prompts
+    Default,
+    /// Delegate permission decisions
+    Delegate,
+    /// Never ask for permissions (may fail on operations requiring permission)
+    DontAsk,
+    /// Plan mode - suggest changes without executing
+    Plan,
+}
+
+impl PermissionMode {
+    /// Returns the string representation used in the CLI
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            PermissionMode::AcceptEdits => "acceptEdits",
+            PermissionMode::BypassPermissions => "bypassPermissions",
+            PermissionMode::Default => "default",
+            PermissionMode::Delegate => "delegate",
+            PermissionMode::DontAsk => "dontAsk",
+            PermissionMode::Plan => "plan",
+        }
+    }
+
+    /// Parse a permission mode string into a PermissionMode enum.
+    ///
+    /// Returns `None` if the string doesn't match any known mode.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "acceptEdits" => Some(PermissionMode::AcceptEdits),
+            "bypassPermissions" => Some(PermissionMode::BypassPermissions),
+            "default" => Some(PermissionMode::Default),
+            "delegate" => Some(PermissionMode::Delegate),
+            "dontAsk" => Some(PermissionMode::DontAsk),
+            "plan" => Some(PermissionMode::Plan),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for PermissionMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+/// Configuration for a Claude agent execution
+///
+/// AgentConfig captures all CLI-passable options that can be used when
+/// executing a workflow step via the Claude CLI. All fields are optional
+/// to allow partial configuration and merging with defaults.
+///
+/// # Example
+///
+/// ```rust
+/// use vertebrae_db::AgentConfig;
+///
+/// let config = AgentConfig::new()
+///     .with_model("sonnet")
+///     .with_system_prompt("You are a code reviewer")
+///     .with_allowed_tools(vec!["Read".to_string(), "Grep".to_string()]);
+///
+/// let args = config.to_cli_args();
+/// // args would be: ["--model", "sonnet", "--system-prompt", "You are a code reviewer", "--allowed-tools", "Read", "Grep"]
+/// ```
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AgentConfig {
+    /// Model for the current session (e.g., "sonnet", "opus", or full model name)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+
+    /// Fallback model when default model is overloaded
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fallback_model: Option<String>,
+
+    /// System prompt to use for the session
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_prompt: Option<String>,
+
+    /// Append a system prompt to the default system prompt
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub append_system_prompt: Option<String>,
+
+    /// JSON object defining custom agents
+    /// Example: {"reviewer": {"description": "Reviews code", "prompt": "You are a code reviewer"}}
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agents: Option<serde_json::Value>,
+
+    /// List of available tools from the built-in set
+    /// Use empty vec to disable all tools, or specify tool names (e.g., ["Bash", "Edit", "Read"])
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tools: Vec<String>,
+
+    /// List of tool names to allow (e.g., ["Bash(git:*)", "Edit"])
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_tools: Vec<String>,
+
+    /// List of tool names to deny (e.g., ["Bash(rm:*)", "Write"])
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub disallowed_tools: Vec<String>,
+
+    /// Permission mode to use for the session
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub permission_mode: Option<PermissionMode>,
+
+    /// Maximum dollar amount to spend on API calls
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_budget_usd: Option<f64>,
+
+    /// Paths to MCP server configuration files or JSON strings
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mcp_config: Vec<String>,
+
+    /// Directories to load plugins from
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub plugin_dirs: Vec<String>,
+
+    /// JSON Schema for structured output validation
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub json_schema: Option<serde_json::Value>,
+}
+
+impl AgentConfig {
+    /// Create a new empty AgentConfig
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the model for this configuration
+    pub fn with_model(mut self, model: impl Into<String>) -> Self {
+        self.model = Some(model.into());
+        self
+    }
+
+    /// Set the fallback model for this configuration
+    pub fn with_fallback_model(mut self, model: impl Into<String>) -> Self {
+        self.fallback_model = Some(model.into());
+        self
+    }
+
+    /// Set the system prompt for this configuration
+    pub fn with_system_prompt(mut self, prompt: impl Into<String>) -> Self {
+        self.system_prompt = Some(prompt.into());
+        self
+    }
+
+    /// Set the append system prompt for this configuration
+    pub fn with_append_system_prompt(mut self, prompt: impl Into<String>) -> Self {
+        self.append_system_prompt = Some(prompt.into());
+        self
+    }
+
+    /// Set the custom agents JSON for this configuration
+    pub fn with_agents(mut self, agents: serde_json::Value) -> Self {
+        self.agents = Some(agents);
+        self
+    }
+
+    /// Set the available tools for this configuration
+    pub fn with_tools(mut self, tools: Vec<String>) -> Self {
+        self.tools = tools;
+        self
+    }
+
+    /// Set the allowed tools for this configuration
+    pub fn with_allowed_tools(mut self, tools: Vec<String>) -> Self {
+        self.allowed_tools = tools;
+        self
+    }
+
+    /// Set the disallowed tools for this configuration
+    pub fn with_disallowed_tools(mut self, tools: Vec<String>) -> Self {
+        self.disallowed_tools = tools;
+        self
+    }
+
+    /// Set the permission mode for this configuration
+    pub fn with_permission_mode(mut self, mode: PermissionMode) -> Self {
+        self.permission_mode = Some(mode);
+        self
+    }
+
+    /// Set the maximum budget in USD for this configuration
+    pub fn with_max_budget_usd(mut self, budget: f64) -> Self {
+        self.max_budget_usd = Some(budget);
+        self
+    }
+
+    /// Set the MCP config paths for this configuration
+    pub fn with_mcp_config(mut self, configs: Vec<String>) -> Self {
+        self.mcp_config = configs;
+        self
+    }
+
+    /// Set the plugin directories for this configuration
+    pub fn with_plugin_dirs(mut self, dirs: Vec<String>) -> Self {
+        self.plugin_dirs = dirs;
+        self
+    }
+
+    /// Set the JSON schema for structured output for this configuration
+    pub fn with_json_schema(mut self, schema: serde_json::Value) -> Self {
+        self.json_schema = Some(schema);
+        self
+    }
+
+    /// Convert this configuration to Claude CLI arguments.
+    ///
+    /// Returns a vector of strings that can be passed to the Claude CLI.
+    /// Only fields that are set (Some or non-empty) will generate arguments.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use vertebrae_db::AgentConfig;
+    ///
+    /// let config = AgentConfig::new()
+    ///     .with_model("sonnet")
+    ///     .with_max_budget_usd(5.0);
+    ///
+    /// let args = config.to_cli_args();
+    /// assert_eq!(args, vec!["--model", "sonnet", "--max-budget-usd", "5"]);
+    /// ```
+    pub fn to_cli_args(&self) -> Vec<String> {
+        let mut args = Vec::new();
+
+        // Model
+        if let Some(ref model) = self.model {
+            args.push("--model".to_string());
+            args.push(model.clone());
+        }
+
+        // Fallback model
+        if let Some(ref model) = self.fallback_model {
+            args.push("--fallback-model".to_string());
+            args.push(model.clone());
+        }
+
+        // System prompt
+        if let Some(ref prompt) = self.system_prompt {
+            args.push("--system-prompt".to_string());
+            args.push(prompt.clone());
+        }
+
+        // Append system prompt
+        if let Some(ref prompt) = self.append_system_prompt {
+            args.push("--append-system-prompt".to_string());
+            args.push(prompt.clone());
+        }
+
+        // Agents JSON
+        if let Some(ref agents) = self.agents {
+            args.push("--agents".to_string());
+            args.push(agents.to_string());
+        }
+
+        // Tools
+        if !self.tools.is_empty() {
+            args.push("--tools".to_string());
+            args.extend(self.tools.iter().cloned());
+        }
+
+        // Allowed tools
+        if !self.allowed_tools.is_empty() {
+            args.push("--allowed-tools".to_string());
+            args.extend(self.allowed_tools.iter().cloned());
+        }
+
+        // Disallowed tools
+        if !self.disallowed_tools.is_empty() {
+            args.push("--disallowed-tools".to_string());
+            args.extend(self.disallowed_tools.iter().cloned());
+        }
+
+        // Permission mode
+        if let Some(ref mode) = self.permission_mode {
+            args.push("--permission-mode".to_string());
+            args.push(mode.as_str().to_string());
+        }
+
+        // Max budget USD
+        if let Some(budget) = self.max_budget_usd {
+            args.push("--max-budget-usd".to_string());
+            // Format without trailing zeros for cleaner output
+            args.push(format_float(budget));
+        }
+
+        // MCP config
+        for config in &self.mcp_config {
+            args.push("--mcp-config".to_string());
+            args.push(config.clone());
+        }
+
+        // Plugin dirs
+        for dir in &self.plugin_dirs {
+            args.push("--plugin-dir".to_string());
+            args.push(dir.clone());
+        }
+
+        // JSON schema
+        if let Some(ref schema) = self.json_schema {
+            args.push("--json-schema".to_string());
+            args.push(schema.to_string());
+        }
+
+        args
+    }
+
+    /// Check if this configuration is empty (all fields are None or empty)
+    pub fn is_empty(&self) -> bool {
+        self.model.is_none()
+            && self.fallback_model.is_none()
+            && self.system_prompt.is_none()
+            && self.append_system_prompt.is_none()
+            && self.agents.is_none()
+            && self.tools.is_empty()
+            && self.allowed_tools.is_empty()
+            && self.disallowed_tools.is_empty()
+            && self.permission_mode.is_none()
+            && self.max_budget_usd.is_none()
+            && self.mcp_config.is_empty()
+            && self.plugin_dirs.is_empty()
+            && self.json_schema.is_none()
+    }
+
+    /// Merge another config into this one.
+    ///
+    /// The other config's values take precedence over this config's values.
+    /// For Vec fields, the other config's values replace this config's values
+    /// if the other config's Vec is non-empty.
+    pub fn merge(mut self, other: AgentConfig) -> Self {
+        if other.model.is_some() {
+            self.model = other.model;
+        }
+        if other.fallback_model.is_some() {
+            self.fallback_model = other.fallback_model;
+        }
+        if other.system_prompt.is_some() {
+            self.system_prompt = other.system_prompt;
+        }
+        if other.append_system_prompt.is_some() {
+            self.append_system_prompt = other.append_system_prompt;
+        }
+        if other.agents.is_some() {
+            self.agents = other.agents;
+        }
+        if !other.tools.is_empty() {
+            self.tools = other.tools;
+        }
+        if !other.allowed_tools.is_empty() {
+            self.allowed_tools = other.allowed_tools;
+        }
+        if !other.disallowed_tools.is_empty() {
+            self.disallowed_tools = other.disallowed_tools;
+        }
+        if other.permission_mode.is_some() {
+            self.permission_mode = other.permission_mode;
+        }
+        if other.max_budget_usd.is_some() {
+            self.max_budget_usd = other.max_budget_usd;
+        }
+        if !other.mcp_config.is_empty() {
+            self.mcp_config = other.mcp_config;
+        }
+        if !other.plugin_dirs.is_empty() {
+            self.plugin_dirs = other.plugin_dirs;
+        }
+        if other.json_schema.is_some() {
+            self.json_schema = other.json_schema;
+        }
+        self
+    }
+}
+
+impl PartialEq for AgentConfig {
+    fn eq(&self, other: &Self) -> bool {
+        self.model == other.model
+            && self.fallback_model == other.fallback_model
+            && self.system_prompt == other.system_prompt
+            && self.append_system_prompt == other.append_system_prompt
+            && self.agents == other.agents
+            && self.tools == other.tools
+            && self.allowed_tools == other.allowed_tools
+            && self.disallowed_tools == other.disallowed_tools
+            && self.permission_mode == other.permission_mode
+            && float_option_eq(self.max_budget_usd, other.max_budget_usd)
+            && self.mcp_config == other.mcp_config
+            && self.plugin_dirs == other.plugin_dirs
+            && self.json_schema == other.json_schema
+    }
+}
+
+impl Eq for AgentConfig {}
+
+/// Compare two optional f64 values for equality, handling NaN correctly
+fn float_option_eq(a: Option<f64>, b: Option<f64>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(x), Some(y)) => {
+            // Use total_cmp for consistent ordering that handles NaN
+            x.total_cmp(&y) == std::cmp::Ordering::Equal
+        }
+        _ => false,
+    }
+}
+
+/// Format a float without unnecessary trailing zeros
+fn format_float(value: f64) -> String {
+    // Check if the value is a whole number
+    if value.fract() == 0.0 {
+        format!("{:.0}", value)
+    } else {
+        // Remove trailing zeros
+        let s = format!("{}", value);
+        s.trim_end_matches('0').trim_end_matches('.').to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3017,5 +3444,495 @@ mod tests {
         let debug_str = format!("{:?}", log);
         assert!(debug_str.contains("SessionLog"));
         assert!(debug_str.contains("Debug content"));
+    }
+
+    // ========================================
+    // PermissionMode enum tests
+    // ========================================
+
+    #[test]
+    fn test_permission_mode_as_str() {
+        assert_eq!(PermissionMode::AcceptEdits.as_str(), "acceptEdits");
+        assert_eq!(
+            PermissionMode::BypassPermissions.as_str(),
+            "bypassPermissions"
+        );
+        assert_eq!(PermissionMode::Default.as_str(), "default");
+        assert_eq!(PermissionMode::Delegate.as_str(), "delegate");
+        assert_eq!(PermissionMode::DontAsk.as_str(), "dontAsk");
+        assert_eq!(PermissionMode::Plan.as_str(), "plan");
+    }
+
+    #[test]
+    fn test_permission_mode_display() {
+        assert_eq!(format!("{}", PermissionMode::AcceptEdits), "acceptEdits");
+        assert_eq!(
+            format!("{}", PermissionMode::BypassPermissions),
+            "bypassPermissions"
+        );
+        assert_eq!(format!("{}", PermissionMode::Default), "default");
+        assert_eq!(format!("{}", PermissionMode::Delegate), "delegate");
+        assert_eq!(format!("{}", PermissionMode::DontAsk), "dontAsk");
+        assert_eq!(format!("{}", PermissionMode::Plan), "plan");
+    }
+
+    #[test]
+    fn test_permission_mode_parse() {
+        assert_eq!(
+            PermissionMode::parse("acceptEdits"),
+            Some(PermissionMode::AcceptEdits)
+        );
+        assert_eq!(
+            PermissionMode::parse("bypassPermissions"),
+            Some(PermissionMode::BypassPermissions)
+        );
+        assert_eq!(
+            PermissionMode::parse("default"),
+            Some(PermissionMode::Default)
+        );
+        assert_eq!(
+            PermissionMode::parse("delegate"),
+            Some(PermissionMode::Delegate)
+        );
+        assert_eq!(
+            PermissionMode::parse("dontAsk"),
+            Some(PermissionMode::DontAsk)
+        );
+        assert_eq!(PermissionMode::parse("plan"), Some(PermissionMode::Plan));
+        assert_eq!(PermissionMode::parse("invalid"), None);
+        assert_eq!(PermissionMode::parse(""), None);
+    }
+
+    #[test]
+    fn test_permission_mode_serialize() {
+        assert_eq!(
+            serde_json::to_string(&PermissionMode::AcceptEdits).unwrap(),
+            "\"acceptEdits\""
+        );
+        assert_eq!(
+            serde_json::to_string(&PermissionMode::BypassPermissions).unwrap(),
+            "\"bypassPermissions\""
+        );
+        assert_eq!(
+            serde_json::to_string(&PermissionMode::Default).unwrap(),
+            "\"default\""
+        );
+        assert_eq!(
+            serde_json::to_string(&PermissionMode::Delegate).unwrap(),
+            "\"delegate\""
+        );
+        assert_eq!(
+            serde_json::to_string(&PermissionMode::DontAsk).unwrap(),
+            "\"dontAsk\""
+        );
+        assert_eq!(
+            serde_json::to_string(&PermissionMode::Plan).unwrap(),
+            "\"plan\""
+        );
+    }
+
+    #[test]
+    fn test_permission_mode_deserialize() {
+        assert_eq!(
+            serde_json::from_str::<PermissionMode>("\"acceptEdits\"").unwrap(),
+            PermissionMode::AcceptEdits
+        );
+        assert_eq!(
+            serde_json::from_str::<PermissionMode>("\"bypassPermissions\"").unwrap(),
+            PermissionMode::BypassPermissions
+        );
+        assert_eq!(
+            serde_json::from_str::<PermissionMode>("\"default\"").unwrap(),
+            PermissionMode::Default
+        );
+        assert_eq!(
+            serde_json::from_str::<PermissionMode>("\"delegate\"").unwrap(),
+            PermissionMode::Delegate
+        );
+        assert_eq!(
+            serde_json::from_str::<PermissionMode>("\"dontAsk\"").unwrap(),
+            PermissionMode::DontAsk
+        );
+        assert_eq!(
+            serde_json::from_str::<PermissionMode>("\"plan\"").unwrap(),
+            PermissionMode::Plan
+        );
+    }
+
+    #[test]
+    fn test_permission_mode_clone_and_eq() {
+        let mode = PermissionMode::AcceptEdits;
+        let cloned = mode.clone();
+        assert_eq!(mode, cloned);
+    }
+
+    // ========================================
+    // AgentConfig struct tests
+    // ========================================
+
+    #[test]
+    fn test_agent_config_new_creates_empty() {
+        let config = AgentConfig::new();
+        assert!(config.is_empty());
+        assert_eq!(config.model, None);
+        assert_eq!(config.fallback_model, None);
+        assert_eq!(config.system_prompt, None);
+        assert_eq!(config.append_system_prompt, None);
+        assert_eq!(config.agents, None);
+        assert!(config.tools.is_empty());
+        assert!(config.allowed_tools.is_empty());
+        assert!(config.disallowed_tools.is_empty());
+        assert_eq!(config.permission_mode, None);
+        assert_eq!(config.max_budget_usd, None);
+        assert!(config.mcp_config.is_empty());
+        assert!(config.plugin_dirs.is_empty());
+        assert_eq!(config.json_schema, None);
+    }
+
+    #[test]
+    fn test_agent_config_default_creates_empty() {
+        let config = AgentConfig::default();
+        assert!(config.is_empty());
+    }
+
+    #[test]
+    fn test_agent_config_builder_methods() {
+        let config = AgentConfig::new()
+            .with_model("sonnet")
+            .with_fallback_model("haiku")
+            .with_system_prompt("You are helpful")
+            .with_append_system_prompt("Be concise")
+            .with_tools(vec!["Bash".to_string(), "Edit".to_string()])
+            .with_allowed_tools(vec!["Bash(git:*)".to_string()])
+            .with_disallowed_tools(vec!["Bash(rm:*)".to_string()])
+            .with_permission_mode(PermissionMode::AcceptEdits)
+            .with_max_budget_usd(10.5)
+            .with_mcp_config(vec!["config.json".to_string()])
+            .with_plugin_dirs(vec!["/plugins".to_string()]);
+
+        assert_eq!(config.model, Some("sonnet".to_string()));
+        assert_eq!(config.fallback_model, Some("haiku".to_string()));
+        assert_eq!(config.system_prompt, Some("You are helpful".to_string()));
+        assert_eq!(config.append_system_prompt, Some("Be concise".to_string()));
+        assert_eq!(config.tools, vec!["Bash", "Edit"]);
+        assert_eq!(config.allowed_tools, vec!["Bash(git:*)"]);
+        assert_eq!(config.disallowed_tools, vec!["Bash(rm:*)"]);
+        assert_eq!(config.permission_mode, Some(PermissionMode::AcceptEdits));
+        assert_eq!(config.max_budget_usd, Some(10.5));
+        assert_eq!(config.mcp_config, vec!["config.json"]);
+        assert_eq!(config.plugin_dirs, vec!["/plugins"]);
+    }
+
+    #[test]
+    fn test_agent_config_with_agents() {
+        let agents_json = serde_json::json!({
+            "reviewer": {
+                "description": "Reviews code",
+                "prompt": "You are a code reviewer"
+            }
+        });
+        let config = AgentConfig::new().with_agents(agents_json.clone());
+        assert_eq!(config.agents, Some(agents_json));
+    }
+
+    #[test]
+    fn test_agent_config_with_json_schema() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"}
+            },
+            "required": ["name"]
+        });
+        let config = AgentConfig::new().with_json_schema(schema.clone());
+        assert_eq!(config.json_schema, Some(schema));
+    }
+
+    #[test]
+    fn test_agent_config_to_cli_args_empty() {
+        let config = AgentConfig::new();
+        let args = config.to_cli_args();
+        assert!(args.is_empty());
+    }
+
+    #[test]
+    fn test_agent_config_to_cli_args_model() {
+        let config = AgentConfig::new().with_model("sonnet");
+        let args = config.to_cli_args();
+        assert_eq!(args, vec!["--model", "sonnet"]);
+    }
+
+    #[test]
+    fn test_agent_config_to_cli_args_fallback_model() {
+        let config = AgentConfig::new().with_fallback_model("haiku");
+        let args = config.to_cli_args();
+        assert_eq!(args, vec!["--fallback-model", "haiku"]);
+    }
+
+    #[test]
+    fn test_agent_config_to_cli_args_system_prompt() {
+        let config = AgentConfig::new().with_system_prompt("You are helpful");
+        let args = config.to_cli_args();
+        assert_eq!(args, vec!["--system-prompt", "You are helpful"]);
+    }
+
+    #[test]
+    fn test_agent_config_to_cli_args_append_system_prompt() {
+        let config = AgentConfig::new().with_append_system_prompt("Be concise");
+        let args = config.to_cli_args();
+        assert_eq!(args, vec!["--append-system-prompt", "Be concise"]);
+    }
+
+    #[test]
+    fn test_agent_config_to_cli_args_agents() {
+        let agents = serde_json::json!({"test": "value"});
+        let config = AgentConfig::new().with_agents(agents);
+        let args = config.to_cli_args();
+        assert_eq!(args, vec!["--agents", "{\"test\":\"value\"}"]);
+    }
+
+    #[test]
+    fn test_agent_config_to_cli_args_tools() {
+        let config = AgentConfig::new().with_tools(vec!["Bash".to_string(), "Edit".to_string()]);
+        let args = config.to_cli_args();
+        assert_eq!(args, vec!["--tools", "Bash", "Edit"]);
+    }
+
+    #[test]
+    fn test_agent_config_to_cli_args_allowed_tools() {
+        let config = AgentConfig::new()
+            .with_allowed_tools(vec!["Bash(git:*)".to_string(), "Read".to_string()]);
+        let args = config.to_cli_args();
+        assert_eq!(args, vec!["--allowed-tools", "Bash(git:*)", "Read"]);
+    }
+
+    #[test]
+    fn test_agent_config_to_cli_args_disallowed_tools() {
+        let config = AgentConfig::new().with_disallowed_tools(vec!["Bash(rm:*)".to_string()]);
+        let args = config.to_cli_args();
+        assert_eq!(args, vec!["--disallowed-tools", "Bash(rm:*)"]);
+    }
+
+    #[test]
+    fn test_agent_config_to_cli_args_permission_mode() {
+        let config = AgentConfig::new().with_permission_mode(PermissionMode::AcceptEdits);
+        let args = config.to_cli_args();
+        assert_eq!(args, vec!["--permission-mode", "acceptEdits"]);
+    }
+
+    #[test]
+    fn test_agent_config_to_cli_args_max_budget_whole_number() {
+        let config = AgentConfig::new().with_max_budget_usd(5.0);
+        let args = config.to_cli_args();
+        assert_eq!(args, vec!["--max-budget-usd", "5"]);
+    }
+
+    #[test]
+    fn test_agent_config_to_cli_args_max_budget_decimal() {
+        let config = AgentConfig::new().with_max_budget_usd(5.5);
+        let args = config.to_cli_args();
+        assert_eq!(args, vec!["--max-budget-usd", "5.5"]);
+    }
+
+    #[test]
+    fn test_agent_config_to_cli_args_mcp_config() {
+        let config = AgentConfig::new()
+            .with_mcp_config(vec!["config1.json".to_string(), "config2.json".to_string()]);
+        let args = config.to_cli_args();
+        assert_eq!(
+            args,
+            vec![
+                "--mcp-config",
+                "config1.json",
+                "--mcp-config",
+                "config2.json"
+            ]
+        );
+    }
+
+    #[test]
+    fn test_agent_config_to_cli_args_plugin_dirs() {
+        let config = AgentConfig::new().with_plugin_dirs(vec!["/path/to/plugins".to_string()]);
+        let args = config.to_cli_args();
+        assert_eq!(args, vec!["--plugin-dir", "/path/to/plugins"]);
+    }
+
+    #[test]
+    fn test_agent_config_to_cli_args_json_schema() {
+        let schema = serde_json::json!({"type": "string"});
+        let config = AgentConfig::new().with_json_schema(schema);
+        let args = config.to_cli_args();
+        assert_eq!(args, vec!["--json-schema", "{\"type\":\"string\"}"]);
+    }
+
+    #[test]
+    fn test_agent_config_to_cli_args_multiple_fields() {
+        let config = AgentConfig::new()
+            .with_model("sonnet")
+            .with_max_budget_usd(5.0)
+            .with_permission_mode(PermissionMode::Default);
+        let args = config.to_cli_args();
+        assert_eq!(
+            args,
+            vec![
+                "--model",
+                "sonnet",
+                "--permission-mode",
+                "default",
+                "--max-budget-usd",
+                "5"
+            ]
+        );
+    }
+
+    #[test]
+    fn test_agent_config_is_empty_false_with_model() {
+        let config = AgentConfig::new().with_model("sonnet");
+        assert!(!config.is_empty());
+    }
+
+    #[test]
+    fn test_agent_config_is_empty_false_with_tools() {
+        let config = AgentConfig::new().with_tools(vec!["Bash".to_string()]);
+        assert!(!config.is_empty());
+    }
+
+    #[test]
+    fn test_agent_config_merge_empty_configs() {
+        let base = AgentConfig::new();
+        let other = AgentConfig::new();
+        let merged = base.merge(other);
+        assert!(merged.is_empty());
+    }
+
+    #[test]
+    fn test_agent_config_merge_other_takes_precedence() {
+        let base = AgentConfig::new()
+            .with_model("sonnet")
+            .with_max_budget_usd(5.0);
+        let other = AgentConfig::new()
+            .with_model("opus")
+            .with_system_prompt("New prompt");
+        let merged = base.merge(other);
+        assert_eq!(merged.model, Some("opus".to_string()));
+        assert_eq!(merged.system_prompt, Some("New prompt".to_string()));
+        assert_eq!(merged.max_budget_usd, Some(5.0)); // Preserved from base
+    }
+
+    #[test]
+    fn test_agent_config_merge_vec_fields_replace() {
+        let base = AgentConfig::new().with_tools(vec!["Bash".to_string(), "Edit".to_string()]);
+        let other = AgentConfig::new().with_tools(vec!["Read".to_string()]);
+        let merged = base.merge(other);
+        assert_eq!(merged.tools, vec!["Read"]);
+    }
+
+    #[test]
+    fn test_agent_config_merge_empty_vec_preserves_base() {
+        let base = AgentConfig::new().with_tools(vec!["Bash".to_string(), "Edit".to_string()]);
+        let other = AgentConfig::new(); // tools is empty
+        let merged = base.merge(other);
+        assert_eq!(merged.tools, vec!["Bash", "Edit"]);
+    }
+
+    #[test]
+    fn test_agent_config_serialize_empty() {
+        let config = AgentConfig::new();
+        let json = serde_json::to_string(&config).unwrap();
+        // Empty config should serialize to minimal JSON
+        assert_eq!(json, "{}");
+    }
+
+    #[test]
+    fn test_agent_config_serialize_with_values() {
+        let config = AgentConfig::new()
+            .with_model("sonnet")
+            .with_permission_mode(PermissionMode::AcceptEdits);
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(json.contains("\"model\":\"sonnet\""));
+        assert!(json.contains("\"permission_mode\":\"acceptEdits\""));
+    }
+
+    #[test]
+    fn test_agent_config_deserialize() {
+        let json = r#"{"model":"sonnet","max_budget_usd":10.5}"#;
+        let config: AgentConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.model, Some("sonnet".to_string()));
+        assert_eq!(config.max_budget_usd, Some(10.5));
+        assert!(config.system_prompt.is_none());
+    }
+
+    #[test]
+    fn test_agent_config_deserialize_with_tools() {
+        let json = r#"{"tools":["Bash","Edit"],"allowed_tools":["Read"]}"#;
+        let config: AgentConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.tools, vec!["Bash", "Edit"]);
+        assert_eq!(config.allowed_tools, vec!["Read"]);
+    }
+
+    #[test]
+    fn test_agent_config_deserialize_with_permission_mode() {
+        let json = r#"{"permission_mode":"dontAsk"}"#;
+        let config: AgentConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.permission_mode, Some(PermissionMode::DontAsk));
+    }
+
+    #[test]
+    fn test_agent_config_roundtrip() {
+        let original = AgentConfig::new()
+            .with_model("sonnet")
+            .with_fallback_model("haiku")
+            .with_system_prompt("Test prompt")
+            .with_append_system_prompt("Append")
+            .with_tools(vec!["Bash".to_string()])
+            .with_allowed_tools(vec!["Read".to_string()])
+            .with_disallowed_tools(vec!["Write".to_string()])
+            .with_permission_mode(PermissionMode::Plan)
+            .with_max_budget_usd(25.5)
+            .with_mcp_config(vec!["mcp.json".to_string()])
+            .with_plugin_dirs(vec!["/plugins".to_string()])
+            .with_agents(serde_json::json!({"test": "agent"}))
+            .with_json_schema(serde_json::json!({"type": "object"}));
+
+        let json = serde_json::to_string(&original).unwrap();
+        let deserialized: AgentConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(original, deserialized);
+    }
+
+    #[test]
+    fn test_agent_config_clone_and_eq() {
+        let config = AgentConfig::new()
+            .with_model("sonnet")
+            .with_permission_mode(PermissionMode::Default);
+        let cloned = config.clone();
+        assert_eq!(config, cloned);
+    }
+
+    #[test]
+    fn test_agent_config_debug() {
+        let config = AgentConfig::new().with_model("sonnet");
+        let debug_str = format!("{:?}", config);
+        assert!(debug_str.contains("AgentConfig"));
+        assert!(debug_str.contains("sonnet"));
+    }
+
+    #[test]
+    fn test_format_float_whole_number() {
+        assert_eq!(format_float(5.0), "5");
+        assert_eq!(format_float(100.0), "100");
+        assert_eq!(format_float(0.0), "0");
+    }
+
+    #[test]
+    fn test_format_float_decimal() {
+        assert_eq!(format_float(5.5), "5.5");
+        assert_eq!(format_float(10.25), "10.25");
+        assert_eq!(format_float(0.1), "0.1");
+    }
+
+    #[test]
+    fn test_format_float_removes_trailing_zeros() {
+        assert_eq!(format_float(5.50), "5.5");
+        assert_eq!(format_float(10.100), "10.1");
     }
 }
