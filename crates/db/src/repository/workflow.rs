@@ -420,6 +420,195 @@ impl<'a> WorkflowRepository<'a> {
         }
     }
 
+    /// Add a skill to a specific step in a workflow.
+    ///
+    /// # Arguments
+    ///
+    /// * `workflow_id` - The workflow ID
+    /// * `step_name` - The name of the step to add the skill to
+    /// * `skill` - The skill name to add
+    ///
+    /// # Errors
+    ///
+    /// Returns `DbError::NotFound` if the workflow or step doesn't exist.
+    /// Returns `DbError::ValidationError` if the skill already exists on the step.
+    pub async fn add_skill_to_step(
+        &self,
+        workflow_id: &str,
+        step_name: &str,
+        skill: &str,
+    ) -> DbResult<()> {
+        debug!(
+            "Adding skill '{}' to step '{}' in workflow '{}'",
+            skill, step_name, workflow_id
+        );
+
+        // Get the workflow
+        let workflow = self.get(workflow_id).await?;
+        let mut workflow = match workflow {
+            Some(w) => w,
+            None => {
+                return Err(DbError::NotFound {
+                    entity: "workflow".to_string(),
+                    id: workflow_id.to_string(),
+                });
+            }
+        };
+
+        // Find the step by name
+        let step = workflow.steps.iter_mut().find(|s| s.name == step_name);
+        let step = match step {
+            Some(s) => s,
+            None => {
+                return Err(DbError::NotFound {
+                    entity: "step".to_string(),
+                    id: format!("{}:{}", workflow_id, step_name),
+                });
+            }
+        };
+
+        // Check if skill already exists
+        if step.skills.contains(&skill.to_string()) {
+            return Err(DbError::ValidationError {
+                message: format!(
+                    "skill '{}' already exists on step '{}' in workflow '{}'",
+                    skill, step_name, workflow_id
+                ),
+            });
+        }
+
+        // Add the skill
+        step.skills.push(skill.to_string());
+
+        // Update the workflow with the modified steps
+        let updates = WorkflowUpdate::new().with_steps(workflow.steps);
+        self.update(workflow_id, &updates).await?;
+
+        debug!(
+            "Successfully added skill '{}' to step '{}' in workflow '{}'",
+            skill, step_name, workflow_id
+        );
+        Ok(())
+    }
+
+    /// Remove a skill from a specific step in a workflow.
+    ///
+    /// # Arguments
+    ///
+    /// * `workflow_id` - The workflow ID
+    /// * `step_name` - The name of the step to remove the skill from
+    /// * `skill` - The skill name to remove
+    ///
+    /// # Errors
+    ///
+    /// Returns `DbError::NotFound` if the workflow, step, or skill doesn't exist.
+    pub async fn remove_skill_from_step(
+        &self,
+        workflow_id: &str,
+        step_name: &str,
+        skill: &str,
+    ) -> DbResult<()> {
+        debug!(
+            "Removing skill '{}' from step '{}' in workflow '{}'",
+            skill, step_name, workflow_id
+        );
+
+        // Get the workflow
+        let workflow = self.get(workflow_id).await?;
+        let mut workflow = match workflow {
+            Some(w) => w,
+            None => {
+                return Err(DbError::NotFound {
+                    entity: "workflow".to_string(),
+                    id: workflow_id.to_string(),
+                });
+            }
+        };
+
+        // Find the step by name
+        let step = workflow.steps.iter_mut().find(|s| s.name == step_name);
+        let step = match step {
+            Some(s) => s,
+            None => {
+                return Err(DbError::NotFound {
+                    entity: "step".to_string(),
+                    id: format!("{}:{}", workflow_id, step_name),
+                });
+            }
+        };
+
+        // Find and remove the skill
+        let skill_pos = step.skills.iter().position(|s| s == skill);
+        match skill_pos {
+            Some(pos) => {
+                step.skills.remove(pos);
+            }
+            None => {
+                return Err(DbError::NotFound {
+                    entity: "skill".to_string(),
+                    id: format!("{}:{}:{}", workflow_id, step_name, skill),
+                });
+            }
+        }
+
+        // Update the workflow with the modified steps
+        let updates = WorkflowUpdate::new().with_steps(workflow.steps);
+        self.update(workflow_id, &updates).await?;
+
+        debug!(
+            "Successfully removed skill '{}' from step '{}' in workflow '{}'",
+            skill, step_name, workflow_id
+        );
+        Ok(())
+    }
+
+    /// Get the skills for a specific step in a workflow.
+    ///
+    /// # Arguments
+    ///
+    /// * `workflow_id` - The workflow ID
+    /// * `step_name` - The name of the step
+    ///
+    /// # Returns
+    ///
+    /// A vector of skill names for the step.
+    ///
+    /// # Errors
+    ///
+    /// Returns `DbError::NotFound` if the workflow or step doesn't exist.
+    pub async fn get_step_skills(
+        &self,
+        workflow_id: &str,
+        step_name: &str,
+    ) -> DbResult<Vec<String>> {
+        debug!(
+            "Getting skills for step '{}' in workflow '{}'",
+            step_name, workflow_id
+        );
+
+        // Get the workflow
+        let workflow = self.get(workflow_id).await?;
+        let workflow = match workflow {
+            Some(w) => w,
+            None => {
+                return Err(DbError::NotFound {
+                    entity: "workflow".to_string(),
+                    id: workflow_id.to_string(),
+                });
+            }
+        };
+
+        // Find the step by name
+        let step = workflow.steps.iter().find(|s| s.name == step_name);
+        match step {
+            Some(s) => Ok(s.skills.clone()),
+            None => Err(DbError::NotFound {
+                entity: "step".to_string(),
+                id: format!("{}:{}", workflow_id, step_name),
+            }),
+        }
+    }
+
     /// Create the default workflow if it doesn't already exist.
     ///
     /// The default workflow matches the standard task status flow:
@@ -1417,5 +1606,287 @@ mod tests {
         assert!(!empty_result.has_migrations());
         assert!(!empty_result.has_skipped());
         assert_eq!(empty_result.total(), 0);
+    }
+
+    // ========================================
+    // Step skills tests
+    // ========================================
+
+    #[tokio::test]
+    async fn test_add_skill_to_step() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = WorkflowRepository::new(db.client());
+
+        // Create a workflow with a step without skills
+        let workflow =
+            Workflow::new("Skills Test").with_step(WorkflowStep::new("review", "reviewer", 0));
+        repo.create("skills_test", &workflow).await.unwrap();
+
+        // Add a skill to the step
+        repo.add_skill_to_step("skills_test", "review", "code-analysis")
+            .await
+            .unwrap();
+
+        // Verify skill was added
+        let updated = repo.get("skills_test").await.unwrap().unwrap();
+        assert_eq!(updated.steps[0].skills, vec!["code-analysis"]);
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_add_multiple_skills_to_step() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = WorkflowRepository::new(db.client());
+
+        let workflow =
+            Workflow::new("Multi Skills").with_step(WorkflowStep::new("build", "builder", 0));
+        repo.create("multi_skills", &workflow).await.unwrap();
+
+        // Add multiple skills
+        repo.add_skill_to_step("multi_skills", "build", "cargo-build")
+            .await
+            .unwrap();
+        repo.add_skill_to_step("multi_skills", "build", "cargo-test")
+            .await
+            .unwrap();
+        repo.add_skill_to_step("multi_skills", "build", "cargo-clippy")
+            .await
+            .unwrap();
+
+        let updated = repo.get("multi_skills").await.unwrap().unwrap();
+        assert_eq!(updated.steps[0].skills.len(), 3);
+        assert!(updated.steps[0].skills.contains(&"cargo-build".to_string()));
+        assert!(updated.steps[0].skills.contains(&"cargo-test".to_string()));
+        assert!(
+            updated.steps[0]
+                .skills
+                .contains(&"cargo-clippy".to_string())
+        );
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_add_skill_to_nonexistent_workflow_fails() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = WorkflowRepository::new(db.client());
+
+        let result = repo.add_skill_to_step("nonexistent", "step", "skill").await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DbError::NotFound { entity, id } => {
+                assert_eq!(entity, "workflow");
+                assert_eq!(id, "nonexistent");
+            }
+            e => panic!("Expected NotFound error, got: {:?}", e),
+        }
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_add_skill_to_nonexistent_step_fails() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = WorkflowRepository::new(db.client());
+
+        let workflow =
+            Workflow::new("Step Test").with_step(WorkflowStep::new("existing", "agent", 0));
+        repo.create("step_test", &workflow).await.unwrap();
+
+        let result = repo
+            .add_skill_to_step("step_test", "nonexistent", "skill")
+            .await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DbError::NotFound { entity, id } => {
+                assert_eq!(entity, "step");
+                assert_eq!(id, "step_test:nonexistent");
+            }
+            e => panic!("Expected NotFound error, got: {:?}", e),
+        }
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_add_duplicate_skill_fails() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = WorkflowRepository::new(db.client());
+
+        let workflow = Workflow::new("Duplicate Test")
+            .with_step(WorkflowStep::new("step1", "agent", 0).with_skill("existing-skill"));
+        repo.create("dup_test", &workflow).await.unwrap();
+
+        let result = repo
+            .add_skill_to_step("dup_test", "step1", "existing-skill")
+            .await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DbError::ValidationError { message } => {
+                assert!(message.contains("already exists"));
+                assert!(message.contains("existing-skill"));
+            }
+            e => panic!("Expected ValidationError, got: {:?}", e),
+        }
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_remove_skill_from_step() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = WorkflowRepository::new(db.client());
+
+        let workflow = Workflow::new("Remove Test")
+            .with_step(WorkflowStep::new("step1", "agent", 0).with_skills(["skill1", "skill2"]));
+        repo.create("remove_test", &workflow).await.unwrap();
+
+        // Remove one skill
+        repo.remove_skill_from_step("remove_test", "step1", "skill1")
+            .await
+            .unwrap();
+
+        let updated = repo.get("remove_test").await.unwrap().unwrap();
+        assert_eq!(updated.steps[0].skills, vec!["skill2"]);
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_remove_last_skill_from_step() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = WorkflowRepository::new(db.client());
+
+        let workflow = Workflow::new("Remove Last Test")
+            .with_step(WorkflowStep::new("step1", "agent", 0).with_skill("only-skill"));
+        repo.create("remove_last", &workflow).await.unwrap();
+
+        repo.remove_skill_from_step("remove_last", "step1", "only-skill")
+            .await
+            .unwrap();
+
+        let updated = repo.get("remove_last").await.unwrap().unwrap();
+        assert!(updated.steps[0].skills.is_empty());
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_remove_skill_from_nonexistent_workflow_fails() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = WorkflowRepository::new(db.client());
+
+        let result = repo
+            .remove_skill_from_step("nonexistent", "step", "skill")
+            .await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DbError::NotFound { entity, .. } => assert_eq!(entity, "workflow"),
+            e => panic!("Expected NotFound error, got: {:?}", e),
+        }
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_remove_skill_from_nonexistent_step_fails() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = WorkflowRepository::new(db.client());
+
+        let workflow =
+            Workflow::new("Step Remove Test").with_step(WorkflowStep::new("existing", "agent", 0));
+        repo.create("step_rm_test", &workflow).await.unwrap();
+
+        let result = repo
+            .remove_skill_from_step("step_rm_test", "nonexistent", "skill")
+            .await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DbError::NotFound { entity, .. } => assert_eq!(entity, "step"),
+            e => panic!("Expected NotFound error, got: {:?}", e),
+        }
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_remove_nonexistent_skill_fails() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = WorkflowRepository::new(db.client());
+
+        let workflow = Workflow::new("Skill Remove Test")
+            .with_step(WorkflowStep::new("step1", "agent", 0).with_skill("actual-skill"));
+        repo.create("skill_rm_test", &workflow).await.unwrap();
+
+        let result = repo
+            .remove_skill_from_step("skill_rm_test", "step1", "nonexistent-skill")
+            .await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DbError::NotFound { entity, id } => {
+                assert_eq!(entity, "skill");
+                assert_eq!(id, "skill_rm_test:step1:nonexistent-skill");
+            }
+            e => panic!("Expected NotFound error, got: {:?}", e),
+        }
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_get_step_skills() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = WorkflowRepository::new(db.client());
+
+        let workflow = Workflow::new("Get Skills Test")
+            .with_step(WorkflowStep::new("step1", "agent", 0).with_skills(["skill1", "skill2"]))
+            .with_step(WorkflowStep::new("step2", "agent", 1));
+        repo.create("get_skills", &workflow).await.unwrap();
+
+        let skills = repo.get_step_skills("get_skills", "step1").await.unwrap();
+        assert_eq!(skills.len(), 2);
+        assert!(skills.contains(&"skill1".to_string()));
+        assert!(skills.contains(&"skill2".to_string()));
+
+        // Step without skills should return empty vec
+        let skills2 = repo.get_step_skills("get_skills", "step2").await.unwrap();
+        assert!(skills2.is_empty());
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_get_step_skills_nonexistent_workflow_fails() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = WorkflowRepository::new(db.client());
+
+        let result = repo.get_step_skills("nonexistent", "step").await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DbError::NotFound { entity, .. } => assert_eq!(entity, "workflow"),
+            e => panic!("Expected NotFound error, got: {:?}", e),
+        }
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_get_step_skills_nonexistent_step_fails() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = WorkflowRepository::new(db.client());
+
+        let workflow =
+            Workflow::new("Get Skills Step Test").with_step(WorkflowStep::new("existing", "a", 0));
+        repo.create("get_skills_step", &workflow).await.unwrap();
+
+        let result = repo.get_step_skills("get_skills_step", "nonexistent").await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DbError::NotFound { entity, .. } => assert_eq!(entity, "step"),
+            e => panic!("Expected NotFound error, got: {:?}", e),
+        }
+
+        cleanup(&temp_dir);
     }
 }
