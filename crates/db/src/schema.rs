@@ -69,6 +69,10 @@ mod sql {
 
         DEFINE FIELD metadata ON workflow FLEXIBLE TYPE object DEFAULT {};
 
+        DEFINE FIELD on_done_workflow ON workflow TYPE option<string>;
+
+        DEFINE FIELD on_reject_workflow ON workflow TYPE option<string>;
+
         DEFINE FIELD created_at ON workflow TYPE datetime DEFAULT time::now();
 
         DEFINE FIELD updated_at ON workflow TYPE datetime DEFAULT time::now();

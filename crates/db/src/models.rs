@@ -640,6 +640,14 @@ pub struct Workflow {
     #[serde(default)]
     pub metadata: std::collections::HashMap<String, String>,
 
+    /// Workflow to assign to task when completing the last step (pipeline chaining)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub on_done_workflow: Option<String>,
+
+    /// Workflow to assign to task when rejected (pipeline chaining)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub on_reject_workflow: Option<String>,
+
     /// Creation timestamp
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_at: Option<DateTime<Utc>>,
@@ -658,6 +666,8 @@ impl Workflow {
             description: None,
             steps: Vec::new(),
             metadata: std::collections::HashMap::new(),
+            on_done_workflow: None,
+            on_reject_workflow: None,
             created_at: None,
             updated_at: None,
         }
@@ -684,6 +694,18 @@ impl Workflow {
     /// Add a metadata key-value pair
     pub fn with_metadata(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.metadata.insert(key.into(), value.into());
+        self
+    }
+
+    /// Set the workflow to chain to when the last step completes
+    pub fn with_on_done_workflow(mut self, workflow_id: impl Into<String>) -> Self {
+        self.on_done_workflow = Some(workflow_id.into());
+        self
+    }
+
+    /// Set the workflow to chain to when the task is rejected
+    pub fn with_on_reject_workflow(mut self, workflow_id: impl Into<String>) -> Self {
+        self.on_reject_workflow = Some(workflow_id.into());
         self
     }
 
@@ -727,6 +749,8 @@ impl PartialEq for Workflow {
             && self.description == other.description
             && self.steps == other.steps
             && self.metadata == other.metadata
+            && self.on_done_workflow == other.on_done_workflow
+            && self.on_reject_workflow == other.on_reject_workflow
     }
 }
 

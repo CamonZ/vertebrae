@@ -30,6 +30,10 @@ pub struct WorkflowUpdate {
     pub steps: Option<Vec<WorkflowStep>>,
     /// Metadata to set (replaces entire metadata object)
     pub metadata: Option<std::collections::HashMap<String, String>>,
+    /// Workflow to chain to when done (Some(Some(id)) to set, Some(None) to clear, None to leave unchanged)
+    pub on_done_workflow: Option<Option<String>>,
+    /// Workflow to chain to when rejected (Some(Some(id)) to set, Some(None) to clear, None to leave unchanged)
+    pub on_reject_workflow: Option<Option<String>>,
 }
 
 impl WorkflowUpdate {
@@ -68,12 +72,38 @@ impl WorkflowUpdate {
         self
     }
 
+    /// Set the on_done_workflow (workflow to chain to when done)
+    pub fn with_on_done_workflow(mut self, workflow_id: impl Into<String>) -> Self {
+        self.on_done_workflow = Some(Some(workflow_id.into()));
+        self
+    }
+
+    /// Clear the on_done_workflow
+    pub fn clear_on_done_workflow(mut self) -> Self {
+        self.on_done_workflow = Some(None);
+        self
+    }
+
+    /// Set the on_reject_workflow (workflow to chain to when rejected)
+    pub fn with_on_reject_workflow(mut self, workflow_id: impl Into<String>) -> Self {
+        self.on_reject_workflow = Some(Some(workflow_id.into()));
+        self
+    }
+
+    /// Clear the on_reject_workflow
+    pub fn clear_on_reject_workflow(mut self) -> Self {
+        self.on_reject_workflow = Some(None);
+        self
+    }
+
     /// Check if any updates are specified
     pub fn has_updates(&self) -> bool {
         self.name.is_some()
             || self.description.is_some()
             || self.steps.is_some()
             || self.metadata.is_some()
+            || self.on_done_workflow.is_some()
+            || self.on_reject_workflow.is_some()
     }
 }
 
@@ -147,6 +177,16 @@ impl<'a> WorkflowRepository<'a> {
                 reason: format!("Failed to serialize metadata: {}", e),
             })?;
 
+        let on_done_str = match &workflow.on_done_workflow {
+            Some(w) => format!("\"{}\"", w.replace('\"', "\\\"")),
+            None => "NONE".to_string(),
+        };
+
+        let on_reject_str = match &workflow.on_reject_workflow {
+            Some(w) => format!("\"{}\"", w.replace('\"', "\\\"")),
+            None => "NONE".to_string(),
+        };
+
         let name = workflow.name.clone();
 
         let query = format!(
@@ -154,8 +194,10 @@ impl<'a> WorkflowRepository<'a> {
                 name = $name,
                 description = {},
                 steps = {},
-                metadata = {}"#,
-            id, description_str, steps_json, metadata_json
+                metadata = {},
+                on_done_workflow = {},
+                on_reject_workflow = {}"#,
+            id, description_str, steps_json, metadata_json, on_done_str, on_reject_str
         );
 
         self.client.query(&query).bind(("name", name)).await?;
@@ -281,6 +323,26 @@ impl<'a> WorkflowRepository<'a> {
                     reason: format!("Failed to serialize metadata: {}", e),
                 })?;
             field_updates.push(format!("metadata = {}", metadata_json));
+        }
+
+        if let Some(on_done_opt) = &updates.on_done_workflow {
+            match on_done_opt {
+                Some(w) => {
+                    let escaped = w.replace('\"', "\\\"");
+                    field_updates.push(format!("on_done_workflow = \"{}\"", escaped));
+                }
+                None => field_updates.push("on_done_workflow = NONE".to_string()),
+            }
+        }
+
+        if let Some(on_reject_opt) = &updates.on_reject_workflow {
+            match on_reject_opt {
+                Some(w) => {
+                    let escaped = w.replace('\"', "\\\"");
+                    field_updates.push(format!("on_reject_workflow = \"{}\"", escaped));
+                }
+                None => field_updates.push("on_reject_workflow = NONE".to_string()),
+            }
         }
 
         if !field_updates.is_empty() {
