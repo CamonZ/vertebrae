@@ -1,3 +1,6 @@
+pub mod commands;
+pub mod types;
+
 use specta_typescript::Typescript;
 use tauri_specta::{collect_commands, Builder};
 
@@ -23,7 +26,12 @@ pub fn export_bindings() -> Result<(), Box<dyn std::error::Error>> {
 
 /// Create the tauri-specta builder with all commands registered.
 fn create_builder() -> Builder {
-    Builder::<tauri::Wry>::new().commands(collect_commands![greet,])
+    Builder::<tauri::Wry>::new().commands(collect_commands![
+        greet,
+        commands::list_tasks,
+        commands::get_task,
+        commands::get_task_hierarchy,
+    ])
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

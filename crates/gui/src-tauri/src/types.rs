@@ -1,0 +1,365 @@
+//! Frontend-friendly data transfer types for Tauri commands
+//!
+//! These types are designed for serialization to TypeScript and don't include
+//! database-specific types like SurrealDB's Thing or chrono's DateTime.
+
+use serde::{Deserialize, Serialize};
+
+/// Task hierarchy level - mirrors db::Level
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskLevel {
+    Epic,
+    Ticket,
+    Task,
+}
+
+impl From<vertebrae_db::Level> for TaskLevel {
+    fn from(level: vertebrae_db::Level) -> Self {
+        match level {
+            vertebrae_db::Level::Epic => TaskLevel::Epic,
+            vertebrae_db::Level::Ticket => TaskLevel::Ticket,
+            vertebrae_db::Level::Task => TaskLevel::Task,
+        }
+    }
+}
+
+/// Task status - mirrors db::Status
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskStatus {
+    Backlog,
+    Todo,
+    InProgress,
+    PendingReview,
+    Done,
+    Rejected,
+}
+
+impl From<vertebrae_db::Status> for TaskStatus {
+    fn from(status: vertebrae_db::Status) -> Self {
+        match status {
+            vertebrae_db::Status::Backlog => TaskStatus::Backlog,
+            vertebrae_db::Status::Todo => TaskStatus::Todo,
+            vertebrae_db::Status::InProgress => TaskStatus::InProgress,
+            vertebrae_db::Status::PendingReview => TaskStatus::PendingReview,
+            vertebrae_db::Status::Done => TaskStatus::Done,
+            vertebrae_db::Status::Rejected => TaskStatus::Rejected,
+        }
+    }
+}
+
+impl From<TaskStatus> for vertebrae_db::Status {
+    fn from(status: TaskStatus) -> Self {
+        match status {
+            TaskStatus::Backlog => vertebrae_db::Status::Backlog,
+            TaskStatus::Todo => vertebrae_db::Status::Todo,
+            TaskStatus::InProgress => vertebrae_db::Status::InProgress,
+            TaskStatus::PendingReview => vertebrae_db::Status::PendingReview,
+            TaskStatus::Done => vertebrae_db::Status::Done,
+            TaskStatus::Rejected => vertebrae_db::Status::Rejected,
+        }
+    }
+}
+
+/// Task priority - mirrors db::Priority
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskPriority {
+    Low,
+    Medium,
+    High,
+    Critical,
+}
+
+impl From<vertebrae_db::Priority> for TaskPriority {
+    fn from(priority: vertebrae_db::Priority) -> Self {
+        match priority {
+            vertebrae_db::Priority::Low => TaskPriority::Low,
+            vertebrae_db::Priority::Medium => TaskPriority::Medium,
+            vertebrae_db::Priority::High => TaskPriority::High,
+            vertebrae_db::Priority::Critical => TaskPriority::Critical,
+        }
+    }
+}
+
+impl From<TaskPriority> for vertebrae_db::Priority {
+    fn from(priority: TaskPriority) -> Self {
+        match priority {
+            TaskPriority::Low => vertebrae_db::Priority::Low,
+            TaskPriority::Medium => vertebrae_db::Priority::Medium,
+            TaskPriority::High => vertebrae_db::Priority::High,
+            TaskPriority::Critical => vertebrae_db::Priority::Critical,
+        }
+    }
+}
+
+/// Section type - mirrors db::SectionType
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum SectionType {
+    Goal,
+    Context,
+    CurrentBehavior,
+    DesiredBehavior,
+    Step,
+    TestingCriterion,
+    AntiPattern,
+    FailureTest,
+    Constraint,
+}
+
+impl From<vertebrae_db::SectionType> for SectionType {
+    fn from(section_type: vertebrae_db::SectionType) -> Self {
+        match section_type {
+            vertebrae_db::SectionType::Goal => SectionType::Goal,
+            vertebrae_db::SectionType::Context => SectionType::Context,
+            vertebrae_db::SectionType::CurrentBehavior => SectionType::CurrentBehavior,
+            vertebrae_db::SectionType::DesiredBehavior => SectionType::DesiredBehavior,
+            vertebrae_db::SectionType::Step => SectionType::Step,
+            vertebrae_db::SectionType::TestingCriterion => SectionType::TestingCriterion,
+            vertebrae_db::SectionType::AntiPattern => SectionType::AntiPattern,
+            vertebrae_db::SectionType::FailureTest => SectionType::FailureTest,
+            vertebrae_db::SectionType::Constraint => SectionType::Constraint,
+        }
+    }
+}
+
+/// Code reference - file location reference
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct CodeRef {
+    /// Path to the file (relative to repository root)
+    pub path: String,
+    /// Optional starting line number
+    pub line_start: Option<u32>,
+    /// Optional ending line number
+    pub line_end: Option<u32>,
+    /// Optional name/label for this reference
+    pub name: Option<String>,
+    /// Optional description
+    pub description: Option<String>,
+}
+
+impl From<vertebrae_db::CodeRef> for CodeRef {
+    fn from(code_ref: vertebrae_db::CodeRef) -> Self {
+        CodeRef {
+            path: code_ref.path,
+            line_start: code_ref.line_start,
+            line_end: code_ref.line_end,
+            name: code_ref.name,
+            description: code_ref.description,
+        }
+    }
+}
+
+/// Section content within a task
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct Section {
+    /// The type of this section
+    #[serde(rename = "type")]
+    pub section_type: SectionType,
+    /// The content of this section
+    pub content: String,
+    /// Optional ordering for sections of the same type
+    pub order: Option<u32>,
+    /// Whether this section (typically a step) is done
+    pub done: Option<bool>,
+    /// When this section was marked as done (ISO 8601 string)
+    pub done_at: Option<String>,
+    /// Code references attached to this section
+    #[serde(default)]
+    pub refs: Vec<CodeRef>,
+}
+
+impl From<vertebrae_db::Section> for Section {
+    fn from(section: vertebrae_db::Section) -> Self {
+        Section {
+            section_type: section.section_type.into(),
+            content: section.content,
+            order: section.order,
+            done: section.done,
+            done_at: section.done_at.map(|dt| dt.to_rfc3339()),
+            refs: section.refs.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+/// Summary of a task for list views - mirrors db::TaskSummary
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+pub struct TaskSummary {
+    /// The task ID
+    pub id: String,
+    /// Task title
+    pub title: String,
+    /// Hierarchy level
+    pub level: TaskLevel,
+    /// Current status
+    pub status: TaskStatus,
+    /// Optional priority
+    pub priority: Option<TaskPriority>,
+    /// Tags for categorization
+    pub tags: Vec<String>,
+    /// Whether this task needs human review
+    pub needs_human_review: Option<bool>,
+}
+
+impl From<vertebrae_db::TaskSummary> for TaskSummary {
+    fn from(summary: vertebrae_db::TaskSummary) -> Self {
+        TaskSummary {
+            id: summary.id,
+            title: summary.title,
+            level: summary.level.into(),
+            status: summary.status.into(),
+            priority: summary.priority.map(Into::into),
+            tags: summary.tags,
+            needs_human_review: summary.needs_human_review,
+        }
+    }
+}
+
+/// Full task details - mirrors db::Task but with string IDs and dates
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct Task {
+    /// Task ID (string form)
+    pub id: Option<String>,
+    /// Task title
+    pub title: String,
+    /// Optional description
+    pub description: Option<String>,
+    /// Hierarchy level
+    pub level: TaskLevel,
+    /// Current status
+    pub status: TaskStatus,
+    /// Optional priority
+    pub priority: Option<TaskPriority>,
+    /// Tags for categorization
+    pub tags: Vec<String>,
+    /// Creation timestamp (ISO 8601 string)
+    pub created_at: Option<String>,
+    /// Last update timestamp (ISO 8601 string)
+    pub updated_at: Option<String>,
+    /// When this task was started (ISO 8601 string)
+    pub started_at: Option<String>,
+    /// When this task was completed (ISO 8601 string)
+    pub completed_at: Option<String>,
+    /// Embedded sections
+    pub sections: Vec<Section>,
+    /// Embedded code references
+    pub code_refs: Vec<CodeRef>,
+    /// Whether this task needs human review
+    pub needs_human_review: Option<bool>,
+    /// Workflow ID (string form)
+    pub workflow_id: Option<String>,
+    /// Current step in workflow (0-indexed)
+    pub current_step: Option<u32>,
+}
+
+impl From<vertebrae_db::Task> for Task {
+    fn from(task: vertebrae_db::Task) -> Self {
+        Task {
+            id: task.id.map(|t| t.id.to_string()),
+            title: task.title,
+            description: task.description,
+            level: task.level.into(),
+            status: task.status.into(),
+            priority: task.priority.map(Into::into),
+            tags: task.tags,
+            created_at: task.created_at.map(|dt| dt.to_rfc3339()),
+            updated_at: task.updated_at.map(|dt| dt.to_rfc3339()),
+            started_at: task.started_at.map(|dt| dt.to_rfc3339()),
+            completed_at: task.completed_at.map(|dt| dt.to_rfc3339()),
+            sections: task.sections.into_iter().map(Into::into).collect(),
+            code_refs: task.code_refs.into_iter().map(Into::into).collect(),
+            needs_human_review: task.needs_human_review,
+            workflow_id: task.workflow_id.map(|t| t.id.to_string()),
+            current_step: task.current_step.map(|s| s as u32),
+        }
+    }
+}
+
+/// Task with its relations (parent, children, dependencies)
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct TaskWithRelations {
+    /// The task itself
+    pub task: Task,
+    /// Parent task ID (if any)
+    pub parent_id: Option<String>,
+    /// Child task IDs
+    pub children_ids: Vec<String>,
+    /// Task IDs this task depends on (blockers)
+    pub depends_on_ids: Vec<String>,
+    /// Task IDs that depend on this task
+    pub dependent_ids: Vec<String>,
+}
+
+/// Task hierarchy node for tree views
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct TaskHierarchyNode {
+    /// The task summary
+    pub task: TaskSummary,
+    /// Child nodes
+    pub children: Vec<TaskHierarchyNode>,
+}
+
+/// Filter options for listing tasks
+#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
+pub struct TaskFilterOptions {
+    /// Filter by statuses (OR semantics)
+    pub statuses: Option<Vec<TaskStatus>>,
+    /// Filter by levels (OR semantics)
+    pub levels: Option<Vec<TaskLevel>>,
+    /// Filter by tags (OR semantics)
+    pub tags: Option<Vec<String>>,
+    /// Show only root items (no parent)
+    pub root_only: Option<bool>,
+    /// Show only children of a specific task
+    pub children_of: Option<String>,
+    /// Include done items (excluded by default)
+    pub include_done: Option<bool>,
+    /// Search text in title and description
+    pub search: Option<String>,
+}
+
+impl From<TaskFilterOptions> for vertebrae_db::TaskFilter {
+    fn from(opts: TaskFilterOptions) -> Self {
+        let mut filter = vertebrae_db::TaskFilter::new();
+
+        if let Some(statuses) = opts.statuses {
+            for status in statuses {
+                filter = filter.with_status(status.into());
+            }
+        }
+
+        if let Some(levels) = opts.levels {
+            for level in levels {
+                filter = filter.with_level(match level {
+                    TaskLevel::Epic => vertebrae_db::Level::Epic,
+                    TaskLevel::Ticket => vertebrae_db::Level::Ticket,
+                    TaskLevel::Task => vertebrae_db::Level::Task,
+                });
+            }
+        }
+
+        if let Some(tags) = opts.tags {
+            filter = filter.with_tags(tags);
+        }
+
+        if opts.root_only.unwrap_or(false) {
+            filter = filter.root_only();
+        }
+
+        if let Some(parent_id) = opts.children_of {
+            filter = filter.children_of(parent_id);
+        }
+
+        if opts.include_done.unwrap_or(false) {
+            filter = filter.include_done();
+        }
+
+        if let Some(search) = opts.search {
+            filter = filter.with_search(search);
+        }
+
+        filter
+    }
+}

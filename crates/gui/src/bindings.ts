@@ -13,6 +13,46 @@ export const commands = {
  */
 async greet(name: string) : Promise<string> {
     return await TAURI_INVOKE("greet", { name });
+},
+/**
+ * List tasks with optional filters
+ * 
+ * Returns a list of task summaries matching the filter criteria.
+ */
+async listTasks(filter: TaskFilterOptions | null) : Promise<Result<TaskSummary[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_tasks", { filter }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Get a single task by ID with its relations
+ * 
+ * Returns the full task details along with parent, children, and dependency relations.
+ */
+async getTask(id: string) : Promise<Result<TaskWithRelations, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_task", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Get task hierarchy starting from a root task
+ * 
+ * Returns a tree structure of tasks starting from the given root.
+ * If no root_id is provided, returns all root-level tasks with their hierarchies.
+ */
+async getTaskHierarchy(rootId: string | null) : Promise<Result<TaskHierarchyNode[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_task_hierarchy", { rootId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -26,7 +66,246 @@ async greet(name: string) : Promise<string> {
 
 /** user-defined types **/
 
-
+/**
+ * Code reference - file location reference
+ */
+export type CodeRef = { 
+/**
+ * Path to the file (relative to repository root)
+ */
+path: string; 
+/**
+ * Optional starting line number
+ */
+line_start: number | null; 
+/**
+ * Optional ending line number
+ */
+line_end: number | null; 
+/**
+ * Optional name/label for this reference
+ */
+name: string | null; 
+/**
+ * Optional description
+ */
+description: string | null }
+/**
+ * Error response type for commands - simple string wrapper with specta support
+ */
+export type CommandError = { message: string }
+/**
+ * Section content within a task
+ */
+export type Section = { 
+/**
+ * The type of this section
+ */
+type: SectionType; 
+/**
+ * The content of this section
+ */
+content: string; 
+/**
+ * Optional ordering for sections of the same type
+ */
+order: number | null; 
+/**
+ * Whether this section (typically a step) is done
+ */
+done: boolean | null; 
+/**
+ * When this section was marked as done (ISO 8601 string)
+ */
+done_at: string | null; 
+/**
+ * Code references attached to this section
+ */
+refs?: CodeRef[] }
+/**
+ * Section type - mirrors db::SectionType
+ */
+export type SectionType = "goal" | "context" | "current_behavior" | "desired_behavior" | "step" | "testing_criterion" | "anti_pattern" | "failure_test" | "constraint"
+/**
+ * Full task details - mirrors db::Task but with string IDs and dates
+ */
+export type Task = { 
+/**
+ * Task ID (string form)
+ */
+id: string | null; 
+/**
+ * Task title
+ */
+title: string; 
+/**
+ * Optional description
+ */
+description: string | null; 
+/**
+ * Hierarchy level
+ */
+level: TaskLevel; 
+/**
+ * Current status
+ */
+status: TaskStatus; 
+/**
+ * Optional priority
+ */
+priority: TaskPriority | null; 
+/**
+ * Tags for categorization
+ */
+tags: string[]; 
+/**
+ * Creation timestamp (ISO 8601 string)
+ */
+created_at: string | null; 
+/**
+ * Last update timestamp (ISO 8601 string)
+ */
+updated_at: string | null; 
+/**
+ * When this task was started (ISO 8601 string)
+ */
+started_at: string | null; 
+/**
+ * When this task was completed (ISO 8601 string)
+ */
+completed_at: string | null; 
+/**
+ * Embedded sections
+ */
+sections: Section[]; 
+/**
+ * Embedded code references
+ */
+code_refs: CodeRef[]; 
+/**
+ * Whether this task needs human review
+ */
+needs_human_review: boolean | null; 
+/**
+ * Workflow ID (string form)
+ */
+workflow_id: string | null; 
+/**
+ * Current step in workflow (0-indexed)
+ */
+current_step: number | null }
+/**
+ * Filter options for listing tasks
+ */
+export type TaskFilterOptions = { 
+/**
+ * Filter by statuses (OR semantics)
+ */
+statuses: TaskStatus[] | null; 
+/**
+ * Filter by levels (OR semantics)
+ */
+levels: TaskLevel[] | null; 
+/**
+ * Filter by tags (OR semantics)
+ */
+tags: string[] | null; 
+/**
+ * Show only root items (no parent)
+ */
+root_only: boolean | null; 
+/**
+ * Show only children of a specific task
+ */
+children_of: string | null; 
+/**
+ * Include done items (excluded by default)
+ */
+include_done: boolean | null; 
+/**
+ * Search text in title and description
+ */
+search: string | null }
+/**
+ * Task hierarchy node for tree views
+ */
+export type TaskHierarchyNode = { 
+/**
+ * The task summary
+ */
+task: TaskSummary; 
+/**
+ * Child nodes
+ */
+children: TaskHierarchyNode[] }
+/**
+ * Task hierarchy level - mirrors db::Level
+ */
+export type TaskLevel = "epic" | "ticket" | "task"
+/**
+ * Task priority - mirrors db::Priority
+ */
+export type TaskPriority = "low" | "medium" | "high" | "critical"
+/**
+ * Task status - mirrors db::Status
+ */
+export type TaskStatus = "backlog" | "todo" | "in_progress" | "pending_review" | "done" | "rejected"
+/**
+ * Summary of a task for list views - mirrors db::TaskSummary
+ */
+export type TaskSummary = { 
+/**
+ * The task ID
+ */
+id: string; 
+/**
+ * Task title
+ */
+title: string; 
+/**
+ * Hierarchy level
+ */
+level: TaskLevel; 
+/**
+ * Current status
+ */
+status: TaskStatus; 
+/**
+ * Optional priority
+ */
+priority: TaskPriority | null; 
+/**
+ * Tags for categorization
+ */
+tags: string[]; 
+/**
+ * Whether this task needs human review
+ */
+needs_human_review: boolean | null }
+/**
+ * Task with its relations (parent, children, dependencies)
+ */
+export type TaskWithRelations = { 
+/**
+ * The task itself
+ */
+task: Task; 
+/**
+ * Parent task ID (if any)
+ */
+parent_id: string | null; 
+/**
+ * Child task IDs
+ */
+children_ids: string[]; 
+/**
+ * Task IDs this task depends on (blockers)
+ */
+depends_on_ids: string[]; 
+/**
+ * Task IDs that depend on this task
+ */
+dependent_ids: string[] }
 
 /** tauri-specta globals **/
 

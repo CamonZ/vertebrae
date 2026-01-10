@@ -2361,6 +2361,8 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-log",
  "tauri-specta",
+ "thiserror 2.0.17",
+ "tokio",
  "vertebrae-db",
 ]
 
@@ -5806,6 +5808,7 @@ dependencies = [
  "paste",
  "specta-macros",
  "thiserror 1.0.69",
+ "tokio",
 ]
 
 [[package]]

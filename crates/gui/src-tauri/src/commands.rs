@@ -1,0 +1,150 @@
+//! Tauri commands for task data access
+//!
+//! Implements list_tasks, get_task, and get_task_hierarchy commands
+//! using the vertebrae-db repository pattern.
+
+use crate::types::{TaskFilterOptions, TaskHierarchyNode, TaskSummary, TaskWithRelations};
+use serde::{Deserialize, Serialize};
+use tauri::State;
+
+/// Application state holding the database connection
+pub struct AppState {
+    pub db: vertebrae_db::Database,
+}
+
+/// Error response type for commands - simple string wrapper with specta support
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct CommandError {
+    pub message: String,
+}
+
+impl From<vertebrae_db::DbError> for CommandError {
+    fn from(err: vertebrae_db::DbError) -> Self {
+        CommandError {
+            message: err.to_string(),
+        }
+    }
+}
+
+impl CommandError {
+    pub fn not_found(id: &str) -> Self {
+        CommandError {
+            message: format!("Task not found: {}", id),
+        }
+    }
+}
+
+/// List tasks with optional filters
+///
+/// Returns a list of task summaries matching the filter criteria.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_tasks(
+    state: State<'_, AppState>,
+    filter: Option<TaskFilterOptions>,
+) -> Result<Vec<TaskSummary>, CommandError> {
+    let db_filter: vertebrae_db::TaskFilter = filter.unwrap_or_default().into();
+    let summaries = state.db.list_tasks().list(&db_filter).await?;
+    Ok(summaries.into_iter().map(Into::into).collect())
+}
+
+/// Get a single task by ID with its relations
+///
+/// Returns the full task details along with parent, children, and dependency relations.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_task(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<TaskWithRelations, CommandError> {
+    // Get the task
+    let task = state
+        .db
+        .tasks()
+        .get(&id)
+        .await?
+        .ok_or_else(|| CommandError::not_found(&id))?;
+
+    // Get relations
+    let parent_id = state.db.relationships().get_parent(&id).await?;
+    let children_ids = state.db.relationships().get_children(&id).await?;
+    let depends_on_ids = state.db.relationships().get_dependencies(&id).await?;
+    let dependent_ids = state.db.relationships().get_dependents(&id).await?;
+
+    Ok(TaskWithRelations {
+        task: task.into(),
+        parent_id,
+        children_ids,
+        depends_on_ids,
+        dependent_ids,
+    })
+}
+
+/// Get task hierarchy starting from a root task
+///
+/// Returns a tree structure of tasks starting from the given root.
+/// If no root_id is provided, returns all root-level tasks with their hierarchies.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_task_hierarchy(
+    state: State<'_, AppState>,
+    root_id: Option<String>,
+) -> Result<Vec<TaskHierarchyNode>, CommandError> {
+    match root_id {
+        Some(id) => {
+            // Build hierarchy from a specific root
+            let node = build_hierarchy_node(&state.db, &id).await?;
+            match node {
+                Some(n) => Ok(vec![n]),
+                None => Err(CommandError::not_found(&id)),
+            }
+        }
+        None => {
+            // Get all root tasks and build their hierarchies
+            let root_filter = vertebrae_db::TaskFilter::new().root_only();
+            let roots = state.db.list_tasks().list(&root_filter).await?;
+
+            let mut nodes = Vec::with_capacity(roots.len());
+            for root in roots {
+                if let Some(node) = build_hierarchy_node(&state.db, &root.id).await? {
+                    nodes.push(node);
+                }
+            }
+            Ok(nodes)
+        }
+    }
+}
+
+/// Helper function to recursively build a hierarchy node
+async fn build_hierarchy_node(
+    db: &vertebrae_db::Database,
+    task_id: &str,
+) -> Result<Option<TaskHierarchyNode>, CommandError> {
+    // Get task summary via filter
+    let filter = vertebrae_db::TaskFilter::new().include_done();
+    let summaries = db.list_tasks().list(&filter).await?;
+
+    // Find the task in the results
+    let task_summary = summaries.into_iter().find(|s| s.id == task_id);
+
+    match task_summary {
+        Some(summary) => {
+            // Get children
+            let children_ids = db.relationships().get_children(task_id).await?;
+
+            // Recursively build child nodes
+            let mut children = Vec::with_capacity(children_ids.len());
+            for child_id in children_ids {
+                if let Some(child_node) = Box::pin(build_hierarchy_node(db, &child_id)).await? {
+                    children.push(child_node);
+                }
+            }
+
+            Ok(Some(TaskHierarchyNode {
+                task: summary.into(),
+                children,
+            }))
+        }
+        None => Ok(None),
+    }
+}
