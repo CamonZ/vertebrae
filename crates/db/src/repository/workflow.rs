@@ -119,10 +119,16 @@ impl<'a> WorkflowRepository<'a> {
     ///
     /// # Errors
     ///
+    /// Returns `DbError::ValidationError` if workflow validation fails.
     /// Returns `DbError::Query` if the database operation fails.
     pub async fn create(&self, id: &str, workflow: &Workflow) -> DbResult<()> {
         debug!("Creating workflow: {} with name: {}", id, workflow.name);
         trace!("Workflow data: {:?}", workflow);
+
+        // Validate workflow configuration
+        workflow
+            .validate()
+            .map_err(|msg| DbError::ValidationError { message: msg })?;
 
         let description_str = match &workflow.description {
             Some(d) => format!("\"{}\"", d.replace('\"', "\\\"")),
@@ -244,6 +250,23 @@ impl<'a> WorkflowRepository<'a> {
         }
 
         if let Some(steps) = &updates.steps {
+            // Validate steps before updating
+            if steps.is_empty() {
+                return Err(DbError::ValidationError {
+                    message: "workflow must have at least one step".to_string(),
+                });
+            }
+
+            // Check for unique step names
+            let mut seen_names = std::collections::HashSet::new();
+            for step in steps {
+                if !seen_names.insert(&step.name) {
+                    return Err(DbError::ValidationError {
+                        message: format!("duplicate step name '{}' in workflow", step.name),
+                    });
+                }
+            }
+
             let steps_json = serde_json::to_string(steps).map_err(|e| DbError::InvalidPath {
                 path: std::path::PathBuf::from(id),
                 reason: format!("Failed to serialize steps: {}", e),
@@ -369,12 +392,17 @@ mod tests {
         cleanup(&temp_dir);
     }
 
+    /// Helper to create a valid workflow with at least one step
+    fn valid_workflow(name: &str) -> Workflow {
+        Workflow::new(name).with_step(WorkflowStep::new("default_step", "default_agent", 0))
+    }
+
     #[tokio::test]
     async fn test_create_and_exists() {
         let (db, temp_dir) = setup_test_db().await;
         let repo = WorkflowRepository::new(db.client());
 
-        let workflow = Workflow::new("Test Workflow");
+        let workflow = valid_workflow("Test Workflow");
         repo.create("test1", &workflow).await.unwrap();
 
         let exists = repo.exists("test1").await.unwrap();
@@ -389,8 +417,8 @@ mod tests {
         let repo = WorkflowRepository::new(db.client());
 
         // Create two workflows with different IDs
-        let workflow1 = Workflow::new("Workflow 1");
-        let workflow2 = Workflow::new("Workflow 2");
+        let workflow1 = valid_workflow("Workflow 1");
+        let workflow2 = valid_workflow("Workflow 2");
 
         repo.create("wf1", &workflow1).await.unwrap();
         repo.create("wf2", &workflow2).await.unwrap();
@@ -446,7 +474,7 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
         let repo = WorkflowRepository::new(db.client());
 
-        let workflow = Workflow::new("Get Test").with_description("Test description");
+        let workflow = valid_workflow("Get Test").with_description("Test description");
 
         repo.create("get1", &workflow).await.unwrap();
 
@@ -487,13 +515,13 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
         let repo = WorkflowRepository::new(db.client());
 
-        repo.create("wf1", &Workflow::new("Workflow 1"))
+        repo.create("wf1", &valid_workflow("Workflow 1"))
             .await
             .unwrap();
-        repo.create("wf2", &Workflow::new("Workflow 2"))
+        repo.create("wf2", &valid_workflow("Workflow 2"))
             .await
             .unwrap();
-        repo.create("wf3", &Workflow::new("Workflow 3"))
+        repo.create("wf3", &valid_workflow("Workflow 3"))
             .await
             .unwrap();
 
@@ -508,7 +536,7 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
         let repo = WorkflowRepository::new(db.client());
 
-        let workflow = Workflow::new("Original Name");
+        let workflow = valid_workflow("Original Name");
         repo.create("upd1", &workflow).await.unwrap();
 
         let updates = WorkflowUpdate::new().with_name("New Name");
@@ -525,7 +553,7 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
         let repo = WorkflowRepository::new(db.client());
 
-        let workflow = Workflow::new("Description Test");
+        let workflow = valid_workflow("Description Test");
         repo.create("upd2", &workflow).await.unwrap();
 
         let updates = WorkflowUpdate::new().with_description("New description");
@@ -542,7 +570,7 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
         let repo = WorkflowRepository::new(db.client());
 
-        let workflow = Workflow::new("Clear Desc Test").with_description("Original description");
+        let workflow = valid_workflow("Clear Desc Test").with_description("Original description");
         repo.create("upd3", &workflow).await.unwrap();
 
         let updates = WorkflowUpdate::new().clear_description();
@@ -583,7 +611,7 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
         let repo = WorkflowRepository::new(db.client());
 
-        let workflow = Workflow::new("Metadata Test").with_metadata("old_key", "old_value");
+        let workflow = valid_workflow("Metadata Test").with_metadata("old_key", "old_value");
         repo.create("upd5", &workflow).await.unwrap();
 
         let mut new_metadata = std::collections::HashMap::new();
@@ -626,7 +654,7 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
         let repo = WorkflowRepository::new(db.client());
 
-        let workflow = Workflow::new("No Change Test");
+        let workflow = valid_workflow("No Change Test");
         repo.create("upd6", &workflow).await.unwrap();
 
         let updates = WorkflowUpdate::new();
@@ -643,7 +671,7 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
         let repo = WorkflowRepository::new(db.client());
 
-        let workflow = Workflow::new("Delete Test");
+        let workflow = valid_workflow("Delete Test");
         repo.create("del1", &workflow).await.unwrap();
 
         assert!(repo.exists("del1").await.unwrap());
@@ -671,10 +699,10 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
         let repo = WorkflowRepository::new(db.client());
 
-        repo.create("wf1", &Workflow::new("Workflow 1"))
+        repo.create("wf1", &valid_workflow("Workflow 1"))
             .await
             .unwrap();
-        repo.create("wf2", &Workflow::new("Workflow 2"))
+        repo.create("wf2", &valid_workflow("Workflow 2"))
             .await
             .unwrap();
 
@@ -769,5 +797,100 @@ mod tests {
         assert!(update.steps.is_none());
         assert!(update.metadata.is_none());
         assert!(!update.has_updates());
+    }
+
+    // ========================================
+    // Validation tests
+    // ========================================
+
+    #[tokio::test]
+    async fn test_create_empty_steps_fails() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = WorkflowRepository::new(db.client());
+
+        let workflow = Workflow::new("Empty Steps");
+        let result = repo.create("test1", &workflow).await;
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DbError::ValidationError { message } => {
+                assert_eq!(message, "workflow must have at least one step");
+            }
+            e => panic!("Expected ValidationError, got: {:?}", e),
+        }
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_create_duplicate_step_names_fails() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = WorkflowRepository::new(db.client());
+
+        let workflow = Workflow::new("Duplicate Steps")
+            .with_step(WorkflowStep::new("review", "agent1", 0))
+            .with_step(WorkflowStep::new("test", "agent2", 1))
+            .with_step(WorkflowStep::new("review", "agent3", 2));
+
+        let result = repo.create("test1", &workflow).await;
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DbError::ValidationError { message } => {
+                assert_eq!(message, "duplicate step name 'review' in workflow");
+            }
+            e => panic!("Expected ValidationError, got: {:?}", e),
+        }
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_update_to_empty_steps_fails() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = WorkflowRepository::new(db.client());
+
+        let workflow = valid_workflow("Test Workflow");
+        repo.create("test1", &workflow).await.unwrap();
+
+        let updates = WorkflowUpdate::new().with_steps(vec![]);
+        let result = repo.update("test1", &updates).await;
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DbError::ValidationError { message } => {
+                assert_eq!(message, "workflow must have at least one step");
+            }
+            e => panic!("Expected ValidationError, got: {:?}", e),
+        }
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_update_to_duplicate_step_names_fails() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = WorkflowRepository::new(db.client());
+
+        let workflow = valid_workflow("Test Workflow");
+        repo.create("test1", &workflow).await.unwrap();
+
+        let new_steps = vec![
+            WorkflowStep::new("build", "agent1", 0),
+            WorkflowStep::new("deploy", "agent2", 1),
+            WorkflowStep::new("build", "agent3", 2), // duplicate
+        ];
+        let updates = WorkflowUpdate::new().with_steps(new_steps);
+        let result = repo.update("test1", &updates).await;
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DbError::ValidationError { message } => {
+                assert_eq!(message, "duplicate step name 'build' in workflow");
+            }
+            e => panic!("Expected ValidationError, got: {:?}", e),
+        }
+
+        cleanup(&temp_dir);
     }
 }

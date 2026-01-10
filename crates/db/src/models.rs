@@ -667,6 +667,32 @@ impl Workflow {
         steps.sort_by_key(|s| s.order);
         steps
     }
+
+    /// Validate the workflow configuration.
+    ///
+    /// Checks that:
+    /// - The workflow has at least one step
+    /// - All step names are unique within the workflow
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if validation passes, or a descriptive error message.
+    pub fn validate(&self) -> Result<(), String> {
+        // Check for at least one step
+        if self.steps.is_empty() {
+            return Err("workflow must have at least one step".to_string());
+        }
+
+        // Check for unique step names
+        let mut seen_names = std::collections::HashSet::new();
+        for step in &self.steps {
+            if !seen_names.insert(&step.name) {
+                return Err(format!("duplicate step name '{}' in workflow", step.name));
+            }
+        }
+
+        Ok(())
+    }
 }
 
 impl PartialEq for Workflow {
@@ -2097,5 +2123,61 @@ mod tests {
         let deserialized: WorkflowStep = serde_json::from_str(&json).unwrap();
 
         assert_eq!(original, deserialized);
+    }
+
+    // ========================================
+    // Workflow validation tests
+    // ========================================
+
+    #[test]
+    fn test_workflow_validate_valid() {
+        let workflow =
+            Workflow::new("Valid Workflow").with_step(WorkflowStep::new("step1", "agent1", 0));
+
+        assert!(workflow.validate().is_ok());
+    }
+
+    #[test]
+    fn test_workflow_validate_multiple_steps() {
+        let workflow = Workflow::new("Multi-step")
+            .with_step(WorkflowStep::new("step1", "agent1", 0))
+            .with_step(WorkflowStep::new("step2", "agent2", 1))
+            .with_step(WorkflowStep::new("step3", "agent3", 2));
+
+        assert!(workflow.validate().is_ok());
+    }
+
+    #[test]
+    fn test_workflow_validate_empty_steps_fails() {
+        let workflow = Workflow::new("Empty Steps");
+
+        let result = workflow.validate();
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "workflow must have at least one step");
+    }
+
+    #[test]
+    fn test_workflow_validate_duplicate_step_names_fails() {
+        let workflow = Workflow::new("Duplicate Steps")
+            .with_step(WorkflowStep::new("review", "agent1", 0))
+            .with_step(WorkflowStep::new("test", "agent2", 1))
+            .with_step(WorkflowStep::new("review", "agent3", 2)); // duplicate name
+
+        let result = workflow.validate();
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            "duplicate step name 'review' in workflow"
+        );
+    }
+
+    #[test]
+    fn test_workflow_validate_case_sensitive_step_names() {
+        // Step names are case-sensitive, so "Review" and "review" are different
+        let workflow = Workflow::new("Case Sensitive")
+            .with_step(WorkflowStep::new("Review", "agent1", 0))
+            .with_step(WorkflowStep::new("review", "agent2", 1));
+
+        assert!(workflow.validate().is_ok());
     }
 }
