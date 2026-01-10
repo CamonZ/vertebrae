@@ -5,7 +5,9 @@
 //! done, triage, and reject commands into a single unified interface.
 
 use clap::{Args, ValueEnum};
-use vertebrae_db::{Database, DbError, Status, TaskUpdate};
+use vertebrae_db::{
+    Database, DbError, Status, TaskUpdate, TriageValidationResult, TriageValidator,
+};
 
 /// Target status for the transition-to command
 #[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
@@ -62,6 +64,14 @@ pub struct TransitionToCommand {
     /// Optional reason for rejection (only used with 'rejected' target)
     #[arg(short, long)]
     pub reason: Option<String>,
+
+    /// Override warnings (but not errors) when transitioning to todo
+    #[arg(short, long)]
+    pub force: bool,
+
+    /// Bypass all validation when transitioning to todo (escape hatch)
+    #[arg(long)]
+    pub skip_validation: bool,
 }
 
 /// Result of the transition-to command execution
@@ -79,11 +89,52 @@ pub struct TransitionToResult {
     pub unblocked_tasks: Vec<(String, String)>, // (id, title)
     /// The reason provided (for rejected)
     pub reason: Option<String>,
+    /// Validation result (for todo transition)
+    pub validation: Option<TriageValidationResult>,
+    /// Whether validation was skipped
+    pub validation_skipped: bool,
+    /// Whether warnings were forced
+    pub warnings_forced: bool,
 }
 
 impl std::fmt::Display for TransitionToResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Show warnings first (for incomplete deps)
+        // Show validation skipped notice
+        if self.validation_skipped {
+            writeln!(f, "Note: Validation skipped (--skip-validation)")?;
+            writeln!(f)?;
+        }
+
+        // Show validation results for todo transitions
+        if let Some(validation) = &self.validation {
+            // Show warnings and notes even if forced
+            if validation.has_warnings() || validation.has_notes() {
+                let warnings = validation.warnings();
+                let notes = validation.notes();
+
+                if !warnings.is_empty() {
+                    if self.warnings_forced {
+                        writeln!(f, "WARNINGS (forced with --force):")?;
+                    } else {
+                        writeln!(f, "WARNINGS ({}):", warnings.len())?;
+                    }
+                    for issue in warnings {
+                        writeln!(f, "  - {}", issue.message)?;
+                    }
+                    writeln!(f)?;
+                }
+
+                if !notes.is_empty() {
+                    writeln!(f, "NOTES ({}):", notes.len())?;
+                    for issue in notes {
+                        writeln!(f, "  - {}", issue.message)?;
+                    }
+                    writeln!(f)?;
+                }
+            }
+        }
+
+        // Show warnings for incomplete deps (for in_progress)
         if !self.incomplete_deps.is_empty() {
             writeln!(f, "Warning: Task depends on incomplete tasks:")?;
             for (id, title, status) in &self.incomplete_deps {
@@ -187,6 +238,9 @@ impl TransitionToCommand {
                 incomplete_deps: vec![],
                 unblocked_tasks: vec![],
                 reason: self.reason.clone(),
+                validation: None,
+                validation_skipped: false,
+                warnings_forced: false,
             });
         }
 
@@ -205,11 +259,68 @@ impl TransitionToCommand {
     }
 
     /// Execute transition to todo status
+    ///
+    /// Validates the task has required sections before transitioning.
+    /// - Required sections (block if missing): testing_criterion (>=2), step (>=1), constraint (>=2)
+    /// - Encouraged sections (warn but allow): anti_pattern (>=1), failure_test (>=1)
+    /// - Recommended sections (note if missing): goal, context, current_behavior, desired_behavior
+    ///
+    /// Use --force to bypass warnings, --skip-validation to bypass all validation.
     async fn execute_todo_transition(
         &self,
         db: &Database,
         id: &str,
     ) -> Result<TransitionToResult, DbError> {
+        // If validation is skipped, proceed directly
+        if self.skip_validation {
+            let updates = TaskUpdate::new().with_status(Status::Todo);
+            db.tasks().update(id, &updates).await?;
+
+            return Ok(TransitionToResult {
+                id: id.to_string(),
+                target: self.target,
+                already_in_target: false,
+                incomplete_deps: vec![],
+                unblocked_tasks: vec![],
+                reason: None,
+                validation: None,
+                validation_skipped: true,
+                warnings_forced: false,
+            });
+        }
+
+        // Fetch the task to validate its sections
+        let task = db.tasks().get(id).await?.ok_or_else(|| DbError::NotFound {
+            task_id: id.to_string(),
+        })?;
+
+        // Run validation
+        let validator = TriageValidator::new();
+        let validation_result = validator.validate(&task);
+
+        // Check for errors (block transition)
+        if validation_result.has_errors() {
+            return Err(DbError::TriageValidationFailed {
+                task_id: id.to_string(),
+                error_count: validation_result.error_count(),
+                warning_count: validation_result.warning_count(),
+                note_count: validation_result.note_count(),
+                details: format!("{}", validation_result),
+            });
+        }
+
+        // Check for warnings (require --force unless in force mode)
+        if validation_result.has_warnings() && !self.force {
+            // Build a helpful error message
+            let mut message = format!(
+                "Task '{}' has validation warnings. Use --force to override:\n\n{}",
+                id, validation_result
+            );
+            message.push_str("\nRun with --force to proceed anyway, or add the missing sections.");
+            return Err(DbError::ValidationError { message });
+        }
+
+        // All checks passed - perform the transition
         let updates = TaskUpdate::new().with_status(Status::Todo);
         db.tasks().update(id, &updates).await?;
 
@@ -220,6 +331,9 @@ impl TransitionToCommand {
             incomplete_deps: vec![],
             unblocked_tasks: vec![],
             reason: None,
+            validation: Some(validation_result),
+            validation_skipped: false,
+            warnings_forced: self.force,
         })
     }
 
@@ -245,6 +359,9 @@ impl TransitionToCommand {
             incomplete_deps,
             unblocked_tasks: vec![],
             reason: None,
+            validation: None,
+            validation_skipped: false,
+            warnings_forced: false,
         })
     }
 
@@ -264,6 +381,9 @@ impl TransitionToCommand {
             incomplete_deps: vec![],
             unblocked_tasks: vec![],
             reason: None,
+            validation: None,
+            validation_skipped: false,
+            warnings_forced: false,
         })
     }
 
@@ -296,6 +416,9 @@ impl TransitionToCommand {
             incomplete_deps: vec![],
             unblocked_tasks,
             reason: None,
+            validation: None,
+            validation_skipped: false,
+            warnings_forced: false,
         })
     }
 
@@ -320,6 +443,9 @@ impl TransitionToCommand {
             incomplete_deps: vec![],
             unblocked_tasks: vec![],
             reason: self.reason.clone(),
+            validation: None,
+            validation_skipped: false,
+            warnings_forced: false,
         })
     }
 
@@ -442,6 +568,8 @@ mod tests {
             id: "task1".to_string(),
             target: TargetStatus::Todo,
             reason: None,
+            force: false,
+            skip_validation: true, // Skip validation in unit tests
         };
 
         let result = cmd.execute(&db).await;
@@ -468,6 +596,8 @@ mod tests {
             id: "task1".to_string(),
             target: TargetStatus::Todo,
             reason: None,
+            force: false,
+            skip_validation: true, // Skip validation in unit tests
         };
 
         let result = cmd.execute(&db).await;
@@ -500,6 +630,8 @@ mod tests {
             id: "task1".to_string(),
             target: TargetStatus::Todo,
             reason: None,
+            force: false,
+            skip_validation: true, // Skip validation in unit tests
         };
 
         let result = cmd.execute(&db).await;
@@ -528,6 +660,8 @@ mod tests {
             id: "task1".to_string(),
             target: TargetStatus::Todo,
             reason: None,
+            force: false,
+            skip_validation: true, // Skip validation in unit tests
         };
 
         let result = cmd.execute(&db).await;
@@ -553,6 +687,8 @@ mod tests {
             id: "task1".to_string(),
             target: TargetStatus::InProgress,
             reason: None,
+            force: false,
+            skip_validation: false,
         };
 
         let result = cmd.execute(&db).await;
@@ -583,6 +719,8 @@ mod tests {
             id: "task1".to_string(),
             target: TargetStatus::InProgress,
             reason: None,
+            force: false,
+            skip_validation: false,
         };
 
         let result = cmd.execute(&db).await;
@@ -604,6 +742,8 @@ mod tests {
             id: "task1".to_string(),
             target: TargetStatus::InProgress,
             reason: None,
+            force: false,
+            skip_validation: false,
         };
 
         let result = cmd.execute(&db).await;
@@ -638,6 +778,8 @@ mod tests {
             id: "task1".to_string(),
             target: TargetStatus::InProgress,
             reason: None,
+            force: false,
+            skip_validation: false,
         };
 
         let result = cmd.execute(&db).await;
@@ -681,6 +823,8 @@ mod tests {
             id: "task1".to_string(),
             target: TargetStatus::InProgress,
             reason: None,
+            force: false,
+            skip_validation: false,
         };
 
         let result = cmd.execute(&db).await;
@@ -709,6 +853,8 @@ mod tests {
             id: "task1".to_string(),
             target: TargetStatus::PendingReview,
             reason: None,
+            force: false,
+            skip_validation: false,
         };
 
         let result = cmd.execute(&db).await;
@@ -733,6 +879,8 @@ mod tests {
             id: "task1".to_string(),
             target: TargetStatus::PendingReview,
             reason: None,
+            force: false,
+            skip_validation: false,
         };
 
         let result = cmd.execute(&db).await;
@@ -766,6 +914,8 @@ mod tests {
             id: "task1".to_string(),
             target: TargetStatus::Done,
             reason: None,
+            force: false,
+            skip_validation: false,
         };
 
         let result = cmd.execute(&db).await;
@@ -795,6 +945,8 @@ mod tests {
             id: "task1".to_string(),
             target: TargetStatus::Done,
             reason: None,
+            force: false,
+            skip_validation: false,
         };
 
         let result = cmd.execute(&db).await;
@@ -826,6 +978,8 @@ mod tests {
             id: "parent".to_string(),
             target: TargetStatus::Done,
             reason: None,
+            force: false,
+            skip_validation: false,
         };
 
         let result = cmd.execute(&db).await;
@@ -858,6 +1012,8 @@ mod tests {
             id: "blocker".to_string(),
             target: TargetStatus::Done,
             reason: None,
+            force: false,
+            skip_validation: false,
         };
 
         let result = cmd.execute(&db).await;
@@ -888,6 +1044,8 @@ mod tests {
             id: "task1".to_string(),
             target: TargetStatus::Rejected,
             reason: None,
+            force: false,
+            skip_validation: false,
         };
 
         let result = cmd.execute(&db).await;
@@ -913,6 +1071,8 @@ mod tests {
             id: "task1".to_string(),
             target: TargetStatus::Rejected,
             reason: Some("Out of scope".to_string()),
+            force: false,
+            skip_validation: false,
         };
 
         let result = cmd.execute(&db).await;
@@ -942,6 +1102,8 @@ mod tests {
             id: "task1".to_string(),
             target: TargetStatus::Rejected,
             reason: None,
+            force: false,
+            skip_validation: false,
         };
 
         let result = cmd.execute(&db).await;
@@ -971,6 +1133,8 @@ mod tests {
             id: "task1".to_string(),
             target: TargetStatus::Rejected,
             reason: Some("Additional reason".to_string()),
+            force: false,
+            skip_validation: false,
         };
 
         let result = cmd.execute(&db).await;
@@ -1003,6 +1167,8 @@ mod tests {
             id: "nonexistent".to_string(),
             target: TargetStatus::Todo,
             reason: None,
+            force: false,
+            skip_validation: true,
         };
 
         let result = cmd.execute(&db).await;
@@ -1027,6 +1193,8 @@ mod tests {
             id: "TASK1".to_string(), // Uppercase
             target: TargetStatus::Todo,
             reason: None,
+            force: false,
+            skip_validation: true,
         };
 
         let result = cmd.execute(&db).await;
@@ -1051,6 +1219,9 @@ mod tests {
             incomplete_deps: vec![],
             unblocked_tasks: vec![],
             reason: None,
+            validation: None,
+            validation_skipped: false,
+            warnings_forced: false,
         };
 
         let output = format!("{}", result);
@@ -1066,6 +1237,9 @@ mod tests {
             incomplete_deps: vec![],
             unblocked_tasks: vec![],
             reason: None,
+            validation: None,
+            validation_skipped: false,
+            warnings_forced: false,
         };
 
         let output = format!("{}", result);
@@ -1085,6 +1259,9 @@ mod tests {
             )],
             unblocked_tasks: vec![],
             reason: None,
+            validation: None,
+            validation_skipped: false,
+            warnings_forced: false,
         };
 
         let output = format!("{}", result);
@@ -1104,6 +1281,9 @@ mod tests {
             incomplete_deps: vec![],
             unblocked_tasks: vec![("dep1".to_string(), "Dependent Task".to_string())],
             reason: None,
+            validation: None,
+            validation_skipped: false,
+            warnings_forced: false,
         };
 
         let output = format!("{}", result);
@@ -1122,6 +1302,9 @@ mod tests {
             incomplete_deps: vec![],
             unblocked_tasks: vec![],
             reason: Some("Out of scope".to_string()),
+            validation: None,
+            validation_skipped: false,
+            warnings_forced: false,
         };
 
         let output = format!("{}", result);
@@ -1138,6 +1321,9 @@ mod tests {
             incomplete_deps: vec![],
             unblocked_tasks: vec![],
             reason: None,
+            validation: None,
+            validation_skipped: false,
+            warnings_forced: false,
         };
 
         let output = format!("{}", result);
@@ -1171,6 +1357,8 @@ mod tests {
             id: "test123".to_string(),
             target: TargetStatus::Todo,
             reason: None,
+            force: false,
+            skip_validation: false,
         };
         let debug_str = format!("{:?}", cmd);
         assert!(

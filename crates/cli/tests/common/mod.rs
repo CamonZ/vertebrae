@@ -144,11 +144,38 @@ pub async fn execute_add(db: &Database, cmd: AddCommand) -> Result<String, DbErr
 }
 
 /// Create a transition-to command for triage (backlog -> todo).
+/// By default skips validation for test convenience. Use `triage_cmd_with_validation` for validation tests.
 pub fn triage_cmd(id: &str) -> TransitionToCommand {
     TransitionToCommand {
         id: id.to_string(),
         target: TargetStatus::Todo,
         reason: None,
+        force: false,
+        skip_validation: true, // Skip validation by default for existing tests
+    }
+}
+
+/// Create a transition-to command for triage with validation enabled.
+#[allow(dead_code)]
+pub fn triage_cmd_with_validation(id: &str) -> TransitionToCommand {
+    TransitionToCommand {
+        id: id.to_string(),
+        target: TargetStatus::Todo,
+        reason: None,
+        force: false,
+        skip_validation: false,
+    }
+}
+
+/// Create a transition-to command for triage with --force flag.
+#[allow(dead_code)]
+pub fn triage_cmd_force(id: &str) -> TransitionToCommand {
+    TransitionToCommand {
+        id: id.to_string(),
+        target: TargetStatus::Todo,
+        reason: None,
+        force: true,
+        skip_validation: false,
     }
 }
 
@@ -158,6 +185,8 @@ pub fn start_cmd(id: &str) -> TransitionToCommand {
         id: id.to_string(),
         target: TargetStatus::InProgress,
         reason: None,
+        force: false,
+        skip_validation: false,
     }
 }
 
@@ -167,6 +196,8 @@ pub fn submit_cmd(id: &str) -> TransitionToCommand {
         id: id.to_string(),
         target: TargetStatus::PendingReview,
         reason: None,
+        force: false,
+        skip_validation: false,
     }
 }
 
@@ -176,6 +207,8 @@ pub fn done_cmd(id: &str) -> TransitionToCommand {
         id: id.to_string(),
         target: TargetStatus::Done,
         reason: None,
+        force: false,
+        skip_validation: false,
     }
 }
 
@@ -185,6 +218,8 @@ pub fn reject_cmd(id: &str) -> TransitionToCommand {
         id: id.to_string(),
         target: TargetStatus::Rejected,
         reason: None,
+        force: false,
+        skip_validation: false,
     }
 }
 
@@ -195,6 +230,8 @@ pub fn reject_cmd_with_reason(id: &str, reason: &str) -> TransitionToCommand {
         id: id.to_string(),
         target: TargetStatus::Rejected,
         reason: Some(reason.to_string()),
+        force: false,
+        skip_validation: false,
     }
 }
 

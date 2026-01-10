@@ -12,8 +12,9 @@ pub use error::{DbError, DbResult, IncompleteChildInfo};
 #[allow(unused_imports)]
 pub use models::{CodeRef, Level, Priority, Section, SectionType, Status, Task};
 pub use repository::{
-    BlockerNode, GraphQueries, Progress, RelationshipRepository, TaskFilter, TaskLister,
-    TaskRepository, TaskSummary, TaskUpdate,
+    BlockerNode, GraphQueries, Progress, RelationshipRepository, SectionRule, TaskFilter,
+    TaskLister, TaskRepository, TaskSummary, TaskUpdate, TriageValidationConfig,
+    TriageValidationResult, TriageValidator, ValidationIssue, ValidationSeverity,
 };
 
 use std::path::{Path, PathBuf};

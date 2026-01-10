@@ -68,6 +68,17 @@ pub enum DbError {
     /// Error for invalid input or validation failure
     #[error("{message}")]
     ValidationError { message: String },
+
+    /// Error when task fails triage validation (missing required sections)
+    #[error("Task '{task_id}' cannot be triaged: missing required sections")]
+    TriageValidationFailed {
+        task_id: String,
+        error_count: usize,
+        warning_count: usize,
+        note_count: usize,
+        /// Formatted validation result message
+        details: String,
+    },
 }
 
 impl From<surrealdb::Error> for DbError {
@@ -301,6 +312,39 @@ mod tests {
         assert!(
             debug_str.contains("ValidationError") && debug_str.contains("Invalid input value"),
             "Debug output should contain ValidationError and message"
+        );
+    }
+
+    #[test]
+    fn test_triage_validation_failed_error_display() {
+        let err = DbError::TriageValidationFailed {
+            task_id: "abc123".to_string(),
+            error_count: 3,
+            warning_count: 2,
+            note_count: 4,
+            details: "ERRORS (3):\n  - Missing step\n".to_string(),
+        };
+        assert_eq!(
+            err.to_string(),
+            "Task 'abc123' cannot be triaged: missing required sections"
+        );
+    }
+
+    #[test]
+    fn test_triage_validation_failed_error_debug() {
+        let err = DbError::TriageValidationFailed {
+            task_id: "task456".to_string(),
+            error_count: 2,
+            warning_count: 1,
+            note_count: 0,
+            details: "ERRORS (2):\n  - Missing testing_criterion\n  - Missing step".to_string(),
+        };
+        let debug_str = format!("{:?}", err);
+        assert!(
+            debug_str.contains("TriageValidationFailed")
+                && debug_str.contains("task456")
+                && debug_str.contains("error_count: 2"),
+            "Debug output should contain TriageValidationFailed and field values"
         );
     }
 }
