@@ -145,24 +145,12 @@ impl UnrefCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
 
-    /// Helper to create a test database
-    async fn setup_test_db() -> (Database, std::path::PathBuf) {
-        let temp_dir = env::temp_dir().join(format!(
-            "vtb-unref-test-{}-{:?}-{}",
-            std::process::id(),
-            std::thread::current().id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-
-        let db = Database::connect(&temp_dir).await.unwrap();
+    /// Helper to create an in-memory test database
+    async fn setup_test_db() -> Database {
+        let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-
-        (db, temp_dir)
+        db
     }
 
     /// Helper to create a task in the database
@@ -233,16 +221,11 @@ mod tests {
             .expect("Task should have updated_at timestamp")
     }
 
-    /// Clean up test database
-    fn cleanup(path: &std::path::Path) {
-        let _ = std::fs::remove_dir_all(path);
-    }
-
     // ==================== UnrefCommand integration tests ====================
 
     #[tokio::test]
     async fn test_unref_removes_refs_by_file() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
         add_ref(&db, "task1", "src/auth.ex", Some(10), None, None, None).await;
@@ -277,13 +260,11 @@ mod tests {
         let refs = get_refs(&db, "task1").await;
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0].path.as_str(), "src/other.ex");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_unref_multiple_refs_to_same_file() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
         add_ref(&db, "task1", "src/auth.ex", Some(10), None, None, None).await;
@@ -305,13 +286,11 @@ mod tests {
         // Verify all refs removed
         let refs = get_refs(&db, "task1").await;
         assert!(refs.is_empty());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_unref_all_removes_all_refs() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
         add_ref(&db, "task1", "src/auth.ex", Some(10), None, None, None).await;
@@ -334,13 +313,11 @@ mod tests {
         // Verify all refs removed
         let refs = get_refs(&db, "task1").await;
         assert!(refs.is_empty());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_unref_nonexistent_file_warns() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
         add_ref(&db, "task1", "src/auth.ex", Some(10), None, None, None).await;
@@ -367,13 +344,11 @@ mod tests {
             display,
             "Warning: No references to src/nonexistent.ex in task: task1"
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_unref_updates_timestamp() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
         add_ref(&db, "task1", "src/auth.ex", Some(10), None, None, None).await;
@@ -400,13 +375,11 @@ mod tests {
             new_ts,
             initial_ts
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_unref_nonexistent_does_not_update_timestamp() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
         add_ref(&db, "task1", "src/auth.ex", Some(10), None, None, None).await;
@@ -431,13 +404,11 @@ mod tests {
             new_ts, initial_ts,
             "Timestamp should not change when no refs removed"
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_unref_nonexistent_task_fails() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         let cmd = UnrefCommand {
             id: "nonexistent".to_string(),
@@ -457,13 +428,11 @@ mod tests {
             Err(other) => panic!("Expected NotFound error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_unref_case_insensitive_id() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
         add_ref(&db, "task1", "src/auth.ex", Some(10), None, None, None).await;
@@ -479,13 +448,11 @@ mod tests {
 
         let refs = get_refs(&db, "task1").await;
         assert!(refs.is_empty());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_unref_preserves_remaining_refs() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
         add_ref(
@@ -525,13 +492,11 @@ mod tests {
         assert_eq!(refs[0].line_end, Some(40));
         assert_eq!(refs[0].name.as_deref(), Some("fn2"));
         assert_eq!(refs[0].description.as_deref(), Some("desc2"));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_unref_idempotent() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
         add_ref(&db, "task1", "src/auth.ex", Some(10), None, None, None).await;
@@ -549,13 +514,11 @@ mod tests {
         // Second removal - should be idempotent
         let result2 = cmd.execute(&db).await.unwrap();
         assert_eq!(result2.removed_count, 0);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_unref_all_empty_refs() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
 
@@ -573,13 +536,11 @@ mod tests {
 
         let display = format!("{}", unref_result);
         assert_eq!(display, "No references to remove from task: task1");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_unref_all_does_not_update_timestamp_when_empty() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
 
@@ -603,8 +564,6 @@ mod tests {
             new_ts, initial_ts,
             "Timestamp should not change when no refs to remove"
         );
-
-        cleanup(&temp_dir);
     }
 
     // ==================== Display tests ====================

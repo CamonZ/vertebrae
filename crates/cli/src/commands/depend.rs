@@ -202,24 +202,12 @@ impl DependCommand {
 mod tests {
     use super::*;
     use serde::Deserialize;
-    use std::env;
 
-    /// Helper to create a test database
-    async fn setup_test_db() -> (Database, std::path::PathBuf) {
-        let temp_dir = env::temp_dir().join(format!(
-            "vtb-depend-test-{}-{:?}-{}",
-            std::process::id(),
-            std::thread::current().id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-
-        let db = Database::connect(&temp_dir).await.unwrap();
+    /// Helper to create an in-memory test database
+    async fn setup_test_db() -> Database {
+        let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-
-        (db, temp_dir)
+        db
     }
 
     /// Helper to create a task in the database
@@ -268,14 +256,9 @@ mod tests {
         !edges.is_empty()
     }
 
-    /// Clean up test database
-    fn cleanup(path: &std::path::Path) {
-        let _ = std::fs::remove_dir_all(path);
-    }
-
     #[tokio::test]
     async fn test_create_dependency() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "taska", "Task A").await;
         create_task(&db, "taskb", "Task B").await;
@@ -295,13 +278,11 @@ mod tests {
 
         // Verify the dependency was created
         assert!(dependency_exists(&db, "taskb", "taska").await);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_create_dependency_updates_timestamp() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "taska", "Task A").await;
         create_task(&db, "taskb", "Task B").await;
@@ -315,13 +296,11 @@ mod tests {
 
         // Verify updated_at was set
         assert!(has_updated_at(&db, "taskb").await);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_dependency_idempotent() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "taska", "Task A").await;
         create_task(&db, "taskb", "Task B").await;
@@ -340,13 +319,11 @@ mod tests {
         let result2 = cmd.execute(&db).await;
         assert!(result2.is_ok());
         assert!(result2.unwrap().already_existed);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_self_dependency_fails() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "taska", "Task A").await;
 
@@ -367,13 +344,11 @@ mod tests {
             Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_direct_cycle_detection() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "taska", "Task A").await;
         create_task(&db, "taskb", "Task B").await;
@@ -409,13 +384,11 @@ mod tests {
             Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_transitive_cycle_detection() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "taska", "Task A").await;
         create_task(&db, "taskb", "Task B").await;
@@ -461,13 +434,11 @@ mod tests {
             Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_task_not_found() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "taska", "Task A").await;
 
@@ -493,13 +464,11 @@ mod tests {
             Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_dependent_task_not_found() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "taska", "Task A").await;
 
@@ -525,13 +494,11 @@ mod tests {
             Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_case_insensitive_ids() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "taska", "Task A").await;
         create_task(&db, "taskb", "Task B").await;
@@ -546,13 +513,11 @@ mod tests {
 
         // Verify the dependency was created with lowercase IDs
         assert!(dependency_exists(&db, "taskb", "taska").await);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_multiple_dependencies_allowed() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "taska", "Task A").await;
         create_task(&db, "taskb", "Task B").await;
@@ -576,13 +541,11 @@ mod tests {
         // Verify both dependencies exist
         assert!(dependency_exists(&db, "taskc", "taska").await);
         assert!(dependency_exists(&db, "taskc", "taskb").await);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_diamond_dependency_allowed() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Diamond: D depends on B and C, both B and C depend on A
         create_task(&db, "taska", "Task A").await;
@@ -644,13 +607,11 @@ mod tests {
             dependency_exists(&db, "taskd", "taskc").await,
             "D -> C edge should exist"
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_long_chain_no_cycle() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create a long chain: E -> D -> C -> B -> A
         for c in ['a', 'b', 'c', 'd', 'e'] {
@@ -713,8 +674,6 @@ mod tests {
             !dependency_exists(&db, "taska", "taske").await,
             "A -> E edge should NOT exist (would create cycle)"
         );
-
-        cleanup(&temp_dir);
     }
 
     #[test]
@@ -760,7 +719,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_idempotent_updates_timestamp() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "taska", "Task A").await;
         create_task(&db, "taskb", "Task B").await;
@@ -797,7 +756,5 @@ mod tests {
 
         // Timestamp should have been updated
         assert!(ts2 >= ts1, "Timestamp should be updated on idempotent call");
-
-        cleanup(&temp_dir);
     }
 }

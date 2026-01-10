@@ -117,51 +117,26 @@ pub async fn init_schema(client: &Surreal<Db>) -> Result<(), DbError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
-    use surrealdb::engine::local::SurrealKv;
+    use surrealdb::engine::local::Mem;
 
-    /// Helper to create a test database
-    async fn setup_test_db() -> (Surreal<Db>, std::path::PathBuf) {
-        let temp_dir = env::temp_dir().join(format!(
-            "vtb-schema-test-{}-{:?}-{}",
-            std::process::id(),
-            std::thread::current().id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-
-        // Create directory
-        std::fs::create_dir_all(&temp_dir).unwrap();
-
-        // Connect to database
-        let client = Surreal::new::<SurrealKv>(temp_dir.clone()).await.unwrap();
-
-        // Select namespace and database
+    /// Helper to create an in-memory test database
+    async fn setup_test_db() -> Surreal<Db> {
+        let client = Surreal::new::<Mem>(()).await.unwrap();
         client.use_ns("vertebrae").use_db("test").await.unwrap();
-
-        (client, temp_dir)
-    }
-
-    /// Clean up test database
-    fn cleanup(path: &std::path::Path) {
-        let _ = std::fs::remove_dir_all(path);
+        client
     }
 
     #[tokio::test]
     async fn test_init_schema_succeeds() {
-        let (client, temp_dir) = setup_test_db().await;
+        let client = setup_test_db().await;
 
         let result = init_schema(&client).await;
         assert!(result.is_ok(), "Schema init failed: {:?}", result.err());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_init_schema_is_idempotent() {
-        let (client, temp_dir) = setup_test_db().await;
+        let client = setup_test_db().await;
 
         // First call
         let result1 = init_schema(&client).await;
@@ -174,13 +149,11 @@ mod tests {
         // Third call for good measure
         let result3 = init_schema(&client).await;
         assert!(result3.is_ok(), "Third init failed: {:?}", result3.err());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_task_table_accepts_valid_data() {
-        let (client, temp_dir) = setup_test_db().await;
+        let client = setup_test_db().await;
         init_schema(&client).await.unwrap();
 
         // Insert a valid task
@@ -202,13 +175,11 @@ mod tests {
             "Valid task insert failed: {:?}",
             result.err()
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_task_table_accepts_minimal_data() {
-        let (client, temp_dir) = setup_test_db().await;
+        let client = setup_test_db().await;
         init_schema(&client).await.unwrap();
 
         // Insert with only required fields
@@ -228,13 +199,11 @@ mod tests {
             "Minimal task insert failed: {:?}",
             result.err()
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_task_table_rejects_invalid_level() {
-        let (client, temp_dir) = setup_test_db().await;
+        let client = setup_test_db().await;
         init_schema(&client).await.unwrap();
 
         // Try to insert with invalid level
@@ -253,13 +222,11 @@ mod tests {
         // SurrealDB returns an error in the response, not as a query error
         let check: Result<Option<surrealdb::Value>, _> = response.take(0);
         assert!(check.is_err(), "Should reject invalid level");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_task_table_rejects_invalid_status() {
-        let (client, temp_dir) = setup_test_db().await;
+        let client = setup_test_db().await;
         init_schema(&client).await.unwrap();
 
         // Try to insert with invalid status
@@ -277,13 +244,11 @@ mod tests {
 
         let check: Result<Option<surrealdb::Value>, _> = response.take(0);
         assert!(check.is_err(), "Should reject invalid status");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_task_table_rejects_invalid_priority() {
-        let (client, temp_dir) = setup_test_db().await;
+        let client = setup_test_db().await;
         init_schema(&client).await.unwrap();
 
         // Try to insert with invalid priority
@@ -302,13 +267,11 @@ mod tests {
 
         let check: Result<Option<surrealdb::Value>, _> = response.take(0);
         assert!(check.is_err(), "Should reject invalid priority");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_task_with_null_priority_succeeds() {
-        let (client, temp_dir) = setup_test_db().await;
+        let client = setup_test_db().await;
         init_schema(&client).await.unwrap();
 
         // Insert with explicit NONE priority
@@ -325,13 +288,11 @@ mod tests {
             .await;
 
         assert!(result.is_ok(), "Null priority should be allowed");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_child_of_relation_between_tasks() {
-        let (client, temp_dir) = setup_test_db().await;
+        let client = setup_test_db().await;
         init_schema(&client).await.unwrap();
 
         // Create parent and child tasks
@@ -365,13 +326,11 @@ mod tests {
             "child_of relation failed: {:?}",
             result.err()
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_depends_on_relation_between_tasks() {
-        let (client, temp_dir) = setup_test_db().await;
+        let client = setup_test_db().await;
         init_schema(&client).await.unwrap();
 
         // Create two tasks
@@ -405,13 +364,11 @@ mod tests {
             "depends_on relation failed: {:?}",
             result.err()
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_task_with_sections() {
-        let (client, temp_dir) = setup_test_db().await;
+        let client = setup_test_db().await;
         init_schema(&client).await.unwrap();
 
         // Insert task with sections
@@ -436,13 +393,11 @@ mod tests {
             "Task with sections failed: {:?}",
             result.err()
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_task_with_refs() {
-        let (client, temp_dir) = setup_test_db().await;
+        let client = setup_test_db().await;
         init_schema(&client).await.unwrap();
 
         // Insert task with code references
@@ -462,13 +417,11 @@ mod tests {
             .await;
 
         assert!(result.is_ok(), "Task with refs failed: {:?}", result.err());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_task_default_values() {
-        let (client, temp_dir) = setup_test_db().await;
+        let client = setup_test_db().await;
         init_schema(&client).await.unwrap();
 
         // Insert minimal task and check defaults
@@ -510,13 +463,11 @@ mod tests {
         // Check that timestamps were set (not empty)
         assert!(!task.created_at.is_empty(), "created_at should be set");
         assert!(!task.updated_at.is_empty(), "updated_at should be set");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_all_valid_levels() {
-        let (client, temp_dir) = setup_test_db().await;
+        let client = setup_test_db().await;
         init_schema(&client).await.unwrap();
 
         for level in ["epic", "ticket", "task"] {
@@ -527,13 +478,11 @@ mod tests {
             let result = client.query(&query).await;
             assert!(result.is_ok(), "Level '{}' should be valid", level);
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_all_valid_statuses() {
-        let (client, temp_dir) = setup_test_db().await;
+        let client = setup_test_db().await;
         init_schema(&client).await.unwrap();
 
         for (i, status) in [
@@ -554,13 +503,11 @@ mod tests {
             let result = client.query(&query).await;
             assert!(result.is_ok(), "Status '{}' should be valid", status);
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_all_valid_priorities() {
-        let (client, temp_dir) = setup_test_db().await;
+        let client = setup_test_db().await;
         init_schema(&client).await.unwrap();
 
         for (i, priority) in ["low", "medium", "high", "critical"].iter().enumerate() {
@@ -571,8 +518,6 @@ mod tests {
             let result = client.query(&query).await;
             assert!(result.is_ok(), "Priority '{}' should be valid", priority);
         }
-
-        cleanup(&temp_dir);
     }
 
     // Test SQL constant accessibility
@@ -617,7 +562,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_task_creation_without_timestamps_succeeds() {
-        let (client, temp_dir) = setup_test_db().await;
+        let client = setup_test_db().await;
         init_schema(&client).await.unwrap();
 
         // Create task without providing started_at or completed_at
@@ -654,13 +599,11 @@ mod tests {
         let row = row.expect("Task should exist");
         assert!(row.started_at.is_none(), "started_at should be NULL");
         assert!(row.completed_at.is_none(), "completed_at should be NULL");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_started_at_accepts_datetime() {
-        let (client, temp_dir) = setup_test_db().await;
+        let client = setup_test_db().await;
         init_schema(&client).await.unwrap();
 
         // Create task with started_at set to time::now()
@@ -702,13 +645,11 @@ mod tests {
             timestamp.timestamp() > 0,
             "started_at should be a valid datetime with positive timestamp"
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_completed_at_accepts_datetime() {
-        let (client, temp_dir) = setup_test_db().await;
+        let client = setup_test_db().await;
         init_schema(&client).await.unwrap();
 
         // Create task with completed_at set to time::now()
@@ -749,13 +690,11 @@ mod tests {
             timestamp.timestamp() > 0,
             "completed_at should be a valid datetime with positive timestamp"
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_timestamp_persists_across_queries() {
-        let (client, temp_dir) = setup_test_db().await;
+        let client = setup_test_db().await;
         init_schema(&client).await.unwrap();
 
         // Create task and set started_at
@@ -793,13 +732,11 @@ mod tests {
         let ts2 = row2.expect("Should have timestamp").started_at.0;
 
         assert_eq!(ts1, ts2, "Timestamp should persist and be consistent");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_update_started_at_with_time_now() {
-        let (client, temp_dir) = setup_test_db().await;
+        let client = setup_test_db().await;
         init_schema(&client).await.unwrap();
 
         // Create task without started_at
@@ -844,8 +781,6 @@ mod tests {
             .unwrap();
         let row: Option<DatetimeRow> = result.take(0).unwrap();
         assert!(row.is_some(), "started_at should be set after update");
-
-        cleanup(&temp_dir);
     }
 
     // Workflow schema tests
@@ -869,7 +804,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_workflow_table_accepts_valid_data() {
-        let (client, temp_dir) = setup_test_db().await;
+        let client = setup_test_db().await;
         init_schema(&client).await.unwrap();
 
         // Insert a valid workflow
@@ -893,13 +828,11 @@ mod tests {
             "Valid workflow insert failed: {:?}",
             result.err()
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_workflow_table_accepts_minimal_data() {
-        let (client, temp_dir) = setup_test_db().await;
+        let client = setup_test_db().await;
         init_schema(&client).await.unwrap();
 
         // Insert with only required fields
@@ -917,13 +850,11 @@ mod tests {
             "Minimal workflow insert failed: {:?}",
             result.err()
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_workflow_default_values() {
-        let (client, temp_dir) = setup_test_db().await;
+        let client = setup_test_db().await;
         init_schema(&client).await.unwrap();
 
         // Insert minimal workflow and check defaults
@@ -964,13 +895,11 @@ mod tests {
         // Check that timestamps were set (not empty)
         assert!(!workflow.created_at.is_empty(), "created_at should be set");
         assert!(!workflow.updated_at.is_empty(), "updated_at should be set");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_workflow_steps_maintain_insertion_order() {
-        let (client, temp_dir) = setup_test_db().await;
+        let client = setup_test_db().await;
         init_schema(&client).await.unwrap();
 
         // Insert workflow with ordered steps
@@ -1017,13 +946,11 @@ mod tests {
         assert_eq!(workflow.steps[1].order, 1);
         assert_eq!(workflow.steps[2].name, "Third");
         assert_eq!(workflow.steps[2].order, 2);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_workflow_can_be_created_and_retrieved() {
-        let (client, temp_dir) = setup_test_db().await;
+        let client = setup_test_db().await;
         init_schema(&client).await.unwrap();
 
         // Create a complete workflow
@@ -1083,13 +1010,11 @@ mod tests {
         assert_eq!(skills.len(), 2);
         assert_eq!(skills[0].as_str().unwrap(), "eslint");
         assert_eq!(skills[1].as_str().unwrap(), "prettier");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_workflow_update_preserves_data() {
-        let (client, temp_dir) = setup_test_db().await;
+        let client = setup_test_db().await;
         init_schema(&client).await.unwrap();
 
         // Create initial workflow
@@ -1147,13 +1072,11 @@ mod tests {
         );
         // Steps should be updated
         assert_eq!(workflow.steps.len(), 2);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_workflow_with_empty_steps() {
-        let (client, temp_dir) = setup_test_db().await;
+        let client = setup_test_db().await;
         init_schema(&client).await.unwrap();
 
         // Create workflow with explicit empty steps
@@ -1172,13 +1095,11 @@ mod tests {
             "Workflow with empty steps should succeed: {:?}",
             result.err()
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_workflow_with_null_description() {
-        let (client, temp_dir) = setup_test_db().await;
+        let client = setup_test_db().await;
         init_schema(&client).await.unwrap();
 
         // Create workflow with explicit null description
@@ -1212,7 +1133,5 @@ mod tests {
         let row: Option<DescRow> = query_result.take(0).unwrap();
         let row = row.expect("Workflow should exist");
         assert!(row.description.is_none(), "description should be null");
-
-        cleanup(&temp_dir);
     }
 }

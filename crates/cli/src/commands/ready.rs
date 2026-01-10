@@ -87,25 +87,11 @@ impl ReadyCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
-    use std::path::PathBuf;
-
-    /// Helper to create a test database
-    async fn setup_test_db() -> (Database, PathBuf) {
-        let temp_dir = env::temp_dir().join(format!(
-            "vtb-ready-test-{}-{:?}-{}",
-            std::process::id(),
-            std::thread::current().id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-
-        let db = Database::connect(&temp_dir).await.unwrap();
+    /// Helper to create an in-memory test database
+    async fn setup_test_db() -> Database {
+        let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-
-        (db, temp_dir)
+        db
     }
 
     /// Helper to create a task in the database
@@ -137,10 +123,6 @@ mod tests {
             dependent_id, dependency_id
         );
         db.client().query(&query).await.unwrap();
-    }
-
-    fn cleanup(path: &std::path::Path) {
-        let _ = std::fs::remove_dir_all(path);
     }
 
     #[test]
@@ -235,20 +217,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_ready_empty_database() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         let cmd = ReadyCommand {};
         let result = cmd.execute(&db).await.unwrap();
 
         assert!(result.todo_ready.is_empty());
         assert!(result.backlog_ready.is_empty());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_ready_single_todo_task() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Ready Task", "task", "todo").await;
 
@@ -258,13 +238,11 @@ mod tests {
         assert_eq!(result.todo_ready.len(), 1);
         assert_eq!(result.todo_ready[0].id, "task1");
         assert!(result.backlog_ready.is_empty());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_ready_single_backlog_task() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Backlog Task", "task", "backlog").await;
 
@@ -274,13 +252,11 @@ mod tests {
         assert!(result.todo_ready.is_empty());
         assert_eq!(result.backlog_ready.len(), 1);
         assert_eq!(result.backlog_ready[0].id, "task1");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_ready_excludes_in_progress() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "In Progress Task", "task", "in_progress").await;
 
@@ -289,13 +265,11 @@ mod tests {
 
         assert!(result.todo_ready.is_empty());
         assert!(result.backlog_ready.is_empty());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_ready_excludes_done() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Done Task", "task", "done").await;
 
@@ -304,13 +278,11 @@ mod tests {
 
         assert!(result.todo_ready.is_empty());
         assert!(result.backlog_ready.is_empty());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_ready_shows_parent_not_child_when_no_work_started() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create epic with todo child - should show epic only
         create_task(&db, "epic1", "Epic", "epic", "todo").await;
@@ -323,13 +295,11 @@ mod tests {
         // Should show only epic1, not ticket1
         assert_eq!(result.todo_ready.len(), 1);
         assert_eq!(result.todo_ready[0].id, "epic1");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_ready_excludes_parent_when_child_work_started() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create epic with in_progress child - epic should not show
         create_task(&db, "epic1", "Epic", "epic", "todo").await;
@@ -341,13 +311,11 @@ mod tests {
 
         // Epic should be excluded because work has started on a child
         assert!(result.todo_ready.is_empty());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_ready_excludes_blocked_tasks() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create blocker and blocked task
         create_task(&db, "blocker", "Blocker", "task", "todo").await;
@@ -360,13 +328,11 @@ mod tests {
         // Should show only blocker (blocked is blocked by an incomplete task)
         assert_eq!(result.todo_ready.len(), 1);
         assert_eq!(result.todo_ready[0].id, "blocker");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_ready_includes_unblocked_tasks() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create blocker (done) and blocked task
         create_task(&db, "blocker", "Blocker", "task", "done").await;
@@ -379,13 +345,11 @@ mod tests {
         // Should show blocked task (blocker is done)
         assert_eq!(result.todo_ready.len(), 1);
         assert_eq!(result.todo_ready[0].id, "blocked");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_ready_prioritizes_epic_over_ticket_over_task() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create independent tasks at all levels
         create_task(&db, "task1", "Task", "task", "todo").await;
@@ -403,13 +367,11 @@ mod tests {
         assert!(ids.contains(&"epic1"));
         assert!(ids.contains(&"ticket1"));
         assert!(ids.contains(&"task1"));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_ready_deep_hierarchy() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create epic -> ticket -> task hierarchy, all todo
         create_task(&db, "epic1", "Epic", "epic", "todo").await;
@@ -424,13 +386,11 @@ mod tests {
         // Should show only epic1 (highest level entry point)
         assert_eq!(result.todo_ready.len(), 1);
         assert_eq!(result.todo_ready[0].id, "epic1");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_ready_work_started_deep_in_hierarchy() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create epic -> ticket -> task hierarchy
         // task is in_progress, so epic should be excluded
@@ -445,13 +405,11 @@ mod tests {
 
         // Should show nothing (work started deep in hierarchy)
         assert!(result.todo_ready.is_empty());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_ready_child_shows_when_parent_has_work_elsewhere() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create epic with two tickets:
         // - ticket1: in_progress
@@ -470,7 +428,5 @@ mod tests {
         // But ticket2 should show (it's the entry point for its subtree)
         assert_eq!(result.todo_ready.len(), 1);
         assert_eq!(result.todo_ready[0].id, "ticket2");
-
-        cleanup(&temp_dir);
     }
 }

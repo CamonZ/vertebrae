@@ -403,24 +403,12 @@ fn type_sort_order(section_type: &SectionType) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
 
-    /// Helper to create a test database
-    async fn setup_test_db() -> (Database, std::path::PathBuf) {
-        let temp_dir = env::temp_dir().join(format!(
-            "vtb-sections-test-{}-{:?}-{}",
-            std::process::id(),
-            std::thread::current().id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-
-        let db = Database::connect(&temp_dir).await.unwrap();
+    /// Helper to create an in-memory test database
+    async fn setup_test_db() -> Database {
+        let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-
-        (db, temp_dir)
+        db
     }
 
     /// Helper to create a task in the database
@@ -464,11 +452,6 @@ mod tests {
             id, section_obj
         );
         db.client().query(&query).await.unwrap();
-    }
-
-    /// Clean up test database
-    fn cleanup(path: &std::path::Path) {
-        let _ = std::fs::remove_dir_all(path);
     }
 
     #[test]
@@ -564,7 +547,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sections_all() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
         add_section(&db, "task1", "goal", "The goal", None).await;
@@ -599,13 +582,11 @@ mod tests {
             sections_result.sections[3].section_type,
             SectionType::AntiPattern
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_sections_filter_by_type() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
         add_section(&db, "task1", "goal", "The goal", None).await;
@@ -643,13 +624,11 @@ mod tests {
             .collect();
         assert!(step_contents.contains("Step 1"), "Should contain 'Step 1'");
         assert!(step_contents.contains("Step 2"), "Should contain 'Step 2'");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_sections_filter_anti_pattern() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
         add_section(&db, "task1", "goal", "The goal", None).await;
@@ -688,13 +667,11 @@ mod tests {
             contents.contains("Avoid that"),
             "Should contain 'Avoid that'"
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_sections_empty() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
 
@@ -712,13 +689,11 @@ mod tests {
         // Test display
         let output = format!("{}", sections_result);
         assert_eq!(output, "No sections defined");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_sections_filter_no_matches() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
         add_section(&db, "task1", "goal", "The goal", None).await;
@@ -737,13 +712,11 @@ mod tests {
         // Test display
         let output = format!("{}", sections_result);
         assert_eq!(output, "No sections of type 'anti_pattern'");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_sections_nonexistent_task() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         let cmd = SectionsCommand {
             id: "nonexistent".to_string(),
@@ -762,13 +735,11 @@ mod tests {
             Err(other) => panic!("Expected NotFound error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_sections_case_insensitive_id() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
         add_section(&db, "task1", "goal", "The goal", None).await;
@@ -783,13 +754,11 @@ mod tests {
 
         let sections_result = result.unwrap();
         assert_eq!(sections_result.sections.len(), 1);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_sections_ordered_by_ordinal() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
         // Add in reverse order
@@ -810,8 +779,6 @@ mod tests {
         assert_eq!(sections_result.sections[0].content, "Step 1");
         assert_eq!(sections_result.sections[1].content, "Step 2");
         assert_eq!(sections_result.sections[2].content, "Step 3");
-
-        cleanup(&temp_dir);
     }
 
     #[test]

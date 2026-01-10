@@ -307,24 +307,12 @@ impl RefCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
 
-    /// Helper to create a test database
-    async fn setup_test_db() -> (Database, std::path::PathBuf) {
-        let temp_dir = env::temp_dir().join(format!(
-            "vtb-ref-test-{}-{:?}-{}",
-            std::process::id(),
-            std::thread::current().id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-
-        let db = Database::connect(&temp_dir).await.unwrap();
+    /// Helper to create an in-memory test database
+    async fn setup_test_db() -> Database {
+        let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-
-        (db, temp_dir)
+        db
     }
 
     /// Helper to create a task in the database
@@ -368,11 +356,6 @@ mod tests {
         let mut result = db.client().query(&query).await.unwrap();
         let row: Option<TimestampRow> = result.take(0).unwrap();
         row.unwrap().updated_at
-    }
-
-    /// Clean up test database
-    fn cleanup(path: &std::path::Path) {
-        let _ = std::fs::remove_dir_all(path);
     }
 
     // ==================== parse_file_ref tests ====================
@@ -483,7 +466,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_ref_add_simple_file() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
 
@@ -509,13 +492,11 @@ mod tests {
         let refs = get_refs(&db, "task1").await;
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0].path.as_deref(), Some("nonexistent/path/file.rs"));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_ref_add_with_line_range() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
 
@@ -537,13 +518,11 @@ mod tests {
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0].line_start, Some(45));
         assert_eq!(refs[0].line_end, Some(67));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_ref_add_with_single_line() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
 
@@ -565,13 +544,11 @@ mod tests {
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0].line_start, Some(45));
         assert!(refs[0].line_end.is_none());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_ref_add_with_name() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
 
@@ -588,13 +565,11 @@ mod tests {
         let refs = get_refs(&db, "task1").await;
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0].name.as_deref(), Some("hash_password"));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_ref_add_with_description() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
 
@@ -614,13 +589,11 @@ mod tests {
             refs[0].description.as_deref(),
             Some("Main authentication function")
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_ref_add_with_name_and_description() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
 
@@ -638,13 +611,11 @@ mod tests {
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0].name.as_deref(), Some("authenticate"));
         assert_eq!(refs[0].description.as_deref(), Some("Entry point"));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_ref_add_multiple_refs() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
 
@@ -697,13 +668,11 @@ mod tests {
             ref_paths.contains("config/auth.exs"),
             "Should contain config/auth.exs path"
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_ref_nonexistent_task_fails() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         let cmd = RefCommand {
             id: "nonexistent".to_string(),
@@ -724,13 +693,11 @@ mod tests {
             Err(other) => panic!("Expected NotFound error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_ref_invalid_line_range_fails() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
 
@@ -753,13 +720,11 @@ mod tests {
             Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_ref_invalid_line_number_fails() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
 
@@ -782,13 +747,11 @@ mod tests {
             Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_ref_updates_timestamp() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
 
@@ -816,13 +779,11 @@ mod tests {
             new_ts,
             initial_ts
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_ref_case_insensitive_id() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
 
@@ -839,13 +800,11 @@ mod tests {
         // Verify ref was added
         let refs = get_refs(&db, "task1").await;
         assert_eq!(refs.len(), 1);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_ref_special_characters_in_content() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
 
@@ -858,8 +817,6 @@ mod tests {
 
         let result = cmd.execute(&db).await;
         assert!(result.is_ok(), "Special chars failed: {:?}", result.err());
-
-        cleanup(&temp_dir);
     }
 
     // ==================== Display tests ====================

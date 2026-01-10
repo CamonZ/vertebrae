@@ -202,24 +202,12 @@ impl ListCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
 
-    /// Helper to create a test database
-    async fn setup_test_db() -> (Database, std::path::PathBuf) {
-        let temp_dir = env::temp_dir().join(format!(
-            "vtb-list-test-{}-{:?}-{}",
-            std::process::id(),
-            std::thread::current().id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-
-        let db = Database::connect(&temp_dir).await.unwrap();
+    /// Helper to create an in-memory test database
+    async fn setup_test_db() -> Database {
+        let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-
-        (db, temp_dir)
+        db
     }
 
     /// Helper to create a task in the database
@@ -266,11 +254,6 @@ mod tests {
     async fn create_child_of(db: &Database, child_id: &str, parent_id: &str) {
         let query = format!("RELATE task:{} -> child_of -> task:{}", child_id, parent_id);
         db.client().query(&query).await.unwrap();
-    }
-
-    /// Clean up test database
-    fn cleanup(path: &std::path::Path) {
-        let _ = std::fs::remove_dir_all(path);
     }
 
     #[test]
@@ -349,7 +332,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_all_tasks_excludes_done_by_default() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create some tasks
         create_task(&db, "task1", "Task 1", "task", "todo", None, &[]).await;
@@ -379,13 +362,11 @@ mod tests {
         assert!(ids.contains("task1"), "Should contain task1");
         assert!(ids.contains("task2"), "Should contain task2");
         assert!(!ids.contains("task3"), "Should not contain done task");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_all_includes_done_with_flag() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create some tasks
         create_task(&db, "task1", "Task 1", "task", "todo", None, &[]).await;
@@ -415,13 +396,11 @@ mod tests {
             ids.contains("task2"),
             "Should contain done task2 with --all flag"
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_filter_by_level() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "epic1", "Epic 1", "epic", "todo", None, &[]).await;
         create_task(&db, "ticket1", "Ticket 1", "ticket", "todo", None, &[]).await;
@@ -442,13 +421,11 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].level, "epic");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_filter_by_multiple_levels() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "epic1", "Epic 1", "epic", "todo", None, &[]).await;
         create_task(&db, "ticket1", "Ticket 1", "ticket", "todo", None, &[]).await;
@@ -483,13 +460,11 @@ mod tests {
             !ids.contains("task1"),
             "Should not contain task1 (level=task)"
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_filter_by_status() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Task 1", "task", "todo", None, &[]).await;
         create_task(&db, "task2", "Task 2", "task", "backlog", None, &[]).await;
@@ -510,13 +485,11 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].status, "backlog");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_filter_by_priority() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Task 1", "task", "todo", Some("high"), &[]).await;
         create_task(&db, "task2", "Task 2", "task", "todo", Some("low"), &[]).await;
@@ -537,13 +510,11 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].priority, Some("high".to_string()));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_filter_by_tag() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Task 1", "task", "todo", None, &["backend"]).await;
         create_task(&db, "task2", "Task 2", "task", "todo", None, &["frontend"]).await;
@@ -593,13 +564,11 @@ mod tests {
             !ids.contains("task2"),
             "Should not contain task2 (only has frontend tag)"
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_root_tasks() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create parent and child tasks
         create_task(&db, "parent1", "Parent Epic", "epic", "todo", None, &[]).await;
@@ -627,13 +596,11 @@ mod tests {
         assert!(result.iter().any(|t| t.id == "parent1"));
         assert!(result.iter().any(|t| t.id == "orphan1"));
         assert!(!result.iter().any(|t| t.id == "child1"));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_children_of_task() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create parent and child tasks
         create_task(&db, "parent1", "Parent Epic", "epic", "todo", None, &[]).await;
@@ -662,13 +629,11 @@ mod tests {
         assert_eq!(result.len(), 2);
         assert!(result.iter().any(|t| t.id == "child1"));
         assert!(result.iter().any(|t| t.id == "child2"));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_children_nonexistent_parent() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Task 1", "task", "todo", None, &[]).await;
 
@@ -687,13 +652,11 @@ mod tests {
 
         // Should return empty list
         assert!(result.is_empty());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_empty_database() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         let cmd = ListCommand {
             levels: vec![],
@@ -709,13 +672,11 @@ mod tests {
         let result = cmd.execute(&db).await.unwrap();
 
         assert!(result.is_empty());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_combined_filters() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(
             &db,
@@ -774,13 +735,11 @@ mod tests {
         // Should match task1 only (epic + high priority + backend tag + not done)
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].id, "task1");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_root_with_level_filter() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "epic1", "Epic", "epic", "todo", None, &[]).await;
         create_task(&db, "ticket1", "Ticket", "ticket", "todo", None, &[]).await;
@@ -800,8 +759,6 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].level, "epic");
-
-        cleanup(&temp_dir);
     }
 
     #[test]
@@ -1007,7 +964,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_search_finds_task_by_title() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(
             &db,
@@ -1047,13 +1004,11 @@ mod tests {
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].id, "task1");
         assert_eq!(result[0].title, "Authentication feature");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_search_finds_task_by_description() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task_with_description(
             &db,
@@ -1089,13 +1044,11 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].id, "task1");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_search_is_case_insensitive() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(
             &db,
@@ -1142,13 +1095,11 @@ mod tests {
 
         assert_eq!(result2.len(), 1);
         assert_eq!(result2[0].id, "task1");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_search_with_no_matches_returns_empty() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Task A", "task", "todo", None, &[]).await;
         create_task(&db, "task2", "Task B", "task", "todo", None, &[]).await;
@@ -1167,13 +1118,11 @@ mod tests {
         let result = cmd.execute(&db).await.unwrap();
 
         assert!(result.is_empty());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_search_combined_with_status_filter() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Auth task todo", "task", "todo", None, &[]).await;
         create_task(
@@ -1204,13 +1153,11 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].id, "task2");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_search_combined_with_level_filter() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "epic1", "Auth epic", "epic", "todo", None, &[]).await;
         create_task(&db, "task1", "Auth task", "task", "todo", None, &[]).await;
@@ -1232,13 +1179,11 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].id, "epic1");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_search_empty_string_returns_error() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Task 1", "task", "todo", None, &[]).await;
 
@@ -1262,13 +1207,11 @@ mod tests {
             }
             _ => panic!("Expected ValidationError"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_search_whitespace_only_returns_error() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Task 1", "task", "todo", None, &[]).await;
 
@@ -1292,13 +1235,11 @@ mod tests {
             }
             _ => panic!("Expected ValidationError"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_search_with_root_flag() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "parent1", "Auth Parent", "epic", "todo", None, &[]).await;
         create_task(&db, "child1", "Auth Child", "task", "todo", None, &[]).await;
@@ -1321,13 +1262,11 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].id, "parent1");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_search_with_children_flag() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "parent1", "Parent", "epic", "todo", None, &[]).await;
         create_task(&db, "child1", "Auth Child", "task", "todo", None, &[]).await;
@@ -1351,13 +1290,11 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].id, "child1");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_search_with_special_characters() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test task", "task", "todo", None, &[]).await;
 
@@ -1377,13 +1314,11 @@ mod tests {
 
         // Should return empty (no SQL injection)
         assert!(result.is_empty());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_search_with_null_description() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create task without description
         create_task(&db, "task1", "Auth Feature", "task", "todo", None, &[]).await;
@@ -1410,13 +1345,11 @@ mod tests {
         let ids: std::collections::HashSet<_> = result.iter().map(|t| t.id.as_str()).collect();
         assert!(ids.contains("task1"));
         assert!(ids.contains("task2"));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_tag_or_semantics_preserved() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Task 1", "task", "todo", None, &["backend"]).await;
         create_task(&db, "task2", "Task 2", "task", "todo", None, &["frontend"]).await;
@@ -1454,7 +1387,5 @@ mod tests {
         assert!(ids.contains("task2"));
         assert!(ids.contains("task3"));
         assert!(!ids.contains("task4"));
-
-        cleanup(&temp_dir);
     }
 }

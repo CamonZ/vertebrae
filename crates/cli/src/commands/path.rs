@@ -253,24 +253,12 @@ impl std::fmt::Display for PathResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
 
-    /// Helper to create a test database
-    async fn setup_test_db() -> (Database, std::path::PathBuf) {
-        let temp_dir = env::temp_dir().join(format!(
-            "vtb-path-test-{}-{:?}-{}",
-            std::process::id(),
-            std::thread::current().id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-
-        let db = Database::connect(&temp_dir).await.unwrap();
+    /// Helper to create an in-memory test database
+    async fn setup_test_db() -> Database {
+        let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-
-        (db, temp_dir)
+        db
     }
 
     /// Helper to create a task in the database
@@ -298,14 +286,9 @@ mod tests {
         db.client().query(&query).await.unwrap();
     }
 
-    /// Clean up test database
-    fn cleanup(path: &std::path::Path) {
-        let _ = std::fs::remove_dir_all(path);
-    }
-
     #[tokio::test]
     async fn test_path_same_task() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "taska", "Task A").await;
 
@@ -326,13 +309,11 @@ mod tests {
         let output = format!("{}", path_result);
         let first_line = output.lines().next().unwrap();
         assert_eq!(first_line, "Same task: taska \"Task A\"");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_path_direct_dependency() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "taska", "Task A").await;
         create_task(&db, "taskb", "Task B").await;
@@ -356,13 +337,11 @@ mod tests {
         assert_eq!(path[0].title, "Task A");
         assert_eq!(path[1].id, "taskb");
         assert_eq!(path[1].title, "Task B");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_path_transitive_dependency() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create chain: A -> B -> C
         create_task(&db, "taska", "Task A").await;
@@ -386,13 +365,11 @@ mod tests {
         assert_eq!(path[0].id, "taska");
         assert_eq!(path[1].id, "taskb");
         assert_eq!(path[2].id, "taskc");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_path_no_path() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "taska", "Task A").await;
         create_task(&db, "taskb", "Task B").await;
@@ -412,13 +389,11 @@ mod tests {
         let output = format!("{}", path_result);
         let first_line = output.lines().next().unwrap();
         assert_eq!(first_line, "No dependency path from taska to taskb");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_path_wrong_direction() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "taska", "Task A").await;
         create_task(&db, "taskb", "Task B").await;
@@ -435,13 +410,11 @@ mod tests {
 
         let path_result = result.unwrap();
         assert!(path_result.path.is_none());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_path_nonexistent_from_task() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "taskb", "Task B").await;
 
@@ -462,13 +435,11 @@ mod tests {
             Err(other) => panic!("Expected NotFound error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_path_nonexistent_to_task() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "taska", "Task A").await;
 
@@ -489,13 +460,11 @@ mod tests {
             Err(other) => panic!("Expected NotFound error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_path_case_insensitive() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "taska", "Task A").await;
         create_task(&db, "taskb", "Task B").await;
@@ -511,13 +480,11 @@ mod tests {
 
         let path_result = result.unwrap();
         assert!(path_result.path.is_some());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_path_shortest_path() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create a diamond: A -> B -> D and A -> C -> D
         // Both paths have equal length, BFS should find one of them
@@ -546,13 +513,11 @@ mod tests {
         assert_eq!(path.len(), 3);
         assert_eq!(path[0].id, "taska");
         assert_eq!(path[2].id, "taskd");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_path_long_chain() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create chain: a -> b -> c -> d -> e
         for c in ['a', 'b', 'c', 'd', 'e'] {
@@ -585,8 +550,6 @@ mod tests {
         // Verify the order
         let ids: Vec<&str> = path.iter().map(|t| t.id.as_str()).collect();
         assert_eq!(ids, vec!["taska", "taskb", "taskc", "taskd", "taske"]);
-
-        cleanup(&temp_dir);
     }
 
     #[test]

@@ -176,6 +176,13 @@ vertebrae/
 - Use `db.list_tasks()` for filtering and listing via `TaskLister`
 - If a command needs new database functionality, add it to the appropriate repository first
 
+### Test Database Backend
+
+- **All tests (unit and integration) must use the in-memory backend** (`Mem`), not `SurrealKv`
+- SurrealDB's query executor uses `spawn_blocking` for operations like sorting, which spawns OS threads
+- Using the disk-based `SurrealKv` backend in tests causes OS thread exhaustion when running 500+ tests in parallel
+- Use `surrealdb::engine::local::Mem` with `Surreal::new::<Mem>(()).await`
+
 ### Code Quality
 
 - All code must be formatted with `cargo fmt`

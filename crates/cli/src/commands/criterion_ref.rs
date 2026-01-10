@@ -278,24 +278,12 @@ impl CriterionRefCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
 
-    /// Helper to create a test database
-    async fn setup_test_db() -> (Database, std::path::PathBuf) {
-        let temp_dir = env::temp_dir().join(format!(
-            "vtb-criterion-ref-test-{}-{:?}-{}",
-            std::process::id(),
-            std::thread::current().id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-
-        let db = Database::connect(&temp_dir).await.unwrap();
+    /// Helper to create an in-memory test database
+    async fn setup_test_db() -> Database {
+        let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-
-        (db, temp_dir)
+        db
     }
 
     /// Helper to create a task with testing criteria
@@ -360,14 +348,9 @@ mod tests {
             .unwrap_or_default()
     }
 
-    /// Clean up test database
-    fn cleanup(path: &std::path::Path) {
-        let _ = std::fs::remove_dir_all(path);
-    }
-
     #[tokio::test]
     async fn test_criterion_ref_adds_ref_to_correct_criterion() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task_with_criteria(&db, "abc123", &["Criterion 1", "Criterion 2"]).await;
 
@@ -398,13 +381,11 @@ mod tests {
         assert_eq!(refs[0].line_start, Some(45));
         assert_eq!(refs[0].line_end, Some(67));
         assert_eq!(refs[0].name.as_deref(), Some("test_auth"));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_criterion_ref_second_criterion() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task_with_criteria(&db, "abc123", &["Criterion 1", "Criterion 2"]).await;
 
@@ -430,13 +411,11 @@ mod tests {
         assert_eq!(refs[0].line_start, Some(100));
         assert_eq!(refs[0].line_end, None);
         assert_eq!(refs[0].description.as_deref(), Some("API validation test"));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_criterion_ref_with_mixed_sections() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task_with_mixed_sections(&db, "abc123").await;
 
@@ -459,13 +438,11 @@ mod tests {
         let refs = get_criterion_refs(&db, "abc123", 3).await;
         assert_eq!(refs.len(), 1, "Should have exactly 1 ref");
         assert_eq!(refs[0].path.as_deref(), Some("tests/test.rs"));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_criterion_ref_rejects_out_of_bounds_index() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task_with_criteria(&db, "abc123", &["Criterion 1"]).await;
 
@@ -494,13 +471,11 @@ mod tests {
             Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_criterion_ref_rejects_zero_index() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task_with_criteria(&db, "abc123", &["Criterion 1"]).await;
 
@@ -524,13 +499,11 @@ mod tests {
             Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_criterion_ref_nonexistent_task() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         let cmd = CriterionRefCommand {
             id: "nonexistent".to_string(),
@@ -552,13 +525,11 @@ mod tests {
             Err(other) => panic!("Expected NotFound error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_criterion_ref_invalid_file_spec() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task_with_criteria(&db, "abc123", &["Criterion 1"]).await;
 
@@ -582,13 +553,11 @@ mod tests {
             Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_criterion_ref_multiple_refs_to_same_criterion() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task_with_criteria(&db, "abc123", &["Criterion 1"]).await;
 
@@ -627,13 +596,11 @@ mod tests {
             ref_names.contains("second_test"),
             "Should contain second_test ref"
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_criterion_ref_case_insensitive_id() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task_with_criteria(&db, "abc123", &["Criterion 1"]).await;
 
@@ -647,13 +614,11 @@ mod tests {
 
         let result = cmd.execute(&db).await;
         assert!(result.is_ok(), "Case-insensitive lookup should work");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_criterion_ref_file_not_found_warning() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task_with_criteria(&db, "abc123", &["Criterion 1"]).await;
 
@@ -674,8 +639,6 @@ mod tests {
             result.warning.as_ref().unwrap().contains("does not exist"),
             "Warning should indicate file doesn't exist"
         );
-
-        cleanup(&temp_dir);
     }
 
     #[test]

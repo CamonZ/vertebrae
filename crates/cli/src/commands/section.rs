@@ -203,24 +203,12 @@ fn is_single_instance_type(section_type: &SectionType) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
 
-    /// Helper to create a test database
-    async fn setup_test_db() -> (Database, std::path::PathBuf) {
-        let temp_dir = env::temp_dir().join(format!(
-            "vtb-section-test-{}-{:?}-{}",
-            std::process::id(),
-            std::thread::current().id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-
-        let db = Database::connect(&temp_dir).await.unwrap();
+    /// Helper to create an in-memory test database
+    async fn setup_test_db() -> Database {
+        let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-
-        (db, temp_dir)
+        db
     }
 
     /// Helper to create a task in the database
@@ -249,11 +237,6 @@ mod tests {
         let task = db.tasks().get(id).await.unwrap().unwrap();
         task.updated_at
             .expect("Task should have updated_at timestamp")
-    }
-
-    /// Clean up test database
-    fn cleanup(path: &std::path::Path) {
-        let _ = std::fs::remove_dir_all(path);
     }
 
     #[test]
@@ -326,7 +309,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_add_goal_section() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
 
@@ -350,13 +333,11 @@ mod tests {
         assert_eq!(sections.len(), 1);
         assert_eq!(sections[0].section_type, SectionType::Goal);
         assert_eq!(sections[0].content, "Implement authentication");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_add_step_section_with_ordinal() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
 
@@ -376,13 +357,11 @@ mod tests {
         let sections = get_sections(&db, "task1").await;
         assert_eq!(sections.len(), 1);
         assert_eq!(sections[0].order, Some(0));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_add_multiple_steps_incrementing_ordinal() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
 
@@ -444,13 +423,11 @@ mod tests {
             sections.iter().any(|s| s.order == Some(2)),
             "Should have ordinal 2"
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_replace_single_instance_section() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
 
@@ -476,13 +453,11 @@ mod tests {
         let sections = get_sections(&db, "task1").await;
         assert_eq!(sections.len(), 1);
         assert_eq!(sections[0].content, "Updated goal");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_add_all_section_types() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
 
@@ -568,13 +543,11 @@ mod tests {
                 .any(|s| s.section_type == SectionType::Constraint),
             "Should contain constraint section"
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_section_nonexistent_task_fails() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         let cmd = SectionCommand {
             id: "nonexistent".to_string(),
@@ -594,13 +567,11 @@ mod tests {
             Err(other) => panic!("Expected NotFound error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_section_empty_content_fails() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
 
@@ -622,13 +593,11 @@ mod tests {
             Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_section_whitespace_content_fails() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
 
@@ -650,13 +619,11 @@ mod tests {
             Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_section_updates_timestamp() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
 
@@ -683,13 +650,11 @@ mod tests {
             new_ts,
             initial_ts
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_section_case_insensitive_id() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
 
@@ -705,13 +670,11 @@ mod tests {
         // Verify section was added
         let sections = get_sections(&db, "task1").await;
         assert_eq!(sections.len(), 1);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_section_preserves_other_types_when_replacing() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
 
@@ -764,13 +727,11 @@ mod tests {
             .iter()
             .find(|s| s.section_type == SectionType::Step);
         assert!(step.is_some());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_section_content_with_special_characters() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
 
@@ -782,8 +743,6 @@ mod tests {
 
         let result = cmd.execute(&db).await;
         assert!(result.is_ok(), "Special chars failed: {:?}", result.err());
-
-        cleanup(&temp_dir);
     }
 
     #[test]

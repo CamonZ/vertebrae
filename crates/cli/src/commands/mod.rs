@@ -240,10 +240,7 @@ impl Command {
             }
             Command::Workflow(cmd) => {
                 let result = cmd.execute(db).await?;
-                Ok(CommandResult::Message(format!(
-                    "Created workflow: {}",
-                    result
-                )))
+                Ok(CommandResult::Message(result))
             }
         }
     }

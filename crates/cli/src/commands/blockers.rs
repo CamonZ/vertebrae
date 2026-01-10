@@ -252,24 +252,12 @@ fn print_node(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
 
-    /// Helper to create a test database
-    async fn setup_test_db() -> (Database, std::path::PathBuf) {
-        let temp_dir = env::temp_dir().join(format!(
-            "vtb-blockers-test-{}-{:?}-{}",
-            std::process::id(),
-            std::thread::current().id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-
-        let db = Database::connect(&temp_dir).await.unwrap();
+    /// Helper to create an in-memory test database
+    async fn setup_test_db() -> Database {
+        let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-
-        (db, temp_dir)
+        db
     }
 
     /// Helper to create a task in the database
@@ -297,14 +285,9 @@ mod tests {
         db.client().query(&query).await.unwrap();
     }
 
-    /// Clean up test database
-    fn cleanup(path: &std::path::Path) {
-        let _ = std::fs::remove_dir_all(path);
-    }
-
     #[tokio::test]
     async fn test_blockers_no_blockers() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Independent Task", "task", "todo").await;
 
@@ -322,13 +305,11 @@ mod tests {
 
         let output = format!("{}", blockers_result);
         assert_eq!(output, "No blockers\n");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_blockers_single_blocker() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "blocker1", "Blocker Task", "task", "todo").await;
         create_task(&db, "task1", "Dependent Task", "task", "backlog").await;
@@ -346,13 +327,11 @@ mod tests {
         assert_eq!(blockers_result.blockers.len(), 1);
         assert_eq!(blockers_result.blockers[0].id, "blocker1");
         assert_eq!(blockers_result.total_count, 1);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_blockers_transitive() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create chain: task1 -> blocker1 -> blocker2
         create_task(&db, "blocker2", "Root Blocker", "task", "todo").await;
@@ -376,13 +355,11 @@ mod tests {
         assert_eq!(blockers_result.blockers[0].children.len(), 1);
         assert_eq!(blockers_result.blockers[0].children[0].id, "blocker2");
         assert_eq!(blockers_result.total_count, 2);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_blockers_multiple_direct() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "blocker1", "Blocker 1", "task", "todo").await;
         create_task(&db, "blocker2", "Blocker 2", "task", "in_progress").await;
@@ -412,13 +389,11 @@ mod tests {
             .collect();
         assert!(blocker_ids.contains("blocker1"), "Should contain blocker1");
         assert!(blocker_ids.contains("blocker2"), "Should contain blocker2");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_blockers_depth_limit() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create chain: task1 -> blocker1 -> blocker2 -> blocker3
         create_task(&db, "blocker3", "Deep Blocker", "task", "todo").await;
@@ -459,13 +434,11 @@ mod tests {
         assert_eq!(blockers_result.blockers[0].children[0].id, "blocker2");
         assert!(blockers_result.blockers[0].children[0].children.is_empty());
         assert_eq!(blockers_result.total_count, 2);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_blockers_depth_zero() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "blocker1", "Blocker", "task", "todo").await;
         create_task(&db, "task1", "Main Task", "task", "backlog").await;
@@ -483,13 +456,11 @@ mod tests {
         let blockers_result = result.unwrap();
         assert!(blockers_result.blockers.is_empty());
         assert_eq!(blockers_result.total_count, 0);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_blockers_nonexistent_task() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         let cmd = BlockersCommand {
             id: "nonexistent".to_string(),
@@ -508,13 +479,11 @@ mod tests {
             Err(other) => panic!("Expected NotFound error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_blockers_case_insensitive() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task", "task", "todo").await;
 
@@ -525,13 +494,11 @@ mod tests {
 
         let result = cmd.execute(&db).await;
         assert!(result.is_ok(), "Case-insensitive lookup should work");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_blockers_diamond_structure() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Diamond: task1 -> (blocker1, blocker2) -> shared_blocker
         create_task(&db, "shared", "Shared Blocker", "task", "todo").await;
@@ -566,13 +533,11 @@ mod tests {
             .collect();
         assert!(blocker_ids.contains("blocker1"), "Should contain blocker1");
         assert!(blocker_ids.contains("blocker2"), "Should contain blocker2");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_blockers_shows_status() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "done_blocker", "Done Blocker", "ticket", "done").await;
         create_task(&db, "todo_blocker", "Todo Blocker", "task", "todo").await;
@@ -622,8 +587,6 @@ mod tests {
             has_done && has_todo,
             "Output should contain both 'done' and 'todo' status values"
         );
-
-        cleanup(&temp_dir);
     }
 
     #[test]

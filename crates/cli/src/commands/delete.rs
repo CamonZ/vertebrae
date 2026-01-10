@@ -339,24 +339,12 @@ impl DeleteCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
 
-    /// Helper to create a test database
-    async fn setup_test_db() -> (Database, std::path::PathBuf) {
-        let temp_dir = env::temp_dir().join(format!(
-            "vtb-delete-test-{}-{:?}-{}",
-            std::process::id(),
-            std::thread::current().id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-
-        let db = Database::connect(&temp_dir).await.unwrap();
+    /// Helper to create an in-memory test database
+    async fn setup_test_db() -> Database {
+        let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-
-        (db, temp_dir)
+        db
     }
 
     /// Helper to create a task in the database
@@ -449,14 +437,9 @@ mod tests {
         !rows.is_empty()
     }
 
-    /// Clean up test database
-    fn cleanup(path: &std::path::Path) {
-        let _ = std::fs::remove_dir_all(path);
-    }
-
     #[tokio::test]
     async fn test_delete_simple_task_with_force() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "abc123", "Test Task", "task", "todo").await;
         assert!(task_exists(&db, "abc123").await);
@@ -472,13 +455,11 @@ mod tests {
         assert_eq!(result.unwrap(), "Deleted task: abc123");
 
         assert!(!task_exists(&db, "abc123").await);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_delete_nonexistent_task() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         let cmd = DeleteCommand {
             id: "nonexistent".to_string(),
@@ -498,13 +479,11 @@ mod tests {
             Err(other) => panic!("Expected NotFound error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_delete_case_insensitive() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "abc123", "Test Task", "task", "todo").await;
 
@@ -518,13 +497,11 @@ mod tests {
         assert!(result.is_ok());
 
         assert!(!task_exists(&db, "abc123").await);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_cascade_delete() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create parent with children
         create_task(&db, "parent1", "Parent Task", "epic", "todo").await;
@@ -579,13 +556,11 @@ mod tests {
             !child_of_exists(&db, "grandchild", "child1").await,
             "grandchild -> child1 edge should be removed"
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_orphan_children() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create parent with children
         create_task(&db, "parent1", "Parent Task", "epic", "todo").await;
@@ -615,13 +590,11 @@ mod tests {
         // Children should have no parent
         assert!(get_parent_id(&db, "child1").await.is_none());
         assert!(get_parent_id(&db, "child2").await.is_none());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_delete_cleans_up_dependencies() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create tasks with dependencies
         create_task(&db, "blocker", "Blocker Task", "task", "done").await;
@@ -648,13 +621,11 @@ mod tests {
 
         // Dependency edge should be cleaned up
         assert!(!depends_on_exists(&db, "dependent", "blocker").await);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_delete_cleans_up_reverse_dependencies() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create tasks with dependencies
         create_task(&db, "dep", "Dependency Task", "task", "done").await;
@@ -682,13 +653,11 @@ mod tests {
 
         // Dependency edge should be cleaned up
         assert!(!depends_on_exists(&db, "main", "dep").await);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_delete_cleans_up_child_of_as_child() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create parent-child relationship
         create_task(&db, "parent", "Parent Task", "epic", "todo").await;
@@ -710,13 +679,11 @@ mod tests {
 
         // Parent should still exist
         assert!(task_exists(&db, "parent").await);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_cascade_delete_with_dependencies() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create a complex graph
         create_task(&db, "root", "Root", "epic", "todo").await;
@@ -747,8 +714,6 @@ mod tests {
 
         // Dependency should be cleaned up
         assert!(!depends_on_exists(&db, "external", "child").await);
-
-        cleanup(&temp_dir);
     }
 
     #[test]
@@ -772,7 +737,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fetch_task_info() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "info1", "Info Task", "task", "todo").await;
 
@@ -786,13 +751,11 @@ mod tests {
         assert!(info.is_ok());
         let info = info.unwrap();
         assert_eq!(info.title, "Info Task");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_fetch_children_ids() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "parent", "Parent", "epic", "todo").await;
         create_task(&db, "child1", "Child 1", "ticket", "todo").await;
@@ -812,13 +775,11 @@ mod tests {
         assert_eq!(children.len(), 2);
         assert!(children.contains(&"child1".to_string()));
         assert!(children.contains(&"child2".to_string()));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_fetch_blocked_tasks() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "blocker", "Blocker", "task", "todo").await;
         create_task(&db, "dependent1", "Dependent 1", "task", "backlog").await;
@@ -848,13 +809,11 @@ mod tests {
             dependent_ids.contains("dependent2"),
             "Should contain dependent2"
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_collect_all_descendants() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create hierarchy: parent -> child -> grandchild
         create_task(&db, "parent", "Parent", "epic", "todo").await;
@@ -875,8 +834,6 @@ mod tests {
         assert_eq!(descendants.len(), 2);
         assert!(descendants.contains(&"child".to_string()));
         assert!(descendants.contains(&"grandchild".to_string()));
-
-        cleanup(&temp_dir);
     }
 
     #[test]
@@ -895,7 +852,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_task_no_children_no_dependencies() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "lonely", "Lonely Task", "task", "todo").await;
 
@@ -908,13 +865,11 @@ mod tests {
         let result = cmd.execute(&db).await;
         assert!(result.is_ok());
         assert!(!task_exists(&db, "lonely").await);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_cascade_delete_deep_hierarchy() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create a 3-level hierarchy: level1 -> level2 -> level3
         create_task(&db, "level1", "Level 1", "epic", "todo").await;
@@ -937,13 +892,11 @@ mod tests {
         assert!(!task_exists(&db, "level1").await);
         assert!(!task_exists(&db, "level2").await);
         assert!(!task_exists(&db, "level3").await);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_delete_preserves_unrelated_tasks() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "target", "Target", "task", "todo").await;
         create_task(&db, "unrelated", "Unrelated", "task", "todo").await;
@@ -959,7 +912,5 @@ mod tests {
 
         assert!(!task_exists(&db, "target").await);
         assert!(task_exists(&db, "unrelated").await);
-
-        cleanup(&temp_dir);
     }
 }

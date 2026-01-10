@@ -470,24 +470,12 @@ impl TransitionToCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
 
-    /// Helper to create a test database
-    async fn setup_test_db() -> (Database, std::path::PathBuf) {
-        let temp_dir = env::temp_dir().join(format!(
-            "vtb-transition-to-test-{}-{:?}-{}",
-            std::process::id(),
-            std::thread::current().id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-
-        let db = Database::connect(&temp_dir).await.unwrap();
+    /// Helper to create an in-memory test database
+    async fn setup_test_db() -> Database {
+        let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-
-        (db, temp_dir)
+        db
     }
 
     /// Helper to create a task in the database
@@ -553,18 +541,13 @@ mod tests {
             .collect()
     }
 
-    /// Clean up test database
-    fn cleanup(path: &std::path::Path) {
-        let _ = std::fs::remove_dir_all(path);
-    }
-
     // ==========================================================================
     // transition-to todo tests
     // ==========================================================================
 
     #[tokio::test]
     async fn test_transition_to_todo_from_backlog() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task", "task", "backlog").await;
 
@@ -586,13 +569,11 @@ mod tests {
 
         let status = get_task_status(&db, "task1").await;
         assert_eq!(status, "todo");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_transition_to_todo_from_in_progress_fails() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task", "task", "in_progress").await;
 
@@ -620,13 +601,11 @@ mod tests {
 
         let status = get_task_status(&db, "task1").await;
         assert_eq!(status, "in_progress");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_transition_to_todo_from_done_fails() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task", "task", "done").await;
 
@@ -650,13 +629,11 @@ mod tests {
             Err(other) => panic!("Expected InvalidStatusTransition error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_transition_to_todo_already_todo() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task", "task", "todo").await;
 
@@ -673,8 +650,6 @@ mod tests {
 
         let transition_result = result.unwrap();
         assert!(transition_result.already_in_target);
-
-        cleanup(&temp_dir);
     }
 
     // ==========================================================================
@@ -683,7 +658,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_transition_to_in_progress_from_todo() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task", "task", "todo").await;
 
@@ -709,13 +684,11 @@ mod tests {
         // Verify started_at was set
         let started_at = get_started_at(&db, "task1").await;
         assert!(started_at.is_some(), "started_at should be set");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_transition_to_in_progress_from_pending_review() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task", "task", "pending_review").await;
 
@@ -732,13 +705,11 @@ mod tests {
 
         let status = get_task_status(&db, "task1").await;
         assert_eq!(status, "in_progress");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_transition_to_in_progress_from_backlog_fails() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task", "task", "backlog").await;
 
@@ -766,13 +737,11 @@ mod tests {
 
         let status = get_task_status(&db, "task1").await;
         assert_eq!(status, "backlog");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_transition_to_in_progress_with_incomplete_deps_warns() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "dep1", "Dependency Task", "task", "todo").await;
         create_task(&db, "task1", "Main Task", "task", "todo").await;
@@ -801,13 +770,11 @@ mod tests {
         // Task should still be started despite incomplete deps
         let status = get_task_status(&db, "task1").await;
         assert_eq!(status, "in_progress");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_transition_to_in_progress_preserves_started_at() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create a pending_review task with an existing started_at
         let query = r#"CREATE task:task1 SET
@@ -839,8 +806,6 @@ mod tests {
             original_started_at, new_started_at,
             "started_at should be preserved"
         );
-
-        cleanup(&temp_dir);
     }
 
     // ==========================================================================
@@ -849,7 +814,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_transition_to_pending_review_from_in_progress() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task", "task", "in_progress").await;
 
@@ -869,13 +834,11 @@ mod tests {
 
         let status = get_task_status(&db, "task1").await;
         assert_eq!(status, "pending_review");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_transition_to_pending_review_from_todo_fails() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task", "task", "todo").await;
 
@@ -900,8 +863,6 @@ mod tests {
             Err(other) => panic!("Expected InvalidStatusTransition error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
-
-        cleanup(&temp_dir);
     }
 
     // ==========================================================================
@@ -910,7 +871,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_transition_to_done_from_pending_review() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task", "task", "pending_review").await;
 
@@ -935,13 +896,11 @@ mod tests {
         // Verify completed_at was set
         let completed_at = get_completed_at(&db, "task1").await;
         assert!(completed_at.is_some(), "completed_at should be set");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_transition_to_done_from_in_progress_fails() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task", "task", "in_progress").await;
 
@@ -966,13 +925,11 @@ mod tests {
             Err(other) => panic!("Expected InvalidStatusTransition error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_transition_to_done_with_incomplete_children_fails() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "parent", "Parent Task", "ticket", "pending_review").await;
         create_task(&db, "child1", "Child Task", "task", "todo").await;
@@ -1000,13 +957,11 @@ mod tests {
 
         let status = get_task_status(&db, "parent").await;
         assert_eq!(status, "pending_review");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_transition_to_done_unblocks_dependent_tasks() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "blocker", "Blocker Task", "task", "pending_review").await;
         create_task(&db, "dependent", "Dependent Task", "task", "backlog").await;
@@ -1030,8 +985,6 @@ mod tests {
         let (unblocked_id, unblocked_title) = &transition_result.unblocked_tasks[0];
         assert_eq!(unblocked_id, "dependent");
         assert_eq!(unblocked_title, "Dependent Task");
-
-        cleanup(&temp_dir);
     }
 
     // ==========================================================================
@@ -1040,7 +993,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_transition_to_rejected_from_todo() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task", "task", "todo").await;
 
@@ -1061,13 +1014,11 @@ mod tests {
 
         let status = get_task_status(&db, "task1").await;
         assert_eq!(status, "rejected");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_transition_to_rejected_with_reason() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task", "task", "todo").await;
 
@@ -1092,13 +1043,11 @@ mod tests {
 
         let status = get_task_status(&db, "task1").await;
         assert_eq!(status, "rejected");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_transition_to_rejected_from_in_progress_fails() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task", "task", "in_progress").await;
 
@@ -1123,13 +1072,11 @@ mod tests {
             Err(other) => panic!("Expected InvalidStatusTransition error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_transition_to_rejected_already_rejected_adds_reason() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task", "task", "rejected").await;
 
@@ -1155,8 +1102,6 @@ mod tests {
         let constraints = get_constraint_sections(&db, "task1").await;
         assert_eq!(constraints.len(), 1);
         assert_eq!(constraints[0], "REJECTED: Additional reason");
-
-        cleanup(&temp_dir);
     }
 
     // ==========================================================================
@@ -1165,7 +1110,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_transition_to_nonexistent_task_fails() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         let cmd = TransitionToCommand {
             id: "nonexistent".to_string(),
@@ -1183,13 +1128,11 @@ mod tests {
             Err(other) => panic!("Expected NotFound error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_transition_to_case_insensitive_id() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task", "task", "backlog").await;
 
@@ -1206,8 +1149,6 @@ mod tests {
 
         let status = get_task_status(&db, "task1").await;
         assert_eq!(status, "todo");
-
-        cleanup(&temp_dir);
     }
 
     // ==========================================================================

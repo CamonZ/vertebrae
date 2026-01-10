@@ -441,24 +441,12 @@ impl UnsectionCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
 
-    /// Helper to create a test database
-    async fn setup_test_db() -> (Database, std::path::PathBuf) {
-        let temp_dir = env::temp_dir().join(format!(
-            "vtb-unsection-test-{}-{:?}-{}",
-            std::process::id(),
-            std::thread::current().id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-
-        let db = Database::connect(&temp_dir).await.unwrap();
+    /// Helper to create an in-memory test database
+    async fn setup_test_db() -> Database {
+        let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-
-        (db, temp_dir)
+        db
     }
 
     /// Helper to create a task in the database
@@ -532,11 +520,6 @@ mod tests {
         row.unwrap().updated_at
     }
 
-    /// Clean up test database
-    fn cleanup(path: &std::path::Path) {
-        let _ = std::fs::remove_dir_all(path);
-    }
-
     #[test]
     fn test_parse_section_type_valid() {
         assert_eq!(parse_section_type("goal").unwrap(), SectionType::Goal);
@@ -607,7 +590,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_remove_goal_section() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
         add_section(&db, "task1", "goal", "The goal", None).await;
@@ -629,13 +612,11 @@ mod tests {
         // Verify section was removed
         let sections = get_sections(&db, "task1").await;
         assert!(sections.is_empty());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_remove_step_at_index() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
         add_section(&db, "task1", "step", "Step 0", Some(0)).await;
@@ -667,13 +648,11 @@ mod tests {
         assert_eq!(steps[0].order, Some(0));
         assert_eq!(steps[1].content.as_deref(), Some("Step 2"));
         assert_eq!(steps[1].order, Some(1)); // Renumbered from 2 to 1
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_remove_all_of_type() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
         add_section(&db, "task1", "step", "Step 0", Some(0)).await;
@@ -697,13 +676,11 @@ mod tests {
         let sections = get_sections(&db, "task1").await;
         assert_eq!(sections.len(), 1);
         assert_eq!(sections[0].section_type.as_deref(), Some("goal"));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_remove_all_sections() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
         add_section(&db, "task1", "goal", "The goal", None).await;
@@ -726,13 +703,11 @@ mod tests {
         // Verify all sections are removed
         let sections = get_sections(&db, "task1").await;
         assert!(sections.is_empty());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_remove_nonexistent_section_fails() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
 
@@ -755,13 +730,11 @@ mod tests {
             Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_remove_at_nonexistent_index_fails() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
         add_section(&db, "task1", "step", "Step 0", Some(0)).await;
@@ -785,13 +758,11 @@ mod tests {
             Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_remove_nonexistent_task_fails() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         let cmd = UnsectionCommand {
             id: "nonexistent".to_string(),
@@ -812,13 +783,11 @@ mod tests {
             Err(other) => panic!("Expected NotFound error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_multi_instance_without_index_or_all_fails() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
         add_section(&db, "task1", "step", "Step 0", Some(0)).await;
@@ -847,13 +816,11 @@ mod tests {
             Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_updates_timestamp() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
         add_section(&db, "task1", "goal", "The goal", None).await;
@@ -881,13 +848,11 @@ mod tests {
             new_ts,
             initial_ts
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_case_insensitive_id() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
         add_section(&db, "task1", "goal", "The goal", None).await;
@@ -901,13 +866,11 @@ mod tests {
 
         let result = cmd.execute(&db).await;
         assert!(result.is_ok(), "Case-insensitive lookup should work");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_preserves_other_sections_when_removing() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
         add_section(&db, "task1", "goal", "The goal", None).await;
@@ -937,13 +900,11 @@ mod tests {
             .iter()
             .find(|s| s.section_type.as_deref() == Some("step"));
         assert!(step.is_some());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_remove_all_of_type_returns_zero_when_none_exist() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
         add_section(&db, "task1", "goal", "The goal", None).await;
@@ -960,13 +921,11 @@ mod tests {
 
         let unsection_result = result.unwrap();
         assert_eq!(unsection_result.removed_count, 0);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_no_type_without_all_flag_fails() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
 
@@ -989,13 +948,11 @@ mod tests {
             Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_index_without_type_fails() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Test Task").await;
 
@@ -1018,8 +975,6 @@ mod tests {
             Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[test]

@@ -271,29 +271,12 @@ impl AddCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
 
-    /// Helper to create a test database
-    async fn setup_test_db() -> (Database, std::path::PathBuf) {
-        let temp_dir = env::temp_dir().join(format!(
-            "vtb-add-test-{}-{:?}-{}",
-            std::process::id(),
-            std::thread::current().id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-
-        let db = Database::connect(&temp_dir).await.unwrap();
+    /// Helper to create an in-memory test database
+    async fn setup_test_db() -> Database {
+        let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-
-        (db, temp_dir)
-    }
-
-    /// Clean up test database
-    fn cleanup(path: &std::path::Path) {
-        let _ = std::fs::remove_dir_all(path);
+        db
     }
 
     #[test]
@@ -393,7 +376,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_add_simple_task() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         let cmd = AddCommand {
             title: "My first task".to_string(),
@@ -416,13 +399,11 @@ mod tests {
         assert_eq!(task.status, "backlog"); // Default status
         assert!(task.priority.is_none());
         assert!(task.tags.is_empty());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_add_task_with_level() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         let cmd = AddCommand {
             title: "Epic task".to_string(),
@@ -441,13 +422,11 @@ mod tests {
         let task = get_task(&db, &id).await.expect("Task should exist in DB");
         assert_eq!(task.title, "Epic task");
         assert_eq!(task.level, "epic");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_add_task_with_priority() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         let cmd = AddCommand {
             title: "Urgent task".to_string(),
@@ -466,13 +445,11 @@ mod tests {
         let task = get_task(&db, &id).await.expect("Task should exist in DB");
         assert_eq!(task.title, "Urgent task");
         assert_eq!(task.priority, Some("high".to_string()));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_add_task_with_tags() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         let cmd = AddCommand {
             title: "Tagged task".to_string(),
@@ -493,13 +470,11 @@ mod tests {
         assert_eq!(task.tags.len(), 2);
         assert!(task.tags.contains(&"backend".to_string()));
         assert!(task.tags.contains(&"urgent".to_string()));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_add_task_empty_title_fails() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         let cmd = AddCommand {
             title: "".to_string(),
@@ -524,13 +499,11 @@ mod tests {
             Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_add_task_whitespace_title_fails() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         let cmd = AddCommand {
             title: "   ".to_string(),
@@ -555,13 +528,11 @@ mod tests {
             Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_add_task_with_nonexistent_parent_fails() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         let cmd = AddCommand {
             title: "Child task".to_string(),
@@ -591,13 +562,11 @@ mod tests {
             Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_add_task_with_nonexistent_dependency_fails() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         let cmd = AddCommand {
             title: "Dependent task".to_string(),
@@ -627,13 +596,11 @@ mod tests {
             Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_add_task_with_parent() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // First create a parent task
         let parent_cmd = AddCommand {
@@ -677,13 +644,11 @@ mod tests {
             1,
             "child should have exactly one child_of edge"
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_add_task_with_dependency() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // First create a dependency task
         let dep_cmd = AddCommand {
@@ -727,13 +692,11 @@ mod tests {
             1,
             "task should have exactly one depends_on edge"
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_add_task_with_multiple_dependencies() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create two dependency tasks
         let dep1_cmd = AddCommand {
@@ -794,13 +757,11 @@ mod tests {
             2,
             "task should have exactly two depends_on edges"
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_add_task_with_all_options() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create a parent task
         let parent_cmd = AddCommand {
@@ -872,13 +833,11 @@ mod tests {
             edge_exists(&db, "depends_on", &task_id, &dep_id).await,
             "depends_on edge should exist"
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_add_task_returns_6_char_id() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         let cmd = AddCommand {
             title: "ID test".to_string(),
@@ -894,13 +853,11 @@ mod tests {
         let result = cmd.execute(&db).await.unwrap();
         assert_eq!(result.len(), 6);
         assert!(result.chars().all(|c| c.is_ascii_hexdigit()));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_task_exists_returns_false_for_nonexistent() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         let cmd = AddCommand {
             title: "Test".to_string(),
@@ -915,13 +872,11 @@ mod tests {
 
         let exists = cmd.task_exists(&db, "xxxxxx").await.unwrap();
         assert!(!exists);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_task_exists_returns_true_for_existing() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create a task
         let cmd = AddCommand {
@@ -940,13 +895,11 @@ mod tests {
         // Check it exists
         let exists = cmd.task_exists(&db, &id).await.unwrap();
         assert!(exists);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_default_level_is_task() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         let cmd = AddCommand {
             title: "Default level".to_string(),
@@ -975,13 +928,11 @@ mod tests {
 
         let row: Option<LevelRow> = result.take(0).unwrap();
         assert_eq!(row.unwrap().level, "task");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_default_status_is_backlog() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         let cmd = AddCommand {
             title: "Default status".to_string(),
@@ -1010,13 +961,11 @@ mod tests {
 
         let row: Option<StatusRow> = result.take(0).unwrap();
         assert_eq!(row.unwrap().status, "backlog");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_unique_ids_for_multiple_tasks() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         let mut ids = std::collections::HashSet::new();
 
@@ -1035,13 +984,11 @@ mod tests {
             let id = cmd.execute(&db).await.unwrap();
             assert!(ids.insert(id), "Duplicate ID generated");
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_add_task_with_needs_review() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         let cmd = AddCommand {
             title: "Task needing review".to_string(),
@@ -1074,13 +1021,11 @@ mod tests {
             row.unwrap().needs_human_review,
             "needs_human_review should be true"
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_add_task_default_needs_review_is_false() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         let cmd = AddCommand {
             title: "Task without review flag".to_string(),
@@ -1113,7 +1058,5 @@ mod tests {
             !row.unwrap().needs_human_review,
             "needs_human_review should be false by default"
         );
-
-        cleanup(&temp_dir);
     }
 }

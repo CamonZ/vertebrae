@@ -23,6 +23,8 @@ pub use repository::{
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use surrealdb::Surreal;
+#[cfg(test)]
+use surrealdb::engine::local::Mem;
 use surrealdb::engine::local::{Db, SurrealKv};
 
 /// Default database path relative to project root or current working directory
@@ -65,6 +67,29 @@ impl Database {
                 })?;
 
         Ok(Self { client, path })
+    }
+
+    /// Connect to an in-memory SurrealDB database for testing.
+    ///
+    /// Uses the in-memory backend (`Mem`) which avoids OS thread exhaustion
+    /// when running many tests in parallel. Each call creates a new isolated
+    /// database instance.
+    ///
+    /// # Errors
+    ///
+    /// Returns `DbError::Schema` if connection fails.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub async fn connect_mem() -> DbResult<Self> {
+        use surrealdb::engine::local::Mem;
+
+        let client = Surreal::new::<Mem>(())
+            .await
+            .map_err(|e| DbError::Schema(Box::new(e)))?;
+
+        Ok(Self {
+            client,
+            path: PathBuf::from(":memory:"),
+        })
     }
 
     /// Initialize the database schema.
@@ -229,14 +254,11 @@ pub fn find_project_root() -> Option<PathBuf> {
 #[cfg(test)]
 pub mod test_utils {
     use super::*;
-    use std::env;
 
-    /// Create an isolated SurrealDB database for testing
+    /// Create an isolated in-memory SurrealDB database for testing
     ///
-    /// Provides isolated database instances for unit tests with unique temporary directories.
-    /// Each test gets its own SurrealKV database in a separate temp directory,
-    /// allowing tests to run concurrently without interference.
-    /// Each call creates a new independent database.
+    /// Uses the in-memory backend (`Mem`) to avoid OS thread exhaustion when running
+    /// many tests in parallel. Each call creates a new independent database instance.
     ///
     /// # Example
     ///
@@ -248,23 +270,9 @@ pub mod test_utils {
     /// }
     /// ```
     pub async fn create_test_db() -> DbResult<Surreal<Db>> {
-        // Create unique temp directory for this test
-        let temp_dir = env::temp_dir().join(format!(
-            "vtb-test-{}-{:?}-{}",
-            std::process::id(),
-            std::thread::current().id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-
-        let client = Surreal::new::<SurrealKv>(temp_dir.to_str().unwrap())
+        let client = Surreal::new::<Mem>(())
             .await
-            .map_err(|e| DbError::Connection {
-                path: temp_dir.clone(),
-                source: Box::new(e),
-            })?;
+            .map_err(|e| DbError::Schema(Box::new(e)))?;
 
         // Initialize schema
         client

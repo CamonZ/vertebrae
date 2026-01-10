@@ -98,24 +98,12 @@ impl ReviewCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
 
-    /// Helper to create a test database
-    async fn setup_test_db() -> (Database, std::path::PathBuf) {
-        let temp_dir = env::temp_dir().join(format!(
-            "vtb-review-test-{}-{:?}-{}",
-            std::process::id(),
-            std::thread::current().id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-
-        let db = Database::connect(&temp_dir).await.unwrap();
+    /// Helper to create an in-memory test database
+    async fn setup_test_db() -> Database {
+        let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-
-        (db, temp_dir)
+        db
     }
 
     /// Helper to create a task in the database
@@ -137,14 +125,9 @@ mod tests {
         task.needs_human_review.unwrap_or(false)
     }
 
-    /// Clean up test database
-    fn cleanup(path: &std::path::Path) {
-        let _ = std::fs::remove_dir_all(path);
-    }
-
     #[tokio::test]
     async fn test_review_toggle_false_to_true() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "abc123", false).await;
 
@@ -159,13 +142,11 @@ mod tests {
 
         let flag = get_review_flag(&db, "abc123").await;
         assert!(flag, "Flag should be true after toggle");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_review_toggle_true_to_false() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "abc123", true).await;
 
@@ -180,13 +161,11 @@ mod tests {
 
         let flag = get_review_flag(&db, "abc123").await;
         assert!(!flag, "Flag should be false after toggle");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_review_set_true() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "abc123", false).await;
 
@@ -200,13 +179,11 @@ mod tests {
 
         let flag = get_review_flag(&db, "abc123").await;
         assert!(flag, "Flag should be true after set");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_review_set_false() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "abc123", true).await;
 
@@ -220,13 +197,11 @@ mod tests {
 
         let flag = get_review_flag(&db, "abc123").await;
         assert!(!flag, "Flag should be false after set");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_review_nonexistent_task() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         let cmd = ReviewCommand {
             id: "nonexistent".to_string(),
@@ -245,13 +220,11 @@ mod tests {
             Err(other) => panic!("Expected NotFound error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_review_case_insensitive() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "abc123", false).await;
 
@@ -262,8 +235,6 @@ mod tests {
 
         let result = cmd.execute(&db).await;
         assert!(result.is_ok(), "Case-insensitive lookup should work");
-
-        cleanup(&temp_dir);
     }
 
     #[test]

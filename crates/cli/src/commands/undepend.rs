@@ -162,24 +162,12 @@ mod tests {
     use super::*;
     use crate::commands::DependCommand;
     use serde::Deserialize;
-    use std::env;
 
-    /// Helper to create a test database
-    async fn setup_test_db() -> (Database, std::path::PathBuf) {
-        let temp_dir = env::temp_dir().join(format!(
-            "vtb-undepend-test-{}-{:?}-{}",
-            std::process::id(),
-            std::thread::current().id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-
-        let db = Database::connect(&temp_dir).await.unwrap();
+    /// Helper to create an in-memory test database
+    async fn setup_test_db() -> Database {
+        let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-
-        (db, temp_dir)
+        db
     }
 
     /// Helper to create a task in the database
@@ -228,14 +216,9 @@ mod tests {
         row.map(|r| r.updated_at.is_some()).unwrap_or(false)
     }
 
-    /// Clean up test database
-    fn cleanup(path: &std::path::Path) {
-        let _ = std::fs::remove_dir_all(path);
-    }
-
     #[tokio::test]
     async fn test_remove_dependency() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "taska", "Task A").await;
         create_task(&db, "taskb", "Task B").await;
@@ -266,13 +249,11 @@ mod tests {
 
         // Verify dependency was removed
         assert!(!dependency_exists(&db, "taskb", "taska").await);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_remove_dependency_updates_timestamp() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "taska", "Task A").await;
         create_task(&db, "taskb", "Task B").await;
@@ -293,13 +274,11 @@ mod tests {
 
         // Verify updated_at was set
         assert!(has_updated_at(&db, "taskb").await);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_remove_nonexistent_dependency_warns() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "taska", "Task A").await;
         create_task(&db, "taskb", "Task B").await;
@@ -325,13 +304,11 @@ mod tests {
         // Verify display message shows warning
         let display = format!("{}", undepend_result);
         assert_eq!(display, "Warning: No dependency from taskb to taska exists");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_remove_dependency_idempotent() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "taska", "Task A").await;
         create_task(&db, "taskb", "Task B").await;
@@ -365,13 +342,11 @@ mod tests {
         assert_eq!(undepend_result2.task_id, "taskb");
         assert_eq!(undepend_result2.blocker_id, "taska");
         assert!(!undepend_result2.existed);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_source_task_must_exist() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "taska", "Task A").await;
 
@@ -397,13 +372,11 @@ mod tests {
             Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_target_task_nonexistence_ok() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "taska", "Task A").await;
 
@@ -420,13 +393,11 @@ mod tests {
         assert_eq!(undepend_result.task_id, "taska");
         assert_eq!(undepend_result.blocker_id, "nonexistent");
         assert!(!undepend_result.existed);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_case_insensitive_ids() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "taska", "Task A").await;
         create_task(&db, "taskb", "Task B").await;
@@ -450,13 +421,11 @@ mod tests {
 
         // Verify dependency was removed
         assert!(!dependency_exists(&db, "taskb", "taska").await);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_remove_only_specified_dependency() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "taska", "Task A").await;
         create_task(&db, "taskb", "Task B").await;
@@ -489,13 +458,11 @@ mod tests {
         // Verify only C -> A was removed, C -> B still exists
         assert!(!dependency_exists(&db, "taskc", "taska").await);
         assert!(dependency_exists(&db, "taskc", "taskb").await);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_nonexistent_does_not_update_timestamp() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "taska", "Task A").await;
         create_task(&db, "taskb", "Task B").await;
@@ -531,8 +498,6 @@ mod tests {
             ts1, ts2,
             "Timestamp should not be updated when no dependency was removed"
         );
-
-        cleanup(&temp_dir);
     }
 
     #[test]

@@ -170,24 +170,12 @@ impl StepDoneCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
 
-    /// Helper to create a test database
-    async fn setup_test_db() -> (Database, std::path::PathBuf) {
-        let temp_dir = env::temp_dir().join(format!(
-            "vtb-step-done-test-{}-{:?}-{}",
-            std::process::id(),
-            std::thread::current().id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-
-        let db = Database::connect(&temp_dir).await.unwrap();
+    /// Helper to create an in-memory test database
+    async fn setup_test_db() -> Database {
+        let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-
-        (db, temp_dir)
+        db
     }
 
     /// Helper to create a task with steps
@@ -247,14 +235,9 @@ mod tests {
         task.and_then(|t| t.sections.get(step_index).cloned())
     }
 
-    /// Clean up test database
-    fn cleanup(path: &std::path::Path) {
-        let _ = std::fs::remove_dir_all(path);
-    }
-
     #[tokio::test]
     async fn test_step_done_marks_step() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task_with_steps(&db, "abc123", &["First step", "Second step"]).await;
 
@@ -274,15 +257,13 @@ mod tests {
         // Verify step is marked as done
         let done = get_step_done(&db, "abc123", 0).await;
         assert_eq!(done, Some(true));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_step_done_sets_done_at_timestamp() {
         use chrono::Utc;
 
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let before = Utc::now();
 
         create_task_with_steps(&db, "abc123", &["Step with timestamp"]).await;
@@ -315,13 +296,11 @@ mod tests {
             before,
             after
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_step_done_second_step() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task_with_steps(&db, "abc123", &["First step", "Second step"]).await;
 
@@ -342,13 +321,11 @@ mod tests {
         let done_second = get_step_done(&db, "abc123", 1).await;
         assert!(done_first.is_none() || done_first == Some(false));
         assert_eq!(done_second, Some(true));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_step_done_nonexistent_task() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         let cmd = StepDoneCommand {
             id: "nonexistent".to_string(),
@@ -362,13 +339,11 @@ mod tests {
             }
             _ => panic!("Expected InvalidPath error"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_step_done_invalid_index_zero() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task_with_steps(&db, "abc123", &["First step"]).await;
 
@@ -384,13 +359,11 @@ mod tests {
             }
             _ => panic!("Expected InvalidPath error"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_step_done_index_out_of_bounds() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task_with_steps(&db, "abc123", &["First step"]).await;
 
@@ -407,13 +380,11 @@ mod tests {
             }
             _ => panic!("Expected InvalidPath error"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_step_done_case_insensitive() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task_with_steps(&db, "abc123", &["First step"]).await;
 
@@ -424,8 +395,6 @@ mod tests {
 
         let result = cmd.execute(&db).await;
         assert!(result.is_ok(), "Case-insensitive lookup failed");
-
-        cleanup(&temp_dir);
     }
 
     #[test]

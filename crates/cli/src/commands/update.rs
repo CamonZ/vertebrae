@@ -258,24 +258,12 @@ impl UpdateCommand {
 mod tests {
     use super::*;
     use serial_test::serial;
-    use std::env;
 
-    /// Helper to create a test database
-    async fn setup_test_db() -> (Database, std::path::PathBuf) {
-        let temp_dir = env::temp_dir().join(format!(
-            "vtb-update-test-{}-{:?}-{}",
-            std::process::id(),
-            std::thread::current().id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-
-        let db = Database::connect(&temp_dir).await.unwrap();
+    /// Helper to create an in-memory test database
+    async fn setup_test_db() -> Database {
+        let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-
-        (db, temp_dir)
+        db
     }
 
     /// Helper to create a task in the database
@@ -358,11 +346,6 @@ mod tests {
         let mut result = db.client().query(&query).await.ok()?;
         let parents: Vec<ParentRow> = result.take(0).ok()?;
         parents.first().map(|p| p.id.id.to_string())
-    }
-
-    /// Clean up test database
-    fn cleanup(path: &std::path::Path) {
-        let _ = std::fs::remove_dir_all(path);
     }
 
     #[test]
@@ -467,7 +450,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_nonexistent_task() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         let cmd = UpdateCommand {
             id: "nonexistent".to_string(),
@@ -495,13 +478,11 @@ mod tests {
             Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_update_title() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(
             &db,
@@ -533,13 +514,11 @@ mod tests {
         // Verify other fields were not changed
         assert_eq!(task.priority, Some("low".to_string()));
         assert!(task.tags.contains(&"backend".to_string()));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_update_priority() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(
             &db,
@@ -571,13 +550,11 @@ mod tests {
         // Verify other fields were not changed
         assert_eq!(task.title, "Test task");
         assert!(task.tags.contains(&"api".to_string()));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_update_add_tag() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(
             &db,
@@ -605,13 +582,11 @@ mod tests {
         let task = get_task(&db, "abc123").await.unwrap();
         assert!(task.tags.contains(&"initial".to_string()));
         assert!(task.tags.contains(&"urgent".to_string()));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_update_remove_tag() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(
             &db,
@@ -639,13 +614,11 @@ mod tests {
         let task = get_task(&db, "abc123").await.unwrap();
         assert!(task.tags.contains(&"initial".to_string()));
         assert!(!task.tags.contains(&"toremove".to_string()));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_update_add_duplicate_tag() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(
             &db,
@@ -674,13 +647,11 @@ mod tests {
         // Should only have one instance of the tag
         assert_eq!(task.tags.len(), 1);
         assert_eq!(task.tags[0], "existing");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_update_set_parent() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "parent1", "Parent task", "epic", "todo", None, &[]).await;
         create_task(&db, "child1", "Child task", "task", "todo", None, &[]).await;
@@ -699,13 +670,11 @@ mod tests {
 
         let parent_id = get_parent_id(&db, "child1").await;
         assert_eq!(parent_id, Some("parent1".to_string()));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_update_change_parent() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "parent1", "Parent 1", "epic", "todo", None, &[]).await;
         create_task(&db, "parent2", "Parent 2", "epic", "todo", None, &[]).await;
@@ -726,13 +695,11 @@ mod tests {
 
         let parent_id = get_parent_id(&db, "child1").await;
         assert_eq!(parent_id, Some("parent2".to_string()));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_update_remove_parent() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "parent1", "Parent task", "epic", "todo", None, &[]).await;
         create_task(&db, "child1", "Child task", "task", "todo", None, &[]).await;
@@ -756,14 +723,12 @@ mod tests {
 
         let parent_id = get_parent_id(&db, "child1").await;
         assert!(parent_id.is_none());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     #[serial]
     async fn test_update_self_parent_fails() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "abc123", "Test task", "task", "todo", None, &[]).await;
 
@@ -788,13 +753,11 @@ mod tests {
             Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_update_nonexistent_parent_fails() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "abc123", "Test task", "task", "todo", None, &[]).await;
 
@@ -824,13 +787,11 @@ mod tests {
             Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_update_timestamp_updated() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "abc123", "Test task", "task", "todo", None, &[]).await;
 
@@ -848,13 +809,11 @@ mod tests {
 
         let task = get_task(&db, "abc123").await.unwrap();
         assert!(task.updated_at.is_some());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_update_case_insensitive_id() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "abc123", "Test task", "task", "todo", None, &[]).await;
 
@@ -872,13 +831,11 @@ mod tests {
 
         let task = get_task(&db, "abc123").await.unwrap();
         assert_eq!(task.title, "New title");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_update_no_changes() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "abc123", "Test task", "task", "todo", None, &[]).await;
 
@@ -894,13 +851,11 @@ mod tests {
         let result = cmd.execute(&db).await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "abc123");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_update_multiple_fields() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(
             &db,
@@ -930,13 +885,11 @@ mod tests {
         assert_eq!(task.priority, Some("critical".to_string()));
         assert!(task.tags.contains(&"new".to_string()));
         assert!(!task.tags.contains(&"old".to_string()));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_update_preserves_other_fields() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create task with specific values
         let query = r#"CREATE task:abc123 SET
@@ -989,8 +942,6 @@ mod tests {
         assert_eq!(task.tags, vec!["backend", "api"]);
         assert_eq!(task.sections.len(), 1);
         assert_eq!(task.code_refs.len(), 1);
-
-        cleanup(&temp_dir);
     }
 
     #[test]
@@ -1018,7 +969,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_parent_case_insensitive() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "parent1", "Parent task", "epic", "todo", None, &[]).await;
         create_task(&db, "child1", "Child task", "task", "todo", None, &[]).await;
@@ -1037,7 +988,5 @@ mod tests {
 
         let parent_id = get_parent_id(&db, "child1").await;
         assert_eq!(parent_id, Some("parent1".to_string()));
-
-        cleanup(&temp_dir);
     }
 }

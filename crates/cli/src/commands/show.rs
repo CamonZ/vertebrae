@@ -590,24 +590,12 @@ fn format_code_ref_location(code_ref: &CodeRef) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
 
-    /// Helper to create a test database
-    async fn setup_test_db() -> (Database, std::path::PathBuf) {
-        let temp_dir = env::temp_dir().join(format!(
-            "vtb-show-test-{}-{:?}-{}",
-            std::process::id(),
-            std::thread::current().id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-
-        let db = Database::connect(&temp_dir).await.unwrap();
+    /// Helper to create an in-memory test database
+    async fn setup_test_db() -> Database {
+        let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-
-        (db, temp_dir)
+        db
     }
 
     /// Helper to create a task in the database
@@ -662,14 +650,9 @@ mod tests {
         db.client().query(&query).await.unwrap();
     }
 
-    /// Clean up test database
-    fn cleanup(path: &std::path::Path) {
-        let _ = std::fs::remove_dir_all(path);
-    }
-
     #[tokio::test]
     async fn test_show_simple_task() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(
             &db,
@@ -705,13 +688,11 @@ mod tests {
         assert!(detail.blocks.is_empty(), "Blocks should be empty");
         assert!(detail.sections.is_empty(), "Sections should be empty");
         assert!(detail.code_refs.is_empty(), "Code_refs should be empty");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_show_nonexistent_task() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         let cmd = ShowCommand {
             id: "nonexistent".to_string(),
@@ -729,13 +710,11 @@ mod tests {
             Err(other) => panic!("Expected NotFound error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_show_case_insensitive() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "abc123", "Test Task", "task", "todo", None, &[]).await;
 
@@ -745,13 +724,11 @@ mod tests {
 
         let result = cmd.execute(&db).await;
         assert!(result.is_ok(), "Case-insensitive lookup failed");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_show_with_parent() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(
             &db,
@@ -782,13 +759,11 @@ mod tests {
         assert_eq!(parent.status, "in_progress");
         assert_eq!(parent.priority, Some("high".to_string()));
         assert_eq!(parent.tags, vec!["backend", "core"]);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_show_with_children() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "parent1", "Parent Epic", "epic", "todo", None, &[]).await;
         create_task(
@@ -838,13 +813,11 @@ mod tests {
         assert_eq!(child2.status, "backlog");
         assert_eq!(child2.priority, Some("medium".to_string()));
         assert_eq!(child2.tags, vec!["backend"]);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_show_with_dependencies() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(
             &db,
@@ -876,13 +849,11 @@ mod tests {
         assert_eq!(dep.status, "done");
         assert_eq!(dep.priority, Some("critical".to_string()));
         assert_eq!(dep.tags, vec!["blocker", "core"]);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_show_with_blocks() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "blocker", "Blocker Task", "task", "todo", None, &[]).await;
         create_task(
@@ -907,8 +878,6 @@ mod tests {
         let detail = result.unwrap();
         assert_eq!(detail.blocks.len(), 1);
         assert_eq!(detail.blocks[0].id, "dependent");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
@@ -916,7 +885,7 @@ mod tests {
         // Note: Due to SurrealDB SCHEMAFULL behavior with array<object>,
         // nested object fields are not preserved unless explicitly defined.
         // This test verifies that the show command handles empty sections/refs gracefully.
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create a task with sections array (even though fields won't be preserved)
         let query = r#"CREATE task:withdata SET
@@ -942,8 +911,6 @@ mod tests {
         // Empty sections and refs should work fine
         assert!(detail.sections.is_empty());
         assert!(detail.code_refs.is_empty());
-
-        cleanup(&temp_dir);
     }
 
     #[test]
@@ -1047,7 +1014,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_show_with_tags() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(
             &db,
@@ -1069,8 +1036,6 @@ mod tests {
 
         let detail = result.unwrap();
         assert_eq!(detail.tags, vec!["backend", "api"]);
-
-        cleanup(&temp_dir);
     }
 
     #[test]
