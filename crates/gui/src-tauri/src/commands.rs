@@ -52,9 +52,18 @@ pub async fn list_tasks(
     state: State<'_, AppState>,
     filter: Option<TaskFilterOptions>,
 ) -> Result<Vec<TaskSummary>, CommandError> {
+    log::info!("list_tasks called with filter: {:?}", filter);
     let db_filter: vertebrae_db::TaskFilter = filter.unwrap_or_default().into();
-    let summaries = state.db.list_tasks().list(&db_filter).await?;
-    Ok(summaries.into_iter().map(Into::into).collect())
+    match state.db.list_tasks().list(&db_filter).await {
+        Ok(summaries) => {
+            log::info!("list_tasks returned {} tasks", summaries.len());
+            Ok(summaries.into_iter().map(Into::into).collect())
+        }
+        Err(e) => {
+            log::error!("list_tasks error: {:?}", e);
+            Err(e.into())
+        }
+    }
 }
 
 /// Get a single task by ID with its relations
@@ -168,8 +177,17 @@ async fn build_hierarchy_node(
 #[tauri::command]
 #[specta::specta]
 pub async fn list_workflows(state: State<'_, AppState>) -> Result<Vec<Workflow>, CommandError> {
-    let workflows = state.db.workflows().list().await?;
-    Ok(workflows.into_iter().map(Into::into).collect())
+    log::info!("list_workflows called");
+    match state.db.workflows().list().await {
+        Ok(workflows) => {
+            log::info!("list_workflows returned {} workflows", workflows.len());
+            Ok(workflows.into_iter().map(Into::into).collect())
+        }
+        Err(e) => {
+            log::error!("list_workflows error: {:?}", e);
+            Err(e.into())
+        }
+    }
 }
 
 /// Get a single workflow by ID

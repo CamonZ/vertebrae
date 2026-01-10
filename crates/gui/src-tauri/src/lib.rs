@@ -2,10 +2,31 @@ pub mod commands;
 pub mod events;
 pub mod types;
 
-use specta_typescript::Typescript;
-use tauri_specta::{collect_commands, collect_events, Builder};
+use std::path::PathBuf;
 
+use specta_typescript::Typescript;
+use tauri::Manager;
+use tauri_specta::{collect_commands, collect_events, Builder};
+use vertebrae_db::Database;
+
+use commands::AppState;
 use events::{TaskChangedEvent, WorkflowChangedEvent};
+
+/// Environment variable for database path override
+const VTB_DB_PATH_ENV: &str = "VTB_DB_PATH";
+
+/// Resolve database path using same logic as CLI
+fn resolve_db_path() -> PathBuf {
+    // Check environment variable first
+    if let Ok(env_path) = std::env::var(VTB_DB_PATH_ENV) {
+        if !env_path.is_empty() {
+            return PathBuf::from(env_path);
+        }
+    }
+
+    // Use default path (~/.vtb/data)
+    Database::default_path().unwrap_or_else(|_| PathBuf::from(".vtb/data"))
+}
 
 /// Example command that will be exported with type definitions.
 /// This serves as a template for future Tauri commands.
@@ -50,6 +71,21 @@ pub fn run() {
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             builder.mount_events(app);
+
+            // Initialize database connection using Tauri's async runtime
+            let db_path = resolve_db_path();
+            log::info!("Connecting to database at: {:?}", db_path);
+
+            let db = tauri::async_runtime::block_on(async {
+                let db = Database::connect(&db_path)
+                    .await
+                    .expect("Failed to connect to database");
+                db.init().await.expect("Failed to initialize database");
+                db
+            });
+
+            // Manage application state with database
+            app.manage(AppState { db });
 
             if cfg!(debug_assertions) {
                 app.handle().plugin(

@@ -601,6 +601,8 @@ pub struct WorkflowStep {
     pub name: String,
 
     /// The agent configuration to use for this step
+    /// Defaults to empty AgentConfig for backwards compatibility with old workflows
+    #[serde(default)]
     pub agent_config: AgentConfig,
 
     /// Ordering index for sequential execution (0-based)
