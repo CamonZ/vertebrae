@@ -31,6 +31,9 @@ pub enum WorkflowCommand {
     Reject(WorkflowRejectCommand),
     /// Migrate existing tasks to use the default workflow
     Migrate(WorkflowMigrateCommand),
+    /// Manage skills associated with workflow steps
+    #[command(subcommand)]
+    StepSkill(StepSkillCommand),
 }
 
 impl WorkflowCommand {
@@ -56,6 +59,7 @@ impl WorkflowCommand {
             WorkflowCommand::Retreat(cmd) => cmd.execute(db).await,
             WorkflowCommand::Reject(cmd) => cmd.execute(db).await,
             WorkflowCommand::Migrate(cmd) => cmd.execute(db).await,
+            WorkflowCommand::StepSkill(cmd) => cmd.execute(db).await,
         }
     }
 }
@@ -1179,6 +1183,171 @@ impl WorkflowMigrateCommand {
         }
 
         output
+    }
+}
+
+/// Step skill management subcommands
+#[derive(Debug, Subcommand)]
+pub enum StepSkillCommand {
+    /// Add a skill to a workflow step
+    Add(StepSkillAddCommand),
+    /// Remove a skill from a workflow step
+    Remove(StepSkillRemoveCommand),
+    /// List skills for a workflow step
+    List(StepSkillListCommand),
+}
+
+impl StepSkillCommand {
+    /// Execute the step-skill subcommand.
+    ///
+    /// # Arguments
+    ///
+    /// * `db` - Reference to the database connection
+    ///
+    /// # Errors
+    ///
+    /// Returns `DbError` if the command execution fails.
+    pub async fn execute(&self, db: &Database) -> Result<String, DbError> {
+        match self {
+            StepSkillCommand::Add(cmd) => cmd.execute(db).await,
+            StepSkillCommand::Remove(cmd) => cmd.execute(db).await,
+            StepSkillCommand::List(cmd) => cmd.execute(db).await,
+        }
+    }
+}
+
+/// Add a skill to a workflow step
+#[derive(Debug, Args)]
+pub struct StepSkillAddCommand {
+    /// Workflow ID (case-insensitive)
+    #[arg(required = true)]
+    pub workflow_id: String,
+
+    /// Step name within the workflow
+    #[arg(required = true)]
+    pub step_name: String,
+
+    /// Skill name to add
+    #[arg(required = true)]
+    pub skill: String,
+}
+
+impl StepSkillAddCommand {
+    /// Execute the add skill command.
+    ///
+    /// Adds a skill to the specified workflow step.
+    ///
+    /// # Arguments
+    ///
+    /// * `db` - Reference to the database connection
+    ///
+    /// # Errors
+    ///
+    /// Returns `DbError::NotFound` if the workflow or step doesn't exist.
+    /// Returns `DbError::ValidationError` if the skill already exists.
+    pub async fn execute(&self, db: &Database) -> Result<String, DbError> {
+        // Normalize workflow ID to lowercase for case-insensitive lookup
+        let workflow_id = self.workflow_id.to_lowercase();
+
+        db.workflows()
+            .add_skill_to_step(&workflow_id, &self.step_name, &self.skill)
+            .await?;
+
+        Ok(format!(
+            "Added skill '{}' to step '{}' in workflow '{}'",
+            self.skill, self.step_name, workflow_id
+        ))
+    }
+}
+
+/// Remove a skill from a workflow step
+#[derive(Debug, Args)]
+pub struct StepSkillRemoveCommand {
+    /// Workflow ID (case-insensitive)
+    #[arg(required = true)]
+    pub workflow_id: String,
+
+    /// Step name within the workflow
+    #[arg(required = true)]
+    pub step_name: String,
+
+    /// Skill name to remove
+    #[arg(required = true)]
+    pub skill: String,
+}
+
+impl StepSkillRemoveCommand {
+    /// Execute the remove skill command.
+    ///
+    /// Removes a skill from the specified workflow step.
+    ///
+    /// # Arguments
+    ///
+    /// * `db` - Reference to the database connection
+    ///
+    /// # Errors
+    ///
+    /// Returns `DbError::NotFound` if the workflow, step, or skill doesn't exist.
+    pub async fn execute(&self, db: &Database) -> Result<String, DbError> {
+        // Normalize workflow ID to lowercase for case-insensitive lookup
+        let workflow_id = self.workflow_id.to_lowercase();
+
+        db.workflows()
+            .remove_skill_from_step(&workflow_id, &self.step_name, &self.skill)
+            .await?;
+
+        Ok(format!(
+            "Removed skill '{}' from step '{}' in workflow '{}'",
+            self.skill, self.step_name, workflow_id
+        ))
+    }
+}
+
+/// List skills for a workflow step
+#[derive(Debug, Args)]
+pub struct StepSkillListCommand {
+    /// Workflow ID (case-insensitive)
+    #[arg(required = true)]
+    pub workflow_id: String,
+
+    /// Step name within the workflow
+    #[arg(required = true)]
+    pub step_name: String,
+}
+
+impl StepSkillListCommand {
+    /// Execute the list skills command.
+    ///
+    /// Lists all skills associated with the specified workflow step.
+    ///
+    /// # Arguments
+    ///
+    /// * `db` - Reference to the database connection
+    ///
+    /// # Errors
+    ///
+    /// Returns `DbError::NotFound` if the workflow or step doesn't exist.
+    pub async fn execute(&self, db: &Database) -> Result<String, DbError> {
+        // Normalize workflow ID to lowercase for case-insensitive lookup
+        let workflow_id = self.workflow_id.to_lowercase();
+
+        let skills = db
+            .workflows()
+            .get_step_skills(&workflow_id, &self.step_name)
+            .await?;
+
+        if skills.is_empty() {
+            Ok(format!(
+                "No skills configured for step '{}' in workflow '{}'",
+                self.step_name, workflow_id
+            ))
+        } else {
+            let skill_list = skills.join("\n  - ");
+            Ok(format!(
+                "Skills for step '{}' in workflow '{}':\n  - {}",
+                self.step_name, workflow_id, skill_list
+            ))
+        }
     }
 }
 
@@ -3494,5 +3663,250 @@ mod tests {
         assert!(output.contains("3 tasks migrated"));
         assert!(output.contains("2 tasks skipped"));
         assert!(output.contains("id1, id2"));
+    }
+
+    // ========================================
+    // Step skill command tests
+    // ========================================
+
+    #[tokio::test]
+    async fn test_step_skill_add() {
+        let db = setup_test_db().await;
+
+        // Create a workflow with a step
+        let add_cmd = WorkflowAddCommand {
+            name: "Test Workflow".to_string(),
+            description: None,
+            steps: vec![ParsedStep {
+                name: "review".to_string(),
+                agent_template: "reviewer".to_string(),
+            }],
+            on_done: None,
+            on_reject: None,
+        };
+        let result = add_cmd.execute(&db).await.unwrap();
+        let workflow_id = extract_workflow_id(&result);
+
+        // Add a skill to the step
+        let cmd = StepSkillAddCommand {
+            workflow_id: workflow_id.clone(),
+            step_name: "review".to_string(),
+            skill: "code-analysis".to_string(),
+        };
+        let result = cmd.execute(&db).await;
+        assert!(result.is_ok());
+        let msg = result.unwrap();
+        assert!(msg.contains("Added skill 'code-analysis'"));
+        assert!(msg.contains("step 'review'"));
+
+        // Verify skill was added
+        let skills = db
+            .workflows()
+            .get_step_skills(&workflow_id, "review")
+            .await
+            .unwrap();
+        assert_eq!(skills, vec!["code-analysis"]);
+    }
+
+    #[tokio::test]
+    async fn test_step_skill_add_nonexistent_step_fails() {
+        let db = setup_test_db().await;
+
+        // Create a workflow
+        let add_cmd = WorkflowAddCommand {
+            name: "Test Workflow".to_string(),
+            description: None,
+            steps: vec![ParsedStep {
+                name: "existing".to_string(),
+                agent_template: "agent".to_string(),
+            }],
+            on_done: None,
+            on_reject: None,
+        };
+        let result = add_cmd.execute(&db).await.unwrap();
+        let workflow_id = extract_workflow_id(&result);
+
+        // Try to add skill to non-existent step
+        let cmd = StepSkillAddCommand {
+            workflow_id,
+            step_name: "nonexistent".to_string(),
+            skill: "skill".to_string(),
+        };
+        let result = cmd.execute(&db).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_step_skill_remove() {
+        let db = setup_test_db().await;
+
+        // Create a workflow with a step
+        let add_cmd = WorkflowAddCommand {
+            name: "Test Workflow".to_string(),
+            description: None,
+            steps: vec![ParsedStep {
+                name: "build".to_string(),
+                agent_template: "builder".to_string(),
+            }],
+            on_done: None,
+            on_reject: None,
+        };
+        let result = add_cmd.execute(&db).await.unwrap();
+        let workflow_id = extract_workflow_id(&result);
+
+        // Add a skill first
+        db.workflows()
+            .add_skill_to_step(&workflow_id, "build", "cargo-build")
+            .await
+            .unwrap();
+
+        // Remove the skill
+        let cmd = StepSkillRemoveCommand {
+            workflow_id: workflow_id.clone(),
+            step_name: "build".to_string(),
+            skill: "cargo-build".to_string(),
+        };
+        let result = cmd.execute(&db).await;
+        assert!(result.is_ok());
+        let msg = result.unwrap();
+        assert!(msg.contains("Removed skill 'cargo-build'"));
+
+        // Verify skill was removed
+        let skills = db
+            .workflows()
+            .get_step_skills(&workflow_id, "build")
+            .await
+            .unwrap();
+        assert!(skills.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_step_skill_remove_nonexistent_skill_fails() {
+        let db = setup_test_db().await;
+
+        // Create a workflow
+        let add_cmd = WorkflowAddCommand {
+            name: "Test Workflow".to_string(),
+            description: None,
+            steps: vec![ParsedStep {
+                name: "step1".to_string(),
+                agent_template: "agent".to_string(),
+            }],
+            on_done: None,
+            on_reject: None,
+        };
+        let result = add_cmd.execute(&db).await.unwrap();
+        let workflow_id = extract_workflow_id(&result);
+
+        // Try to remove non-existent skill
+        let cmd = StepSkillRemoveCommand {
+            workflow_id,
+            step_name: "step1".to_string(),
+            skill: "nonexistent".to_string(),
+        };
+        let result = cmd.execute(&db).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_step_skill_list_empty() {
+        let db = setup_test_db().await;
+
+        // Create a workflow with a step (no skills)
+        let add_cmd = WorkflowAddCommand {
+            name: "Test Workflow".to_string(),
+            description: None,
+            steps: vec![ParsedStep {
+                name: "empty-step".to_string(),
+                agent_template: "agent".to_string(),
+            }],
+            on_done: None,
+            on_reject: None,
+        };
+        let result = add_cmd.execute(&db).await.unwrap();
+        let workflow_id = extract_workflow_id(&result);
+
+        // List skills (should be empty)
+        let cmd = StepSkillListCommand {
+            workflow_id,
+            step_name: "empty-step".to_string(),
+        };
+        let result = cmd.execute(&db).await;
+        assert!(result.is_ok());
+        let msg = result.unwrap();
+        assert!(msg.contains("No skills configured"));
+    }
+
+    #[tokio::test]
+    async fn test_step_skill_list_with_skills() {
+        let db = setup_test_db().await;
+
+        // Create a workflow
+        let add_cmd = WorkflowAddCommand {
+            name: "Test Workflow".to_string(),
+            description: None,
+            steps: vec![ParsedStep {
+                name: "test".to_string(),
+                agent_template: "tester".to_string(),
+            }],
+            on_done: None,
+            on_reject: None,
+        };
+        let result = add_cmd.execute(&db).await.unwrap();
+        let workflow_id = extract_workflow_id(&result);
+
+        // Add some skills
+        db.workflows()
+            .add_skill_to_step(&workflow_id, "test", "unit-test")
+            .await
+            .unwrap();
+        db.workflows()
+            .add_skill_to_step(&workflow_id, "test", "integration-test")
+            .await
+            .unwrap();
+
+        // List skills
+        let cmd = StepSkillListCommand {
+            workflow_id,
+            step_name: "test".to_string(),
+        };
+        let result = cmd.execute(&db).await;
+        assert!(result.is_ok());
+        let msg = result.unwrap();
+        assert!(msg.contains("Skills for step 'test'"));
+        assert!(msg.contains("unit-test"));
+        assert!(msg.contains("integration-test"));
+    }
+
+    #[tokio::test]
+    async fn test_step_skill_case_insensitive_workflow_id() {
+        let db = setup_test_db().await;
+
+        // Create a workflow (ID will be lowercase)
+        let add_cmd = WorkflowAddCommand {
+            name: "Test Workflow".to_string(),
+            description: None,
+            steps: vec![ParsedStep {
+                name: "step1".to_string(),
+                agent_template: "agent".to_string(),
+            }],
+            on_done: None,
+            on_reject: None,
+        };
+        let result = add_cmd.execute(&db).await.unwrap();
+        let workflow_id = extract_workflow_id(&result);
+
+        // Use uppercase workflow ID
+        let cmd = StepSkillAddCommand {
+            workflow_id: workflow_id.to_uppercase(),
+            step_name: "step1".to_string(),
+            skill: "my-skill".to_string(),
+        };
+        let result = cmd.execute(&db).await;
+        assert!(
+            result.is_ok(),
+            "Should work with uppercase workflow ID: {:?}",
+            result
+        );
     }
 }
