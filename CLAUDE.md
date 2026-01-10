@@ -41,10 +41,11 @@ A task management CLI tool written in Rust.
 8. **Execute** → `vtb transition-to <id> in_progress`, do work, `vtb transition-to <id> done`, **commit**, repeat
 9. **Track progress** → `vtb list`, `vtb blockers`, `vtb show`
 
-**IMPORTANT: Commit after each `vtb transition-to <id> done`** - Each completed ticket should have its own commit. This ensures:
+**CRITICAL: You MUST commit immediately after each `vtb transition-to <id> done`** - This is non-negotiable. Each completed ticket MUST have its own commit before moving to the next task. Do NOT batch multiple tickets into a single commit. This ensures:
 - Atomic, traceable changes linked to tickets
 - Easy rollback if needed
 - Clear git history matching task progression
+- Ability to split work across sessions without losing attribution
 
 ### Hierarchy
 
