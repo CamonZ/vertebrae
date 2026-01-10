@@ -1110,6 +1110,436 @@ mod data_operations {
 // BOUNDARY AND EDGE CASE TESTS
 // =============================================================================
 
+// =============================================================================
+// TRIAGE VALIDATION TESTS
+// =============================================================================
+
+mod triage_validation {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_triage_blocks_task_without_required_sections() {
+        let ctx = TestContext::new().await;
+        create_task(&ctx.db, "task1", "Task without sections", "task", "backlog").await;
+
+        // Use transition with validation enabled
+        let result = triage_cmd_with_validation("task1").execute(&ctx.db).await;
+
+        // Should fail due to missing required sections
+        match result {
+            Err(DbError::TriageValidationFailed {
+                task_id,
+                error_count,
+                ..
+            }) => {
+                assert_eq!(task_id, "task1");
+                assert!(
+                    error_count >= 3,
+                    "Should have at least 3 errors (testing_criterion, step, constraint)"
+                );
+            }
+            Err(other) => panic!("Expected TriageValidationFailed, got: {:?}", other),
+            Ok(_) => panic!("Expected validation to fail for task without required sections"),
+        }
+
+        // Task should remain in backlog
+        assert_eq!(
+            get_task_status(&ctx.db, "task1").await,
+            Some("backlog".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_triage_succeeds_with_all_required_sections() {
+        let ctx = TestContext::new().await;
+        create_task(&ctx.db, "task1", "Well-prepared task", "task", "backlog").await;
+
+        // Add required sections
+        section_cmd(
+            "task1",
+            SectionType::TestingCriterion,
+            "Unit test: verify input validation",
+        )
+        .execute(&ctx.db)
+        .await
+        .unwrap();
+        section_cmd(
+            "task1",
+            SectionType::TestingCriterion,
+            "Integration test: verify end-to-end flow",
+        )
+        .execute(&ctx.db)
+        .await
+        .unwrap();
+        section_cmd("task1", SectionType::Step, "1. Implement the feature")
+            .execute(&ctx.db)
+            .await
+            .unwrap();
+        section_cmd(
+            "task1",
+            SectionType::Constraint,
+            "Must follow existing code patterns",
+        )
+        .execute(&ctx.db)
+        .await
+        .unwrap();
+        section_cmd(
+            "task1",
+            SectionType::Constraint,
+            "Tests must have specific assertions",
+        )
+        .execute(&ctx.db)
+        .await
+        .unwrap();
+        // Add encouraged sections to avoid warnings
+        section_cmd("task1", SectionType::AntiPattern, "Don't hardcode values")
+            .execute(&ctx.db)
+            .await
+            .unwrap();
+        section_cmd(
+            "task1",
+            SectionType::FailureTest,
+            "Should fail with invalid input",
+        )
+        .execute(&ctx.db)
+        .await
+        .unwrap();
+        // Add recommended sections
+        section_cmd("task1", SectionType::Goal, "Implement feature X")
+            .execute(&ctx.db)
+            .await
+            .unwrap();
+
+        // Triage should succeed with validation
+        let result = triage_cmd_with_validation("task1").execute(&ctx.db).await;
+        assert!(result.is_ok(), "Triage should succeed: {:?}", result.err());
+
+        // Task should be in todo
+        assert_eq!(
+            get_task_status(&ctx.db, "task1").await,
+            Some("todo".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_triage_warns_about_missing_encouraged_sections() {
+        let ctx = TestContext::new().await;
+        create_task(
+            &ctx.db,
+            "task1",
+            "Task with required only",
+            "task",
+            "backlog",
+        )
+        .await;
+
+        // Add only required sections (no anti_pattern or failure_test)
+        section_cmd("task1", SectionType::TestingCriterion, "Test 1")
+            .execute(&ctx.db)
+            .await
+            .unwrap();
+        section_cmd("task1", SectionType::TestingCriterion, "Test 2")
+            .execute(&ctx.db)
+            .await
+            .unwrap();
+        section_cmd("task1", SectionType::Step, "Step 1")
+            .execute(&ctx.db)
+            .await
+            .unwrap();
+        section_cmd("task1", SectionType::Constraint, "Constraint 1")
+            .execute(&ctx.db)
+            .await
+            .unwrap();
+        section_cmd("task1", SectionType::Constraint, "Constraint 2")
+            .execute(&ctx.db)
+            .await
+            .unwrap();
+        // Add recommended sections to avoid notes
+        section_cmd("task1", SectionType::Goal, "Goal")
+            .execute(&ctx.db)
+            .await
+            .unwrap();
+        section_cmd("task1", SectionType::Context, "Context")
+            .execute(&ctx.db)
+            .await
+            .unwrap();
+        section_cmd("task1", SectionType::CurrentBehavior, "Current")
+            .execute(&ctx.db)
+            .await
+            .unwrap();
+        section_cmd("task1", SectionType::DesiredBehavior, "Desired")
+            .execute(&ctx.db)
+            .await
+            .unwrap();
+
+        // Triage should fail with warnings (need --force)
+        let result = triage_cmd_with_validation("task1").execute(&ctx.db).await;
+
+        match result {
+            Err(DbError::ValidationError { message }) => {
+                assert!(message.contains("validation warnings"));
+                assert!(message.contains("--force"));
+            }
+            Err(other) => panic!("Expected ValidationError for warnings, got: {:?}", other),
+            Ok(_) => panic!("Expected validation warning to block triage without --force"),
+        }
+
+        // Task should remain in backlog
+        assert_eq!(
+            get_task_status(&ctx.db, "task1").await,
+            Some("backlog".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_triage_force_bypasses_warnings() {
+        let ctx = TestContext::new().await;
+        create_task(
+            &ctx.db,
+            "task1",
+            "Task with required only",
+            "task",
+            "backlog",
+        )
+        .await;
+
+        // Add only required sections (no anti_pattern or failure_test)
+        section_cmd("task1", SectionType::TestingCriterion, "Test 1")
+            .execute(&ctx.db)
+            .await
+            .unwrap();
+        section_cmd("task1", SectionType::TestingCriterion, "Test 2")
+            .execute(&ctx.db)
+            .await
+            .unwrap();
+        section_cmd("task1", SectionType::Step, "Step 1")
+            .execute(&ctx.db)
+            .await
+            .unwrap();
+        section_cmd("task1", SectionType::Constraint, "Constraint 1")
+            .execute(&ctx.db)
+            .await
+            .unwrap();
+        section_cmd("task1", SectionType::Constraint, "Constraint 2")
+            .execute(&ctx.db)
+            .await
+            .unwrap();
+        // Add recommended sections
+        section_cmd("task1", SectionType::Goal, "Goal")
+            .execute(&ctx.db)
+            .await
+            .unwrap();
+        section_cmd("task1", SectionType::Context, "Context")
+            .execute(&ctx.db)
+            .await
+            .unwrap();
+        section_cmd("task1", SectionType::CurrentBehavior, "Current")
+            .execute(&ctx.db)
+            .await
+            .unwrap();
+        section_cmd("task1", SectionType::DesiredBehavior, "Desired")
+            .execute(&ctx.db)
+            .await
+            .unwrap();
+
+        // Triage with --force should succeed despite warnings
+        let result = triage_cmd_force("task1").execute(&ctx.db).await;
+        assert!(
+            result.is_ok(),
+            "Triage with --force should succeed: {:?}",
+            result.err()
+        );
+
+        // Task should be in todo
+        assert_eq!(
+            get_task_status(&ctx.db, "task1").await,
+            Some("todo".to_string())
+        );
+
+        // Result should indicate warnings were forced
+        let transition_result = result.unwrap();
+        assert!(transition_result.warnings_forced);
+    }
+
+    #[tokio::test]
+    async fn test_triage_force_cannot_bypass_errors() {
+        let ctx = TestContext::new().await;
+        create_task(&ctx.db, "task1", "Task missing required", "task", "backlog").await;
+
+        // Only add anti_pattern (encouraged) - still missing required sections
+        section_cmd("task1", SectionType::AntiPattern, "Don't do X")
+            .execute(&ctx.db)
+            .await
+            .unwrap();
+
+        // Triage with --force should still fail due to missing required sections
+        let result = triage_cmd_force("task1").execute(&ctx.db).await;
+
+        match result {
+            Err(DbError::TriageValidationFailed { error_count, .. }) => {
+                assert!(
+                    error_count >= 3,
+                    "Should have errors for missing required sections"
+                );
+            }
+            Err(other) => panic!("Expected TriageValidationFailed, got: {:?}", other),
+            Ok(_) => panic!("--force should not bypass required section errors"),
+        }
+
+        // Task should remain in backlog
+        assert_eq!(
+            get_task_status(&ctx.db, "task1").await,
+            Some("backlog".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_triage_skip_validation_bypasses_everything() {
+        let ctx = TestContext::new().await;
+        create_task(&ctx.db, "task1", "Task with no sections", "task", "backlog").await;
+
+        // Use regular triage command which has skip_validation=true by default
+        let result = triage_cmd("task1").execute(&ctx.db).await;
+        assert!(
+            result.is_ok(),
+            "Triage with skip_validation should succeed: {:?}",
+            result.err()
+        );
+
+        // Task should be in todo
+        assert_eq!(
+            get_task_status(&ctx.db, "task1").await,
+            Some("todo".to_string())
+        );
+
+        // Result should indicate validation was skipped
+        let transition_result = result.unwrap();
+        assert!(transition_result.validation_skipped);
+    }
+
+    #[tokio::test]
+    async fn test_triage_validation_checks_specific_counts() {
+        let ctx = TestContext::new().await;
+        create_task(
+            &ctx.db,
+            "task1",
+            "Task with insufficient sections",
+            "task",
+            "backlog",
+        )
+        .await;
+
+        // Add goal (satisfies required goal/desired_behavior)
+        section_cmd("task1", SectionType::Goal, "Clear objective")
+            .execute(&ctx.db)
+            .await
+            .unwrap();
+        // Add only 1 testing_criterion (need 2)
+        section_cmd("task1", SectionType::TestingCriterion, "Test 1")
+            .execute(&ctx.db)
+            .await
+            .unwrap();
+        // Add 1 step (sufficient)
+        section_cmd("task1", SectionType::Step, "Step 1")
+            .execute(&ctx.db)
+            .await
+            .unwrap();
+        // Add only 1 constraint (need 2)
+        section_cmd("task1", SectionType::Constraint, "Constraint 1")
+            .execute(&ctx.db)
+            .await
+            .unwrap();
+
+        let result = triage_cmd_with_validation("task1").execute(&ctx.db).await;
+
+        match result {
+            Err(DbError::TriageValidationFailed {
+                error_count,
+                details,
+                ..
+            }) => {
+                assert_eq!(
+                    error_count, 2,
+                    "Should have exactly 2 errors (testing_criterion and constraint): {details}"
+                );
+                assert!(
+                    details.contains("testing_criterion"),
+                    "Error should mention testing_criterion"
+                );
+                assert!(
+                    details.contains("constraint"),
+                    "Error should mention constraint"
+                );
+            }
+            Err(other) => panic!("Expected TriageValidationFailed, got: {:?}", other),
+            Ok(_) => panic!("Expected validation to fail with insufficient counts"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_triage_validation_result_shows_notes() {
+        let ctx = TestContext::new().await;
+        create_task(
+            &ctx.db,
+            "task1",
+            "Task without recommended sections",
+            "task",
+            "backlog",
+        )
+        .await;
+
+        // Add all required and encouraged sections
+        section_cmd("task1", SectionType::Goal, "Clear objective")
+            .execute(&ctx.db)
+            .await
+            .unwrap();
+        section_cmd("task1", SectionType::TestingCriterion, "Test 1")
+            .execute(&ctx.db)
+            .await
+            .unwrap();
+        section_cmd("task1", SectionType::TestingCriterion, "Test 2")
+            .execute(&ctx.db)
+            .await
+            .unwrap();
+        section_cmd("task1", SectionType::Step, "Step 1")
+            .execute(&ctx.db)
+            .await
+            .unwrap();
+        section_cmd("task1", SectionType::Constraint, "Constraint 1")
+            .execute(&ctx.db)
+            .await
+            .unwrap();
+        section_cmd("task1", SectionType::Constraint, "Constraint 2")
+            .execute(&ctx.db)
+            .await
+            .unwrap();
+        section_cmd("task1", SectionType::AntiPattern, "Anti-pattern")
+            .execute(&ctx.db)
+            .await
+            .unwrap();
+        section_cmd("task1", SectionType::FailureTest, "Failure test")
+            .execute(&ctx.db)
+            .await
+            .unwrap();
+        // No context, current_behavior - should be notes
+
+        // Triage should succeed but have notes
+        let result = triage_cmd_with_validation("task1").execute(&ctx.db).await;
+        assert!(result.is_ok(), "Triage should succeed: {:?}", result.err());
+
+        let transition_result = result.unwrap();
+        assert!(transition_result.validation.is_some());
+
+        let validation = transition_result.validation.unwrap();
+        assert!(
+            validation.has_notes(),
+            "Should have notes about missing recommended sections"
+        );
+        assert!(!validation.has_warnings());
+        assert!(!validation.has_errors());
+    }
+}
+
 mod boundary_edge_cases {
     use super::*;
 
