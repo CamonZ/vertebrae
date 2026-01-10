@@ -4,7 +4,7 @@
 //! using the vertebrae-db repository pattern.
 
 use crate::types::{
-    TaskFilterOptions, TaskHierarchyNode, TaskSummary, TaskWithRelations, Workflow,
+    StepExecution, TaskFilterOptions, TaskHierarchyNode, TaskSummary, TaskWithRelations, Workflow,
     WorkflowWithTasks,
 };
 use serde::{Deserialize, Serialize};
@@ -255,4 +255,39 @@ pub async fn get_workflow_with_tasks(
         workflow: workflow.into(),
         tasks,
     })
+}
+
+// ============================================================================
+// Execution Commands
+// ============================================================================
+
+/// Get all step executions for a task
+///
+/// Returns a chronological list of all step executions for the given task.
+/// This shows how the task has progressed through workflow steps over time.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_task_executions(
+    state: State<'_, AppState>,
+    task_id: String,
+) -> Result<Vec<StepExecution>, CommandError> {
+    log::info!("get_task_executions called for task: {}", task_id);
+    match state
+        .db
+        .executions()
+        .list_executions_for_task(&task_id)
+        .await
+    {
+        Ok(executions) => {
+            log::info!(
+                "get_task_executions returned {} executions",
+                executions.len()
+            );
+            Ok(executions.into_iter().map(Into::into).collect())
+        }
+        Err(e) => {
+            log::error!("get_task_executions error: {:?}", e);
+            Err(e.into())
+        }
+    }
 }

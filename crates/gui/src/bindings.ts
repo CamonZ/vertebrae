@@ -92,6 +92,20 @@ async getWorkflowWithTasks(id: string) : Promise<Result<WorkflowWithTasks, Comma
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+/**
+ * Get all step executions for a task
+ * 
+ * Returns a chronological list of all step executions for the given task.
+ * This shows how the task has progressed through workflow steps over time.
+ */
+async getTaskExecutions(taskId: string) : Promise<Result<StepExecution[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_task_executions", { taskId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -197,6 +211,10 @@ description: string | null }
  */
 export type CommandError = { message: string }
 /**
+ * Execution status - mirrors db::ExecutionStatus
+ */
+export type ExecutionStatus = "in_progress" | "completed" | "failed"
+/**
  * Permission mode for agent sessions - mirrors db::PermissionMode
  */
 export type PermissionMode = "accept_edits" | "bypass_permissions" | "default" | "delegate" | "dont_ask" | "plan"
@@ -232,6 +250,38 @@ refs?: CodeRef[] }
  * Section type - mirrors db::SectionType
  */
 export type SectionType = "goal" | "context" | "current_behavior" | "desired_behavior" | "step" | "testing_criterion" | "anti_pattern" | "failure_test" | "constraint"
+/**
+ * Step execution record - mirrors db::StepExecution
+ */
+export type StepExecution = { 
+/**
+ * Execution ID (string form)
+ */
+id: string | null; 
+/**
+ * Task ID this execution belongs to
+ */
+task_id: string; 
+/**
+ * Workflow ID being executed
+ */
+workflow_id: string; 
+/**
+ * Name of the step being executed
+ */
+step_name: string; 
+/**
+ * When this step execution started (ISO 8601 string)
+ */
+started_at: string; 
+/**
+ * When this step execution completed (ISO 8601 string)
+ */
+completed_at: string | null; 
+/**
+ * Current status of this step execution
+ */
+status: ExecutionStatus }
 /**
  * Full task details - mirrors db::Task but with string IDs and dates
  */

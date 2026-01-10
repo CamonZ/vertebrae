@@ -512,3 +512,59 @@ pub struct WorkflowWithTasks {
     /// Tasks associated with this workflow
     pub tasks: Vec<TaskSummary>,
 }
+
+// ============================================================================
+// Execution Types
+// ============================================================================
+
+/// Execution status - mirrors db::ExecutionStatus
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionStatus {
+    InProgress,
+    Completed,
+    Failed,
+}
+
+impl From<vertebrae_db::ExecutionStatus> for ExecutionStatus {
+    fn from(status: vertebrae_db::ExecutionStatus) -> Self {
+        match status {
+            vertebrae_db::ExecutionStatus::InProgress => ExecutionStatus::InProgress,
+            vertebrae_db::ExecutionStatus::Completed => ExecutionStatus::Completed,
+            vertebrae_db::ExecutionStatus::Failed => ExecutionStatus::Failed,
+        }
+    }
+}
+
+/// Step execution record - mirrors db::StepExecution
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct StepExecution {
+    /// Execution ID (string form)
+    pub id: Option<String>,
+    /// Task ID this execution belongs to
+    pub task_id: String,
+    /// Workflow ID being executed
+    pub workflow_id: String,
+    /// Name of the step being executed
+    pub step_name: String,
+    /// When this step execution started (ISO 8601 string)
+    pub started_at: String,
+    /// When this step execution completed (ISO 8601 string)
+    pub completed_at: Option<String>,
+    /// Current status of this step execution
+    pub status: ExecutionStatus,
+}
+
+impl From<vertebrae_db::StepExecution> for StepExecution {
+    fn from(exec: vertebrae_db::StepExecution) -> Self {
+        StepExecution {
+            id: exec.id.map(|t| t.id.to_string()),
+            task_id: exec.task_id.id.to_string(),
+            workflow_id: exec.workflow_id.id.to_string(),
+            step_name: exec.step_name,
+            started_at: exec.started_at.to_rfc3339(),
+            completed_at: exec.completed_at.map(|dt| dt.to_rfc3339()),
+            status: exec.status.into(),
+        }
+    }
+}

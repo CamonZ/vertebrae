@@ -4,6 +4,7 @@ import { useTask } from '../../hooks/useTask';
 import { TaskSections } from './TaskSections';
 import { TaskCodeRefs } from './TaskCodeRefs';
 import { TaskRelations } from './TaskRelations';
+import { ExecutionHistory } from './ExecutionHistory';
 
 interface TaskDetailPanelProps {
   taskId: string | null;
@@ -11,7 +12,7 @@ interface TaskDetailPanelProps {
   onTaskSelect?: (taskId: string) => void;
 }
 
-type TabId = 'details' | 'sections' | 'code_refs' | 'relations';
+type TabId = 'details' | 'sections' | 'code_refs' | 'relations' | 'history';
 
 interface Tab {
   id: TabId;
@@ -23,6 +24,7 @@ const TABS: Tab[] = [
   { id: 'sections', label: 'Sections' },
   { id: 'code_refs', label: 'Code Refs' },
   { id: 'relations', label: 'Relations' },
+  { id: 'history', label: 'History' },
 ];
 
 /**
@@ -423,6 +425,9 @@ export function TaskDetailPanel({ taskId, onClose, onTaskSelect }: TaskDetailPan
                 dependentIds={taskData.dependent_ids}
                 onTaskSelect={onTaskSelect}
               />
+            )}
+            {activeTab === 'history' && taskData.task.id && (
+              <ExecutionHistory taskId={taskData.task.id} />
             )}
           </div>
         </>
