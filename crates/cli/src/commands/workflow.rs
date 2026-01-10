@@ -4,7 +4,11 @@
 
 use crate::id::IdGenerator;
 use clap::{Args, Subcommand};
-use vertebrae_db::{Database, DbError, MigrationResult, Workflow, WorkflowStep, WorkflowUpdate};
+use surrealdb::sql::Thing;
+use vertebrae_db::{
+    Database, DbError, ExecutionStatus, MigrationResult, StepExecution, Workflow, WorkflowStep,
+    WorkflowUpdate,
+};
 
 /// Workflow management commands
 #[derive(Debug, Subcommand)]
@@ -796,6 +800,32 @@ impl WorkflowAdvanceCommand {
 
         let total_steps = workflow.ordered_steps().len();
 
+        // Get current step name for execution tracking
+        let current_step_name = workflow
+            .ordered_steps()
+            .get(current_step)
+            .map(|s| s.name.clone())
+            .unwrap_or_else(|| format!("Step {}", current_step + 1));
+
+        // Complete any existing execution for the current step
+        let latest_execution = db
+            .executions()
+            .get_latest_execution_for_task(&task_id)
+            .await?;
+        if let Some(exec) = latest_execution
+            && exec.step_name == current_step_name
+            && exec.status == ExecutionStatus::InProgress
+            && let Some(exec_id) = exec.id
+        {
+            db.executions()
+                .update_status(
+                    &exec_id.id.to_string(),
+                    ExecutionStatus::Completed,
+                    Some(chrono::Utc::now()),
+                )
+                .await?;
+        }
+
         // Check if at the last step - if so, handle chaining
         if current_step + 1 >= total_steps {
             // Check if there's an on_done_workflow to chain to
@@ -823,12 +853,19 @@ impl WorkflowAdvanceCommand {
                             .map(|s| s.name.clone())
                             .unwrap_or_else(|| "Step 1".to_string());
 
+                        // Create a new execution for the first step of the new workflow
+                        let task_thing = Thing::from(("task", task_id.as_str()));
+                        let execution =
+                            StepExecution::new(task_thing, next_workflow_thing, &first_step_name);
+                        let exec_id = db.executions().create_execution(&execution).await?;
+
                         return Ok(format!(
-                            "Completed workflow {} and chained task {} to workflow {} at step 1: {}",
+                            "Completed workflow {} and chained task {} to workflow {} at step 1: {} (execution: {})",
                             workflow_id.id.to_raw(),
                             task_id,
                             next_workflow_id,
-                            first_step_name
+                            first_step_name,
+                            &exec_id[..6.min(exec_id.len())]
                         ));
                     }
                     None => {
@@ -870,12 +907,18 @@ impl WorkflowAdvanceCommand {
             .map(|s| s.name.clone())
             .unwrap_or_else(|| format!("Step {}", new_step + 1));
 
+        // Create a new execution for the new step
+        let task_thing = Thing::from(("task", task_id.as_str()));
+        let execution = StepExecution::new(task_thing, workflow_id.clone(), &new_step_name);
+        let exec_id = db.executions().create_execution(&execution).await?;
+
         Ok(format!(
-            "Advanced task {} to step {}/{}: {}",
+            "Advanced task {} to step {}/{}: {} (execution: {})",
             task_id,
             new_step + 1,
             total_steps,
-            new_step_name
+            new_step_name,
+            &exec_id[..6.min(exec_id.len())]
         ))
     }
 }
@@ -947,10 +990,45 @@ impl WorkflowRetreatCommand {
 
         // Get the workflow for step info
         let workflow = db.workflows().get(&workflow_id.id.to_raw()).await?;
-        let total_steps = workflow
-            .as_ref()
-            .map(|w| w.ordered_steps().len())
-            .unwrap_or(0);
+        let workflow = match workflow {
+            Some(w) => w,
+            None => {
+                return Err(DbError::ValidationError {
+                    message: format!(
+                        "Task {} is assigned to non-existent workflow {}",
+                        task_id,
+                        workflow_id.id.to_raw()
+                    ),
+                });
+            }
+        };
+        let total_steps = workflow.ordered_steps().len();
+
+        // Get current step name for execution tracking
+        let current_step_name = workflow
+            .ordered_steps()
+            .get(current_step)
+            .map(|s| s.name.clone())
+            .unwrap_or_else(|| format!("Step {}", current_step + 1));
+
+        // Fail any existing execution for the current step (retreat implies failure/rejection)
+        let latest_execution = db
+            .executions()
+            .get_latest_execution_for_task(&task_id)
+            .await?;
+        if let Some(exec) = latest_execution
+            && exec.step_name == current_step_name
+            && exec.status == ExecutionStatus::InProgress
+            && let Some(exec_id) = exec.id
+        {
+            db.executions()
+                .update_status(
+                    &exec_id.id.to_string(),
+                    ExecutionStatus::Failed,
+                    Some(chrono::Utc::now()),
+                )
+                .await?;
+        }
 
         // Retreat to previous step
         let new_step = current_step - 1;
@@ -958,15 +1036,23 @@ impl WorkflowRetreatCommand {
 
         // Get step name for display
         let new_step_name = workflow
-            .and_then(|w| w.ordered_steps().get(new_step).map(|s| s.name.clone()))
+            .ordered_steps()
+            .get(new_step)
+            .map(|s| s.name.clone())
             .unwrap_or_else(|| format!("Step {}", new_step + 1));
 
+        // Create a new execution for the previous step
+        let task_thing = Thing::from(("task", task_id.as_str()));
+        let execution = StepExecution::new(task_thing, workflow_id.clone(), &new_step_name);
+        let exec_id = db.executions().create_execution(&execution).await?;
+
         Ok(format!(
-            "Retreated task {} to step {}/{}: {}",
+            "Retreated task {} to step {}/{}: {} (execution: {})",
             task_id,
             new_step + 1,
             total_steps,
-            new_step_name
+            new_step_name,
+            &exec_id[..6.min(exec_id.len())]
         ))
     }
 }
@@ -1036,6 +1122,33 @@ impl WorkflowRejectCommand {
         };
 
         let current_workflow_id = workflow_id.id.to_raw();
+        let current_step = task.current_step.unwrap_or(0);
+
+        // Get current step name for execution tracking
+        let current_step_name = workflow
+            .ordered_steps()
+            .get(current_step)
+            .map(|s| s.name.clone())
+            .unwrap_or_else(|| format!("Step {}", current_step + 1));
+
+        // Fail any existing execution for the current step (reject implies failure)
+        let latest_execution = db
+            .executions()
+            .get_latest_execution_for_task(&task_id)
+            .await?;
+        if let Some(exec) = latest_execution
+            && exec.step_name == current_step_name
+            && exec.status == ExecutionStatus::InProgress
+            && let Some(exec_id) = exec.id
+        {
+            db.executions()
+                .update_status(
+                    &exec_id.id.to_string(),
+                    ExecutionStatus::Failed,
+                    Some(chrono::Utc::now()),
+                )
+                .await?;
+        }
 
         // Check if there's an on_reject_workflow to chain to
         if let Some(reject_workflow_id) = &workflow.on_reject_workflow {
@@ -1062,9 +1175,19 @@ impl WorkflowRejectCommand {
                         .map(|s| s.name.clone())
                         .unwrap_or_else(|| "Step 1".to_string());
 
+                    // Create a new execution for the first step of the reject workflow
+                    let task_thing = Thing::from(("task", task_id.as_str()));
+                    let execution =
+                        StepExecution::new(task_thing, reject_workflow_thing, &first_step_name);
+                    let exec_id = db.executions().create_execution(&execution).await?;
+
                     Ok(format!(
-                        "Rejected task {} from workflow {} and chained to workflow {} at step 1: {}",
-                        task_id, current_workflow_id, reject_workflow_id, first_step_name
+                        "Rejected task {} from workflow {} and chained to workflow {} at step 1: {} (execution: {})",
+                        task_id,
+                        current_workflow_id,
+                        reject_workflow_id,
+                        first_step_name,
+                        &exec_id[..6.min(exec_id.len())]
                     ))
                 }
                 None => Err(DbError::ValidationError {

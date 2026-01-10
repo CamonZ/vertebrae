@@ -4,7 +4,8 @@
 //! and their associated session logs.
 
 use clap::{Args, Subcommand};
-use vertebrae_db::{Database, DbError, ExecutionStatus};
+use surrealdb::sql::Thing;
+use vertebrae_db::{Database, DbError, ExecutionStatus, SessionLog};
 
 /// Execution management commands
 #[derive(Debug, Subcommand)]
@@ -13,6 +14,8 @@ pub enum ExecutionCommand {
     List(ExecutionListCommand),
     /// Show details of a specific execution
     Show(ExecutionShowCommand),
+    /// Add a log entry to an execution
+    Log(ExecutionLogCommand),
 }
 
 impl ExecutionCommand {
@@ -29,6 +32,7 @@ impl ExecutionCommand {
         match self {
             ExecutionCommand::List(cmd) => cmd.execute(db).await,
             ExecutionCommand::Show(cmd) => cmd.execute(db).await,
+            ExecutionCommand::Log(cmd) => cmd.execute(db).await,
         }
     }
 }
@@ -235,6 +239,68 @@ impl ExecutionShowCommand {
     }
 }
 
+/// Add a log entry to an execution
+#[derive(Debug, Args)]
+pub struct ExecutionLogCommand {
+    /// Execution ID to add the log to
+    #[arg(required = true)]
+    pub execution_id: String,
+
+    /// Log content (can be multiline text from stdin or shell)
+    #[arg(required = true)]
+    pub content: String,
+}
+
+impl ExecutionLogCommand {
+    /// Execute the log command.
+    ///
+    /// Adds a log entry to the specified execution.
+    ///
+    /// # Arguments
+    ///
+    /// * `db` - Reference to the database connection
+    ///
+    /// # Errors
+    ///
+    /// Returns `DbError` if:
+    /// - The execution is not found
+    /// - Database operations fail
+    pub async fn execute(&self, db: &Database) -> Result<String, DbError> {
+        // Verify the execution exists
+        let execution = db
+            .executions()
+            .get_execution(&self.execution_id)
+            .await?
+            .ok_or_else(|| DbError::NotFound {
+                entity: "execution".to_string(),
+                id: self.execution_id.clone(),
+            })?;
+
+        // Create the session log
+        let exec_id = execution
+            .id
+            .as_ref()
+            .map(|t| t.id.to_string())
+            .unwrap_or_else(|| self.execution_id.clone());
+        let step_execution_thing = Thing::from(("step_execution", exec_id.as_str()));
+        let log = SessionLog::new(step_execution_thing, &self.content);
+        let log_id = db.executions().add_log(&log).await?;
+
+        let content_preview = if self.content.len() > 50 {
+            format!("{}...", &self.content[..50])
+        } else {
+            self.content.clone()
+        };
+
+        Ok(format!(
+            "Added log {} to execution {}: \"{}\"",
+            &log_id[..6.min(log_id.len())],
+            &self.execution_id[..6.min(self.execution_id.len())],
+            content_preview.replace('\n', " ")
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -300,6 +366,41 @@ mod tests {
         assert!(
             debug_str.contains("Show") && debug_str.contains("exec123"),
             "Debug output should contain Show variant and execution_id field value"
+        );
+    }
+
+    #[test]
+    fn test_execution_log_parses() {
+        let cli = TestCli::try_parse_from(["test", "log", "exec123", "Test log content"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            ExecutionCommand::Log(cmd) => {
+                assert_eq!(cmd.execution_id, "exec123");
+                assert_eq!(cmd.content, "Test log content");
+            }
+            _ => panic!("Expected Log command"),
+        }
+    }
+
+    #[test]
+    fn test_execution_log_requires_execution_id() {
+        let result = TestCli::try_parse_from(["test", "log"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_execution_log_requires_content() {
+        let result = TestCli::try_parse_from(["test", "log", "exec123"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_execution_log_debug() {
+        let cli = TestCli::try_parse_from(["test", "log", "exec123", "content"]).unwrap();
+        let debug_str = format!("{:?}", cli.command);
+        assert!(
+            debug_str.contains("Log") && debug_str.contains("exec123"),
+            "Debug output should contain Log variant and execution_id field value"
         );
     }
 }
