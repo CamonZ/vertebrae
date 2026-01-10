@@ -1818,3 +1818,902 @@ mod boundary_edge_cases {
         assert_eq!(count_tasks(&ctx.db).await, 10);
     }
 }
+
+// =============================================================================
+// WORKFLOW TESTS
+// =============================================================================
+
+mod workflows {
+    use super::*;
+
+    // =========================================================================
+    // WORKFLOW CREATION TESTS
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_workflow_add_creates_workflow_with_single_step() {
+        let ctx = TestContext::new().await;
+
+        let cmd = workflow_add_cmd("Review Workflow", "review", "code-reviewer");
+        let result = cmd.execute(&ctx.db).await.expect("Add should succeed");
+
+        assert!(
+            result.starts_with("Created workflow: "),
+            "Result should start with 'Created workflow: '"
+        );
+
+        let id = extract_workflow_id(&result);
+        assert_eq!(id.len(), 6, "Workflow ID should be 6 characters");
+
+        // Verify workflow was persisted
+        let workflow = ctx.db.workflows().get(&id).await.unwrap();
+        assert!(workflow.is_some(), "Workflow should exist in database");
+
+        let workflow = workflow.unwrap();
+        assert_eq!(workflow.name, "Review Workflow");
+        assert!(workflow.description.is_none());
+        assert_eq!(workflow.steps.len(), 1);
+        assert_eq!(workflow.steps[0].name, "review");
+        assert_eq!(workflow.steps[0].agent_template, "code-reviewer");
+        assert_eq!(workflow.steps[0].order, 0);
+    }
+
+    #[tokio::test]
+    async fn test_workflow_add_with_description() {
+        let ctx = TestContext::new().await;
+
+        let cmd = workflow_add_cmd_with_description(
+            "Described Workflow",
+            "A workflow for code reviews",
+            vec![("review", "code-reviewer")],
+        );
+        let result = cmd.execute(&ctx.db).await.expect("Add should succeed");
+        let id = extract_workflow_id(&result);
+
+        let workflow = ctx.db.workflows().get(&id).await.unwrap().unwrap();
+        assert_eq!(workflow.name, "Described Workflow");
+        assert_eq!(
+            workflow.description,
+            Some("A workflow for code reviews".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_workflow_add_with_multiple_steps() {
+        let ctx = TestContext::new().await;
+
+        let cmd = workflow_add_cmd_multi_step(
+            "Multi-step Workflow",
+            vec![
+                ("review", "code-reviewer"),
+                ("test", "tester"),
+                ("deploy", "deployer"),
+            ],
+        );
+        let result = cmd.execute(&ctx.db).await.expect("Add should succeed");
+        let id = extract_workflow_id(&result);
+
+        let workflow = ctx.db.workflows().get(&id).await.unwrap().unwrap();
+        assert_eq!(workflow.steps.len(), 3);
+
+        // Verify steps are ordered correctly
+        assert_eq!(workflow.steps[0].name, "review");
+        assert_eq!(workflow.steps[0].order, 0);
+        assert_eq!(workflow.steps[1].name, "test");
+        assert_eq!(workflow.steps[1].order, 1);
+        assert_eq!(workflow.steps[2].name, "deploy");
+        assert_eq!(workflow.steps[2].order, 2);
+    }
+
+    #[tokio::test]
+    async fn test_workflow_add_empty_name_fails() {
+        let ctx = TestContext::new().await;
+
+        let cmd = workflow_add_cmd("", "step1", "agent1");
+        let result = cmd.execute(&ctx.db).await;
+
+        assert!(result.is_err(), "Empty name should fail");
+        match result {
+            Err(DbError::InvalidPath { reason, .. }) => {
+                assert!(
+                    reason.contains("name required"),
+                    "Error should mention name required: {}",
+                    reason
+                );
+            }
+            Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
+            Ok(_) => panic!("Expected error, got success"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_workflow_add_whitespace_name_fails() {
+        let ctx = TestContext::new().await;
+
+        let cmd = workflow_add_cmd("   ", "step1", "agent1");
+        let result = cmd.execute(&ctx.db).await;
+
+        assert!(result.is_err(), "Whitespace-only name should fail");
+        match result {
+            Err(DbError::InvalidPath { reason, .. }) => {
+                assert!(
+                    reason.contains("name required"),
+                    "Error should mention name required: {}",
+                    reason
+                );
+            }
+            _ => panic!("Expected InvalidPath error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_workflow_add_no_steps_fails() {
+        let ctx = TestContext::new().await;
+
+        let cmd = workflow_add_cmd_multi_step("No Steps Workflow", vec![]);
+        let result = cmd.execute(&ctx.db).await;
+
+        assert!(result.is_err(), "No steps should fail");
+        match result {
+            Err(DbError::InvalidPath { reason, .. }) => {
+                assert!(
+                    reason.contains("at least one step is required"),
+                    "Error should mention step requirement: {}",
+                    reason
+                );
+            }
+            _ => panic!("Expected InvalidPath error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_workflow_add_generates_unique_ids() {
+        let ctx = TestContext::new().await;
+
+        let mut ids = std::collections::HashSet::new();
+
+        for i in 0..10 {
+            let cmd = workflow_add_cmd(&format!("Workflow {}", i), "step1", "agent1");
+            let result = cmd.execute(&ctx.db).await.unwrap();
+            let id = extract_workflow_id(&result);
+
+            assert!(
+                ids.insert(id.clone()),
+                "Workflow ID {} should be unique",
+                id
+            );
+        }
+
+        assert_eq!(ids.len(), 10, "Should have 10 unique workflow IDs");
+    }
+
+    // =========================================================================
+    // WORKFLOW PERSISTENCE AND RETRIEVAL TESTS
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_workflow_show_displays_details() {
+        let ctx = TestContext::new().await;
+
+        // Create a workflow
+        let add_cmd = workflow_add_cmd_with_description(
+            "Show Test Workflow",
+            "Test description",
+            vec![("step1", "agent1"), ("step2", "agent2")],
+        );
+        let result = add_cmd.execute(&ctx.db).await.unwrap();
+        let id = extract_workflow_id(&result);
+
+        // Show the workflow
+        let show_cmd = workflow_show_cmd(&id);
+        let output = show_cmd.execute(&ctx.db).await.unwrap();
+
+        assert!(output.contains("Show Test Workflow"));
+        assert!(output.contains("Test description"));
+        assert!(output.contains("step1"));
+        assert!(output.contains("step2"));
+        assert!(output.contains("agent1"));
+        assert!(output.contains("agent2"));
+    }
+
+    #[tokio::test]
+    async fn test_workflow_show_nonexistent_fails() {
+        let ctx = TestContext::new().await;
+
+        let show_cmd = workflow_show_cmd("nonexistent");
+        let result = show_cmd.execute(&ctx.db).await;
+
+        assert!(result.is_err(), "Showing nonexistent workflow should fail");
+        match result {
+            Err(DbError::NotFound { entity, id }) => {
+                assert_eq!(entity, "workflow");
+                assert_eq!(id, "nonexistent");
+            }
+            _ => panic!("Expected NotFound error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_workflow_list_includes_created_workflows() {
+        let ctx = TestContext::new().await;
+
+        // Create some workflows
+        let cmd1 = workflow_add_cmd("Workflow A", "step1", "agent1");
+        let cmd2 = workflow_add_cmd("Workflow B", "step1", "agent1");
+        cmd1.execute(&ctx.db).await.unwrap();
+        cmd2.execute(&ctx.db).await.unwrap();
+
+        // List workflows
+        let list_cmd = workflow_list_cmd();
+        let output = list_cmd.execute(&ctx.db).await.unwrap();
+
+        assert!(output.contains("Workflow A"));
+        assert!(output.contains("Workflow B"));
+        // Default workflow should also be present
+        assert!(output.contains("Default Workflow"));
+    }
+
+    #[tokio::test]
+    async fn test_workflow_update_name() {
+        let ctx = TestContext::new().await;
+
+        // Create a workflow
+        let add_cmd = workflow_add_cmd("Original Name", "step1", "agent1");
+        let result = add_cmd.execute(&ctx.db).await.unwrap();
+        let id = extract_workflow_id(&result);
+
+        // Update the name
+        let update_cmd = workflow_update_cmd(&id, Some("Updated Name"), None);
+        update_cmd.execute(&ctx.db).await.unwrap();
+
+        // Verify the update
+        let workflow = ctx.db.workflows().get(&id).await.unwrap().unwrap();
+        assert_eq!(workflow.name, "Updated Name");
+    }
+
+    #[tokio::test]
+    async fn test_workflow_update_description() {
+        let ctx = TestContext::new().await;
+
+        // Create a workflow without description
+        let add_cmd = workflow_add_cmd("Test Workflow", "step1", "agent1");
+        let result = add_cmd.execute(&ctx.db).await.unwrap();
+        let id = extract_workflow_id(&result);
+
+        // Update with description
+        let update_cmd = workflow_update_cmd(&id, None, Some("New description"));
+        update_cmd.execute(&ctx.db).await.unwrap();
+
+        // Verify the update
+        let workflow = ctx.db.workflows().get(&id).await.unwrap().unwrap();
+        assert_eq!(workflow.description, Some("New description".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_workflow_delete() {
+        let ctx = TestContext::new().await;
+
+        // Create a workflow
+        let add_cmd = workflow_add_cmd("To Delete", "step1", "agent1");
+        let result = add_cmd.execute(&ctx.db).await.unwrap();
+        let id = extract_workflow_id(&result);
+
+        // Verify it exists
+        assert!(workflow_exists(&ctx.db, &id).await);
+
+        // Delete the workflow
+        let delete_cmd = workflow_delete_cmd(&id);
+        delete_cmd.execute(&ctx.db).await.unwrap();
+
+        // Verify it's gone
+        assert!(!workflow_exists(&ctx.db, &id).await);
+    }
+
+    #[tokio::test]
+    async fn test_workflow_delete_nonexistent_fails() {
+        let ctx = TestContext::new().await;
+
+        let delete_cmd = workflow_delete_cmd("nonexistent");
+        let result = delete_cmd.execute(&ctx.db).await;
+
+        assert!(result.is_err());
+        match result {
+            Err(DbError::NotFound { entity, id }) => {
+                assert_eq!(entity, "workflow");
+                assert_eq!(id, "nonexistent");
+            }
+            _ => panic!("Expected NotFound error"),
+        }
+    }
+
+    // =========================================================================
+    // MULTI-STEP WORKFLOW SCENARIOS
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_workflow_assign_task_to_workflow() {
+        let ctx = TestContext::new().await;
+
+        // Create a task
+        create_task(&ctx.db, "task1", "Test Task", "task", "todo").await;
+
+        // Create a workflow
+        let add_cmd = workflow_add_cmd_multi_step(
+            "Test Workflow",
+            vec![("step1", "agent1"), ("step2", "agent2")],
+        );
+        let result = add_cmd.execute(&ctx.db).await.unwrap();
+        let workflow_id = extract_workflow_id(&result);
+
+        // Assign task to workflow
+        let assign_cmd = workflow_assign_cmd("task1", &workflow_id);
+        let output = assign_cmd.execute(&ctx.db).await.unwrap();
+
+        assert!(output.contains("Assigned task task1"));
+        assert!(output.contains(&workflow_id));
+        assert!(output.contains("step 1"));
+
+        // Verify assignment
+        let task = ctx.db.tasks().get("task1").await.unwrap().unwrap();
+        assert!(task.workflow_id.is_some());
+        assert_eq!(task.current_step, Some(0));
+    }
+
+    #[tokio::test]
+    async fn test_workflow_advance_through_steps() {
+        let ctx = TestContext::new().await;
+
+        // Create a task
+        create_task(&ctx.db, "task1", "Test Task", "task", "todo").await;
+
+        // Create a 3-step workflow
+        let add_cmd = workflow_add_cmd_multi_step(
+            "Three Step Workflow",
+            vec![
+                ("step1", "agent1"),
+                ("step2", "agent2"),
+                ("step3", "agent3"),
+            ],
+        );
+        let result = add_cmd.execute(&ctx.db).await.unwrap();
+        let workflow_id = extract_workflow_id(&result);
+
+        // Assign task to workflow
+        let assign_cmd = workflow_assign_cmd("task1", &workflow_id);
+        assign_cmd.execute(&ctx.db).await.unwrap();
+
+        // Verify at step 0
+        let task = ctx.db.tasks().get("task1").await.unwrap().unwrap();
+        assert_eq!(task.current_step, Some(0));
+
+        // Advance to step 1
+        let advance_cmd = workflow_advance_cmd("task1");
+        let output = advance_cmd.execute(&ctx.db).await.unwrap();
+        assert!(output.contains("step 2/3"));
+
+        let task = ctx.db.tasks().get("task1").await.unwrap().unwrap();
+        assert_eq!(task.current_step, Some(1));
+
+        // Advance to step 2
+        let advance_cmd = workflow_advance_cmd("task1");
+        let output = advance_cmd.execute(&ctx.db).await.unwrap();
+        assert!(output.contains("step 3/3"));
+
+        let task = ctx.db.tasks().get("task1").await.unwrap().unwrap();
+        assert_eq!(task.current_step, Some(2));
+    }
+
+    #[tokio::test]
+    async fn test_workflow_advance_at_last_step_without_chaining_fails() {
+        let ctx = TestContext::new().await;
+
+        // Create a task
+        create_task(&ctx.db, "task1", "Test Task", "task", "todo").await;
+
+        // Create a single-step workflow
+        let add_cmd = workflow_add_cmd("Single Step", "only_step", "agent1");
+        let result = add_cmd.execute(&ctx.db).await.unwrap();
+        let workflow_id = extract_workflow_id(&result);
+
+        // Assign task to workflow
+        let assign_cmd = workflow_assign_cmd("task1", &workflow_id);
+        assign_cmd.execute(&ctx.db).await.unwrap();
+
+        // Try to advance - should fail since at last step
+        let advance_cmd = workflow_advance_cmd("task1");
+        let result = advance_cmd.execute(&ctx.db).await;
+
+        assert!(result.is_err());
+        match result {
+            Err(DbError::ValidationError { message }) => {
+                assert!(message.contains("last step"));
+            }
+            _ => panic!("Expected ValidationError about last step"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_workflow_retreat_through_steps() {
+        let ctx = TestContext::new().await;
+
+        // Create a task
+        create_task(&ctx.db, "task1", "Test Task", "task", "todo").await;
+
+        // Create a workflow
+        let add_cmd = workflow_add_cmd_multi_step(
+            "Test Workflow",
+            vec![("step1", "agent1"), ("step2", "agent2")],
+        );
+        let result = add_cmd.execute(&ctx.db).await.unwrap();
+        let workflow_id = extract_workflow_id(&result);
+
+        // Assign and advance
+        let assign_cmd = workflow_assign_cmd("task1", &workflow_id);
+        assign_cmd.execute(&ctx.db).await.unwrap();
+
+        let advance_cmd = workflow_advance_cmd("task1");
+        advance_cmd.execute(&ctx.db).await.unwrap();
+
+        // Verify at step 1
+        let task = ctx.db.tasks().get("task1").await.unwrap().unwrap();
+        assert_eq!(task.current_step, Some(1));
+
+        // Retreat to step 0
+        let retreat_cmd = workflow_retreat_cmd("task1");
+        let output = retreat_cmd.execute(&ctx.db).await.unwrap();
+        assert!(output.contains("step 1/2"));
+
+        let task = ctx.db.tasks().get("task1").await.unwrap().unwrap();
+        assert_eq!(task.current_step, Some(0));
+    }
+
+    #[tokio::test]
+    async fn test_workflow_retreat_at_first_step_fails() {
+        let ctx = TestContext::new().await;
+
+        // Create a task
+        create_task(&ctx.db, "task1", "Test Task", "task", "todo").await;
+
+        // Create a workflow
+        let add_cmd = workflow_add_cmd("Test Workflow", "step1", "agent1");
+        let result = add_cmd.execute(&ctx.db).await.unwrap();
+        let workflow_id = extract_workflow_id(&result);
+
+        // Assign task
+        let assign_cmd = workflow_assign_cmd("task1", &workflow_id);
+        assign_cmd.execute(&ctx.db).await.unwrap();
+
+        // Try to retreat - should fail since at first step
+        let retreat_cmd = workflow_retreat_cmd("task1");
+        let result = retreat_cmd.execute(&ctx.db).await;
+
+        assert!(result.is_err());
+        match result {
+            Err(DbError::ValidationError { message }) => {
+                assert!(message.contains("first step"));
+            }
+            _ => panic!("Expected ValidationError about first step"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_workflow_unassign_task() {
+        let ctx = TestContext::new().await;
+
+        // Create a task
+        create_task(&ctx.db, "task1", "Test Task", "task", "todo").await;
+
+        // Create and assign workflow
+        let add_cmd = workflow_add_cmd("Test Workflow", "step1", "agent1");
+        let result = add_cmd.execute(&ctx.db).await.unwrap();
+        let workflow_id = extract_workflow_id(&result);
+
+        let assign_cmd = workflow_assign_cmd("task1", &workflow_id);
+        assign_cmd.execute(&ctx.db).await.unwrap();
+
+        // Verify assigned
+        let task = ctx.db.tasks().get("task1").await.unwrap().unwrap();
+        assert!(task.workflow_id.is_some());
+
+        // Unassign
+        let unassign_cmd = workflow_unassign_cmd("task1");
+        unassign_cmd.execute(&ctx.db).await.unwrap();
+
+        // Verify unassigned
+        let task = ctx.db.tasks().get("task1").await.unwrap().unwrap();
+        assert!(task.workflow_id.is_none());
+        assert!(task.current_step.is_none());
+    }
+
+    // =========================================================================
+    // PIPELINE CHAINING TESTS (on_done/on_reject)
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_workflow_add_with_on_done_chaining() {
+        let ctx = TestContext::new().await;
+
+        // Create target workflow first
+        let target_cmd = workflow_add_cmd("Target Workflow", "deploy", "deployer");
+        let target_result = target_cmd.execute(&ctx.db).await.unwrap();
+        let target_id = extract_workflow_id(&target_result);
+
+        // Create workflow with on_done chaining
+        let cmd = workflow_add_cmd_with_chaining(
+            "Review Workflow",
+            vec![("review", "reviewer")],
+            Some(&target_id),
+            None,
+        );
+        let result = cmd.execute(&ctx.db).await.unwrap();
+        let id = extract_workflow_id(&result);
+
+        // Verify on_done_workflow was set
+        let workflow = ctx.db.workflows().get(&id).await.unwrap().unwrap();
+        assert_eq!(workflow.on_done_workflow, Some(target_id));
+        assert!(workflow.on_reject_workflow.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_workflow_add_with_on_reject_chaining() {
+        let ctx = TestContext::new().await;
+
+        // Create target workflow first
+        let target_cmd = workflow_add_cmd("Rejection Handler", "handle_rejection", "handler");
+        let target_result = target_cmd.execute(&ctx.db).await.unwrap();
+        let target_id = extract_workflow_id(&target_result);
+
+        // Create workflow with on_reject chaining
+        let cmd = workflow_add_cmd_with_chaining(
+            "Review Workflow",
+            vec![("review", "reviewer")],
+            None,
+            Some(&target_id),
+        );
+        let result = cmd.execute(&ctx.db).await.unwrap();
+        let id = extract_workflow_id(&result);
+
+        // Verify on_reject_workflow was set
+        let workflow = ctx.db.workflows().get(&id).await.unwrap().unwrap();
+        assert!(workflow.on_done_workflow.is_none());
+        assert_eq!(workflow.on_reject_workflow, Some(target_id));
+    }
+
+    #[tokio::test]
+    async fn test_workflow_add_with_both_chaining() {
+        let ctx = TestContext::new().await;
+
+        // Create target workflows
+        let done_cmd = workflow_add_cmd("Done Handler", "deploy", "deployer");
+        let done_result = done_cmd.execute(&ctx.db).await.unwrap();
+        let done_id = extract_workflow_id(&done_result);
+
+        let reject_cmd = workflow_add_cmd("Reject Handler", "handle_rejection", "handler");
+        let reject_result = reject_cmd.execute(&ctx.db).await.unwrap();
+        let reject_id = extract_workflow_id(&reject_result);
+
+        // Create workflow with both chains
+        let cmd = workflow_add_cmd_with_chaining(
+            "Main Workflow",
+            vec![("review", "reviewer")],
+            Some(&done_id),
+            Some(&reject_id),
+        );
+        let result = cmd.execute(&ctx.db).await.unwrap();
+        let id = extract_workflow_id(&result);
+
+        // Verify both were set
+        let workflow = ctx.db.workflows().get(&id).await.unwrap().unwrap();
+        assert_eq!(workflow.on_done_workflow, Some(done_id));
+        assert_eq!(workflow.on_reject_workflow, Some(reject_id));
+    }
+
+    #[tokio::test]
+    async fn test_workflow_advance_triggers_on_done_chaining() {
+        let ctx = TestContext::new().await;
+
+        // Create a task
+        create_task(&ctx.db, "task1", "Test Task", "task", "todo").await;
+
+        // Create target workflow
+        let target_cmd = workflow_add_cmd_multi_step(
+            "Deploy Workflow",
+            vec![("stage", "stager"), ("prod", "deployer")],
+        );
+        let target_result = target_cmd.execute(&ctx.db).await.unwrap();
+        let target_id = extract_workflow_id(&target_result);
+
+        // Create source workflow with on_done chaining
+        let source_cmd = workflow_add_cmd_with_chaining(
+            "Review Workflow",
+            vec![("review", "reviewer")],
+            Some(&target_id),
+            None,
+        );
+        let source_result = source_cmd.execute(&ctx.db).await.unwrap();
+        let source_id = extract_workflow_id(&source_result);
+
+        // Assign task to source workflow
+        let assign_cmd = workflow_assign_cmd("task1", &source_id);
+        assign_cmd.execute(&ctx.db).await.unwrap();
+
+        // Task is at step 0 (last step of single-step workflow)
+        // Advance should trigger chaining
+        let advance_cmd = workflow_advance_cmd("task1");
+        let output = advance_cmd.execute(&ctx.db).await.unwrap();
+
+        assert!(output.contains("Completed workflow"));
+        assert!(output.contains("chained"));
+        assert!(output.contains(&target_id));
+
+        // Verify task is now in target workflow at step 0
+        let task = ctx.db.tasks().get("task1").await.unwrap().unwrap();
+        assert!(task.workflow_id.is_some());
+        let workflow_thing = task.workflow_id.unwrap();
+        assert_eq!(workflow_thing.id.to_raw(), target_id);
+        assert_eq!(task.current_step, Some(0));
+    }
+
+    #[tokio::test]
+    async fn test_workflow_reject_triggers_on_reject_chaining() {
+        let ctx = TestContext::new().await;
+
+        // Create a task
+        create_task(&ctx.db, "task1", "Test Task", "task", "todo").await;
+
+        // Create target workflow for rejections
+        let target_cmd = workflow_add_cmd("Fix Workflow", "fix", "fixer");
+        let target_result = target_cmd.execute(&ctx.db).await.unwrap();
+        let target_id = extract_workflow_id(&target_result);
+
+        // Create source workflow with on_reject chaining
+        let source_cmd = workflow_add_cmd_with_chaining(
+            "Review Workflow",
+            vec![("review", "reviewer")],
+            None,
+            Some(&target_id),
+        );
+        let source_result = source_cmd.execute(&ctx.db).await.unwrap();
+        let source_id = extract_workflow_id(&source_result);
+
+        // Assign task to source workflow
+        let assign_cmd = workflow_assign_cmd("task1", &source_id);
+        assign_cmd.execute(&ctx.db).await.unwrap();
+
+        // Reject the task
+        let reject_cmd = workflow_reject_cmd("task1");
+        let output = reject_cmd.execute(&ctx.db).await.unwrap();
+
+        assert!(output.contains("Rejected"));
+        assert!(output.contains("chained"));
+        assert!(output.contains(&target_id));
+
+        // Verify task is now in target workflow at step 0
+        let task = ctx.db.tasks().get("task1").await.unwrap().unwrap();
+        assert!(task.workflow_id.is_some());
+        let workflow_thing = task.workflow_id.unwrap();
+        assert_eq!(workflow_thing.id.to_raw(), target_id);
+        assert_eq!(task.current_step, Some(0));
+    }
+
+    #[tokio::test]
+    async fn test_workflow_reject_without_chaining_unassigns() {
+        let ctx = TestContext::new().await;
+
+        // Create a task
+        create_task(&ctx.db, "task1", "Test Task", "task", "todo").await;
+
+        // Create workflow without on_reject chaining
+        let cmd = workflow_add_cmd("Review Workflow", "review", "reviewer");
+        let result = cmd.execute(&ctx.db).await.unwrap();
+        let workflow_id = extract_workflow_id(&result);
+
+        // Assign task to workflow
+        let assign_cmd = workflow_assign_cmd("task1", &workflow_id);
+        assign_cmd.execute(&ctx.db).await.unwrap();
+
+        // Reject the task
+        let reject_cmd = workflow_reject_cmd("task1");
+        let output = reject_cmd.execute(&ctx.db).await.unwrap();
+
+        assert!(output.contains("Rejected"));
+        assert!(output.contains("workflow unassigned"));
+
+        // Verify task is unassigned
+        let task = ctx.db.tasks().get("task1").await.unwrap().unwrap();
+        assert!(task.workflow_id.is_none());
+        assert!(task.current_step.is_none());
+    }
+
+    // =========================================================================
+    // ERROR HANDLING TESTS
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_workflow_assign_nonexistent_task_fails() {
+        let ctx = TestContext::new().await;
+
+        // Create a workflow
+        let cmd = workflow_add_cmd("Test Workflow", "step1", "agent1");
+        let result = cmd.execute(&ctx.db).await.unwrap();
+        let workflow_id = extract_workflow_id(&result);
+
+        // Try to assign nonexistent task
+        let assign_cmd = workflow_assign_cmd("nonexistent", &workflow_id);
+        let result = assign_cmd.execute(&ctx.db).await;
+
+        assert!(result.is_err());
+        match result {
+            Err(DbError::NotFound { entity, id }) => {
+                assert_eq!(entity, "task");
+                assert_eq!(id, "nonexistent");
+            }
+            _ => panic!("Expected NotFound error for task"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_workflow_assign_nonexistent_workflow_fails() {
+        let ctx = TestContext::new().await;
+
+        // Create a task
+        create_task(&ctx.db, "task1", "Test Task", "task", "todo").await;
+
+        // Try to assign to nonexistent workflow
+        let assign_cmd = workflow_assign_cmd("task1", "nonexistent");
+        let result = assign_cmd.execute(&ctx.db).await;
+
+        assert!(result.is_err());
+        match result {
+            Err(DbError::NotFound { entity, id }) => {
+                assert_eq!(entity, "workflow");
+                assert_eq!(id, "nonexistent");
+            }
+            _ => panic!("Expected NotFound error for workflow"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_workflow_advance_unassigned_task_fails() {
+        let ctx = TestContext::new().await;
+
+        // Create a task without workflow assignment
+        create_task(&ctx.db, "task1", "Test Task", "task", "todo").await;
+
+        // Try to advance
+        let advance_cmd = workflow_advance_cmd("task1");
+        let result = advance_cmd.execute(&ctx.db).await;
+
+        assert!(result.is_err());
+        match result {
+            Err(DbError::ValidationError { message }) => {
+                assert!(message.contains("not assigned"));
+            }
+            _ => panic!("Expected ValidationError about not assigned"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_workflow_retreat_unassigned_task_fails() {
+        let ctx = TestContext::new().await;
+
+        // Create a task without workflow assignment
+        create_task(&ctx.db, "task1", "Test Task", "task", "todo").await;
+
+        // Try to retreat
+        let retreat_cmd = workflow_retreat_cmd("task1");
+        let result = retreat_cmd.execute(&ctx.db).await;
+
+        assert!(result.is_err());
+        match result {
+            Err(DbError::ValidationError { message }) => {
+                assert!(message.contains("not assigned"));
+            }
+            _ => panic!("Expected ValidationError about not assigned"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_workflow_reject_unassigned_task_fails() {
+        let ctx = TestContext::new().await;
+
+        // Create a task without workflow assignment
+        create_task(&ctx.db, "task1", "Test Task", "task", "todo").await;
+
+        // Try to reject
+        let reject_cmd = workflow_reject_cmd("task1");
+        let result = reject_cmd.execute(&ctx.db).await;
+
+        assert!(result.is_err());
+        match result {
+            Err(DbError::ValidationError { message }) => {
+                assert!(message.contains("not assigned"));
+            }
+            _ => panic!("Expected ValidationError about not assigned"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_workflow_advance_nonexistent_task_fails() {
+        let ctx = TestContext::new().await;
+
+        let advance_cmd = workflow_advance_cmd("nonexistent");
+        let result = advance_cmd.execute(&ctx.db).await;
+
+        assert!(result.is_err());
+        match result {
+            Err(DbError::NotFound { entity, id }) => {
+                assert_eq!(entity, "task");
+                assert_eq!(id, "nonexistent");
+            }
+            _ => panic!("Expected NotFound error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_workflow_unassign_nonexistent_task_fails() {
+        let ctx = TestContext::new().await;
+
+        let unassign_cmd = workflow_unassign_cmd("nonexistent");
+        let result = unassign_cmd.execute(&ctx.db).await;
+
+        assert!(result.is_err());
+        match result {
+            Err(DbError::NotFound { entity, id }) => {
+                assert_eq!(entity, "task");
+                assert_eq!(id, "nonexistent");
+            }
+            _ => panic!("Expected NotFound error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_workflow_update_nonexistent_fails() {
+        let ctx = TestContext::new().await;
+
+        let update_cmd = workflow_update_cmd("nonexistent", Some("New Name"), None);
+        let result = update_cmd.execute(&ctx.db).await;
+
+        assert!(result.is_err());
+        match result {
+            Err(DbError::NotFound { entity, id }) => {
+                assert_eq!(entity, "workflow");
+                assert_eq!(id, "nonexistent");
+            }
+            _ => panic!("Expected NotFound error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_workflow_case_insensitive_lookup() {
+        let ctx = TestContext::new().await;
+
+        // Create a workflow
+        let cmd = workflow_add_cmd("Test Workflow", "step1", "agent1");
+        let result = cmd.execute(&ctx.db).await.unwrap();
+        let id = extract_workflow_id(&result);
+
+        // Show with uppercase ID
+        let uppercase_id = id.to_uppercase();
+        let show_cmd = workflow_show_cmd(&uppercase_id);
+        let result = show_cmd.execute(&ctx.db).await;
+
+        assert!(result.is_ok(), "Should find workflow with uppercase ID");
+    }
+
+    #[tokio::test]
+    async fn test_default_workflow_exists_on_init() {
+        let ctx = TestContext::new().await;
+
+        // Default workflow should be created during db.init()
+        assert!(
+            workflow_exists(&ctx.db, "default").await,
+            "Default workflow should exist"
+        );
+
+        // Verify it has the expected structure
+        let workflow = ctx.db.workflows().get("default").await.unwrap().unwrap();
+        assert_eq!(workflow.name, "Default Workflow");
+        assert_eq!(workflow.steps.len(), 5);
+    }
+}

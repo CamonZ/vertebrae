@@ -8,6 +8,11 @@ use vertebrae_cli::commands::{
     AddCommand, DeleteCommand, DependCommand, DoneCommand, ExportCommand, ListCommand, RefCommand,
     SectionCommand, StartCommand, SubmitCommand, TransitionToCommand, TriageCommand,
     transition_to::TargetStatus,
+    workflow::{
+        ParsedStep, WorkflowAddCommand, WorkflowAdvanceCommand, WorkflowAssignCommand,
+        WorkflowDeleteCommand, WorkflowListCommand, WorkflowRejectCommand, WorkflowRetreatCommand,
+        WorkflowShowCommand, WorkflowUnassignCommand, WorkflowUpdateCommand,
+    },
 };
 use vertebrae_db::{Database, DbError, Level, SectionType};
 
@@ -318,6 +323,179 @@ pub fn list_cmd_with_search(search: &str) -> ListCommand {
 /// Create an export command.
 pub fn export_cmd(output: Option<PathBuf>) -> ExportCommand {
     ExportCommand { output }
+}
+
+// =============================================================================
+// Workflow Command Helpers
+// =============================================================================
+
+/// Create a workflow add command with a single step.
+pub fn workflow_add_cmd(name: &str, step_name: &str, agent_template: &str) -> WorkflowAddCommand {
+    WorkflowAddCommand {
+        name: name.to_string(),
+        description: None,
+        steps: vec![ParsedStep {
+            name: step_name.to_string(),
+            agent_template: agent_template.to_string(),
+        }],
+        on_done: None,
+        on_reject: None,
+    }
+}
+
+/// Create a workflow add command with description.
+#[allow(dead_code)]
+pub fn workflow_add_cmd_with_description(
+    name: &str,
+    description: &str,
+    steps: Vec<(&str, &str)>,
+) -> WorkflowAddCommand {
+    WorkflowAddCommand {
+        name: name.to_string(),
+        description: Some(description.to_string()),
+        steps: steps
+            .into_iter()
+            .map(|(name, agent)| ParsedStep {
+                name: name.to_string(),
+                agent_template: agent.to_string(),
+            })
+            .collect(),
+        on_done: None,
+        on_reject: None,
+    }
+}
+
+/// Create a workflow add command with multiple steps.
+#[allow(dead_code)]
+pub fn workflow_add_cmd_multi_step(name: &str, steps: Vec<(&str, &str)>) -> WorkflowAddCommand {
+    WorkflowAddCommand {
+        name: name.to_string(),
+        description: None,
+        steps: steps
+            .into_iter()
+            .map(|(name, agent)| ParsedStep {
+                name: name.to_string(),
+                agent_template: agent.to_string(),
+            })
+            .collect(),
+        on_done: None,
+        on_reject: None,
+    }
+}
+
+/// Create a workflow add command with pipeline chaining.
+#[allow(dead_code)]
+pub fn workflow_add_cmd_with_chaining(
+    name: &str,
+    steps: Vec<(&str, &str)>,
+    on_done: Option<&str>,
+    on_reject: Option<&str>,
+) -> WorkflowAddCommand {
+    WorkflowAddCommand {
+        name: name.to_string(),
+        description: None,
+        steps: steps
+            .into_iter()
+            .map(|(name, agent)| ParsedStep {
+                name: name.to_string(),
+                agent_template: agent.to_string(),
+            })
+            .collect(),
+        on_done: on_done.map(String::from),
+        on_reject: on_reject.map(String::from),
+    }
+}
+
+/// Create a workflow list command.
+#[allow(dead_code)]
+pub fn workflow_list_cmd() -> WorkflowListCommand {
+    WorkflowListCommand {}
+}
+
+/// Create a workflow show command.
+#[allow(dead_code)]
+pub fn workflow_show_cmd(id: &str) -> WorkflowShowCommand {
+    WorkflowShowCommand { id: id.to_string() }
+}
+
+/// Create a workflow update command.
+#[allow(dead_code)]
+pub fn workflow_update_cmd(
+    id: &str,
+    name: Option<&str>,
+    description: Option<&str>,
+) -> WorkflowUpdateCommand {
+    WorkflowUpdateCommand {
+        id: id.to_string(),
+        name: name.map(String::from),
+        description: description.map(String::from),
+        clear_description: false,
+        on_done: None,
+        clear_on_done: false,
+        on_reject: None,
+        clear_on_reject: false,
+    }
+}
+
+/// Create a workflow delete command.
+#[allow(dead_code)]
+pub fn workflow_delete_cmd(id: &str) -> WorkflowDeleteCommand {
+    WorkflowDeleteCommand { id: id.to_string() }
+}
+
+/// Create a workflow assign command.
+#[allow(dead_code)]
+pub fn workflow_assign_cmd(task_id: &str, workflow_id: &str) -> WorkflowAssignCommand {
+    WorkflowAssignCommand {
+        task_id: task_id.to_string(),
+        workflow_id: workflow_id.to_string(),
+    }
+}
+
+/// Create a workflow unassign command.
+#[allow(dead_code)]
+pub fn workflow_unassign_cmd(task_id: &str) -> WorkflowUnassignCommand {
+    WorkflowUnassignCommand {
+        task_id: task_id.to_string(),
+    }
+}
+
+/// Create a workflow advance command.
+#[allow(dead_code)]
+pub fn workflow_advance_cmd(task_id: &str) -> WorkflowAdvanceCommand {
+    WorkflowAdvanceCommand {
+        task_id: task_id.to_string(),
+    }
+}
+
+/// Create a workflow retreat command.
+#[allow(dead_code)]
+pub fn workflow_retreat_cmd(task_id: &str) -> WorkflowRetreatCommand {
+    WorkflowRetreatCommand {
+        task_id: task_id.to_string(),
+    }
+}
+
+/// Create a workflow reject command.
+#[allow(dead_code)]
+pub fn workflow_reject_cmd(task_id: &str) -> WorkflowRejectCommand {
+    WorkflowRejectCommand {
+        task_id: task_id.to_string(),
+    }
+}
+
+/// Extract workflow ID from "Created workflow: {id}" message.
+#[allow(dead_code)]
+pub fn extract_workflow_id(msg: &str) -> String {
+    msg.strip_prefix("Created workflow: ")
+        .unwrap_or(msg)
+        .to_string()
+}
+
+/// Helper to check if a workflow exists.
+#[allow(dead_code)]
+pub async fn workflow_exists(db: &Database, id: &str) -> bool {
+    db.workflows().exists(id).await.unwrap_or(false)
 }
 
 // =============================================================================
