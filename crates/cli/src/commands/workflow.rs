@@ -4,7 +4,7 @@
 
 use crate::id::IdGenerator;
 use clap::{Args, Subcommand};
-use vertebrae_db::{Database, DbError, Workflow, WorkflowStep};
+use vertebrae_db::{Database, DbError, Workflow, WorkflowStep, WorkflowUpdate};
 
 /// Workflow management commands
 #[derive(Debug, Subcommand)]
@@ -15,6 +15,10 @@ pub enum WorkflowCommand {
     List(WorkflowListCommand),
     /// Show details of a specific workflow
     Show(WorkflowShowCommand),
+    /// Update a workflow's properties
+    Update(WorkflowUpdateCommand),
+    /// Delete a workflow
+    Delete(WorkflowDeleteCommand),
 }
 
 impl WorkflowCommand {
@@ -32,6 +36,8 @@ impl WorkflowCommand {
             WorkflowCommand::Add(cmd) => cmd.execute(db).await,
             WorkflowCommand::List(cmd) => cmd.execute(db).await,
             WorkflowCommand::Show(cmd) => cmd.execute(db).await,
+            WorkflowCommand::Update(cmd) => cmd.execute(db).await,
+            WorkflowCommand::Delete(cmd) => cmd.execute(db).await,
         }
     }
 }
@@ -400,6 +406,124 @@ impl WorkflowShowCommand {
                 id: self.id.clone(),
             }),
         }
+    }
+}
+
+/// Update a workflow's properties
+#[derive(Debug, Args)]
+pub struct WorkflowUpdateCommand {
+    /// Workflow ID to update (case-insensitive)
+    #[arg(required = true)]
+    pub id: String,
+
+    /// New name for the workflow
+    #[arg(short, long)]
+    pub name: Option<String>,
+
+    /// New description for the workflow
+    #[arg(short, long)]
+    pub description: Option<String>,
+
+    /// Clear the workflow description
+    #[arg(long, conflicts_with = "description")]
+    pub clear_description: bool,
+}
+
+impl WorkflowUpdateCommand {
+    /// Execute the update workflow command.
+    ///
+    /// Updates the workflow with the specified ID using the provided options.
+    ///
+    /// # Arguments
+    ///
+    /// * `db` - Reference to the database connection
+    ///
+    /// # Errors
+    ///
+    /// Returns `DbError::NotFound` if the workflow doesn't exist.
+    /// Returns `DbError` if database operations fail.
+    pub async fn execute(&self, db: &Database) -> Result<String, DbError> {
+        // Normalize ID to lowercase for case-insensitive lookup
+        let id = self.id.to_lowercase();
+
+        // Build the update
+        let mut updates = WorkflowUpdate::new();
+
+        if let Some(name) = &self.name {
+            if name.trim().is_empty() {
+                return Err(DbError::InvalidPath {
+                    path: std::path::PathBuf::from("name"),
+                    reason: "workflow name cannot be empty".to_string(),
+                });
+            }
+            updates = updates.with_name(name.clone());
+        }
+
+        if let Some(description) = &self.description {
+            updates = updates.with_description(description.clone());
+        } else if self.clear_description {
+            updates = updates.clear_description();
+        }
+
+        // Check if any updates were provided
+        if !updates.has_updates() {
+            return Err(DbError::InvalidPath {
+                path: std::path::PathBuf::from("updates"),
+                reason: "no updates specified (use --name, --description, or --clear-description)"
+                    .to_string(),
+            });
+        }
+
+        // Apply the updates
+        db.workflows().update(&id, &updates).await?;
+
+        Ok(format!("Updated workflow: {}", id))
+    }
+}
+
+/// Delete a workflow
+#[derive(Debug, Args)]
+pub struct WorkflowDeleteCommand {
+    /// Workflow ID to delete (case-insensitive)
+    #[arg(required = true)]
+    pub id: String,
+}
+
+impl WorkflowDeleteCommand {
+    /// Execute the delete workflow command.
+    ///
+    /// Deletes the workflow with the specified ID.
+    ///
+    /// # Arguments
+    ///
+    /// * `db` - Reference to the database connection
+    ///
+    /// # Errors
+    ///
+    /// Returns `DbError::NotFound` if the workflow doesn't exist.
+    /// Returns `DbError::ConstraintViolation` if tasks are assigned to the workflow.
+    /// Returns `DbError` if database operations fail.
+    pub async fn execute(&self, db: &Database) -> Result<String, DbError> {
+        // Normalize ID to lowercase for case-insensitive lookup
+        let id = self.id.to_lowercase();
+
+        // Check if workflow exists first
+        let exists = db.workflows().exists(&id).await?;
+        if !exists {
+            return Err(DbError::NotFound {
+                entity: "workflow".to_string(),
+                id: self.id.clone(),
+            });
+        }
+
+        // TODO: When task-workflow binding is implemented, check if any tasks
+        // are assigned to this workflow and return an error if so.
+        // For now, we allow deletion since no tasks can be bound to workflows yet.
+
+        // Delete the workflow
+        db.workflows().delete(&id).await?;
+
+        Ok(format!("Deleted workflow: {}", id))
     }
 }
 
@@ -1185,6 +1309,341 @@ mod tests {
                 && debug_str.contains("abc123")
                 && debug_str.contains("Test Workflow"),
             "Debug output should contain WorkflowDetail and fields"
+        );
+    }
+
+    // ========================================
+    // WorkflowUpdateCommand tests
+    // ========================================
+
+    #[tokio::test]
+    async fn test_update_workflow_name() {
+        let db = setup_test_db().await;
+
+        // Create a workflow first
+        let add_cmd = WorkflowAddCommand {
+            name: "Original Name".to_string(),
+            description: None,
+            steps: vec![ParsedStep {
+                name: "step1".to_string(),
+                agent_template: "agent1".to_string(),
+            }],
+        };
+        let add_result = add_cmd.execute(&db).await.unwrap();
+        let id = extract_workflow_id(&add_result);
+
+        // Update the name
+        let update_cmd = WorkflowUpdateCommand {
+            id: id.clone(),
+            name: Some("New Name".to_string()),
+            description: None,
+            clear_description: false,
+        };
+        let result = update_cmd.execute(&db).await.unwrap();
+        assert_eq!(result, format!("Updated workflow: {}", id));
+
+        // Verify the update
+        let workflow = db.workflows().get(&id).await.unwrap().unwrap();
+        assert_eq!(workflow.name, "New Name");
+    }
+
+    #[tokio::test]
+    async fn test_update_workflow_description() {
+        let db = setup_test_db().await;
+
+        // Create a workflow
+        let add_cmd = WorkflowAddCommand {
+            name: "Test Workflow".to_string(),
+            description: None,
+            steps: vec![ParsedStep {
+                name: "step1".to_string(),
+                agent_template: "agent1".to_string(),
+            }],
+        };
+        let add_result = add_cmd.execute(&db).await.unwrap();
+        let id = extract_workflow_id(&add_result);
+
+        // Update the description
+        let update_cmd = WorkflowUpdateCommand {
+            id: id.clone(),
+            name: None,
+            description: Some("New description".to_string()),
+            clear_description: false,
+        };
+        let result = update_cmd.execute(&db).await.unwrap();
+        assert_eq!(result, format!("Updated workflow: {}", id));
+
+        // Verify the update
+        let workflow = db.workflows().get(&id).await.unwrap().unwrap();
+        assert_eq!(workflow.description, Some("New description".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_update_workflow_clear_description() {
+        let db = setup_test_db().await;
+
+        // Create a workflow with description
+        let add_cmd = WorkflowAddCommand {
+            name: "Test Workflow".to_string(),
+            description: Some("Original description".to_string()),
+            steps: vec![ParsedStep {
+                name: "step1".to_string(),
+                agent_template: "agent1".to_string(),
+            }],
+        };
+        let add_result = add_cmd.execute(&db).await.unwrap();
+        let id = extract_workflow_id(&add_result);
+
+        // Clear the description
+        let update_cmd = WorkflowUpdateCommand {
+            id: id.clone(),
+            name: None,
+            description: None,
+            clear_description: true,
+        };
+        let result = update_cmd.execute(&db).await.unwrap();
+        assert_eq!(result, format!("Updated workflow: {}", id));
+
+        // Verify the update
+        let workflow = db.workflows().get(&id).await.unwrap().unwrap();
+        assert!(workflow.description.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_update_workflow_not_found() {
+        let db = setup_test_db().await;
+
+        let update_cmd = WorkflowUpdateCommand {
+            id: "nonexistent".to_string(),
+            name: Some("New Name".to_string()),
+            description: None,
+            clear_description: false,
+        };
+
+        let result = update_cmd.execute(&db).await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DbError::NotFound { entity, id } => {
+                assert_eq!(entity, "workflow");
+                assert_eq!(id, "nonexistent");
+            }
+            e => panic!("Expected NotFound error, got {:?}", e),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_update_workflow_no_updates_fails() {
+        let db = setup_test_db().await;
+
+        // Create a workflow
+        let add_cmd = WorkflowAddCommand {
+            name: "Test Workflow".to_string(),
+            description: None,
+            steps: vec![ParsedStep {
+                name: "step1".to_string(),
+                agent_template: "agent1".to_string(),
+            }],
+        };
+        let add_result = add_cmd.execute(&db).await.unwrap();
+        let id = extract_workflow_id(&add_result);
+
+        // Try to update with no changes
+        let update_cmd = WorkflowUpdateCommand {
+            id: id.clone(),
+            name: None,
+            description: None,
+            clear_description: false,
+        };
+
+        let result = update_cmd.execute(&db).await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DbError::InvalidPath { reason, .. } => {
+                assert!(
+                    reason.contains("no updates specified"),
+                    "Expected 'no updates specified' in error, got: {}",
+                    reason
+                );
+            }
+            e => panic!("Expected InvalidPath error, got {:?}", e),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_update_workflow_empty_name_fails() {
+        let db = setup_test_db().await;
+
+        // Create a workflow
+        let add_cmd = WorkflowAddCommand {
+            name: "Test Workflow".to_string(),
+            description: None,
+            steps: vec![ParsedStep {
+                name: "step1".to_string(),
+                agent_template: "agent1".to_string(),
+            }],
+        };
+        let add_result = add_cmd.execute(&db).await.unwrap();
+        let id = extract_workflow_id(&add_result);
+
+        // Try to update with empty name
+        let update_cmd = WorkflowUpdateCommand {
+            id: id.clone(),
+            name: Some("   ".to_string()),
+            description: None,
+            clear_description: false,
+        };
+
+        let result = update_cmd.execute(&db).await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DbError::InvalidPath { reason, .. } => {
+                assert!(
+                    reason.contains("name cannot be empty"),
+                    "Expected 'name cannot be empty' in error, got: {}",
+                    reason
+                );
+            }
+            e => panic!("Expected InvalidPath error, got {:?}", e),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_update_workflow_case_insensitive() {
+        let db = setup_test_db().await;
+
+        // Create a workflow
+        let add_cmd = WorkflowAddCommand {
+            name: "Test Workflow".to_string(),
+            description: None,
+            steps: vec![ParsedStep {
+                name: "step1".to_string(),
+                agent_template: "agent1".to_string(),
+            }],
+        };
+        let add_result = add_cmd.execute(&db).await.unwrap();
+        let id = extract_workflow_id(&add_result);
+
+        // Update using uppercase ID
+        let update_cmd = WorkflowUpdateCommand {
+            id: id.to_uppercase(),
+            name: Some("Updated Name".to_string()),
+            description: None,
+            clear_description: false,
+        };
+
+        let result = update_cmd.execute(&db).await;
+        assert!(result.is_ok(), "Should update with case-insensitive ID");
+
+        // Verify the update
+        let workflow = db.workflows().get(&id).await.unwrap().unwrap();
+        assert_eq!(workflow.name, "Updated Name");
+    }
+
+    #[test]
+    fn test_workflow_update_command_debug() {
+        let cmd = WorkflowUpdateCommand {
+            id: "test123".to_string(),
+            name: Some("New Name".to_string()),
+            description: None,
+            clear_description: false,
+        };
+        let debug_str = format!("{:?}", cmd);
+        assert!(
+            debug_str.contains("WorkflowUpdateCommand")
+                && debug_str.contains("test123")
+                && debug_str.contains("New Name"),
+            "Debug output should contain WorkflowUpdateCommand and fields"
+        );
+    }
+
+    // ========================================
+    // WorkflowDeleteCommand tests
+    // ========================================
+
+    #[tokio::test]
+    async fn test_delete_workflow_success() {
+        let db = setup_test_db().await;
+
+        // Create a workflow
+        let add_cmd = WorkflowAddCommand {
+            name: "To Be Deleted".to_string(),
+            description: None,
+            steps: vec![ParsedStep {
+                name: "step1".to_string(),
+                agent_template: "agent1".to_string(),
+            }],
+        };
+        let add_result = add_cmd.execute(&db).await.unwrap();
+        let id = extract_workflow_id(&add_result);
+
+        // Verify it exists
+        assert!(db.workflows().exists(&id).await.unwrap());
+
+        // Delete it
+        let delete_cmd = WorkflowDeleteCommand { id: id.clone() };
+        let result = delete_cmd.execute(&db).await.unwrap();
+        assert_eq!(result, format!("Deleted workflow: {}", id));
+
+        // Verify it's gone
+        assert!(!db.workflows().exists(&id).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_delete_workflow_not_found() {
+        let db = setup_test_db().await;
+
+        let delete_cmd = WorkflowDeleteCommand {
+            id: "nonexistent".to_string(),
+        };
+
+        let result = delete_cmd.execute(&db).await;
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DbError::NotFound { entity, id } => {
+                assert_eq!(entity, "workflow");
+                assert_eq!(id, "nonexistent");
+            }
+            e => panic!("Expected NotFound error, got {:?}", e),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_delete_workflow_case_insensitive() {
+        let db = setup_test_db().await;
+
+        // Create a workflow
+        let add_cmd = WorkflowAddCommand {
+            name: "Case Test".to_string(),
+            description: None,
+            steps: vec![ParsedStep {
+                name: "step1".to_string(),
+                agent_template: "agent1".to_string(),
+            }],
+        };
+        let add_result = add_cmd.execute(&db).await.unwrap();
+        let id = extract_workflow_id(&add_result);
+
+        // Delete using uppercase ID
+        let delete_cmd = WorkflowDeleteCommand {
+            id: id.to_uppercase(),
+        };
+
+        let result = delete_cmd.execute(&db).await;
+        assert!(result.is_ok(), "Should delete with case-insensitive ID");
+
+        // Verify it's gone
+        assert!(!db.workflows().exists(&id).await.unwrap());
+    }
+
+    #[test]
+    fn test_workflow_delete_command_debug() {
+        let cmd = WorkflowDeleteCommand {
+            id: "test123".to_string(),
+        };
+        let debug_str = format!("{:?}", cmd);
+        assert!(
+            debug_str.contains("WorkflowDeleteCommand") && debug_str.contains("test123"),
+            "Debug output should contain WorkflowDeleteCommand and id"
         );
     }
 }
