@@ -5,8 +5,9 @@
 
 use std::path::PathBuf;
 use vertebrae_cli::commands::{
-    AddCommand, DeleteCommand, DependCommand, ExportCommand, ListCommand, RefCommand,
-    SectionCommand, TransitionToCommand, transition_to::TargetStatus,
+    AddCommand, DeleteCommand, DependCommand, DoneCommand, ExportCommand, ListCommand, RefCommand,
+    SectionCommand, StartCommand, SubmitCommand, TransitionToCommand, TriageCommand,
+    transition_to::TargetStatus,
 };
 use vertebrae_db::{Database, DbError, Level, SectionType};
 
@@ -317,6 +318,45 @@ pub fn list_cmd_with_search(search: &str) -> ListCommand {
 /// Create an export command.
 pub fn export_cmd(output: Option<PathBuf>) -> ExportCommand {
     ExportCommand { output }
+}
+
+// =============================================================================
+// Backwards Compatibility Command Helpers (standalone start/done/submit/triage)
+// =============================================================================
+
+/// Create a standalone triage command (backwards compatibility).
+/// By default skips validation for test convenience.
+pub fn standalone_triage_cmd(id: &str) -> TriageCommand {
+    TriageCommand {
+        id: id.to_string(),
+        force: false,
+        skip_validation: true,
+    }
+}
+
+/// Create a standalone triage command with validation enabled (backwards compatibility).
+#[allow(dead_code)]
+pub fn standalone_triage_cmd_with_validation(id: &str) -> TriageCommand {
+    TriageCommand {
+        id: id.to_string(),
+        force: false,
+        skip_validation: false,
+    }
+}
+
+/// Create a standalone start command (backwards compatibility).
+pub fn standalone_start_cmd(id: &str) -> StartCommand {
+    StartCommand { id: id.to_string() }
+}
+
+/// Create a standalone submit command (backwards compatibility).
+pub fn standalone_submit_cmd(id: &str) -> SubmitCommand {
+    SubmitCommand { id: id.to_string() }
+}
+
+/// Create a standalone done command (backwards compatibility).
+pub fn standalone_done_cmd(id: &str) -> DoneCommand {
+    DoneCommand { id: id.to_string() }
 }
 
 // =============================================================================

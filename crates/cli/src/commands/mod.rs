@@ -7,6 +7,7 @@ pub mod blockers;
 pub mod criterion_ref;
 pub mod delete;
 pub mod depend;
+pub mod done;
 pub mod export;
 pub mod import;
 pub mod init;
@@ -19,8 +20,11 @@ pub mod review;
 pub mod section;
 pub mod sections;
 pub mod show;
+pub mod start;
 pub mod step_done;
+pub mod submit;
 pub mod transition_to;
+pub mod triage;
 pub mod undepend;
 pub mod unref;
 pub mod unsection;
@@ -32,6 +36,7 @@ pub use blockers::BlockersCommand;
 pub use criterion_ref::CriterionRefCommand;
 pub use delete::DeleteCommand;
 pub use depend::DependCommand;
+pub use done::DoneCommand;
 pub use export::ExportCommand;
 pub use import::ImportCommand;
 pub use init::InitCommand;
@@ -44,8 +49,11 @@ pub use review::ReviewCommand;
 pub use section::SectionCommand;
 pub use sections::SectionsCommand;
 pub use show::ShowCommand;
+pub use start::StartCommand;
 pub use step_done::StepDoneCommand;
+pub use submit::SubmitCommand;
 pub use transition_to::TransitionToCommand;
+pub use triage::TriageCommand;
 pub use undepend::UndependCommand;
 pub use unref::UnrefCommand;
 pub use unsection::UnsectionCommand;
@@ -70,6 +78,8 @@ pub enum Command {
     Delete(DeleteCommand),
     /// Create a dependency relationship between tasks
     Depend(DependCommand),
+    /// Complete a task (transition from pending_review to done)
+    Done(DoneCommand),
     /// Export all tasks and relationships to JSONL format
     Export(ExportCommand),
     /// Import tasks and relationships from JSONL format
@@ -94,6 +104,8 @@ pub enum Command {
     Sections(SectionsCommand),
     /// Show full details of a task
     Show(ShowCommand),
+    /// Start a task (transition from todo to in_progress)
+    Start(StartCommand),
     /// Remove a dependency relationship between tasks
     Undepend(UndependCommand),
     /// Remove code references from a task
@@ -103,9 +115,13 @@ pub enum Command {
     /// Mark a step as done within a task
     #[command(name = "step-done")]
     StepDone(StepDoneCommand),
+    /// Submit a task for review (transition from in_progress to pending_review)
+    Submit(SubmitCommand),
     /// Transition a task to a specific status
     #[command(name = "transition-to")]
     TransitionTo(TransitionToCommand),
+    /// Triage a task (transition from backlog to todo)
+    Triage(TriageCommand),
     /// Update an existing task
     Update(UpdateCommand),
     /// Workflow management commands
@@ -162,6 +178,10 @@ impl Command {
                 let result = cmd.execute(db).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
+            Command::Done(cmd) => {
+                let result = cmd.execute(db).await?;
+                Ok(CommandResult::Message(format!("{}", result)))
+            }
             Command::Export(cmd) => {
                 let result = cmd.execute(db).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
@@ -214,6 +234,10 @@ impl Command {
                 let detail = cmd.execute(db).await?;
                 Ok(CommandResult::Message(format!("{}", detail)))
             }
+            Command::Start(cmd) => {
+                let result = cmd.execute(db).await?;
+                Ok(CommandResult::Message(format!("{}", result)))
+            }
             Command::Undepend(cmd) => {
                 let result = cmd.execute(db).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
@@ -230,7 +254,15 @@ impl Command {
                 let result = cmd.execute(db).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
+            Command::Submit(cmd) => {
+                let result = cmd.execute(db).await?;
+                Ok(CommandResult::Message(format!("{}", result)))
+            }
             Command::TransitionTo(cmd) => {
+                let result = cmd.execute(db).await?;
+                Ok(CommandResult::Message(format!("{}", result)))
+            }
+            Command::Triage(cmd) => {
                 let result = cmd.execute(db).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }

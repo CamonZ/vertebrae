@@ -316,6 +316,184 @@ mod lifecycle {
         assert!(task.started_at.is_some());
         assert!(task.completed_at.is_some());
     }
+
+    // =========================================================================
+    // BACKWARDS COMPATIBILITY TESTS (standalone start/done/submit/triage)
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_standalone_start_works_identically_to_transition_to() {
+        // Test that `vtb start` produces the same behavior as `vtb transition-to <id> in_progress`
+        let ctx = TestContext::new().await;
+        create_task(&ctx.db, "task1", "Todo Task", "task", "todo").await;
+
+        // Use the standalone start command
+        standalone_start_cmd("task1")
+            .execute(&ctx.db)
+            .await
+            .unwrap();
+
+        // Verify same outcome as transition-to
+        assert_eq!(
+            get_task_status(&ctx.db, "task1").await,
+            Some("in_progress".to_string())
+        );
+
+        // Verify started_at was set
+        let task = ctx.db.tasks().get("task1").await.unwrap().unwrap();
+        assert!(task.started_at.is_some(), "started_at should be set");
+    }
+
+    #[tokio::test]
+    async fn test_standalone_done_works_identically_to_transition_to() {
+        // Test that `vtb done` produces the same behavior as `vtb transition-to <id> done`
+        let ctx = TestContext::new().await;
+        create_task(&ctx.db, "task1", "Review Task", "task", "pending_review").await;
+
+        // Use the standalone done command
+        standalone_done_cmd("task1").execute(&ctx.db).await.unwrap();
+
+        // Verify same outcome as transition-to
+        assert_eq!(
+            get_task_status(&ctx.db, "task1").await,
+            Some("done".to_string())
+        );
+
+        // Verify completed_at was set
+        let task = ctx.db.tasks().get("task1").await.unwrap().unwrap();
+        assert!(task.completed_at.is_some(), "completed_at should be set");
+    }
+
+    #[tokio::test]
+    async fn test_standalone_submit_works_identically_to_transition_to() {
+        // Test that `vtb submit` produces the same behavior as `vtb transition-to <id> pending_review`
+        let ctx = TestContext::new().await;
+        create_task(&ctx.db, "task1", "Active Task", "task", "in_progress").await;
+
+        // Use the standalone submit command
+        standalone_submit_cmd("task1")
+            .execute(&ctx.db)
+            .await
+            .unwrap();
+
+        // Verify same outcome as transition-to
+        assert_eq!(
+            get_task_status(&ctx.db, "task1").await,
+            Some("pending_review".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_standalone_triage_works_identically_to_transition_to() {
+        // Test that `vtb triage` produces the same behavior as `vtb transition-to <id> todo`
+        let ctx = TestContext::new().await;
+        create_task(&ctx.db, "task1", "Backlog Task", "task", "backlog").await;
+
+        // Use the standalone triage command
+        standalone_triage_cmd("task1")
+            .execute(&ctx.db)
+            .await
+            .unwrap();
+
+        // Verify same outcome as transition-to
+        assert_eq!(
+            get_task_status(&ctx.db, "task1").await,
+            Some("todo".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_standalone_commands_complete_happy_path() {
+        // Test complete lifecycle using only standalone commands
+        let ctx = TestContext::new().await;
+
+        // 1. Add task (creates in backlog)
+        let task_id = add_cmd("Backwards compat test")
+            .execute(&ctx.db)
+            .await
+            .unwrap();
+        assert_eq!(
+            get_task_status(&ctx.db, &task_id).await,
+            Some("backlog".to_string())
+        );
+
+        // 2. Triage using standalone command
+        standalone_triage_cmd(&task_id)
+            .execute(&ctx.db)
+            .await
+            .unwrap();
+        assert_eq!(
+            get_task_status(&ctx.db, &task_id).await,
+            Some("todo".to_string())
+        );
+
+        // 3. Start using standalone command
+        standalone_start_cmd(&task_id)
+            .execute(&ctx.db)
+            .await
+            .unwrap();
+        assert_eq!(
+            get_task_status(&ctx.db, &task_id).await,
+            Some("in_progress".to_string())
+        );
+
+        // 4. Submit using standalone command
+        standalone_submit_cmd(&task_id)
+            .execute(&ctx.db)
+            .await
+            .unwrap();
+        assert_eq!(
+            get_task_status(&ctx.db, &task_id).await,
+            Some("pending_review".to_string())
+        );
+
+        // 5. Done using standalone command
+        standalone_done_cmd(&task_id)
+            .execute(&ctx.db)
+            .await
+            .unwrap();
+        assert_eq!(
+            get_task_status(&ctx.db, &task_id).await,
+            Some("done".to_string())
+        );
+
+        // Verify timestamps
+        let task = ctx.db.tasks().get(&task_id).await.unwrap().unwrap();
+        assert!(task.started_at.is_some());
+        assert!(task.completed_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_standalone_start_from_backlog_fails() {
+        let ctx = TestContext::new().await;
+        create_task(&ctx.db, "task1", "Backlog Task", "task", "backlog").await;
+
+        let result = standalone_start_cmd("task1").execute(&ctx.db).await;
+        assert!(result.is_err(), "Start from backlog should fail");
+
+        assert_eq!(
+            get_task_status(&ctx.db, "task1").await,
+            Some("backlog".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_standalone_done_with_incomplete_children_fails() {
+        let ctx = TestContext::new().await;
+
+        create_task(&ctx.db, "parent", "Parent", "ticket", "pending_review").await;
+        create_task(&ctx.db, "child", "Child", "task", "todo").await;
+        create_child_of(&ctx.db, "child", "parent").await;
+
+        let result = standalone_done_cmd("parent").execute(&ctx.db).await;
+        match result {
+            Err(DbError::IncompleteChildren { task_id, children }) => {
+                assert_eq!(task_id, "parent");
+                assert_eq!(children.len(), 1);
+            }
+            _ => panic!("Expected IncompleteChildren error"),
+        }
+    }
 }
 
 // =============================================================================
