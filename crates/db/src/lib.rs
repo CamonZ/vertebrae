@@ -16,9 +16,9 @@ pub use models::{
 };
 pub use repository::{
     BlockerNode, GraphQueries, MigrationResult, Progress, RelationshipRepository, SectionRule,
-    TaskFilter, TaskLister, TaskRepository, TaskSummary, TaskUpdate, TriageValidationConfig,
-    TriageValidationResult, TriageValidator, ValidationIssue, ValidationSeverity,
-    WorkflowRepository, WorkflowUpdate,
+    StepExecutionRepository, TaskFilter, TaskLister, TaskRepository, TaskSummary, TaskUpdate,
+    TriageValidationConfig, TriageValidationResult, TriageValidator, ValidationIssue,
+    ValidationSeverity, WorkflowRepository, WorkflowUpdate,
 };
 
 use std::path::{Path, PathBuf};
@@ -136,6 +136,11 @@ impl Database {
     /// Get a relationship repository for managing task relationships.
     pub fn relationships(&self) -> RelationshipRepository<'_> {
         RelationshipRepository::new(&self.client)
+    }
+
+    /// Get a step execution repository for tracking workflow executions.
+    pub fn executions(&self) -> StepExecutionRepository<'_> {
+        StepExecutionRepository::new(&self.client)
     }
 
     /// Get a task lister for filtering and listing tasks.
