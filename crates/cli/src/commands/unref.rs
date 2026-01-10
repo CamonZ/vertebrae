@@ -135,9 +135,10 @@ impl UnrefCommand {
     async fn fetch_task_refs(&self, db: &Database, id: &str) -> Result<Vec<CodeRef>, DbError> {
         let task = db.tasks().get(id).await?;
 
-        task.map(|t| t.code_refs).ok_or_else(|| DbError::NotFound {
-            task_id: self.id.clone(),
-        })
+        task.map(|t| t.code_refs)
+            .ok_or_else(|| DbError::TaskNotFound {
+                task_id: self.id.clone(),
+            })
     }
 }
 
@@ -446,7 +447,7 @@ mod tests {
 
         let result = cmd.execute(&db).await;
         match result {
-            Err(DbError::NotFound { task_id }) => {
+            Err(DbError::TaskNotFound { task_id }) => {
                 assert_eq!(
                     task_id, "nonexistent",
                     "Expected task_id 'nonexistent', got: {}",

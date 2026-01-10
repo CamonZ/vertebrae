@@ -424,7 +424,7 @@ mod sections {
         let result = section_cmd("nonexistent", SectionType::Goal, "The goal")
             .execute(&ctx.db)
             .await;
-        assert!(matches!(result, Err(DbError::NotFound { .. })));
+        assert!(matches!(result, Err(DbError::TaskNotFound { .. })));
     }
 
     #[tokio::test]
@@ -630,7 +630,7 @@ mod code_refs {
         let ctx = TestContext::new().await;
 
         let result = ref_cmd("nonexistent", "src/main.rs").execute(&ctx.db).await;
-        assert!(matches!(result, Err(DbError::NotFound { .. })));
+        assert!(matches!(result, Err(DbError::TaskNotFound { .. })));
     }
 
     #[tokio::test]
@@ -960,7 +960,9 @@ mod error_cases {
         let ctx = TestContext::new().await;
 
         let result = triage_cmd("nonexistent").execute(&ctx.db).await;
-        assert!(matches!(result, Err(DbError::NotFound { task_id }) if task_id == "nonexistent"));
+        assert!(
+            matches!(result, Err(DbError::TaskNotFound { task_id }) if task_id == "nonexistent")
+        );
     }
 
     #[tokio::test]
@@ -968,7 +970,7 @@ mod error_cases {
         let ctx = TestContext::new().await;
 
         let result = start_cmd("nonexistent").execute(&ctx.db).await;
-        assert!(matches!(result, Err(DbError::NotFound { .. })));
+        assert!(matches!(result, Err(DbError::TaskNotFound { .. })));
     }
 
     #[tokio::test]
@@ -976,7 +978,7 @@ mod error_cases {
         let ctx = TestContext::new().await;
 
         let result = done_cmd("nonexistent").execute(&ctx.db).await;
-        assert!(matches!(result, Err(DbError::NotFound { .. })));
+        assert!(matches!(result, Err(DbError::TaskNotFound { .. })));
     }
 
     #[tokio::test]
@@ -1040,7 +1042,7 @@ mod data_operations {
         let ctx = TestContext::new().await;
 
         let result = delete_cmd("nonexistent", false).execute(&ctx.db).await;
-        assert!(matches!(result, Err(DbError::NotFound { .. })));
+        assert!(matches!(result, Err(DbError::TaskNotFound { .. })));
     }
 
     #[tokio::test]

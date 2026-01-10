@@ -39,7 +39,11 @@ pub enum DbError {
 
     /// Error when a requested task was not found
     #[error("Task '{task_id}' not found")]
-    NotFound { task_id: String },
+    TaskNotFound { task_id: String },
+
+    /// Error when a requested entity was not found (generic)
+    #[error("{entity} '{id}' not found")]
+    NotFound { entity: String, id: String },
 
     /// Error creating database directory
     #[error("Failed to create database directory at {path}: {source}")]
@@ -276,22 +280,46 @@ mod tests {
     }
 
     #[test]
-    fn test_not_found_error_display() {
-        let err = DbError::NotFound {
+    fn test_task_not_found_error_display() {
+        let err = DbError::TaskNotFound {
             task_id: "abc123".to_string(),
         };
         assert_eq!(err.to_string(), "Task 'abc123' not found");
     }
 
     #[test]
-    fn test_not_found_error_debug() {
-        let err = DbError::NotFound {
+    fn test_task_not_found_error_debug() {
+        let err = DbError::TaskNotFound {
             task_id: "xyz789".to_string(),
         };
         let debug_str = format!("{:?}", err);
         assert!(
-            debug_str.contains("NotFound") && debug_str.contains("xyz789"),
-            "Debug output should contain NotFound and task_id"
+            debug_str.contains("TaskNotFound") && debug_str.contains("xyz789"),
+            "Debug output should contain TaskNotFound and task_id"
+        );
+    }
+
+    #[test]
+    fn test_not_found_error_display() {
+        let err = DbError::NotFound {
+            entity: "workflow".to_string(),
+            id: "wf123".to_string(),
+        };
+        assert_eq!(err.to_string(), "workflow 'wf123' not found");
+    }
+
+    #[test]
+    fn test_not_found_error_debug() {
+        let err = DbError::NotFound {
+            entity: "workflow".to_string(),
+            id: "wf789".to_string(),
+        };
+        let debug_str = format!("{:?}", err);
+        assert!(
+            debug_str.contains("NotFound")
+                && debug_str.contains("workflow")
+                && debug_str.contains("wf789"),
+            "Debug output should contain NotFound, entity, and id"
         );
     }
 

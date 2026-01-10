@@ -99,7 +99,7 @@ impl BlockersCommand {
         let mut result = db.client().query(&query).await?;
         let task: Option<TaskRow> = result.take(0)?;
 
-        task.ok_or_else(|| DbError::NotFound {
+        task.ok_or_else(|| DbError::TaskNotFound {
             task_id: self.id.clone(),
         })
     }
@@ -498,7 +498,7 @@ mod tests {
 
         let result = cmd.execute(&db).await;
         match result {
-            Err(DbError::NotFound { task_id }) => {
+            Err(DbError::TaskNotFound { task_id }) => {
                 assert_eq!(
                     task_id, "nonexistent",
                     "Expected task_id 'nonexistent', got: {}",

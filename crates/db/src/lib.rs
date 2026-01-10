@@ -17,6 +17,7 @@ pub use repository::{
     BlockerNode, GraphQueries, Progress, RelationshipRepository, SectionRule, TaskFilter,
     TaskLister, TaskRepository, TaskSummary, TaskUpdate, TriageValidationConfig,
     TriageValidationResult, TriageValidator, ValidationIssue, ValidationSeverity,
+    WorkflowRepository, WorkflowUpdate,
 };
 
 use std::path::{Path, PathBuf};
@@ -91,6 +92,11 @@ impl Database {
     /// Get a task repository for CRUD operations on tasks.
     pub fn tasks(&self) -> TaskRepository<'_> {
         TaskRepository::new(&self.client)
+    }
+
+    /// Get a workflow repository for CRUD operations on workflows.
+    pub fn workflows(&self) -> WorkflowRepository<'_> {
+        WorkflowRepository::new(&self.client)
     }
 
     /// Get a graph queries instance for hierarchy and dependency operations.

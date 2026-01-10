@@ -215,7 +215,7 @@ impl TransitionToCommand {
             .tasks()
             .get(&id)
             .await?
-            .ok_or_else(|| DbError::NotFound {
+            .ok_or_else(|| DbError::TaskNotFound {
                 task_id: self.id.clone(),
             })?;
 
@@ -290,9 +290,13 @@ impl TransitionToCommand {
         }
 
         // Fetch the task to validate its sections
-        let task = db.tasks().get(id).await?.ok_or_else(|| DbError::NotFound {
-            task_id: id.to_string(),
-        })?;
+        let task = db
+            .tasks()
+            .get(id)
+            .await?
+            .ok_or_else(|| DbError::TaskNotFound {
+                task_id: id.to_string(),
+            })?;
 
         // Run validation
         let validator = TriageValidator::new();
@@ -1173,7 +1177,7 @@ mod tests {
 
         let result = cmd.execute(&db).await;
         match result {
-            Err(DbError::NotFound { task_id }) => {
+            Err(DbError::TaskNotFound { task_id }) => {
                 assert_eq!(task_id, "nonexistent");
             }
             Err(other) => panic!("Expected NotFound error, got {:?}", other),
