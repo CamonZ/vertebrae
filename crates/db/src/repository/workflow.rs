@@ -17,6 +17,34 @@ use surrealdb::Surreal;
 use surrealdb::engine::local::Db;
 use tracing::{debug, trace};
 
+/// Result of a migration operation
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MigrationResult {
+    /// Number of tasks successfully migrated
+    pub migrated: usize,
+    /// Number of tasks skipped (e.g., Rejected status)
+    pub skipped: usize,
+    /// IDs of tasks that were skipped
+    pub skipped_ids: Vec<String>,
+}
+
+impl MigrationResult {
+    /// Check if any tasks were migrated
+    pub fn has_migrations(&self) -> bool {
+        self.migrated > 0
+    }
+
+    /// Check if any tasks were skipped
+    pub fn has_skipped(&self) -> bool {
+        self.skipped > 0
+    }
+
+    /// Total number of tasks processed
+    pub fn total(&self) -> usize {
+        self.migrated + self.skipped
+    }
+}
+
 /// Repository for workflow CRUD operations
 ///
 /// Encapsulates database queries for workflows, providing a clean API
@@ -429,6 +457,105 @@ impl<'a> WorkflowRepository<'a> {
 
         debug!("Default workflow created successfully");
         Ok(true)
+    }
+
+    /// Migrate existing tasks to use the default workflow.
+    ///
+    /// Finds all tasks without a workflow assignment and assigns them to the
+    /// default workflow, setting their current_step based on their current status.
+    ///
+    /// Tasks with `Rejected` status are skipped since that status is not part
+    /// of the default workflow.
+    ///
+    /// This migration is idempotent - running it multiple times is safe as it
+    /// only affects tasks without a workflow_id.
+    ///
+    /// # Returns
+    ///
+    /// A `MigrationResult` containing counts of migrated and skipped tasks.
+    ///
+    /// # Errors
+    ///
+    /// Returns `DbError::NotFound` if the default workflow doesn't exist.
+    /// Returns `DbError::Query` if database operations fail.
+    pub async fn migrate_to_default_workflow(&self) -> DbResult<MigrationResult> {
+        use crate::models::Status;
+
+        debug!("Starting migration to default workflow");
+
+        // Ensure default workflow exists
+        if !self.exists(DEFAULT_WORKFLOW_ID).await? {
+            return Err(DbError::NotFound {
+                entity: "workflow".to_string(),
+                id: DEFAULT_WORKFLOW_ID.to_string(),
+            });
+        }
+
+        let default_workflow_thing = surrealdb::sql::Thing::from(("workflow", DEFAULT_WORKFLOW_ID));
+
+        // Find all tasks without workflow_id
+        #[derive(Debug, Deserialize)]
+        struct TaskWithStatus {
+            id: surrealdb::sql::Thing,
+            status: Status,
+        }
+
+        let query = "SELECT id, status FROM task WHERE workflow_id IS NONE";
+        let mut result = self
+            .client
+            .query(query)
+            .await
+            .map_err(|e| DbError::Query(Box::new(e)))?;
+        let tasks: Vec<TaskWithStatus> = result.take(0)?;
+
+        debug!("Found {} tasks without workflow assignment", tasks.len());
+
+        let mut migrated = 0;
+        let mut skipped = 0;
+        let mut skipped_ids = Vec::new();
+
+        for task in tasks {
+            let task_id = task.id.id.to_raw();
+
+            // Get the step index for this status
+            match task.status.default_workflow_step() {
+                Some(step) => {
+                    // Update the task with workflow_id and current_step
+                    let update_query = format!(
+                        "UPDATE task:{} SET workflow_id = $workflow_id, current_step = {}, updated_at = time::now()",
+                        task_id, step
+                    );
+                    self.client
+                        .query(&update_query)
+                        .bind(("workflow_id", default_workflow_thing.clone()))
+                        .await
+                        .map_err(|e| DbError::Query(Box::new(e)))?;
+
+                    trace!("Migrated task {} to step {}", task_id, step);
+                    migrated += 1;
+                }
+                None => {
+                    // Status not in default workflow (e.g., Rejected)
+                    debug!(
+                        "Skipping task {} with status {:?} (not in default workflow)",
+                        task_id, task.status
+                    );
+                    skipped_ids.push(task_id);
+                    skipped += 1;
+                }
+            }
+        }
+
+        debug!(
+            "Migration complete: {} migrated, {} skipped",
+            migrated, skipped
+        );
+
+        Ok(MigrationResult {
+            migrated,
+            skipped,
+            skipped_ids,
+        })
     }
 
     /// Export all workflows from the database.
@@ -1094,5 +1221,201 @@ mod tests {
     #[test]
     fn test_default_workflow_id_constant() {
         assert_eq!(DEFAULT_WORKFLOW_ID, "default");
+    }
+
+    // ========================================
+    // Migration tests
+    // ========================================
+
+    #[tokio::test]
+    async fn test_migrate_no_tasks_without_workflow() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = WorkflowRepository::new(db.client());
+
+        // No tasks exist, migration should report 0 migrated
+        let result = repo.migrate_to_default_workflow().await.unwrap();
+        assert_eq!(result.migrated, 0);
+        assert_eq!(result.skipped, 0);
+        assert!(result.skipped_ids.is_empty());
+        assert!(!result.has_migrations());
+        assert!(!result.has_skipped());
+        assert_eq!(result.total(), 0);
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_migrate_tasks_with_various_statuses() {
+        use crate::models::{Level, Status, Task};
+        use crate::repository::TaskRepository;
+
+        let (db, temp_dir) = setup_test_db().await;
+        let workflow_repo = WorkflowRepository::new(db.client());
+        let task_repo = TaskRepository::new(db.client());
+
+        // Create tasks with different statuses
+        let task1 = Task::new("Backlog Task", Level::Task).with_status(Status::Backlog);
+        let task2 = Task::new("Todo Task", Level::Task).with_status(Status::Todo);
+        let task3 = Task::new("In Progress Task", Level::Task).with_status(Status::InProgress);
+        let task4 =
+            Task::new("Pending Review Task", Level::Task).with_status(Status::PendingReview);
+        let task5 = Task::new("Done Task", Level::Task).with_status(Status::Done);
+
+        task_repo.create("t1", &task1).await.unwrap();
+        task_repo.create("t2", &task2).await.unwrap();
+        task_repo.create("t3", &task3).await.unwrap();
+        task_repo.create("t4", &task4).await.unwrap();
+        task_repo.create("t5", &task5).await.unwrap();
+
+        // Run migration
+        let result = workflow_repo.migrate_to_default_workflow().await.unwrap();
+        assert_eq!(result.migrated, 5);
+        assert_eq!(result.skipped, 0);
+        assert!(result.has_migrations());
+        assert!(!result.has_skipped());
+
+        // Verify each task has correct workflow_id and current_step
+        let t1 = task_repo.get("t1").await.unwrap().unwrap();
+        assert!(t1.workflow_id.is_some());
+        assert_eq!(t1.current_step, Some(0)); // backlog
+
+        let t2 = task_repo.get("t2").await.unwrap().unwrap();
+        assert!(t2.workflow_id.is_some());
+        assert_eq!(t2.current_step, Some(1)); // todo
+
+        let t3 = task_repo.get("t3").await.unwrap().unwrap();
+        assert!(t3.workflow_id.is_some());
+        assert_eq!(t3.current_step, Some(2)); // in_progress
+
+        let t4 = task_repo.get("t4").await.unwrap().unwrap();
+        assert!(t4.workflow_id.is_some());
+        assert_eq!(t4.current_step, Some(3)); // pending_review
+
+        let t5 = task_repo.get("t5").await.unwrap().unwrap();
+        assert!(t5.workflow_id.is_some());
+        assert_eq!(t5.current_step, Some(4)); // done
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_migrate_skips_rejected_tasks() {
+        use crate::models::{Level, Status, Task};
+        use crate::repository::TaskRepository;
+
+        let (db, temp_dir) = setup_test_db().await;
+        let workflow_repo = WorkflowRepository::new(db.client());
+        let task_repo = TaskRepository::new(db.client());
+
+        // Create a rejected task and a normal task
+        let rejected_task = Task::new("Rejected Task", Level::Task).with_status(Status::Rejected);
+        let normal_task = Task::new("Normal Task", Level::Task).with_status(Status::Todo);
+
+        task_repo.create("rejected", &rejected_task).await.unwrap();
+        task_repo.create("normal", &normal_task).await.unwrap();
+
+        // Run migration
+        let result = workflow_repo.migrate_to_default_workflow().await.unwrap();
+        assert_eq!(result.migrated, 1);
+        assert_eq!(result.skipped, 1);
+        assert!(result.has_migrations());
+        assert!(result.has_skipped());
+        assert!(result.skipped_ids.contains(&"rejected".to_string()));
+
+        // Verify rejected task still has no workflow
+        let rejected = task_repo.get("rejected").await.unwrap().unwrap();
+        assert!(rejected.workflow_id.is_none());
+        assert!(rejected.current_step.is_none());
+
+        // Verify normal task was migrated
+        let normal = task_repo.get("normal").await.unwrap().unwrap();
+        assert!(normal.workflow_id.is_some());
+        assert_eq!(normal.current_step, Some(1));
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_migrate_is_idempotent() {
+        use crate::models::{Level, Status, Task};
+        use crate::repository::TaskRepository;
+
+        let (db, temp_dir) = setup_test_db().await;
+        let workflow_repo = WorkflowRepository::new(db.client());
+        let task_repo = TaskRepository::new(db.client());
+
+        // Create a task
+        let task = Task::new("Test Task", Level::Task).with_status(Status::Todo);
+        task_repo.create("test", &task).await.unwrap();
+
+        // Run migration first time
+        let result1 = workflow_repo.migrate_to_default_workflow().await.unwrap();
+        assert_eq!(result1.migrated, 1);
+
+        // Run migration second time - should find no tasks to migrate
+        let result2 = workflow_repo.migrate_to_default_workflow().await.unwrap();
+        assert_eq!(result2.migrated, 0);
+        assert_eq!(result2.skipped, 0);
+
+        // Verify task still has correct workflow
+        let t = task_repo.get("test").await.unwrap().unwrap();
+        assert!(t.workflow_id.is_some());
+        assert_eq!(t.current_step, Some(1));
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_migrate_skips_already_assigned_tasks() {
+        use crate::models::{Level, Status, Task};
+        use crate::repository::TaskRepository;
+
+        let (db, temp_dir) = setup_test_db().await;
+        let workflow_repo = WorkflowRepository::new(db.client());
+        let task_repo = TaskRepository::new(db.client());
+
+        // Create a task and assign it to the workflow manually
+        let task = Task::new("Pre-assigned Task", Level::Task).with_status(Status::Todo);
+        task_repo.create("assigned", &task).await.unwrap();
+
+        let workflow_thing = surrealdb::sql::Thing::from(("workflow", DEFAULT_WORKFLOW_ID));
+        task_repo
+            .assign_workflow("assigned", &workflow_thing)
+            .await
+            .unwrap();
+
+        // Create another task without workflow
+        let task2 = Task::new("Unassigned Task", Level::Task).with_status(Status::InProgress);
+        task_repo.create("unassigned", &task2).await.unwrap();
+
+        // Run migration - should only migrate the unassigned task
+        let result = workflow_repo.migrate_to_default_workflow().await.unwrap();
+        assert_eq!(result.migrated, 1);
+        assert_eq!(result.skipped, 0);
+
+        cleanup(&temp_dir);
+    }
+
+    #[test]
+    fn test_migration_result_helpers() {
+        let result = MigrationResult {
+            migrated: 5,
+            skipped: 2,
+            skipped_ids: vec!["a".to_string(), "b".to_string()],
+        };
+
+        assert!(result.has_migrations());
+        assert!(result.has_skipped());
+        assert_eq!(result.total(), 7);
+
+        let empty_result = MigrationResult {
+            migrated: 0,
+            skipped: 0,
+            skipped_ids: vec![],
+        };
+
+        assert!(!empty_result.has_migrations());
+        assert!(!empty_result.has_skipped());
+        assert_eq!(empty_result.total(), 0);
     }
 }

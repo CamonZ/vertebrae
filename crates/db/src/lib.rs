@@ -14,8 +14,8 @@ pub use models::{
     CodeRef, Level, Priority, Section, SectionType, Status, Task, Workflow, WorkflowStep,
 };
 pub use repository::{
-    BlockerNode, GraphQueries, Progress, RelationshipRepository, SectionRule, TaskFilter,
-    TaskLister, TaskRepository, TaskSummary, TaskUpdate, TriageValidationConfig,
+    BlockerNode, GraphQueries, MigrationResult, Progress, RelationshipRepository, SectionRule,
+    TaskFilter, TaskLister, TaskRepository, TaskSummary, TaskUpdate, TriageValidationConfig,
     TriageValidationResult, TriageValidator, ValidationIssue, ValidationSeverity,
     WorkflowRepository, WorkflowUpdate,
 };

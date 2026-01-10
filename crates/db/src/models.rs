@@ -72,6 +72,26 @@ impl Status {
         }
     }
 
+    /// Returns the step index in the default workflow for this status.
+    ///
+    /// The default workflow has steps: backlog(0), todo(1), in_progress(2),
+    /// pending_review(3), done(4). The Rejected status is not part of the
+    /// default workflow, so it returns `None`.
+    ///
+    /// # Returns
+    ///
+    /// `Some(index)` for statuses in the default workflow, `None` for Rejected.
+    pub fn default_workflow_step(&self) -> Option<usize> {
+        match self {
+            Status::Backlog => Some(0),
+            Status::Todo => Some(1),
+            Status::InProgress => Some(2),
+            Status::PendingReview => Some(3),
+            Status::Done => Some(4),
+            Status::Rejected => None,
+        }
+    }
+
     /// Returns the list of valid target states this status can transition to.
     ///
     /// The workflow transitions are:
@@ -1041,6 +1061,16 @@ mod tests {
         assert_eq!(Status::parse("rejected"), Some(Status::Rejected));
         assert_eq!(Status::parse("unknown"), None);
         assert_eq!(Status::parse(""), None);
+    }
+
+    #[test]
+    fn test_status_default_workflow_step() {
+        assert_eq!(Status::Backlog.default_workflow_step(), Some(0));
+        assert_eq!(Status::Todo.default_workflow_step(), Some(1));
+        assert_eq!(Status::InProgress.default_workflow_step(), Some(2));
+        assert_eq!(Status::PendingReview.default_workflow_step(), Some(3));
+        assert_eq!(Status::Done.default_workflow_step(), Some(4));
+        assert_eq!(Status::Rejected.default_workflow_step(), None);
     }
 
     // Priority enum tests
