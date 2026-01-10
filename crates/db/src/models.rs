@@ -925,6 +925,55 @@ impl PartialEq for StepExecution {
 
 impl Eq for StepExecution {}
 
+/// A log entry for a workflow step execution
+///
+/// SessionLog stores content from Claude sessions during step execution,
+/// providing a record of what happened during each step.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionLog {
+    /// Unique identifier (SurrealDB record ID)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<Thing>,
+
+    /// Reference to the step execution this log belongs to
+    pub step_execution_id: Thing,
+
+    /// The log content (arbitrary text from Claude sessions)
+    pub content: String,
+
+    /// When this log was created
+    pub created_at: DateTime<Utc>,
+}
+
+impl SessionLog {
+    /// Create a new session log entry
+    ///
+    /// The log is created with the current timestamp.
+    pub fn new(step_execution_id: Thing, content: impl Into<String>) -> Self {
+        Self {
+            id: None,
+            step_execution_id,
+            content: content.into(),
+            created_at: Utc::now(),
+        }
+    }
+
+    /// Create a new session log with a specific creation time
+    pub fn with_created_at(mut self, created_at: DateTime<Utc>) -> Self {
+        self.created_at = created_at;
+        self
+    }
+}
+
+impl PartialEq for SessionLog {
+    fn eq(&self, other: &Self) -> bool {
+        self.step_execution_id == other.step_execution_id && self.content == other.content
+        // Ignore id and created_at in equality comparison
+    }
+}
+
+impl Eq for SessionLog {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2874,5 +2923,148 @@ mod tests {
         exec_f.fail();
         let json_f = serde_json::to_string(&exec_f).unwrap();
         assert!(json_f.contains("failed"));
+    }
+
+    // ========================================
+    // SessionLog tests
+    // ========================================
+
+    #[test]
+    fn test_session_log_new() {
+        let step_execution_id = Thing::from(("step_execution", "exec123"));
+        let log = SessionLog::new(step_execution_id.clone(), "Test log content");
+
+        assert!(log.id.is_none());
+        assert_eq!(log.step_execution_id, step_execution_id);
+        assert_eq!(log.content, "Test log content");
+    }
+
+    #[test]
+    fn test_session_log_with_created_at() {
+        let step_execution_id = Thing::from(("step_execution", "exec123"));
+        let custom_time = Utc::now() - chrono::Duration::hours(2);
+
+        let log = SessionLog::new(step_execution_id, "Content").with_created_at(custom_time);
+
+        assert_eq!(log.created_at, custom_time);
+    }
+
+    #[test]
+    fn test_session_log_clone() {
+        let step_execution_id = Thing::from(("step_execution", "exec123"));
+        let log = SessionLog::new(step_execution_id, "Clone test");
+        let cloned = log.clone();
+
+        assert_eq!(log.step_execution_id, cloned.step_execution_id);
+        assert_eq!(log.content, cloned.content);
+    }
+
+    #[test]
+    fn test_session_log_eq_ignores_timestamps() {
+        let step_execution_id = Thing::from(("step_execution", "exec123"));
+
+        let log1 = SessionLog::new(step_execution_id.clone(), "Same content");
+        let log2 = SessionLog::new(step_execution_id, "Same content")
+            .with_created_at(Utc::now() - chrono::Duration::days(1));
+
+        // Should be equal because timestamps are ignored in PartialEq
+        assert_eq!(log1, log2);
+    }
+
+    #[test]
+    fn test_session_log_neq_different_content() {
+        let step_execution_id = Thing::from(("step_execution", "exec123"));
+
+        let log1 = SessionLog::new(step_execution_id.clone(), "Content A");
+        let log2 = SessionLog::new(step_execution_id, "Content B");
+
+        assert_ne!(log1, log2);
+    }
+
+    #[test]
+    fn test_session_log_serialize() {
+        let step_execution_id = Thing::from(("step_execution", "exec123"));
+        let log = SessionLog::new(step_execution_id, "Serialize test");
+
+        let value = serde_json::to_value(&log).unwrap();
+
+        assert!(
+            value.get("step_execution_id").is_some(),
+            "step_execution_id should be present"
+        );
+        assert_eq!(value["content"], "Serialize test");
+        assert!(
+            value.get("created_at").is_some(),
+            "created_at should be present"
+        );
+        assert!(value.get("id").is_none(), "id should be omitted when None");
+    }
+
+    #[test]
+    fn test_session_log_deserialize() {
+        // Thing type requires object format with tb (table) and id fields
+        let json = r#"{
+            "step_execution_id": {"tb": "step_execution", "id": {"String": "exec123"}},
+            "content": "Deserialized content",
+            "created_at": "2025-01-15T10:30:00Z"
+        }"#;
+
+        let log: SessionLog = serde_json::from_str(json).unwrap();
+
+        assert_eq!(
+            log.step_execution_id,
+            Thing::from(("step_execution", "exec123"))
+        );
+        assert_eq!(log.content, "Deserialized content");
+        assert!(log.id.is_none());
+    }
+
+    #[test]
+    fn test_session_log_serialize_roundtrip() {
+        let step_execution_id = Thing::from(("step_execution", "exec456"));
+        let original = SessionLog::new(step_execution_id, "Roundtrip test content");
+
+        let json = serde_json::to_string(&original).unwrap();
+        let deserialized: SessionLog = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(original, deserialized);
+    }
+
+    #[test]
+    fn test_session_log_stores_arbitrary_text() {
+        let step_execution_id = Thing::from(("step_execution", "exec789"));
+
+        // Test with various content types
+        let logs = vec![
+            SessionLog::new(step_execution_id.clone(), "Simple text"),
+            SessionLog::new(step_execution_id.clone(), ""),
+            SessionLog::new(
+                step_execution_id.clone(),
+                "Multi\nline\ncontent\nwith\nnewlines",
+            ),
+            SessionLog::new(
+                step_execution_id.clone(),
+                "Special chars: @#$%^&*()[]{}|\\<>?",
+            ),
+            SessionLog::new(step_execution_id.clone(), "Unicode: 日本語 🎉 émojis"),
+            SessionLog::new(step_execution_id, "A".repeat(10000)), // Large content
+        ];
+
+        for log in logs {
+            // All should serialize without error
+            let json = serde_json::to_string(&log).unwrap();
+            let deserialized: SessionLog = serde_json::from_str(&json).unwrap();
+            assert_eq!(log.content, deserialized.content);
+        }
+    }
+
+    #[test]
+    fn test_session_log_debug() {
+        let step_execution_id = Thing::from(("step_execution", "debug_test"));
+        let log = SessionLog::new(step_execution_id, "Debug content");
+
+        let debug_str = format!("{:?}", log);
+        assert!(debug_str.contains("SessionLog"));
+        assert!(debug_str.contains("Debug content"));
     }
 }

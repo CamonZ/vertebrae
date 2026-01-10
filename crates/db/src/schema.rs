@@ -95,12 +95,23 @@ mod sql {
         DEFINE FIELD status ON step_execution TYPE string
             ASSERT $value IN ["in_progress", "completed", "failed"];
     "#;
+
+    /// Define the session_log table for storing Claude session content during step execution
+    pub const DEFINE_SESSION_LOG_TABLE: &str = r#"
+        DEFINE TABLE IF NOT EXISTS session_log SCHEMAFULL;
+
+        DEFINE FIELD step_execution_id ON session_log TYPE record<step_execution>;
+
+        DEFINE FIELD content ON session_log TYPE string;
+
+        DEFINE FIELD created_at ON session_log TYPE datetime DEFAULT time::now();
+    "#;
 }
 
 /// Initialize the database schema.
 ///
-/// Creates the task table, workflow table, step_execution table, child_of relation,
-/// and depends_on relation with all required fields and constraints.
+/// Creates the task table, workflow table, step_execution table, session_log table,
+/// child_of relation, and depends_on relation with all required fields and constraints.
 ///
 /// This function is idempotent - it can be called multiple times safely
 /// as it uses `IF NOT EXISTS` clauses.
@@ -140,6 +151,12 @@ pub async fn init_schema(client: &Surreal<Db>) -> Result<(), DbError> {
     // Define the step_execution table for tracking workflow execution history
     client
         .query(sql::DEFINE_STEP_EXECUTION_TABLE)
+        .await
+        .map_err(|e| DbError::Schema(Box::new(e)))?;
+
+    // Define the session_log table for storing Claude session content
+    client
+        .query(sql::DEFINE_SESSION_LOG_TABLE)
         .await
         .map_err(|e| DbError::Schema(Box::new(e)))?;
 
@@ -1478,5 +1495,225 @@ mod tests {
 
         let rows: Vec<ExecRow> = result.take(0).unwrap();
         assert_eq!(rows.len(), 2, "Should have 2 executions for the task");
+    }
+
+    // ========================================
+    // Session Log Schema Tests
+    // ========================================
+
+    #[test]
+    fn test_session_log_sql_constant_defined() {
+        assert!(!sql::DEFINE_SESSION_LOG_TABLE.is_empty());
+    }
+
+    #[test]
+    fn test_session_log_sql_contains_expected_definitions() {
+        assert!(sql::DEFINE_SESSION_LOG_TABLE.contains("DEFINE TABLE"));
+        assert!(sql::DEFINE_SESSION_LOG_TABLE.contains("session_log"));
+        assert!(sql::DEFINE_SESSION_LOG_TABLE.contains("SCHEMAFULL"));
+        assert!(sql::DEFINE_SESSION_LOG_TABLE.contains("step_execution_id"));
+        assert!(sql::DEFINE_SESSION_LOG_TABLE.contains("content"));
+        assert!(sql::DEFINE_SESSION_LOG_TABLE.contains("created_at"));
+    }
+
+    #[tokio::test]
+    async fn test_session_log_table_accepts_valid_data() {
+        let client = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // First create prerequisite records
+        client
+            .query(
+                r#"
+                CREATE task:log_test SET
+                    title = "Test Task",
+                    level = "task",
+                    status = "backlog";
+
+                CREATE workflow:log_test SET
+                    name = "Test Workflow";
+
+                CREATE step_execution:log_exec SET
+                    task_id = task:log_test,
+                    workflow_id = workflow:log_test,
+                    step_name = "test_step",
+                    status = "in_progress";
+                "#,
+            )
+            .await
+            .unwrap();
+
+        // Create a session log
+        let result = client
+            .query(
+                r#"
+                CREATE session_log:test_log SET
+                    step_execution_id = step_execution:log_exec,
+                    content = "Test log content from Claude session"
+                "#,
+            )
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "Creating session_log should succeed: {:?}",
+            result.err()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_session_log_default_created_at() {
+        let client = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // Create prerequisites
+        client
+            .query(
+                r#"
+                CREATE task:created_test SET title = "Test", level = "task", status = "backlog";
+                CREATE workflow:created_test SET name = "Test WF";
+                CREATE step_execution:created_test SET
+                    task_id = task:created_test,
+                    workflow_id = workflow:created_test,
+                    step_name = "step",
+                    status = "in_progress";
+                "#,
+            )
+            .await
+            .unwrap();
+
+        // Create session log without explicit created_at
+        client
+            .query(
+                r#"
+                CREATE session_log:created_test SET
+                    step_execution_id = step_execution:created_test,
+                    content = "Content"
+                "#,
+            )
+            .await
+            .unwrap();
+
+        // Verify created_at was auto-set
+        #[derive(Debug, serde::Deserialize)]
+        #[allow(dead_code)]
+        struct DatetimeRow {
+            created_at: surrealdb::sql::Datetime,
+        }
+
+        let mut result = client
+            .query("SELECT created_at FROM session_log:created_test")
+            .await
+            .unwrap();
+        let row: Option<DatetimeRow> = result.take(0).unwrap();
+        assert!(row.is_some(), "created_at should be set by default");
+    }
+
+    #[tokio::test]
+    async fn test_session_log_stores_arbitrary_content() {
+        let client = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // Create prerequisites
+        client
+            .query(
+                r#"
+                CREATE task:content_test SET title = "Test", level = "task", status = "backlog";
+                CREATE workflow:content_test SET name = "Test WF";
+                CREATE step_execution:content_test SET
+                    task_id = task:content_test,
+                    workflow_id = workflow:content_test,
+                    step_name = "step",
+                    status = "in_progress";
+                "#,
+            )
+            .await
+            .unwrap();
+
+        // Test various content types
+        let contents = vec![
+            ("log1", "Simple text"),
+            ("log2", ""),
+            ("log3", "Multi\nline\ncontent"),
+            ("log4", "Special: @#$%^&*()"),
+            ("log5", "Unicode: 日本語"),
+        ];
+
+        for (id, content) in contents {
+            let query = format!(
+                r#"CREATE session_log:{} SET
+                    step_execution_id = step_execution:content_test,
+                    content = "{}""#,
+                id, content
+            );
+            let result = client.query(&query).await;
+            assert!(
+                result.is_ok(),
+                "Content '{}' should be stored: {:?}",
+                content,
+                result.err()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_session_log_multiple_logs_per_execution() {
+        let client = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // Create prerequisites
+        client
+            .query(
+                r#"
+                CREATE task:multi_test SET title = "Test", level = "task", status = "backlog";
+                CREATE workflow:multi_test SET name = "Test WF";
+                CREATE step_execution:multi_exec SET
+                    task_id = task:multi_test,
+                    workflow_id = workflow:multi_test,
+                    step_name = "step",
+                    status = "in_progress";
+                "#,
+            )
+            .await
+            .unwrap();
+
+        // Create multiple logs for the same execution
+        client
+            .query(
+                r#"
+                CREATE session_log:multi1 SET
+                    step_execution_id = step_execution:multi_exec,
+                    content = "First log entry";
+
+                CREATE session_log:multi2 SET
+                    step_execution_id = step_execution:multi_exec,
+                    content = "Second log entry";
+
+                CREATE session_log:multi3 SET
+                    step_execution_id = step_execution:multi_exec,
+                    content = "Third log entry";
+                "#,
+            )
+            .await
+            .unwrap();
+
+        // Query logs for the execution
+        #[derive(Debug, serde::Deserialize)]
+        #[allow(dead_code)]
+        struct LogRow {
+            content: String,
+        }
+
+        let mut result = client
+            .query("SELECT content FROM session_log WHERE step_execution_id = step_execution:multi_exec")
+            .await
+            .unwrap();
+
+        let rows: Vec<LogRow> = result.take(0).unwrap();
+        assert_eq!(
+            rows.len(),
+            3,
+            "Should have 3 logs attached to one execution"
+        );
     }
 }
