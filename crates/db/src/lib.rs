@@ -95,7 +95,7 @@ impl Database {
     /// Initialize the database schema.
     ///
     /// Sets up the namespace and database for Vertebrae operations,
-    /// then initializes the task table and graph relations.
+    /// then initializes the task table, graph relations, and default workflow.
     ///
     /// # Errors
     ///
@@ -110,6 +110,9 @@ impl Database {
 
         // Initialize the schema (task table, relations)
         schema::init_schema(&self.client).await?;
+
+        // Create the default workflow if it doesn't exist
+        self.workflows().create_default_workflow().await?;
 
         Ok(())
     }

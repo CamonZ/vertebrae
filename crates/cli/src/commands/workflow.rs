@@ -1441,13 +1441,23 @@ mod tests {
     // ========================================
 
     #[tokio::test]
-    async fn test_list_workflows_empty() {
+    async fn test_list_workflows_shows_default_workflow() {
         let db = setup_test_db().await;
 
         let cmd = WorkflowListCommand {};
         let result = cmd.execute(&db).await.unwrap();
 
-        assert_eq!(result, "No workflows found");
+        // Default workflow is created on db.init()
+        assert!(
+            result.contains("default - Default Workflow"),
+            "Expected default workflow in output: {}",
+            result
+        );
+        assert!(
+            result.contains("5 steps"),
+            "Expected 5 steps in default workflow: {}",
+            result
+        );
     }
 
     #[tokio::test]

@@ -5,6 +5,12 @@
 
 use crate::error::{DbError, DbResult};
 use crate::models::{Workflow, WorkflowStep};
+
+/// The ID of the default workflow that matches the standard status flow.
+///
+/// This workflow is automatically created during database initialization
+/// and provides backwards compatibility for tasks without explicit workflow assignment.
+pub const DEFAULT_WORKFLOW_ID: &str = "default";
 use serde::Deserialize;
 use serde_json;
 use surrealdb::Surreal;
@@ -386,6 +392,45 @@ impl<'a> WorkflowRepository<'a> {
         }
     }
 
+    /// Create the default workflow if it doesn't already exist.
+    ///
+    /// The default workflow matches the standard task status flow:
+    /// backlog -> todo -> in_progress -> pending_review -> done
+    ///
+    /// This workflow is used for backwards compatibility and is automatically
+    /// assigned to tasks that don't have an explicit workflow.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(true)` if the workflow was created, `Ok(false)` if it already existed.
+    pub async fn create_default_workflow(&self) -> DbResult<bool> {
+        debug!("Checking for default workflow");
+
+        // Check if default workflow already exists
+        if self.exists(DEFAULT_WORKFLOW_ID).await? {
+            debug!("Default workflow already exists");
+            return Ok(false);
+        }
+
+        debug!("Creating default workflow");
+
+        let default_workflow = Workflow::new("Default Workflow")
+            .with_description(
+                "Standard task workflow matching the status flow: \
+                backlog -> todo -> in_progress -> pending_review -> done",
+            )
+            .with_step(WorkflowStep::new("backlog", "task-agent", 0))
+            .with_step(WorkflowStep::new("todo", "task-agent", 1))
+            .with_step(WorkflowStep::new("in_progress", "task-agent", 2))
+            .with_step(WorkflowStep::new("pending_review", "task-agent", 3))
+            .with_step(WorkflowStep::new("done", "task-agent", 4));
+
+        self.create(DEFAULT_WORKFLOW_ID, &default_workflow).await?;
+
+        debug!("Default workflow created successfully");
+        Ok(true)
+    }
+
     /// Export all workflows from the database.
     ///
     /// Returns all workflows with their IDs for backup or migration purposes.
@@ -562,12 +607,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_list_empty() {
+    async fn test_list_contains_default_workflow() {
         let (db, temp_dir) = setup_test_db().await;
         let repo = WorkflowRepository::new(db.client());
 
+        // Default workflow is created by db.init()
         let workflows = repo.list().await.unwrap();
-        assert!(workflows.is_empty());
+        assert_eq!(workflows.len(), 1);
+        assert_eq!(workflows[0].name, "Default Workflow");
 
         cleanup(&temp_dir);
     }
@@ -588,7 +635,8 @@ mod tests {
             .unwrap();
 
         let workflows = repo.list().await.unwrap();
-        assert_eq!(workflows.len(), 3);
+        // 3 created + 1 default workflow
+        assert_eq!(workflows.len(), 4);
 
         cleanup(&temp_dir);
     }
@@ -769,11 +817,13 @@ mod tests {
             .unwrap();
 
         let exported = repo.export_all().await.unwrap();
-        assert_eq!(exported.len(), 2);
+        // 2 created + 1 default workflow
+        assert_eq!(exported.len(), 3);
 
         let ids: Vec<&str> = exported.iter().map(|(id, _)| id.as_str()).collect();
         assert!(ids.contains(&"wf1"));
         assert!(ids.contains(&"wf2"));
+        assert!(ids.contains(&"default"));
 
         cleanup(&temp_dir);
     }
@@ -813,18 +863,19 @@ mod tests {
         assert_eq!(updated.description, Some("Updated description".to_string()));
         assert_eq!(updated.steps.len(), 2);
 
-        // List
+        // List - should include crud1 + default workflow
         let list = repo.list().await.unwrap();
-        assert_eq!(list.len(), 1);
+        assert_eq!(list.len(), 2);
 
         // Delete
         repo.delete("crud1").await.unwrap();
         assert!(!repo.exists("crud1").await.unwrap());
         assert!(repo.get("crud1").await.unwrap().is_none());
 
-        // List should be empty
+        // List should only have default workflow
         let list = repo.list().await.unwrap();
-        assert!(list.is_empty());
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].name, "Default Workflow");
 
         cleanup(&temp_dir);
     }
@@ -954,5 +1005,94 @@ mod tests {
         }
 
         cleanup(&temp_dir);
+    }
+
+    // ========================================
+    // Default workflow tests
+    // ========================================
+
+    #[tokio::test]
+    async fn test_create_default_workflow_creates_workflow() {
+        // setup_test_db() calls db.init() which creates the default workflow,
+        // so we verify it exists and has the correct structure
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = WorkflowRepository::new(db.client());
+
+        // Default workflow should exist (created by db.init())
+        assert!(repo.exists(DEFAULT_WORKFLOW_ID).await.unwrap());
+
+        // Verify the workflow has correct structure
+        let workflow = repo.get(DEFAULT_WORKFLOW_ID).await.unwrap().unwrap();
+        assert_eq!(workflow.name, "Default Workflow");
+        assert!(workflow.description.is_some());
+        assert_eq!(workflow.steps.len(), 5);
+
+        // Verify step order matches standard status flow
+        assert_eq!(workflow.steps[0].name, "backlog");
+        assert_eq!(workflow.steps[0].order, 0);
+        assert_eq!(workflow.steps[1].name, "todo");
+        assert_eq!(workflow.steps[1].order, 1);
+        assert_eq!(workflow.steps[2].name, "in_progress");
+        assert_eq!(workflow.steps[2].order, 2);
+        assert_eq!(workflow.steps[3].name, "pending_review");
+        assert_eq!(workflow.steps[3].order, 3);
+        assert_eq!(workflow.steps[4].name, "done");
+        assert_eq!(workflow.steps[4].order, 4);
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_create_default_workflow_is_idempotent() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = WorkflowRepository::new(db.client());
+
+        // Default workflow already exists from db.init()
+        // Calling create_default_workflow again should return false
+        let created = repo.create_default_workflow().await.unwrap();
+        assert!(!created, "Should return false when workflow already exists");
+
+        // Workflow should still exist and be unchanged
+        let workflow = repo.get(DEFAULT_WORKFLOW_ID).await.unwrap().unwrap();
+        assert_eq!(workflow.name, "Default Workflow");
+        assert_eq!(workflow.steps.len(), 5);
+
+        // Verify there's only one default workflow
+        let all_workflows = repo.list().await.unwrap();
+        let default_count = all_workflows
+            .iter()
+            .filter(|w| w.name == "Default Workflow")
+            .count();
+        assert_eq!(default_count, 1, "Should only have one default workflow");
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_create_default_workflow_when_no_workflows_exist() {
+        // Use in-memory database with schema init but no db.init()
+        // to test creation when default workflow doesn't exist
+        use surrealdb::engine::local::Mem;
+
+        let client = Surreal::new::<Mem>(()).await.unwrap();
+        client.use_ns("vertebrae").use_db("test").await.unwrap();
+        crate::schema::init_schema(&client).await.unwrap();
+
+        let repo = WorkflowRepository::new(&client);
+
+        // Default workflow should not exist yet
+        assert!(!repo.exists(DEFAULT_WORKFLOW_ID).await.unwrap());
+
+        // Create default workflow
+        let created = repo.create_default_workflow().await.unwrap();
+        assert!(created, "Should return true when creating workflow");
+
+        // Verify it exists now
+        assert!(repo.exists(DEFAULT_WORKFLOW_ID).await.unwrap());
+    }
+
+    #[test]
+    fn test_default_workflow_id_constant() {
+        assert_eq!(DEFAULT_WORKFLOW_ID, "default");
     }
 }
