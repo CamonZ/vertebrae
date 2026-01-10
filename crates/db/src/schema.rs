@@ -41,6 +41,10 @@ mod sql {
         DEFINE FIELD refs ON task FLEXIBLE TYPE array<object> DEFAULT [];
 
         DEFINE FIELD needs_human_review ON task TYPE option<bool> DEFAULT NONE;
+
+        DEFINE FIELD workflow_id ON task TYPE option<record<workflow>>;
+
+        DEFINE FIELD current_step ON task TYPE option<int>;
     "#;
 
     /// Define the child_of relation table for hierarchy edges

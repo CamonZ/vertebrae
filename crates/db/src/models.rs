@@ -456,6 +456,14 @@ pub struct Task {
     /// Whether this task needs human review before completion
     #[serde(default)]
     pub needs_human_review: Option<bool>,
+
+    /// The workflow this task is assigned to (if any)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workflow_id: Option<Thing>,
+
+    /// Current step index in the assigned workflow (0-based)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_step: Option<usize>,
 }
 
 impl Task {
@@ -476,6 +484,8 @@ impl Task {
             sections: Vec::new(),
             code_refs: Vec::new(),
             needs_human_review: None,
+            workflow_id: None,
+            current_step: None,
         }
     }
 
@@ -526,6 +536,20 @@ impl Task {
         self.needs_human_review = Some(needs_review);
         self
     }
+
+    /// Assign this task to a workflow at a specific step
+    pub fn with_workflow(mut self, workflow_id: Thing, current_step: usize) -> Self {
+        self.workflow_id = Some(workflow_id);
+        self.current_step = Some(current_step);
+        self
+    }
+
+    /// Clear workflow assignment from this task
+    pub fn without_workflow(mut self) -> Self {
+        self.workflow_id = None;
+        self.current_step = None;
+        self
+    }
 }
 
 impl PartialEq for Task {
@@ -539,6 +563,8 @@ impl PartialEq for Task {
             && self.sections == other.sections
             && self.code_refs == other.code_refs
             && self.needs_human_review == other.needs_human_review
+            && self.workflow_id == other.workflow_id
+            && self.current_step == other.current_step
     }
 }
 
@@ -1494,6 +1520,8 @@ mod tests {
         assert!(task.completed_at.is_none());
         assert!(task.sections.is_empty());
         assert!(task.code_refs.is_empty());
+        assert!(task.workflow_id.is_none());
+        assert!(task.current_step.is_none());
     }
 
     #[test]
@@ -1827,6 +1855,95 @@ mod tests {
         // This is a compile-time check - if it compiles, the types are correct
         let _started: Option<DateTime<Utc>> = task.started_at;
         let _completed: Option<DateTime<Utc>> = task.completed_at;
+    }
+
+    // Task workflow assignment tests
+    #[test]
+    fn test_task_with_workflow() {
+        let workflow_id = Thing::from(("workflow", "wf123"));
+        let task =
+            Task::new("Task with workflow", Level::Task).with_workflow(workflow_id.clone(), 0);
+
+        assert_eq!(task.workflow_id, Some(workflow_id));
+        assert_eq!(task.current_step, Some(0));
+    }
+
+    #[test]
+    fn test_task_without_workflow() {
+        let workflow_id = Thing::from(("workflow", "wf123"));
+        let task = Task::new("Task", Level::Task)
+            .with_workflow(workflow_id, 2)
+            .without_workflow();
+
+        assert!(task.workflow_id.is_none());
+        assert!(task.current_step.is_none());
+    }
+
+    #[test]
+    fn test_task_workflow_serialize() {
+        let workflow_id = Thing::from(("workflow", "wf123"));
+        let task = Task::new("Workflow Task", Level::Task).with_workflow(workflow_id, 1);
+
+        let value = serde_json::to_value(&task).unwrap();
+        assert!(
+            value.get("workflow_id").is_some(),
+            "workflow_id should be serialized"
+        );
+        assert_eq!(value["current_step"], 1);
+    }
+
+    #[test]
+    fn test_task_workflow_serialize_omits_when_none() {
+        let task = Task::new("No Workflow", Level::Task);
+        let value = serde_json::to_value(&task).unwrap();
+
+        assert!(
+            value.get("workflow_id").is_none(),
+            "workflow_id should be omitted when None"
+        );
+        assert!(
+            value.get("current_step").is_none(),
+            "current_step should be omitted when None"
+        );
+    }
+
+    #[test]
+    fn test_task_workflow_roundtrip() {
+        // Create a task with workflow, serialize it, then deserialize it
+        let workflow_id = Thing::from(("workflow", "wf456"));
+        let original = Task::new("Workflow Task", Level::Task)
+            .with_status(Status::InProgress)
+            .with_workflow(workflow_id.clone(), 2);
+
+        let json = serde_json::to_string(&original).unwrap();
+        let deserialized: Task = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.workflow_id, Some(workflow_id));
+        assert_eq!(deserialized.current_step, Some(2));
+    }
+
+    #[test]
+    fn test_task_workflow_deserialize_without_workflow() {
+        let json = r#"{
+            "title": "No Workflow Task",
+            "level": "task",
+            "status": "todo"
+        }"#;
+
+        let task: Task = serde_json::from_str(json).unwrap();
+        assert!(task.workflow_id.is_none());
+        assert!(task.current_step.is_none());
+    }
+
+    #[test]
+    fn test_task_workflow_equality() {
+        let workflow_id = Thing::from(("workflow", "wf123"));
+        let task1 = Task::new("Test", Level::Task).with_workflow(workflow_id.clone(), 0);
+        let task2 = Task::new("Test", Level::Task).with_workflow(workflow_id, 0);
+        let task3 = Task::new("Test", Level::Task);
+
+        assert_eq!(task1, task2);
+        assert_ne!(task1, task3);
     }
 
     // WorkflowStep tests

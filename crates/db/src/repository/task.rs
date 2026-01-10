@@ -46,6 +46,10 @@ pub struct TaskUpdate {
     pub set_started_at_if_null: bool,
     /// New status (if Some)
     pub status: Option<Status>,
+    /// Workflow ID to assign (if Some)
+    pub workflow_id: Option<Option<surrealdb::sql::Thing>>,
+    /// Current step in the workflow (if Some)
+    pub current_step: Option<Option<usize>>,
 }
 
 impl TaskUpdate {
@@ -133,6 +137,24 @@ impl TaskUpdate {
         self
     }
 
+    /// Assign the task to a workflow at a specific step
+    pub fn with_workflow(
+        mut self,
+        workflow_id: surrealdb::sql::Thing,
+        current_step: usize,
+    ) -> Self {
+        self.workflow_id = Some(Some(workflow_id));
+        self.current_step = Some(Some(current_step));
+        self
+    }
+
+    /// Remove workflow assignment from the task
+    pub fn clear_workflow(mut self) -> Self {
+        self.workflow_id = Some(None);
+        self.current_step = Some(None);
+        self
+    }
+
     /// Check if any updates are specified
     pub fn has_updates(&self) -> bool {
         self.title.is_some()
@@ -147,6 +169,8 @@ impl TaskUpdate {
             || self.set_started_at
             || self.set_started_at_if_null
             || self.status.is_some()
+            || self.workflow_id.is_some()
+            || self.current_step.is_some()
     }
 }
 
@@ -516,6 +540,23 @@ impl<'a> TaskRepository<'a> {
             field_updates.push(format!("sections = {}", sections_json));
         }
 
+        // Handle workflow assignment updates
+        if let Some(workflow_id_opt) = &updates.workflow_id {
+            match workflow_id_opt {
+                Some(wf_id) => {
+                    field_updates.push(format!("workflow_id = {}", wf_id));
+                }
+                None => field_updates.push("workflow_id = NONE".to_string()),
+            }
+        }
+
+        if let Some(current_step_opt) = &updates.current_step {
+            match current_step_opt {
+                Some(step) => field_updates.push(format!("current_step = {}", step)),
+                None => field_updates.push("current_step = NONE".to_string()),
+            }
+        }
+
         if !field_updates.is_empty() {
             field_updates.push("updated_at = time::now()".to_string());
             let query = format!("UPDATE task:{} SET {}", id, field_updates.join(", "));
@@ -594,6 +635,80 @@ impl<'a> TaskRepository<'a> {
         let update_query = format!("UPDATE task:{} SET tags = {}", id, tags_str);
         self.client.query(&update_query).await?;
 
+        Ok(())
+    }
+
+    /// Assign a task to a workflow at the first step (step 0).
+    ///
+    /// # Arguments
+    ///
+    /// * `task_id` - The task ID to assign
+    /// * `workflow_id` - The workflow ID to assign to
+    ///
+    /// # Errors
+    ///
+    /// Returns `DbError::Query` if the database operation fails.
+    pub async fn assign_workflow(
+        &self,
+        task_id: &str,
+        workflow_id: &surrealdb::sql::Thing,
+    ) -> DbResult<()> {
+        debug!(
+            "Assigning task {} to workflow {}",
+            task_id,
+            workflow_id.id.to_raw()
+        );
+        // Use parameter binding for the workflow_id to ensure proper serialization
+        let query = format!(
+            "UPDATE task:{} SET workflow_id = $workflow_id, current_step = 0, updated_at = time::now()",
+            task_id
+        );
+        trace!("Assign workflow query: {}", query);
+        self.client
+            .query(&query)
+            .bind(("workflow_id", workflow_id.clone()))
+            .await?;
+        Ok(())
+    }
+
+    /// Remove workflow assignment from a task.
+    ///
+    /// Clears both workflow_id and current_step fields.
+    ///
+    /// # Arguments
+    ///
+    /// * `task_id` - The task ID to unassign
+    ///
+    /// # Errors
+    ///
+    /// Returns `DbError::Query` if the database operation fails.
+    pub async fn unassign_workflow(&self, task_id: &str) -> DbResult<()> {
+        debug!("Unassigning workflow from task {}", task_id);
+        let query = format!(
+            "UPDATE task:{} SET workflow_id = NONE, current_step = NONE, updated_at = time::now()",
+            task_id
+        );
+        self.client.query(&query).await?;
+        Ok(())
+    }
+
+    /// Update the current step of a task in its workflow.
+    ///
+    /// # Arguments
+    ///
+    /// * `task_id` - The task ID to update
+    /// * `step` - The new step index (0-based)
+    ///
+    /// # Errors
+    ///
+    /// Returns `DbError::Query` if the database operation fails.
+    pub async fn update_current_step(&self, task_id: &str, step: usize) -> DbResult<()> {
+        debug!("Updating task {} to step {}", task_id, step);
+        let query = format!(
+            "UPDATE task:{} SET current_step = {}, updated_at = time::now()",
+            task_id, step
+        );
+        self.client.query(&query).await?;
         Ok(())
     }
 
@@ -1058,6 +1173,65 @@ mod tests {
 
         let retrieved = repo.get("nhr2").await.unwrap().unwrap();
         assert_eq!(retrieved.needs_human_review, Some(false));
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_assign_workflow() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = TaskRepository::new(db.client());
+
+        // Create a task
+        let task = Task::new("Assign Workflow Test", Level::Task);
+        repo.create("wf1", &task).await.unwrap();
+
+        // Create a workflow_id Thing
+        let workflow_id = surrealdb::sql::Thing::from(("workflow", "abc123"));
+
+        // Assign the task to the workflow
+        repo.assign_workflow("wf1", &workflow_id).await.unwrap();
+
+        // Verify the task was updated
+        let retrieved = repo.get("wf1").await.unwrap().unwrap();
+        assert!(
+            retrieved.workflow_id.is_some(),
+            "Task should have workflow_id"
+        );
+        assert_eq!(retrieved.current_step, Some(0), "Task should be at step 0");
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_unassign_workflow() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = TaskRepository::new(db.client());
+
+        // Create a task and assign it
+        let task = Task::new("Unassign Workflow Test", Level::Task);
+        repo.create("wf2", &task).await.unwrap();
+
+        let workflow_id = surrealdb::sql::Thing::from(("workflow", "abc123"));
+        repo.assign_workflow("wf2", &workflow_id).await.unwrap();
+
+        // Verify task is assigned
+        let retrieved = repo.get("wf2").await.unwrap().unwrap();
+        assert!(retrieved.workflow_id.is_some());
+
+        // Unassign the workflow
+        repo.unassign_workflow("wf2").await.unwrap();
+
+        // Verify the task was updated
+        let retrieved = repo.get("wf2").await.unwrap().unwrap();
+        assert!(
+            retrieved.workflow_id.is_none(),
+            "Task should not have workflow_id after unassign"
+        );
+        assert!(
+            retrieved.current_step.is_none(),
+            "Task should not have current_step after unassign"
+        );
 
         cleanup(&temp_dir);
     }
