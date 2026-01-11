@@ -5,8 +5,8 @@
 
 use crate::project_config::{ProjectConfig, SavedProject};
 use crate::types::{
-    StepExecution, TaskFilterOptions, TaskHierarchyNode, TaskSummary, TaskWithRelations, Workflow,
-    WorkflowWithTasks,
+    SessionLog, StepExecution, TaskFilterOptions, TaskHierarchyNode, TaskSummary,
+    TaskWithRelations, Workflow, WorkflowWithTasks,
 };
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -436,6 +436,34 @@ pub async fn get_task_executions(
         }
         Err(e) => {
             log::error!("get_task_executions error: {:?}", e);
+            Err(e.into())
+        }
+    }
+}
+
+/// Get all session logs for a step execution
+///
+/// Returns a chronological list of all session logs for the given execution.
+/// This shows the content recorded during the step execution.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_execution_logs(
+    state: State<'_, AppState>,
+    execution_id: String,
+) -> Result<Vec<SessionLog>, CommandError> {
+    log::info!("get_execution_logs called for execution: {}", execution_id);
+    let db_guard = state.db.read().await;
+    let db = db_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    match db.executions().list_logs_for_execution(&execution_id).await {
+        Ok(logs) => {
+            log::info!("get_execution_logs returned {} logs", logs.len());
+            Ok(logs.into_iter().map(Into::into).collect())
+        }
+        Err(e) => {
+            log::error!("get_execution_logs error: {:?}", e);
             Err(e.into())
         }
     }

@@ -568,3 +568,27 @@ impl From<vertebrae_db::StepExecution> for StepExecution {
         }
     }
 }
+
+/// Session log entry - mirrors db::SessionLog
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct SessionLog {
+    /// Log ID (string form)
+    pub id: Option<String>,
+    /// Step execution ID this log belongs to
+    pub step_execution_id: String,
+    /// The log content
+    pub content: String,
+    /// When this log was created (ISO 8601 string)
+    pub created_at: String,
+}
+
+impl From<vertebrae_db::SessionLog> for SessionLog {
+    fn from(log: vertebrae_db::SessionLog) -> Self {
+        SessionLog {
+            id: log.id.map(|t| t.id.to_string()),
+            step_execution_id: log.step_execution_id.id.to_string(),
+            content: log.content,
+            created_at: log.created_at.to_rfc3339(),
+        }
+    }
+}

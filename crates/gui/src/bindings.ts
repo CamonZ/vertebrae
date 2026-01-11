@@ -174,6 +174,20 @@ async getTaskExecutions(taskId: string) : Promise<Result<StepExecution[], Comman
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+/**
+ * Get all session logs for a step execution
+ * 
+ * Returns a chronological list of all session logs for the given execution.
+ * This shows the content recorded during the step execution.
+ */
+async getExecutionLogs(executionId: string) : Promise<Result<SessionLog[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_execution_logs", { executionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -338,6 +352,26 @@ refs?: CodeRef[] }
  * Section type - mirrors db::SectionType
  */
 export type SectionType = "goal" | "context" | "current_behavior" | "desired_behavior" | "step" | "testing_criterion" | "anti_pattern" | "failure_test" | "constraint"
+/**
+ * Session log entry - mirrors db::SessionLog
+ */
+export type SessionLog = { 
+/**
+ * Log ID (string form)
+ */
+id: string | null; 
+/**
+ * Step execution ID this log belongs to
+ */
+step_execution_id: string; 
+/**
+ * The log content
+ */
+content: string; 
+/**
+ * When this log was created (ISO 8601 string)
+ */
+created_at: string }
 /**
  * Step execution record - mirrors db::StepExecution
  */

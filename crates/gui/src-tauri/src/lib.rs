@@ -57,6 +57,7 @@ fn create_builder() -> Builder {
             commands::get_workflow_with_tasks,
             // Execution commands
             commands::get_task_executions,
+            commands::get_execution_logs,
         ])
         .events(collect_events![TaskChangedEvent, WorkflowChangedEvent])
 }
