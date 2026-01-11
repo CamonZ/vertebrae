@@ -335,18 +335,10 @@ impl ShowCommand {
     /// Fetch tasks that this task depends on (blocked by).
     /// Only returns incomplete blockers (status != done).
     async fn fetch_blocked_by(&self, db: &Database, id: &str) -> Result<Vec<TaskSummary>, DbError> {
-        // SELECT ->depends_on->task.* FROM task:<id> gets dependencies
-        // Filter out completed blockers - they no longer block this task
-        let query = format!(
-            "SELECT id, title, level, status, priority, tags, needs_human_review \
-             FROM task WHERE <-depends_on<-task CONTAINS task:{} AND status != \"done\"",
-            id
-        );
+        // Use the service layer method to get incomplete blockers with details
+        let blockers = db.graph().get_incomplete_blockers_with_details(id).await?;
 
-        let mut result = db.client().query(&query).await?;
-        let deps: Vec<RelatedTaskRow> = result.take(0)?;
-
-        Ok(deps.into_iter().map(TaskSummary::from).collect())
+        Ok(blockers.into_iter().map(TaskSummary::from).collect())
     }
 
     /// Fetch tasks that are blocked by this task.
