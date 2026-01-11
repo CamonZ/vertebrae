@@ -17,6 +17,10 @@ pub struct BlockersCommand {
     /// Maximum depth to traverse (default: unlimited)
     #[arg(long, short = 'd')]
     pub depth: Option<usize>,
+
+    /// Include completed blockers (status = done) in output
+    #[arg(long, short = 'a')]
+    pub all: bool,
 }
 
 /// A node in the blocker tree
@@ -146,16 +150,27 @@ impl BlockersCommand {
     }
 
     /// Fetch direct blockers for a task (tasks it depends on).
+    ///
+    /// By default, only returns incomplete blockers (status != done).
+    /// When `--all` flag is set, returns all blockers including completed ones.
     async fn fetch_direct_blockers(
         &self,
         db: &Database,
         task_id: &str,
     ) -> Result<Vec<TaskRow>, DbError> {
         // Get tasks that this task depends on via the depends_on edge
-        let query = format!(
-            "SELECT id, title, level, status FROM task WHERE <-depends_on<-task CONTAINS task:{}",
-            task_id
-        );
+        // By default, filter out completed blockers (status = done)
+        let query = if self.all {
+            format!(
+                "SELECT id, title, level, status FROM task WHERE <-depends_on<-task CONTAINS task:{}",
+                task_id
+            )
+        } else {
+            format!(
+                r#"SELECT id, title, level, status FROM task WHERE <-depends_on<-task CONTAINS task:{} AND status != "done""#,
+                task_id
+            )
+        };
 
         let mut result = db.client().query(&query).await?;
         let blockers: Vec<TaskRow> = result.take(0)?;
@@ -294,6 +309,7 @@ mod tests {
         let cmd = BlockersCommand {
             id: "task1".to_string(),
             depth: None,
+            all: false,
         };
 
         let result = cmd.execute(&db).await;
@@ -318,6 +334,7 @@ mod tests {
         let cmd = BlockersCommand {
             id: "task1".to_string(),
             depth: None,
+            all: false,
         };
 
         let result = cmd.execute(&db).await;
@@ -344,6 +361,7 @@ mod tests {
         let cmd = BlockersCommand {
             id: "task1".to_string(),
             depth: None,
+            all: false,
         };
 
         let result = cmd.execute(&db).await;
@@ -371,6 +389,7 @@ mod tests {
         let cmd = BlockersCommand {
             id: "task1".to_string(),
             depth: None,
+            all: false,
         };
 
         let result = cmd.execute(&db).await;
@@ -409,6 +428,7 @@ mod tests {
         let cmd = BlockersCommand {
             id: "task1".to_string(),
             depth: Some(1),
+            all: false,
         };
 
         let result = cmd.execute(&db).await;
@@ -424,6 +444,7 @@ mod tests {
         let cmd = BlockersCommand {
             id: "task1".to_string(),
             depth: Some(2),
+            all: false,
         };
 
         let result = cmd.execute(&db).await;
@@ -448,6 +469,7 @@ mod tests {
         let cmd = BlockersCommand {
             id: "task1".to_string(),
             depth: Some(0),
+            all: false,
         };
 
         let result = cmd.execute(&db).await;
@@ -465,6 +487,7 @@ mod tests {
         let cmd = BlockersCommand {
             id: "nonexistent".to_string(),
             depth: None,
+            all: false,
         };
 
         let result = cmd.execute(&db).await;
@@ -490,6 +513,7 @@ mod tests {
         let cmd = BlockersCommand {
             id: "TASK1".to_string(),
             depth: None,
+            all: false,
         };
 
         let result = cmd.execute(&db).await;
@@ -514,6 +538,7 @@ mod tests {
         let cmd = BlockersCommand {
             id: "task1".to_string(),
             depth: None,
+            all: false,
         };
 
         let result = cmd.execute(&db).await;
@@ -536,7 +561,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_blockers_shows_status() {
+    async fn test_blockers_filters_completed_by_default() {
         let db = setup_test_db().await;
 
         create_task(&db, "done_blocker", "Done Blocker", "ticket", "done").await;
@@ -546,16 +571,61 @@ mod tests {
         create_depends_on(&db, "task1", "done_blocker").await;
         create_depends_on(&db, "task1", "todo_blocker").await;
 
+        // By default, completed blockers should be filtered out
         let cmd = BlockersCommand {
             id: "task1".to_string(),
             depth: None,
+            all: false,
         };
 
         let result = cmd.execute(&db).await;
         assert!(result.is_ok());
 
         let blockers_result = result.unwrap();
+        // Should only show the incomplete blocker
+        assert_eq!(blockers_result.blockers.len(), 1);
+        assert_eq!(blockers_result.total_count, 1);
+
+        let todo_blocker = &blockers_result.blockers[0];
+        assert_eq!(todo_blocker.id, "todo_blocker");
+        assert_eq!(todo_blocker.title, "Todo Blocker");
+        assert_eq!(todo_blocker.level, "task");
+        assert_eq!(todo_blocker.status, "todo");
+        assert!(todo_blocker.children.is_empty());
+
+        // Output should only contain the todo blocker, not the done one
+        let output = format!("{}", blockers_result);
+        assert!(
+            output.contains("todo") && !output.lines().any(|line| line.contains("done_blocker")),
+            "Output should only contain incomplete blockers"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_blockers_all_flag_includes_completed() {
+        let db = setup_test_db().await;
+
+        create_task(&db, "done_blocker", "Done Blocker", "ticket", "done").await;
+        create_task(&db, "todo_blocker", "Todo Blocker", "task", "todo").await;
+        create_task(&db, "task1", "Main Task", "task", "backlog").await;
+
+        create_depends_on(&db, "task1", "done_blocker").await;
+        create_depends_on(&db, "task1", "todo_blocker").await;
+
+        // With --all flag, should include completed blockers
+        let cmd = BlockersCommand {
+            id: "task1".to_string(),
+            depth: None,
+            all: true,
+        };
+
+        let result = cmd.execute(&db).await;
+        assert!(result.is_ok());
+
+        let blockers_result = result.unwrap();
+        // Should show both blockers
         assert_eq!(blockers_result.blockers.len(), 2);
+        assert_eq!(blockers_result.total_count, 2);
 
         // Verify all fields of each BlockerNode
         let done_blocker = blockers_result
@@ -578,15 +648,113 @@ mod tests {
         assert_eq!(todo_blocker.status, "todo");
         assert!(todo_blocker.children.is_empty());
 
-        // Check output contains status info by verifying blockers have the expected statuses
+        // Check output contains both status values
         let output = format!("{}", blockers_result);
-        // The output should contain the status values from the blockers
         let has_done = output.lines().any(|line| line.contains("done"));
         let has_todo = output.lines().any(|line| line.contains("todo"));
         assert!(
             has_done && has_todo,
             "Output should contain both 'done' and 'todo' status values"
         );
+    }
+
+    #[tokio::test]
+    async fn test_blockers_transitive_filters_completed() {
+        let db = setup_test_db().await;
+
+        // Create chain: task1 -> blocker1 (todo) -> blocker2 (done) -> blocker3 (todo)
+        // By default, blocker2 and its children should be filtered out
+        create_task(&db, "blocker3", "Deep Blocker", "task", "todo").await;
+        create_task(&db, "blocker2", "Done Blocker", "task", "done").await;
+        create_task(&db, "blocker1", "Direct Blocker", "task", "todo").await;
+        create_task(&db, "task1", "Main Task", "task", "backlog").await;
+
+        create_depends_on(&db, "task1", "blocker1").await;
+        create_depends_on(&db, "blocker1", "blocker2").await;
+        create_depends_on(&db, "blocker2", "blocker3").await;
+
+        // Default behavior: should stop at completed blocker
+        let cmd = BlockersCommand {
+            id: "task1".to_string(),
+            depth: None,
+            all: false,
+        };
+
+        let result = cmd.execute(&db).await;
+        assert!(result.is_ok());
+
+        let blockers_result = result.unwrap();
+        // Should only show blocker1, not blocker2 (done) or blocker3 (blocked by done)
+        assert_eq!(blockers_result.blockers.len(), 1);
+        assert_eq!(blockers_result.blockers[0].id, "blocker1");
+        // blocker1's child (blocker2) is done, so it's filtered out
+        assert!(blockers_result.blockers[0].children.is_empty());
+        assert_eq!(blockers_result.total_count, 1);
+
+        // With --all flag: should show entire chain
+        let cmd = BlockersCommand {
+            id: "task1".to_string(),
+            depth: None,
+            all: true,
+        };
+
+        let result = cmd.execute(&db).await;
+        assert!(result.is_ok());
+
+        let blockers_result = result.unwrap();
+        assert_eq!(blockers_result.blockers.len(), 1);
+        assert_eq!(blockers_result.blockers[0].id, "blocker1");
+        assert_eq!(blockers_result.blockers[0].children.len(), 1);
+        assert_eq!(blockers_result.blockers[0].children[0].id, "blocker2");
+        assert_eq!(blockers_result.blockers[0].children[0].children.len(), 1);
+        assert_eq!(
+            blockers_result.blockers[0].children[0].children[0].id,
+            "blocker3"
+        );
+        assert_eq!(blockers_result.total_count, 3);
+    }
+
+    #[tokio::test]
+    async fn test_blockers_no_blockers_when_all_completed() {
+        let db = setup_test_db().await;
+
+        create_task(&db, "done_blocker1", "Done Blocker 1", "task", "done").await;
+        create_task(&db, "done_blocker2", "Done Blocker 2", "task", "done").await;
+        create_task(&db, "task1", "Main Task", "task", "backlog").await;
+
+        create_depends_on(&db, "task1", "done_blocker1").await;
+        create_depends_on(&db, "task1", "done_blocker2").await;
+
+        // Default: should show no blockers since all are done
+        let cmd = BlockersCommand {
+            id: "task1".to_string(),
+            depth: None,
+            all: false,
+        };
+
+        let result = cmd.execute(&db).await;
+        assert!(result.is_ok());
+
+        let blockers_result = result.unwrap();
+        assert!(blockers_result.blockers.is_empty());
+        assert_eq!(blockers_result.total_count, 0);
+
+        let output = format!("{}", blockers_result);
+        assert_eq!(output, "No blockers\n");
+
+        // With --all flag: should show both completed blockers
+        let cmd = BlockersCommand {
+            id: "task1".to_string(),
+            depth: None,
+            all: true,
+        };
+
+        let result = cmd.execute(&db).await;
+        assert!(result.is_ok());
+
+        let blockers_result = result.unwrap();
+        assert_eq!(blockers_result.blockers.len(), 2);
+        assert_eq!(blockers_result.total_count, 2);
     }
 
     #[test]
@@ -692,11 +860,14 @@ mod tests {
         let cmd = BlockersCommand {
             id: "test".to_string(),
             depth: Some(5),
+            all: true,
         };
         let debug_str = format!("{:?}", cmd);
         assert!(
-            debug_str.contains("BlockersCommand") && debug_str.contains("depth: Some(5)"),
-            "Debug output should contain BlockersCommand and depth info"
+            debug_str.contains("BlockersCommand")
+                && debug_str.contains("depth: Some(5)")
+                && debug_str.contains("all: true"),
+            "Debug output should contain BlockersCommand, depth info, and all flag"
         );
     }
 
