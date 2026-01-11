@@ -2207,11 +2207,13 @@ name = "gui"
 version = "0.1.0"
 dependencies = [
  "dirs 6.0.0",
+ "futures",
  "log",
  "serde",
  "serde_json",
  "specta",
  "specta-typescript",
+ "surrealdb",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",

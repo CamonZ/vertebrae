@@ -39,6 +39,12 @@ specta-typescript = "0.0.9"
 tauri-specta = { version = "=2.0.0-rc.21", features = ["derive", "typescript"] }
 tokio = { version = "1", features = ["full"] }
 
+# Async stream processing for LIVE queries
+futures = "0.3"
+
 # Workspace dependencies
 vertebrae-db = { path = "../../db" }
 vertebrae-core = { path = "../../core" }
+
+# Direct dependency for LIVE query types
+surrealdb = { version = "2" }
