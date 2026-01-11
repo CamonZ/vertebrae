@@ -246,8 +246,8 @@ impl Command {
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Ref(cmd) => {
-                let result = cmd.execute(db).await?;
-                notification::notify_task_changed(format!("task:{}", cmd.id), "Updated").await;
+                // Service handles notification via callback
+                let result = cmd.execute(service).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Refs(cmd) => {

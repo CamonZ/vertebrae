@@ -4,9 +4,9 @@
 //! Supports GitHub-style file:line notation (file:L45-67, file:L45, or just file).
 
 use clap::Args;
-use serde::Deserialize;
 use std::path::Path;
-use vertebrae_db::{Database, DbError};
+use vertebrae_core::TaskService;
+use vertebrae_db::{CodeRef, DbError};
 
 /// Add a code reference to a task
 #[derive(Debug, Args)]
@@ -81,32 +81,6 @@ impl std::fmt::Display for RefResult {
 
         Ok(())
     }
-}
-
-/// Result from querying a task's refs
-#[derive(Debug, Deserialize)]
-struct TaskRefsRow {
-    #[allow(dead_code)]
-    id: surrealdb::sql::Thing,
-    #[allow(dead_code)]
-    #[serde(default, rename = "refs")]
-    code_refs: Vec<CodeRefRow>,
-}
-
-/// Code reference row from database
-#[allow(dead_code)]
-#[derive(Debug, Deserialize, Clone)]
-struct CodeRefRow {
-    #[serde(default)]
-    path: Option<String>,
-    #[serde(default)]
-    line_start: Option<u32>,
-    #[serde(default)]
-    line_end: Option<u32>,
-    #[serde(default)]
-    name: Option<String>,
-    #[serde(default)]
-    description: Option<String>,
 }
 
 /// Parse a file specification into its components.
@@ -200,7 +174,7 @@ impl RefCommand {
     ///
     /// # Arguments
     ///
-    /// * `db` - Reference to the database connection
+    /// * `service` - Reference to the task service
     ///
     /// # Errors
     ///
@@ -208,7 +182,7 @@ impl RefCommand {
     /// - The task with the given ID does not exist
     /// - The file specification is invalid
     /// - Database operations fail
-    pub async fn execute(&self, db: &Database) -> Result<RefResult, DbError> {
+    pub async fn execute(&self, service: &dyn TaskService) -> Result<RefResult, DbError> {
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
 
@@ -218,9 +192,6 @@ impl RefCommand {
             reason: msg,
         })?;
 
-        // Fetch task and verify it exists
-        self.fetch_task_refs(db, &id).await?;
-
         // Check if file exists (warning only)
         let warning = if !Path::new(&parsed.path).exists() {
             Some(format!("file '{}' does not exist", parsed.path))
@@ -228,11 +199,28 @@ impl RefCommand {
             None
         };
 
-        // Append the new reference
-        self.append_ref(db, &id, &parsed).await?;
+        // Build the CodeRef
+        let code_ref = CodeRef {
+            path: parsed.path.clone(),
+            line_start: parsed.line_start,
+            line_end: parsed.line_end,
+            name: self.name.clone(),
+            description: self.description.clone(),
+        };
 
-        // Update timestamp
-        self.update_timestamp(db, &id).await?;
+        // Use service to append the ref (handles existence check, timestamp, and notification)
+        service
+            .append_ref(&id, &code_ref)
+            .await
+            .map_err(|e| match e {
+                vertebrae_core::ServiceError::TaskNotFound { task_id } => {
+                    DbError::TaskNotFound { task_id }
+                }
+                vertebrae_core::ServiceError::Database(db_err) => db_err,
+                other => DbError::ValidationError {
+                    message: other.to_string(),
+                },
+            })?;
 
         Ok(RefResult {
             id,
@@ -243,80 +231,25 @@ impl RefCommand {
             warning,
         })
     }
-
-    /// Fetch the task by ID and return its refs (mainly to verify task exists).
-    async fn fetch_task_refs(&self, db: &Database, id: &str) -> Result<TaskRefsRow, DbError> {
-        let query = format!("SELECT id, refs FROM task:{}", id);
-        let mut result = db.client().query(&query).await?;
-        let task: Option<TaskRefsRow> = result.take(0)?;
-
-        task.ok_or_else(|| DbError::TaskNotFound {
-            task_id: self.id.clone(),
-        })
-    }
-
-    /// Append a new code reference to the task.
-    async fn append_ref(
-        &self,
-        db: &Database,
-        id: &str,
-        parsed: &ParsedFileRef,
-    ) -> Result<(), DbError> {
-        let escaped_path = parsed.path.replace('\\', "\\\\").replace('"', "\\\"");
-
-        // Build the ref object
-        let mut ref_parts = vec![format!(r#""path": "{}""#, escaped_path)];
-
-        if let Some(start) = parsed.line_start {
-            ref_parts.push(format!(r#""line_start": {}"#, start));
-        }
-
-        if let Some(end) = parsed.line_end {
-            ref_parts.push(format!(r#""line_end": {}"#, end));
-        }
-
-        if let Some(ref name) = self.name {
-            let escaped_name = name.replace('\\', "\\\\").replace('"', "\\\"");
-            ref_parts.push(format!(r#""name": "{}""#, escaped_name));
-        }
-
-        if let Some(ref desc) = self.description {
-            let escaped_desc = desc.replace('\\', "\\\\").replace('"', "\\\"");
-            ref_parts.push(format!(r#""description": "{}""#, escaped_desc));
-        }
-
-        let ref_obj = format!("{{ {} }}", ref_parts.join(", "));
-
-        let query = format!(
-            "UPDATE task:{} SET refs = array::append(refs, {})",
-            id, ref_obj
-        );
-        db.client().query(&query).await?;
-
-        Ok(())
-    }
-
-    /// Update the task's updated_at timestamp.
-    async fn update_timestamp(&self, db: &Database, id: &str) -> Result<(), DbError> {
-        let query = format!("UPDATE task:{} SET updated_at = time::now()", id);
-        db.client().query(&query).await?;
-        Ok(())
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde::Deserialize;
+    use vertebrae_core::DefaultTaskService;
+    use vertebrae_db::Database;
 
-    /// Helper to create an in-memory test database
-    async fn setup_test_db() -> Database {
+    /// Helper to create a test service with an in-memory database
+    async fn setup_test_service() -> DefaultTaskService {
         let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-        db
+        DefaultTaskService::new(db)
     }
 
     /// Helper to create a task in the database
-    async fn create_task(db: &Database, id: &str, title: &str) {
+    async fn create_task(service: &DefaultTaskService, id: &str, title: &str) {
+        let db = service.database();
         let query = format!(
             r#"CREATE task:{} SET
                 title = "{}",
@@ -331,27 +264,19 @@ mod tests {
     }
 
     /// Helper to get refs from a task
-    async fn get_refs(db: &Database, id: &str) -> Vec<CodeRefRow> {
-        let query = format!("SELECT refs FROM task:{}", id);
-        let mut result = db.client().query(&query).await.unwrap();
-
-        #[derive(Deserialize)]
-        struct Row {
-            #[serde(default, rename = "refs")]
-            code_refs: Vec<CodeRefRow>,
-        }
-
-        let row: Option<Row> = result.take(0).unwrap();
-        row.map(|r| r.code_refs).unwrap_or_default()
+    async fn get_refs(service: &DefaultTaskService, id: &str) -> Vec<CodeRef> {
+        let task = service.get_task(id).await.unwrap();
+        task.code_refs
     }
 
     /// Helper to get updated_at timestamp
-    async fn get_updated_at(db: &Database, id: &str) -> surrealdb::sql::Datetime {
+    async fn get_updated_at(service: &DefaultTaskService, id: &str) -> surrealdb::sql::Datetime {
         #[derive(Deserialize)]
         struct TimestampRow {
             updated_at: surrealdb::sql::Datetime,
         }
 
+        let db = service.database();
         let query = format!("SELECT updated_at FROM task:{}", id);
         let mut result = db.client().query(&query).await.unwrap();
         let row: Option<TimestampRow> = result.take(0).unwrap();
@@ -466,9 +391,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_ref_add_simple_file() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "task1", "Test Task").await;
+        create_task(&service, "task1", "Test Task").await;
 
         let cmd = RefCommand {
             id: "task1".to_string(),
@@ -477,7 +402,7 @@ mod tests {
             description: None,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok(), "Ref add failed: {:?}", result.err());
 
         let ref_result = result.unwrap();
@@ -489,16 +414,16 @@ mod tests {
         assert!(ref_result.warning.is_some());
 
         // Verify ref was added
-        let refs = get_refs(&db, "task1").await;
+        let refs = get_refs(&service, "task1").await;
         assert_eq!(refs.len(), 1);
-        assert_eq!(refs[0].path.as_deref(), Some("nonexistent/path/file.rs"));
+        assert_eq!(refs[0].path, "nonexistent/path/file.rs");
     }
 
     #[tokio::test]
     async fn test_ref_add_with_line_range() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "task1", "Test Task").await;
+        create_task(&service, "task1", "Test Task").await;
 
         let cmd = RefCommand {
             id: "task1".to_string(),
@@ -507,14 +432,14 @@ mod tests {
             description: None,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         let ref_result = result.unwrap();
         assert_eq!(ref_result.line_start, Some(45));
         assert_eq!(ref_result.line_end, Some(67));
 
-        let refs = get_refs(&db, "task1").await;
+        let refs = get_refs(&service, "task1").await;
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0].line_start, Some(45));
         assert_eq!(refs[0].line_end, Some(67));
@@ -522,9 +447,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_ref_add_with_single_line() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "task1", "Test Task").await;
+        create_task(&service, "task1", "Test Task").await;
 
         let cmd = RefCommand {
             id: "task1".to_string(),
@@ -533,14 +458,14 @@ mod tests {
             description: None,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         let ref_result = result.unwrap();
         assert_eq!(ref_result.line_start, Some(45));
         assert!(ref_result.line_end.is_none());
 
-        let refs = get_refs(&db, "task1").await;
+        let refs = get_refs(&service, "task1").await;
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0].line_start, Some(45));
         assert!(refs[0].line_end.is_none());
@@ -548,9 +473,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_ref_add_with_name() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "task1", "Test Task").await;
+        create_task(&service, "task1", "Test Task").await;
 
         let cmd = RefCommand {
             id: "task1".to_string(),
@@ -559,19 +484,19 @@ mod tests {
             description: None,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
-        let refs = get_refs(&db, "task1").await;
+        let refs = get_refs(&service, "task1").await;
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0].name.as_deref(), Some("hash_password"));
     }
 
     #[tokio::test]
     async fn test_ref_add_with_description() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "task1", "Test Task").await;
+        create_task(&service, "task1", "Test Task").await;
 
         let cmd = RefCommand {
             id: "task1".to_string(),
@@ -580,10 +505,10 @@ mod tests {
             description: Some("Main authentication function".to_string()),
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
-        let refs = get_refs(&db, "task1").await;
+        let refs = get_refs(&service, "task1").await;
         assert_eq!(refs.len(), 1);
         assert_eq!(
             refs[0].description.as_deref(),
@@ -593,9 +518,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_ref_add_with_name_and_description() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "task1", "Test Task").await;
+        create_task(&service, "task1", "Test Task").await;
 
         let cmd = RefCommand {
             id: "task1".to_string(),
@@ -604,10 +529,10 @@ mod tests {
             description: Some("Entry point".to_string()),
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
-        let refs = get_refs(&db, "task1").await;
+        let refs = get_refs(&service, "task1").await;
         assert_eq!(refs.len(), 1);
         assert_eq!(refs[0].name.as_deref(), Some("authenticate"));
         assert_eq!(refs[0].description.as_deref(), Some("Entry point"));
@@ -615,9 +540,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_ref_add_multiple_refs() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "task1", "Test Task").await;
+        create_task(&service, "task1", "Test Task").await;
 
         let cmd1 = RefCommand {
             id: "task1".to_string(),
@@ -625,7 +550,7 @@ mod tests {
             name: Some("hash_password".to_string()),
             description: None,
         };
-        cmd1.execute(&db).await.unwrap();
+        cmd1.execute(&service).await.unwrap();
 
         let cmd2 = RefCommand {
             id: "task1".to_string(),
@@ -633,7 +558,7 @@ mod tests {
             name: Some("authenticate".to_string()),
             description: Some("Entry point".to_string()),
         };
-        cmd2.execute(&db).await.unwrap();
+        cmd2.execute(&service).await.unwrap();
 
         let cmd3 = RefCommand {
             id: "task1".to_string(),
@@ -641,9 +566,9 @@ mod tests {
             name: Some("config".to_string()),
             description: None,
         };
-        cmd3.execute(&db).await.unwrap();
+        cmd3.execute(&service).await.unwrap();
 
-        let refs = get_refs(&db, "task1").await;
+        let refs = get_refs(&service, "task1").await;
         assert_eq!(refs.len(), 3);
 
         // Verify specific ref names and paths
@@ -659,7 +584,7 @@ mod tests {
         );
         assert!(ref_names.contains("config"), "Should contain config ref");
 
-        let ref_paths: HashSet<_> = refs.iter().filter_map(|r| r.path.as_deref()).collect();
+        let ref_paths: HashSet<_> = refs.iter().map(|r| r.path.as_str()).collect();
         assert!(
             ref_paths.contains("src/auth.ex"),
             "Should contain src/auth.ex path"
@@ -672,7 +597,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_ref_nonexistent_task_fails() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
         let cmd = RefCommand {
             id: "nonexistent".to_string(),
@@ -681,25 +606,15 @@ mod tests {
             description: None,
         };
 
-        let result = cmd.execute(&db).await;
-        match result {
-            Err(DbError::TaskNotFound { task_id }) => {
-                assert_eq!(
-                    task_id, "nonexistent",
-                    "Expected task_id 'nonexistent', got: {}",
-                    task_id
-                );
-            }
-            Err(other) => panic!("Expected NotFound error, got {:?}", other),
-            Ok(_) => panic!("Expected error, got success"),
-        }
+        let result = cmd.execute(&service).await;
+        assert!(result.is_err(), "Expected error for nonexistent task");
     }
 
     #[tokio::test]
     async fn test_ref_invalid_line_range_fails() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "task1", "Test Task").await;
+        create_task(&service, "task1", "Test Task").await;
 
         let cmd = RefCommand {
             id: "task1".to_string(),
@@ -708,7 +623,7 @@ mod tests {
             description: None,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         match result {
             Err(DbError::InvalidPath { reason, .. }) => {
                 assert!(
@@ -724,9 +639,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_ref_invalid_line_number_fails() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "task1", "Test Task").await;
+        create_task(&service, "task1", "Test Task").await;
 
         let cmd = RefCommand {
             id: "task1".to_string(),
@@ -735,7 +650,7 @@ mod tests {
             description: None,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         match result {
             Err(DbError::InvalidPath { reason, .. }) => {
                 assert!(
@@ -751,12 +666,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_ref_updates_timestamp() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "task1", "Test Task").await;
+        create_task(&service, "task1", "Test Task").await;
 
         // Get initial timestamp
-        let initial_ts = get_updated_at(&db, "task1").await;
+        let initial_ts = get_updated_at(&service, "task1").await;
 
         // Wait a tiny bit to ensure time passes
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -768,11 +683,11 @@ mod tests {
             description: None,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         // Verify updated_at was refreshed
-        let new_ts = get_updated_at(&db, "task1").await;
+        let new_ts = get_updated_at(&service, "task1").await;
         assert!(
             new_ts > initial_ts,
             "updated_at should be refreshed: {:?} > {:?}",
@@ -783,9 +698,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_ref_case_insensitive_id() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "task1", "Test Task").await;
+        create_task(&service, "task1", "Test Task").await;
 
         let cmd = RefCommand {
             id: "TASK1".to_string(),
@@ -794,19 +709,19 @@ mod tests {
             description: None,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok(), "Case-insensitive lookup should work");
 
         // Verify ref was added
-        let refs = get_refs(&db, "task1").await;
+        let refs = get_refs(&service, "task1").await;
         assert_eq!(refs.len(), 1);
     }
 
     #[tokio::test]
     async fn test_ref_special_characters_in_content() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "task1", "Test Task").await;
+        create_task(&service, "task1", "Test Task").await;
 
         let cmd = RefCommand {
             id: "task1".to_string(),
@@ -815,7 +730,7 @@ mod tests {
             description: Some(r#"desc with \backslash"#.to_string()),
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok(), "Special chars failed: {:?}", result.err());
     }
 

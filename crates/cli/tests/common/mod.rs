@@ -14,11 +14,12 @@ use vertebrae_cli::commands::{
         WorkflowShowCommand, WorkflowUnassignCommand, WorkflowUpdateCommand,
     },
 };
+use vertebrae_core::DefaultTaskService;
 use vertebrae_db::{AgentConfig, Database, DbError, Level, SectionType};
 
-/// Test context containing an isolated database and temp directory
+/// Test context containing an isolated database, service, and temp directory
 pub struct TestContext {
-    pub db: Database,
+    pub service: DefaultTaskService,
     pub temp_dir: PathBuf,
 }
 
@@ -40,8 +41,9 @@ impl TestContext {
 
         let db = Database::connect(&temp_dir).await.unwrap();
         db.init().await.unwrap();
+        let service = DefaultTaskService::new(db);
 
-        Self { db, temp_dir }
+        Self { service, temp_dir }
     }
 
     /// Create a new test context with a specific suffix for debugging.
@@ -59,8 +61,14 @@ impl TestContext {
 
         let db = Database::connect(&temp_dir).await.unwrap();
         db.init().await.unwrap();
+        let service = DefaultTaskService::new(db);
 
-        Self { db, temp_dir }
+        Self { service, temp_dir }
+    }
+
+    /// Get a reference to the database for direct queries in tests
+    pub fn db(&self) -> &Database {
+        self.service.database()
     }
 
     /// Clean up the test database directory.
@@ -747,15 +755,15 @@ mod tests {
         );
 
         // Verify both are empty initially
-        assert_eq!(count_tasks(&ctx1.db).await, 0);
-        assert_eq!(count_tasks(&ctx2.db).await, 0);
+        assert_eq!(count_tasks(&ctx1.db()).await, 0);
+        assert_eq!(count_tasks(&ctx2.db()).await, 0);
 
         // Add task to ctx1
-        create_task(&ctx1.db, "task1", "Test Task", "task", "todo").await;
+        create_task(&ctx1.db(), "task1", "Test Task", "task", "todo").await;
 
         // Verify ctx1 has task but ctx2 does not
-        assert_eq!(count_tasks(&ctx1.db).await, 1);
-        assert_eq!(count_tasks(&ctx2.db).await, 0);
+        assert_eq!(count_tasks(&ctx1.db()).await, 1);
+        assert_eq!(count_tasks(&ctx2.db()).await, 0);
     }
 
     #[tokio::test]
@@ -768,15 +776,15 @@ mod tests {
     async fn test_create_task_helper() {
         let ctx = TestContext::new().await;
 
-        create_task(&ctx.db, "abc123", "My Task", "ticket", "backlog").await;
+        create_task(&ctx.db(), "abc123", "My Task", "ticket", "backlog").await;
 
-        assert!(task_exists(&ctx.db, "abc123").await);
+        assert!(task_exists(&ctx.db(), "abc123").await);
         assert_eq!(
-            get_task_status(&ctx.db, "abc123").await,
+            get_task_status(&ctx.db(), "abc123").await,
             Some("backlog".to_string())
         );
         assert_eq!(
-            get_task_level(&ctx.db, "abc123").await,
+            get_task_level(&ctx.db(), "abc123").await,
             Some("ticket".to_string())
         );
     }
@@ -785,30 +793,30 @@ mod tests {
     async fn test_relationship_helpers() {
         let ctx = TestContext::new().await;
 
-        create_task(&ctx.db, "parent", "Parent", "epic", "todo").await;
-        create_task(&ctx.db, "child", "Child", "ticket", "todo").await;
-        create_task(&ctx.db, "blocker", "Blocker", "task", "done").await;
+        create_task(&ctx.db(), "parent", "Parent", "epic", "todo").await;
+        create_task(&ctx.db(), "child", "Child", "ticket", "todo").await;
+        create_task(&ctx.db(), "blocker", "Blocker", "task", "done").await;
 
-        create_child_of(&ctx.db, "child", "parent").await;
-        create_depends_on(&ctx.db, "child", "blocker").await;
+        create_child_of(&ctx.db(), "child", "parent").await;
+        create_depends_on(&ctx.db(), "child", "blocker").await;
 
-        assert!(child_of_exists(&ctx.db, "child", "parent").await);
-        assert!(dependency_exists(&ctx.db, "child", "blocker").await);
+        assert!(child_of_exists(&ctx.db(), "child", "parent").await);
+        assert!(dependency_exists(&ctx.db(), "child", "blocker").await);
     }
 
     #[tokio::test]
     async fn test_count_and_get_all_helpers() {
         let ctx = TestContext::new().await;
 
-        assert_eq!(count_tasks(&ctx.db).await, 0);
+        assert_eq!(count_tasks(&ctx.db()).await, 0);
 
-        create_task(&ctx.db, "task1", "Task 1", "task", "todo").await;
-        create_task(&ctx.db, "task2", "Task 2", "task", "todo").await;
-        create_task(&ctx.db, "task3", "Task 3", "task", "todo").await;
+        create_task(&ctx.db(), "task1", "Task 1", "task", "todo").await;
+        create_task(&ctx.db(), "task2", "Task 2", "task", "todo").await;
+        create_task(&ctx.db(), "task3", "Task 3", "task", "todo").await;
 
-        assert_eq!(count_tasks(&ctx.db).await, 3);
+        assert_eq!(count_tasks(&ctx.db()).await, 3);
 
-        let ids = get_all_task_ids(&ctx.db).await;
+        let ids = get_all_task_ids(&ctx.db()).await;
         assert_eq!(ids.len(), 3);
         assert!(ids.contains(&"task1".to_string()));
         assert!(ids.contains(&"task2".to_string()));
