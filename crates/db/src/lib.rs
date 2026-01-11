@@ -15,10 +15,10 @@ pub use models::{
     SessionLog, Status, StepExecution, Task, Workflow, WorkflowStep,
 };
 pub use repository::{
-    BlockerNode, GraphQueries, MigrationResult, Progress, RelationshipRepository, SectionRule,
-    StepExecutionRepository, TaskFilter, TaskLister, TaskRepository, TaskSummary, TaskUpdate,
-    TriageValidationConfig, TriageValidationResult, TriageValidator, ValidationIssue,
-    ValidationSeverity, WorkflowRepository, WorkflowUpdate,
+    BlockerNode, DEFAULT_WORKFLOW_ID, GraphQueries, MigrationResult, Progress,
+    RelationshipRepository, SectionRule, StepExecutionRepository, TaskFilter, TaskLister,
+    TaskRepository, TaskSummary, TaskUpdate, TriageValidationConfig, TriageValidationResult,
+    TriageValidator, ValidationIssue, ValidationSeverity, WorkflowRepository, WorkflowUpdate,
 };
 
 use std::path::{Path, PathBuf};

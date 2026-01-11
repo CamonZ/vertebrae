@@ -92,6 +92,7 @@ pub fn add_cmd(title: &str) -> AddCommand {
         parent: None,
         depends_on: vec![],
         needs_review: false,
+        workflow: None,
     }
 }
 
@@ -107,6 +108,7 @@ pub fn add_cmd_with_level(title: &str, level: Level) -> AddCommand {
         parent: None,
         depends_on: vec![],
         needs_review: false,
+        workflow: None,
     }
 }
 
@@ -121,6 +123,7 @@ pub fn add_cmd_with_parent(title: &str, parent: &str) -> AddCommand {
         parent: Some(parent.to_string()),
         depends_on: vec![],
         needs_review: false,
+        workflow: None,
     }
 }
 
@@ -140,6 +143,7 @@ pub fn add_cmd_full(
         parent: parent.map(String::from),
         depends_on: vec![],
         needs_review: false,
+        workflow: None,
     }
 }
 

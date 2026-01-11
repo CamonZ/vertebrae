@@ -4,7 +4,7 @@
 
 use crate::id::IdGenerator;
 use clap::Args;
-use vertebrae_db::{Database, DbError, Level, Priority, Status, Task};
+use vertebrae_db::{DEFAULT_WORKFLOW_ID, Database, DbError, Level, Priority, Status, Task};
 
 /// Create a new task
 #[derive(Debug, Args)]
@@ -40,6 +40,10 @@ pub struct AddCommand {
     /// Mark task as needing human review before completion
     #[arg(long = "needs-review")]
     pub needs_review: bool,
+
+    /// Workflow ID to assign task to (defaults to 'default')
+    #[arg(long)]
+    pub workflow: Option<String>,
 }
 
 /// Parse a level string into a Level enum
@@ -73,6 +77,8 @@ impl AddCommand {
     /// Execute the add command.
     ///
     /// Creates a new task with the specified options and stores it in the database.
+    /// Automatically assigns the task to a workflow (defaults to "default") to enable
+    /// execution history tracking when transitioning through workflow steps.
     ///
     /// # Arguments
     ///
@@ -84,6 +90,7 @@ impl AddCommand {
     /// - The title is empty
     /// - Parent task doesn't exist
     /// - Dependency tasks don't exist
+    /// - Specified workflow doesn't exist
     /// - Database operations fail
     pub async fn execute(&self, db: &Database) -> Result<String, DbError> {
         // Validate title is not empty
@@ -112,6 +119,17 @@ impl AddCommand {
                     reason: format!("dependency task '{}' does not exist", dep_id),
                 });
             }
+        }
+
+        // Determine which workflow to use (default to "default")
+        let workflow_id = self.workflow.as_deref().unwrap_or(DEFAULT_WORKFLOW_ID);
+
+        // Validate workflow exists before creating task
+        if !self.workflow_exists(db, workflow_id).await? {
+            return Err(DbError::NotFound {
+                entity: "workflow".to_string(),
+                id: workflow_id.to_string(),
+            });
         }
 
         // Generate unique ID with collision detection
@@ -149,6 +167,10 @@ impl AddCommand {
         for dep_id in &self.depends_on {
             self.create_depends_on_edge(db, &id, dep_id).await?;
         }
+
+        // Assign the task to the validated workflow
+        let workflow_thing = surrealdb::sql::Thing::from(("workflow", workflow_id));
+        self.assign_workflow(db, &id, &workflow_thing).await?;
 
         Ok(id)
     }
@@ -265,6 +287,21 @@ impl AddCommand {
         let query = format!("RELATE task:{} -> depends_on -> task:{}", task_id, dep_id);
         db.client().query(&query).await?;
         Ok(())
+    }
+
+    /// Check if a workflow with the given ID exists.
+    async fn workflow_exists(&self, db: &Database, id: &str) -> Result<bool, DbError> {
+        db.workflows().exists(id).await
+    }
+
+    /// Assign a task to a workflow.
+    async fn assign_workflow(
+        &self,
+        db: &Database,
+        task_id: &str,
+        workflow_id: &surrealdb::sql::Thing,
+    ) -> Result<(), DbError> {
+        db.tasks().assign_workflow(task_id, workflow_id).await
     }
 }
 
@@ -387,6 +424,7 @@ mod tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            workflow: None,
         };
 
         let id = cmd.execute(&db).await.expect("Add should succeed");
@@ -414,6 +452,7 @@ mod tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            workflow: None,
         };
 
         let id = cmd.execute(&db).await.expect("Add should succeed");
@@ -437,6 +476,7 @@ mod tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            workflow: None,
         };
 
         let id = cmd.execute(&db).await.expect("Add should succeed");
@@ -460,6 +500,7 @@ mod tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            workflow: None,
         };
 
         let id = cmd.execute(&db).await.expect("Add should succeed");
@@ -485,6 +526,7 @@ mod tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            workflow: None,
         };
 
         let result = cmd.execute(&db).await;
@@ -514,6 +556,7 @@ mod tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            workflow: None,
         };
 
         let result = cmd.execute(&db).await;
@@ -543,6 +586,7 @@ mod tests {
             parent: Some("nonexistent".to_string()),
             depends_on: vec![],
             needs_review: false,
+            workflow: None,
         };
 
         let result = cmd.execute(&db).await;
@@ -577,6 +621,7 @@ mod tests {
             parent: None,
             depends_on: vec!["nonexistent".to_string()],
             needs_review: false,
+            workflow: None,
         };
 
         let result = cmd.execute(&db).await;
@@ -612,6 +657,7 @@ mod tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            workflow: None,
         };
 
         let parent_id = parent_cmd.execute(&db).await.unwrap();
@@ -626,6 +672,7 @@ mod tests {
             parent: Some(parent_id.clone()),
             depends_on: vec![],
             needs_review: false,
+            workflow: None,
         };
 
         let child_id = child_cmd.execute(&db).await.unwrap();
@@ -660,6 +707,7 @@ mod tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            workflow: None,
         };
 
         let dep_id = dep_cmd.execute(&db).await.unwrap();
@@ -674,6 +722,7 @@ mod tests {
             parent: None,
             depends_on: vec![dep_id.clone()],
             needs_review: false,
+            workflow: None,
         };
 
         let task_id = task_cmd.execute(&db).await.unwrap();
@@ -708,6 +757,7 @@ mod tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            workflow: None,
         };
         let dep1_id = dep1_cmd.execute(&db).await.unwrap();
 
@@ -720,6 +770,7 @@ mod tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            workflow: None,
         };
         let dep2_id = dep2_cmd.execute(&db).await.unwrap();
 
@@ -733,6 +784,7 @@ mod tests {
             parent: None,
             depends_on: vec![dep1_id.clone(), dep2_id.clone()],
             needs_review: false,
+            workflow: None,
         };
 
         let task_id = task_cmd.execute(&db).await.unwrap();
@@ -773,6 +825,7 @@ mod tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            workflow: None,
         };
         let parent_id = parent_cmd
             .execute(&db)
@@ -789,6 +842,7 @@ mod tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            workflow: None,
         };
         let dep_id = dep_cmd
             .execute(&db)
@@ -805,6 +859,7 @@ mod tests {
             parent: Some(parent_id.clone()),
             depends_on: vec![dep_id.clone()],
             needs_review: false,
+            workflow: None,
         };
 
         let task_id = cmd.execute(&db).await.expect("Task should be created");
@@ -848,6 +903,7 @@ mod tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            workflow: None,
         };
 
         let result = cmd.execute(&db).await.unwrap();
@@ -868,6 +924,7 @@ mod tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            workflow: None,
         };
 
         let exists = cmd.task_exists(&db, "xxxxxx").await.unwrap();
@@ -888,6 +945,7 @@ mod tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            workflow: None,
         };
 
         let id = cmd.execute(&db).await.unwrap();
@@ -910,6 +968,7 @@ mod tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            workflow: None,
         };
 
         let id = cmd.execute(&db).await.unwrap();
@@ -943,6 +1002,7 @@ mod tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            workflow: None,
         };
 
         let id = cmd.execute(&db).await.unwrap();
@@ -979,6 +1039,7 @@ mod tests {
                 parent: None,
                 depends_on: vec![],
                 needs_review: false,
+                workflow: None,
             };
 
             let id = cmd.execute(&db).await.unwrap();
@@ -999,6 +1060,7 @@ mod tests {
             parent: None,
             depends_on: vec![],
             needs_review: true,
+            workflow: None,
         };
 
         let id = cmd.execute(&db).await.expect("Add should succeed");
@@ -1036,6 +1098,7 @@ mod tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            workflow: None,
         };
 
         let id = cmd.execute(&db).await.expect("Add should succeed");
@@ -1058,5 +1121,152 @@ mod tests {
             !row.unwrap().needs_human_review,
             "needs_human_review should be false by default"
         );
+    }
+
+    #[tokio::test]
+    async fn test_add_task_assigns_default_workflow() {
+        let db = setup_test_db().await;
+
+        let cmd = AddCommand {
+            title: "Task with default workflow".to_string(),
+            level: None,
+            description: None,
+            priority: None,
+            tags: vec![],
+            parent: None,
+            depends_on: vec![],
+            needs_review: false,
+            workflow: None, // Should default to "default" workflow
+        };
+
+        let id = cmd.execute(&db).await.expect("Add should succeed");
+
+        // Verify task was assigned to default workflow with current_step = 0
+        #[derive(Debug, serde::Deserialize)]
+        struct WorkflowRow {
+            workflow_id: Option<surrealdb::sql::Thing>,
+            current_step: Option<i64>,
+        }
+
+        let mut result = db
+            .client()
+            .query(format!("SELECT workflow_id, current_step FROM task:{}", id))
+            .await
+            .unwrap();
+
+        let row: Option<WorkflowRow> = result.take(0).unwrap();
+        let row = row.expect("Task should exist");
+
+        assert!(
+            row.workflow_id.is_some(),
+            "Task should have workflow_id assigned"
+        );
+        let workflow_id = row.workflow_id.unwrap();
+        assert_eq!(
+            workflow_id.id.to_raw(),
+            "default",
+            "Task should be assigned to 'default' workflow"
+        );
+        assert_eq!(
+            row.current_step,
+            Some(0),
+            "Task should have current_step = 0"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_add_task_with_custom_workflow() {
+        let db = setup_test_db().await;
+
+        // Create a custom workflow
+        use vertebrae_db::{AgentConfig, Workflow, WorkflowStep};
+        let custom_workflow = Workflow::new("Custom Workflow")
+            .with_step(WorkflowStep::new(
+                "start",
+                AgentConfig::new().with_model("test"),
+                0,
+            ))
+            .with_step(WorkflowStep::new(
+                "end",
+                AgentConfig::new().with_model("test"),
+                1,
+            ));
+        db.workflows()
+            .create("custom", &custom_workflow)
+            .await
+            .expect("Should create custom workflow");
+
+        let cmd = AddCommand {
+            title: "Task with custom workflow".to_string(),
+            level: None,
+            description: None,
+            priority: None,
+            tags: vec![],
+            parent: None,
+            depends_on: vec![],
+            needs_review: false,
+            workflow: Some("custom".to_string()),
+        };
+
+        let id = cmd.execute(&db).await.expect("Add should succeed");
+
+        // Verify task was assigned to custom workflow
+        #[derive(Debug, serde::Deserialize)]
+        struct WorkflowRow {
+            workflow_id: Option<surrealdb::sql::Thing>,
+            current_step: Option<i64>,
+        }
+
+        let mut result = db
+            .client()
+            .query(format!("SELECT workflow_id, current_step FROM task:{}", id))
+            .await
+            .unwrap();
+
+        let row: Option<WorkflowRow> = result.take(0).unwrap();
+        let row = row.expect("Task should exist");
+
+        assert!(
+            row.workflow_id.is_some(),
+            "Task should have workflow_id assigned"
+        );
+        let workflow_id = row.workflow_id.unwrap();
+        assert_eq!(
+            workflow_id.id.to_raw(),
+            "custom",
+            "Task should be assigned to 'custom' workflow"
+        );
+        assert_eq!(
+            row.current_step,
+            Some(0),
+            "Task should have current_step = 0"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_add_task_with_nonexistent_workflow_fails() {
+        let db = setup_test_db().await;
+
+        let cmd = AddCommand {
+            title: "Task with nonexistent workflow".to_string(),
+            level: None,
+            description: None,
+            priority: None,
+            tags: vec![],
+            parent: None,
+            depends_on: vec![],
+            needs_review: false,
+            workflow: Some("nonexistent".to_string()),
+        };
+
+        let result = cmd.execute(&db).await;
+        match result {
+            Err(DbError::NotFound { entity, id }) => {
+                assert_eq!(entity, "workflow", "Expected workflow entity in error");
+                assert_eq!(id, "nonexistent", "Expected workflow ID in error");
+            }
+            Err(other) => panic!("Expected NotFound error, got {:?}", other),
+            Ok(_) => panic!("Expected error, got success"),
+        }
     }
 }
