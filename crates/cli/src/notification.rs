@@ -5,6 +5,9 @@
 //! converts these notifications to events that trigger frontend cache invalidation.
 
 use serde::Serialize;
+use std::sync::Arc;
+use vertebrae_core::service::MutationCallback;
+pub use vertebrae_core::service::MutationEvent;
 
 /// Default port that the Tauri notification server listens on
 pub const NOTIFICATION_PORT: u16 = 17273;
@@ -75,6 +78,42 @@ pub async fn notify_workflow_changed(workflow_id: String, change_type: &str) {
             e
         );
     }
+}
+
+/// Create a MutationCallback that bridges service layer events to HTTP notifications
+///
+/// This function creates a callback suitable for passing to `DefaultTaskService::with_callback()`.
+/// The callback converts `MutationEvent` types to HTTP POST requests to the Tauri notification
+/// endpoint at `http://127.0.0.1:17273/api/notify-change`.
+///
+/// Since the callback signature is synchronous (`Fn(MutationEvent)`) but HTTP notifications
+/// are async, this spawns a tokio task for each notification. Notifications are fire-and-forget
+/// and failures are logged but don't block the caller.
+///
+/// # Example
+///
+/// ```ignore
+/// use vertebrae_cli::notification::create_http_notification_callback;
+/// use vertebrae_core::service::DefaultTaskService;
+///
+/// let callback = create_http_notification_callback();
+/// let service = DefaultTaskService::with_callback(db, callback);
+/// ```
+pub fn create_http_notification_callback() -> MutationCallback {
+    Arc::new(move |event: MutationEvent| {
+        // Extract task_id and change_type from the event
+        let (task_id, change_type) = match event {
+            MutationEvent::TaskCreated { id } => (id, "Created"),
+            MutationEvent::TaskUpdated { id } => (id, "Updated"),
+            MutationEvent::TaskDeleted { id } => (id, "Deleted"),
+            MutationEvent::TaskStatusChanged { id, .. } => (id, "StatusChanged"),
+        };
+
+        // Spawn async notification task - fire and forget
+        tokio::spawn(async move {
+            notify_task_changed(task_id, change_type).await;
+        });
+    })
 }
 
 /// Send a notification payload to the Tauri notification server
@@ -178,5 +217,56 @@ mod tests {
         let json = serde_json::to_string(&payload).unwrap();
         assert!(json.contains("workflow:default"));
         assert!(json.contains("Updated"));
+    }
+
+    #[test]
+    fn test_create_http_notification_callback_returns_arc() {
+        // Verify the callback can be created and is Send + Sync
+        let callback = create_http_notification_callback();
+
+        // The callback should be clonable (Arc)
+        let _cloned = Arc::clone(&callback);
+
+        // Verify it's Send + Sync by moving to a function that requires it
+        fn assert_send_sync<T: Send + Sync>(_: &T) {}
+        assert_send_sync(&callback);
+    }
+
+    #[tokio::test]
+    async fn test_callback_handles_all_event_variants() {
+        use vertebrae_db::Status;
+
+        // This test verifies that the callback handles all MutationEvent variants
+        // without panicking. We can't easily test the HTTP call itself without
+        // a mock server, but we can verify the callback processes each variant.
+        let callback = create_http_notification_callback();
+
+        // Create all event variants
+        let events = vec![
+            MutationEvent::TaskCreated {
+                id: "abc123".to_string(),
+            },
+            MutationEvent::TaskUpdated {
+                id: "abc123".to_string(),
+            },
+            MutationEvent::TaskDeleted {
+                id: "abc123".to_string(),
+            },
+            MutationEvent::TaskStatusChanged {
+                id: "abc123".to_string(),
+                old_status: Status::Backlog,
+                new_status: Status::Todo,
+            },
+        ];
+
+        // Call the callback with each event - should not panic
+        // (the actual HTTP calls will fail since no server is running,
+        // but that's logged and ignored)
+        for event in events {
+            callback(event);
+        }
+
+        // Give spawned tasks a moment to execute (they'll fail silently due to no server)
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
 }
