@@ -39,7 +39,7 @@ export function TasksPage() {
 
   const memoizedFilters = useMemo(() => filters, [filters]);
   const { tasks, isLoading, error, refetch } = useTasks(memoizedFilters);
-  const { hierarchy, isLoading: isHierarchyLoading, error: hierarchyError, refetch: refetchHierarchy } = useTaskHierarchy();
+  const { hierarchy, isLoading: isHierarchyLoading, error: hierarchyError, refetch: refetchHierarchy } = useTaskHierarchy(null, memoizedFilters);
 
   const handleFiltersChange = useCallback((newFilters: TaskFilterOptions) => {
     setFilters(newFilters);

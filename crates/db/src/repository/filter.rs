@@ -372,19 +372,22 @@ impl<'a> TaskLister<'a> {
             .replace('\'', "\\'") // Escape single quotes
     }
 
-    /// Build search condition for case-insensitive title and description search.
+    /// Build search condition for case-insensitive title, description, and ID search.
     ///
-    /// Returns a condition that matches if the search query appears in either
-    /// the title or description (case-insensitive). Description can be null,
+    /// Returns a condition that matches if the search query appears in the title,
+    /// description, or task ID (case-insensitive). Description can be null,
     /// so we handle that case by defaulting to empty string.
+    /// The ID is stored as a SurrealDB Thing, so we use meta::id() to extract
+    /// the string portion for matching.
     fn build_search_condition(search: &str) -> String {
         let escaped = Self::escape_search_string(search);
         let lower_search = escaped.to_lowercase();
         // Use string::lowercase for case-insensitive matching
         // Handle null description by using IFNULL (or description ?? "" in SurrealQL)
+        // Use meta::id() to extract the ID string portion for matching
         format!(
-            "(string::lowercase(title) CONTAINS \"{}\" OR string::lowercase(description ?? \"\") CONTAINS \"{}\")",
-            lower_search, lower_search
+            "(string::lowercase(title) CONTAINS \"{}\" OR string::lowercase(description ?? \"\") CONTAINS \"{}\" OR string::lowercase(meta::id(id)) CONTAINS \"{}\")",
+            lower_search, lower_search, lower_search
         )
     }
 
@@ -1432,10 +1435,11 @@ mod tests {
     }
 
     #[test]
-    fn test_build_search_condition_checks_title_and_description() {
+    fn test_build_search_condition_checks_title_description_and_id() {
         let condition = TaskLister::build_search_condition("search");
         assert!(condition.contains("string::lowercase(title)"));
         assert!(condition.contains("string::lowercase(description ?? \"\")"));
+        assert!(condition.contains("string::lowercase(meta::id(id))"));
     }
 
     #[test]
@@ -1644,6 +1648,75 @@ mod tests {
         let result = lister.list(&filter).await.unwrap();
 
         assert!(result.is_empty());
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_list_with_search_finds_by_task_id() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        // Create tasks with specific IDs
+        create_task(&db, "abc123", "Task One", "task", "todo", None, &[]).await;
+        create_task(&db, "xyz789", "Task Two", "task", "todo", None, &[]).await;
+        create_task(&db, "def456", "Task Three", "task", "todo", None, &[]).await;
+
+        let lister = TaskLister::new(db.client());
+
+        // Search by partial task ID
+        let filter = TaskFilter::new().with_search("abc");
+        let result = lister.list(&filter).await.unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].id, "abc123");
+
+        // Search by different partial ID
+        let filter2 = TaskFilter::new().with_search("xyz");
+        let result2 = lister.list(&filter2).await.unwrap();
+
+        assert_eq!(result2.len(), 1);
+        assert_eq!(result2[0].id, "xyz789");
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_list_with_search_by_id_is_case_insensitive() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        // Create task with mixed case ID
+        create_task(&db, "AbCdEf", "Task One", "task", "todo", None, &[]).await;
+
+        let lister = TaskLister::new(db.client());
+
+        // Search with lowercase should find uppercase ID
+        let filter = TaskFilter::new().with_search("abcdef");
+        let result = lister.list(&filter).await.unwrap();
+        assert_eq!(result.len(), 1);
+
+        // Search with uppercase should also find
+        let filter2 = TaskFilter::new().with_search("ABCDEF");
+        let result2 = lister.list(&filter2).await.unwrap();
+        assert_eq!(result2.len(), 1);
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_list_with_empty_search_returns_all_tasks() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        create_task(&db, "task1", "Task A", "task", "todo", None, &[]).await;
+        create_task(&db, "task2", "Task B", "task", "todo", None, &[]).await;
+        create_task(&db, "task3", "Task C", "task", "todo", None, &[]).await;
+
+        let lister = TaskLister::new(db.client());
+
+        // Empty search should return all tasks (no filter applied)
+        let filter = TaskFilter::new();
+        let result = lister.list(&filter).await.unwrap();
+
+        assert_eq!(result.len(), 3);
 
         cleanup(&temp_dir);
     }
