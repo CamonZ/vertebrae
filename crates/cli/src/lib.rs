@@ -6,6 +6,7 @@
 pub mod commands;
 pub mod error;
 mod id;
+pub mod notification;
 pub mod output;
 
 pub use commands::*;

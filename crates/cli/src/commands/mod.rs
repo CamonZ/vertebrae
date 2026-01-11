@@ -62,6 +62,7 @@ pub use unsection::UnsectionCommand;
 pub use update::UpdateCommand;
 pub use workflow::WorkflowCommand;
 
+use crate::notification;
 use crate::output::{format_task_table, format_task_tree};
 use clap::Subcommand;
 use vertebrae_core::TaskService;
@@ -167,6 +168,7 @@ impl Command {
         match self {
             Command::Add(cmd) => {
                 let id = cmd.execute(db).await?;
+                notification::notify_task_changed(format!("task:{}", id), "Created").await;
                 Ok(CommandResult::Message(format!("Created task: {}", id)))
             }
             Command::Blockers(cmd) => {
@@ -175,18 +177,28 @@ impl Command {
             }
             Command::CriterionRef(cmd) => {
                 let result = cmd.execute(db).await?;
+                notification::notify_task_changed(format!("task:{}", cmd.id), "Updated").await;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Delete(cmd) => {
                 let message = cmd.execute(db).await?;
+                // Extract task ID from message (format: "Deleted task: task:id")
+                if let Some(task_id) = message.split("task:").nth(1) {
+                    let task_id = format!("task:{}", task_id.trim());
+                    notification::notify_task_changed(task_id, "Deleted").await;
+                }
                 Ok(CommandResult::Message(message))
             }
             Command::Depend(cmd) => {
                 let result = cmd.execute(db).await?;
+                notification::notify_task_changed(format!("task:{}", result.task_id), "Updated")
+                    .await;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Done(cmd) => {
                 let result = cmd.execute(db).await?;
+                notification::notify_task_changed(format!("task:{}", cmd.id), "StatusChanged")
+                    .await;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Execution(cmd) => {
@@ -235,6 +247,7 @@ impl Command {
             }
             Command::Ref(cmd) => {
                 let result = cmd.execute(db).await?;
+                notification::notify_task_changed(format!("task:{}", cmd.id), "Updated").await;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Refs(cmd) => {
@@ -243,10 +256,13 @@ impl Command {
             }
             Command::Review(cmd) => {
                 let result = cmd.execute(db).await?;
+                notification::notify_task_changed(format!("task:{}", cmd.id), "StatusChanged")
+                    .await;
                 Ok(CommandResult::Message(result))
             }
             Command::Section(cmd) => {
                 let result = cmd.execute(db).await?;
+                notification::notify_task_changed(format!("task:{}", cmd.id), "Updated").await;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Sections(cmd) => {
@@ -259,30 +275,40 @@ impl Command {
             }
             Command::Start(cmd) => {
                 let result = cmd.execute(db).await?;
+                notification::notify_task_changed(format!("task:{}", cmd.id), "StatusChanged")
+                    .await;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Undepend(cmd) => {
                 let result = cmd.execute(db).await?;
+                notification::notify_task_changed(format!("task:{}", cmd.id), "Updated").await;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Unref(cmd) => {
                 let result = cmd.execute(db).await?;
+                notification::notify_task_changed(format!("task:{}", cmd.id), "Updated").await;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Unsection(cmd) => {
                 let result = cmd.execute(db).await?;
+                notification::notify_task_changed(format!("task:{}", cmd.id), "Updated").await;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::StepDone(cmd) => {
                 let result = cmd.execute(db).await?;
+                notification::notify_task_changed(format!("task:{}", cmd.id), "Updated").await;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Submit(cmd) => {
                 let result = cmd.execute(db).await?;
+                notification::notify_task_changed(format!("task:{}", cmd.id), "StatusChanged")
+                    .await;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::TransitionTo(cmd) => {
                 let result = cmd.execute(db).await?;
+                notification::notify_task_changed(format!("task:{}", result.id), "StatusChanged")
+                    .await;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Triage(cmd) => {
@@ -291,6 +317,7 @@ impl Command {
             }
             Command::Update(cmd) => {
                 let id = cmd.execute(db).await?;
+                notification::notify_task_changed(format!("task:{}", id), "Updated").await;
                 Ok(CommandResult::Message(format!("Updated task: {}", id)))
             }
             Command::Workflow(cmd) => {
