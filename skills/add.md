@@ -39,3 +39,23 @@ epic       → tickets → tasks
 
 ## Priorities
 - `low`, `medium`, `high`, `critical`
+
+## Next steps: Move to todo (triage)
+
+After creating a ticket, you'll need to add structured content before it can be moved to `todo` status.
+
+**Required sections to triage** (minimum to move from backlog → todo):
+- `testing_criterion` - 2 minimum (at least 1 unit + 1 integration test)
+- `step` - 1 minimum (implementation steps)
+- `constraint` - 2 minimum (architectural guidelines + test quality rules)
+
+**Strongly encouraged** (will warn but allow with `--force`):
+- `anti_pattern` - What NOT to do / pitfalls to avoid
+- `failure_test` - Expected error scenarios and failure cases
+
+**Recommended** (informational notes):
+- `goal` or `desired_behavior` - Clear objective
+- `context` - Background information
+- `current_behavior` - For bugs/changes (current state)
+
+See `/triage` for complete workflow and examples of adding these sections.
