@@ -15,7 +15,9 @@ use events::{TaskChangedEvent, WorkflowChangedEvent};
 /// Environment variable for database path override
 const VTB_DB_PATH_ENV: &str = "VTB_DB_PATH";
 
-/// Resolve database path using same logic as CLI
+/// Resolve database path for the GUI application.
+/// Unlike the CLI which uses the git project root, the GUI uses the user's home directory
+/// as the default location since it can be launched from anywhere (e.g., Finder).
 fn resolve_db_path() -> PathBuf {
     // Check environment variable first
     if let Ok(env_path) = std::env::var(VTB_DB_PATH_ENV) {
@@ -24,8 +26,15 @@ fn resolve_db_path() -> PathBuf {
         }
     }
 
-    // Use default path (~/.vtb/data)
-    Database::default_path().unwrap_or_else(|_| PathBuf::from(".vtb/data"))
+    // Try git project root first (for development), then fall back to home directory
+    if let Ok(path) = Database::default_path() {
+        return path;
+    }
+
+    // Fall back to ~/.vtb/data for bundled app launched from Finder
+    dirs::home_dir()
+        .map(|home| home.join(".vtb/data"))
+        .unwrap_or_else(|| PathBuf::from(".vtb/data"))
 }
 
 /// Example command that will be exported with type definitions.
