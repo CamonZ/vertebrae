@@ -93,6 +93,13 @@ impl LiveQueryRegistry {
         client: Surreal<Db>,
         app_handle: AppHandle,
     ) -> Result<(), String> {
+        // Set the namespace and database context for this client
+        client
+            .use_ns("vertebrae")
+            .use_db("main")
+            .await
+            .map_err(|e| format!("Failed to set namespace/database context: {}", e))?;
+
         // Start LIVE SELECT on task table
         let stream_result = client.select(TASK_TABLE).live().await;
 
@@ -104,10 +111,13 @@ impl LiveQueryRegistry {
             }
         };
 
-        log::info!("LIVE query started on task table");
+        log::info!("LIVE query started on task table - now listening for changes...");
 
         // Spawn a task to process the notification stream
         let handle = tokio::spawn(async move {
+            log::info!(
+                "[LiveQuery] Task stream listening loop started, waiting for notifications..."
+            );
             while let Some(result) = stream.next().await {
                 match result {
                     Ok(notification) => {
@@ -160,6 +170,13 @@ impl LiveQueryRegistry {
         client: Surreal<Db>,
         app_handle: AppHandle,
     ) -> Result<(), String> {
+        // Set the namespace and database context for this client
+        client
+            .use_ns("vertebrae")
+            .use_db("main")
+            .await
+            .map_err(|e| format!("Failed to set namespace/database context: {}", e))?;
+
         // Start LIVE SELECT on workflow table
         let stream_result = client.select(WORKFLOW_TABLE).live().await;
 
@@ -171,10 +188,13 @@ impl LiveQueryRegistry {
             }
         };
 
-        log::info!("LIVE query started on workflow table");
+        log::info!("LIVE query started on workflow table - now listening for changes...");
 
         // Spawn a task to process the notification stream
         let handle = tokio::spawn(async move {
+            log::info!(
+                "[LiveQuery] Workflow stream listening loop started, waiting for notifications..."
+            );
             while let Some(result) = stream.next().await {
                 match result {
                     Ok(notification) => {
@@ -245,16 +265,36 @@ fn handle_task_notification(
         }
     };
 
-    log::debug!("Task change detected: {} - {:?}", task_id, change_type);
+    log::info!(
+        "[LiveQuery] Task change detected: {} - {:?}",
+        task_id
+            .rsplit_once(':')
+            .map(|(_, id)| id)
+            .unwrap_or(&task_id),
+        change_type
+    );
 
     // Emit Tauri event to frontend
     let event = TaskChangedEvent {
-        task_id,
-        change_type,
+        task_id: task_id.clone(),
+        change_type: change_type.clone(),
     };
 
     if let Err(e) = app_handle.emit("task-changed-event", &event) {
-        log::error!("Failed to emit TaskChangedEvent: {}", e);
+        log::error!(
+            "[LiveQuery] Failed to emit TaskChangedEvent for {}: {}",
+            task_id,
+            e
+        );
+    } else {
+        log::info!(
+            "[LiveQuery] TaskChangedEvent emitted to frontend: {} - {:?}",
+            task_id
+                .rsplit_once(':')
+                .map(|(_, id)| id)
+                .unwrap_or(&task_id),
+            change_type
+        );
     }
 }
 
@@ -281,20 +321,36 @@ fn handle_workflow_notification(
         }
     };
 
-    log::debug!(
-        "Workflow change detected: {} - {:?}",
-        workflow_id,
+    log::info!(
+        "[LiveQuery] Workflow change detected: {} - {:?}",
+        workflow_id
+            .rsplit_once(':')
+            .map(|(_, id)| id)
+            .unwrap_or(&workflow_id),
         change_type
     );
 
     // Emit Tauri event to frontend
     let event = WorkflowChangedEvent {
-        workflow_id,
-        change_type,
+        workflow_id: workflow_id.clone(),
+        change_type: change_type.clone(),
     };
 
     if let Err(e) = app_handle.emit("workflow-changed-event", &event) {
-        log::error!("Failed to emit WorkflowChangedEvent: {}", e);
+        log::error!(
+            "[LiveQuery] Failed to emit WorkflowChangedEvent for {}: {}",
+            workflow_id,
+            e
+        );
+    } else {
+        log::info!(
+            "[LiveQuery] WorkflowChangedEvent emitted to frontend: {} - {:?}",
+            workflow_id
+                .rsplit_once(':')
+                .map(|(_, id)| id)
+                .unwrap_or(&workflow_id),
+            change_type
+        );
     }
 }
 

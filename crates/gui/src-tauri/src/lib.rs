@@ -1,6 +1,7 @@
 pub mod commands;
 pub mod events;
 pub mod live_queries;
+pub mod notification_server;
 pub mod project_config;
 pub mod types;
 
@@ -68,11 +69,31 @@ fn create_builder() -> Builder {
 pub fn run() {
     let builder = create_builder();
 
-    tauri::Builder::default()
-        .plugin(tauri_plugin_dialog::init())
+    let mut tauri_app_builder = tauri::Builder::default().plugin(tauri_plugin_dialog::init());
+
+    if cfg!(debug_assertions) {
+        tauri_app_builder = tauri_app_builder.plugin(
+            tauri_plugin_log::Builder::default()
+                .level(log::LevelFilter::Info)
+                .build(),
+        );
+    }
+
+    tauri_app_builder
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             builder.mount_events(app);
+
+            // Start HTTP notification server for CLI mutations
+            let app_handle = app.handle().clone();
+            let server_handle = notification_server::start_notification_server(
+                app_handle,
+                notification_server::DEFAULT_NOTIFICATION_PORT,
+            );
+            log::info!(
+                "[STARTUP] Notification server started on 127.0.0.1:{}",
+                notification_server::DEFAULT_NOTIFICATION_PORT
+            );
 
             // Initialize project configuration
             let project_config = ProjectConfig::new().expect("Failed to initialize project config");
@@ -96,21 +117,33 @@ pub fn run() {
                                 let client = db.client().clone();
 
                                 // Start LIVE query for task table changes
+                                log::info!("[STARTUP] Initializing LIVE queries");
                                 let mut registry = live_queries::LiveQueryRegistry::new();
+                                log::info!("[STARTUP] Starting task LIVE query");
                                 if let Err(e) = registry
                                     .start_task_live_query(client.clone(), app_handle.clone())
                                     .await
                                 {
-                                    log::error!("Failed to start task LIVE query: {}", e);
+                                    log::error!("[STARTUP] Failed to start task LIVE query: {}", e);
                                     log::info!("App will continue with polling fallback");
+                                } else {
+                                    log::info!("[STARTUP] Task LIVE query started successfully");
                                 }
 
                                 // Start LIVE query for workflow table changes
+                                log::info!("[STARTUP] Starting workflow LIVE query");
                                 if let Err(e) =
                                     registry.start_workflow_live_query(client, app_handle).await
                                 {
-                                    log::error!("Failed to start workflow LIVE query: {}", e);
+                                    log::error!(
+                                        "[STARTUP] Failed to start workflow LIVE query: {}",
+                                        e
+                                    );
                                     log::info!("App will continue with polling fallback");
+                                } else {
+                                    log::info!(
+                                        "[STARTUP] Workflow LIVE query started successfully"
+                                    );
                                 }
 
                                 (Some(DefaultTaskService::new(db)), registry)
@@ -136,13 +169,9 @@ pub fn run() {
             // Store LIVE query registry to keep streams alive for app lifetime
             app.manage(RwLock::new(live_registry));
 
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        .build(),
-                )?;
-            }
+            // Store notification server handle to keep it running for app lifetime
+            app.manage(server_handle);
+
             Ok(())
         })
         .run(tauri::generate_context!())

@@ -48,3 +48,6 @@ vertebrae-core = { path = "../../core" }
 
 # Direct dependency for LIVE query types
 surrealdb = { version = "2" }
+
+# HTTP server for receiving mutation notifications from CLI
+axum = "0.7"
