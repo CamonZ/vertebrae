@@ -32,7 +32,9 @@ export function TaskFilters({ filters, onFiltersChange }: TaskFiltersProps) {
     (event: React.ChangeEvent<HTMLSelectElement>) => {
       const value = event.target.value;
       const statuses = value ? [value as TaskStatus] : null;
-      onFiltersChange({ ...filters, statuses });
+      // When 'All' is selected (no specific status), include done tasks to show everything
+      const include_done = value ? filters.include_done : true;
+      onFiltersChange({ ...filters, statuses, include_done });
     },
     [filters, onFiltersChange]
   );
@@ -69,7 +71,7 @@ export function TaskFilters({ filters, onFiltersChange }: TaskFiltersProps) {
       tags: null,
       root_only: null,
       children_of: null,
-      include_done: null,
+      include_done: true, // Include done tasks when showing 'All' statuses
       search: null,
     });
   }, [onFiltersChange]);

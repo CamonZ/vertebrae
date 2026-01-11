@@ -1,11 +1,11 @@
-import { useState, useCallback, useMemo } from 'react';
-import type { TaskFilterOptions, TaskSummary } from '../bindings';
-import { useTasks } from '../hooks/useTasks';
-import { TaskList, TaskFilters } from '../components/TaskList';
-import { TaskDetailPanel } from '../components/TaskDetail';
+import { useState, useCallback, useMemo } from "react";
+import type { TaskFilterOptions, TaskSummary } from "../bindings";
+import { useTasks } from "../hooks/useTasks";
+import { TaskList, TaskFilters } from "../components/TaskList";
+import { TaskDetailPanel } from "../components/TaskDetail";
 
 /**
- * Initial empty filter state
+ * Initial filter state - shows all tasks including done when status is 'All'
  */
 const INITIAL_FILTERS: TaskFilterOptions = {
   statuses: null,
@@ -13,7 +13,7 @@ const INITIAL_FILTERS: TaskFilterOptions = {
   tags: null,
   root_only: null,
   children_of: null,
-  include_done: null,
+  include_done: true, // Include done tasks by default when showing 'All' statuses
   search: null,
 };
 
@@ -45,7 +45,7 @@ export function TasksPage() {
   }, []);
 
   // Count active tasks
-  const activeCount = tasks.filter(t => t.status === 'in_progress').length;
+  const activeCount = tasks.filter((t) => t.status === "in_progress").length;
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -79,7 +79,7 @@ export function TasksPage() {
               aria-label="Refresh task list"
             >
               <svg
-                className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`}
+                className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`}
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -92,13 +92,16 @@ export function TasksPage() {
                   d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
                 />
               </svg>
-              {isLoading ? 'Loading...' : 'Refresh'}
+              {isLoading ? "Loading..." : "Refresh"}
             </button>
           </div>
 
           {/* Filter controls */}
           <div className="relative">
-            <TaskFilters filters={filters} onFiltersChange={handleFiltersChange} />
+            <TaskFilters
+              filters={filters}
+              onFiltersChange={handleFiltersChange}
+            />
           </div>
         </div>
 
@@ -117,11 +120,14 @@ export function TasksPage() {
         {!isLoading && !error && tasks.length > 0 && (
           <div className="flex items-center justify-between border-t border-border bg-bg-secondary px-6 py-2">
             <p className="font-mono text-xs text-text-muted">
-              {tasks.length} task{tasks.length !== 1 ? 's' : ''}
+              {tasks.length} task{tasks.length !== 1 ? "s" : ""}
             </p>
             {selectedTaskId && (
               <p className="font-mono text-xs text-text-muted">
-                Selected: <span className="text-primary">{selectedTaskId.slice(0, 6)}</span>
+                Selected:{" "}
+                <span className="text-primary">
+                  {selectedTaskId.slice(0, 6)}
+                </span>
               </p>
             )}
           </div>
