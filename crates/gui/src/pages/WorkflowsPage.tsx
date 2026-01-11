@@ -1,11 +1,18 @@
 import { useWorkflows } from "../hooks/useWorkflows";
+import { useWorkflowChangeListener } from "../hooks/useWorkflowChangeListener";
 import { WorkflowGrid } from "../components/WorkflowGrid";
 
 /**
  * WorkflowsPage displays all workflows with neural-pathway design.
+ * Automatically refreshes when workflow change events are received.
  */
 export function WorkflowsPage() {
   const { workflows, isLoading, error, refetch } = useWorkflows();
+
+  // Subscribe to workflow change events for automatic list refresh
+  useWorkflowChangeListener({
+    onWorkflowListChange: refetch,
+  });
 
   return (
     <div className="relative flex-1 space-y-6 overflow-auto p-6">

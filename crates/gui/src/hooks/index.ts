@@ -3,6 +3,8 @@ export { useTasks } from "./useTasks";
 export { useTask } from "./useTask";
 export { useTaskHierarchy } from "./useTaskHierarchy";
 export { useTaskExecutions } from "./useTaskExecutions";
+export { useTaskChangeListener } from "./useTaskChangeListener";
 export { useWorkflows } from "./useWorkflows";
 export { useWorkflow } from "./useWorkflow";
+export { useWorkflowChangeListener } from "./useWorkflowChangeListener";
 export { useTheme } from "./useTheme";

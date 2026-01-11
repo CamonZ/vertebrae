@@ -1,5 +1,7 @@
 import { useParams, Link } from "react-router-dom";
 import { useWorkflow } from "../hooks/useWorkflow";
+import { useWorkflowChangeListener } from "../hooks/useWorkflowChangeListener";
+import { useTaskChangeListener } from "../hooks/useTaskChangeListener";
 import { WorkflowPipeline } from "../components/WorkflowPipeline";
 
 /**
@@ -12,6 +14,7 @@ function truncateId(id: string): string {
 /**
  * WorkflowDetailPage displays a workflow's pipeline view.
  * Features neural-pathway-inspired design with animated connections.
+ * Automatically refreshes when workflow or task change events are received.
  */
 export function WorkflowDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -21,6 +24,16 @@ export function WorkflowDetailPage() {
     error,
     refetch,
   } = useWorkflow(id);
+
+  // Subscribe to workflow change events for this workflow
+  useWorkflowChangeListener({
+    onWorkflowChange: refetch,
+  });
+
+  // Subscribe to task change events - workflow shows associated tasks
+  useTaskChangeListener({
+    onTaskListChange: refetch,
+  });
 
   if (isLoading) {
     return (

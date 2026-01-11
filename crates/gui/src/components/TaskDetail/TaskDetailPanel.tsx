@@ -1,10 +1,14 @@
-import { useState } from 'react';
-import type { TaskWithRelations, TaskStatus, TaskLevel, TaskPriority } from '../../bindings';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import type { TaskWithRelations, TaskStatus, TaskLevel, TaskPriority, TaskChangedEvent } from '../../bindings';
+import { events } from '../../bindings';
 import { useTask } from '../../hooks/useTask';
 import { TaskSections } from './TaskSections';
 import { TaskCodeRefs } from './TaskCodeRefs';
 import { TaskRelations } from './TaskRelations';
 import { ExecutionHistory } from './ExecutionHistory';
+
+/** Debounce delay in milliseconds for batching rapid events */
+const DEBOUNCE_MS = 100;
 
 interface TaskDetailPanelProps {
   taskId: string | null;
@@ -271,10 +275,66 @@ function TaskDetailsTab({ taskData }: { taskData: TaskWithRelations }) {
 /**
  * TaskDetailPanel displays comprehensive task information in a side panel.
  * Features neural-pathway-inspired design with glowing accents.
+ * Automatically refreshes when task change events are received.
  */
 export function TaskDetailPanel({ taskId, onClose, onTaskSelect }: TaskDetailPanelProps) {
   const [activeTab, setActiveTab] = useState<TabId>('details');
-  const { task: taskData, isLoading, error } = useTask(taskId);
+  const { task: taskData, isLoading, error, refetch } = useTask(taskId);
+
+  // Track pending refetch for debouncing
+  const pendingRefetch = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refetchRef = useRef(refetch);
+  refetchRef.current = refetch;
+
+  // Handle task change events for this specific task
+  const handleTaskChanged = useCallback(
+    (event: { payload: TaskChangedEvent }) => {
+      const { task_id, change_type } = event.payload;
+
+      // Only respond to events for the currently displayed task
+      if (task_id !== taskId) {
+        return;
+      }
+
+      console.debug(
+        `[TaskDetailPanel] Received ${change_type} event for task ${task_id.slice(0, 6)}`
+      );
+
+      // For deletions, refetch immediately (will show error state)
+      if (change_type === "Deleted") {
+        refetchRef.current();
+        return;
+      }
+
+      // Debounce updates to batch rapid changes
+      if (pendingRefetch.current) {
+        clearTimeout(pendingRefetch.current);
+      }
+      pendingRefetch.current = setTimeout(() => {
+        refetchRef.current();
+        pendingRefetch.current = null;
+      }, DEBOUNCE_MS);
+    },
+    [taskId]
+  );
+
+  // Subscribe to task change events
+  useEffect(() => {
+    if (!taskId) {
+      return;
+    }
+
+    const unlistenPromise = events.taskChangedEvent.listen(handleTaskChanged);
+
+    return () => {
+      unlistenPromise.then((unlisten) => unlisten());
+
+      // Clear pending timeout on cleanup
+      if (pendingRefetch.current) {
+        clearTimeout(pendingRefetch.current);
+      }
+    };
+  }, [taskId, handleTaskChanged]);
 
   if (!taskId) {
     return null;

@@ -2,6 +2,7 @@ import { useState, useCallback, useMemo } from "react";
 import type { TaskFilterOptions, TaskSummary, TaskHierarchyNode } from "../bindings";
 import { useTasks } from "../hooks/useTasks";
 import { useTaskHierarchy } from "../hooks/useTaskHierarchy";
+import { useTaskChangeListener } from "../hooks/useTaskChangeListener";
 import { TaskList, TaskFilters, TaskTreeView, type ViewMode } from "../components/TaskList";
 import { TaskDetailPanel } from "../components/TaskDetail";
 
@@ -40,6 +41,17 @@ export function TasksPage() {
   const memoizedFilters = useMemo(() => filters, [filters]);
   const { tasks, isLoading, error, refetch } = useTasks(memoizedFilters);
   const { hierarchy, isLoading: isHierarchyLoading, error: hierarchyError, refetch: refetchHierarchy } = useTaskHierarchy(null, memoizedFilters);
+
+  // Refetch both list and hierarchy when task changes are detected
+  const handleTaskListChange = useCallback(() => {
+    refetch();
+    refetchHierarchy();
+  }, [refetch, refetchHierarchy]);
+
+  // Subscribe to task change events for automatic list refresh
+  useTaskChangeListener({
+    onTaskListChange: handleTaskListChange,
+  });
 
   const handleFiltersChange = useCallback((newFilters: TaskFilterOptions) => {
     setFilters(newFilters);
