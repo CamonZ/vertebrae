@@ -2720,3 +2720,243 @@ mod workflows {
         assert_eq!(workflow.steps.len(), 5);
     }
 }
+
+// =============================================================================
+// EXECUTION TRACKING TESTS
+// =============================================================================
+
+mod execution_tracking {
+    use super::*;
+    use vertebrae_db::ExecutionStatus;
+
+    /// Helper to assign a task to the default workflow
+    async fn assign_to_default_workflow(db: &vertebrae_db::Database, task_id: &str) {
+        let workflow_thing = surrealdb::sql::Thing::from(("workflow", "default"));
+        db.tasks()
+            .assign_workflow(task_id, &workflow_thing)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_transition_creates_execution_record() {
+        let ctx = TestContext::new().await;
+
+        // Create task and assign to default workflow
+        create_task(&ctx.db, "task1", "Test Task", "task", "backlog").await;
+        assign_to_default_workflow(&ctx.db, "task1").await;
+
+        // Transition to todo
+        triage_cmd("task1").execute(&ctx.db).await.unwrap();
+
+        // Verify execution record was created
+        let executions = ctx
+            .db
+            .executions()
+            .list_executions_for_task("task1")
+            .await
+            .unwrap();
+        assert_eq!(executions.len(), 1, "Should have one execution record");
+        assert_eq!(executions[0].step_name, "todo");
+        assert_eq!(executions[0].status, ExecutionStatus::InProgress);
+        assert!(executions[0].completed_at.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_transition_completes_previous_execution() {
+        let ctx = TestContext::new().await;
+
+        // Create task and assign to default workflow
+        create_task(&ctx.db, "task1", "Test Task", "task", "backlog").await;
+        assign_to_default_workflow(&ctx.db, "task1").await;
+
+        // Transition to todo then to in_progress
+        triage_cmd("task1").execute(&ctx.db).await.unwrap();
+        start_cmd("task1").execute(&ctx.db).await.unwrap();
+
+        // Verify executions
+        let executions = ctx
+            .db
+            .executions()
+            .list_executions_for_task("task1")
+            .await
+            .unwrap();
+        assert_eq!(executions.len(), 2);
+
+        // First execution (todo) should be completed
+        assert_eq!(executions[0].step_name, "todo");
+        assert_eq!(executions[0].status, ExecutionStatus::Completed);
+        assert!(
+            executions[0].completed_at.is_some(),
+            "First execution should have completed_at"
+        );
+
+        // Second execution (in_progress) should be in progress
+        assert_eq!(executions[1].step_name, "in_progress");
+        assert_eq!(executions[1].status, ExecutionStatus::InProgress);
+        assert!(
+            executions[1].completed_at.is_none(),
+            "Second execution should not have completed_at"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_full_lifecycle_creates_all_executions() {
+        let ctx = TestContext::new().await;
+
+        // Create task and assign to default workflow
+        create_task(&ctx.db, "task1", "Test Task", "task", "backlog").await;
+        assign_to_default_workflow(&ctx.db, "task1").await;
+
+        // Full lifecycle: backlog -> todo -> in_progress -> pending_review -> done
+        triage_cmd("task1").execute(&ctx.db).await.unwrap();
+        start_cmd("task1").execute(&ctx.db).await.unwrap();
+        submit_cmd("task1").execute(&ctx.db).await.unwrap();
+        done_cmd("task1").execute(&ctx.db).await.unwrap();
+
+        // Verify all executions
+        let executions = ctx
+            .db
+            .executions()
+            .list_executions_for_task("task1")
+            .await
+            .unwrap();
+        assert_eq!(executions.len(), 4, "Should have 4 execution records");
+
+        // Verify step names in order
+        assert_eq!(executions[0].step_name, "todo");
+        assert_eq!(executions[1].step_name, "in_progress");
+        assert_eq!(executions[2].step_name, "pending_review");
+        assert_eq!(executions[3].step_name, "done");
+
+        // All except last should be completed
+        for (i, exec) in executions.iter().enumerate() {
+            if i < 3 {
+                assert_eq!(
+                    exec.status,
+                    ExecutionStatus::Completed,
+                    "Execution {} should be completed",
+                    i
+                );
+                assert!(
+                    exec.completed_at.is_some(),
+                    "Execution {} should have completed_at",
+                    i
+                );
+            } else {
+                assert_eq!(
+                    exec.status,
+                    ExecutionStatus::InProgress,
+                    "Last execution should be in progress"
+                );
+                assert!(
+                    exec.completed_at.is_none(),
+                    "Last execution should not have completed_at"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_no_execution_for_task_without_workflow() {
+        let ctx = TestContext::new().await;
+
+        // Create task WITHOUT workflow assignment
+        create_task(&ctx.db, "task1", "Test Task", "task", "backlog").await;
+
+        // Transition through lifecycle
+        triage_cmd("task1").execute(&ctx.db).await.unwrap();
+        start_cmd("task1").execute(&ctx.db).await.unwrap();
+
+        // Verify no execution records
+        let executions = ctx
+            .db
+            .executions()
+            .list_executions_for_task("task1")
+            .await
+            .unwrap();
+        assert!(
+            executions.is_empty(),
+            "Should have no execution records for task without workflow"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_execution_timestamps_are_chronological() {
+        let ctx = TestContext::new().await;
+
+        // Create task and assign to default workflow
+        create_task(&ctx.db, "task1", "Test Task", "task", "backlog").await;
+        assign_to_default_workflow(&ctx.db, "task1").await;
+
+        // Transition through steps
+        triage_cmd("task1").execute(&ctx.db).await.unwrap();
+        start_cmd("task1").execute(&ctx.db).await.unwrap();
+        submit_cmd("task1").execute(&ctx.db).await.unwrap();
+
+        let executions = ctx
+            .db
+            .executions()
+            .list_executions_for_task("task1")
+            .await
+            .unwrap();
+        assert_eq!(executions.len(), 3);
+
+        // Verify chronological order
+        for i in 0..executions.len() - 1 {
+            let current = &executions[i];
+            let next = &executions[i + 1];
+
+            // Each started_at should be <= next's started_at
+            assert!(
+                current.started_at <= next.started_at,
+                "Execution {} started_at should be <= execution {} started_at",
+                i,
+                i + 1
+            );
+
+            // completed_at should be <= next's started_at
+            if let Some(completed_at) = current.completed_at {
+                assert!(
+                    completed_at <= next.started_at,
+                    "Execution {} completed_at should be <= execution {} started_at",
+                    i,
+                    i + 1
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_current_step_updated_on_transition() {
+        let ctx = TestContext::new().await;
+
+        // Create task and assign to default workflow
+        create_task(&ctx.db, "task1", "Test Task", "task", "backlog").await;
+        assign_to_default_workflow(&ctx.db, "task1").await;
+
+        // Initial state - current_step should be 0 (backlog)
+        let task = ctx.db.tasks().get("task1").await.unwrap().unwrap();
+        assert_eq!(task.current_step, Some(0));
+
+        // Transition to todo (step 1)
+        triage_cmd("task1").execute(&ctx.db).await.unwrap();
+        let task = ctx.db.tasks().get("task1").await.unwrap().unwrap();
+        assert_eq!(task.current_step, Some(1));
+
+        // Transition to in_progress (step 2)
+        start_cmd("task1").execute(&ctx.db).await.unwrap();
+        let task = ctx.db.tasks().get("task1").await.unwrap().unwrap();
+        assert_eq!(task.current_step, Some(2));
+
+        // Transition to pending_review (step 3)
+        submit_cmd("task1").execute(&ctx.db).await.unwrap();
+        let task = ctx.db.tasks().get("task1").await.unwrap().unwrap();
+        assert_eq!(task.current_step, Some(3));
+
+        // Transition to done (step 4)
+        done_cmd("task1").execute(&ctx.db).await.unwrap();
+        let task = ctx.db.tasks().get("task1").await.unwrap().unwrap();
+        assert_eq!(task.current_step, Some(4));
+    }
+}

@@ -4,9 +4,12 @@
 //! with proper validation. This consolidates the functionality of start, submit,
 //! done, triage, and reject commands into a single unified interface.
 
+use chrono::Utc;
 use clap::{Args, ValueEnum};
+use surrealdb::sql::Thing;
 use vertebrae_db::{
-    Database, DbError, DbResult, Status, TaskUpdate, TriageValidationResult, TriageValidator,
+    Database, DbError, DbResult, ExecutionStatus, Status, StepExecution, TaskUpdate,
+    TriageValidationResult, TriageValidator,
 };
 
 /// Target status for the transition-to command
@@ -46,6 +49,19 @@ impl TargetStatus {
             TargetStatus::PendingReview => "pending_review",
             TargetStatus::Done => "done",
             TargetStatus::Rejected => "rejected",
+        }
+    }
+
+    /// Get the default workflow step index for this target status.
+    ///
+    /// Returns None for Rejected since it's not part of the standard workflow.
+    pub fn default_step_index(&self) -> Option<usize> {
+        match self {
+            TargetStatus::Todo => Some(1),
+            TargetStatus::InProgress => Some(2),
+            TargetStatus::PendingReview => Some(3),
+            TargetStatus::Done => Some(4),
+            TargetStatus::Rejected => None,
         }
     }
 }
@@ -274,6 +290,7 @@ impl TransitionToCommand {
         if self.skip_validation {
             let updates = TaskUpdate::new().with_status(Status::Todo);
             db.tasks().update(id, &updates).await?;
+            self.track_workflow_execution(db, id).await?;
 
             return Ok(TransitionToResult {
                 id: id.to_string(),
@@ -326,6 +343,7 @@ impl TransitionToCommand {
         // All checks passed - perform the transition
         let updates = TaskUpdate::new().with_status(Status::Todo);
         db.tasks().update(id, &updates).await?;
+        self.track_workflow_execution(db, id).await?;
 
         Ok(TransitionToResult {
             id: id.to_string(),
@@ -354,6 +372,7 @@ impl TransitionToCommand {
             .with_status(Status::InProgress)
             .set_started_at_if_null();
         db.tasks().update(id, &updates).await?;
+        self.track_workflow_execution(db, id).await?;
 
         Ok(TransitionToResult {
             id: id.to_string(),
@@ -376,6 +395,7 @@ impl TransitionToCommand {
     ) -> Result<TransitionToResult, DbError> {
         let updates = TaskUpdate::new().with_status(Status::PendingReview);
         db.tasks().update(id, &updates).await?;
+        self.track_workflow_execution(db, id).await?;
 
         Ok(TransitionToResult {
             id: id.to_string(),
@@ -411,6 +431,7 @@ impl TransitionToCommand {
 
         // Mark task as done
         db.tasks().mark_done(id).await?;
+        self.track_workflow_execution(db, id).await?;
 
         Ok(TransitionToResult {
             id: id.to_string(),
@@ -463,6 +484,79 @@ impl TransitionToCommand {
         db.tasks()
             .add_section(id, vertebrae_db::SectionType::Constraint, &content)
             .await
+    }
+
+    /// Track workflow step execution for a task transition.
+    ///
+    /// If the task has an assigned workflow:
+    /// 1. Completes the previous step execution (if any) by setting completed_at
+    /// 2. Updates the task's current_step to match the target status
+    /// 3. Creates a new StepExecution record for the new step
+    ///
+    /// Does nothing if the task has no workflow assigned.
+    async fn track_workflow_execution(&self, db: &Database, task_id: &str) -> Result<(), DbError> {
+        // Get the step index for the target status
+        let step_index = match self.target.default_step_index() {
+            Some(idx) => idx,
+            None => return Ok(()), // Rejected has no step
+        };
+
+        // Fetch task to check if it has a workflow
+        let task = db
+            .tasks()
+            .get(task_id)
+            .await?
+            .ok_or_else(|| DbError::TaskNotFound {
+                task_id: task_id.to_string(),
+            })?;
+
+        // Only track if task has a workflow assigned
+        let workflow_id = match &task.workflow_id {
+            Some(wf_id) => wf_id.clone(),
+            None => return Ok(()), // No workflow assigned
+        };
+
+        // Get the workflow to find the step name
+        let workflow_id_str = workflow_id.id.to_string();
+        let workflow =
+            db.workflows()
+                .get(&workflow_id_str)
+                .await?
+                .ok_or_else(|| DbError::NotFound {
+                    entity: "workflow".to_string(),
+                    id: workflow_id_str.clone(),
+                })?;
+
+        // Get the step name for this index
+        let step_name = workflow
+            .steps
+            .get(step_index)
+            .map(|s| s.name.clone())
+            .unwrap_or_else(|| self.target.as_str().to_string());
+
+        // Complete the previous step execution if one exists and is still in progress
+        if let Some(prev_execution) = db
+            .executions()
+            .get_latest_execution_for_task(task_id)
+            .await?
+            && prev_execution.status == ExecutionStatus::InProgress
+            && let Some(exec_id) = &prev_execution.id
+        {
+            let exec_id_str = exec_id.id.to_string();
+            db.executions()
+                .update_status(&exec_id_str, ExecutionStatus::Completed, Some(Utc::now()))
+                .await?;
+        }
+
+        // Update the task's current_step
+        db.tasks().update_current_step(task_id, step_index).await?;
+
+        // Create execution record for the new step
+        let task_thing = Thing::from(("task", task_id));
+        let execution = StepExecution::new(task_thing, workflow_id, &step_name);
+        db.executions().create_execution(&execution).await?;
+
+        Ok(())
     }
 }
 
@@ -1323,5 +1417,311 @@ mod tests {
             "Debug output should contain TransitionToCommand and its fields: {}",
             debug_str
         );
+    }
+
+    #[test]
+    fn test_default_step_index() {
+        assert_eq!(TargetStatus::Todo.default_step_index(), Some(1));
+        assert_eq!(TargetStatus::InProgress.default_step_index(), Some(2));
+        assert_eq!(TargetStatus::PendingReview.default_step_index(), Some(3));
+        assert_eq!(TargetStatus::Done.default_step_index(), Some(4));
+        assert_eq!(TargetStatus::Rejected.default_step_index(), None);
+    }
+
+    // ==========================================================================
+    // Execution tracking tests
+    // ==========================================================================
+
+    /// Helper to assign a task to the default workflow
+    async fn assign_to_default_workflow(db: &Database, task_id: &str) {
+        let workflow_thing = surrealdb::sql::Thing::from(("workflow", "default"));
+        db.tasks()
+            .assign_workflow(task_id, &workflow_thing)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_transition_creates_execution_record_for_workflow_task() {
+        let db = setup_test_db().await;
+
+        // Create a task in backlog status
+        create_task(&db, "task1", "Test Task", "task", "backlog").await;
+
+        // Assign task to default workflow
+        assign_to_default_workflow(&db, "task1").await;
+
+        // Transition to todo (step 1)
+        let cmd = TransitionToCommand {
+            id: "task1".to_string(),
+            target: TargetStatus::Todo,
+            reason: None,
+            force: false,
+            skip_validation: true,
+        };
+
+        let result = cmd.execute(&db).await;
+        assert!(result.is_ok(), "Transition failed: {:?}", result.err());
+
+        // Verify execution record was created
+        let executions = db
+            .executions()
+            .list_executions_for_task("task1")
+            .await
+            .unwrap();
+        assert_eq!(executions.len(), 1, "Should have one execution record");
+        assert_eq!(executions[0].step_name, "todo");
+
+        // Verify current_step was updated
+        let task = db.tasks().get("task1").await.unwrap().unwrap();
+        assert_eq!(task.current_step, Some(1));
+    }
+
+    #[tokio::test]
+    async fn test_transition_does_not_create_execution_for_task_without_workflow() {
+        let db = setup_test_db().await;
+
+        // Create a task in backlog status (no workflow assigned)
+        create_task(&db, "task1", "Test Task", "task", "backlog").await;
+
+        // Transition to todo
+        let cmd = TransitionToCommand {
+            id: "task1".to_string(),
+            target: TargetStatus::Todo,
+            reason: None,
+            force: false,
+            skip_validation: true,
+        };
+
+        let result = cmd.execute(&db).await;
+        assert!(result.is_ok());
+
+        // Verify no execution record was created
+        let executions = db
+            .executions()
+            .list_executions_for_task("task1")
+            .await
+            .unwrap();
+        assert!(executions.is_empty(), "Should have no execution records");
+    }
+
+    #[tokio::test]
+    async fn test_full_workflow_creates_multiple_executions() {
+        let db = setup_test_db().await;
+
+        // Create a task and assign to workflow
+        create_task(&db, "task1", "Test Task", "task", "backlog").await;
+        assign_to_default_workflow(&db, "task1").await;
+
+        // Transition through full workflow: backlog -> todo -> in_progress -> pending_review -> done
+        let transitions = vec![
+            (TargetStatus::Todo, "todo", 1),
+            (TargetStatus::InProgress, "in_progress", 2),
+            (TargetStatus::PendingReview, "pending_review", 3),
+            (TargetStatus::Done, "done", 4),
+        ];
+
+        for (target, _expected_step_name, expected_step_index) in transitions {
+            let cmd = TransitionToCommand {
+                id: "task1".to_string(),
+                target,
+                reason: None,
+                force: false,
+                skip_validation: true,
+            };
+
+            let result = cmd.execute(&db).await;
+            assert!(
+                result.is_ok(),
+                "Transition to {:?} failed: {:?}",
+                target,
+                result.err()
+            );
+
+            // Verify current_step
+            let task = db.tasks().get("task1").await.unwrap().unwrap();
+            assert_eq!(
+                task.current_step,
+                Some(expected_step_index),
+                "current_step should be {} after transition to {:?}",
+                expected_step_index,
+                target
+            );
+        }
+
+        // Verify all execution records were created
+        let executions = db
+            .executions()
+            .list_executions_for_task("task1")
+            .await
+            .unwrap();
+        assert_eq!(executions.len(), 4, "Should have 4 execution records");
+
+        // Verify execution steps in order
+        let step_names: Vec<&str> = executions.iter().map(|e| e.step_name.as_str()).collect();
+        assert_eq!(
+            step_names,
+            vec!["todo", "in_progress", "pending_review", "done"]
+        );
+
+        // Verify that all but the last execution have completed_at set
+        for (i, exec) in executions.iter().enumerate() {
+            if i < executions.len() - 1 {
+                assert!(
+                    exec.completed_at.is_some(),
+                    "Execution {} ({}) should have completed_at set",
+                    i,
+                    exec.step_name
+                );
+                assert_eq!(
+                    exec.status,
+                    vertebrae_db::ExecutionStatus::Completed,
+                    "Execution {} ({}) should be Completed",
+                    i,
+                    exec.step_name
+                );
+            } else {
+                // Last execution should still be in progress
+                assert!(
+                    exec.completed_at.is_none(),
+                    "Last execution ({}) should not have completed_at",
+                    exec.step_name
+                );
+                assert_eq!(
+                    exec.status,
+                    vertebrae_db::ExecutionStatus::InProgress,
+                    "Last execution ({}) should be InProgress",
+                    exec.step_name
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_transition_completes_previous_execution() {
+        let db = setup_test_db().await;
+
+        // Create a task and assign to workflow
+        create_task(&db, "task1", "Test Task", "task", "backlog").await;
+        assign_to_default_workflow(&db, "task1").await;
+
+        // Transition to todo (first step)
+        let cmd1 = TransitionToCommand {
+            id: "task1".to_string(),
+            target: TargetStatus::Todo,
+            reason: None,
+            force: false,
+            skip_validation: true,
+        };
+        cmd1.execute(&db).await.unwrap();
+
+        // Verify first execution is in progress
+        let executions = db
+            .executions()
+            .list_executions_for_task("task1")
+            .await
+            .unwrap();
+        assert_eq!(executions.len(), 1);
+        assert!(executions[0].completed_at.is_none());
+        assert_eq!(
+            executions[0].status,
+            vertebrae_db::ExecutionStatus::InProgress
+        );
+
+        // Transition to in_progress (second step)
+        let cmd2 = TransitionToCommand {
+            id: "task1".to_string(),
+            target: TargetStatus::InProgress,
+            reason: None,
+            force: false,
+            skip_validation: true,
+        };
+        cmd2.execute(&db).await.unwrap();
+
+        // Verify first execution is now completed
+        let executions = db
+            .executions()
+            .list_executions_for_task("task1")
+            .await
+            .unwrap();
+        assert_eq!(executions.len(), 2);
+
+        // First execution (todo) should be completed
+        assert!(
+            executions[0].completed_at.is_some(),
+            "First execution should have completed_at"
+        );
+        assert_eq!(
+            executions[0].status,
+            vertebrae_db::ExecutionStatus::Completed,
+            "First execution should be Completed"
+        );
+
+        // Second execution (in_progress) should still be in progress
+        assert!(
+            executions[1].completed_at.is_none(),
+            "Second execution should not have completed_at"
+        );
+        assert_eq!(
+            executions[1].status,
+            vertebrae_db::ExecutionStatus::InProgress,
+            "Second execution should be InProgress"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_execution_timestamps_are_chronological() {
+        let db = setup_test_db().await;
+
+        // Create a task and assign to workflow
+        create_task(&db, "task1", "Test Task", "task", "backlog").await;
+        assign_to_default_workflow(&db, "task1").await;
+
+        // Transition through multiple steps
+        for target in [
+            TargetStatus::Todo,
+            TargetStatus::InProgress,
+            TargetStatus::PendingReview,
+        ] {
+            let cmd = TransitionToCommand {
+                id: "task1".to_string(),
+                target,
+                reason: None,
+                force: false,
+                skip_validation: true,
+            };
+            cmd.execute(&db).await.unwrap();
+        }
+
+        let executions = db
+            .executions()
+            .list_executions_for_task("task1")
+            .await
+            .unwrap();
+        assert_eq!(executions.len(), 3);
+
+        // Verify timestamps are chronological
+        for i in 0..executions.len() - 1 {
+            let current = &executions[i];
+            let next = &executions[i + 1];
+
+            // Each execution's started_at should be before or equal to the next's
+            assert!(
+                current.started_at <= next.started_at,
+                "Execution {} started_at should be <= execution {} started_at",
+                i,
+                i + 1
+            );
+
+            // Completed execution's completed_at should be before or equal to next's started_at
+            if let Some(completed_at) = current.completed_at {
+                assert!(
+                    completed_at <= next.started_at,
+                    "Execution {} completed_at should be <= execution {} started_at",
+                    i,
+                    i + 1
+                );
+            }
+        }
     }
 }
