@@ -787,6 +787,89 @@ impl<'a> TaskRepository<'a> {
         debug!("Successfully appended ref to task: {}", id);
         Ok(())
     }
+
+    /// Atomically append a code reference to a section's refs array.
+    ///
+    /// This method uses SurrealDB's array::append function to atomically
+    /// add a new code reference to a specific section without requiring
+    /// a get-modify-set pattern.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The task ID to update
+    /// * `section_index` - The index of the section to append to (0-based)
+    /// * `code_ref` - The code reference to append
+    ///
+    /// # Errors
+    ///
+    /// Returns `DbError::TaskNotFound` if the task doesn't exist.
+    /// Returns `DbError::ValidationError` if the section index is out of bounds.
+    /// Returns `DbError::Query` if the database operation fails.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let code_ref = CodeRef::file("src/main.rs");
+    /// repo.append_section_ref("task1", 0, &code_ref).await?;
+    /// ```
+    pub async fn append_section_ref(
+        &self,
+        id: &str,
+        section_index: usize,
+        code_ref: &CodeRef,
+    ) -> DbResult<()> {
+        debug!("Appending ref to task {} section {}", id, section_index);
+        trace!("CodeRef: {:?}", code_ref);
+
+        // First, validate the task exists and get the sections count
+        #[derive(Debug, Deserialize)]
+        struct SectionCount {
+            count: usize,
+        }
+
+        let count_query = format!("SELECT array::len(sections) AS count FROM task:{}", id);
+
+        let mut result = self.client.query(&count_query).await?;
+        let counts: Vec<SectionCount> = result.take(0)?;
+
+        if counts.is_empty() {
+            return Err(DbError::TaskNotFound {
+                task_id: id.to_string(),
+            });
+        }
+
+        let section_count = counts[0].count;
+        if section_index >= section_count {
+            return Err(DbError::ValidationError {
+                message: format!(
+                    "Section index {} is out of bounds (task has {} sections)",
+                    section_index, section_count
+                ),
+            });
+        }
+
+        // Serialize the code ref to JSON for the query
+        let ref_json = serde_json::to_string(code_ref).map_err(|e| DbError::InvalidPath {
+            path: std::path::PathBuf::from(id),
+            reason: format!("Failed to serialize code ref: {}", e),
+        })?;
+
+        // Use array::append with null coalescing to handle empty/null refs array
+        // This is atomic - no get-modify-set pattern
+        let query = format!(
+            "UPDATE task:{} SET sections[{}].refs = array::append(sections[{}].refs ?? [], {}), updated_at = time::now()",
+            id, section_index, section_index, ref_json
+        );
+
+        trace!("Query: {}", query);
+        self.client.query(&query).await?;
+
+        debug!(
+            "Successfully appended ref to task {} section {}",
+            id, section_index
+        );
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -1464,6 +1547,150 @@ mod tests {
         let retrieved = repo.get("ref5").await.unwrap().unwrap();
         assert_eq!(retrieved.code_refs.len(), 1);
         assert_eq!(retrieved.code_refs[0].path, "src/null_test.rs");
+
+        cleanup(&temp_dir);
+    }
+
+    // ========================================
+    // append_section_ref tests
+    // ========================================
+
+    #[tokio::test]
+    async fn test_append_section_ref_to_empty_refs() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = TaskRepository::new(db.client());
+
+        // Create task with a section that has empty refs
+        let query = r#"CREATE task:secref1 SET
+            title = "Section Ref Test",
+            level = "task",
+            status = "todo",
+            tags = [],
+            sections = [{ type: "testing_criterion", content: "Verify something", refs: [] }],
+            refs = []"#;
+        db.client().query(query).await.unwrap();
+
+        // Append a ref to the section
+        let code_ref = CodeRef::file("src/test.rs");
+        repo.append_section_ref("secref1", 0, &code_ref)
+            .await
+            .unwrap();
+
+        // Verify the ref was added to the section
+        let retrieved = repo.get("secref1").await.unwrap().unwrap();
+        assert_eq!(retrieved.sections.len(), 1);
+        assert_eq!(retrieved.sections[0].refs.len(), 1);
+        assert_eq!(retrieved.sections[0].refs[0].path, "src/test.rs");
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_append_section_ref_to_existing_refs() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = TaskRepository::new(db.client());
+
+        // Create task with a section that already has refs
+        let query = r#"CREATE task:secref2 SET
+            title = "Section Ref Test",
+            level = "task",
+            status = "todo",
+            tags = [],
+            sections = [{ type: "testing_criterion", content: "Verify something", refs: [{ path: "src/existing.rs" }] }],
+            refs = []"#;
+        db.client().query(query).await.unwrap();
+
+        // Append another ref to the section
+        let code_ref = CodeRef::file("src/new.rs");
+        repo.append_section_ref("secref2", 0, &code_ref)
+            .await
+            .unwrap();
+
+        // Verify both refs are present
+        let retrieved = repo.get("secref2").await.unwrap().unwrap();
+        assert_eq!(retrieved.sections[0].refs.len(), 2);
+        assert_eq!(retrieved.sections[0].refs[0].path, "src/existing.rs");
+        assert_eq!(retrieved.sections[0].refs[1].path, "src/new.rs");
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_append_section_ref_invalid_section_index() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = TaskRepository::new(db.client());
+
+        // Create task with one section
+        let query = r#"CREATE task:secref3 SET
+            title = "Section Ref Test",
+            level = "task",
+            status = "todo",
+            tags = [],
+            sections = [{ type: "step", content: "Do something", refs: [] }],
+            refs = []"#;
+        db.client().query(query).await.unwrap();
+
+        // Try to append to section index 5 (out of bounds)
+        let code_ref = CodeRef::file("src/test.rs");
+        let result = repo.append_section_ref("secref3", 5, &code_ref).await;
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DbError::ValidationError { message } => {
+                assert!(message.contains("out of bounds"));
+                assert!(message.contains("5"));
+            }
+            other => panic!("Expected ValidationError, got: {:?}", other),
+        }
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_append_section_ref_task_not_found() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = TaskRepository::new(db.client());
+
+        // Try to append to nonexistent task
+        let code_ref = CodeRef::file("src/test.rs");
+        let result = repo.append_section_ref("nonexistent", 0, &code_ref).await;
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DbError::TaskNotFound { task_id } => {
+                assert_eq!(task_id, "nonexistent");
+            }
+            other => panic!("Expected TaskNotFound, got: {:?}", other),
+        }
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_append_section_ref_to_null_refs() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = TaskRepository::new(db.client());
+
+        // Create task with a section that has no refs field (null/missing)
+        let query = r#"CREATE task:secref4 SET
+            title = "Section Ref Test",
+            level = "task",
+            status = "todo",
+            tags = [],
+            sections = [{ type: "testing_criterion", content: "Test criterion" }],
+            refs = []"#;
+        db.client().query(query).await.unwrap();
+
+        // Append a ref - should work even with null refs
+        let code_ref = CodeRef::file("src/null_test.rs");
+        repo.append_section_ref("secref4", 0, &code_ref)
+            .await
+            .unwrap();
+
+        // Verify the ref was added to the section
+        let retrieved = repo.get("secref4").await.unwrap().unwrap();
+        assert_eq!(retrieved.sections[0].refs.len(), 1);
+        assert_eq!(retrieved.sections[0].refs[0].path, "src/null_test.rs");
 
         cleanup(&temp_dir);
     }
