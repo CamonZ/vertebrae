@@ -253,7 +253,7 @@ fn handle_task_notification(
         change_type,
     };
 
-    if let Err(e) = app_handle.emit("task-changed", &event) {
+    if let Err(e) = app_handle.emit("task-changed-event", &event) {
         log::error!("Failed to emit TaskChangedEvent: {}", e);
     }
 }
@@ -293,7 +293,7 @@ fn handle_workflow_notification(
         change_type,
     };
 
-    if let Err(e) = app_handle.emit("workflow-changed", &event) {
+    if let Err(e) = app_handle.emit("workflow-changed-event", &event) {
         log::error!("Failed to emit WorkflowChangedEvent: {}", e);
     }
 }
