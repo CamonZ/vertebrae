@@ -4,7 +4,7 @@
 //! encapsulating SurrealDB queries and providing a clean API.
 
 use crate::error::{DbError, DbResult};
-use crate::models::{CodeRef, Priority, Section, Status, Task};
+use crate::models::{CodeRef, Priority, Section, SectionType, Status, Task};
 use serde::Deserialize;
 use serde_json;
 use surrealdb::Surreal;
@@ -870,6 +870,113 @@ impl<'a> TaskRepository<'a> {
         );
         Ok(())
     }
+
+    /// Remove a section by type and ordinal, renumbering remaining sections.
+    ///
+    /// This method removes a specific section from a task, identified by its
+    /// type and ordinal (order field). After removal, remaining sections of
+    /// the same type are renumbered to maintain contiguous ordinals starting
+    /// from 1.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The task ID to update
+    /// * `section_type` - The type of section to remove
+    /// * `ordinal` - The ordinal (order) of the section to remove (1-based)
+    ///
+    /// # Errors
+    ///
+    /// Returns `DbError::TaskNotFound` if the task doesn't exist.
+    /// Returns `DbError::ValidationError` if no section matches the type/ordinal.
+    /// Returns `DbError::Query` if the database operation fails.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Remove the second step from a task
+    /// repo.remove_section("task1", SectionType::Step, 2).await?;
+    /// ```
+    pub async fn remove_section(
+        &self,
+        id: &str,
+        section_type: SectionType,
+        ordinal: u32,
+    ) -> DbResult<()> {
+        debug!(
+            "Removing section type={:?} ordinal={} from task {}",
+            section_type, ordinal, id
+        );
+
+        // First, get the task and its sections
+        let task = self.get(id).await?.ok_or_else(|| DbError::TaskNotFound {
+            task_id: id.to_string(),
+        })?;
+
+        // Find the index of the section to remove
+        let section_index = task
+            .sections
+            .iter()
+            .position(|s| s.section_type == section_type && s.order == Some(ordinal));
+
+        let section_index = match section_index {
+            Some(idx) => idx,
+            None => {
+                return Err(DbError::ValidationError {
+                    message: format!(
+                        "No section of type '{}' with ordinal {} found",
+                        section_type.as_str(),
+                        ordinal
+                    ),
+                });
+            }
+        };
+
+        // Build the new sections array:
+        // 1. Remove the target section
+        // 2. Renumber remaining sections of the same type
+        let mut new_sections: Vec<Section> = Vec::with_capacity(task.sections.len() - 1);
+        let mut next_ordinal = 1u32;
+
+        for (i, section) in task.sections.iter().enumerate() {
+            if i == section_index {
+                // Skip the section being removed
+                continue;
+            }
+
+            if section.section_type == section_type {
+                // Renumber sections of the same type
+                let mut renumbered = section.clone();
+                renumbered.order = Some(next_ordinal);
+                next_ordinal += 1;
+                new_sections.push(renumbered);
+            } else {
+                // Keep other sections unchanged
+                new_sections.push(section.clone());
+            }
+        }
+
+        // Serialize sections to JSON for the query
+        let sections_json =
+            serde_json::to_string(&new_sections).map_err(|e| DbError::InvalidPath {
+                path: std::path::PathBuf::from(id),
+                reason: format!("Failed to serialize sections: {}", e),
+            })?;
+
+        // Update the task with the new sections array
+        let query = format!(
+            "UPDATE task:{} SET sections = {}, updated_at = time::now()",
+            id, sections_json
+        );
+
+        trace!("Query: {}", query);
+        self.client.query(&query).await?;
+
+        debug!(
+            "Successfully removed section type={:?} ordinal={} from task {}",
+            section_type, ordinal, id
+        );
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -1691,6 +1798,212 @@ mod tests {
         let retrieved = repo.get("secref4").await.unwrap().unwrap();
         assert_eq!(retrieved.sections[0].refs.len(), 1);
         assert_eq!(retrieved.sections[0].refs[0].path, "src/null_test.rs");
+
+        cleanup(&temp_dir);
+    }
+
+    // ========================================
+    // remove_section tests
+    // ========================================
+
+    #[tokio::test]
+    async fn test_remove_section_single() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = TaskRepository::new(db.client());
+
+        // Create task with a single step section
+        let query = r#"CREATE task:remsec1 SET
+            title = "Remove Section Test",
+            level = "task",
+            status = "todo",
+            tags = [],
+            sections = [{ type: "step", content: "Only step", order: 1 }],
+            refs = []"#;
+        db.client().query(query).await.unwrap();
+
+        // Remove the only step
+        repo.remove_section("remsec1", SectionType::Step, 1)
+            .await
+            .unwrap();
+
+        // Verify sections is now empty
+        let retrieved = repo.get("remsec1").await.unwrap().unwrap();
+        assert!(retrieved.sections.is_empty());
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_remove_section_renumbers_ordinals() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = TaskRepository::new(db.client());
+
+        // Create task with three step sections
+        let query = r#"CREATE task:remsec2 SET
+            title = "Remove Section Test",
+            level = "task",
+            status = "todo",
+            tags = [],
+            sections = [
+                { type: "step", content: "Step 1", order: 1 },
+                { type: "step", content: "Step 2", order: 2 },
+                { type: "step", content: "Step 3", order: 3 }
+            ],
+            refs = []"#;
+        db.client().query(query).await.unwrap();
+
+        // Remove the middle step (ordinal 2)
+        repo.remove_section("remsec2", SectionType::Step, 2)
+            .await
+            .unwrap();
+
+        // Verify remaining steps are renumbered
+        let retrieved = repo.get("remsec2").await.unwrap().unwrap();
+        assert_eq!(retrieved.sections.len(), 2);
+        assert_eq!(retrieved.sections[0].content, "Step 1");
+        assert_eq!(retrieved.sections[0].order, Some(1));
+        assert_eq!(retrieved.sections[1].content, "Step 3");
+        assert_eq!(retrieved.sections[1].order, Some(2)); // Renumbered from 3 to 2
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_remove_section_preserves_other_types() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = TaskRepository::new(db.client());
+
+        // Create task with mixed section types
+        let query = r#"CREATE task:remsec3 SET
+            title = "Remove Section Test",
+            level = "task",
+            status = "todo",
+            tags = [],
+            sections = [
+                { type: "goal", content: "The goal", order: 1 },
+                { type: "step", content: "Step 1", order: 1 },
+                { type: "step", content: "Step 2", order: 2 },
+                { type: "constraint", content: "A constraint", order: 1 }
+            ],
+            refs = []"#;
+        db.client().query(query).await.unwrap();
+
+        // Remove step 1
+        repo.remove_section("remsec3", SectionType::Step, 1)
+            .await
+            .unwrap();
+
+        // Verify other section types are unchanged
+        let retrieved = repo.get("remsec3").await.unwrap().unwrap();
+        assert_eq!(retrieved.sections.len(), 3);
+
+        // Goal should be unchanged
+        let goal = retrieved
+            .sections
+            .iter()
+            .find(|s| s.section_type == SectionType::Goal)
+            .unwrap();
+        assert_eq!(goal.content, "The goal");
+        assert_eq!(goal.order, Some(1));
+
+        // Only one step remains, renumbered to 1
+        let step = retrieved
+            .sections
+            .iter()
+            .find(|s| s.section_type == SectionType::Step)
+            .unwrap();
+        assert_eq!(step.content, "Step 2");
+        assert_eq!(step.order, Some(1)); // Renumbered from 2 to 1
+
+        // Constraint should be unchanged
+        let constraint = retrieved
+            .sections
+            .iter()
+            .find(|s| s.section_type == SectionType::Constraint)
+            .unwrap();
+        assert_eq!(constraint.content, "A constraint");
+        assert_eq!(constraint.order, Some(1));
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_remove_section_not_found() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = TaskRepository::new(db.client());
+
+        // Create task with a goal section
+        let query = r#"CREATE task:remsec4 SET
+            title = "Remove Section Test",
+            level = "task",
+            status = "todo",
+            tags = [],
+            sections = [{ type: "goal", content: "The goal", order: 1 }],
+            refs = []"#;
+        db.client().query(query).await.unwrap();
+
+        // Try to remove a step that doesn't exist
+        let result = repo.remove_section("remsec4", SectionType::Step, 1).await;
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DbError::ValidationError { message } => {
+                assert!(message.contains("step"));
+                assert!(message.contains("1"));
+            }
+            other => panic!("Expected ValidationError, got: {:?}", other),
+        }
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_remove_section_wrong_ordinal() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = TaskRepository::new(db.client());
+
+        // Create task with a step at ordinal 1
+        let query = r#"CREATE task:remsec5 SET
+            title = "Remove Section Test",
+            level = "task",
+            status = "todo",
+            tags = [],
+            sections = [{ type: "step", content: "Step 1", order: 1 }],
+            refs = []"#;
+        db.client().query(query).await.unwrap();
+
+        // Try to remove step at ordinal 5 (doesn't exist)
+        let result = repo.remove_section("remsec5", SectionType::Step, 5).await;
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DbError::ValidationError { message } => {
+                assert!(message.contains("step"));
+                assert!(message.contains("5"));
+            }
+            other => panic!("Expected ValidationError, got: {:?}", other),
+        }
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_remove_section_task_not_found() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = TaskRepository::new(db.client());
+
+        // Try to remove section from nonexistent task
+        let result = repo
+            .remove_section("nonexistent", SectionType::Step, 1)
+            .await;
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            DbError::TaskNotFound { task_id } => {
+                assert_eq!(task_id, "nonexistent");
+            }
+            other => panic!("Expected TaskNotFound, got: {:?}", other),
+        }
 
         cleanup(&temp_dir);
     }
