@@ -1,6 +1,6 @@
-import { useUIStore } from '../stores/uiStore';
+import { useUIStore } from "../stores/uiStore";
 
-type Theme = 'light' | 'dark' | 'system';
+type Theme = "light" | "dark" | "system";
 
 interface ThemeOption {
   value: Theme;
@@ -10,8 +10,8 @@ interface ThemeOption {
 
 const themeOptions: ThemeOption[] = [
   {
-    value: 'light',
-    label: 'Light',
+    value: "light",
+    label: "Light",
     icon: (
       <svg
         className="h-4 w-4"
@@ -30,8 +30,8 @@ const themeOptions: ThemeOption[] = [
     ),
   },
   {
-    value: 'dark',
-    label: 'Dark',
+    value: "dark",
+    label: "Dark",
     icon: (
       <svg
         className="h-4 w-4"
@@ -50,8 +50,8 @@ const themeOptions: ThemeOption[] = [
     ),
   },
   {
-    value: 'system',
-    label: 'System',
+    value: "system",
+    label: "System",
     icon: (
       <svg
         className="h-4 w-4"
@@ -79,7 +79,8 @@ export function ThemeToggle() {
   const theme = useUIStore((state) => state.theme);
   const setTheme = useUIStore((state) => state.setTheme);
 
-  const currentOption = themeOptions.find((opt) => opt.value === theme) ?? themeOptions[2];
+  const currentOption =
+    themeOptions.find((opt) => opt.value === theme) ?? themeOptions[2];
 
   function cycleTheme() {
     const currentIndex = themeOptions.findIndex((opt) => opt.value === theme);

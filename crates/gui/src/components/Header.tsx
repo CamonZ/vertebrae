@@ -1,4 +1,4 @@
-import { ThemeToggle } from './ThemeToggle';
+import { ThemeToggle } from "./ThemeToggle";
 
 interface HeaderProps {
   title: string;
@@ -22,9 +22,7 @@ export function Header({ title, subtitle }: HeaderProps) {
       <div className="flex items-center gap-3">
         <div>
           <h1 className="text-sm font-medium text-text-primary">{title}</h1>
-          {subtitle && (
-            <p className="text-xs text-text-muted">{subtitle}</p>
-          )}
+          {subtitle && <p className="text-xs text-text-muted">{subtitle}</p>}
         </div>
       </div>
 

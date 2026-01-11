@@ -1,6 +1,6 @@
-import { useParams, Link } from 'react-router-dom';
-import { useWorkflow } from '../hooks/useWorkflow';
-import { WorkflowPipeline } from '../components/WorkflowPipeline';
+import { useParams, Link } from "react-router-dom";
+import { useWorkflow } from "../hooks/useWorkflow";
+import { WorkflowPipeline } from "../components/WorkflowPipeline";
 
 /**
  * Truncate workflow ID for display (show first 6 characters)
@@ -15,7 +15,12 @@ function truncateId(id: string): string {
  */
 export function WorkflowDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const { workflow: workflowWithTasks, isLoading, error, refetch } = useWorkflow(id);
+  const {
+    workflow: workflowWithTasks,
+    isLoading,
+    error,
+    refetch,
+  } = useWorkflow(id);
 
   if (isLoading) {
     return (
@@ -56,8 +61,18 @@ export function WorkflowDetailPage() {
           to="/workflows"
           className="mt-4 inline-flex items-center gap-2 text-sm text-primary hover:underline"
         >
-          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+          <svg
+            className="h-4 w-4"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={1.5}
+              d="M10 19l-7-7m0 0l7-7m-7 7h18"
+            />
           </svg>
           Back to Workflows
         </Link>
@@ -66,7 +81,7 @@ export function WorkflowDetailPage() {
   }
 
   const { workflow, tasks } = workflowWithTasks;
-  const workflowId = workflow.id ?? '';
+  const workflowId = workflow.id ?? "";
 
   return (
     <div className="relative flex-1 space-y-6 overflow-auto p-6">
@@ -83,11 +98,23 @@ export function WorkflowDetailPage() {
                 className="rounded-lg p-1.5 text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary"
                 aria-label="Back to workflows"
               >
-                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                <svg
+                  className="h-5 w-5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={1.5}
+                    d="M10 19l-7-7m0 0l7-7m-7 7h18"
+                  />
                 </svg>
               </Link>
-              <h1 className="text-xl font-bold text-text-primary">{workflow.name}</h1>
+              <h1 className="text-xl font-bold text-text-primary">
+                {workflow.name}
+              </h1>
             </div>
             <code className="rounded bg-bg-tertiary px-2 py-1 font-mono text-xs text-text-muted">
               {truncateId(workflowId)}
@@ -96,21 +123,42 @@ export function WorkflowDetailPage() {
 
           <div className="flex items-center gap-4 text-sm text-text-secondary">
             <div className="flex items-center gap-2 rounded-lg border border-border bg-bg-tertiary/50 px-3 py-1.5">
-              <svg className="h-4 w-4 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 6h16M4 12h16M4 18h7" />
+              <svg
+                className="h-4 w-4 text-primary"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.5}
+                  d="M4 6h16M4 12h16M4 18h7"
+                />
               </svg>
               <span className="font-mono text-xs">
-                {workflow.steps.length} step{workflow.steps.length !== 1 ? 's' : ''}
+                {workflow.steps.length} step
+                {workflow.steps.length !== 1 ? "s" : ""}
               </span>
             </div>
 
             {tasks.length > 0 && (
               <div className="flex items-center gap-2 rounded-lg border border-border bg-bg-tertiary/50 px-3 py-1.5">
-                <svg className="h-4 w-4 text-info" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                <svg
+                  className="h-4 w-4 text-info"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={1.5}
+                    d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
+                  />
                 </svg>
                 <span className="font-mono text-xs">
-                  {tasks.length} task{tasks.length !== 1 ? 's' : ''}
+                  {tasks.length} task{tasks.length !== 1 ? "s" : ""}
                 </span>
               </div>
             )}
@@ -118,7 +166,9 @@ export function WorkflowDetailPage() {
         </div>
 
         {workflow.description && (
-          <p className="mt-4 text-sm text-text-secondary">{workflow.description}</p>
+          <p className="mt-4 text-sm text-text-secondary">
+            {workflow.description}
+          </p>
         )}
 
         {/* Chain indicators */}
@@ -126,18 +176,40 @@ export function WorkflowDetailPage() {
           <div className="mt-4 flex gap-4">
             {workflow.on_done_workflow && (
               <div className="flex items-center gap-2 rounded-lg border border-success/30 bg-success/10 px-3 py-1.5 text-xs font-medium text-success">
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                <svg
+                  className="h-4 w-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={1.5}
+                    d="M13 7l5 5m0 0l-5 5m5-5H6"
+                  />
                 </svg>
                 <span>On done: {truncateId(workflow.on_done_workflow)}</span>
               </div>
             )}
             {workflow.on_reject_workflow && (
               <div className="flex items-center gap-2 rounded-lg border border-error/30 bg-error/10 px-3 py-1.5 text-xs font-medium text-error">
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" />
+                <svg
+                  className="h-4 w-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={1.5}
+                    d="M6 18L18 6M6 6l12 12"
+                  />
                 </svg>
-                <span>On reject: {truncateId(workflow.on_reject_workflow)}</span>
+                <span>
+                  On reject: {truncateId(workflow.on_reject_workflow)}
+                </span>
               </div>
             )}
           </div>
@@ -161,7 +233,10 @@ export function WorkflowDetailPage() {
           <div className="rounded-xl border border-border bg-bg-secondary">
             <ul className="divide-y divide-border">
               {tasks.map((task) => (
-                <li key={task.id} className="group transition-colors hover:bg-bg-hover">
+                <li
+                  key={task.id}
+                  className="group transition-colors hover:bg-bg-hover"
+                >
                   <Link
                     to={`/tasks?task=${task.id}`}
                     className="flex items-center justify-between p-4"
@@ -169,16 +244,18 @@ export function WorkflowDetailPage() {
                     <div className="flex items-center gap-3">
                       <span
                         className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                          task.status === 'done'
-                            ? 'bg-success/10 text-success'
-                            : task.status === 'in_progress'
-                              ? 'bg-warning/10 text-warning'
-                              : 'bg-bg-tertiary text-text-muted'
+                          task.status === "done"
+                            ? "bg-success/10 text-success"
+                            : task.status === "in_progress"
+                              ? "bg-warning/10 text-warning"
+                              : "bg-bg-tertiary text-text-muted"
                         }`}
                       >
-                        {task.status.replace('_', ' ')}
+                        {task.status.replace("_", " ")}
                       </span>
-                      <span className="text-sm text-text-primary group-hover:text-primary">{task.title}</span>
+                      <span className="text-sm text-text-primary group-hover:text-primary">
+                        {task.title}
+                      </span>
                     </div>
                     <code className="font-mono text-xs text-text-muted">
                       {truncateId(task.id)}

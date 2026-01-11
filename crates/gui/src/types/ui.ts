@@ -5,7 +5,7 @@
  * to support UI components and state management.
  */
 
-import type { ReactNode } from 'react';
+import type { ReactNode } from "react";
 
 /**
  * Theme mode options for the application.
@@ -13,7 +13,7 @@ import type { ReactNode } from 'react';
  * - 'dark': Force dark theme
  * - 'system': Follow system preference
  */
-export type ThemeMode = 'light' | 'dark' | 'system';
+export type ThemeMode = "light" | "dark" | "system";
 
 /**
  * Navigation item configuration for sidebar and menus.
@@ -86,7 +86,7 @@ export interface ModalProps {
 /**
  * Toast notification message type.
  */
-export type ToastType = 'success' | 'error' | 'warning' | 'info';
+export type ToastType = "success" | "error" | "warning" | "info";
 
 /**
  * Toast notification message configuration.

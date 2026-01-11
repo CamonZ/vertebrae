@@ -1,5 +1,5 @@
-import { useWorkflows } from '../hooks/useWorkflows';
-import { WorkflowGrid } from '../components/WorkflowGrid';
+import { useWorkflows } from "../hooks/useWorkflows";
+import { WorkflowGrid } from "../components/WorkflowGrid";
 
 /**
  * WorkflowsPage displays all workflows with neural-pathway design.
@@ -26,7 +26,7 @@ export function WorkflowsPage() {
           aria-label="Refresh workflows"
         >
           <svg
-            className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`}
+            className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`}
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -38,12 +38,16 @@ export function WorkflowsPage() {
               d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
             />
           </svg>
-          {isLoading ? 'Loading...' : 'Refresh'}
+          {isLoading ? "Loading..." : "Refresh"}
         </button>
       </div>
 
       <div className="relative">
-        <WorkflowGrid workflows={workflows} isLoading={isLoading} error={error} />
+        <WorkflowGrid
+          workflows={workflows}
+          isLoading={isLoading}
+          error={error}
+        />
       </div>
     </div>
   );

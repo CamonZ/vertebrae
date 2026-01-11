@@ -1,6 +1,6 @@
-import { useEffect, useState, useCallback } from 'react';
-import { commands, type TaskFilterOptions } from '../bindings';
-import { useTaskStore } from '../stores';
+import { useEffect, useState, useCallback } from "react";
+import { commands, type TaskFilterOptions } from "../bindings";
+import { useTaskStore } from "../stores";
 
 /**
  * Hook for fetching and managing the task list.
@@ -19,7 +19,7 @@ export function useTasks(filter?: TaskFilterOptions) {
     setError(null);
     try {
       const result = await commands.listTasks(filter ?? null);
-      if (result.status === 'ok') {
+      if (result.status === "ok") {
         setTasks(result.data);
       } else {
         setError(result.error.message);

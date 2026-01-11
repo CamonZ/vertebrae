@@ -1,6 +1,6 @@
-import { useCallback, useState, useEffect } from 'react';
-import { NavLink, useNavigate } from 'react-router-dom';
-import { commands } from '../bindings';
+import { useCallback, useState, useEffect } from "react";
+import { NavLink, useNavigate } from "react-router-dom";
+import { commands } from "../bindings";
 
 interface SidebarProps {
   isCollapsed: boolean;
@@ -25,8 +25,8 @@ function NavItem({ to, icon, label, isCollapsed }: NavItemProps) {
         className={({ isActive }) =>
           `group relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
             isActive
-              ? 'bg-primary/10 text-primary shadow-glow-sm'
-              : 'text-text-secondary hover:bg-bg-hover hover:text-text-primary'
+              ? "bg-primary/10 text-primary shadow-glow-sm"
+              : "text-text-secondary hover:bg-bg-hover hover:text-text-primary"
           }`
         }
       >
@@ -36,12 +36,12 @@ function NavItem({ to, icon, label, isCollapsed }: NavItemProps) {
             {isActive && (
               <span className="absolute left-0 top-1/2 h-6 w-0.5 -translate-y-1/2 rounded-full bg-primary shadow-glow-sm" />
             )}
-            <span className={`shrink-0 transition-transform duration-200 ${isActive ? 'scale-110' : 'group-hover:scale-105'}`}>
+            <span
+              className={`shrink-0 transition-transform duration-200 ${isActive ? "scale-110" : "group-hover:scale-105"}`}
+            >
               {icon}
             </span>
-            {!isCollapsed && (
-              <span className="truncate">{label}</span>
-            )}
+            {!isCollapsed && <span className="truncate">{label}</span>}
           </>
         )}
       </NavLink>
@@ -60,10 +60,10 @@ function ProjectSwitcher({ isCollapsed }: { isCollapsed: boolean }) {
     async function loadCurrentProject() {
       try {
         const result = await commands.getCurrentProject();
-        if (result.status === 'ok' && result.data) {
+        if (result.status === "ok" && result.data) {
           // Extract project name from path
-          const parts = result.data.split('/');
-          setProjectName(parts[parts.length - 1] || 'Unknown');
+          const parts = result.data.split("/");
+          setProjectName(parts[parts.length - 1] || "Unknown");
         }
       } catch {
         // Ignore errors
@@ -73,7 +73,7 @@ function ProjectSwitcher({ isCollapsed }: { isCollapsed: boolean }) {
   }, []);
 
   const handleClick = () => {
-    navigate('/setup');
+    navigate("/setup");
   };
 
   if (!projectName) return null;
@@ -136,7 +136,7 @@ function ProjectSwitcher({ isCollapsed }: { isCollapsed: boolean }) {
 export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
-      if (event.key === 'Enter' || event.key === ' ') {
+      if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
         onToggle();
       }
@@ -147,7 +147,7 @@ export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
   return (
     <aside
       className={`relative flex flex-col border-r border-border bg-bg-secondary transition-all duration-300 ease-out ${
-        isCollapsed ? 'w-16' : 'w-60'
+        isCollapsed ? "w-16" : "w-60"
       }`}
       aria-label="Sidebar navigation"
     >
@@ -200,7 +200,10 @@ export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
       <ProjectSwitcher isCollapsed={isCollapsed} />
 
       {/* Navigation */}
-      <nav className="relative flex-1 overflow-y-auto p-3" aria-label="Main navigation">
+      <nav
+        className="relative flex-1 overflow-y-auto p-3"
+        aria-label="Main navigation"
+      >
         <ul className="space-y-1" role="list">
           <NavItem
             to="/tasks"
@@ -254,14 +257,14 @@ export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
           onClick={onToggle}
           onKeyDown={handleKeyDown}
           className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-text-muted transition-all duration-200 hover:bg-bg-hover hover:text-text-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
-            isCollapsed ? 'justify-center' : ''
+            isCollapsed ? "justify-center" : ""
           }`}
-          aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
           aria-expanded={!isCollapsed}
         >
           <svg
             className={`h-4 w-4 transition-transform duration-300 ${
-              isCollapsed ? 'rotate-180' : ''
+              isCollapsed ? "rotate-180" : ""
             }`}
             fill="none"
             stroke="currentColor"

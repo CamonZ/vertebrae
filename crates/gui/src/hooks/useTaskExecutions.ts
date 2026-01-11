@@ -1,5 +1,5 @@
-import { useEffect, useState, useCallback } from 'react';
-import { commands, StepExecution } from '../bindings';
+import { useEffect, useState, useCallback } from "react";
+import { commands, StepExecution } from "../bindings";
 
 /**
  * Hook for fetching step executions for a task.
@@ -23,7 +23,7 @@ export function useTaskExecutions(taskId: string | null | undefined) {
     setError(null);
     try {
       const result = await commands.getTaskExecutions(taskId);
-      if (result.status === 'ok') {
+      if (result.status === "ok") {
         setExecutions(result.data);
       } else {
         setError(result.error.message);

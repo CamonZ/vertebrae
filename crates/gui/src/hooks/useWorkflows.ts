@@ -1,6 +1,6 @@
-import { useEffect, useState, useCallback } from 'react';
-import { commands } from '../bindings';
-import { useWorkflowStore } from '../stores';
+import { useEffect, useState, useCallback } from "react";
+import { commands } from "../bindings";
+import { useWorkflowStore } from "../stores";
 
 /**
  * Hook for fetching and managing the workflow list.
@@ -18,7 +18,7 @@ export function useWorkflows() {
     setError(null);
     try {
       const result = await commands.listWorkflows();
-      if (result.status === 'ok') {
+      if (result.status === "ok") {
         setWorkflows(result.data);
       } else {
         setError(result.error.message);

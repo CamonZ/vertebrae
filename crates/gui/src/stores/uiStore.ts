@@ -1,7 +1,7 @@
-import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { create } from "zustand";
+import { persist } from "zustand/middleware";
 
-type Theme = 'light' | 'dark' | 'system';
+type Theme = "light" | "dark" | "system";
 
 interface UIState {
   /** Whether the sidebar is collapsed */
@@ -26,7 +26,7 @@ export const useUIStore = create<UIStore>()(
     (set) => ({
       // Initial state
       sidebarCollapsed: false,
-      theme: 'system',
+      theme: "system",
 
       // Actions
       toggleSidebar: () =>
@@ -37,7 +37,7 @@ export const useUIStore = create<UIStore>()(
       setTheme: (theme) => set({ theme }),
     }),
     {
-      name: 'vertebrae-ui-storage',
+      name: "vertebrae-ui-storage",
       // Only persist UI preferences, not transient state
       partialize: (state) => ({
         sidebarCollapsed: state.sidebarCollapsed,

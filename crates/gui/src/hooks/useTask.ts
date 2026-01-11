@@ -1,6 +1,6 @@
-import { useEffect, useState, useCallback } from 'react';
-import { commands } from '../bindings';
-import { useTaskStore } from '../stores';
+import { useEffect, useState, useCallback } from "react";
+import { commands } from "../bindings";
+import { useTaskStore } from "../stores";
 
 /**
  * Hook for fetching a single task with its relations.
@@ -24,7 +24,7 @@ export function useTask(id: string | null | undefined) {
     setError(null);
     try {
       const result = await commands.getTask(id);
-      if (result.status === 'ok') {
+      if (result.status === "ok") {
         selectTask(id, result.data);
       } else {
         setError(result.error.message);

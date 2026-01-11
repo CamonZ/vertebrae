@@ -1,5 +1,5 @@
-import { create } from 'zustand';
-import type { Workflow, WorkflowWithTasks } from '../bindings';
+import { create } from "zustand";
+import type { Workflow, WorkflowWithTasks } from "../bindings";
 
 interface WorkflowState {
   /** List of all workflows */

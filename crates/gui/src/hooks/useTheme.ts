@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
-import { useUIStore } from '../stores/uiStore';
+import { useEffect } from "react";
+import { useUIStore } from "../stores/uiStore";
 
 /**
  * Hook that manages theme application based on user preference and system settings.
@@ -26,27 +26,27 @@ export function useTheme() {
      */
     function applyTheme(isLight: boolean) {
       if (isLight) {
-        root.classList.add('light');
-        root.classList.remove('dark');
+        root.classList.add("light");
+        root.classList.remove("dark");
       } else {
-        root.classList.remove('light');
-        root.classList.add('dark');
+        root.classList.remove("light");
+        root.classList.add("dark");
       }
     }
 
     // Handle explicit light/dark preferences
-    if (theme === 'light') {
+    if (theme === "light") {
       applyTheme(true);
       return;
     }
 
-    if (theme === 'dark') {
+    if (theme === "dark") {
       applyTheme(false);
       return;
     }
 
     // Handle 'system' preference - use matchMedia to detect and track system preference
-    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
 
     // Apply current system preference (inverted - dark by default)
     applyTheme(!mediaQuery.matches);
@@ -56,10 +56,10 @@ export function useTheme() {
       applyTheme(!event.matches);
     }
 
-    mediaQuery.addEventListener('change', handleChange);
+    mediaQuery.addEventListener("change", handleChange);
 
     return () => {
-      mediaQuery.removeEventListener('change', handleChange);
+      mediaQuery.removeEventListener("change", handleChange);
     };
   }, [theme]);
 }

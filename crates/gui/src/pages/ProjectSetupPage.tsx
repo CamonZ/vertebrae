@@ -71,7 +71,8 @@ export function ProjectSetupPage() {
       if (selected && typeof selected === "string") {
         // Extract project name from path
         const pathParts = selected.split("/");
-        const projectName = pathParts[pathParts.length - 1] || "Unnamed Project";
+        const projectName =
+          pathParts[pathParts.length - 1] || "Unnamed Project";
 
         const result = await commands.addProject(projectName, selected);
         if (result.status === "ok") {
@@ -109,7 +110,10 @@ export function ProjectSetupPage() {
 
   return (
     <div className="flex h-screen w-screen items-center justify-center bg-bg-secondary p-8">
-      <div className="w-full rounded-xl border border-border bg-bg-primary p-8 shadow-lg" style={{ maxWidth: '640px', minWidth: '400px' }}>
+      <div
+        className="w-full rounded-xl border border-border bg-bg-primary p-8 shadow-lg"
+        style={{ maxWidth: "640px", minWidth: "400px" }}
+      >
         {/* Header */}
         <div className="mb-8 text-center">
           <h1 className="mb-2 text-3xl font-bold text-text-primary">

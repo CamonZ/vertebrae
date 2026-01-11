@@ -5,7 +5,7 @@
  * for frequently used type transformations.
  */
 
-import type { Result } from '../bindings';
+import type { Result } from "../bindings";
 
 /**
  * Make all properties optional recursively, including nested objects.
@@ -58,7 +58,8 @@ export type Optional<T> = T | undefined;
  * // Task with 'id' guaranteed to be non-null
  * ```
  */
-export type RequiredFields<T, K extends keyof T> = Omit<T, K> & Required<Pick<T, K>>;
+export type RequiredFields<T, K extends keyof T> = Omit<T, K> &
+  Required<Pick<T, K>>;
 
 /**
  * Pick properties from T whose values are assignable to V.
@@ -103,8 +104,9 @@ export type OmitByType<T, V> = {
  * type TaskResult = AsyncReturnType<typeof fetchTask>; // Task
  * ```
  */
-export type AsyncReturnType<T extends (...args: unknown[]) => Promise<unknown>> =
-  T extends (...args: unknown[]) => Promise<infer R> ? R : never;
+export type AsyncReturnType<
+  T extends (...args: unknown[]) => Promise<unknown>,
+> = T extends (...args: unknown[]) => Promise<infer R> ? R : never;
 
 /**
  * Unwrap a Result type to get the success data type.

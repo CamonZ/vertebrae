@@ -1,5 +1,5 @@
-import { create } from 'zustand';
-import type { TaskSummary, TaskWithRelations } from '../bindings';
+import { create } from "zustand";
+import type { TaskSummary, TaskWithRelations } from "../bindings";
 
 interface TaskState {
   /** List of task summaries for list views */
