@@ -62,7 +62,7 @@ pub use unsection::UnsectionCommand;
 pub use update::UpdateCommand;
 pub use workflow::WorkflowCommand;
 
-use crate::output::format_task_table;
+use crate::output::{format_task_table, format_task_tree};
 use clap::Subcommand;
 use vertebrae_core::TaskService;
 use vertebrae_db::DbError;
@@ -211,7 +211,19 @@ impl Command {
             }
             Command::List(cmd) => {
                 let tasks = cmd.execute(db).await?;
-                Ok(CommandResult::Table(format_task_table(&tasks)))
+                // Use tree format if --tree is specified (or if default behavior)
+                // Use flat format if --flat is specified
+                let output = if cmd.tree {
+                    // Get all parent-child relationships for tree rendering
+                    let parent_relations = db.relationships().export_all_child_of().await?;
+                    // Build a map from child_id to parent_id
+                    let parent_map: std::collections::HashMap<String, String> =
+                        parent_relations.into_iter().collect();
+                    format_task_tree(&tasks, &parent_map)
+                } else {
+                    format_task_table(&tasks)
+                };
+                Ok(CommandResult::Table(output))
             }
             Command::Path(cmd) => {
                 let result = cmd.execute(db).await?;

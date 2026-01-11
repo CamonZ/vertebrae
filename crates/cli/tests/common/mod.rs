@@ -303,6 +303,8 @@ pub fn list_cmd() -> ListCommand {
         children: None,
         all: false,
         search: None,
+        tree: false,
+        flat: false,
     }
 }
 
@@ -317,6 +319,8 @@ pub fn list_cmd_with_search(search: &str) -> ListCommand {
         children: None,
         all: false,
         search: Some(search.to_string()),
+        tree: false,
+        flat: false,
     }
 }
 

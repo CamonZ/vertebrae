@@ -58,6 +58,14 @@ pub struct ListCommand {
     /// Search text in title and description (case-insensitive)
     #[arg(long)]
     pub search: Option<String>,
+
+    /// Display tasks as a hierarchical tree (showing parent-child relationships)
+    #[arg(long)]
+    pub tree: bool,
+
+    /// Display tasks as a flat table (default behavior)
+    #[arg(long)]
+    pub flat: bool,
 }
 
 /// Parse a level string into a Level enum
@@ -348,6 +356,8 @@ mod tests {
             children: None,
             all: false,
             search: None,
+            tree: false,
+            flat: false,
         };
 
         let result = cmd.execute(&db).await.unwrap();
@@ -381,6 +391,8 @@ mod tests {
             children: None,
             all: true,
             search: None,
+            tree: false,
+            flat: false,
         };
 
         let result = cmd.execute(&db).await.unwrap();
@@ -415,6 +427,8 @@ mod tests {
             children: None,
             all: false,
             search: None,
+            tree: false,
+            flat: false,
         };
 
         let result = cmd.execute(&db).await.unwrap();
@@ -440,6 +454,8 @@ mod tests {
             children: None,
             all: false,
             search: None,
+            tree: false,
+            flat: false,
         };
 
         let result = cmd.execute(&db).await.unwrap();
@@ -479,6 +495,8 @@ mod tests {
             children: None,
             all: false,
             search: None,
+            tree: false,
+            flat: false,
         };
 
         let result = cmd.execute(&db).await.unwrap();
@@ -504,6 +522,8 @@ mod tests {
             children: None,
             all: false,
             search: None,
+            tree: false,
+            flat: false,
         };
 
         let result = cmd.execute(&db).await.unwrap();
@@ -538,6 +558,8 @@ mod tests {
             children: None,
             all: false,
             search: None,
+            tree: false,
+            flat: false,
         };
 
         let result = cmd.execute(&db).await.unwrap();
@@ -587,6 +609,8 @@ mod tests {
             children: None,
             all: false,
             search: None,
+            tree: false,
+            flat: false,
         };
 
         let result = cmd.execute(&db).await.unwrap();
@@ -621,6 +645,8 @@ mod tests {
             children: Some("parent1".to_string()),
             all: false,
             search: None,
+            tree: false,
+            flat: false,
         };
 
         let result = cmd.execute(&db).await.unwrap();
@@ -646,6 +672,8 @@ mod tests {
             children: Some("nonexistent".to_string()),
             all: false,
             search: None,
+            tree: false,
+            flat: false,
         };
 
         let result = cmd.execute(&db).await.unwrap();
@@ -667,6 +695,8 @@ mod tests {
             children: None,
             all: false,
             search: None,
+            tree: false,
+            flat: false,
         };
 
         let result = cmd.execute(&db).await.unwrap();
@@ -728,6 +758,8 @@ mod tests {
             children: None,
             all: false,
             search: None,
+            tree: false,
+            flat: false,
         };
 
         let result = cmd.execute(&db).await.unwrap();
@@ -753,6 +785,8 @@ mod tests {
             children: None,
             all: false,
             search: None,
+            tree: false,
+            flat: false,
         };
 
         let result = cmd.execute(&db).await.unwrap();
@@ -772,6 +806,8 @@ mod tests {
             children: None,
             all: true,
             search: Some("test query".to_string()),
+            tree: false,
+            flat: false,
         };
 
         let filter = cmd.build_filter();
@@ -797,6 +833,8 @@ mod tests {
             children: Some("parent123".to_string()),
             all: false,
             search: None,
+            tree: false,
+            flat: false,
         };
 
         let filter = cmd.build_filter();
@@ -818,6 +856,8 @@ mod tests {
             children: None,
             all: false,
             search: None,
+            tree: false,
+            flat: false,
         };
 
         let filter = cmd.build_filter();
@@ -915,6 +955,8 @@ mod tests {
             children: Some("parent123".to_string()),
             all: true,
             search: Some("test query".to_string()),
+            tree: false,
+            flat: false,
         };
 
         let debug_str = format!("{:?}", cmd);
@@ -997,6 +1039,8 @@ mod tests {
             children: None,
             all: false,
             search: Some("auth".to_string()),
+            tree: false,
+            flat: false,
         };
 
         let result = cmd.execute(&db).await.unwrap();
@@ -1038,6 +1082,8 @@ mod tests {
             children: None,
             all: false,
             search: Some("authentication".to_string()),
+            tree: false,
+            flat: false,
         };
 
         let result = cmd.execute(&db).await.unwrap();
@@ -1072,6 +1118,8 @@ mod tests {
             children: None,
             all: false,
             search: Some("authentication".to_string()),
+            tree: false,
+            flat: false,
         };
 
         let result = cmd.execute(&db).await.unwrap();
@@ -1089,6 +1137,8 @@ mod tests {
             children: None,
             all: false,
             search: Some("AUTHENTICATION".to_string()),
+            tree: false,
+            flat: false,
         };
 
         let result2 = cmd2.execute(&db).await.unwrap();
@@ -1113,6 +1163,8 @@ mod tests {
             children: None,
             all: false,
             search: Some("nonexistent".to_string()),
+            tree: false,
+            flat: false,
         };
 
         let result = cmd.execute(&db).await.unwrap();
@@ -1147,6 +1199,8 @@ mod tests {
             children: None,
             all: false,
             search: Some("auth".to_string()),
+            tree: false,
+            flat: false,
         };
 
         let result = cmd.execute(&db).await.unwrap();
@@ -1173,6 +1227,8 @@ mod tests {
             children: None,
             all: false,
             search: Some("auth".to_string()),
+            tree: false,
+            flat: false,
         };
 
         let result = cmd.execute(&db).await.unwrap();
@@ -1196,6 +1252,8 @@ mod tests {
             children: None,
             all: false,
             search: Some("".to_string()),
+            tree: false,
+            flat: false,
         };
 
         let result = cmd.execute(&db).await;
@@ -1224,6 +1282,8 @@ mod tests {
             children: None,
             all: false,
             search: Some("   ".to_string()),
+            tree: false,
+            flat: false,
         };
 
         let result = cmd.execute(&db).await;
@@ -1256,6 +1316,8 @@ mod tests {
             children: None,
             all: false,
             search: Some("auth".to_string()),
+            tree: false,
+            flat: false,
         };
 
         let result = cmd.execute(&db).await.unwrap();
@@ -1284,6 +1346,8 @@ mod tests {
             children: Some("parent1".to_string()),
             all: false,
             search: Some("auth".to_string()),
+            tree: false,
+            flat: false,
         };
 
         let result = cmd.execute(&db).await.unwrap();
@@ -1308,6 +1372,8 @@ mod tests {
             children: None,
             all: false,
             search: Some("test\" OR 1=1 --".to_string()),
+            tree: false,
+            flat: false,
         };
 
         let result = cmd.execute(&db).await.unwrap();
@@ -1335,6 +1401,8 @@ mod tests {
             children: None,
             all: false,
             search: Some("auth".to_string()),
+            tree: false,
+            flat: false,
         };
 
         let result = cmd.execute(&db).await.unwrap();
@@ -1375,6 +1443,8 @@ mod tests {
             children: None,
             all: false,
             search: None,
+            tree: false,
+            flat: false,
         };
 
         let result = cmd.execute(&db).await.unwrap();
