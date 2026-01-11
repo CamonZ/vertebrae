@@ -56,14 +56,6 @@ export function TaskFilters({ filters, onFiltersChange }: TaskFiltersProps) {
     [filters, onFiltersChange]
   );
 
-  const handleIncludeDoneChange = useCallback(
-    (event: React.ChangeEvent<HTMLInputElement>) => {
-      const include_done = event.target.checked;
-      onFiltersChange({ ...filters, include_done });
-    },
-    [filters, onFiltersChange]
-  );
-
   const handleClearFilters = useCallback(() => {
     onFiltersChange({
       statuses: null,
@@ -79,8 +71,7 @@ export function TaskFilters({ filters, onFiltersChange }: TaskFiltersProps) {
   const hasActiveFilters =
     filters.statuses ||
     filters.levels ||
-    filters.search ||
-    filters.include_done;
+    filters.search;
 
   const selectedStatus = filters.statuses?.[0] ?? '';
   const selectedLevel = filters.levels?.[0] ?? '';
@@ -163,22 +154,6 @@ export function TaskFilters({ filters, onFiltersChange }: TaskFiltersProps) {
           </select>
         </div>
 
-        <div className="h-4 w-px bg-border" />
-
-        {/* Include done toggle */}
-        <label className="flex cursor-pointer items-center gap-2 px-2 py-1.5 text-sm text-text-secondary hover:text-text-primary">
-          <div className="relative">
-            <input
-              type="checkbox"
-              checked={filters.include_done ?? false}
-              onChange={handleIncludeDoneChange}
-              className="peer sr-only"
-            />
-            <div className="h-4 w-7 rounded-full bg-bg-tertiary transition-colors peer-checked:bg-primary/30" />
-            <div className="absolute left-0.5 top-0.5 h-3 w-3 rounded-full bg-text-muted transition-all peer-checked:left-3.5 peer-checked:bg-primary" />
-          </div>
-          <span className="font-mono text-[10px] uppercase tracking-wider">Done</span>
-        </label>
       </div>
 
       {/* Clear filters button */}
