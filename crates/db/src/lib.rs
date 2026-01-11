@@ -24,9 +24,12 @@ pub use repository::{
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use surrealdb::Surreal;
+
+// Re-export surrealdb types needed by downstream crates
 #[cfg(test)]
 use surrealdb::engine::local::Mem;
 use surrealdb::engine::local::{Db, SurrealKv};
+pub use surrealdb::sql::Thing;
 
 /// Default database path relative to project root or current working directory
 pub const DEFAULT_DB_PATH: &str = ".vtb/data";

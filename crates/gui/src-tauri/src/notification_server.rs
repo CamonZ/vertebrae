@@ -149,16 +149,13 @@ async fn handle_notify_change(
 /// Start the HTTP server for mutation notifications
 ///
 /// Spawns an async task that listens on localhost:port for POST /api/notify-change requests.
-/// Runs on a separate tokio task to avoid blocking Tauri setup.
+/// Runs on a separate task to avoid blocking Tauri setup.
 ///
 /// # Arguments
 /// * `app_handle` - Tauri app handle for emitting events
 /// * `port` - Port to listen on
-///
-/// # Returns
-/// Tokio task handle that will run for the lifetime of the app
-pub fn start_notification_server(app_handle: AppHandle, port: u16) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
+pub fn start_notification_server(app_handle: AppHandle, port: u16) {
+    tauri::async_runtime::spawn(async move {
         let app_handle = Arc::new(app_handle);
 
         let app = Router::new()
@@ -191,7 +188,7 @@ pub fn start_notification_server(app_handle: AppHandle, port: u16) -> tokio::tas
         if let Err(e) = axum_listener.await {
             log::error!("[NotificationServer] Server error: {}", e);
         }
-    })
+    });
 }
 
 #[cfg(test)]

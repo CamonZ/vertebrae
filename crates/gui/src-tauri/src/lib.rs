@@ -86,7 +86,7 @@ pub fn run() {
 
             // Start HTTP notification server for CLI mutations
             let app_handle = app.handle().clone();
-            let server_handle = notification_server::start_notification_server(
+            notification_server::start_notification_server(
                 app_handle,
                 notification_server::DEFAULT_NOTIFICATION_PORT,
             );
@@ -168,9 +168,6 @@ pub fn run() {
 
             // Store LIVE query registry to keep streams alive for app lifetime
             app.manage(RwLock::new(live_registry));
-
-            // Store notification server handle to keep it running for app lifetime
-            app.manage(server_handle);
 
             Ok(())
         })

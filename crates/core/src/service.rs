@@ -7,13 +7,35 @@
 use crate::error::{ServiceError, ServiceResult};
 use async_trait::async_trait;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use vertebrae_db::{
     BlockerNode, CodeRef, Database, Level, Priority, Section, Status, Task, TaskFilter,
-    TaskSummary, TaskUpdate,
+    TaskSummary, TaskUpdate, Thing,
 };
 
 // Re-export commonly used types
 pub use vertebrae_db::{Level as TaskLevel, Priority as TaskPriority, Status as TaskStatus};
+
+/// Event representing a task mutation for cache invalidation
+#[derive(Debug, Clone)]
+pub enum MutationEvent {
+    /// Task was created
+    TaskCreated { id: String },
+    /// Task was updated (any field change)
+    TaskUpdated { id: String },
+    /// Task was deleted
+    TaskDeleted { id: String },
+    /// Task status changed (for explicit status-only updates)
+    TaskStatusChanged {
+        id: String,
+        old_status: Status,
+        new_status: Status,
+    },
+}
+
+/// Callback for mutation events - fires after each mutation completes
+/// Used by consumers (CLI, GUI) to invalidate caches
+pub type MutationCallback = Arc<dyn Fn(MutationEvent) + Send + Sync>;
 
 /// Options for creating a new task
 #[derive(Debug, Default)]
@@ -415,6 +437,16 @@ pub trait TaskService: Send + Sync {
     /// Get the dependency chain (blockers) for a task
     async fn get_blockers(&self, id: &str) -> ServiceResult<Vec<BlockerNode>>;
 
+    /// Get incomplete blockers for a task with full details
+    ///
+    /// Returns `TaskSummary` information for all tasks that block this task
+    /// and are not yet done. This is a read-only query that doesn't fire
+    /// mutation callbacks.
+    async fn get_incomplete_blockers_with_details(
+        &self,
+        id: &str,
+    ) -> ServiceResult<Vec<TaskSummary>>;
+
     // =========================================================================
     // Sections and Code References
     // =========================================================================
@@ -435,17 +467,85 @@ pub trait TaskService: Send + Sync {
 
     /// Remove code references from a task
     async fn remove_code_refs(&self, id: &str, indices: Option<Vec<usize>>) -> ServiceResult<()>;
+
+    /// Atomically append a code reference to a task
+    ///
+    /// Uses database-level append operation for atomic updates without
+    /// read-modify-write race conditions.
+    async fn append_ref(&self, id: &str, code_ref: &CodeRef) -> ServiceResult<()>;
+
+    /// Atomically append a code reference to a section within a task
+    ///
+    /// Uses database-level append operation for atomic updates without
+    /// read-modify-write race conditions.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The task ID
+    /// * `section_index` - The 0-based index of the section to add the ref to
+    /// * `code_ref` - The code reference to append
+    async fn append_section_ref(
+        &self,
+        id: &str,
+        section_index: usize,
+        code_ref: &CodeRef,
+    ) -> ServiceResult<()>;
+
+    // =========================================================================
+    // Workflow Operations
+    // =========================================================================
+
+    /// Assign a workflow to a task
+    ///
+    /// Sets the task's workflow_id and initializes current_step to 0.
+    async fn assign_workflow(&self, task_id: &str, workflow_id: &Thing) -> ServiceResult<()>;
+
+    /// Remove workflow assignment from a task
+    ///
+    /// Clears both workflow_id and current_step fields.
+    async fn unassign_workflow(&self, task_id: &str) -> ServiceResult<()>;
+
+    /// Update the current step of a task in its workflow
+    ///
+    /// # Arguments
+    ///
+    /// * `task_id` - The task ID to update
+    /// * `step` - The new step index (0-based)
+    async fn update_current_step(&self, task_id: &str, step: usize) -> ServiceResult<()>;
 }
 
 /// Default implementation of TaskService backed by Database
 pub struct DefaultTaskService {
     db: Database,
+    /// Optional callback for mutations (cache invalidation, notifications, etc.)
+    mutation_callback: Option<MutationCallback>,
 }
 
 impl DefaultTaskService {
     /// Create a new DefaultTaskService with the given database
     pub fn new(db: Database) -> Self {
-        Self { db }
+        Self {
+            db,
+            mutation_callback: None,
+        }
+    }
+
+    /// Create a new DefaultTaskService with a mutation callback
+    ///
+    /// The callback fires after each mutation completes, enabling cache invalidation
+    /// or other side effects in consumers (CLI, GUI, etc.).
+    pub fn with_callback(db: Database, callback: MutationCallback) -> Self {
+        Self {
+            db,
+            mutation_callback: Some(callback),
+        }
+    }
+
+    /// Fire the mutation callback if registered
+    fn on_mutation(&self, event: MutationEvent) {
+        if let Some(callback) = &self.mutation_callback {
+            callback(event);
+        }
     }
 
     /// Get a reference to the underlying database
@@ -644,6 +744,9 @@ impl TaskService for DefaultTaskService {
                 .await?;
         }
 
+        // Fire mutation callback
+        self.on_mutation(MutationEvent::TaskCreated { id: id.clone() });
+
         Ok(id)
     }
 
@@ -709,6 +812,9 @@ impl TaskService for DefaultTaskService {
             self.db.tasks().update(&id, &update).await?;
         }
 
+        // Fire mutation callback
+        self.on_mutation(MutationEvent::TaskUpdated { id: id.clone() });
+
         Ok(())
     }
 
@@ -737,6 +843,9 @@ impl TaskService for DefaultTaskService {
 
         // Delete the task itself
         self.db.tasks().delete(&id).await?;
+
+        // Fire mutation callback
+        self.on_mutation(MutationEvent::TaskDeleted { id: id.clone() });
 
         Ok(())
     }
@@ -947,6 +1056,13 @@ impl TaskService for DefaultTaskService {
             vec![]
         };
 
+        // Fire mutation callback
+        self.on_mutation(MutationEvent::TaskStatusChanged {
+            id: id.clone(),
+            old_status: from_status.clone(),
+            new_status: target.clone(),
+        });
+
         Ok(TransitionResult {
             task_id: id,
             from_status,
@@ -974,6 +1090,12 @@ impl TaskService for DefaultTaskService {
             .relationships()
             .create_child_of(&child_id, &parent_id)
             .await?;
+
+        // Fire mutation callback
+        self.on_mutation(MutationEvent::TaskUpdated {
+            id: child_id.clone(),
+        });
+
         Ok(())
     }
 
@@ -985,6 +1107,12 @@ impl TaskService for DefaultTaskService {
         }
 
         self.db.relationships().remove_child_of(&child_id).await?;
+
+        // Fire mutation callback
+        self.on_mutation(MutationEvent::TaskUpdated {
+            id: child_id.clone(),
+        });
+
         Ok(())
     }
 
@@ -1014,6 +1142,12 @@ impl TaskService for DefaultTaskService {
             .relationships()
             .create_depends_on(&task_id, &depends_on_id)
             .await?;
+
+        // Fire mutation callback
+        self.on_mutation(MutationEvent::TaskUpdated {
+            id: task_id.clone(),
+        });
+
         Ok(())
     }
 
@@ -1029,6 +1163,12 @@ impl TaskService for DefaultTaskService {
             .relationships()
             .remove_depends_on(&task_id, &depends_on_id)
             .await?;
+
+        // Fire mutation callback
+        self.on_mutation(MutationEvent::TaskUpdated {
+            id: task_id.clone(),
+        });
+
         Ok(())
     }
 
@@ -1040,6 +1180,23 @@ impl TaskService for DefaultTaskService {
         }
 
         Ok(self.db.graph().get_blockers(&id, None).await?)
+    }
+
+    async fn get_incomplete_blockers_with_details(
+        &self,
+        id: &str,
+    ) -> ServiceResult<Vec<TaskSummary>> {
+        let id = id.to_lowercase();
+
+        if !self.db.tasks().exists(&id).await? {
+            return Err(ServiceError::task_not_found(&id));
+        }
+
+        Ok(self
+            .db
+            .graph()
+            .get_incomplete_blockers_with_details(&id)
+            .await?)
     }
 
     async fn add_section(&self, id: &str, section: Section) -> ServiceResult<()> {
@@ -1055,6 +1212,9 @@ impl TaskService for DefaultTaskService {
         // Update task
         let update = TaskUpdate::new().with_sections(sections);
         self.db.tasks().update(&id, &update).await?;
+
+        // Fire mutation callback
+        self.on_mutation(MutationEvent::TaskUpdated { id: id.clone() });
 
         Ok(())
     }
@@ -1093,6 +1253,9 @@ impl TaskService for DefaultTaskService {
         let update = TaskUpdate::new().with_sections(sections);
         self.db.tasks().update(&id, &update).await?;
 
+        // Fire mutation callback
+        self.on_mutation(MutationEvent::TaskUpdated { id: id.clone() });
+
         Ok(())
     }
 
@@ -1110,6 +1273,7 @@ impl TaskService for DefaultTaskService {
         let update = TaskUpdate::new().with_refs(code_refs);
         self.db.tasks().update(&id, &update).await?;
 
+        self.on_mutation(MutationEvent::TaskUpdated { id: id.clone() });
         Ok(())
     }
 
@@ -1142,6 +1306,94 @@ impl TaskService for DefaultTaskService {
         let update = TaskUpdate::new().with_refs(code_refs);
         self.db.tasks().update(&id, &update).await?;
 
+        self.on_mutation(MutationEvent::TaskUpdated { id: id.clone() });
+        Ok(())
+    }
+
+    async fn append_ref(&self, id: &str, code_ref: &CodeRef) -> ServiceResult<()> {
+        let id = id.to_lowercase();
+
+        // Verify task exists
+        if !self.db.tasks().exists(&id).await? {
+            return Err(ServiceError::task_not_found(&id));
+        }
+
+        self.db.tasks().append_ref(&id, code_ref).await?;
+
+        self.on_mutation(MutationEvent::TaskUpdated { id: id.clone() });
+        Ok(())
+    }
+
+    async fn append_section_ref(
+        &self,
+        id: &str,
+        section_index: usize,
+        code_ref: &CodeRef,
+    ) -> ServiceResult<()> {
+        let id = id.to_lowercase();
+
+        // Verify task exists
+        if !self.db.tasks().exists(&id).await? {
+            return Err(ServiceError::task_not_found(&id));
+        }
+
+        self.db
+            .tasks()
+            .append_section_ref(&id, section_index, code_ref)
+            .await?;
+
+        self.on_mutation(MutationEvent::TaskUpdated { id: id.clone() });
+        Ok(())
+    }
+
+    async fn assign_workflow(&self, task_id: &str, workflow_id: &Thing) -> ServiceResult<()> {
+        let task_id = task_id.to_lowercase();
+
+        // Verify task exists
+        if !self.db.tasks().exists(&task_id).await? {
+            return Err(ServiceError::task_not_found(&task_id));
+        }
+
+        self.db
+            .tasks()
+            .assign_workflow(&task_id, workflow_id)
+            .await?;
+
+        self.on_mutation(MutationEvent::TaskUpdated {
+            id: task_id.clone(),
+        });
+        Ok(())
+    }
+
+    async fn unassign_workflow(&self, task_id: &str) -> ServiceResult<()> {
+        let task_id = task_id.to_lowercase();
+
+        // Verify task exists
+        if !self.db.tasks().exists(&task_id).await? {
+            return Err(ServiceError::task_not_found(&task_id));
+        }
+
+        self.db.tasks().unassign_workflow(&task_id).await?;
+
+        self.on_mutation(MutationEvent::TaskUpdated {
+            id: task_id.clone(),
+        });
+        Ok(())
+    }
+
+    async fn update_current_step(&self, task_id: &str, step: usize) -> ServiceResult<()> {
+        let task_id = task_id.to_lowercase();
+
+        // Verify task exists
+        if !self.db.tasks().exists(&task_id).await? {
+            return Err(ServiceError::task_not_found(&task_id));
+        }
+
+        self.db.tasks().update_current_step(&task_id, step).await?;
+
+        self.on_mutation(MutationEvent::TaskUpdated {
+            id: task_id.clone(),
+        });
         Ok(())
     }
 }
