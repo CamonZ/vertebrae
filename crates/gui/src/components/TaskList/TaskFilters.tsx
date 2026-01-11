@@ -1,9 +1,13 @@
 import { useCallback } from 'react';
 import type { TaskStatus, TaskLevel, TaskFilterOptions } from '../../bindings';
 
+export type ViewMode = 'list' | 'tree';
+
 interface TaskFiltersProps {
   filters: TaskFilterOptions;
   onFiltersChange: (filters: TaskFilterOptions) => void;
+  viewMode?: ViewMode;
+  onViewModeChange?: (mode: ViewMode) => void;
 }
 
 /** Available status options for filtering */
@@ -25,9 +29,9 @@ const LEVEL_OPTIONS: { value: TaskLevel; label: string }[] = [
 
 /**
  * TaskFilters component with neural-pathway design.
- * Includes status dropdown, level dropdown, search, and toggles.
+ * Includes status dropdown, level dropdown, search, view mode toggle, and toggles.
  */
-export function TaskFilters({ filters, onFiltersChange }: TaskFiltersProps) {
+export function TaskFilters({ filters, onFiltersChange, viewMode = 'list', onViewModeChange }: TaskFiltersProps) {
   const handleStatusChange = useCallback(
     (event: React.ChangeEvent<HTMLSelectElement>) => {
       const value = event.target.value;
@@ -179,6 +183,66 @@ export function TaskFilters({ filters, onFiltersChange }: TaskFiltersProps) {
           </svg>
           Clear
         </button>
+      )}
+
+      {/* View mode toggle */}
+      {onViewModeChange && (
+        <div className="ml-auto flex items-center rounded-lg border border-border bg-bg-tertiary/50 p-1">
+          <button
+            type="button"
+            onClick={() => onViewModeChange('list')}
+            className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-all ${
+              viewMode === 'list'
+                ? 'bg-primary/10 text-primary'
+                : 'text-text-muted hover:text-text-primary'
+            }`}
+            aria-label="List view"
+            aria-pressed={viewMode === 'list'}
+          >
+            <svg
+              className="h-4 w-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={1.5}
+                d="M4 6h16M4 10h16M4 14h16M4 18h16"
+              />
+            </svg>
+            List
+          </button>
+          <button
+            type="button"
+            onClick={() => onViewModeChange('tree')}
+            className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-all ${
+              viewMode === 'tree'
+                ? 'bg-primary/10 text-primary'
+                : 'text-text-muted hover:text-text-primary'
+            }`}
+            aria-label="Tree view"
+            aria-pressed={viewMode === 'tree'}
+          >
+            <svg
+              className="h-4 w-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={1.5}
+                d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z"
+              />
+            </svg>
+            Tree
+          </button>
+        </div>
       )}
     </div>
   );

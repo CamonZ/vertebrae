@@ -1,7 +1,8 @@
 import { useState, useCallback, useMemo } from "react";
-import type { TaskFilterOptions, TaskSummary } from "../bindings";
+import type { TaskFilterOptions, TaskSummary, TaskHierarchyNode } from "../bindings";
 import { useTasks } from "../hooks/useTasks";
-import { TaskList, TaskFilters } from "../components/TaskList";
+import { useTaskHierarchy } from "../hooks/useTaskHierarchy";
+import { TaskList, TaskFilters, TaskTreeView, type ViewMode } from "../components/TaskList";
 import { TaskDetailPanel } from "../components/TaskDetail";
 
 /**
@@ -18,15 +19,27 @@ const INITIAL_FILTERS: TaskFilterOptions = {
 };
 
 /**
+ * Count total tasks in hierarchy recursively
+ */
+function countHierarchyTasks(nodes: TaskHierarchyNode[]): number {
+  return nodes.reduce((count, node) => {
+    return count + 1 + countHierarchyTasks(node.children);
+  }, 0);
+}
+
+/**
  * TasksPage displays a filterable, searchable list of all tasks.
  * Features neural-pathway-inspired design with animated elements.
+ * Supports both flat list and hierarchical tree views.
  */
 export function TasksPage() {
   const [filters, setFilters] = useState<TaskFilterOptions>(INITIAL_FILTERS);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>('list');
 
   const memoizedFilters = useMemo(() => filters, [filters]);
   const { tasks, isLoading, error, refetch } = useTasks(memoizedFilters);
+  const { hierarchy, isLoading: isHierarchyLoading, error: hierarchyError, refetch: refetchHierarchy } = useTaskHierarchy();
 
   const handleFiltersChange = useCallback((newFilters: TaskFilterOptions) => {
     setFilters(newFilters);
@@ -44,8 +57,29 @@ export function TasksPage() {
     setSelectedTaskId(taskId);
   }, []);
 
-  // Count active tasks
+  const handleViewModeChange = useCallback((mode: ViewMode) => {
+    setViewMode(mode);
+  }, []);
+
+  const handleRefresh = useCallback(() => {
+    if (viewMode === 'tree') {
+      refetchHierarchy();
+    } else {
+      refetch();
+    }
+  }, [viewMode, refetch, refetchHierarchy]);
+
+  // Count active tasks - works for both list and tree views
   const activeCount = tasks.filter((t) => t.status === "in_progress").length;
+
+  // Determine current loading/error state based on view mode
+  const currentIsLoading = viewMode === 'tree' ? isHierarchyLoading : isLoading;
+  const currentError = viewMode === 'tree' ? hierarchyError : error;
+
+  // Calculate task count for footer
+  const taskCount = viewMode === 'tree'
+    ? countHierarchyTasks(hierarchy)
+    : tasks.length;
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -73,13 +107,13 @@ export function TasksPage() {
             </div>
             <button
               type="button"
-              onClick={refetch}
-              disabled={isLoading}
+              onClick={handleRefresh}
+              disabled={currentIsLoading}
               className="flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/10 px-4 py-2 text-sm font-medium text-primary transition-all hover:border-primary hover:bg-primary hover:text-bg-primary hover:shadow-glow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
               aria-label="Refresh task list"
             >
               <svg
-                className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`}
+                className={`h-4 w-4 ${currentIsLoading ? "animate-spin" : ""}`}
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -92,7 +126,7 @@ export function TasksPage() {
                   d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
                 />
               </svg>
-              {isLoading ? "Loading..." : "Refresh"}
+              {currentIsLoading ? "Loading..." : "Refresh"}
             </button>
           </div>
 
@@ -101,26 +135,43 @@ export function TasksPage() {
             <TaskFilters
               filters={filters}
               onFiltersChange={handleFiltersChange}
+              viewMode={viewMode}
+              onViewModeChange={handleViewModeChange}
             />
           </div>
         </div>
 
-        {/* Task list section */}
+        {/* Task list/tree section */}
         <div className="flex-1 overflow-auto bg-bg-primary">
-          <TaskList
-            tasks={tasks}
-            isLoading={isLoading}
-            error={error}
-            selectedTaskId={selectedTaskId}
-            onTaskSelect={handleTaskSelect}
-          />
+          {viewMode === 'tree' ? (
+            <TaskTreeView
+              hierarchy={hierarchy}
+              isLoading={isHierarchyLoading}
+              error={hierarchyError}
+              selectedTaskId={selectedTaskId}
+              onTaskSelect={handleTaskSelect}
+            />
+          ) : (
+            <TaskList
+              tasks={tasks}
+              isLoading={isLoading}
+              error={error}
+              selectedTaskId={selectedTaskId}
+              onTaskSelect={handleTaskSelect}
+            />
+          )}
         </div>
 
         {/* Footer with task count */}
-        {!isLoading && !error && tasks.length > 0 && (
+        {!currentIsLoading && !currentError && taskCount > 0 && (
           <div className="flex items-center justify-between border-t border-border bg-bg-secondary px-6 py-2">
             <p className="font-mono text-xs text-text-muted">
-              {tasks.length} task{tasks.length !== 1 ? "s" : ""}
+              {taskCount} task{taskCount !== 1 ? "s" : ""}
+              {viewMode === 'tree' && hierarchy.length > 0 && (
+                <span className="ml-2 text-text-muted/70">
+                  ({hierarchy.length} root{hierarchy.length !== 1 ? "s" : ""})
+                </span>
+              )}
             </p>
             {selectedTaskId && (
               <p className="font-mono text-xs text-text-muted">
