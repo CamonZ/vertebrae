@@ -9,6 +9,7 @@ use tokio::sync::RwLock;
 use specta_typescript::Typescript;
 use tauri::Manager;
 use tauri_specta::{collect_commands, collect_events, Builder};
+use vertebrae_core::DefaultTaskService;
 use vertebrae_db::Database;
 
 use commands::AppState;
@@ -77,7 +78,7 @@ pub fn run() {
 
             // Check if there's a current project set
             let current_project = project_config.get_current_project();
-            let db = if let Some(ref project_path) = current_project {
+            let service = if let Some(ref project_path) = current_project {
                 let db_path = PathBuf::from(project_path).join(".vtb/data");
                 log::info!("Connecting to database at: {:?}", db_path);
 
@@ -88,7 +89,7 @@ pub fn run() {
                                 log::error!("Failed to initialize database: {}", e);
                                 None
                             } else {
-                                Some(db)
+                                Some(DefaultTaskService::new(db))
                             }
                         }
                         Err(e) => {
@@ -102,9 +103,9 @@ pub fn run() {
                 None
             };
 
-            // Manage application state with optional database
+            // Manage application state with optional task service
             app.manage(AppState {
-                db: RwLock::new(db),
+                service: RwLock::new(service),
                 project_config,
             });
 

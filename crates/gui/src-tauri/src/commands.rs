@@ -1,7 +1,7 @@
 //! Tauri commands for task and workflow data access
 //!
 //! Implements list_tasks, get_task, get_task_hierarchy, and workflow commands
-//! using the vertebrae-db repository pattern.
+//! using the vertebrae-core TaskService layer.
 
 use crate::project_config::{ProjectConfig, SavedProject};
 use crate::types::{
@@ -11,11 +11,12 @@ use crate::types::{
 use serde::{Deserialize, Serialize};
 use tauri::State;
 use tokio::sync::RwLock;
+use vertebrae_core::{DefaultTaskService, TaskService};
 
-/// Application state holding the database connection
+/// Application state holding the task service
 pub struct AppState {
-    /// Database connection (None until a project is selected)
-    pub db: RwLock<Option<vertebrae_db::Database>>,
+    /// Task service (None until a project is selected)
+    pub service: RwLock<Option<DefaultTaskService>>,
     /// Project configuration manager
     pub project_config: ProjectConfig,
 }
@@ -28,6 +29,14 @@ pub struct CommandError {
 
 impl From<vertebrae_db::DbError> for CommandError {
     fn from(err: vertebrae_db::DbError) -> Self {
+        CommandError {
+            message: err.to_string(),
+        }
+    }
+}
+
+impl From<vertebrae_core::ServiceError> for CommandError {
+    fn from(err: vertebrae_core::ServiceError) -> Self {
         CommandError {
             message: err.to_string(),
         }
@@ -132,7 +141,7 @@ pub async fn set_current_project(
         .set_current_project(path.clone())
         .map_err(|e| CommandError { message: e })?;
 
-    // Connect to database if a project is selected
+    // Connect to database and create service if a project is selected
     if let Some(project_path) = path {
         let db_path = std::path::PathBuf::from(&project_path).join(".vtb/data");
         log::info!("Connecting to database at: {:?}", db_path);
@@ -147,11 +156,12 @@ pub async fn set_current_project(
             message: format!("Failed to initialize database: {}", e),
         })?;
 
-        let mut db_lock = state.db.write().await;
-        *db_lock = Some(db);
+        let service = DefaultTaskService::new(db);
+        let mut service_lock = state.service.write().await;
+        *service_lock = Some(service);
     } else {
-        let mut db_lock = state.db.write().await;
-        *db_lock = None;
+        let mut service_lock = state.service.write().await;
+        *service_lock = None;
     }
 
     Ok(())
@@ -161,8 +171,8 @@ pub async fn set_current_project(
 #[tauri::command]
 #[specta::specta]
 pub async fn has_project_selected(state: State<'_, AppState>) -> Result<bool, CommandError> {
-    let db_lock = state.db.read().await;
-    Ok(db_lock.is_some())
+    let service_lock = state.service.read().await;
+    Ok(service_lock.is_some())
 }
 
 /// List tasks with optional filters
@@ -175,13 +185,13 @@ pub async fn list_tasks(
     filter: Option<TaskFilterOptions>,
 ) -> Result<Vec<TaskSummary>, CommandError> {
     log::info!("list_tasks called with filter: {:?}", filter);
-    let db_guard = state.db.read().await;
-    let db = db_guard
+    let service_guard = state.service.read().await;
+    let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
     let db_filter: vertebrae_db::TaskFilter = filter.unwrap_or_default().into();
-    match db.list_tasks().list(&db_filter).await {
+    match service.list_tasks(&db_filter).await {
         Ok(summaries) => {
             log::info!("list_tasks returned {} tasks", summaries.len());
             Ok(summaries.into_iter().map(Into::into).collect())
@@ -202,30 +212,20 @@ pub async fn get_task(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<TaskWithRelations, CommandError> {
-    let db_guard = state.db.read().await;
-    let db = db_guard
+    let service_guard = state.service.read().await;
+    let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    // Get the task
-    let task = db
-        .tasks()
-        .get(&id)
-        .await?
-        .ok_or_else(|| CommandError::task_not_found(&id))?;
-
-    // Get relations
-    let parent_id = db.relationships().get_parent(&id).await?;
-    let children_ids = db.relationships().get_children(&id).await?;
-    let depends_on_ids = db.relationships().get_dependencies(&id).await?;
-    let dependent_ids = db.relationships().get_dependents(&id).await?;
+    // Get the task with relations using the service
+    let task_with_relations = service.get_task_with_relations(&id).await?;
 
     Ok(TaskWithRelations {
-        task: task.into(),
-        parent_id,
-        children_ids,
-        depends_on_ids,
-        dependent_ids,
+        task: task_with_relations.task.into(),
+        parent_id: task_with_relations.parent_id,
+        children_ids: task_with_relations.children_ids,
+        depends_on_ids: task_with_relations.depends_on_ids,
+        dependent_ids: task_with_relations.dependent_ids,
     })
 }
 
@@ -239,67 +239,59 @@ pub async fn get_task_hierarchy(
     state: State<'_, AppState>,
     root_id: Option<String>,
 ) -> Result<Vec<TaskHierarchyNode>, CommandError> {
-    let db_guard = state.db.read().await;
-    let db = db_guard
+    let service_guard = state.service.read().await;
+    let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
+    // Use the service's get_task_tree with include_done filter
+    let filter = vertebrae_db::TaskFilter::new().include_done();
+    let tree_options = vertebrae_core::TreeFilterOptions::new(filter);
+    let tree = service.get_task_tree(&tree_options).await?;
+
     match root_id {
         Some(id) => {
-            // Build hierarchy from a specific root
-            let node = build_hierarchy_node(db, &id).await?;
-            match node {
-                Some(n) => Ok(vec![n]),
+            // Find the specific node in the tree
+            fn find_node(
+                nodes: &[vertebrae_core::TaskTreeNode],
+                id: &str,
+            ) -> Option<TaskHierarchyNode> {
+                for node in nodes {
+                    if node.id == id {
+                        return Some(convert_tree_node(node));
+                    }
+                    if let Some(found) = find_node(&node.children, id) {
+                        return Some(found);
+                    }
+                }
+                None
+            }
+
+            match find_node(&tree, &id) {
+                Some(node) => Ok(vec![node]),
                 None => Err(CommandError::task_not_found(&id)),
             }
         }
         None => {
-            // Get all root tasks and build their hierarchies
-            let root_filter = vertebrae_db::TaskFilter::new().root_only();
-            let roots = db.list_tasks().list(&root_filter).await?;
-
-            let mut nodes = Vec::with_capacity(roots.len());
-            for root in roots {
-                if let Some(node) = build_hierarchy_node(db, &root.id).await? {
-                    nodes.push(node);
-                }
-            }
-            Ok(nodes)
+            // Return all root nodes converted to TaskHierarchyNode
+            Ok(tree.iter().map(convert_tree_node).collect())
         }
     }
 }
 
-/// Helper function to recursively build a hierarchy node
-async fn build_hierarchy_node(
-    db: &vertebrae_db::Database,
-    task_id: &str,
-) -> Result<Option<TaskHierarchyNode>, CommandError> {
-    // Get task summary via filter
-    let filter = vertebrae_db::TaskFilter::new().include_done();
-    let summaries = db.list_tasks().list(&filter).await?;
-
-    // Find the task in the results
-    let task_summary = summaries.into_iter().find(|s| s.id == task_id);
-
-    match task_summary {
-        Some(summary) => {
-            // Get children
-            let children_ids = db.relationships().get_children(task_id).await?;
-
-            // Recursively build child nodes
-            let mut children = Vec::with_capacity(children_ids.len());
-            for child_id in children_ids {
-                if let Some(child_node) = Box::pin(build_hierarchy_node(db, &child_id)).await? {
-                    children.push(child_node);
-                }
-            }
-
-            Ok(Some(TaskHierarchyNode {
-                task: summary.into(),
-                children,
-            }))
-        }
-        None => Ok(None),
+/// Helper function to convert TaskTreeNode to TaskHierarchyNode
+fn convert_tree_node(node: &vertebrae_core::TaskTreeNode) -> TaskHierarchyNode {
+    TaskHierarchyNode {
+        task: TaskSummary {
+            id: node.id.clone(),
+            title: node.title.clone(),
+            level: node.level.clone().into(),
+            status: node.status.clone().into(),
+            priority: node.priority.clone().map(Into::into),
+            tags: node.tags.clone(),
+            needs_human_review: node.needs_human_review,
+        },
+        children: node.children.iter().map(convert_tree_node).collect(),
     }
 }
 
@@ -314,12 +306,12 @@ async fn build_hierarchy_node(
 #[specta::specta]
 pub async fn list_workflows(state: State<'_, AppState>) -> Result<Vec<Workflow>, CommandError> {
     log::info!("list_workflows called");
-    let db_guard = state.db.read().await;
-    let db = db_guard
+    let service_guard = state.service.read().await;
+    let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    match db.workflows().list().await {
+    match service.database().workflows().list().await {
         Ok(workflows) => {
             log::info!("list_workflows returned {} workflows", workflows.len());
             Ok(workflows.into_iter().map(Into::into).collect())
@@ -340,12 +332,13 @@ pub async fn get_workflow(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<Workflow, CommandError> {
-    let db_guard = state.db.read().await;
-    let db = db_guard
+    let service_guard = state.service.read().await;
+    let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    let workflow = db
+    let workflow = service
+        .database()
         .workflows()
         .get(&id)
         .await?
@@ -363,10 +356,12 @@ pub async fn get_workflow_with_tasks(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<WorkflowWithTasks, CommandError> {
-    let db_guard = state.db.read().await;
-    let db = db_guard
+    let service_guard = state.service.read().await;
+    let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
+
+    let db = service.database();
 
     // Get the workflow
     let workflow = db
@@ -375,10 +370,9 @@ pub async fn get_workflow_with_tasks(
         .await?
         .ok_or_else(|| CommandError::workflow_not_found(&id))?;
 
-    // Get tasks associated with this workflow
-    // Use include_done to get all tasks regardless of status
+    // Get tasks associated with this workflow using the service
     let filter = vertebrae_db::TaskFilter::new().include_done();
-    let all_tasks = db.list_tasks().list(&filter).await?;
+    let all_tasks = service.list_tasks(&filter).await?;
 
     // Filter tasks that have this workflow_id
     // Tasks store workflow_id as Thing, so we need to match the id portion
@@ -391,7 +385,7 @@ pub async fn get_workflow_with_tasks(
     // We need to get full tasks to check workflow_id since TaskSummary doesn't include it
     let mut tasks = Vec::new();
     for summary in all_tasks {
-        if let Ok(Some(task)) = db.tasks().get(&summary.id).await {
+        if let Ok(task) = service.get_task(&summary.id).await {
             if let Some(ref wf_id) = task.workflow_id {
                 if wf_id.id.to_string() == workflow_id_str {
                     tasks.push(summary.into());
@@ -421,12 +415,17 @@ pub async fn get_task_executions(
     task_id: String,
 ) -> Result<Vec<StepExecution>, CommandError> {
     log::info!("get_task_executions called for task: {}", task_id);
-    let db_guard = state.db.read().await;
-    let db = db_guard
+    let service_guard = state.service.read().await;
+    let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    match db.executions().list_executions_for_task(&task_id).await {
+    match service
+        .database()
+        .executions()
+        .list_executions_for_task(&task_id)
+        .await
+    {
         Ok(executions) => {
             log::info!(
                 "get_task_executions returned {} executions",
@@ -452,12 +451,17 @@ pub async fn get_execution_logs(
     execution_id: String,
 ) -> Result<Vec<SessionLog>, CommandError> {
     log::info!("get_execution_logs called for execution: {}", execution_id);
-    let db_guard = state.db.read().await;
-    let db = db_guard
+    let service_guard = state.service.read().await;
+    let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    match db.executions().list_logs_for_execution(&execution_id).await {
+    match service
+        .database()
+        .executions()
+        .list_logs_for_execution(&execution_id)
+        .await
+    {
         Ok(logs) => {
             log::info!("get_execution_logs returned {} logs", logs.len());
             Ok(logs.into_iter().map(Into::into).collect())

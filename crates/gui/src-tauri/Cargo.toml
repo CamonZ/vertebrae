@@ -41,3 +41,4 @@ tokio = { version = "1", features = ["full"] }
 
 # Workspace dependencies
 vertebrae-db = { path = "../../db" }
+vertebrae-core = { path = "../../core" }
