@@ -97,10 +97,19 @@ pub fn run() {
 
                                 // Start LIVE query for task table changes
                                 let mut registry = live_queries::LiveQueryRegistry::new();
-                                if let Err(e) =
-                                    registry.start_task_live_query(client, app_handle).await
+                                if let Err(e) = registry
+                                    .start_task_live_query(client.clone(), app_handle.clone())
+                                    .await
                                 {
                                     log::error!("Failed to start task LIVE query: {}", e);
+                                    log::info!("App will continue with polling fallback");
+                                }
+
+                                // Start LIVE query for workflow table changes
+                                if let Err(e) =
+                                    registry.start_workflow_live_query(client, app_handle).await
+                                {
+                                    log::error!("Failed to start workflow LIVE query: {}", e);
                                     log::info!("App will continue with polling fallback");
                                 }
 
