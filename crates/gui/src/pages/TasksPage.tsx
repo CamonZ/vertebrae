@@ -19,17 +19,13 @@ const INITIAL_FILTERS: TaskFilterOptions = {
 
 /**
  * TasksPage displays a filterable, searchable list of all tasks.
- * Uses the useTasks hook for data fetching and manages filter state locally.
- * Includes a side panel for viewing task details when a task is selected.
+ * Features neural-pathway-inspired design with animated elements.
  */
 export function TasksPage() {
   const [filters, setFilters] = useState<TaskFilterOptions>(INITIAL_FILTERS);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
 
-  // Memoize the filter object to prevent unnecessary re-renders
   const memoizedFilters = useMemo(() => filters, [filters]);
-
-  // Fetch tasks with current filters
   const { tasks, isLoading, error, refetch } = useTasks(memoizedFilters);
 
   const handleFiltersChange = useCallback((newFilters: TaskFilterOptions) => {
@@ -48,19 +44,38 @@ export function TasksPage() {
     setSelectedTaskId(taskId);
   }, []);
 
+  // Count active tasks
+  const activeCount = tasks.filter(t => t.status === 'in_progress').length;
+
   return (
-    <div className="flex h-full">
+    <div className="flex min-h-0 flex-1">
       {/* Main content area */}
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Header section */}
-        <div className="border-b border-border bg-bg-primary px-6 py-4">
-          <div className="mb-4 flex items-center justify-between">
-            <h1 className="text-xl font-semibold text-text-primary">Tasks</h1>
+        <div className="relative border-b border-border bg-bg-primary px-6 py-4">
+          {/* Neural grid background */}
+          <div className="neural-grid pointer-events-none absolute inset-0 opacity-20" />
+
+          <div className="relative mb-4 flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <h1 className="text-lg font-semibold text-text-primary">Tasks</h1>
+              {activeCount > 0 && (
+                <div className="flex items-center gap-2 rounded-full border border-warning/30 bg-warning/10 px-3 py-1">
+                  <span className="relative flex h-2 w-2">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-warning opacity-75" />
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-warning" />
+                  </span>
+                  <span className="text-xs font-medium text-warning">
+                    {activeCount} active
+                  </span>
+                </div>
+              )}
+            </div>
             <button
               type="button"
               onClick={refetch}
               disabled={isLoading}
-              className="flex items-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-primary-hover focus:outline-none focus:ring-2 focus:ring-border-focus focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/10 px-4 py-2 text-sm font-medium text-primary transition-all hover:border-primary hover:bg-primary hover:text-bg-primary hover:shadow-glow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
               aria-label="Refresh task list"
             >
               <svg
@@ -73,16 +88,18 @@ export function TasksPage() {
                 <path
                   strokeLinecap="round"
                   strokeLinejoin="round"
-                  strokeWidth={2}
+                  strokeWidth={1.5}
                   d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
                 />
               </svg>
-              Refresh
+              {isLoading ? 'Loading...' : 'Refresh'}
             </button>
           </div>
 
           {/* Filter controls */}
-          <TaskFilters filters={filters} onFiltersChange={handleFiltersChange} />
+          <div className="relative">
+            <TaskFilters filters={filters} onFiltersChange={handleFiltersChange} />
+          </div>
         </div>
 
         {/* Task list section */}
@@ -98,10 +115,15 @@ export function TasksPage() {
 
         {/* Footer with task count */}
         {!isLoading && !error && tasks.length > 0 && (
-          <div className="border-t border-border bg-bg-secondary px-6 py-2">
-            <p className="text-sm text-text-secondary">
-              Showing {tasks.length} task{tasks.length !== 1 ? 's' : ''}
+          <div className="flex items-center justify-between border-t border-border bg-bg-secondary px-6 py-2">
+            <p className="font-mono text-xs text-text-muted">
+              {tasks.length} task{tasks.length !== 1 ? 's' : ''}
             </p>
+            {selectedTaskId && (
+              <p className="font-mono text-xs text-text-muted">
+                Selected: <span className="text-primary">{selectedTaskId.slice(0, 6)}</span>
+              </p>
+            )}
           </div>
         )}
       </div>

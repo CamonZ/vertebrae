@@ -7,7 +7,7 @@ interface ContentAreaProps {
 export function ContentArea({ children }: ContentAreaProps) {
   return (
     <main
-      className="flex-1 overflow-auto bg-bg-secondary p-6"
+      className="flex min-h-0 flex-1 flex-col overflow-hidden bg-bg-primary"
       role="main"
       aria-label="Main content"
     >

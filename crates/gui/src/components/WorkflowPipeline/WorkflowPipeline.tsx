@@ -33,20 +33,16 @@ const nodeTypes: NodeTypes = {
 /**
  * Horizontal spacing between nodes
  */
-const NODE_SPACING_X = 280;
+const NODE_SPACING_X = 320;
 
 /**
  * Vertical position for all nodes (single row layout)
  */
-const NODE_Y_POSITION = 100;
+const NODE_Y_POSITION = 80;
 
 /**
  * WorkflowPipeline displays workflow steps as a connected React Flow diagram.
- * Features:
- * - Custom StepNode for each workflow step
- * - Horizontal auto-layout
- * - Sequential edge connections
- * - Zoom, pan, and minimap controls
+ * Features neural-pathway-inspired design with signal flow animations.
  */
 export function WorkflowPipeline({ workflow }: WorkflowPipelineProps) {
   // Sort steps by order to ensure correct layout
@@ -71,7 +67,7 @@ export function WorkflowPipeline({ workflow }: WorkflowPipelineProps) {
     [sortedSteps]
   );
 
-  // Create edges connecting sequential steps
+  // Create edges connecting sequential steps with signal flow styling
   const initialEdges: Edge[] = useMemo(
     () =>
       sortedSteps.slice(0, -1).map((step, index) => ({
@@ -80,7 +76,10 @@ export function WorkflowPipeline({ workflow }: WorkflowPipelineProps) {
         target: `step-${sortedSteps[index + 1].order}`,
         type: 'smoothstep',
         animated: true,
-        style: { strokeWidth: 2 },
+        style: {
+          strokeWidth: 2,
+          stroke: 'var(--color-primary)',
+        },
       })),
     [sortedSteps]
   );
@@ -91,26 +90,49 @@ export function WorkflowPipeline({ workflow }: WorkflowPipelineProps) {
   // Calculate initial viewport to fit all nodes
   const defaultViewport = useMemo(() => {
     const totalWidth = sortedSteps.length * NODE_SPACING_X;
-    // Zoom out if there are many steps
-    const zoom = totalWidth > 800 ? Math.max(0.5, 800 / totalWidth) : 1;
-    return { x: 50, y: 50, zoom };
+    const zoom = totalWidth > 800 ? Math.max(0.5, 800 / totalWidth) : 0.9;
+    return { x: 40, y: 40, zoom };
   }, [sortedSteps.length]);
 
-  // Minimap node color based on position
+  // Minimap node color
   const minimapNodeColor = useCallback(() => {
     return 'var(--color-primary)';
   }, []);
 
   if (sortedSteps.length === 0) {
     return (
-      <div className="flex h-[400px] items-center justify-center rounded-lg border border-border bg-bg-secondary">
-        <p className="text-text-muted">No steps defined in this workflow</p>
+      <div className="relative flex h-[400px] items-center justify-center rounded-xl border border-border bg-bg-secondary">
+        {/* Neural grid background */}
+        <div className="neural-grid pointer-events-none absolute inset-0 rounded-xl opacity-30" />
+
+        <div className="relative text-center">
+          <svg
+            className="mx-auto h-12 w-12 text-text-muted"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={1}
+              d="M13 10V3L4 14h7v7l9-11h-7z"
+            />
+          </svg>
+          <p className="mt-3 text-sm font-medium text-text-primary">No steps defined</p>
+          <p className="mt-1 text-xs text-text-muted">
+            Add steps to this workflow to create a pipeline
+          </p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="h-[500px] rounded-lg border border-border bg-bg-secondary">
+    <div className="relative h-[500px] overflow-hidden rounded-xl border border-border bg-bg-secondary">
+      {/* Subtle gradient overlay */}
+      <div className="pointer-events-none absolute inset-0 z-10 bg-gradient-to-b from-transparent via-transparent to-bg-secondary/50" />
+
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -119,27 +141,32 @@ export function WorkflowPipeline({ workflow }: WorkflowPipelineProps) {
         nodeTypes={nodeTypes}
         defaultViewport={defaultViewport}
         fitView
-        fitViewOptions={{ padding: 0.2 }}
+        fitViewOptions={{ padding: 0.3 }}
         minZoom={0.25}
         maxZoom={2}
+        colorMode="dark"
         attributionPosition="bottom-left"
+        proOptions={{ hideAttribution: true }}
+        style={{ backgroundColor: '#0c0c0e' }}
       >
         <Controls
-          className="!border-border !bg-bg-primary !shadow-md [&>button]:!border-border [&>button]:!bg-bg-primary [&>button]:!fill-text-secondary hover:[&>button]:!bg-bg-secondary"
           showInteractive={false}
+          className="!rounded-lg !border-border !bg-bg-elevated !shadow-lg"
         />
         <MiniMap
-          className="!border-border !bg-bg-primary"
           nodeColor={minimapNodeColor}
-          maskColor="rgba(0, 0, 0, 0.1)"
+          maskColor="rgba(0, 0, 0, 0.6)"
+          bgColor="#1f1f23"
           pannable
           zoomable
+          className="!rounded-lg !border-border"
         />
         <Background
           variant={BackgroundVariant.Dots}
-          gap={16}
+          gap={24}
           size={1}
-          className="!bg-bg-secondary"
+          color="#57534e"
+          bgColor="#0c0c0e"
         />
       </ReactFlow>
     </div>
