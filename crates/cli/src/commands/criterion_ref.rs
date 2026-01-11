@@ -4,11 +4,11 @@
 //! testing_criterion sections. This links testing criteria to actual test
 //! implementations that prove the desired functionality works.
 
-use crate::commands::r#ref::{ParsedFileRef, parse_file_ref};
+use crate::commands::r#ref::parse_file_ref;
 use clap::Args;
-use serde::Deserialize;
 use std::path::Path;
-use vertebrae_db::{Database, DbError};
+use vertebrae_core::TaskService;
+use vertebrae_db::{CodeRef, DbError};
 
 /// Add a code reference to a testing criterion
 #[derive(Debug, Args)]
@@ -82,40 +82,6 @@ impl std::fmt::Display for CriterionRefResult {
     }
 }
 
-/// Section row from database
-#[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)]
-struct SectionRow {
-    #[serde(rename = "type", default)]
-    section_type: Option<String>,
-    #[serde(default)]
-    content: Option<String>,
-    #[serde(default)]
-    order: Option<u32>,
-    #[serde(default)]
-    done: Option<bool>,
-    #[serde(default)]
-    done_at: Option<chrono::DateTime<chrono::Utc>>,
-    #[serde(default)]
-    refs: Vec<CodeRefRow>,
-}
-
-/// Code reference row from database
-#[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)]
-struct CodeRefRow {
-    #[serde(default)]
-    path: Option<String>,
-    #[serde(default)]
-    line_start: Option<u32>,
-    #[serde(default)]
-    line_end: Option<u32>,
-    #[serde(default)]
-    name: Option<String>,
-    #[serde(default)]
-    description: Option<String>,
-}
-
 impl CriterionRefCommand {
     /// Execute the criterion-ref command.
     ///
@@ -123,7 +89,7 @@ impl CriterionRefCommand {
     ///
     /// # Arguments
     ///
-    /// * `db` - Reference to the database connection
+    /// * `service` - Reference to the task service
     ///
     /// # Errors
     ///
@@ -133,7 +99,7 @@ impl CriterionRefCommand {
     /// - The section at the index is not a testing_criterion
     /// - The file specification is invalid
     /// - Database operations fail
-    pub async fn execute(&self, db: &Database) -> Result<CriterionRefResult, DbError> {
+    pub async fn execute(&self, service: &dyn TaskService) -> Result<CriterionRefResult, DbError> {
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
 
@@ -151,14 +117,23 @@ impl CriterionRefCommand {
             reason: msg,
         })?;
 
-        // Fetch current sections
-        let sections = self.fetch_sections(db, &id).await?;
+        // Fetch the task to get sections
+        let task = service.get_task(&id).await.map_err(|e| match e {
+            vertebrae_core::ServiceError::TaskNotFound { task_id } => {
+                DbError::TaskNotFound { task_id }
+            }
+            vertebrae_core::ServiceError::Database(db_err) => db_err,
+            other => DbError::ValidationError {
+                message: other.to_string(),
+            },
+        })?;
 
         // Filter to only testing_criterion sections and sort by order
-        let mut criteria: Vec<(usize, SectionRow)> = sections
-            .into_iter()
+        let mut criteria: Vec<(usize, &vertebrae_db::Section)> = task
+            .sections
+            .iter()
             .enumerate()
-            .filter(|(_, s)| s.section_type.as_deref() == Some("testing_criterion"))
+            .filter(|(_, s)| s.section_type == vertebrae_db::SectionType::TestingCriterion)
             .collect();
         criteria.sort_by_key(|(_, s)| s.order.unwrap_or(u32::MAX));
 
@@ -175,8 +150,8 @@ impl CriterionRefCommand {
             });
         }
 
-        let (original_idx, criterion) = &criteria[criterion_idx];
-        let criterion_content = criterion.content.clone().unwrap_or_default();
+        let (original_idx, criterion) = criteria[criterion_idx];
+        let criterion_content = criterion.content.clone();
 
         // Check if file exists (warning only)
         let warning = if !Path::new(&parsed.path).exists() {
@@ -185,12 +160,28 @@ impl CriterionRefCommand {
             None
         };
 
-        // Append the new reference to the criterion's refs array
-        self.append_criterion_ref(db, &id, *original_idx, &parsed)
-            .await?;
+        // Build the CodeRef
+        let code_ref = CodeRef {
+            path: parsed.path.clone(),
+            line_start: parsed.line_start,
+            line_end: parsed.line_end,
+            name: self.name.clone(),
+            description: self.description.clone(),
+        };
 
-        // Update the task's updated_at timestamp
-        self.update_timestamp(db, &id).await?;
+        // Use service to append the section ref (handles timestamp and notification)
+        service
+            .append_section_ref(&id, original_idx, &code_ref)
+            .await
+            .map_err(|e| match e {
+                vertebrae_core::ServiceError::TaskNotFound { task_id } => {
+                    DbError::TaskNotFound { task_id }
+                }
+                vertebrae_core::ServiceError::Database(db_err) => db_err,
+                other => DbError::ValidationError {
+                    message: other.to_string(),
+                },
+            })?;
 
         Ok(CriterionRefResult {
             task_id: id,
@@ -203,91 +194,23 @@ impl CriterionRefCommand {
             warning,
         })
     }
-
-    /// Fetch sections from a task.
-    async fn fetch_sections(&self, db: &Database, id: &str) -> Result<Vec<SectionRow>, DbError> {
-        #[derive(Debug, Deserialize)]
-        struct TaskRow {
-            #[serde(default)]
-            sections: Vec<SectionRow>,
-        }
-
-        let query = format!("SELECT sections FROM task:{}", id);
-        let mut result = db.client().query(&query).await?;
-        let task: Option<TaskRow> = result.take(0)?;
-
-        match task {
-            Some(t) => Ok(t.sections),
-            None => Err(DbError::TaskNotFound {
-                task_id: self.id.clone(),
-            }),
-        }
-    }
-
-    /// Append a code reference to a specific section's refs array.
-    async fn append_criterion_ref(
-        &self,
-        db: &Database,
-        id: &str,
-        section_index: usize,
-        parsed: &ParsedFileRef,
-    ) -> Result<(), DbError> {
-        let escaped_path = parsed.path.replace('\\', "\\\\").replace('"', "\\\"");
-
-        // Build the ref object
-        let mut ref_parts = vec![format!(r#""path": "{}""#, escaped_path)];
-
-        if let Some(start) = parsed.line_start {
-            ref_parts.push(format!(r#""line_start": {}"#, start));
-        }
-
-        if let Some(end) = parsed.line_end {
-            ref_parts.push(format!(r#""line_end": {}"#, end));
-        }
-
-        if let Some(ref name) = self.name {
-            let escaped_name = name.replace('\\', "\\\\").replace('"', "\\\"");
-            ref_parts.push(format!(r#""name": "{}""#, escaped_name));
-        }
-
-        if let Some(ref desc) = self.description {
-            let escaped_desc = desc.replace('\\', "\\\\").replace('"', "\\\"");
-            ref_parts.push(format!(r#""description": "{}""#, escaped_desc));
-        }
-
-        let ref_obj = format!("{{ {} }}", ref_parts.join(", "));
-
-        // Use SurrealDB array append to add the ref to the section's refs array
-        let query = format!(
-            "UPDATE task:{} SET sections[{}].refs = array::append(sections[{}].refs ?? [], {})",
-            id, section_index, section_index, ref_obj
-        );
-        db.client().query(&query).await?;
-
-        Ok(())
-    }
-
-    /// Update the task's updated_at timestamp.
-    async fn update_timestamp(&self, db: &Database, id: &str) -> Result<(), DbError> {
-        let query = format!("UPDATE task:{} SET updated_at = time::now()", id);
-        db.client().query(&query).await?;
-        Ok(())
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vertebrae_core::DefaultTaskService;
 
-    /// Helper to create an in-memory test database
-    async fn setup_test_db() -> Database {
-        let db = Database::connect_mem().await.unwrap();
+    /// Helper to create a test service with an in-memory database
+    async fn setup_test_service() -> DefaultTaskService {
+        let db = vertebrae_db::Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-        db
+        DefaultTaskService::new(db)
     }
 
     /// Helper to create a task with testing criteria
-    async fn create_task_with_criteria(db: &Database, id: &str, criteria: &[&str]) {
+    async fn create_task_with_criteria(service: &DefaultTaskService, id: &str, criteria: &[&str]) {
+        let db = service.database();
         let sections: Vec<String> = criteria
             .iter()
             .enumerate()
@@ -314,7 +237,8 @@ mod tests {
     }
 
     /// Helper to create a task with mixed section types
-    async fn create_task_with_mixed_sections(db: &Database, id: &str) {
+    async fn create_task_with_mixed_sections(service: &DefaultTaskService, id: &str) {
+        let db = service.database();
         let query = format!(
             r#"CREATE task:{} SET
                 title = "Test Task",
@@ -333,26 +257,23 @@ mod tests {
     }
 
     /// Helper to get criterion refs from a task
-    async fn get_criterion_refs(db: &Database, id: &str, section_index: usize) -> Vec<CodeRefRow> {
-        #[derive(Debug, Deserialize)]
-        struct TaskRow {
-            #[serde(default)]
-            sections: Vec<SectionRow>,
-        }
-
-        let query = format!("SELECT sections FROM task:{}", id);
-        let mut result = db.client().query(&query).await.unwrap();
-        let task: Option<TaskRow> = result.take(0).unwrap();
-        task.and_then(|t| t.sections.get(section_index).cloned())
-            .map(|s| s.refs)
+    async fn get_criterion_refs(
+        service: &DefaultTaskService,
+        id: &str,
+        section_index: usize,
+    ) -> Vec<CodeRef> {
+        let task = service.get_task(id).await.unwrap();
+        task.sections
+            .get(section_index)
+            .map(|s| s.refs.clone())
             .unwrap_or_default()
     }
 
     #[tokio::test]
     async fn test_criterion_ref_adds_ref_to_correct_criterion() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task_with_criteria(&db, "abc123", &["Criterion 1", "Criterion 2"]).await;
+        create_task_with_criteria(&service, "abc123", &["Criterion 1", "Criterion 2"]).await;
 
         let cmd = CriterionRefCommand {
             id: "abc123".to_string(),
@@ -362,7 +283,7 @@ mod tests {
             description: None,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok(), "criterion-ref failed: {:?}", result.err());
 
         let result = result.unwrap();
@@ -375,9 +296,9 @@ mod tests {
         assert_eq!(result.name, Some("test_auth".to_string()));
 
         // Verify ref was added to the correct section (index 0 in sections array)
-        let refs = get_criterion_refs(&db, "abc123", 0).await;
+        let refs = get_criterion_refs(&service, "abc123", 0).await;
         assert_eq!(refs.len(), 1, "Should have exactly 1 ref");
-        assert_eq!(refs[0].path.as_deref(), Some("tests/auth_test.rs"));
+        assert_eq!(refs[0].path, "tests/auth_test.rs");
         assert_eq!(refs[0].line_start, Some(45));
         assert_eq!(refs[0].line_end, Some(67));
         assert_eq!(refs[0].name.as_deref(), Some("test_auth"));
@@ -385,9 +306,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_criterion_ref_second_criterion() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task_with_criteria(&db, "abc123", &["Criterion 1", "Criterion 2"]).await;
+        create_task_with_criteria(&service, "abc123", &["Criterion 1", "Criterion 2"]).await;
 
         let cmd = CriterionRefCommand {
             id: "abc123".to_string(),
@@ -397,7 +318,7 @@ mod tests {
             description: Some("API validation test".to_string()),
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         let result = result.unwrap();
@@ -405,9 +326,9 @@ mod tests {
         assert_eq!(result.criterion_content, "Criterion 2");
 
         // Verify ref was added to the second criterion (index 1 in sections array)
-        let refs = get_criterion_refs(&db, "abc123", 1).await;
+        let refs = get_criterion_refs(&service, "abc123", 1).await;
         assert_eq!(refs.len(), 1, "Should have exactly 1 ref");
-        assert_eq!(refs[0].path.as_deref(), Some("tests/api_test.rs"));
+        assert_eq!(refs[0].path, "tests/api_test.rs");
         assert_eq!(refs[0].line_start, Some(100));
         assert_eq!(refs[0].line_end, None);
         assert_eq!(refs[0].description.as_deref(), Some("API validation test"));
@@ -415,9 +336,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_criterion_ref_with_mixed_sections() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task_with_mixed_sections(&db, "abc123").await;
+        create_task_with_mixed_sections(&service, "abc123").await;
 
         let cmd = CriterionRefCommand {
             id: "abc123".to_string(),
@@ -427,7 +348,7 @@ mod tests {
             description: None,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         let result = result.unwrap();
@@ -435,16 +356,16 @@ mod tests {
         assert_eq!(result.criterion_content, "Second criterion");
 
         // The second testing_criterion is at index 3 in the sections array
-        let refs = get_criterion_refs(&db, "abc123", 3).await;
+        let refs = get_criterion_refs(&service, "abc123", 3).await;
         assert_eq!(refs.len(), 1, "Should have exactly 1 ref");
-        assert_eq!(refs[0].path.as_deref(), Some("tests/test.rs"));
+        assert_eq!(refs[0].path, "tests/test.rs");
     }
 
     #[tokio::test]
     async fn test_criterion_ref_rejects_out_of_bounds_index() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task_with_criteria(&db, "abc123", &["Criterion 1"]).await;
+        create_task_with_criteria(&service, "abc123", &["Criterion 1"]).await;
 
         let cmd = CriterionRefCommand {
             id: "abc123".to_string(),
@@ -454,7 +375,7 @@ mod tests {
             description: None,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         match result {
             Err(DbError::InvalidPath { reason, .. }) => {
                 assert!(
@@ -475,9 +396,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_criterion_ref_rejects_zero_index() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task_with_criteria(&db, "abc123", &["Criterion 1"]).await;
+        create_task_with_criteria(&service, "abc123", &["Criterion 1"]).await;
 
         let cmd = CriterionRefCommand {
             id: "abc123".to_string(),
@@ -487,7 +408,7 @@ mod tests {
             description: None,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         match result {
             Err(DbError::InvalidPath { reason, .. }) => {
                 assert!(
@@ -503,7 +424,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_criterion_ref_nonexistent_task() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
         let cmd = CriterionRefCommand {
             id: "nonexistent".to_string(),
@@ -513,7 +434,7 @@ mod tests {
             description: None,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         match result {
             Err(DbError::TaskNotFound { task_id }) => {
                 assert_eq!(
@@ -529,9 +450,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_criterion_ref_invalid_file_spec() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task_with_criteria(&db, "abc123", &["Criterion 1"]).await;
+        create_task_with_criteria(&service, "abc123", &["Criterion 1"]).await;
 
         let cmd = CriterionRefCommand {
             id: "abc123".to_string(),
@@ -541,7 +462,7 @@ mod tests {
             description: None,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         match result {
             Err(DbError::InvalidPath { reason, .. }) => {
                 assert!(
@@ -557,9 +478,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_criterion_ref_multiple_refs_to_same_criterion() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task_with_criteria(&db, "abc123", &["Criterion 1"]).await;
+        create_task_with_criteria(&service, "abc123", &["Criterion 1"]).await;
 
         // Add first ref
         let cmd1 = CriterionRefCommand {
@@ -569,7 +490,7 @@ mod tests {
             name: Some("first_test".to_string()),
             description: None,
         };
-        cmd1.execute(&db).await.unwrap();
+        cmd1.execute(&service).await.unwrap();
 
         // Add second ref
         let cmd2 = CriterionRefCommand {
@@ -579,10 +500,10 @@ mod tests {
             name: Some("second_test".to_string()),
             description: None,
         };
-        cmd2.execute(&db).await.unwrap();
+        cmd2.execute(&service).await.unwrap();
 
         // Verify both refs were added
-        let refs = get_criterion_refs(&db, "abc123", 0).await;
+        let refs = get_criterion_refs(&service, "abc123", 0).await;
         assert_eq!(refs.len(), 2, "Should have 2 refs");
 
         // Verify specific refs by name
@@ -600,9 +521,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_criterion_ref_case_insensitive_id() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task_with_criteria(&db, "abc123", &["Criterion 1"]).await;
+        create_task_with_criteria(&service, "abc123", &["Criterion 1"]).await;
 
         let cmd = CriterionRefCommand {
             id: "ABC123".to_string(),
@@ -612,15 +533,15 @@ mod tests {
             description: None,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok(), "Case-insensitive lookup should work");
     }
 
     #[tokio::test]
     async fn test_criterion_ref_file_not_found_warning() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task_with_criteria(&db, "abc123", &["Criterion 1"]).await;
+        create_task_with_criteria(&service, "abc123", &["Criterion 1"]).await;
 
         let cmd = CriterionRefCommand {
             id: "abc123".to_string(),
@@ -630,7 +551,7 @@ mod tests {
             description: None,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         let result = result.unwrap();
