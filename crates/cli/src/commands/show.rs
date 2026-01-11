@@ -333,11 +333,13 @@ impl ShowCommand {
     }
 
     /// Fetch tasks that this task depends on (blocked by).
+    /// Only returns incomplete blockers (status != done).
     async fn fetch_blocked_by(&self, db: &Database, id: &str) -> Result<Vec<TaskSummary>, DbError> {
         // SELECT ->depends_on->task.* FROM task:<id> gets dependencies
+        // Filter out completed blockers - they no longer block this task
         let query = format!(
             "SELECT id, title, level, status, priority, tags, needs_human_review \
-             FROM task WHERE <-depends_on<-task CONTAINS task:{}",
+             FROM task WHERE <-depends_on<-task CONTAINS task:{} AND status != \"done\"",
             id
         );
 
@@ -938,12 +940,13 @@ mod tests {
     async fn test_show_with_dependencies() {
         let db = setup_test_db().await;
 
+        // Use in_progress status - completed blockers are filtered out
         create_task(
             &db,
             "dep1",
             "Dependency Task",
             "task",
-            "done",
+            "in_progress",
             Some("critical"),
             &["blocker", "core"],
         )
@@ -965,9 +968,42 @@ mod tests {
         assert_eq!(dep.id, "dep1");
         assert_eq!(dep.title, "Dependency Task");
         assert_eq!(dep.level, "task");
-        assert_eq!(dep.status, "done");
+        assert_eq!(dep.status, "in_progress");
         assert_eq!(dep.priority, Some("critical".to_string()));
         assert_eq!(dep.tags, vec!["blocker", "core"]);
+    }
+
+    #[tokio::test]
+    async fn test_show_filters_completed_blockers() {
+        let db = setup_test_db().await;
+
+        // Completed blocker should not appear in blocked_by
+        create_task(
+            &db,
+            "done_dep",
+            "Done Dependency",
+            "task",
+            "done",
+            None,
+            &[],
+        )
+        .await;
+        create_task(&db, "task1", "Main Task", "task", "backlog", None, &[]).await;
+        create_depends_on(&db, "task1", "done_dep").await;
+
+        let cmd = ShowCommand {
+            id: "task1".to_string(),
+        };
+
+        let result = cmd.execute(&db).await;
+        assert!(result.is_ok());
+
+        let detail = result.unwrap();
+        // Completed blockers are filtered out
+        assert!(
+            detail.blocked_by.is_empty(),
+            "Completed blockers should be filtered out"
+        );
     }
 
     #[tokio::test]
