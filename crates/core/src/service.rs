@@ -6,6 +6,7 @@
 
 use crate::error::{ServiceError, ServiceResult};
 use async_trait::async_trait;
+use std::collections::{HashMap, HashSet};
 use vertebrae_db::{
     BlockerNode, CodeRef, Database, Level, Priority, Section, Status, Task, TaskFilter,
     TaskSummary, TaskUpdate,
@@ -229,6 +230,87 @@ pub struct TransitionResult {
     pub unblocked_tasks: Vec<UnblockedTask>,
 }
 
+/// A node in the hierarchical task tree
+///
+/// Represents a task with its children nested hierarchically.
+/// Used for displaying tasks in a tree structure.
+#[derive(Debug, Clone)]
+pub struct TaskTreeNode {
+    /// Task ID
+    pub id: String,
+    /// Task title
+    pub title: String,
+    /// Hierarchy level (epic, ticket, task)
+    pub level: Level,
+    /// Current status
+    pub status: Status,
+    /// Optional priority
+    pub priority: Option<Priority>,
+    /// Tags for categorization
+    pub tags: Vec<String>,
+    /// Whether this task needs human review
+    pub needs_human_review: Option<bool>,
+    /// Whether this task has incomplete dependencies (blockers)
+    pub has_blockers: bool,
+    /// Number of incomplete dependencies
+    pub blocker_count: usize,
+    /// Child nodes in the hierarchy
+    pub children: Vec<TaskTreeNode>,
+}
+
+impl TaskTreeNode {
+    /// Create a new TaskTreeNode from a TaskSummary
+    fn from_summary(summary: &TaskSummary, has_blockers: bool, blocker_count: usize) -> Self {
+        Self {
+            id: summary.id.clone(),
+            title: summary.title.clone(),
+            level: summary.level.clone(),
+            status: summary.status.clone(),
+            priority: summary.priority.clone(),
+            tags: summary.tags.clone(),
+            needs_human_review: summary.needs_human_review,
+            has_blockers,
+            blocker_count,
+            children: Vec::new(),
+        }
+    }
+
+    /// Check if this is a leaf node (no children)
+    pub fn is_leaf(&self) -> bool {
+        self.children.is_empty()
+    }
+
+    /// Get the total number of descendants
+    pub fn descendant_count(&self) -> usize {
+        self.children.iter().map(|c| 1 + c.descendant_count()).sum()
+    }
+}
+
+/// Options for tree filtering
+#[derive(Debug, Clone, Default)]
+pub struct TreeFilterOptions {
+    /// Base task filter (levels, statuses, etc.)
+    pub filter: TaskFilter,
+    /// Whether to preserve ancestor chain for matching nodes
+    pub preserve_ancestors: bool,
+}
+
+impl TreeFilterOptions {
+    /// Create new tree filter options with a base filter
+    pub fn new(filter: TaskFilter) -> Self {
+        Self {
+            filter,
+            preserve_ancestors: true,
+        }
+    }
+
+    /// Set whether to preserve ancestors
+    pub fn with_preserve_ancestors(mut self, preserve: bool) -> Self {
+        self.preserve_ancestors = preserve;
+        self
+    }
+}
+
 /// Service trait for task management operations
 ///
 /// This trait defines the interface for all task-related business logic.
@@ -275,6 +357,24 @@ pub trait TaskService: Send + Sync {
 
     /// Get tasks ready for work at a given status
     async fn list_ready(&self, status: Status) -> ServiceResult<Vec<TaskSummary>>;
+
+    /// Get tasks as a hierarchical tree structure
+    ///
+    /// Returns root-level tasks (orphans) with their children nested recursively.
+    /// Each node includes dependency indicators (has_blockers, blocker_count).
+    ///
+    /// When `options.preserve_ancestors` is true and filters are applied,
+    /// matching nodes will have their ancestor chain included even if
+    /// ancestors don't match the filter criteria.
+    ///
+    /// # Arguments
+    ///
+    /// * `options` - Tree filter options including base filters and ancestor preservation
+    ///
+    /// # Returns
+    ///
+    /// A vector of root-level TaskTreeNode items, each with children populated.
+    async fn get_task_tree(&self, options: &TreeFilterOptions) -> ServiceResult<Vec<TaskTreeNode>>;
 
     // =========================================================================
     // Status Transitions
@@ -413,6 +513,46 @@ impl DefaultTaskService {
         }
 
         update
+    }
+
+    /// Check if a task matches the given filter criteria
+    fn task_matches_filter(&self, task: &TaskSummary, filter: &TaskFilter) -> bool {
+        // Default: exclude done status unless include_done is set or statuses are specified
+        if !filter.include_done && filter.statuses.is_empty() && task.status == Status::Done {
+            return false;
+        }
+
+        // Level filter (OR within type)
+        if !filter.levels.is_empty() && !filter.levels.contains(&task.level) {
+            return false;
+        }
+
+        // Status filter (OR within type)
+        if !filter.statuses.is_empty() && !filter.statuses.contains(&task.status) {
+            return false;
+        }
+
+        // Priority filter (OR within type)
+        if !filter.priorities.is_empty() {
+            match &task.priority {
+                Some(p) => {
+                    if !filter.priorities.contains(p) {
+                        return false;
+                    }
+                }
+                None => return false,
+            }
+        }
+
+        // Tag filter (OR within type - task must have at least one matching tag)
+        if !filter.tags.is_empty() && !filter.tags.iter().any(|t| task.tags.contains(t)) {
+            return false;
+        }
+
+        // Note: root_only and children_of are structural filters handled separately
+        // Note: search filter would require description which isn't in TaskSummary
+
+        true
     }
 }
 
@@ -597,6 +737,157 @@ impl TaskService for DefaultTaskService {
 
     async fn list_ready(&self, status: Status) -> ServiceResult<Vec<TaskSummary>> {
         Ok(self.db.list_ready_items(status).await?)
+    }
+
+    async fn get_task_tree(&self, options: &TreeFilterOptions) -> ServiceResult<Vec<TaskTreeNode>> {
+        // Step 1: Get all tasks (include_done based on filter)
+        let all_filter = TaskFilter::new().include_done();
+        let all_tasks = self.db.list_tasks().list(&all_filter).await?;
+
+        if all_tasks.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // Step 2: Get all parent-child relationships
+        let child_of_relations = self.db.relationships().export_all_child_of().await?;
+
+        // Step 3: Get all incomplete blockers for each task
+        let depends_on_relations = self.db.relationships().export_all_depends_on().await?;
+
+        // Build lookup maps
+        let task_map: HashMap<String, &TaskSummary> =
+            all_tasks.iter().map(|t| (t.id.clone(), t)).collect();
+
+        // child_id -> parent_id
+        let parent_map: HashMap<String, String> = child_of_relations.into_iter().collect();
+
+        // parent_id -> [child_ids]
+        let mut children_map: HashMap<String, Vec<String>> = HashMap::new();
+        for (child_id, parent_id) in &parent_map {
+            children_map
+                .entry(parent_id.clone())
+                .or_default()
+                .push(child_id.clone());
+        }
+
+        // task_id -> [blocker_ids] (for incomplete blockers only)
+        let mut blocker_map: HashMap<String, Vec<String>> = HashMap::new();
+        for (dependent_id, blocker_id) in depends_on_relations {
+            // Only count as blocker if the blocker is not done
+            if let Some(blocker_task) = task_map.get(&blocker_id)
+                && blocker_task.status != Status::Done
+            {
+                blocker_map
+                    .entry(dependent_id)
+                    .or_default()
+                    .push(blocker_id);
+            }
+        }
+
+        // Step 4: Apply filtering
+        let filter = &options.filter;
+
+        // Get IDs of tasks that match the filter criteria
+        let matching_ids: HashSet<String> = all_tasks
+            .iter()
+            .filter(|t| self.task_matches_filter(t, filter))
+            .map(|t| t.id.clone())
+            .collect();
+
+        // If preserve_ancestors is true, collect all ancestors of matching tasks
+        let ids_to_include: HashSet<String> =
+            if options.preserve_ancestors && !matching_ids.is_empty() {
+                let mut to_include = matching_ids.clone();
+                for id in &matching_ids {
+                    // Walk up the parent chain
+                    let mut current = id.clone();
+                    while let Some(parent_id) = parent_map.get(&current) {
+                        to_include.insert(parent_id.clone());
+                        current = parent_id.clone();
+                    }
+                }
+                to_include
+            } else {
+                matching_ids
+            };
+
+        // Step 5: Build tree nodes for included tasks
+        fn build_node(
+            id: &str,
+            task_map: &HashMap<String, &TaskSummary>,
+            children_map: &HashMap<String, Vec<String>>,
+            blocker_map: &HashMap<String, Vec<String>>,
+            ids_to_include: &HashSet<String>,
+        ) -> Option<TaskTreeNode> {
+            if !ids_to_include.contains(id) {
+                return None;
+            }
+
+            let task = task_map.get(id)?;
+
+            let blockers = blocker_map.get(id);
+            let has_blockers = blockers.is_some_and(|b| !b.is_empty());
+            let blocker_count = blockers.map_or(0, |b| b.len());
+
+            let mut node = TaskTreeNode::from_summary(task, has_blockers, blocker_count);
+
+            // Recursively build children
+            if let Some(child_ids) = children_map.get(id) {
+                for child_id in child_ids {
+                    if let Some(child_node) = build_node(
+                        child_id,
+                        task_map,
+                        children_map,
+                        blocker_map,
+                        ids_to_include,
+                    ) {
+                        node.children.push(child_node);
+                    }
+                }
+                // Sort children by level priority (epic > ticket > task), then by title
+                node.children.sort_by(|a, b| {
+                    let level_priority = |level: &Level| match level {
+                        Level::Epic => 0,
+                        Level::Ticket => 1,
+                        Level::Task => 2,
+                    };
+                    level_priority(&a.level)
+                        .cmp(&level_priority(&b.level))
+                        .then_with(|| a.title.cmp(&b.title))
+                });
+            }
+
+            Some(node)
+        }
+
+        // Step 6: Find root tasks (orphans - no parent)
+        let root_ids: Vec<String> = all_tasks
+            .iter()
+            .filter(|t| !parent_map.contains_key(&t.id) && ids_to_include.contains(&t.id))
+            .map(|t| t.id.clone())
+            .collect();
+
+        // Build tree starting from roots
+        let mut tree: Vec<TaskTreeNode> = root_ids
+            .iter()
+            .filter_map(|id| {
+                build_node(id, &task_map, &children_map, &blocker_map, &ids_to_include)
+            })
+            .collect();
+
+        // Sort roots by level priority, then by title
+        tree.sort_by(|a, b| {
+            let level_priority = |level: &Level| match level {
+                Level::Epic => 0,
+                Level::Ticket => 1,
+                Level::Task => 2,
+            };
+            level_priority(&a.level)
+                .cmp(&level_priority(&b.level))
+                .then_with(|| a.title.cmp(&b.title))
+        });
+
+        Ok(tree)
     }
 
     async fn transition_to(&self, id: &str, target: Status) -> ServiceResult<TransitionResult> {
@@ -1090,5 +1381,400 @@ mod tests {
         let upper_id = id.to_uppercase();
         let task = service.get_task(&upper_id).await.unwrap();
         assert_eq!(task.title, "Task");
+    }
+
+    // =========================================================================
+    // get_task_tree tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_get_task_tree_empty() {
+        let service = setup_test_service().await;
+
+        let options = TreeFilterOptions::default();
+        let tree = service.get_task_tree(&options).await.unwrap();
+
+        assert!(tree.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_task_tree_orphan_at_root() {
+        let service = setup_test_service().await;
+
+        // Create an orphan task (no parent)
+        let task_id = service
+            .create_task(CreateTaskOptions::new("Orphan Task"))
+            .await
+            .unwrap();
+
+        let options = TreeFilterOptions::default();
+        let tree = service.get_task_tree(&options).await.unwrap();
+
+        assert_eq!(tree.len(), 1);
+        assert_eq!(tree[0].id, task_id);
+        assert!(tree[0].children.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_task_tree_hierarchy_preserved() {
+        let service = setup_test_service().await;
+
+        // Create epic -> ticket -> task hierarchy
+        let epic_id = service
+            .create_task(CreateTaskOptions::new("Epic").with_level(Level::Epic))
+            .await
+            .unwrap();
+
+        let ticket_id = service
+            .create_task(
+                CreateTaskOptions::new("Ticket")
+                    .with_level(Level::Ticket)
+                    .with_parent(&epic_id),
+            )
+            .await
+            .unwrap();
+
+        let task_id = service
+            .create_task(CreateTaskOptions::new("Task").with_parent(&ticket_id))
+            .await
+            .unwrap();
+
+        let options = TreeFilterOptions::default();
+        let tree = service.get_task_tree(&options).await.unwrap();
+
+        // Epic at root
+        assert_eq!(tree.len(), 1);
+        assert_eq!(tree[0].id, epic_id);
+        assert_eq!(tree[0].level, Level::Epic);
+
+        // Ticket as child of epic
+        assert_eq!(tree[0].children.len(), 1);
+        assert_eq!(tree[0].children[0].id, ticket_id);
+        assert_eq!(tree[0].children[0].level, Level::Ticket);
+
+        // Task as child of ticket
+        assert_eq!(tree[0].children[0].children.len(), 1);
+        assert_eq!(tree[0].children[0].children[0].id, task_id);
+        assert_eq!(tree[0].children[0].children[0].level, Level::Task);
+    }
+
+    #[tokio::test]
+    async fn test_get_task_tree_multiple_roots() {
+        let service = setup_test_service().await;
+
+        // Create two independent epics
+        let epic1_id = service
+            .create_task(CreateTaskOptions::new("Alpha Epic").with_level(Level::Epic))
+            .await
+            .unwrap();
+
+        let epic2_id = service
+            .create_task(CreateTaskOptions::new("Beta Epic").with_level(Level::Epic))
+            .await
+            .unwrap();
+
+        let options = TreeFilterOptions::default();
+        let tree = service.get_task_tree(&options).await.unwrap();
+
+        // Both epics at root level, sorted alphabetically
+        assert_eq!(tree.len(), 2);
+        assert_eq!(tree[0].id, epic1_id); // "Alpha Epic" first
+        assert_eq!(tree[1].id, epic2_id); // "Beta Epic" second
+    }
+
+    #[tokio::test]
+    async fn test_get_task_tree_with_blockers() {
+        let service = setup_test_service().await;
+
+        // Create blocker task
+        let blocker_id = service
+            .create_task(CreateTaskOptions::new("Blocker"))
+            .await
+            .unwrap();
+
+        // Create dependent task
+        let dependent_id = service
+            .create_task(CreateTaskOptions::new("Dependent").with_dependency(&blocker_id))
+            .await
+            .unwrap();
+
+        let options = TreeFilterOptions::default();
+        let tree = service.get_task_tree(&options).await.unwrap();
+
+        // Both tasks at root (no parent-child relationship)
+        assert_eq!(tree.len(), 2);
+
+        // Find the dependent task
+        let dependent_node = tree.iter().find(|n| n.id == dependent_id).unwrap();
+        assert!(dependent_node.has_blockers);
+        assert_eq!(dependent_node.blocker_count, 1);
+
+        // Blocker task should have no blockers
+        let blocker_node = tree.iter().find(|n| n.id == blocker_id).unwrap();
+        assert!(!blocker_node.has_blockers);
+        assert_eq!(blocker_node.blocker_count, 0);
+    }
+
+    #[tokio::test]
+    async fn test_get_task_tree_completed_blocker_not_counted() {
+        let service = setup_test_service().await;
+
+        // Create blocker task and mark it done
+        let blocker_id = service
+            .create_task(CreateTaskOptions::new("Blocker").with_status(Status::Todo))
+            .await
+            .unwrap();
+
+        // Create dependent task
+        let dependent_id = service
+            .create_task(CreateTaskOptions::new("Dependent").with_dependency(&blocker_id))
+            .await
+            .unwrap();
+
+        // Mark blocker as done (must go through full workflow)
+        service
+            .transition_to(&blocker_id, Status::InProgress)
+            .await
+            .unwrap();
+        service
+            .transition_to(&blocker_id, Status::PendingReview)
+            .await
+            .unwrap();
+        service
+            .transition_to(&blocker_id, Status::Done)
+            .await
+            .unwrap();
+
+        let options = TreeFilterOptions::new(TaskFilter::new().include_done());
+        let tree = service.get_task_tree(&options).await.unwrap();
+
+        // Find the dependent task
+        let dependent_node = tree.iter().find(|n| n.id == dependent_id).unwrap();
+
+        // Blocker is done, so it shouldn't count as a blocker
+        assert!(!dependent_node.has_blockers);
+        assert_eq!(dependent_node.blocker_count, 0);
+    }
+
+    #[tokio::test]
+    async fn test_get_task_tree_excludes_done_by_default() {
+        let service = setup_test_service().await;
+
+        // Create a done task
+        let done_id = service
+            .create_task(CreateTaskOptions::new("Done Task").with_status(Status::Todo))
+            .await
+            .unwrap();
+
+        // Mark task as done (must go through full workflow)
+        service
+            .transition_to(&done_id, Status::InProgress)
+            .await
+            .unwrap();
+        service
+            .transition_to(&done_id, Status::PendingReview)
+            .await
+            .unwrap();
+        service.transition_to(&done_id, Status::Done).await.unwrap();
+
+        // Create an active task
+        let _active_id = service
+            .create_task(CreateTaskOptions::new("Active Task"))
+            .await
+            .unwrap();
+
+        let options = TreeFilterOptions::default();
+        let tree = service.get_task_tree(&options).await.unwrap();
+
+        // Only the active task should appear
+        assert_eq!(tree.len(), 1);
+        assert_eq!(tree[0].title, "Active Task");
+    }
+
+    #[tokio::test]
+    async fn test_get_task_tree_filter_by_level() {
+        let service = setup_test_service().await;
+
+        // Create epic with ticket child
+        let epic_id = service
+            .create_task(CreateTaskOptions::new("Epic").with_level(Level::Epic))
+            .await
+            .unwrap();
+
+        let _ticket_id = service
+            .create_task(
+                CreateTaskOptions::new("Ticket")
+                    .with_level(Level::Ticket)
+                    .with_parent(&epic_id),
+            )
+            .await
+            .unwrap();
+
+        // Filter for epics only
+        let filter = TaskFilter::new().with_level(Level::Epic);
+        let options = TreeFilterOptions::new(filter).with_preserve_ancestors(false);
+        let tree = service.get_task_tree(&options).await.unwrap();
+
+        // Only epic should appear (without preserve_ancestors)
+        assert_eq!(tree.len(), 1);
+        assert_eq!(tree[0].id, epic_id);
+        assert!(tree[0].children.is_empty()); // Ticket doesn't match filter
+    }
+
+    #[tokio::test]
+    async fn test_get_task_tree_filter_preserves_ancestors() {
+        let service = setup_test_service().await;
+
+        // Create epic -> ticket -> task hierarchy
+        let epic_id = service
+            .create_task(CreateTaskOptions::new("Epic").with_level(Level::Epic))
+            .await
+            .unwrap();
+
+        let ticket_id = service
+            .create_task(
+                CreateTaskOptions::new("Ticket")
+                    .with_level(Level::Ticket)
+                    .with_parent(&epic_id),
+            )
+            .await
+            .unwrap();
+
+        let task_id = service
+            .create_task(CreateTaskOptions::new("Task").with_parent(&ticket_id))
+            .await
+            .unwrap();
+
+        // Filter for tasks only but preserve ancestors
+        let filter = TaskFilter::new().with_level(Level::Task);
+        let options = TreeFilterOptions::new(filter).with_preserve_ancestors(true);
+        let tree = service.get_task_tree(&options).await.unwrap();
+
+        // Epic should appear as root (ancestor preserved)
+        assert_eq!(tree.len(), 1);
+        assert_eq!(tree[0].id, epic_id);
+
+        // Ticket should appear as child (ancestor preserved)
+        assert_eq!(tree[0].children.len(), 1);
+        assert_eq!(tree[0].children[0].id, ticket_id);
+
+        // Task should appear (matches filter)
+        assert_eq!(tree[0].children[0].children.len(), 1);
+        assert_eq!(tree[0].children[0].children[0].id, task_id);
+    }
+
+    #[tokio::test]
+    async fn test_get_task_tree_filter_by_status() {
+        let service = setup_test_service().await;
+
+        // Create tasks with different statuses
+        let backlog_id = service
+            .create_task(CreateTaskOptions::new("Backlog Task"))
+            .await
+            .unwrap();
+
+        let todo_id = service
+            .create_task(CreateTaskOptions::new("Todo Task").with_status(Status::Todo))
+            .await
+            .unwrap();
+
+        // Filter for todo status only
+        let filter = TaskFilter::new().with_status(Status::Todo);
+        let options = TreeFilterOptions::new(filter).with_preserve_ancestors(false);
+        let tree = service.get_task_tree(&options).await.unwrap();
+
+        // Only todo task should appear
+        assert_eq!(tree.len(), 1);
+        assert_eq!(tree[0].id, todo_id);
+        assert!(!tree.iter().any(|n| n.id == backlog_id));
+    }
+
+    #[tokio::test]
+    async fn test_get_task_tree_node_methods() {
+        let service = setup_test_service().await;
+
+        // Create epic with children
+        let epic_id = service
+            .create_task(CreateTaskOptions::new("Epic").with_level(Level::Epic))
+            .await
+            .unwrap();
+
+        let _child1 = service
+            .create_task(CreateTaskOptions::new("Child1").with_parent(&epic_id))
+            .await
+            .unwrap();
+
+        let child2 = service
+            .create_task(CreateTaskOptions::new("Child2").with_parent(&epic_id))
+            .await
+            .unwrap();
+
+        let _grandchild = service
+            .create_task(CreateTaskOptions::new("Grandchild").with_parent(&child2))
+            .await
+            .unwrap();
+
+        let options = TreeFilterOptions::default();
+        let tree = service.get_task_tree(&options).await.unwrap();
+
+        let epic_node = &tree[0];
+        assert!(!epic_node.is_leaf());
+        assert_eq!(epic_node.descendant_count(), 3); // 2 children + 1 grandchild
+
+        // Find grandchild node
+        let grandchild_node = &epic_node
+            .children
+            .iter()
+            .find(|n| n.id == child2)
+            .unwrap()
+            .children[0];
+        assert!(grandchild_node.is_leaf());
+        assert_eq!(grandchild_node.descendant_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_get_task_tree_sorted_by_level_and_title() {
+        let service = setup_test_service().await;
+
+        // Create parent with mixed children
+        let parent_id = service
+            .create_task(CreateTaskOptions::new("Parent").with_level(Level::Epic))
+            .await
+            .unwrap();
+
+        // Create children in random order
+        let _task1 = service
+            .create_task(CreateTaskOptions::new("Zebra Task").with_parent(&parent_id))
+            .await
+            .unwrap();
+
+        let _ticket1 = service
+            .create_task(
+                CreateTaskOptions::new("Alpha Ticket")
+                    .with_level(Level::Ticket)
+                    .with_parent(&parent_id),
+            )
+            .await
+            .unwrap();
+
+        let _task2 = service
+            .create_task(CreateTaskOptions::new("Alpha Task").with_parent(&parent_id))
+            .await
+            .unwrap();
+
+        let options = TreeFilterOptions::default();
+        let tree = service.get_task_tree(&options).await.unwrap();
+
+        let children = &tree[0].children;
+
+        // Ticket should come before tasks (level priority)
+        assert_eq!(children[0].level, Level::Ticket);
+        assert_eq!(children[0].title, "Alpha Ticket");
+
+        // Tasks should be sorted by title
+        assert_eq!(children[1].level, Level::Task);
+        assert_eq!(children[1].title, "Alpha Task");
+        assert_eq!(children[2].level, Level::Task);
+        assert_eq!(children[2].title, "Zebra Task");
     }
 }

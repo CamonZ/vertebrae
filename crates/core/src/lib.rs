@@ -46,8 +46,8 @@ pub mod service;
 // Re-export main types for convenience
 pub use error::{ServiceError, ServiceResult};
 pub use service::{
-    CreateTaskOptions, DefaultTaskService, TaskService, TaskWithRelations, TransitionResult,
-    UnblockedTask, UpdateTaskOptions,
+    CreateTaskOptions, DefaultTaskService, TaskService, TaskTreeNode, TaskWithRelations,
+    TransitionResult, TreeFilterOptions, UnblockedTask, UpdateTaskOptions,
 };
 
 // Re-export commonly used types from vertebrae-db
