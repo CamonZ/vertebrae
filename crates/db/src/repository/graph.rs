@@ -5,6 +5,8 @@
 //! and descendant collection.
 
 use crate::error::DbResult;
+use crate::models::{Level, Priority, Status};
+use crate::repository::TaskSummary;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 use surrealdb::Surreal;
@@ -715,6 +717,94 @@ impl<'a> GraphQueries<'a> {
         Ok(blockers.into_iter().map(|r| r.id.id.to_string()).collect())
     }
 
+    /// Get all incomplete blockers for a task with full details.
+    ///
+    /// Returns full `TaskSummary` information for tasks that block this task
+    /// and are not done, avoiding the need for separate queries to fetch details.
+    ///
+    /// # Arguments
+    ///
+    /// * `task_id` - The ID of the task to check
+    ///
+    /// # Returns
+    ///
+    /// A vector of `TaskSummary` for incomplete blockers, including id, title,
+    /// level, status, priority, and tags.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let blockers = graph.get_incomplete_blockers_with_details("task1").await?;
+    /// for blocker in &blockers {
+    ///     println!("{} - {} [{}]", blocker.id, blocker.title, blocker.status);
+    /// }
+    /// ```
+    pub async fn get_incomplete_blockers_with_details(
+        &self,
+        task_id: &str,
+    ) -> DbResult<Vec<TaskSummary>> {
+        #[derive(Debug, Deserialize)]
+        struct BlockerDetailRow {
+            id: surrealdb::sql::Thing,
+            title: String,
+            level: String,
+            status: String,
+            priority: Option<String>,
+            #[serde(default)]
+            tags: Vec<String>,
+            #[serde(default)]
+            needs_human_review: Option<bool>,
+        }
+
+        let query = format!(
+            r#"SELECT id, title, level, status, priority, tags, needs_human_review FROM task
+               WHERE <-depends_on<-task CONTAINS task:{}
+               AND status != "done""#,
+            task_id
+        );
+
+        let mut result = self.client.query(&query).await?;
+        let blockers: Vec<BlockerDetailRow> = result.take(0)?;
+
+        Ok(blockers
+            .into_iter()
+            .map(|row| TaskSummary {
+                id: row.id.id.to_string(),
+                title: row.title,
+                level: Self::parse_level(&row.level),
+                status: Self::parse_status(&row.status),
+                priority: row.priority.as_deref().map(Self::parse_priority),
+                tags: row.tags,
+                needs_human_review: row.needs_human_review,
+            })
+            .collect())
+    }
+
+    /// Parse a level string into a Level enum
+    fn parse_level(s: &str) -> Level {
+        match s {
+            "epic" => Level::Epic,
+            "ticket" => Level::Ticket,
+            _ => Level::Task,
+        }
+    }
+
+    /// Parse a status string into a Status enum
+    fn parse_status(s: &str) -> Status {
+        Status::parse(s).unwrap_or(Status::Todo)
+    }
+
+    /// Parse a priority string into a Priority enum
+    fn parse_priority(s: &str) -> Priority {
+        match s {
+            "low" => Priority::Low,
+            "medium" => Priority::Medium,
+            "high" => Priority::High,
+            "critical" => Priority::Critical,
+            _ => Priority::Medium,
+        }
+    }
+
     /// Get all incomplete dependencies for a task with their details.
     ///
     /// Returns tasks that this task depends on (blockers) which are not yet done,
@@ -909,6 +999,7 @@ impl<'a> GraphQueries<'a> {
 mod tests {
     use super::*;
     use crate::Database;
+    use crate::models::{Level, Priority, Status};
     use std::env;
 
     /// Helper to create a test database
@@ -1540,6 +1631,91 @@ mod tests {
         let blockers = graph.get_incomplete_blockers("task1").await.unwrap();
         assert_eq!(blockers.len(), 1);
         assert!(blockers.contains(&"blocker2".to_string()));
+
+        cleanup(&temp_dir);
+    }
+
+    // ========================================
+    // get_incomplete_blockers_with_details tests
+    // ========================================
+
+    #[tokio::test]
+    async fn test_get_incomplete_blockers_with_details_empty_when_no_blockers() {
+        let (db, temp_dir) = setup_test_db().await;
+        let graph = GraphQueries::new(db.client());
+
+        create_task(&db, "task1", "Task 1", "task", "todo").await;
+
+        let blockers = graph
+            .get_incomplete_blockers_with_details("task1")
+            .await
+            .unwrap();
+        assert!(blockers.is_empty());
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_get_incomplete_blockers_with_details_returns_incomplete() {
+        let (db, temp_dir) = setup_test_db().await;
+        let graph = GraphQueries::new(db.client());
+
+        // Create blocker with full details including priority and tags
+        let query = r#"CREATE task:blocker1 SET
+            title = "Blocker Task",
+            level = "ticket",
+            status = "in_progress",
+            priority = "high",
+            tags = ["backend", "urgent"],
+            sections = [],
+            refs = [],
+            needs_human_review = true"#;
+        db.client().query(query).await.unwrap();
+
+        create_task(&db, "task1", "Task 1", "task", "backlog").await;
+        create_depends_on(&db, "task1", "blocker1").await;
+
+        let blockers = graph
+            .get_incomplete_blockers_with_details("task1")
+            .await
+            .unwrap();
+
+        assert_eq!(blockers.len(), 1);
+        let blocker = &blockers[0];
+        assert_eq!(blocker.id, "blocker1");
+        assert_eq!(blocker.title, "Blocker Task");
+        assert_eq!(blocker.level, Level::Ticket);
+        assert_eq!(blocker.status, Status::InProgress);
+        assert_eq!(blocker.priority, Some(Priority::High));
+        assert_eq!(blocker.tags, vec!["backend", "urgent"]);
+        assert_eq!(blocker.needs_human_review, Some(true));
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_get_incomplete_blockers_with_details_excludes_completed() {
+        let (db, temp_dir) = setup_test_db().await;
+        let graph = GraphQueries::new(db.client());
+
+        // Create two blockers: one done, one in_progress
+        create_task(&db, "blocker1", "Completed Blocker", "task", "done").await;
+        create_task(&db, "blocker2", "Active Blocker", "task", "in_progress").await;
+        create_task(&db, "task1", "Task 1", "task", "backlog").await;
+
+        create_depends_on(&db, "task1", "blocker1").await;
+        create_depends_on(&db, "task1", "blocker2").await;
+
+        let blockers = graph
+            .get_incomplete_blockers_with_details("task1")
+            .await
+            .unwrap();
+
+        // Should only include the incomplete blocker
+        assert_eq!(blockers.len(), 1);
+        assert_eq!(blockers[0].id, "blocker2");
+        assert_eq!(blockers[0].title, "Active Blocker");
+        assert_eq!(blockers[0].status, Status::InProgress);
 
         cleanup(&temp_dir);
     }
