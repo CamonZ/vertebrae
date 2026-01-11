@@ -64,7 +64,8 @@ pub use workflow::WorkflowCommand;
 
 use crate::output::format_task_table;
 use clap::Subcommand;
-use vertebrae_db::{Database, DbError};
+use vertebrae_core::TaskService;
+use vertebrae_db::DbError;
 
 /// Available CLI commands
 #[derive(Debug, Subcommand)]
@@ -152,16 +153,17 @@ impl std::fmt::Display for CommandResult {
 }
 
 impl Command {
-    /// Execute the command with the given database connection.
+    /// Execute the command with the given task service.
     ///
     /// # Arguments
     ///
-    /// * `db` - Reference to the database connection
+    /// * `service` - Reference to the task service
     ///
     /// # Errors
     ///
     /// Returns `DbError` if the command execution fails.
-    pub async fn execute(&self, db: &Database) -> Result<CommandResult, DbError> {
+    pub async fn execute(&self, service: &dyn TaskService) -> Result<CommandResult, DbError> {
+        let db = service.database();
         match self {
             Command::Add(cmd) => {
                 let id = cmd.execute(db).await?;

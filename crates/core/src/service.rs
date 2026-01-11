@@ -323,6 +323,17 @@ impl TreeFilterOptions {
 #[async_trait]
 pub trait TaskService: Send + Sync {
     // =========================================================================
+    // Database Access
+    // =========================================================================
+
+    /// Get a reference to the underlying database
+    ///
+    /// This is provided during the migration period to allow CLI commands
+    /// to access database functionality not yet exposed through the service.
+    /// New code should prefer using service methods when available.
+    fn database(&self) -> &Database;
+
+    // =========================================================================
     // Task CRUD Operations
     // =========================================================================
 
@@ -565,6 +576,10 @@ mod hex {
 
 #[async_trait]
 impl TaskService for DefaultTaskService {
+    fn database(&self) -> &Database {
+        &self.db
+    }
+
     async fn create_task(&self, options: CreateTaskOptions) -> ServiceResult<String> {
         // Validate title
         if options.title.trim().is_empty() {

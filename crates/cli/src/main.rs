@@ -4,6 +4,7 @@ use std::process;
 use tracing_subscriber::EnvFilter;
 
 use vertebrae_cli::commands::Command;
+use vertebrae_core::DefaultTaskService;
 use vertebrae_db::{Database, DbError};
 
 /// Environment variable name for the database path
@@ -94,10 +95,13 @@ async fn run_with_args(args: &Args) -> Result<(), DbError> {
     // Initialize database schema
     db.init().await?;
 
+    // Create the task service
+    let service = DefaultTaskService::new(db);
+
     // Run the command or show welcome message
     match &args.command {
         Some(cmd) => {
-            let result = cmd.execute(&db).await?;
+            let result = cmd.execute(&service).await?;
             println!("{}", result);
         }
         None => {
