@@ -1,15 +1,11 @@
 //! Update command for modifying existing tasks
 //!
 //! Implements the `vtb update` command to modify task fields including
-//! title, priority, tags, and parent relationship.
-//!
-//! Note: Description support (via --description/-d) is not currently implemented
-//! because it requires storing data in sections, which have limitations with
-//! SurrealDB's SCHEMAFULL mode and array<object> types.
+//! title, description, priority, tags, parent relationship, and sections.
 
 use clap::Args;
 use serde::Deserialize;
-use vertebrae_db::{Database, DbError, Priority};
+use vertebrae_db::{Database, DbError, Priority, SectionType};
 
 /// Update an existing task
 #[derive(Debug, Args)]
@@ -21,6 +17,10 @@ pub struct UpdateCommand {
     /// New title for the task
     #[arg(long)]
     pub title: Option<String>,
+
+    /// New description for the task (use empty string "" to clear)
+    #[arg(short, long)]
+    pub description: Option<String>,
 
     /// New priority (low, medium, high, critical)
     #[arg(short, long, value_parser = parse_priority)]
@@ -37,6 +37,16 @@ pub struct UpdateCommand {
     /// Parent task ID (use empty string "" to remove parent)
     #[arg(long)]
     pub parent: Option<String>,
+
+    /// Edit a section: <type> <ordinal> <new-content>
+    /// Example: --edit-section step 0 "New step content"
+    #[arg(long = "edit-section", num_args = 3, value_names = ["TYPE", "ORDINAL", "CONTENT"])]
+    pub edit_section: Option<Vec<String>>,
+
+    /// Remove a section: <type> <ordinal>
+    /// Example: --remove-section step 0
+    #[arg(long = "remove-section", num_args = 2, value_names = ["TYPE", "ORDINAL"])]
+    pub remove_section: Option<Vec<String>>,
 }
 
 /// Parse a priority string into a Priority enum
@@ -48,6 +58,26 @@ fn parse_priority(s: &str) -> Result<Priority, String> {
         "critical" => Ok(Priority::Critical),
         _ => Err(format!(
             "invalid priority '{}'. Valid values: low, medium, high, critical",
+            s
+        )),
+    }
+}
+
+/// Parse a section type string into a SectionType enum
+fn parse_section_type(s: &str) -> Result<SectionType, String> {
+    match s.to_lowercase().as_str() {
+        "goal" => Ok(SectionType::Goal),
+        "context" => Ok(SectionType::Context),
+        "current_behavior" => Ok(SectionType::CurrentBehavior),
+        "desired_behavior" => Ok(SectionType::DesiredBehavior),
+        "step" => Ok(SectionType::Step),
+        "testing_criterion" => Ok(SectionType::TestingCriterion),
+        "anti_pattern" => Ok(SectionType::AntiPattern),
+        "failure_test" => Ok(SectionType::FailureTest),
+        "constraint" => Ok(SectionType::Constraint),
+        _ => Err(format!(
+            "invalid section type '{}'. Valid types: goal, context, current_behavior, \
+             desired_behavior, step, testing_criterion, anti_pattern, failure_test, constraint",
             s
         )),
     }
@@ -128,6 +158,9 @@ impl UpdateCommand {
         // Handle parent update
         self.apply_parent_update(db, &id).await?;
 
+        // Handle section updates
+        self.apply_section_updates(db, &id).await?;
+
         // Update timestamp
         self.update_timestamp(db, &id).await?;
 
@@ -152,13 +185,16 @@ impl UpdateCommand {
     /// Check if any updates were specified.
     fn has_updates(&self) -> bool {
         self.title.is_some()
+            || self.description.is_some()
             || self.priority.is_some()
             || !self.add_tags.is_empty()
             || !self.remove_tags.is_empty()
             || self.parent.is_some()
+            || self.edit_section.is_some()
+            || self.remove_section.is_some()
     }
 
-    /// Apply field updates (title, priority).
+    /// Apply field updates (title, description, priority).
     async fn apply_field_updates(&self, db: &Database, id: &str) -> Result<(), DbError> {
         let mut updates = Vec::new();
 
@@ -166,6 +202,16 @@ impl UpdateCommand {
             // Escape quotes in title
             let escaped_title = title.replace('\"', "\\\"");
             updates.push(format!("title = \"{}\"", escaped_title));
+        }
+
+        if let Some(description) = &self.description {
+            if description.is_empty() {
+                // Empty string clears description
+                updates.push("description = NONE".to_string());
+            } else {
+                let escaped_desc = description.replace('\"', "\\\"");
+                updates.push(format!("description = \"{}\"", escaped_desc));
+            }
         }
 
         if let Some(priority) = &self.priority {
@@ -246,12 +292,225 @@ impl UpdateCommand {
         Ok(())
     }
 
+    /// Apply section updates (edit and remove).
+    async fn apply_section_updates(&self, db: &Database, id: &str) -> Result<(), DbError> {
+        // Handle edit section
+        if let Some(args) = &self.edit_section {
+            if args.len() != 3 {
+                return Err(DbError::InvalidPath {
+                    path: std::path::PathBuf::from(&self.id),
+                    reason: "edit-section requires: <type> <ordinal> <content>".to_string(),
+                });
+            }
+
+            let section_type = parse_section_type(&args[0]).map_err(|e| DbError::InvalidPath {
+                path: std::path::PathBuf::from(&self.id),
+                reason: e,
+            })?;
+
+            let ordinal: u32 = args[1].parse().map_err(|_| DbError::InvalidPath {
+                path: std::path::PathBuf::from(&self.id),
+                reason: format!("invalid ordinal '{}': expected a number", args[1]),
+            })?;
+
+            let new_content = &args[2];
+            self.edit_section_at(db, id, &section_type, ordinal, new_content)
+                .await?;
+        }
+
+        // Handle remove section
+        if let Some(args) = &self.remove_section {
+            if args.len() != 2 {
+                return Err(DbError::InvalidPath {
+                    path: std::path::PathBuf::from(&self.id),
+                    reason: "remove-section requires: <type> <ordinal>".to_string(),
+                });
+            }
+
+            let section_type = parse_section_type(&args[0]).map_err(|e| DbError::InvalidPath {
+                path: std::path::PathBuf::from(&self.id),
+                reason: e,
+            })?;
+
+            let ordinal: u32 = args[1].parse().map_err(|_| DbError::InvalidPath {
+                path: std::path::PathBuf::from(&self.id),
+                reason: format!("invalid ordinal '{}': expected a number", args[1]),
+            })?;
+
+            self.remove_section_at(db, id, &section_type, ordinal)
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    /// Edit a section at a specific ordinal.
+    async fn edit_section_at(
+        &self,
+        db: &Database,
+        id: &str,
+        section_type: &SectionType,
+        ordinal: u32,
+        new_content: &str,
+    ) -> Result<(), DbError> {
+        // Fetch current sections
+        let sections = self.fetch_sections(db, id).await?;
+        let type_str = section_type.as_str();
+
+        // Find sections of this type and locate the one at ordinal
+        let mut found = false;
+        let mut new_sections: Vec<String> = Vec::new();
+
+        for section in &sections {
+            if section.section_type.as_deref() == Some(type_str) && section.order == Some(ordinal) {
+                // Replace this section's content
+                found = true;
+                let escaped_content = new_content.replace('\\', "\\\\").replace('"', "\\\"");
+                new_sections.push(format!(
+                    r#"{{ "type": "{}", "content": "{}", "order": {} }}"#,
+                    type_str, escaped_content, ordinal
+                ));
+            } else {
+                // Keep section as-is
+                if let Some(section_str) = self.section_to_string(section) {
+                    new_sections.push(section_str);
+                }
+            }
+        }
+
+        if !found {
+            return Err(DbError::InvalidPath {
+                path: std::path::PathBuf::from(&self.id),
+                reason: format!("No {} section found at ordinal {}", section_type, ordinal),
+            });
+        }
+
+        // Update sections in database
+        let sections_array = format!("[{}]", new_sections.join(", "));
+        let query = format!("UPDATE task:{} SET sections = {}", id, sections_array);
+        db.client().query(&query).await?;
+
+        Ok(())
+    }
+
+    /// Remove a section at a specific ordinal.
+    async fn remove_section_at(
+        &self,
+        db: &Database,
+        id: &str,
+        section_type: &SectionType,
+        ordinal: u32,
+    ) -> Result<(), DbError> {
+        // Fetch current sections
+        let sections = self.fetch_sections(db, id).await?;
+        let type_str = section_type.as_str();
+
+        // Check if the section exists at this ordinal
+        let exists = sections
+            .iter()
+            .any(|s| s.section_type.as_deref() == Some(type_str) && s.order == Some(ordinal));
+
+        if !exists {
+            return Err(DbError::InvalidPath {
+                path: std::path::PathBuf::from(&self.id),
+                reason: format!("No {} section found at ordinal {}", section_type, ordinal),
+            });
+        }
+
+        // Build new sections array:
+        // 1. Keep all sections that are NOT of this type
+        // 2. Keep sections of this type that don't have the target ordinal
+        // 3. Renumber the remaining sections of this type
+        let mut new_sections: Vec<String> = Vec::new();
+
+        // First, add all non-matching type sections
+        for s in &sections {
+            if s.section_type.as_deref() != Some(type_str)
+                && let Some(section_str) = self.section_to_string(s)
+            {
+                new_sections.push(section_str);
+            }
+        }
+
+        // Collect matching sections (excluding the one at ordinal) and renumber
+        let mut sections_of_type: Vec<&SectionRow> = sections
+            .iter()
+            .filter(|s| s.section_type.as_deref() == Some(type_str) && s.order != Some(ordinal))
+            .collect();
+
+        // Sort by original order
+        sections_of_type.sort_by_key(|s| s.order.unwrap_or(u32::MAX));
+
+        // Add with renumbered ordinals
+        for (new_ordinal, s) in sections_of_type.iter().enumerate() {
+            if let (Some(content), Some(_)) = (&s.content, &s.section_type) {
+                let escaped_content = content.replace('\\', "\\\\").replace('"', "\\\"");
+                new_sections.push(format!(
+                    r#"{{ "type": "{}", "content": "{}", "order": {} }}"#,
+                    type_str, escaped_content, new_ordinal
+                ));
+            }
+        }
+
+        // Update sections in database
+        let sections_array = format!("[{}]", new_sections.join(", "));
+        let query = format!("UPDATE task:{} SET sections = {}", id, sections_array);
+        db.client().query(&query).await?;
+
+        Ok(())
+    }
+
+    /// Fetch sections from a task.
+    async fn fetch_sections(&self, db: &Database, id: &str) -> Result<Vec<SectionRow>, DbError> {
+        let query = format!("SELECT sections FROM task:{}", id);
+        let mut result = db.client().query(&query).await?;
+
+        #[derive(Deserialize)]
+        struct SectionsRow {
+            #[serde(default)]
+            sections: Vec<SectionRow>,
+        }
+
+        let row: Option<SectionsRow> = result.take(0)?;
+        Ok(row.map(|r| r.sections).unwrap_or_default())
+    }
+
+    /// Convert a SectionRow to its string representation for the query.
+    fn section_to_string(&self, section: &SectionRow) -> Option<String> {
+        let section_type = section.section_type.as_ref()?;
+        let content = section.content.as_ref()?;
+        let escaped_content = content.replace('\\', "\\\\").replace('"', "\\\"");
+
+        if let Some(order) = section.order {
+            Some(format!(
+                r#"{{ "type": "{}", "content": "{}", "order": {} }}"#,
+                section_type, escaped_content, order
+            ))
+        } else {
+            Some(format!(
+                r#"{{ "type": "{}", "content": "{}" }}"#,
+                section_type, escaped_content
+            ))
+        }
+    }
+
     /// Update the updated_at timestamp.
     async fn update_timestamp(&self, db: &Database, id: &str) -> Result<(), DbError> {
         let query = format!("UPDATE task:{} SET updated_at = time::now()", id);
         db.client().query(&query).await?;
         Ok(())
     }
+}
+
+/// Section row from database
+#[derive(Debug, Deserialize, Clone)]
+struct SectionRow {
+    #[serde(rename = "type", default)]
+    section_type: Option<String>,
+    #[serde(default)]
+    content: Option<String>,
+    #[serde(default)]
+    order: Option<u32>,
 }
 
 #[cfg(test)]
@@ -375,10 +634,13 @@ mod tests {
         let cmd = UpdateCommand {
             id: "abc123".to_string(),
             title: None,
+            description: None,
             priority: None,
             add_tags: vec![],
             remove_tags: vec![],
             parent: None,
+            edit_section: None,
+            remove_section: None,
         };
         assert!(!cmd.has_updates());
     }
@@ -388,10 +650,29 @@ mod tests {
         let cmd = UpdateCommand {
             id: "abc123".to_string(),
             title: Some("New title".to_string()),
+            description: None,
             priority: None,
             add_tags: vec![],
             remove_tags: vec![],
             parent: None,
+            edit_section: None,
+            remove_section: None,
+        };
+        assert!(cmd.has_updates());
+    }
+
+    #[test]
+    fn test_has_updates_with_description() {
+        let cmd = UpdateCommand {
+            id: "abc123".to_string(),
+            title: None,
+            description: Some("New description".to_string()),
+            priority: None,
+            add_tags: vec![],
+            remove_tags: vec![],
+            parent: None,
+            edit_section: None,
+            remove_section: None,
         };
         assert!(cmd.has_updates());
     }
@@ -401,10 +682,13 @@ mod tests {
         let cmd = UpdateCommand {
             id: "abc123".to_string(),
             title: None,
+            description: None,
             priority: Some(Priority::High),
             add_tags: vec![],
             remove_tags: vec![],
             parent: None,
+            edit_section: None,
+            remove_section: None,
         };
         assert!(cmd.has_updates());
     }
@@ -414,10 +698,13 @@ mod tests {
         let cmd = UpdateCommand {
             id: "abc123".to_string(),
             title: None,
+            description: None,
             priority: None,
             add_tags: vec!["urgent".to_string()],
             remove_tags: vec![],
             parent: None,
+            edit_section: None,
+            remove_section: None,
         };
         assert!(cmd.has_updates());
     }
@@ -427,10 +714,13 @@ mod tests {
         let cmd = UpdateCommand {
             id: "abc123".to_string(),
             title: None,
+            description: None,
             priority: None,
             add_tags: vec![],
             remove_tags: vec!["old".to_string()],
             parent: None,
+            edit_section: None,
+            remove_section: None,
         };
         assert!(cmd.has_updates());
     }
@@ -440,10 +730,49 @@ mod tests {
         let cmd = UpdateCommand {
             id: "abc123".to_string(),
             title: None,
+            description: None,
             priority: None,
             add_tags: vec![],
             remove_tags: vec![],
             parent: Some("parent1".to_string()),
+            edit_section: None,
+            remove_section: None,
+        };
+        assert!(cmd.has_updates());
+    }
+
+    #[test]
+    fn test_has_updates_with_edit_section() {
+        let cmd = UpdateCommand {
+            id: "abc123".to_string(),
+            title: None,
+            description: None,
+            priority: None,
+            add_tags: vec![],
+            remove_tags: vec![],
+            parent: None,
+            edit_section: Some(vec![
+                "step".to_string(),
+                "0".to_string(),
+                "new content".to_string(),
+            ]),
+            remove_section: None,
+        };
+        assert!(cmd.has_updates());
+    }
+
+    #[test]
+    fn test_has_updates_with_remove_section() {
+        let cmd = UpdateCommand {
+            id: "abc123".to_string(),
+            title: None,
+            description: None,
+            priority: None,
+            add_tags: vec![],
+            remove_tags: vec![],
+            parent: None,
+            edit_section: None,
+            remove_section: Some(vec!["step".to_string(), "0".to_string()]),
         };
         assert!(cmd.has_updates());
     }
@@ -455,10 +784,13 @@ mod tests {
         let cmd = UpdateCommand {
             id: "nonexistent".to_string(),
             title: Some("New title".to_string()),
+            description: None,
             priority: None,
             add_tags: vec![],
             remove_tags: vec![],
             parent: None,
+            edit_section: None,
+            remove_section: None,
         };
 
         let result = cmd.execute(&db).await;
@@ -498,10 +830,13 @@ mod tests {
         let cmd = UpdateCommand {
             id: "abc123".to_string(),
             title: Some("New title".to_string()),
+            description: None,
             priority: None,
             add_tags: vec![],
             remove_tags: vec![],
             parent: None,
+            edit_section: None,
+            remove_section: None,
         };
 
         let result = cmd.execute(&db).await;
@@ -534,10 +869,13 @@ mod tests {
         let cmd = UpdateCommand {
             id: "abc123".to_string(),
             title: None,
+            description: None,
             priority: Some(Priority::High),
             add_tags: vec![],
             remove_tags: vec![],
             parent: None,
+            edit_section: None,
+            remove_section: None,
         };
 
         let result = cmd.execute(&db).await;
@@ -570,10 +908,13 @@ mod tests {
         let cmd = UpdateCommand {
             id: "abc123".to_string(),
             title: None,
+            description: None,
             priority: None,
             add_tags: vec!["urgent".to_string()],
             remove_tags: vec![],
             parent: None,
+            edit_section: None,
+            remove_section: None,
         };
 
         let result = cmd.execute(&db).await;
@@ -602,10 +943,13 @@ mod tests {
         let cmd = UpdateCommand {
             id: "abc123".to_string(),
             title: None,
+            description: None,
             priority: None,
             add_tags: vec![],
             remove_tags: vec!["toremove".to_string()],
             parent: None,
+            edit_section: None,
+            remove_section: None,
         };
 
         let result = cmd.execute(&db).await;
@@ -634,10 +978,13 @@ mod tests {
         let cmd = UpdateCommand {
             id: "abc123".to_string(),
             title: None,
+            description: None,
             priority: None,
             add_tags: vec!["existing".to_string()],
             remove_tags: vec![],
             parent: None,
+            edit_section: None,
+            remove_section: None,
         };
 
         let result = cmd.execute(&db).await;
@@ -659,10 +1006,13 @@ mod tests {
         let cmd = UpdateCommand {
             id: "child1".to_string(),
             title: None,
+            description: None,
             priority: None,
             add_tags: vec![],
             remove_tags: vec![],
             parent: Some("parent1".to_string()),
+            edit_section: None,
+            remove_section: None,
         };
 
         let result = cmd.execute(&db).await;
@@ -684,10 +1034,13 @@ mod tests {
         let cmd = UpdateCommand {
             id: "child1".to_string(),
             title: None,
+            description: None,
             priority: None,
             add_tags: vec![],
             remove_tags: vec![],
             parent: Some("parent2".to_string()),
+            edit_section: None,
+            remove_section: None,
         };
 
         let result = cmd.execute(&db).await;
@@ -712,10 +1065,13 @@ mod tests {
         let cmd = UpdateCommand {
             id: "child1".to_string(),
             title: None,
+            description: None,
             priority: None,
             add_tags: vec![],
             remove_tags: vec![],
-            parent: Some("".to_string()), // Empty string removes parent
+            parent: Some("".to_string()),
+            edit_section: None,
+            remove_section: None, // Empty string removes parent
         };
 
         let result = cmd.execute(&db).await;
@@ -735,10 +1091,13 @@ mod tests {
         let cmd = UpdateCommand {
             id: "abc123".to_string(),
             title: None,
+            description: None,
             priority: None,
             add_tags: vec![],
             remove_tags: vec![],
             parent: Some("abc123".to_string()),
+            edit_section: None,
+            remove_section: None,
         };
 
         let result = cmd.execute(&db).await;
@@ -764,10 +1123,13 @@ mod tests {
         let cmd = UpdateCommand {
             id: "abc123".to_string(),
             title: None,
+            description: None,
             priority: None,
             add_tags: vec![],
             remove_tags: vec![],
             parent: Some("nonexistent".to_string()),
+            edit_section: None,
+            remove_section: None,
         };
 
         let result = cmd.execute(&db).await;
@@ -798,10 +1160,13 @@ mod tests {
         let cmd = UpdateCommand {
             id: "abc123".to_string(),
             title: Some("New title".to_string()),
+            description: None,
             priority: None,
             add_tags: vec![],
             remove_tags: vec![],
             parent: None,
+            edit_section: None,
+            remove_section: None,
         };
 
         let result = cmd.execute(&db).await;
@@ -820,10 +1185,13 @@ mod tests {
         let cmd = UpdateCommand {
             id: "ABC123".to_string(), // Uppercase
             title: Some("New title".to_string()),
+            description: None,
             priority: None,
             add_tags: vec![],
             remove_tags: vec![],
             parent: None,
+            edit_section: None,
+            remove_section: None,
         };
 
         let result = cmd.execute(&db).await;
@@ -842,10 +1210,13 @@ mod tests {
         let cmd = UpdateCommand {
             id: "abc123".to_string(),
             title: None,
+            description: None,
             priority: None,
             add_tags: vec![],
             remove_tags: vec![],
             parent: None,
+            edit_section: None,
+            remove_section: None,
         };
 
         let result = cmd.execute(&db).await;
@@ -871,10 +1242,13 @@ mod tests {
         let cmd = UpdateCommand {
             id: "abc123".to_string(),
             title: Some("Updated".to_string()),
+            description: None,
             priority: Some(Priority::Critical),
             add_tags: vec!["new".to_string()],
             remove_tags: vec!["old".to_string()],
             parent: None,
+            edit_section: None,
+            remove_section: None,
         };
 
         let result = cmd.execute(&db).await;
@@ -906,10 +1280,13 @@ mod tests {
         let cmd = UpdateCommand {
             id: "abc123".to_string(),
             title: Some("Updated title".to_string()),
+            description: None,
             priority: None,
             add_tags: vec![],
             remove_tags: vec![],
             parent: None,
+            edit_section: None,
+            remove_section: None,
         };
 
         let result = cmd.execute(&db).await;
@@ -949,10 +1326,13 @@ mod tests {
         let cmd = UpdateCommand {
             id: "test123".to_string(),
             title: Some("New Title".to_string()),
+            description: None,
             priority: Some(Priority::High),
             add_tags: vec!["urgent".to_string()],
             remove_tags: vec!["old".to_string()],
             parent: Some("parent456".to_string()),
+            edit_section: None,
+            remove_section: None,
         };
         let debug_str = format!("{:?}", cmd);
         assert!(
@@ -977,10 +1357,13 @@ mod tests {
         let cmd = UpdateCommand {
             id: "CHILD1".to_string(), // Uppercase child
             title: None,
+            description: None,
             priority: None,
             add_tags: vec![],
             remove_tags: vec![],
-            parent: Some("PARENT1".to_string()), // Uppercase parent
+            parent: Some("PARENT1".to_string()),
+            edit_section: None,
+            remove_section: None, // Uppercase parent
         };
 
         let result = cmd.execute(&db).await;
@@ -988,5 +1371,286 @@ mod tests {
 
         let parent_id = get_parent_id(&db, "child1").await;
         assert_eq!(parent_id, Some("parent1".to_string()));
+    }
+
+    // ========== Description Tests ==========
+
+    #[tokio::test]
+    async fn test_update_description() {
+        let db = setup_test_db().await;
+
+        create_task(&db, "abc123", "Test task", "task", "todo", None, &[]).await;
+
+        let cmd = UpdateCommand {
+            id: "abc123".to_string(),
+            title: None,
+            description: Some("New description".to_string()),
+            priority: None,
+            add_tags: vec![],
+            remove_tags: vec![],
+            parent: None,
+            edit_section: None,
+            remove_section: None,
+        };
+
+        let result = cmd.execute(&db).await;
+        assert!(result.is_ok());
+
+        // Verify description was set
+        #[derive(Debug, Deserialize)]
+        struct TaskWithDesc {
+            description: Option<String>,
+        }
+
+        let query = "SELECT description FROM task:abc123";
+        let mut result = db.client().query(query).await.unwrap();
+        let task: Option<TaskWithDesc> = result.take(0).unwrap();
+        assert_eq!(
+            task.unwrap().description,
+            Some("New description".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_update_clear_description() {
+        let db = setup_test_db().await;
+
+        // Create task with description
+        let query = r#"CREATE task:abc123 SET
+            title = "Test task",
+            description = "Original description",
+            level = "task",
+            status = "todo",
+            tags = [],
+            sections = [],
+            refs = []"#;
+        db.client().query(query).await.unwrap();
+
+        let cmd = UpdateCommand {
+            id: "abc123".to_string(),
+            title: None,
+            description: Some("".to_string()), // Empty string clears
+            priority: None,
+            add_tags: vec![],
+            remove_tags: vec![],
+            parent: None,
+            edit_section: None,
+            remove_section: None,
+        };
+
+        let result = cmd.execute(&db).await;
+        assert!(result.is_ok());
+
+        // Verify description was cleared
+        #[derive(Debug, Deserialize)]
+        struct TaskWithDesc {
+            description: Option<String>,
+        }
+
+        let query = "SELECT description FROM task:abc123";
+        let mut result = db.client().query(query).await.unwrap();
+        let task: Option<TaskWithDesc> = result.take(0).unwrap();
+        assert!(task.unwrap().description.is_none());
+    }
+
+    // ========== Section Tests ==========
+
+    /// Helper to add a section to a task
+    async fn add_section(
+        db: &Database,
+        id: &str,
+        section_type: &str,
+        content: &str,
+        order: Option<u32>,
+    ) {
+        let escaped_content = content.replace('\\', "\\\\").replace('"', "\\\"");
+        let section_obj = if let Some(ord) = order {
+            format!(
+                r#"{{ "type": "{}", "content": "{}", "order": {} }}"#,
+                section_type, escaped_content, ord
+            )
+        } else {
+            format!(
+                r#"{{ "type": "{}", "content": "{}" }}"#,
+                section_type, escaped_content
+            )
+        };
+
+        let query = format!(
+            "UPDATE task:{} SET sections = array::append(sections, {})",
+            id, section_obj
+        );
+        db.client().query(&query).await.unwrap();
+    }
+
+    /// Helper to get sections from a task
+    async fn get_sections(db: &Database, id: &str) -> Vec<SectionRow> {
+        let query = format!("SELECT sections FROM task:{}", id);
+        let mut result = db.client().query(&query).await.unwrap();
+
+        #[derive(Deserialize)]
+        struct Row {
+            #[serde(default)]
+            sections: Vec<SectionRow>,
+        }
+
+        let row: Option<Row> = result.take(0).unwrap();
+        row.map(|r| r.sections).unwrap_or_default()
+    }
+
+    #[tokio::test]
+    async fn test_update_remove_section() {
+        let db = setup_test_db().await;
+
+        create_task(&db, "abc123", "Test task", "task", "todo", None, &[]).await;
+        add_section(&db, "abc123", "step", "Step 0", Some(0)).await;
+        add_section(&db, "abc123", "step", "Step 1", Some(1)).await;
+        add_section(&db, "abc123", "step", "Step 2", Some(2)).await;
+
+        let cmd = UpdateCommand {
+            id: "abc123".to_string(),
+            title: None,
+            description: None,
+            priority: None,
+            add_tags: vec![],
+            remove_tags: vec![],
+            parent: None,
+            edit_section: None,
+            remove_section: Some(vec!["step".to_string(), "0".to_string()]),
+        };
+
+        let result = cmd.execute(&db).await;
+        assert!(result.is_ok(), "Remove section failed: {:?}", result.err());
+
+        // Verify section was removed and others renumbered
+        let sections = get_sections(&db, "abc123").await;
+        assert_eq!(sections.len(), 2);
+
+        // Find steps and verify renumbering
+        let steps: Vec<&SectionRow> = sections
+            .iter()
+            .filter(|s| s.section_type.as_deref() == Some("step"))
+            .collect();
+
+        assert_eq!(steps.len(), 2);
+        assert_eq!(steps[0].content.as_deref(), Some("Step 1"));
+        assert_eq!(steps[0].order, Some(0)); // Renumbered from 1 to 0
+        assert_eq!(steps[1].content.as_deref(), Some("Step 2"));
+        assert_eq!(steps[1].order, Some(1)); // Renumbered from 2 to 1
+    }
+
+    #[tokio::test]
+    async fn test_update_edit_section() {
+        let db = setup_test_db().await;
+
+        create_task(&db, "abc123", "Test task", "task", "todo", None, &[]).await;
+        add_section(&db, "abc123", "step", "Original step", Some(0)).await;
+
+        let cmd = UpdateCommand {
+            id: "abc123".to_string(),
+            title: None,
+            description: None,
+            priority: None,
+            add_tags: vec![],
+            remove_tags: vec![],
+            parent: None,
+            edit_section: Some(vec![
+                "step".to_string(),
+                "0".to_string(),
+                "Updated step content".to_string(),
+            ]),
+            remove_section: None,
+        };
+
+        let result = cmd.execute(&db).await;
+        assert!(result.is_ok(), "Edit section failed: {:?}", result.err());
+
+        // Verify section was updated
+        let sections = get_sections(&db, "abc123").await;
+        assert_eq!(sections.len(), 1);
+        assert_eq!(sections[0].content.as_deref(), Some("Updated step content"));
+    }
+
+    #[tokio::test]
+    async fn test_update_remove_nonexistent_section_fails() {
+        let db = setup_test_db().await;
+
+        create_task(&db, "abc123", "Test task", "task", "todo", None, &[]).await;
+
+        let cmd = UpdateCommand {
+            id: "abc123".to_string(),
+            title: None,
+            description: None,
+            priority: None,
+            add_tags: vec![],
+            remove_tags: vec![],
+            parent: None,
+            edit_section: None,
+            remove_section: Some(vec!["step".to_string(), "99".to_string()]),
+        };
+
+        let result = cmd.execute(&db).await;
+        match result {
+            Err(DbError::InvalidPath { reason, .. }) => {
+                assert!(
+                    reason.contains("No step section found at ordinal 99"),
+                    "Expected 'No step section found' in error, got: {}",
+                    reason
+                );
+            }
+            Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
+            Ok(_) => panic!("Expected error, got success"),
+        }
+    }
+
+    #[test]
+    fn test_parse_section_type_valid() {
+        assert_eq!(parse_section_type("goal").unwrap(), SectionType::Goal);
+        assert_eq!(parse_section_type("context").unwrap(), SectionType::Context);
+        assert_eq!(
+            parse_section_type("current_behavior").unwrap(),
+            SectionType::CurrentBehavior
+        );
+        assert_eq!(
+            parse_section_type("desired_behavior").unwrap(),
+            SectionType::DesiredBehavior
+        );
+        assert_eq!(parse_section_type("step").unwrap(), SectionType::Step);
+        assert_eq!(
+            parse_section_type("testing_criterion").unwrap(),
+            SectionType::TestingCriterion
+        );
+        assert_eq!(
+            parse_section_type("anti_pattern").unwrap(),
+            SectionType::AntiPattern
+        );
+        assert_eq!(
+            parse_section_type("failure_test").unwrap(),
+            SectionType::FailureTest
+        );
+        assert_eq!(
+            parse_section_type("constraint").unwrap(),
+            SectionType::Constraint
+        );
+    }
+
+    #[test]
+    fn test_parse_section_type_case_insensitive() {
+        assert_eq!(parse_section_type("GOAL").unwrap(), SectionType::Goal);
+        assert_eq!(parse_section_type("Step").unwrap(), SectionType::Step);
+        assert_eq!(
+            parse_section_type("TESTING_CRITERION").unwrap(),
+            SectionType::TestingCriterion
+        );
+    }
+
+    #[test]
+    fn test_parse_section_type_invalid() {
+        let result = parse_section_type("invalid");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("invalid section type"));
+        assert!(err.contains("goal"));
+        assert!(err.contains("step"));
     }
 }

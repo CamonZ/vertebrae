@@ -24,6 +24,8 @@ pub struct TaskRepository<'a> {
 pub struct TaskUpdate {
     /// New title (if Some)
     pub title: Option<String>,
+    /// New description (if Some(Some(desc)), clear if Some(None))
+    pub description: Option<Option<String>>,
     /// New priority (if Some)
     pub priority: Option<Option<Priority>>,
     /// Tags to add
@@ -61,6 +63,18 @@ impl TaskUpdate {
     /// Set a new title
     pub fn with_title(mut self, title: impl Into<String>) -> Self {
         self.title = Some(title.into());
+        self
+    }
+
+    /// Set a new description
+    pub fn with_description(mut self, description: impl Into<String>) -> Self {
+        self.description = Some(Some(description.into()));
+        self
+    }
+
+    /// Clear the description
+    pub fn clear_description(mut self) -> Self {
+        self.description = Some(None);
         self
     }
 
@@ -158,6 +172,7 @@ impl TaskUpdate {
     /// Check if any updates are specified
     pub fn has_updates(&self) -> bool {
         self.title.is_some()
+            || self.description.is_some()
             || self.priority.is_some()
             || !self.add_tags.is_empty()
             || !self.remove_tags.is_empty()
@@ -447,6 +462,16 @@ impl<'a> TaskRepository<'a> {
         if let Some(title) = &updates.title {
             let escaped_title = title.replace('\"', "\\\"");
             field_updates.push(format!("title = \"{}\"", escaped_title));
+        }
+
+        if let Some(description_opt) = &updates.description {
+            match description_opt {
+                Some(desc) => {
+                    let escaped_desc = desc.replace('\"', "\\\"");
+                    field_updates.push(format!("description = \"{}\"", escaped_desc));
+                }
+                None => field_updates.push("description = NONE".to_string()),
+            }
         }
 
         if let Some(priority_opt) = &updates.priority {
@@ -1187,5 +1212,72 @@ mod tests {
         );
 
         cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_update_description() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = TaskRepository::new(db.client());
+
+        let task = Task::new("Description Test", Level::Task);
+        repo.create("desc1", &task).await.unwrap();
+
+        // Update with description
+        let updates = TaskUpdate::new().with_description("This is a description");
+        repo.update("desc1", &updates).await.unwrap();
+
+        // Verify the description was set
+        let retrieved = repo.get("desc1").await.unwrap().unwrap();
+        assert_eq!(
+            retrieved.description,
+            Some("This is a description".to_string())
+        );
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_update_clear_description() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = TaskRepository::new(db.client());
+
+        // Create task with initial description
+        let query = r#"CREATE task:desc2 SET
+            title = "Clear Description Test",
+            description = "Initial description",
+            level = "task",
+            status = "todo",
+            tags = [],
+            sections = [],
+            refs = []"#;
+        db.client().query(query).await.unwrap();
+
+        // Verify initial description
+        let retrieved = repo.get("desc2").await.unwrap().unwrap();
+        assert_eq!(
+            retrieved.description,
+            Some("Initial description".to_string())
+        );
+
+        // Clear description
+        let updates = TaskUpdate::new().clear_description();
+        repo.update("desc2", &updates).await.unwrap();
+
+        // Verify description was cleared
+        let retrieved = repo.get("desc2").await.unwrap().unwrap();
+        assert!(retrieved.description.is_none());
+
+        cleanup(&temp_dir);
+    }
+
+    #[test]
+    fn test_task_update_description_builder() {
+        let update = TaskUpdate::new().with_description("My description");
+        assert_eq!(update.description, Some(Some("My description".to_string())));
+        assert!(update.has_updates());
+
+        let update = TaskUpdate::new().clear_description();
+        assert_eq!(update.description, Some(None));
+        assert!(update.has_updates());
     }
 }
