@@ -6,7 +6,8 @@
 
 use clap::Args;
 use serde::Deserialize;
-use vertebrae_db::{Database, DbError, SectionType};
+use vertebrae_core::TaskService;
+use vertebrae_db::{DbError, SectionType};
 
 /// Remove sections from a task
 #[derive(Debug, Args)]
@@ -109,6 +110,7 @@ struct SectionRow {
     #[serde(rename = "type", default)]
     section_type: Option<String>,
     #[serde(default)]
+    #[allow(dead_code)]
     content: Option<String>,
     #[serde(default)]
     order: Option<u32>,
@@ -149,37 +151,69 @@ impl UnsectionCommand {
     /// - The section to remove does not exist
     /// - For multi-instance types without --index or --all
     /// - Database operations fail
-    pub async fn execute(&self, db: &Database) -> Result<UnsectionResult, DbError> {
+    pub async fn execute(&self, service: &dyn TaskService) -> Result<UnsectionResult, DbError> {
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
 
         // Validate command arguments
         self.validate_arguments()?;
 
-        // Fetch task and verify it exists
-        let task = self.fetch_task_sections(db, &id).await?;
+        // We need to fetch task sections to determine what to remove
+        // Get the service's database connection to verify task exists
+        let db_result = service.get_task(&id).await.map_err(|e| {
+            // Check if it's a task not found error and propagate it as-is
+            if e.to_string().contains("Task not found") {
+                DbError::TaskNotFound {
+                    task_id: self.id.clone(),
+                }
+            } else {
+                DbError::InvalidPath {
+                    path: std::path::PathBuf::from(&self.id),
+                    reason: format!("Failed to get task: {}", e),
+                }
+            }
+        })?;
+
+        // Convert task to sections for analysis
+        let existing_sections: Vec<SectionRow> = db_result
+            .sections
+            .iter()
+            .map(|s| SectionRow {
+                section_type: Some(s.section_type.as_str().to_string()),
+                content: Some(s.content.clone()),
+                order: s.order,
+            })
+            .collect();
+
+        let task = TaskSectionsRow {
+            id: surrealdb::sql::Thing::from(("task", id.as_str())),
+            sections: existing_sections,
+        };
 
         // Determine what to remove and perform the removal
         let removed_count = match (&self.section_type, self.index, self.all) {
             // --all without type: remove all sections
-            (None, None, true) => self.remove_all_sections(db, &id, &task.sections).await?,
+            (None, None, true) => {
+                self.remove_all_sections(service, &id, &task.sections)
+                    .await?
+            }
 
             // type + --all: remove all sections of that type
             (Some(section_type), None, true) => {
-                self.remove_all_of_type(db, &id, section_type, &task.sections)
+                self.remove_all_of_type(service, &id, section_type, &task.sections)
                     .await?
             }
 
             // type + --index: remove specific section at ordinal
             (Some(section_type), Some(index), false) => {
-                self.remove_at_index(db, &id, section_type, index, &task.sections)
+                self.remove_at_index(service, &id, section_type, index, &task.sections)
                     .await?
             }
 
             // type only (no --index, no --all): for single-instance, remove it; for multi-instance, error
             (Some(section_type), None, false) => {
                 if is_single_instance_type(section_type) {
-                    self.remove_single_instance(db, &id, section_type, &task.sections)
+                    self.remove_single_instance(service, &id, section_type, &task.sections)
                         .await?
                 } else {
                     return Err(DbError::InvalidPath {
@@ -205,11 +239,6 @@ impl UnsectionCommand {
             _ => unreachable!(),
         };
 
-        // Update timestamp if any sections were removed
-        if removed_count > 0 {
-            self.update_timestamp(db, &id).await?;
-        }
-
         Ok(UnsectionResult {
             id,
             removed_count,
@@ -230,32 +259,42 @@ impl UnsectionCommand {
         Ok(())
     }
 
-    /// Fetch the task by ID and return its sections.
-    async fn fetch_task_sections(
-        &self,
-        db: &Database,
-        id: &str,
-    ) -> Result<TaskSectionsRow, DbError> {
-        let query = format!("SELECT id, sections FROM task:{}", id);
-        let mut result = db.client().query(&query).await?;
-        let task: Option<TaskSectionsRow> = result.take(0)?;
-
-        task.ok_or_else(|| DbError::TaskNotFound {
-            task_id: self.id.clone(),
-        })
-    }
-
     /// Remove all sections from the task
     async fn remove_all_sections(
         &self,
-        db: &Database,
+        service: &dyn TaskService,
         id: &str,
         existing_sections: &[SectionRow],
     ) -> Result<usize, DbError> {
         let count = existing_sections.len();
 
-        let query = format!("UPDATE task:{} SET sections = []", id);
-        db.client().query(&query).await?;
+        if count == 0 {
+            return Ok(0);
+        }
+
+        // Remove all sections of each type that exists
+        let mut types_to_remove = Vec::new();
+        for section in existing_sections {
+            if let Some(type_str) = &section.section_type
+                && !types_to_remove
+                    .iter()
+                    .any(|t: &SectionType| t.as_str() == type_str)
+                && let Ok(section_type) = parse_section_type(type_str)
+            {
+                types_to_remove.push(section_type);
+            }
+        }
+
+        // Remove all sections of each type
+        for section_type in types_to_remove {
+            service
+                .remove_sections(id, section_type, None)
+                .await
+                .map_err(|e| DbError::InvalidPath {
+                    path: std::path::PathBuf::from(id),
+                    reason: format!("Failed to remove sections: {}", e),
+                })?;
+        }
 
         Ok(count)
     }
@@ -263,7 +302,7 @@ impl UnsectionCommand {
     /// Remove all sections of a specific type
     async fn remove_all_of_type(
         &self,
-        db: &Database,
+        service: &dyn TaskService,
         id: &str,
         section_type: &SectionType,
         existing_sections: &[SectionRow],
@@ -280,9 +319,14 @@ impl UnsectionCommand {
             return Ok(0);
         }
 
-        // Keep sections that are NOT of this type
-        let new_sections = self.filter_sections_excluding_type(existing_sections, type_str);
-        self.update_sections(db, id, &new_sections).await?;
+        // Use service layer to remove all sections of this type
+        service
+            .remove_sections(id, section_type.clone(), None)
+            .await
+            .map_err(|e| DbError::InvalidPath {
+                path: std::path::PathBuf::from(id),
+                reason: format!("Failed to remove sections: {}", e),
+            })?;
 
         Ok(count)
     }
@@ -290,7 +334,7 @@ impl UnsectionCommand {
     /// Remove a specific section at the given ordinal
     async fn remove_at_index(
         &self,
-        db: &Database,
+        service: &dyn TaskService,
         id: &str,
         section_type: &SectionType,
         index: u32,
@@ -314,44 +358,11 @@ impl UnsectionCommand {
             });
         }
 
-        // Build new sections array:
-        // 1. Keep all sections that are NOT of this type
-        // 2. Keep sections of this type that don't have the target index
-        // 3. Renumber the remaining sections of this type
-        let mut new_sections: Vec<String> = Vec::new();
-
-        // First, add all non-matching type sections
-        for s in existing_sections {
-            if s.section_type.as_deref() != Some(type_str)
-                && let Some(section_str) = self.section_to_string(s)
-            {
-                new_sections.push(section_str);
-            }
-        }
-
-        // Now add matching sections (excluding the one at index) with renumbered ordinals
-        let mut new_ordinal = 0u32;
-        let mut sections_of_type: Vec<&SectionRow> = matching_sections
-            .iter()
-            .filter(|s| s.order != Some(index))
-            .copied()
-            .collect();
-
-        // Sort by original order
-        sections_of_type.sort_by_key(|s| s.order.unwrap_or(u32::MAX));
-
-        for s in sections_of_type {
-            if let (Some(content), Some(_type_str)) = (&s.content, &s.section_type) {
-                let escaped_content = content.replace('\\', "\\\\").replace('"', "\\\"");
-                new_sections.push(format!(
-                    r#"{{ "type": "{}", "content": "{}", "order": {} }}"#,
-                    type_str, escaped_content, new_ordinal
-                ));
-                new_ordinal += 1;
-            }
-        }
-
-        self.update_sections(db, id, &new_sections).await?;
+        // Get database from service to use repository method for proper renumbering
+        let db = service.database();
+        db.tasks()
+            .remove_section(id, section_type.clone(), index)
+            .await?;
 
         Ok(1)
     }
@@ -359,7 +370,7 @@ impl UnsectionCommand {
     /// Remove a single-instance section
     async fn remove_single_instance(
         &self,
-        db: &Database,
+        service: &dyn TaskService,
         id: &str,
         section_type: &SectionType,
         existing_sections: &[SectionRow],
@@ -378,75 +389,37 @@ impl UnsectionCommand {
             });
         }
 
-        // Keep sections that are NOT of this type
-        let new_sections = self.filter_sections_excluding_type(existing_sections, type_str);
-        self.update_sections(db, id, &new_sections).await?;
+        // Use service layer to remove all sections of this type
+        service
+            .remove_sections(id, section_type.clone(), None)
+            .await
+            .map_err(|e| DbError::InvalidPath {
+                path: std::path::PathBuf::from(id),
+                reason: format!("Failed to remove section: {}", e),
+            })?;
 
         Ok(1)
-    }
-
-    /// Filter sections to exclude a specific type
-    fn filter_sections_excluding_type(
-        &self,
-        sections: &[SectionRow],
-        exclude_type: &str,
-    ) -> Vec<String> {
-        sections
-            .iter()
-            .filter(|s| s.section_type.as_deref() != Some(exclude_type))
-            .filter_map(|s| self.section_to_string(s))
-            .collect()
-    }
-
-    /// Convert a SectionRow to its string representation for the query
-    fn section_to_string(&self, section: &SectionRow) -> Option<String> {
-        let section_type = section.section_type.as_ref()?;
-        let content = section.content.as_ref()?;
-        let escaped_content = content.replace('\\', "\\\\").replace('"', "\\\"");
-
-        if let Some(order) = section.order {
-            Some(format!(
-                r#"{{ "type": "{}", "content": "{}", "order": {} }}"#,
-                section_type, escaped_content, order
-            ))
-        } else {
-            Some(format!(
-                r#"{{ "type": "{}", "content": "{}" }}"#,
-                section_type, escaped_content
-            ))
-        }
-    }
-
-    /// Update the task's sections array
-    async fn update_sections(
-        &self,
-        db: &Database,
-        id: &str,
-        sections: &[String],
-    ) -> Result<(), DbError> {
-        let sections_array = format!("[{}]", sections.join(", "));
-        let query = format!("UPDATE task:{} SET sections = {}", id, sections_array);
-        db.client().query(&query).await?;
-        Ok(())
-    }
-
-    /// Update the task's updated_at timestamp.
-    async fn update_timestamp(&self, db: &Database, id: &str) -> Result<(), DbError> {
-        let query = format!("UPDATE task:{} SET updated_at = time::now()", id);
-        db.client().query(&query).await?;
-        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vertebrae_core::DefaultTaskService;
+    use vertebrae_db::Database;
 
     /// Helper to create an in-memory test database
     async fn setup_test_db() -> Database {
         let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
         db
+    }
+
+    /// Helper to create an in-memory test service
+    async fn setup_test_service() -> DefaultTaskService {
+        let db = Database::connect_mem().await.unwrap();
+        db.init().await.unwrap();
+        DefaultTaskService::new(db)
     }
 
     /// Helper to create a task in the database
@@ -590,7 +563,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_remove_goal_section() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
+        let db = service.database();
 
         create_task(&db, "task1", "Test Task").await;
         add_section(&db, "task1", "goal", "The goal", None).await;
@@ -602,7 +576,7 @@ mod tests {
             all: false,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok(), "Unsection failed: {:?}", result.err());
 
         let unsection_result = result.unwrap();
@@ -616,21 +590,22 @@ mod tests {
 
     #[tokio::test]
     async fn test_remove_step_at_index() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
+        let db = service.database();
 
         create_task(&db, "task1", "Test Task").await;
-        add_section(&db, "task1", "step", "Step 0", Some(0)).await;
-        add_section(&db, "task1", "step", "Step 1", Some(1)).await;
-        add_section(&db, "task1", "step", "Step 2", Some(2)).await;
+        add_section(&db, "task1", "step", "Step 0", Some(1)).await;
+        add_section(&db, "task1", "step", "Step 1", Some(2)).await;
+        add_section(&db, "task1", "step", "Step 2", Some(3)).await;
 
         let cmd = UnsectionCommand {
             id: "task1".to_string(),
             section_type: Some(SectionType::Step),
-            index: Some(1),
+            index: Some(2),
             all: false,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok(), "Unsection failed: {:?}", result.err());
 
         // Verify remaining steps are renumbered
@@ -645,18 +620,19 @@ mod tests {
 
         assert_eq!(steps.len(), 2);
         assert_eq!(steps[0].content.as_deref(), Some("Step 0"));
-        assert_eq!(steps[0].order, Some(0));
+        assert_eq!(steps[0].order, Some(1));
         assert_eq!(steps[1].content.as_deref(), Some("Step 2"));
-        assert_eq!(steps[1].order, Some(1)); // Renumbered from 2 to 1
+        assert_eq!(steps[1].order, Some(2)); // Renumbered from 3 to 2
     }
 
     #[tokio::test]
     async fn test_remove_all_of_type() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
+        let db = service.database();
 
         create_task(&db, "task1", "Test Task").await;
-        add_section(&db, "task1", "step", "Step 0", Some(0)).await;
-        add_section(&db, "task1", "step", "Step 1", Some(1)).await;
+        add_section(&db, "task1", "step", "Step 0", Some(1)).await;
+        add_section(&db, "task1", "step", "Step 1", Some(2)).await;
         add_section(&db, "task1", "goal", "The goal", None).await;
 
         let cmd = UnsectionCommand {
@@ -666,7 +642,7 @@ mod tests {
             all: true,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         let unsection_result = result.unwrap();
@@ -680,11 +656,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_remove_all_sections() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
+        let db = service.database();
 
         create_task(&db, "task1", "Test Task").await;
         add_section(&db, "task1", "goal", "The goal", None).await;
-        add_section(&db, "task1", "step", "Step 0", Some(0)).await;
+        add_section(&db, "task1", "step", "Step 0", Some(1)).await;
         add_section(&db, "task1", "anti_pattern", "Don't do this", Some(0)).await;
 
         let cmd = UnsectionCommand {
@@ -694,7 +671,7 @@ mod tests {
             all: true,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         let unsection_result = result.unwrap();
@@ -707,7 +684,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_remove_nonexistent_section_fails() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
+        let db = service.database();
 
         create_task(&db, "task1", "Test Task").await;
 
@@ -718,7 +696,7 @@ mod tests {
             all: false,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         match result {
             Err(DbError::InvalidPath { reason, .. }) => {
                 assert!(
@@ -734,10 +712,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_remove_at_nonexistent_index_fails() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
+        let db = service.database();
 
         create_task(&db, "task1", "Test Task").await;
-        add_section(&db, "task1", "step", "Step 0", Some(0)).await;
+        add_section(&db, "task1", "step", "Step 0", Some(1)).await;
 
         let cmd = UnsectionCommand {
             id: "task1".to_string(),
@@ -746,7 +725,7 @@ mod tests {
             all: false,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         match result {
             Err(DbError::InvalidPath { reason, .. }) => {
                 assert!(
@@ -762,7 +741,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_remove_nonexistent_task_fails() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
+        let db = service.database();
 
         let cmd = UnsectionCommand {
             id: "nonexistent".to_string(),
@@ -771,7 +751,7 @@ mod tests {
             all: false,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         match result {
             Err(DbError::TaskNotFound { task_id }) => {
                 assert_eq!(
@@ -787,10 +767,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_multi_instance_without_index_or_all_fails() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
+        let db = service.database();
 
         create_task(&db, "task1", "Test Task").await;
-        add_section(&db, "task1", "step", "Step 0", Some(0)).await;
+        add_section(&db, "task1", "step", "Step 0", Some(1)).await;
 
         let cmd = UnsectionCommand {
             id: "task1".to_string(),
@@ -799,7 +780,7 @@ mod tests {
             all: false,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         match result {
             Err(DbError::InvalidPath { reason, .. }) => {
                 assert!(
@@ -820,7 +801,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_updates_timestamp() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
+        let db = service.database();
 
         create_task(&db, "task1", "Test Task").await;
         add_section(&db, "task1", "goal", "The goal", None).await;
@@ -837,7 +819,7 @@ mod tests {
             all: false,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         // Verify timestamp was updated
@@ -852,7 +834,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_case_insensitive_id() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
+        let db = service.database();
 
         create_task(&db, "task1", "Test Task").await;
         add_section(&db, "task1", "goal", "The goal", None).await;
@@ -864,18 +847,19 @@ mod tests {
             all: false,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok(), "Case-insensitive lookup should work");
     }
 
     #[tokio::test]
     async fn test_preserves_other_sections_when_removing() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
+        let db = service.database();
 
         create_task(&db, "task1", "Test Task").await;
         add_section(&db, "task1", "goal", "The goal", None).await;
         add_section(&db, "task1", "context", "The context", None).await;
-        add_section(&db, "task1", "step", "Step 0", Some(0)).await;
+        add_section(&db, "task1", "step", "Step 0", Some(1)).await;
 
         let cmd = UnsectionCommand {
             id: "task1".to_string(),
@@ -884,7 +868,7 @@ mod tests {
             all: false,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         // Verify other sections remain
@@ -904,7 +888,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_remove_all_of_type_returns_zero_when_none_exist() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
+        let db = service.database();
 
         create_task(&db, "task1", "Test Task").await;
         add_section(&db, "task1", "goal", "The goal", None).await;
@@ -916,7 +901,7 @@ mod tests {
             all: true,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         let unsection_result = result.unwrap();
@@ -925,7 +910,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_no_type_without_all_flag_fails() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
+        let db = service.database();
 
         create_task(&db, "task1", "Test Task").await;
 
@@ -936,7 +922,7 @@ mod tests {
             all: false,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         match result {
             Err(DbError::InvalidPath { reason, .. }) => {
                 assert!(
@@ -952,7 +938,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_index_without_type_fails() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
+        let db = service.database();
 
         create_task(&db, "task1", "Test Task").await;
 
@@ -963,7 +950,7 @@ mod tests {
             all: false,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         match result {
             Err(DbError::InvalidPath { reason, .. }) => {
                 assert!(
