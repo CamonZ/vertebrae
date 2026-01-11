@@ -743,6 +743,50 @@ impl<'a> TaskRepository<'a> {
             .map(|t| (t.id.id.to_raw(), t.task))
             .collect())
     }
+
+    /// Atomically append a code reference to a task's refs array.
+    ///
+    /// This method uses SurrealDB's array::append function to atomically
+    /// add a new code reference without requiring a get-modify-set pattern.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The task ID to update
+    /// * `code_ref` - The code reference to append
+    ///
+    /// # Errors
+    ///
+    /// Returns `DbError::Query` if the database operation fails.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let code_ref = CodeRef::file("src/main.rs");
+    /// repo.append_ref("task1", &code_ref).await?;
+    /// ```
+    pub async fn append_ref(&self, id: &str, code_ref: &CodeRef) -> DbResult<()> {
+        debug!("Appending ref to task: {}", id);
+        trace!("CodeRef: {:?}", code_ref);
+
+        // Serialize the code ref to JSON for the query
+        let ref_json = serde_json::to_string(code_ref).map_err(|e| DbError::InvalidPath {
+            path: std::path::PathBuf::from(id),
+            reason: format!("Failed to serialize code ref: {}", e),
+        })?;
+
+        // Use array::append with null coalescing to handle empty/null refs array
+        // This is atomic - no get-modify-set pattern
+        let query = format!(
+            "UPDATE task:{} SET refs = array::append(refs ?? [], {}), updated_at = time::now()",
+            id, ref_json
+        );
+
+        trace!("Query: {}", query);
+        self.client.query(&query).await?;
+
+        debug!("Successfully appended ref to task: {}", id);
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -1279,5 +1323,148 @@ mod tests {
         let update = TaskUpdate::new().clear_description();
         assert_eq!(update.description, Some(None));
         assert!(update.has_updates());
+    }
+
+    // ========================================
+    // append_ref tests
+    // ========================================
+
+    #[tokio::test]
+    async fn test_append_ref_to_empty_refs() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = TaskRepository::new(db.client());
+
+        // Create task without refs
+        let task = Task::new("Ref Test", Level::Task);
+        repo.create("ref1", &task).await.unwrap();
+
+        // Append a ref
+        let code_ref = CodeRef::file("src/main.rs");
+        repo.append_ref("ref1", &code_ref).await.unwrap();
+
+        // Verify the ref was added
+        let retrieved = repo.get("ref1").await.unwrap().unwrap();
+        assert_eq!(retrieved.code_refs.len(), 1);
+        assert_eq!(retrieved.code_refs[0].path, "src/main.rs");
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_append_ref_to_existing_refs() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = TaskRepository::new(db.client());
+
+        // Create task with initial ref
+        let query = r#"CREATE task:ref2 SET
+            title = "Multiple Refs Test",
+            level = "task",
+            status = "todo",
+            tags = [],
+            sections = [],
+            refs = [{ path: "src/lib.rs" }]"#;
+        db.client().query(query).await.unwrap();
+
+        // Append another ref
+        let code_ref = CodeRef::line("src/main.rs", 42);
+        repo.append_ref("ref2", &code_ref).await.unwrap();
+
+        // Verify both refs exist
+        let retrieved = repo.get("ref2").await.unwrap().unwrap();
+        assert_eq!(retrieved.code_refs.len(), 2);
+        assert_eq!(retrieved.code_refs[0].path, "src/lib.rs");
+        assert_eq!(retrieved.code_refs[1].path, "src/main.rs");
+        assert_eq!(retrieved.code_refs[1].line_start, Some(42));
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_append_ref_updates_timestamp() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = TaskRepository::new(db.client());
+
+        // Create task
+        let task = Task::new("Timestamp Ref Test", Level::Task);
+        repo.create("ref3", &task).await.unwrap();
+
+        // Get initial updated_at (should be None)
+        let initial = repo.get("ref3").await.unwrap().unwrap();
+        let initial_updated = initial.updated_at;
+
+        // Append a ref
+        let code_ref = CodeRef::file("src/test.rs");
+        repo.append_ref("ref3", &code_ref).await.unwrap();
+
+        // Verify updated_at was set
+        let updated = repo.get("ref3").await.unwrap().unwrap();
+        assert!(
+            updated.updated_at.is_some(),
+            "updated_at should be set after append_ref"
+        );
+        assert!(
+            updated.updated_at != initial_updated,
+            "updated_at should change after append_ref"
+        );
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_append_ref_with_all_fields() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = TaskRepository::new(db.client());
+
+        // Create task
+        let task = Task::new("Full Ref Test", Level::Task);
+        repo.create("ref4", &task).await.unwrap();
+
+        // Append a ref with all optional fields
+        let code_ref = CodeRef::range("src/module.rs", 10, 25)
+            .with_name("process_data")
+            .with_description("Main data processing function");
+        repo.append_ref("ref4", &code_ref).await.unwrap();
+
+        // Verify all fields
+        let retrieved = repo.get("ref4").await.unwrap().unwrap();
+        assert_eq!(retrieved.code_refs.len(), 1);
+        let ref_retrieved = &retrieved.code_refs[0];
+        assert_eq!(ref_retrieved.path, "src/module.rs");
+        assert_eq!(ref_retrieved.line_start, Some(10));
+        assert_eq!(ref_retrieved.line_end, Some(25));
+        assert_eq!(ref_retrieved.name, Some("process_data".to_string()));
+        assert_eq!(
+            ref_retrieved.description,
+            Some("Main data processing function".to_string())
+        );
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_append_ref_to_null_refs() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = TaskRepository::new(db.client());
+
+        // Create task with explicitly null refs
+        let query = r#"CREATE task:ref5 SET
+            title = "Null Refs Test",
+            level = "task",
+            status = "todo",
+            tags = [],
+            sections = [],
+            refs = NONE"#;
+        db.client().query(query).await.unwrap();
+
+        // Append a ref - should work even with null refs
+        let code_ref = CodeRef::file("src/null_test.rs");
+        repo.append_ref("ref5", &code_ref).await.unwrap();
+
+        // Verify the ref was added
+        let retrieved = repo.get("ref5").await.unwrap().unwrap();
+        assert_eq!(retrieved.code_refs.len(), 1);
+        assert_eq!(retrieved.code_refs[0].path, "src/null_test.rs");
+
+        cleanup(&temp_dir);
     }
 }
