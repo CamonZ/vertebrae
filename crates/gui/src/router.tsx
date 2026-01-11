@@ -1,7 +1,9 @@
-import { createBrowserRouter, Navigate, Outlet } from "react-router-dom";
+import { createBrowserRouter, Navigate, Outlet, useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
 import { AppShell } from "./components";
 import { useTheme } from "./hooks";
-import { TasksPage, WorkflowsPage, WorkflowDetailPage } from "./pages";
+import { ProjectSetupPage, TasksPage, WorkflowsPage, WorkflowDetailPage } from "./pages";
+import { commands } from "./bindings";
 
 function RootLayout() {
   // Initialize theme management at the app root
@@ -14,26 +16,93 @@ function RootLayout() {
   );
 }
 
+/**
+ * Guard component that checks if a project is selected before rendering children.
+ * If no project is selected, redirects to the project setup page.
+ */
+function ProjectGuard({ children }: { children: React.ReactNode }) {
+  const navigate = useNavigate();
+  const [isChecking, setIsChecking] = useState(true);
+  const [hasProject, setHasProject] = useState(false);
+
+  useEffect(() => {
+    async function checkProject() {
+      try {
+        const result = await commands.hasProjectSelected();
+        if (result.status === "ok") {
+          if (result.data) {
+            setHasProject(true);
+          } else {
+            navigate("/setup", { replace: true });
+          }
+        } else {
+          // On error, redirect to setup
+          navigate("/setup", { replace: true });
+        }
+      } catch (e) {
+        navigate("/setup", { replace: true });
+      } finally {
+        setIsChecking(false);
+      }
+    }
+    checkProject();
+  }, [navigate]);
+
+  if (isChecking) {
+    return (
+      <div className="flex h-full items-center justify-center text-text-secondary">
+        Loading...
+      </div>
+    );
+  }
+
+  if (!hasProject) {
+    return null;
+  }
+
+  return <>{children}</>;
+}
+
 export const router = createBrowserRouter([
+  {
+    path: "/setup",
+    element: <ProjectSetupPage />,
+  },
   {
     path: "/",
     element: <RootLayout />,
     children: [
       {
         index: true,
-        element: <Navigate to="/tasks" replace />,
+        element: (
+          <ProjectGuard>
+            <Navigate to="/tasks" replace />
+          </ProjectGuard>
+        ),
       },
       {
         path: "tasks",
-        element: <TasksPage />,
+        element: (
+          <ProjectGuard>
+            <TasksPage />
+          </ProjectGuard>
+        ),
       },
       {
         path: "workflows",
-        element: <WorkflowsPage />,
+        element: (
+          <ProjectGuard>
+            <WorkflowsPage />
+          </ProjectGuard>
+        ),
       },
       {
         path: "workflow/:id",
-        element: <WorkflowDetailPage />,
+        element: (
+          <ProjectGuard>
+            <WorkflowDetailPage />
+          </ProjectGuard>
+        ),
       },
     ],
   },

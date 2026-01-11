@@ -15,6 +15,74 @@ async greet(name: string) : Promise<string> {
     return await TAURI_INVOKE("greet", { name });
 },
 /**
+ * Get the list of saved projects
+ */
+async getProjects() : Promise<Result<SavedProject[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_projects") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Add a project to the saved list
+ * 
+ * If the project doesn't have a vtb database, one will be initialized.
+ */
+async addProject(name: string, path: string) : Promise<Result<SavedProject, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("add_project", { name, path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Remove a project from the saved list
+ */
+async removeProject(path: string) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("remove_project", { path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Get the currently selected project path
+ */
+async getCurrentProject() : Promise<Result<string | null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_current_project") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Set the current project and connect to its database
+ */
+async setCurrentProject(path: string | null) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_current_project", { path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Check if a project is currently selected and database is connected
+ */
+async hasProjectSelected() : Promise<Result<boolean, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("has_project_selected") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * List tasks with optional filters
  * 
  * Returns a list of task summaries matching the filter criteria.
@@ -218,6 +286,26 @@ export type ExecutionStatus = "in_progress" | "completed" | "failed"
  * Permission mode for agent sessions - mirrors db::PermissionMode
  */
 export type PermissionMode = "accept_edits" | "bypass_permissions" | "default" | "delegate" | "dont_ask" | "plan"
+/**
+ * A saved project in the project list
+ */
+export type SavedProject = { 
+/**
+ * Display name for the project
+ */
+name: string; 
+/**
+ * Path to the project directory
+ */
+path: string; 
+/**
+ * Whether a vtb database exists at this project path
+ */
+has_database: boolean; 
+/**
+ * Whether the project directory still exists on disk
+ */
+exists: boolean }
 /**
  * Section content within a task
  */

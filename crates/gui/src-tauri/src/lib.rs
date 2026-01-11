@@ -1,8 +1,10 @@
 pub mod commands;
 pub mod events;
+pub mod project_config;
 pub mod types;
 
 use std::path::PathBuf;
+use tokio::sync::RwLock;
 
 use specta_typescript::Typescript;
 use tauri::Manager;
@@ -11,31 +13,7 @@ use vertebrae_db::Database;
 
 use commands::AppState;
 use events::{TaskChangedEvent, WorkflowChangedEvent};
-
-/// Environment variable for database path override
-const VTB_DB_PATH_ENV: &str = "VTB_DB_PATH";
-
-/// Resolve database path for the GUI application.
-/// Unlike the CLI which uses the git project root, the GUI uses the user's home directory
-/// as the default location since it can be launched from anywhere (e.g., Finder).
-fn resolve_db_path() -> PathBuf {
-    // Check environment variable first
-    if let Ok(env_path) = std::env::var(VTB_DB_PATH_ENV) {
-        if !env_path.is_empty() {
-            return PathBuf::from(env_path);
-        }
-    }
-
-    // Try git project root first (for development), then fall back to home directory
-    if let Ok(path) = Database::default_path() {
-        return path;
-    }
-
-    // Fall back to ~/.vtb/data for bundled app launched from Finder
-    dirs::home_dir()
-        .map(|home| home.join(".vtb/data"))
-        .unwrap_or_else(|| PathBuf::from(".vtb/data"))
-}
+use project_config::ProjectConfig;
 
 /// Example command that will be exported with type definitions.
 /// This serves as a template for future Tauri commands.
@@ -62,12 +40,22 @@ fn create_builder() -> Builder {
     Builder::<tauri::Wry>::new()
         .commands(collect_commands![
             greet,
+            // Project management commands
+            commands::get_projects,
+            commands::add_project,
+            commands::remove_project,
+            commands::get_current_project,
+            commands::set_current_project,
+            commands::has_project_selected,
+            // Task commands
             commands::list_tasks,
             commands::get_task,
             commands::get_task_hierarchy,
+            // Workflow commands
             commands::list_workflows,
             commands::get_workflow,
             commands::get_workflow_with_tasks,
+            // Execution commands
             commands::get_task_executions,
         ])
         .events(collect_events![TaskChangedEvent, WorkflowChangedEvent])
@@ -78,24 +66,46 @@ pub fn run() {
     let builder = create_builder();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             builder.mount_events(app);
 
-            // Initialize database connection using Tauri's async runtime
-            let db_path = resolve_db_path();
-            log::info!("Connecting to database at: {:?}", db_path);
+            // Initialize project configuration
+            let project_config = ProjectConfig::new().expect("Failed to initialize project config");
 
-            let db = tauri::async_runtime::block_on(async {
-                let db = Database::connect(&db_path)
-                    .await
-                    .expect("Failed to connect to database");
-                db.init().await.expect("Failed to initialize database");
-                db
+            // Check if there's a current project set
+            let current_project = project_config.get_current_project();
+            let db = if let Some(ref project_path) = current_project {
+                let db_path = PathBuf::from(project_path).join(".vtb/data");
+                log::info!("Connecting to database at: {:?}", db_path);
+
+                tauri::async_runtime::block_on(async {
+                    match Database::connect(&db_path).await {
+                        Ok(db) => {
+                            if let Err(e) = db.init().await {
+                                log::error!("Failed to initialize database: {}", e);
+                                None
+                            } else {
+                                Some(db)
+                            }
+                        }
+                        Err(e) => {
+                            log::error!("Failed to connect to database: {}", e);
+                            None
+                        }
+                    }
+                })
+            } else {
+                log::info!("No project selected, starting without database connection");
+                None
+            };
+
+            // Manage application state with optional database
+            app.manage(AppState {
+                db: RwLock::new(db),
+                project_config,
             });
-
-            // Manage application state with database
-            app.manage(AppState { db });
 
             if cfg!(debug_assertions) {
                 app.handle().plugin(

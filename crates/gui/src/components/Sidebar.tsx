@@ -1,5 +1,6 @@
-import { useCallback } from 'react';
-import { NavLink } from 'react-router-dom';
+import { useCallback, useState, useEffect } from 'react';
+import { NavLink, useNavigate } from 'react-router-dom';
+import { commands } from '../bindings';
 
 interface SidebarProps {
   isCollapsed: boolean;
@@ -45,6 +46,86 @@ function NavItem({ to, icon, label, isCollapsed }: NavItemProps) {
         )}
       </NavLink>
     </li>
+  );
+}
+
+/**
+ * Project switcher component that shows current project and allows switching
+ */
+function ProjectSwitcher({ isCollapsed }: { isCollapsed: boolean }) {
+  const navigate = useNavigate();
+  const [projectName, setProjectName] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function loadCurrentProject() {
+      try {
+        const result = await commands.getCurrentProject();
+        if (result.status === 'ok' && result.data) {
+          // Extract project name from path
+          const parts = result.data.split('/');
+          setProjectName(parts[parts.length - 1] || 'Unknown');
+        }
+      } catch {
+        // Ignore errors
+      }
+    }
+    loadCurrentProject();
+  }, []);
+
+  const handleClick = () => {
+    navigate('/setup');
+  };
+
+  if (!projectName) return null;
+
+  return (
+    <button
+      onClick={handleClick}
+      className="flex w-full items-center gap-3 border-b border-border px-4 py-3 text-left transition-colors hover:bg-bg-hover"
+      title="Switch project"
+    >
+      {/* Folder icon */}
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+        <svg
+          className="h-4 w-4 text-primary"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={1.5}
+            d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+          />
+        </svg>
+      </div>
+      {!isCollapsed && (
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-medium text-text-primary">
+            {projectName}
+          </div>
+          <div className="text-xs text-text-muted">Click to switch</div>
+        </div>
+      )}
+      {!isCollapsed && (
+        <svg
+          className="h-4 w-4 shrink-0 text-text-muted"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={1.5}
+            d="M8 9l4-4 4 4m0 6l-4 4-4-4"
+          />
+        </svg>
+      )}
+    </button>
   );
 }
 
@@ -114,6 +195,9 @@ export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
           )}
         </div>
       </div>
+
+      {/* Project Switcher */}
+      <ProjectSwitcher isCollapsed={isCollapsed} />
 
       {/* Navigation */}
       <nav className="relative flex-1 overflow-y-auto p-3" aria-label="Main navigation">
