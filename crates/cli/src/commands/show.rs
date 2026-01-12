@@ -6,6 +6,7 @@
 use crate::commands::list::TaskSummary;
 use clap::Args;
 use serde::Deserialize;
+use vertebrae_core::TaskService;
 use vertebrae_db::{CodeRef, Database, DbError, Section, SectionType};
 
 /// Show full details of a task
@@ -170,16 +171,17 @@ impl ShowCommand {
     ///
     /// # Arguments
     ///
-    /// * `db` - Reference to the database connection
+    /// * `service` - Reference to the task service
     ///
     /// # Errors
     ///
     /// Returns `DbError` if:
     /// - The task with the given ID does not exist
     /// - Database operations fail
-    pub async fn execute(&self, db: &Database) -> Result<TaskDetail, DbError> {
+    pub async fn execute(&self, service: &dyn TaskService) -> Result<TaskDetail, DbError> {
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
+        let db = service.database();
 
         // Fetch the main task
         let task = self.fetch_task(db, &id).await?;
@@ -283,53 +285,117 @@ impl ShowCommand {
         })
     }
 
-    /// Fetch the main task by ID.
+    /// Fetch the main task by ID using the repository layer.
     async fn fetch_task(&self, db: &Database, id: &str) -> Result<TaskRow, DbError> {
-        // Use raw query instead of .select() to handle both numeric and string IDs.
-        // .select(("task", id)) creates a string ID, but tasks created with
-        // CREATE task:123 have numeric IDs, causing a mismatch.
-        let query = format!("SELECT * FROM task:{}", id);
-        let mut result = db
-            .client()
-            .query(&query)
-            .await
-            .map_err(|e| DbError::Query(Box::new(e)))?;
+        // Use repository method instead of raw query to ensure consistency
+        let task = db
+            .tasks()
+            .get(id)
+            .await?
+            .ok_or_else(|| DbError::TaskNotFound {
+                task_id: self.id.clone(),
+            })?;
 
-        let task: Option<TaskRow> = result.take(0).map_err(|e| DbError::Query(Box::new(e)))?;
-
-        task.ok_or_else(|| DbError::TaskNotFound {
-            task_id: self.id.clone(),
+        // Convert Task to TaskRow for display
+        Ok(TaskRow {
+            id: task.id.ok_or_else(|| DbError::TaskNotFound {
+                task_id: self.id.clone(),
+            })?,
+            title: task.title,
+            description: task.description,
+            level: task.level.as_str().to_string(),
+            status: task.status.as_str().to_string(),
+            priority: task.priority.map(|p| p.as_str().to_string()),
+            tags: task.tags,
+            created_at: task.created_at.map(surrealdb::sql::Datetime::from),
+            updated_at: task.updated_at.map(surrealdb::sql::Datetime::from),
+            completed_at: task.completed_at.map(surrealdb::sql::Datetime::from),
+            needs_human_review: task.needs_human_review,
+            workflow_id: task.workflow_id,
+            current_step: task.current_step,
+            sections: task
+                .sections
+                .into_iter()
+                .map(|s| SectionRow {
+                    section_type: Some(s.section_type.as_str().to_string()),
+                    content: Some(s.content),
+                    order: s.order,
+                    refs: s
+                        .refs
+                        .into_iter()
+                        .map(|r| CodeRefRow {
+                            path: Some(r.path),
+                            line_start: r.line_start,
+                            line_end: r.line_end,
+                            name: r.name,
+                            description: r.description,
+                        })
+                        .collect(),
+                })
+                .collect(),
+            code_refs: task
+                .code_refs
+                .into_iter()
+                .map(|r| CodeRefRow {
+                    path: Some(r.path),
+                    line_start: r.line_start,
+                    line_end: r.line_end,
+                    name: r.name,
+                    description: r.description,
+                })
+                .collect(),
         })
     }
 
-    /// Fetch the parent task (if any) using graph traversal.
+    /// Fetch the parent task (if any) using the repository layer.
     async fn fetch_parent(&self, db: &Database, id: &str) -> Result<Option<TaskSummary>, DbError> {
-        // SELECT ->child_of->task.* FROM task:<id> gets the parent
-        let query = format!(
-            "SELECT id, title, level, status, priority, tags, needs_human_review \
-             FROM task WHERE <-child_of<-task CONTAINS task:{}",
-            id
-        );
+        // Use repository method to get parent ID
+        let parent_id = db.relationships().get_parent(id).await?;
 
-        let mut result = db.client().query(&query).await?;
-        let parents: Vec<RelatedTaskRow> = result.take(0)?;
+        if let Some(parent_id) = parent_id {
+            let task = db
+                .tasks()
+                .get(&parent_id)
+                .await?
+                .ok_or_else(|| DbError::TaskNotFound {
+                    task_id: parent_id.clone(),
+                })?;
 
-        Ok(parents.into_iter().next().map(TaskSummary::from))
+            Ok(Some(TaskSummary {
+                id: parent_id,
+                title: task.title,
+                level: task.level.as_str().to_string(),
+                status: task.status.as_str().to_string(),
+                priority: task.priority.map(|p| p.as_str().to_string()),
+                tags: task.tags,
+                needs_human_review: task.needs_human_review,
+            }))
+        } else {
+            Ok(None)
+        }
     }
 
-    /// Fetch children tasks using graph traversal.
+    /// Fetch children tasks using the repository layer.
     async fn fetch_children(&self, db: &Database, id: &str) -> Result<Vec<TaskSummary>, DbError> {
-        // SELECT <-child_of<-task.* FROM task:<id> gets children
-        let query = format!(
-            "SELECT id, title, level, status, priority, tags, needs_human_review \
-             FROM task WHERE ->child_of->task CONTAINS task:{}",
-            id
-        );
+        // Use repository method to get child IDs
+        let child_ids = db.relationships().get_children(id).await?;
 
-        let mut result = db.client().query(&query).await?;
-        let children: Vec<RelatedTaskRow> = result.take(0)?;
+        let mut children = Vec::new();
+        for child_id in child_ids {
+            if let Some(task) = db.tasks().get(&child_id).await? {
+                children.push(TaskSummary {
+                    id: child_id,
+                    title: task.title,
+                    level: task.level.as_str().to_string(),
+                    status: task.status.as_str().to_string(),
+                    priority: task.priority.map(|p| p.as_str().to_string()),
+                    tags: task.tags,
+                    needs_human_review: task.needs_human_review,
+                });
+            }
+        }
 
-        Ok(children.into_iter().map(TaskSummary::from).collect())
+        Ok(children)
     }
 
     /// Fetch tasks that this task depends on (blocked by).
@@ -343,17 +409,25 @@ impl ShowCommand {
 
     /// Fetch tasks that are blocked by this task.
     async fn fetch_blocks(&self, db: &Database, id: &str) -> Result<Vec<TaskSummary>, DbError> {
-        // SELECT <-depends_on<-task.* FROM task:<id> gets tasks that depend on this
-        let query = format!(
-            "SELECT id, title, level, status, priority, tags, needs_human_review \
-             FROM task WHERE ->depends_on->task CONTAINS task:{}",
-            id
-        );
+        // Use repository method to get dependent task IDs (tasks blocked by this one)
+        let dependent_ids = db.relationships().get_dependents(id).await?;
 
-        let mut result = db.client().query(&query).await?;
-        let blocking: Vec<RelatedTaskRow> = result.take(0)?;
+        let mut blocks = Vec::new();
+        for dependent_id in dependent_ids {
+            if let Some(task) = db.tasks().get(&dependent_id).await? {
+                blocks.push(TaskSummary {
+                    id: dependent_id,
+                    title: task.title,
+                    level: task.level.as_str().to_string(),
+                    status: task.status.as_str().to_string(),
+                    priority: task.priority.map(|p| p.as_str().to_string()),
+                    tags: task.tags,
+                    needs_human_review: task.needs_human_review,
+                });
+            }
+        }
 
-        Ok(blocking.into_iter().map(TaskSummary::from).collect())
+        Ok(blocks)
     }
 
     /// Fetch workflow information for a task assigned to a workflow.
@@ -703,17 +777,19 @@ fn format_code_ref_location(code_ref: &CodeRef) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vertebrae_core::DefaultTaskService;
+    use vertebrae_db::{Level, Priority, Status, Task};
 
-    /// Helper to create an in-memory test database
-    async fn setup_test_db() -> Database {
+    /// Helper to create an in-memory test service
+    async fn setup_test_service() -> DefaultTaskService {
         let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-        db
+        DefaultTaskService::new(db)
     }
 
-    /// Helper to create a task in the database
+    /// Helper to create a task using the service
     async fn create_task(
-        db: &Database,
+        service: &DefaultTaskService,
         id: &str,
         title: &str,
         level: &str,
@@ -721,54 +797,62 @@ mod tests {
         priority: Option<&str>,
         tags: &[&str],
     ) {
-        let priority_str = match priority {
-            Some(p) => format!("\"{}\"", p),
-            None => "NONE".to_string(),
+        let db = service.database();
+        let level_enum = match level {
+            "epic" => Level::Epic,
+            "ticket" => Level::Ticket,
+            _ => Level::Task,
         };
 
-        let tags_str = if tags.is_empty() {
-            "[]".to_string()
-        } else {
-            format!(
-                "[{}]",
-                tags.iter()
-                    .map(|t| format!("\"{}\"", t))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
+        let status_enum = match status {
+            "backlog" => Status::Backlog,
+            "in_progress" => Status::InProgress,
+            "pending_review" => Status::PendingReview,
+            "done" => Status::Done,
+            "rejected" => Status::Rejected,
+            _ => Status::Todo,
         };
 
-        let query = format!(
-            r#"CREATE task:{} SET
-                title = "{}",
-                level = "{}",
-                status = "{}",
-                priority = {},
-                tags = {}"#,
-            id, title, level, status, priority_str, tags_str
-        );
+        let priority_enum = priority.and_then(|p| match p {
+            "critical" => Some(Priority::Critical),
+            "high" => Some(Priority::High),
+            "medium" => Some(Priority::Medium),
+            "low" => Some(Priority::Low),
+            _ => None,
+        });
 
-        db.client().query(&query).await.unwrap();
+        let mut task = Task::new(title, level_enum);
+        task.status = status_enum;
+        task.priority = priority_enum;
+        task.tags = tags.iter().map(|s| s.to_string()).collect();
+
+        db.tasks().create(id, &task).await.unwrap();
     }
 
-    /// Helper to create a child_of relationship
-    async fn create_child_of(db: &Database, child_id: &str, parent_id: &str) {
-        let query = format!("RELATE task:{} -> child_of -> task:{}", child_id, parent_id);
-        db.client().query(&query).await.unwrap();
+    /// Helper to create a child_of relationship using the service
+    async fn create_child_of(service: &DefaultTaskService, child_id: &str, parent_id: &str) {
+        let db = service.database();
+        db.relationships()
+            .create_child_of(child_id, parent_id)
+            .await
+            .unwrap();
     }
 
-    /// Helper to create a depends_on relationship
-    async fn create_depends_on(db: &Database, task_id: &str, dep_id: &str) {
-        let query = format!("RELATE task:{} -> depends_on -> task:{}", task_id, dep_id);
-        db.client().query(&query).await.unwrap();
+    /// Helper to create a depends_on relationship using the service
+    async fn create_depends_on(service: &DefaultTaskService, task_id: &str, dep_id: &str) {
+        let db = service.database();
+        db.relationships()
+            .create_depends_on(task_id, dep_id)
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
     async fn test_show_simple_task() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
         create_task(
-            &db,
+            &service,
             "abc123",
             "Test Task",
             "task",
@@ -782,7 +866,7 @@ mod tests {
             id: "abc123".to_string(),
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok(), "Show failed: {:?}", result.err());
 
         let detail = result.unwrap();
@@ -805,13 +889,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_show_nonexistent_task() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
         let cmd = ShowCommand {
             id: "nonexistent".to_string(),
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         match result {
             Err(DbError::TaskNotFound { task_id }) => {
                 assert_eq!(
@@ -827,24 +911,24 @@ mod tests {
 
     #[tokio::test]
     async fn test_show_case_insensitive() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "abc123", "Test Task", "task", "todo", None, &[]).await;
+        create_task(&service, "abc123", "Test Task", "task", "todo", None, &[]).await;
 
         let cmd = ShowCommand {
             id: "ABC123".to_string(),
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok(), "Case-insensitive lookup failed");
     }
 
     #[tokio::test]
     async fn test_show_with_parent() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
         create_task(
-            &db,
+            &service,
             "parent1",
             "Parent Epic",
             "epic",
@@ -853,14 +937,14 @@ mod tests {
             &["backend", "core"],
         )
         .await;
-        create_task(&db, "child1", "Child Task", "task", "todo", None, &[]).await;
-        create_child_of(&db, "child1", "parent1").await;
+        create_task(&service, "child1", "Child Task", "task", "todo", None, &[]).await;
+        create_child_of(&service, "child1", "parent1").await;
 
         let cmd = ShowCommand {
             id: "child1".to_string(),
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         let detail = result.unwrap();
@@ -876,11 +960,20 @@ mod tests {
 
     #[tokio::test]
     async fn test_show_with_children() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "parent1", "Parent Epic", "epic", "todo", None, &[]).await;
         create_task(
-            &db,
+            &service,
+            "parent1",
+            "Parent Epic",
+            "epic",
+            "todo",
+            None,
+            &[],
+        )
+        .await;
+        create_task(
+            &service,
             "child1",
             "Child 1",
             "ticket",
@@ -890,7 +983,7 @@ mod tests {
         )
         .await;
         create_task(
-            &db,
+            &service,
             "child2",
             "Child 2",
             "ticket",
@@ -899,14 +992,14 @@ mod tests {
             &["backend"],
         )
         .await;
-        create_child_of(&db, "child1", "parent1").await;
-        create_child_of(&db, "child2", "parent1").await;
+        create_child_of(&service, "child1", "parent1").await;
+        create_child_of(&service, "child2", "parent1").await;
 
         let cmd = ShowCommand {
             id: "parent1".to_string(),
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         let detail = result.unwrap();
@@ -930,11 +1023,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_show_with_dependencies() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
         // Use in_progress status - completed blockers are filtered out
         create_task(
-            &db,
+            &service,
             "dep1",
             "Dependency Task",
             "task",
@@ -943,14 +1036,14 @@ mod tests {
             &["blocker", "core"],
         )
         .await;
-        create_task(&db, "task1", "Main Task", "task", "backlog", None, &[]).await;
-        create_depends_on(&db, "task1", "dep1").await;
+        create_task(&service, "task1", "Main Task", "task", "backlog", None, &[]).await;
+        create_depends_on(&service, "task1", "dep1").await;
 
         let cmd = ShowCommand {
             id: "task1".to_string(),
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         let detail = result.unwrap();
@@ -967,11 +1060,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_show_filters_completed_blockers() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
         // Completed blocker should not appear in blocked_by
         create_task(
-            &db,
+            &service,
             "done_dep",
             "Done Dependency",
             "task",
@@ -980,14 +1073,14 @@ mod tests {
             &[],
         )
         .await;
-        create_task(&db, "task1", "Main Task", "task", "backlog", None, &[]).await;
-        create_depends_on(&db, "task1", "done_dep").await;
+        create_task(&service, "task1", "Main Task", "task", "backlog", None, &[]).await;
+        create_depends_on(&service, "task1", "done_dep").await;
 
         let cmd = ShowCommand {
             id: "task1".to_string(),
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         let detail = result.unwrap();
@@ -1000,11 +1093,20 @@ mod tests {
 
     #[tokio::test]
     async fn test_show_with_blocks() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "blocker", "Blocker Task", "task", "todo", None, &[]).await;
         create_task(
-            &db,
+            &service,
+            "blocker",
+            "Blocker Task",
+            "task",
+            "todo",
+            None,
+            &[],
+        )
+        .await;
+        create_task(
+            &service,
             "dependent",
             "Dependent Task",
             "task",
@@ -1013,13 +1115,13 @@ mod tests {
             &[],
         )
         .await;
-        create_depends_on(&db, "dependent", "blocker").await;
+        create_depends_on(&service, "dependent", "blocker").await;
 
         let cmd = ShowCommand {
             id: "blocker".to_string(),
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         let detail = result.unwrap();
@@ -1032,22 +1134,25 @@ mod tests {
         // Note: Due to SurrealDB SCHEMAFULL behavior with array<object>,
         // nested object fields are not preserved unless explicitly defined.
         // This test verifies that the show command handles empty sections/refs gracefully.
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        // Create a task with sections array (even though fields won't be preserved)
-        let query = r#"CREATE task:withdata SET
-            title = "Task with Data",
-            level = "ticket",
-            status = "todo",
-            sections = [],
-            refs = []"#;
-        db.client().query(query).await.unwrap();
+        // Create a task using the service
+        create_task(
+            &service,
+            "withdata",
+            "Task with Data",
+            "ticket",
+            "todo",
+            None,
+            &[],
+        )
+        .await;
 
         let cmd = ShowCommand {
             id: "withdata".to_string(),
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(
             result.is_ok(),
             "Show with empty sections/refs failed: {:?}",
@@ -1161,10 +1266,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_show_with_tags() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
         create_task(
-            &db,
+            &service,
             "tagged",
             "Tagged Task",
             "task",
@@ -1178,7 +1283,7 @@ mod tests {
             id: "tagged".to_string(),
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         let detail = result.unwrap();

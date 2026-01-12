@@ -269,7 +269,8 @@ impl Command {
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Show(cmd) => {
-                let detail = cmd.execute(db).await?;
+                // Service handles notification via callback if needed
+                let detail = cmd.execute(service).await?;
                 Ok(CommandResult::Message(format!("{}", detail)))
             }
             Command::Start(cmd) => {
