@@ -4,10 +4,11 @@
 //! Shows highest-level unblocked items prioritized by hierarchy (epic > ticket > task).
 
 use clap::Args;
-use vertebrae_db::{Database, DbError, Status, TaskSummary};
+use vertebrae_core::TaskService;
+use vertebrae_db::{DbError, Status, TaskSummary};
 
 #[cfg(test)]
-use vertebrae_db::Level;
+use {vertebrae_core::DefaultTaskService, vertebrae_db::Level};
 
 /// Show highest-level actionable items
 #[derive(Debug, Args)]
@@ -65,12 +66,14 @@ impl ReadyCommand {
     ///
     /// # Arguments
     ///
-    /// * `db` - Reference to the database connection
+    /// * `service` - Reference to the task service
     ///
     /// # Errors
     ///
     /// Returns `DbError` if database operations fail.
-    pub async fn execute(&self, db: &Database) -> Result<ReadyResult, DbError> {
+    pub async fn execute(&self, service: &dyn TaskService) -> Result<ReadyResult, DbError> {
+        let db = service.database();
+
         // Get ready items for todo status
         let todo_ready = db.list_ready_items(Status::Todo).await?;
 
@@ -87,42 +90,82 @@ impl ReadyCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    /// Helper to create an in-memory test database
-    async fn setup_test_db() -> Database {
+    use vertebrae_db::{Database, Task};
+
+    /// Helper to create an in-memory test service
+    async fn setup_test_service() -> DefaultTaskService {
         let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-        db
+        DefaultTaskService::new(db)
     }
 
     /// Helper to create a task in the database
-    async fn create_task(db: &Database, id: &str, title: &str, level: &str, status: &str) {
-        let query = format!(
-            r#"CREATE task:{} SET
-                title = "{}",
-                level = "{}",
-                status = "{}",
-                tags = [],
-                sections = [],
-                refs = []"#,
-            id, title, level, status
-        );
+    async fn create_task(
+        service: &DefaultTaskService,
+        id: &str,
+        title: &str,
+        level: &str,
+        status: &str,
+    ) {
+        let db = service.database();
+        let level = match level {
+            "epic" => Level::Epic,
+            "ticket" => Level::Ticket,
+            "task" => Level::Task,
+            _ => Level::Task,
+        };
+        let status = match status {
+            "todo" => Status::Todo,
+            "in_progress" => Status::InProgress,
+            "pending_review" => Status::PendingReview,
+            "done" => Status::Done,
+            "backlog" => Status::Backlog,
+            "rejected" => Status::Rejected,
+            _ => Status::Backlog,
+        };
 
-        db.client().query(&query).await.unwrap();
+        let task = Task {
+            id: None,
+            title: title.to_string(),
+            description: None,
+            level,
+            status,
+            priority: None,
+            tags: vec![],
+            sections: vec![],
+            code_refs: vec![],
+            created_at: None,
+            updated_at: None,
+            started_at: None,
+            completed_at: None,
+            needs_human_review: None,
+            workflow_id: None,
+            current_step: None,
+        };
+
+        db.tasks().create(id, &task).await.unwrap();
     }
 
     /// Helper to create a child_of relationship (child -> parent)
-    async fn create_child_of(db: &Database, child_id: &str, parent_id: &str) {
-        let query = format!("RELATE task:{} -> child_of -> task:{}", child_id, parent_id);
-        db.client().query(&query).await.unwrap();
+    async fn create_child_of(service: &DefaultTaskService, child_id: &str, parent_id: &str) {
+        let db = service.database();
+        db.relationships()
+            .create_child_of(child_id, parent_id)
+            .await
+            .unwrap();
     }
 
     /// Helper to create a depends_on relationship (dependent -> dependency)
-    async fn create_depends_on(db: &Database, dependent_id: &str, dependency_id: &str) {
-        let query = format!(
-            "RELATE task:{} -> depends_on -> task:{}",
-            dependent_id, dependency_id
-        );
-        db.client().query(&query).await.unwrap();
+    async fn create_depends_on(
+        service: &DefaultTaskService,
+        dependent_id: &str,
+        dependency_id: &str,
+    ) {
+        let db = service.database();
+        db.relationships()
+            .create_depends_on(dependent_id, dependency_id)
+            .await
+            .unwrap();
     }
 
     #[test]
@@ -217,10 +260,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_ready_empty_database() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
         let cmd = ReadyCommand {};
-        let result = cmd.execute(&db).await.unwrap();
+        let result = cmd.execute(&service).await.unwrap();
 
         assert!(result.todo_ready.is_empty());
         assert!(result.backlog_ready.is_empty());
@@ -228,12 +271,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_ready_single_todo_task() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "task1", "Ready Task", "task", "todo").await;
+        create_task(&service, "task1", "Ready Task", "task", "todo").await;
 
         let cmd = ReadyCommand {};
-        let result = cmd.execute(&db).await.unwrap();
+        let result = cmd.execute(&service).await.unwrap();
 
         assert_eq!(result.todo_ready.len(), 1);
         assert_eq!(result.todo_ready[0].id, "task1");
@@ -242,12 +285,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_ready_single_backlog_task() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "task1", "Backlog Task", "task", "backlog").await;
+        create_task(&service, "task1", "Backlog Task", "task", "backlog").await;
 
         let cmd = ReadyCommand {};
-        let result = cmd.execute(&db).await.unwrap();
+        let result = cmd.execute(&service).await.unwrap();
 
         assert!(result.todo_ready.is_empty());
         assert_eq!(result.backlog_ready.len(), 1);
@@ -256,12 +299,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_ready_excludes_in_progress() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "task1", "In Progress Task", "task", "in_progress").await;
+        create_task(&service, "task1", "In Progress Task", "task", "in_progress").await;
 
         let cmd = ReadyCommand {};
-        let result = cmd.execute(&db).await.unwrap();
+        let result = cmd.execute(&service).await.unwrap();
 
         assert!(result.todo_ready.is_empty());
         assert!(result.backlog_ready.is_empty());
@@ -269,12 +312,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_ready_excludes_done() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "task1", "Done Task", "task", "done").await;
+        create_task(&service, "task1", "Done Task", "task", "done").await;
 
         let cmd = ReadyCommand {};
-        let result = cmd.execute(&db).await.unwrap();
+        let result = cmd.execute(&service).await.unwrap();
 
         assert!(result.todo_ready.is_empty());
         assert!(result.backlog_ready.is_empty());
@@ -282,15 +325,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_ready_shows_parent_not_child_when_no_work_started() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
         // Create epic with todo child - should show epic only
-        create_task(&db, "epic1", "Epic", "epic", "todo").await;
-        create_task(&db, "ticket1", "Ticket", "ticket", "todo").await;
-        create_child_of(&db, "ticket1", "epic1").await;
+        create_task(&service, "epic1", "Epic", "epic", "todo").await;
+        create_task(&service, "ticket1", "Ticket", "ticket", "todo").await;
+        create_child_of(&service, "ticket1", "epic1").await;
 
         let cmd = ReadyCommand {};
-        let result = cmd.execute(&db).await.unwrap();
+        let result = cmd.execute(&service).await.unwrap();
 
         // Should show only epic1, not ticket1
         assert_eq!(result.todo_ready.len(), 1);
@@ -299,15 +342,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_ready_excludes_parent_when_child_work_started() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
         // Create epic with in_progress child - epic should not show
-        create_task(&db, "epic1", "Epic", "epic", "todo").await;
-        create_task(&db, "ticket1", "Ticket", "ticket", "in_progress").await;
-        create_child_of(&db, "ticket1", "epic1").await;
+        create_task(&service, "epic1", "Epic", "epic", "todo").await;
+        create_task(&service, "ticket1", "Ticket", "ticket", "in_progress").await;
+        create_child_of(&service, "ticket1", "epic1").await;
 
         let cmd = ReadyCommand {};
-        let result = cmd.execute(&db).await.unwrap();
+        let result = cmd.execute(&service).await.unwrap();
 
         // Epic should be excluded because work has started on a child
         assert!(result.todo_ready.is_empty());
@@ -315,15 +358,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_ready_excludes_blocked_tasks() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
         // Create blocker and blocked task
-        create_task(&db, "blocker", "Blocker", "task", "todo").await;
-        create_task(&db, "blocked", "Blocked", "task", "todo").await;
-        create_depends_on(&db, "blocked", "blocker").await;
+        create_task(&service, "blocker", "Blocker", "task", "todo").await;
+        create_task(&service, "blocked", "Blocked", "task", "todo").await;
+        create_depends_on(&service, "blocked", "blocker").await;
 
         let cmd = ReadyCommand {};
-        let result = cmd.execute(&db).await.unwrap();
+        let result = cmd.execute(&service).await.unwrap();
 
         // Should show only blocker (blocked is blocked by an incomplete task)
         assert_eq!(result.todo_ready.len(), 1);
@@ -332,15 +375,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_ready_includes_unblocked_tasks() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
         // Create blocker (done) and blocked task
-        create_task(&db, "blocker", "Blocker", "task", "done").await;
-        create_task(&db, "blocked", "Blocked", "task", "todo").await;
-        create_depends_on(&db, "blocked", "blocker").await;
+        create_task(&service, "blocker", "Blocker", "task", "done").await;
+        create_task(&service, "blocked", "Blocked", "task", "todo").await;
+        create_depends_on(&service, "blocked", "blocker").await;
 
         let cmd = ReadyCommand {};
-        let result = cmd.execute(&db).await.unwrap();
+        let result = cmd.execute(&service).await.unwrap();
 
         // Should show blocked task (blocker is done)
         assert_eq!(result.todo_ready.len(), 1);
@@ -349,15 +392,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_ready_prioritizes_epic_over_ticket_over_task() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
         // Create independent tasks at all levels
-        create_task(&db, "task1", "Task", "task", "todo").await;
-        create_task(&db, "ticket1", "Ticket", "ticket", "todo").await;
-        create_task(&db, "epic1", "Epic", "epic", "todo").await;
+        create_task(&service, "task1", "Task", "task", "todo").await;
+        create_task(&service, "ticket1", "Ticket", "ticket", "todo").await;
+        create_task(&service, "epic1", "Epic", "epic", "todo").await;
 
         let cmd = ReadyCommand {};
-        let result = cmd.execute(&db).await.unwrap();
+        let result = cmd.execute(&service).await.unwrap();
 
         // Should show all three since they're independent
         assert_eq!(result.todo_ready.len(), 3);
@@ -371,17 +414,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_ready_deep_hierarchy() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
         // Create epic -> ticket -> task hierarchy, all todo
-        create_task(&db, "epic1", "Epic", "epic", "todo").await;
-        create_task(&db, "ticket1", "Ticket", "ticket", "todo").await;
-        create_task(&db, "task1", "Task", "task", "todo").await;
-        create_child_of(&db, "ticket1", "epic1").await;
-        create_child_of(&db, "task1", "ticket1").await;
+        create_task(&service, "epic1", "Epic", "epic", "todo").await;
+        create_task(&service, "ticket1", "Ticket", "ticket", "todo").await;
+        create_task(&service, "task1", "Task", "task", "todo").await;
+        create_child_of(&service, "ticket1", "epic1").await;
+        create_child_of(&service, "task1", "ticket1").await;
 
         let cmd = ReadyCommand {};
-        let result = cmd.execute(&db).await.unwrap();
+        let result = cmd.execute(&service).await.unwrap();
 
         // Should show only epic1 (highest level entry point)
         assert_eq!(result.todo_ready.len(), 1);
@@ -390,18 +433,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_ready_work_started_deep_in_hierarchy() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
         // Create epic -> ticket -> task hierarchy
         // task is in_progress, so epic should be excluded
-        create_task(&db, "epic1", "Epic", "epic", "todo").await;
-        create_task(&db, "ticket1", "Ticket", "ticket", "todo").await;
-        create_task(&db, "task1", "Task", "task", "in_progress").await;
-        create_child_of(&db, "ticket1", "epic1").await;
-        create_child_of(&db, "task1", "ticket1").await;
+        create_task(&service, "epic1", "Epic", "epic", "todo").await;
+        create_task(&service, "ticket1", "Ticket", "ticket", "todo").await;
+        create_task(&service, "task1", "Task", "task", "in_progress").await;
+        create_child_of(&service, "ticket1", "epic1").await;
+        create_child_of(&service, "task1", "ticket1").await;
 
         let cmd = ReadyCommand {};
-        let result = cmd.execute(&db).await.unwrap();
+        let result = cmd.execute(&service).await.unwrap();
 
         // Should show nothing (work started deep in hierarchy)
         assert!(result.todo_ready.is_empty());
@@ -409,20 +452,20 @@ mod tests {
 
     #[tokio::test]
     async fn test_ready_child_shows_when_parent_has_work_elsewhere() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
         // Create epic with two tickets:
         // - ticket1: in_progress
         // - ticket2: todo
         // ticket2 should show (it's an entry point, not under the in_progress one)
-        create_task(&db, "epic1", "Epic", "epic", "todo").await;
-        create_task(&db, "ticket1", "Ticket 1", "ticket", "in_progress").await;
-        create_task(&db, "ticket2", "Ticket 2", "ticket", "todo").await;
-        create_child_of(&db, "ticket1", "epic1").await;
-        create_child_of(&db, "ticket2", "epic1").await;
+        create_task(&service, "epic1", "Epic", "epic", "todo").await;
+        create_task(&service, "ticket1", "Ticket 1", "ticket", "in_progress").await;
+        create_task(&service, "ticket2", "Ticket 2", "ticket", "todo").await;
+        create_child_of(&service, "ticket1", "epic1").await;
+        create_child_of(&service, "ticket2", "epic1").await;
 
         let cmd = ReadyCommand {};
-        let result = cmd.execute(&db).await.unwrap();
+        let result = cmd.execute(&service).await.unwrap();
 
         // Epic has work started (ticket1 is in_progress), so it shouldn't show
         // But ticket2 should show (it's the entry point for its subtree)
