@@ -44,8 +44,8 @@ vtb add "Add token validation" --parent <ticket-id>
 vtb depend <validation-task> --on <signing-task>
 
 # Work on tasks
-vtb start <task-id>    # Mark as in_progress
-vtb done <task-id>     # Mark as done (shows unblocked tasks)
+vtb transition-to <task-id> in_progress   # Start working
+vtb transition-to <task-id> done          # Complete (shows unblocked tasks)
 
 # View tasks
 vtb list                        # All active tasks
@@ -64,9 +64,7 @@ vtb blockers <task-id>          # Show dependency tree
 | `show` | Show full task details |
 | `update` | Update task fields |
 | `delete` | Delete a task (with optional cascade) |
-| `start` | Begin working on a task |
-| `done` | Mark task as complete |
-| `block` | Mark task as blocked |
+| `transition-to` | Change task status (backlog, todo, in_progress, pending_review, done) |
 | `depend` | Create dependency between tasks |
 | `undepend` | Remove dependency |
 | `blockers` | Show blocking task tree |

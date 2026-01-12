@@ -78,8 +78,11 @@ See `skills/` for detailed command guides:
 - `/plan` - Create implementation plans
 - `/status` - Check current state
 - `/next` - Complete and continue
+- `/ready` - Show items ready for work or triage
+- `/triage` - Move backlog items to todo
 - `/add`, `/depend`, `/section`, `/ref` - Individual commands
 - `/list`, `/blockers`, `/update`, `/delete` - Management
+- `/step-done`, `/vtb-show` - Task details and progress
 
 ## Build Commands
 
