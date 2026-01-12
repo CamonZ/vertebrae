@@ -228,40 +228,43 @@ mod tests {
         priority: Option<&str>,
         tags: &[&str],
     ) {
-        let priority_str = match priority {
-            Some(p) => format!("\"{}\"", p),
-            None => "NONE".to_string(),
+        use vertebrae_db::{Level, Priority, Status, Task};
+
+        let level_enum = match level {
+            "epic" => Level::Epic,
+            "ticket" => Level::Ticket,
+            "task" => Level::Task,
+            _ => Level::Task,
         };
 
-        let tags_str = if tags.is_empty() {
-            "[]".to_string()
-        } else {
-            format!(
-                "[{}]",
-                tags.iter()
-                    .map(|t| format!("\"{}\"", t))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-        };
+        let status_enum = Status::parse(status).unwrap_or(Status::Todo);
 
-        let query = format!(
-            r#"CREATE task:{} SET
-                title = "{}",
-                level = "{}",
-                status = "{}",
-                priority = {},
-                tags = {}"#,
-            id, title, level, status, priority_str, tags_str
-        );
+        let priority_enum = priority.and_then(|p| match p {
+            "low" => Some(Priority::Low),
+            "medium" => Some(Priority::Medium),
+            "high" => Some(Priority::High),
+            "critical" => Some(Priority::Critical),
+            _ => None,
+        });
 
-        db.client().query(&query).await.unwrap();
+        let tags_vec: Vec<String> = tags.iter().map(|t| t.to_string()).collect();
+
+        let mut task = Task::new(title, level_enum).with_status(status_enum);
+
+        if let Some(p) = priority_enum {
+            task = task.with_priority(p);
+        }
+        task.tags = tags_vec;
+
+        db.tasks().create(id, &task).await.unwrap();
     }
 
     /// Helper to create a child_of relationship
     async fn create_child_of(db: &Database, child_id: &str, parent_id: &str) {
-        let query = format!("RELATE task:{} -> child_of -> task:{}", child_id, parent_id);
-        db.client().query(&query).await.unwrap();
+        db.relationships()
+            .create_child_of(child_id, parent_id)
+            .await
+            .unwrap();
     }
 
     #[test]
@@ -991,17 +994,26 @@ mod tests {
         level: &str,
         status: &str,
     ) {
-        let query = format!(
-            r#"CREATE task:{} SET
-                title = "{}",
-                description = "{}",
-                level = "{}",
-                status = "{}",
-                priority = NONE,
-                tags = []"#,
-            id, title, description, level, status
-        );
-        db.client().query(&query).await.unwrap();
+        use vertebrae_db::{Level, Status, Task, TaskUpdate};
+
+        let level_enum = match level {
+            "epic" => Level::Epic,
+            "ticket" => Level::Ticket,
+            "task" => Level::Task,
+            _ => Level::Task,
+        };
+
+        let status_enum = Status::parse(status).unwrap_or(Status::Todo);
+
+        let task = Task::new(title, level_enum)
+            .with_description(description)
+            .with_status(status_enum);
+
+        db.tasks().create(id, &task).await.unwrap();
+
+        // Update task to persist description (which create() doesn't persist)
+        let update = TaskUpdate::new().with_description(description);
+        db.tasks().update(id, &update).await.unwrap();
     }
 
     #[tokio::test]
