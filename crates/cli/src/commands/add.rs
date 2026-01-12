@@ -158,6 +158,24 @@ impl AddCommand {
         // Store the task in the database
         self.create_task(db, &id, &task).await?;
 
+        // Update task with fields that create() doesn't persist (description, needs_review)
+        let mut needs_update = false;
+        let mut update = vertebrae_db::TaskUpdate::new();
+
+        if self.description.is_some() {
+            update = update.with_description(task.description.clone().unwrap_or_default());
+            needs_update = true;
+        }
+
+        if self.needs_review {
+            update = update.with_needs_human_review(true);
+            needs_update = true;
+        }
+
+        if needs_update {
+            db.tasks().update(&id, &update).await?;
+        }
+
         // Create parent relationship if specified
         if let Some(parent_id) = &self.parent {
             self.create_child_of_edge(db, &id, parent_id).await?;
@@ -177,18 +195,7 @@ impl AddCommand {
 
     /// Check if a task with the given ID exists.
     async fn task_exists(&self, db: &Database, id: &str) -> Result<bool, DbError> {
-        // Use a simple struct to avoid deserializing full Task
-        #[derive(serde::Deserialize)]
-        struct IdOnly {
-            #[allow(dead_code)]
-            id: surrealdb::sql::Thing,
-        }
-
-        let query = format!("SELECT id FROM task:{} LIMIT 1", id);
-        let mut result = db.client().query(&query).await?;
-
-        let tasks: Vec<IdOnly> = result.take(0)?;
-        Ok(!tasks.is_empty())
+        db.tasks().exists(id).await
     }
 
     /// Generate a unique ID that doesn't collide with existing tasks.
@@ -209,60 +216,7 @@ impl AddCommand {
 
     /// Create a task in the database.
     async fn create_task(&self, db: &Database, id: &str, task: &Task) -> Result<(), DbError> {
-        // Build the query with proper escaping
-        let priority_str = match &task.priority {
-            Some(p) => format!("\"{}\"", p.as_str()),
-            None => "NONE".to_string(),
-        };
-
-        let description_str = match &task.description {
-            Some(_) => "$description".to_string(),
-            None => "NONE".to_string(),
-        };
-
-        let tags_str = if task.tags.is_empty() {
-            "[]".to_string()
-        } else {
-            format!(
-                "[{}]",
-                task.tags
-                    .iter()
-                    .map(|t| format!("\"{}\"", t.replace('\"', "\\\"")))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-        };
-
-        // Clone title to avoid lifetime issues with async query
-        let title = task.title.clone();
-
-        let query = format!(
-            r#"CREATE task:{} SET
-                title = $title,
-                description = {},
-                level = "{}",
-                status = "{}",
-                priority = {},
-                tags = {},
-                needs_human_review = {}"#,
-            id,
-            description_str,
-            task.level.as_str(),
-            task.status.as_str(),
-            priority_str,
-            tags_str,
-            task.needs_human_review.unwrap_or(false)
-        );
-
-        let mut query_builder = db.client().query(&query).bind(("title", title));
-
-        if let Some(description) = &task.description {
-            query_builder = query_builder.bind(("description", description.clone()));
-        }
-
-        query_builder.await?;
-
-        Ok(())
+        db.tasks().create(id, task).await
     }
 
     /// Create a child_of edge between tasks.
@@ -272,9 +226,9 @@ impl AddCommand {
         child_id: &str,
         parent_id: &str,
     ) -> Result<(), DbError> {
-        let query = format!("RELATE task:{} -> child_of -> task:{}", child_id, parent_id);
-        db.client().query(&query).await?;
-        Ok(())
+        db.relationships()
+            .create_child_of(child_id, parent_id)
+            .await
     }
 
     /// Create a depends_on edge between tasks.
@@ -284,9 +238,7 @@ impl AddCommand {
         task_id: &str,
         dep_id: &str,
     ) -> Result<(), DbError> {
-        let query = format!("RELATE task:{} -> depends_on -> task:{}", task_id, dep_id);
-        db.client().query(&query).await?;
-        Ok(())
+        db.relationships().create_depends_on(task_id, dep_id).await
     }
 
     /// Check if a workflow with the given ID exists.
@@ -361,12 +313,14 @@ mod tests {
 
     /// Helper to get a task from the database
     async fn get_task(db: &Database, id: &str) -> Option<TaskRow> {
-        let query = format!(
-            "SELECT title, level, status, priority, tags FROM task:{}",
-            id
-        );
-        let mut result = db.client().query(&query).await.ok()?;
-        result.take(0).ok()?
+        let task = db.tasks().get(id).await.ok()??;
+        Some(TaskRow {
+            title: task.title,
+            level: task.level.as_str().to_string(),
+            status: task.status.as_str().to_string(),
+            priority: task.priority.as_ref().map(|p| p.as_str().to_string()),
+            tags: task.tags,
+        })
     }
 
     /// Struct for querying task fields
@@ -382,33 +336,49 @@ mod tests {
 
     /// Helper to check if an edge exists between two tasks
     async fn edge_exists(db: &Database, relation: &str, from_id: &str, to_id: &str) -> bool {
-        #[derive(serde::Deserialize)]
-        struct EdgeRow {
-            #[allow(dead_code)]
-            id: surrealdb::sql::Thing,
+        match relation {
+            "child_of" => {
+                // Check if to_id is the parent of from_id
+                db.relationships()
+                    .get_parent(from_id)
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|p| p == to_id)
+                    .unwrap_or(false)
+            }
+            "depends_on" => db
+                .relationships()
+                .depends_on_exists(from_id, to_id)
+                .await
+                .unwrap_or(false),
+            _ => false,
         }
-
-        let query = format!(
-            "SELECT id FROM {} WHERE in = task:{} AND out = task:{}",
-            relation, from_id, to_id
-        );
-        let mut result = db.client().query(&query).await.unwrap();
-        let edges: Vec<EdgeRow> = result.take(0).unwrap();
-        !edges.is_empty()
     }
 
     /// Helper to count edges from a task for a given relation
     async fn count_edges(db: &Database, relation: &str, from_id: &str) -> usize {
-        #[derive(serde::Deserialize)]
-        struct EdgeRow {
-            #[allow(dead_code)]
-            id: surrealdb::sql::Thing,
+        match relation {
+            "child_of" => {
+                // For child_of, we count if this task has a parent (0 or 1)
+                db.relationships()
+                    .get_parent(from_id)
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|_| 1)
+                    .unwrap_or(0)
+            }
+            "depends_on" => {
+                // Count the number of dependencies
+                db.relationships()
+                    .get_dependencies(from_id)
+                    .await
+                    .unwrap_or_default()
+                    .len()
+            }
+            _ => 0,
         }
-
-        let query = format!("SELECT id FROM {} WHERE in = task:{}", relation, from_id);
-        let mut result = db.client().query(&query).await.unwrap();
-        let edges: Vec<EdgeRow> = result.take(0).unwrap();
-        edges.len()
     }
 
     #[tokio::test]
@@ -973,20 +943,9 @@ mod tests {
 
         let id = cmd.execute(&db).await.unwrap();
 
-        // Query the task to verify level
-        let mut result = db
-            .client()
-            .query(format!("SELECT level FROM task:{}", id))
-            .await
-            .unwrap();
-
-        #[derive(Debug, serde::Deserialize)]
-        struct LevelRow {
-            level: String,
-        }
-
-        let row: Option<LevelRow> = result.take(0).unwrap();
-        assert_eq!(row.unwrap().level, "task");
+        // Verify level is task by default
+        let task = get_task(&db, &id).await.expect("Task should exist");
+        assert_eq!(task.level, "task");
     }
 
     #[tokio::test]
@@ -1007,20 +966,9 @@ mod tests {
 
         let id = cmd.execute(&db).await.unwrap();
 
-        // Query the task to verify status
-        let mut result = db
-            .client()
-            .query(format!("SELECT status FROM task:{}", id))
-            .await
-            .unwrap();
-
-        #[derive(Debug, serde::Deserialize)]
-        struct StatusRow {
-            status: String,
-        }
-
-        let row: Option<StatusRow> = result.take(0).unwrap();
-        assert_eq!(row.unwrap().status, "backlog");
+        // Verify status is backlog by default
+        let task = get_task(&db, &id).await.expect("Task should exist");
+        assert_eq!(task.status, "backlog");
     }
 
     #[tokio::test]
@@ -1066,21 +1014,14 @@ mod tests {
         let id = cmd.execute(&db).await.expect("Add should succeed");
 
         // Verify needs_human_review was persisted correctly
-        #[derive(Debug, serde::Deserialize)]
-        struct ReviewRow {
-            #[serde(default)]
-            needs_human_review: bool,
-        }
-
-        let mut result = db
-            .client()
-            .query(format!("SELECT needs_human_review FROM task:{}", id))
+        let task = db
+            .tasks()
+            .get(&id)
             .await
-            .unwrap();
-
-        let row: Option<ReviewRow> = result.take(0).unwrap();
+            .expect("DB error")
+            .expect("Task should exist");
         assert!(
-            row.unwrap().needs_human_review,
+            task.needs_human_review.unwrap_or(false),
             "needs_human_review should be true"
         );
     }
@@ -1104,21 +1045,14 @@ mod tests {
         let id = cmd.execute(&db).await.expect("Add should succeed");
 
         // Verify needs_human_review defaults to false
-        #[derive(Debug, serde::Deserialize)]
-        struct ReviewRow {
-            #[serde(default)]
-            needs_human_review: bool,
-        }
-
-        let mut result = db
-            .client()
-            .query(format!("SELECT needs_human_review FROM task:{}", id))
+        let task = db
+            .tasks()
+            .get(&id)
             .await
-            .unwrap();
-
-        let row: Option<ReviewRow> = result.take(0).unwrap();
+            .expect("DB error")
+            .expect("Task should exist");
         assert!(
-            !row.unwrap().needs_human_review,
+            !task.needs_human_review.unwrap_or(false),
             "needs_human_review should be false by default"
         );
     }
@@ -1142,33 +1076,24 @@ mod tests {
         let id = cmd.execute(&db).await.expect("Add should succeed");
 
         // Verify task was assigned to default workflow with current_step = 0
-        #[derive(Debug, serde::Deserialize)]
-        struct WorkflowRow {
-            workflow_id: Option<surrealdb::sql::Thing>,
-            current_step: Option<i64>,
-        }
-
-        let mut result = db
-            .client()
-            .query(format!("SELECT workflow_id, current_step FROM task:{}", id))
+        let task = db
+            .tasks()
+            .get(&id)
             .await
-            .unwrap();
-
-        let row: Option<WorkflowRow> = result.take(0).unwrap();
-        let row = row.expect("Task should exist");
-
+            .expect("DB error")
+            .expect("Task should exist");
         assert!(
-            row.workflow_id.is_some(),
+            task.workflow_id.is_some(),
             "Task should have workflow_id assigned"
         );
-        let workflow_id = row.workflow_id.unwrap();
+        let workflow_id = task.workflow_id.unwrap();
         assert_eq!(
             workflow_id.id.to_raw(),
             "default",
             "Task should be assigned to 'default' workflow"
         );
         assert_eq!(
-            row.current_step,
+            task.current_step,
             Some(0),
             "Task should have current_step = 0"
         );
@@ -1211,33 +1136,24 @@ mod tests {
         let id = cmd.execute(&db).await.expect("Add should succeed");
 
         // Verify task was assigned to custom workflow
-        #[derive(Debug, serde::Deserialize)]
-        struct WorkflowRow {
-            workflow_id: Option<surrealdb::sql::Thing>,
-            current_step: Option<i64>,
-        }
-
-        let mut result = db
-            .client()
-            .query(format!("SELECT workflow_id, current_step FROM task:{}", id))
+        let task = db
+            .tasks()
+            .get(&id)
             .await
-            .unwrap();
-
-        let row: Option<WorkflowRow> = result.take(0).unwrap();
-        let row = row.expect("Task should exist");
-
+            .expect("DB error")
+            .expect("Task should exist");
         assert!(
-            row.workflow_id.is_some(),
+            task.workflow_id.is_some(),
             "Task should have workflow_id assigned"
         );
-        let workflow_id = row.workflow_id.unwrap();
+        let workflow_id = task.workflow_id.unwrap();
         assert_eq!(
             workflow_id.id.to_raw(),
             "custom",
             "Task should be assigned to 'custom' workflow"
         );
         assert_eq!(
-            row.current_step,
+            task.current_step,
             Some(0),
             "Task should have current_step = 0"
         );
