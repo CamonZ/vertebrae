@@ -368,25 +368,6 @@ mod lifecycle {
     }
 
     #[tokio::test]
-    async fn test_standalone_submit_works_identically_to_transition_to() {
-        // Test that `vtb submit` produces the same behavior as `vtb transition-to <id> pending_review`
-        let ctx = TestContext::new().await;
-        create_task(ctx.db(), "task1", "Active Task", "task", "in_progress").await;
-
-        // Use the standalone submit command
-        standalone_submit_cmd("task1")
-            .execute(ctx.db())
-            .await
-            .unwrap();
-
-        // Verify same outcome as transition-to
-        assert_eq!(
-            get_task_status(ctx.db(), "task1").await,
-            Some("pending_review".to_string())
-        );
-    }
-
-    #[tokio::test]
     async fn test_standalone_commands_complete_happy_path() {
         // Test complete lifecycle using standalone commands
         let ctx = TestContext::new().await;
@@ -418,11 +399,8 @@ mod lifecycle {
             Some("in_progress".to_string())
         );
 
-        // 4. Submit using standalone command
-        standalone_submit_cmd(&task_id)
-            .execute(ctx.db())
-            .await
-            .unwrap();
+        // 4. Submit using transition-to command
+        submit_cmd(&task_id).execute(ctx.db()).await.unwrap();
         assert_eq!(
             get_task_status(ctx.db(), &task_id).await,
             Some("pending_review".to_string())

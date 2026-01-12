@@ -23,7 +23,6 @@ pub mod sections;
 pub mod show;
 pub mod start;
 pub mod step_done;
-pub mod submit;
 pub mod transition_to;
 pub mod undepend;
 pub mod unref;
@@ -52,7 +51,6 @@ pub use sections::SectionsCommand;
 pub use show::ShowCommand;
 pub use start::StartCommand;
 pub use step_done::StepDoneCommand;
-pub use submit::SubmitCommand;
 pub use transition_to::TransitionToCommand;
 pub use undepend::UndependCommand;
 pub use unref::UnrefCommand;
@@ -120,8 +118,6 @@ pub enum Command {
     /// Mark a step as done within a task
     #[command(name = "step-done")]
     StepDone(StepDoneCommand),
-    /// Submit a task for review (transition from in_progress to pending_review)
-    Submit(SubmitCommand),
     /// Transition a task to a specific status
     #[command(name = "transition-to")]
     TransitionTo(TransitionToCommand),
@@ -293,12 +289,6 @@ impl Command {
             Command::StepDone(cmd) => {
                 let result = cmd.execute(db).await?;
                 notification::notify_task_changed(format!("task:{}", cmd.id), "Updated").await;
-                Ok(CommandResult::Message(format!("{}", result)))
-            }
-            Command::Submit(cmd) => {
-                let result = cmd.execute(db).await?;
-                notification::notify_task_changed(format!("task:{}", cmd.id), "StatusChanged")
-                    .await;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::TransitionTo(cmd) => {
