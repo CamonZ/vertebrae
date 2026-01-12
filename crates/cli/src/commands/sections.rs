@@ -4,8 +4,8 @@
 //! optionally filtered by type and grouped by positive/negative space.
 
 use clap::Args;
-use serde::Deserialize;
-use vertebrae_db::{Database, DbError, Section, SectionType};
+use vertebrae_core::TaskService;
+use vertebrae_db::{DbError, Section, SectionType};
 
 /// List all sections for a task
 #[derive(Debug, Args)]
@@ -206,43 +206,6 @@ fn format_code_ref_location(code_ref: &vertebrae_db::CodeRef) -> String {
     }
 }
 
-/// Result from querying a task's sections
-#[derive(Debug, Deserialize)]
-struct TaskSectionsRow {
-    #[allow(dead_code)]
-    id: surrealdb::sql::Thing,
-    #[serde(default)]
-    sections: Vec<SectionRow>,
-}
-
-/// Section row from database
-#[derive(Debug, Deserialize, Clone)]
-struct SectionRow {
-    #[serde(rename = "type", default)]
-    section_type: Option<String>,
-    #[serde(default)]
-    content: Option<String>,
-    #[serde(default)]
-    order: Option<u32>,
-    #[serde(default)]
-    refs: Vec<CodeRefRow>,
-}
-
-/// Code reference row from database
-#[derive(Debug, Clone, Deserialize)]
-struct CodeRefRow {
-    #[serde(default)]
-    path: Option<String>,
-    #[serde(default)]
-    line_start: Option<u32>,
-    #[serde(default)]
-    line_end: Option<u32>,
-    #[serde(default)]
-    name: Option<String>,
-    #[serde(default)]
-    description: Option<String>,
-}
-
 impl SectionsCommand {
     /// Execute the sections command.
     ///
@@ -251,62 +214,27 @@ impl SectionsCommand {
     ///
     /// # Arguments
     ///
-    /// * `db` - Reference to the database connection
+    /// * `service` - Reference to the task service
     ///
     /// # Errors
     ///
     /// Returns `DbError` if:
     /// - The task with the given ID does not exist
-    /// - Database operations fail
-    pub async fn execute(&self, db: &Database) -> Result<SectionsResult, DbError> {
+    /// - Service operations fail
+    pub async fn execute(&self, service: &dyn TaskService) -> Result<SectionsResult, DbError> {
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
 
-        // Fetch task sections
-        let task = self.fetch_task_sections(db, &id).await?;
+        // Fetch task using service
+        let task = service
+            .get_task(&id)
+            .await
+            .map_err(|_e| DbError::TaskNotFound {
+                task_id: self.id.clone(),
+            })?;
 
-        // Convert and filter sections
-        let mut sections: Vec<Section> = task
-            .sections
-            .into_iter()
-            .filter_map(|s| {
-                let section_type_str = s.section_type?;
-                let content = s.content?;
-                let section_type = self.parse_section_type_from_db(&section_type_str);
-
-                // Convert section refs
-                let section_refs: Vec<vertebrae_db::CodeRef> = s
-                    .refs
-                    .into_iter()
-                    .filter_map(|r| {
-                        let path = r.path?;
-                        let mut code_ref =
-                            if let (Some(start), Some(end)) = (r.line_start, r.line_end) {
-                                vertebrae_db::CodeRef::range(path, start, end)
-                            } else if let Some(line) = r.line_start {
-                                vertebrae_db::CodeRef::line(path, line)
-                            } else {
-                                vertebrae_db::CodeRef::file(path)
-                            };
-                        if let Some(name) = r.name {
-                            code_ref = code_ref.with_name(name);
-                        }
-                        if let Some(desc) = r.description {
-                            code_ref = code_ref.with_description(desc);
-                        }
-                        Some(code_ref)
-                    })
-                    .collect();
-
-                let mut section = if let Some(order) = s.order {
-                    Section::with_order(section_type, content, order)
-                } else {
-                    Section::new(section_type, content)
-                };
-                section.refs = section_refs;
-                Some(section)
-            })
-            .collect();
+        // Use the task's sections directly
+        let mut sections = task.sections;
 
         // Apply type filter if specified
         if let Some(ref filter_type) = self.section_type {
@@ -349,38 +277,6 @@ impl SectionsCommand {
             filter_type: self.section_type.clone(),
         })
     }
-
-    /// Fetch the task by ID and return its sections.
-    async fn fetch_task_sections(
-        &self,
-        db: &Database,
-        id: &str,
-    ) -> Result<TaskSectionsRow, DbError> {
-        let query = format!("SELECT id, sections FROM task:{}", id);
-        let mut result = db.client().query(&query).await?;
-        let task: Option<TaskSectionsRow> = result.take(0)?;
-
-        task.ok_or_else(|| DbError::TaskNotFound {
-            task_id: self.id.clone(),
-        })
-    }
-
-    /// Parse a section type string from the database into SectionType enum
-    fn parse_section_type_from_db(&self, s: &str) -> SectionType {
-        match s {
-            "goal" => SectionType::Goal,
-            "context" => SectionType::Context,
-            "current_behavior" => SectionType::CurrentBehavior,
-            "desired_behavior" => SectionType::DesiredBehavior,
-            "step" => SectionType::Step,
-            "testing_criterion" => SectionType::TestingCriterion,
-            "anti_pattern" => SectionType::AntiPattern,
-            "failure_test" => SectionType::FailureTest,
-            "constraint" => SectionType::Constraint,
-            // Default to Goal if unknown (should not happen with schema validation)
-            _ => SectionType::Goal,
-        }
-    }
 }
 
 /// Get the sort order for a section type within its space
@@ -403,55 +299,37 @@ fn type_sort_order(section_type: &SectionType) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vertebrae_core::{CreateTaskOptions, DefaultTaskService};
+    use vertebrae_db::Database;
 
-    /// Helper to create an in-memory test database
-    async fn setup_test_db() -> Database {
+    /// Helper to create a test service with in-memory database
+    async fn setup_test_service() -> DefaultTaskService {
         let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-        db
+        DefaultTaskService::new(db)
     }
 
-    /// Helper to create a task in the database
-    async fn create_task(db: &Database, id: &str, title: &str) {
-        let query = format!(
-            r#"CREATE task:{} SET
-                title = "{}",
-                level = "task",
-                status = "todo",
-                tags = [],
-                sections = [],
-                refs = []"#,
-            id, title
-        );
-        db.client().query(&query).await.unwrap();
-    }
-
-    /// Helper to add a section to a task
-    async fn add_section(
-        db: &Database,
-        id: &str,
-        section_type: &str,
+    /// Helper to create a task with the service
+    async fn create_task_with_section(
+        service: &DefaultTaskService,
+        title: &str,
+        section_type: SectionType,
         content: &str,
         order: Option<u32>,
-    ) {
-        let escaped_content = content.replace('\\', "\\\\").replace('"', "\\\"");
-        let section_obj = if let Some(ord) = order {
-            format!(
-                r#"{{ "type": "{}", "content": "{}", "order": {} }}"#,
-                section_type, escaped_content, ord
-            )
-        } else {
-            format!(
-                r#"{{ "type": "{}", "content": "{}" }}"#,
-                section_type, escaped_content
-            )
-        };
+    ) -> String {
+        let options = CreateTaskOptions::new(title);
+        let created_id = service.create_task(options).await.unwrap();
 
-        let query = format!(
-            "UPDATE task:{} SET sections = array::append(sections, {})",
-            id, section_obj
-        );
-        db.client().query(&query).await.unwrap();
+        // Create section and append it
+        let mut section = if let Some(ord) = order {
+            Section::with_order(section_type, content.to_string(), ord)
+        } else {
+            Section::new(section_type, content.to_string())
+        };
+        section.refs = vec![];
+        service.add_section(&created_id, section).await.unwrap();
+
+        created_id
     }
 
     #[test]
@@ -547,20 +425,39 @@ mod tests {
 
     #[tokio::test]
     async fn test_sections_all() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "task1", "Test Task").await;
-        add_section(&db, "task1", "goal", "The goal", None).await;
-        add_section(&db, "task1", "step", "Step 1", Some(0)).await;
-        add_section(&db, "task1", "step", "Step 2", Some(1)).await;
-        add_section(&db, "task1", "anti_pattern", "Don't do this", Some(0)).await;
+        let task_id =
+            create_task_with_section(&service, "Test Task", SectionType::Goal, "The goal", None)
+                .await;
+        service
+            .add_section(
+                &task_id,
+                Section::with_order(SectionType::Step, "Step 1".to_string(), 0),
+            )
+            .await
+            .unwrap();
+        service
+            .add_section(
+                &task_id,
+                Section::with_order(SectionType::Step, "Step 2".to_string(), 1),
+            )
+            .await
+            .unwrap();
+        service
+            .add_section(
+                &task_id,
+                Section::with_order(SectionType::AntiPattern, "Don't do this".to_string(), 0),
+            )
+            .await
+            .unwrap();
 
         let cmd = SectionsCommand {
-            id: "task1".to_string(),
+            id: task_id.clone(),
             section_type: None,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(
             result.is_ok(),
             "Sections command failed: {:?}",
@@ -568,7 +465,7 @@ mod tests {
         );
 
         let sections_result = result.unwrap();
-        assert_eq!(sections_result.id, "task1");
+        assert_eq!(sections_result.id, task_id.to_lowercase());
         assert_eq!(sections_result.sections.len(), 4);
         assert!(sections_result.filter_type.is_none());
 
@@ -586,20 +483,39 @@ mod tests {
 
     #[tokio::test]
     async fn test_sections_filter_by_type() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "task1", "Test Task").await;
-        add_section(&db, "task1", "goal", "The goal", None).await;
-        add_section(&db, "task1", "step", "Step 1", Some(0)).await;
-        add_section(&db, "task1", "step", "Step 2", Some(1)).await;
-        add_section(&db, "task1", "anti_pattern", "Don't do this", Some(0)).await;
+        let task_id =
+            create_task_with_section(&service, "Test Task", SectionType::Goal, "The goal", None)
+                .await;
+        service
+            .add_section(
+                &task_id,
+                Section::with_order(SectionType::Step, "Step 1".to_string(), 0),
+            )
+            .await
+            .unwrap();
+        service
+            .add_section(
+                &task_id,
+                Section::with_order(SectionType::Step, "Step 2".to_string(), 1),
+            )
+            .await
+            .unwrap();
+        service
+            .add_section(
+                &task_id,
+                Section::with_order(SectionType::AntiPattern, "Don't do this".to_string(), 0),
+            )
+            .await
+            .unwrap();
 
         let cmd = SectionsCommand {
-            id: "task1".to_string(),
+            id: task_id.clone(),
             section_type: Some(SectionType::Step),
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         let sections_result = result.unwrap();
@@ -628,19 +544,32 @@ mod tests {
 
     #[tokio::test]
     async fn test_sections_filter_anti_pattern() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "task1", "Test Task").await;
-        add_section(&db, "task1", "goal", "The goal", None).await;
-        add_section(&db, "task1", "anti_pattern", "Don't do this", Some(0)).await;
-        add_section(&db, "task1", "anti_pattern", "Avoid that", Some(1)).await;
+        let task_id =
+            create_task_with_section(&service, "Test Task", SectionType::Goal, "The goal", None)
+                .await;
+        service
+            .add_section(
+                &task_id,
+                Section::with_order(SectionType::AntiPattern, "Don't do this".to_string(), 0),
+            )
+            .await
+            .unwrap();
+        service
+            .add_section(
+                &task_id,
+                Section::with_order(SectionType::AntiPattern, "Avoid that".to_string(), 1),
+            )
+            .await
+            .unwrap();
 
         let cmd = SectionsCommand {
-            id: "task1".to_string(),
+            id: task_id.clone(),
             section_type: Some(SectionType::AntiPattern),
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         let sections_result = result.unwrap();
@@ -671,16 +600,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_sections_empty() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "task1", "Test Task").await;
+        let options = CreateTaskOptions::new("Test Task");
+        let task_id = service.create_task(options).await.unwrap();
 
         let cmd = SectionsCommand {
-            id: "task1".to_string(),
+            id: task_id.clone(),
             section_type: None,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         let sections_result = result.unwrap();
@@ -693,17 +623,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_sections_filter_no_matches() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "task1", "Test Task").await;
-        add_section(&db, "task1", "goal", "The goal", None).await;
+        let task_id =
+            create_task_with_section(&service, "Test Task", SectionType::Goal, "The goal", None)
+                .await;
 
         let cmd = SectionsCommand {
-            id: "task1".to_string(),
+            id: task_id.clone(),
             section_type: Some(SectionType::AntiPattern),
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         let sections_result = result.unwrap();
@@ -716,14 +647,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_sections_nonexistent_task() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
         let cmd = SectionsCommand {
             id: "nonexistent".to_string(),
             section_type: None,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         match result {
             Err(DbError::TaskNotFound { task_id }) => {
                 assert_eq!(
@@ -739,17 +670,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_sections_case_insensitive_id() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "task1", "Test Task").await;
-        add_section(&db, "task1", "goal", "The goal", None).await;
+        let task_id =
+            create_task_with_section(&service, "Test Task", SectionType::Goal, "The goal", None)
+                .await;
 
         let cmd = SectionsCommand {
-            id: "TASK1".to_string(),
+            id: task_id.to_uppercase(),
             section_type: None,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok(), "Case-insensitive lookup should work");
 
         let sections_result = result.unwrap();
@@ -758,20 +690,40 @@ mod tests {
 
     #[tokio::test]
     async fn test_sections_ordered_by_ordinal() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "task1", "Test Task").await;
+        let options = CreateTaskOptions::new("Test Task");
+        let task_id = service.create_task(options).await.unwrap();
+
         // Add in reverse order
-        add_section(&db, "task1", "step", "Step 3", Some(2)).await;
-        add_section(&db, "task1", "step", "Step 1", Some(0)).await;
-        add_section(&db, "task1", "step", "Step 2", Some(1)).await;
+        service
+            .add_section(
+                &task_id,
+                Section::with_order(SectionType::Step, "Step 3".to_string(), 2),
+            )
+            .await
+            .unwrap();
+        service
+            .add_section(
+                &task_id,
+                Section::with_order(SectionType::Step, "Step 1".to_string(), 0),
+            )
+            .await
+            .unwrap();
+        service
+            .add_section(
+                &task_id,
+                Section::with_order(SectionType::Step, "Step 2".to_string(), 1),
+            )
+            .await
+            .unwrap();
 
         let cmd = SectionsCommand {
-            id: "task1".to_string(),
+            id: task_id.clone(),
             section_type: None,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         let sections_result = result.unwrap();

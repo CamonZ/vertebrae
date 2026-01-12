@@ -265,7 +265,7 @@ impl Command {
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Sections(cmd) => {
-                let result = cmd.execute(db).await?;
+                let result = cmd.execute(service).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Show(cmd) => {
