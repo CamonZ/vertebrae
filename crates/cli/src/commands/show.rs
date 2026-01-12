@@ -6,7 +6,9 @@
 use crate::commands::list::TaskSummary;
 use clap::Args;
 use serde::Deserialize;
-use vertebrae_core::{ServiceError, TaskService};
+use vertebrae_core::{
+    DefaultWorkflowService, ServiceError, TaskService, WorkflowInfo, WorkflowService,
+};
 use vertebrae_db::{CodeRef, Database, DbError, Section, SectionType};
 
 /// Show full details of a task
@@ -15,25 +17,6 @@ pub struct ShowCommand {
     /// Task ID to show (case-insensitive)
     #[arg(required = true)]
     pub id: String,
-}
-
-/// Workflow assignment information
-#[derive(Debug)]
-pub struct WorkflowInfo {
-    /// Workflow ID
-    pub id: String,
-    /// Workflow name
-    pub name: String,
-    /// Current step name
-    pub current_step_name: String,
-    /// Current step index (0-based)
-    pub current_step_index: usize,
-    /// Total number of steps
-    pub total_steps: usize,
-    /// Previous step name (if any)
-    pub prev_step_name: Option<String>,
-    /// Next step name (if any)
-    pub next_step_name: Option<String>,
 }
 
 /// Detailed view of a task with all relationships
@@ -181,6 +164,7 @@ impl ShowCommand {
     pub async fn execute(&self, service: &dyn TaskService) -> Result<TaskDetail, ServiceError> {
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
+        #[allow(deprecated)]
         let db = service.database();
 
         // Fetch the main task
@@ -207,11 +191,17 @@ impl ShowCommand {
             .await
             .map_err(ServiceError::Database)?;
 
+        // Create workflow service for fetching workflow info
+        let workflow_service = DefaultWorkflowService::new(db.clone());
+
         // Fetch workflow info if task is assigned to a workflow
         let workflow = self
-            .fetch_workflow_info(db, task.workflow_id.as_ref(), task.current_step)
-            .await
-            .map_err(ServiceError::Database)?;
+            .fetch_workflow_info(
+                &workflow_service,
+                task.workflow_id.as_ref(),
+                task.current_step,
+            )
+            .await?;
 
         // Convert sections - filter out any without required fields
         let sections: Vec<Section> = task
@@ -449,68 +439,18 @@ impl ShowCommand {
     /// Fetch workflow information for a task assigned to a workflow.
     async fn fetch_workflow_info(
         &self,
-        db: &Database,
+        service: &dyn WorkflowService,
         workflow_id: Option<&surrealdb::sql::Thing>,
         current_step: Option<usize>,
-    ) -> Result<Option<WorkflowInfo>, DbError> {
+    ) -> Result<Option<WorkflowInfo>, ServiceError> {
         let (workflow_id, step_index) = match (workflow_id, current_step) {
             (Some(wf_id), Some(step)) => (wf_id, step),
             _ => return Ok(None),
         };
 
-        // Fetch the workflow
-        let workflow = db.workflows().get(&workflow_id.id.to_raw()).await?;
-
-        let workflow = match workflow {
-            Some(w) => w,
-            None => {
-                // Workflow doesn't exist anymore - return minimal info
-                return Ok(Some(WorkflowInfo {
-                    id: workflow_id.id.to_raw(),
-                    name: "(deleted workflow)".to_string(),
-                    current_step_name: format!("Step {}", step_index + 1),
-                    current_step_index: step_index,
-                    total_steps: 0,
-                    prev_step_name: None,
-                    next_step_name: None,
-                }));
-            }
-        };
-
-        // Get ordered steps
-        let steps = workflow.ordered_steps();
-        let total_steps = steps.len();
-
-        // Get current step name
-        let current_step_name = if step_index < steps.len() {
-            steps[step_index].name.clone()
-        } else {
-            format!("Step {}", step_index + 1)
-        };
-
-        // Get previous step name
-        let prev_step_name = if step_index > 0 && step_index <= steps.len() {
-            Some(steps[step_index - 1].name.clone())
-        } else {
-            None
-        };
-
-        // Get next step name
-        let next_step_name = if step_index + 1 < steps.len() {
-            Some(steps[step_index + 1].name.clone())
-        } else {
-            None
-        };
-
-        Ok(Some(WorkflowInfo {
-            id: workflow_id.id.to_raw(),
-            name: workflow.name,
-            current_step_name,
-            current_step_index: step_index,
-            total_steps,
-            prev_step_name,
-            next_step_name,
-        }))
+        // Fetch the workflow info from the service
+        let info = service.get_workflow_info(workflow_id, step_index).await?;
+        Ok(Some(info))
     }
 }
 

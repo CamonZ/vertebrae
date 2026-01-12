@@ -11,7 +11,7 @@ use crate::types::{
 use serde::{Deserialize, Serialize};
 use tauri::State;
 use tokio::sync::RwLock;
-use vertebrae_core::{DefaultTaskService, TaskService};
+use vertebrae_core::{DefaultTaskService, DefaultWorkflowService, TaskService, WorkflowService};
 
 /// Application state holding the task service
 pub struct AppState {
@@ -311,10 +311,22 @@ pub async fn list_workflows(state: State<'_, AppState>) -> Result<Vec<Workflow>,
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    match service.database().workflows().list().await {
-        Ok(workflows) => {
-            log::info!("list_workflows returned {} workflows", workflows.len());
-            Ok(workflows.into_iter().map(Into::into).collect())
+    #[allow(deprecated)]
+    let db = service.database();
+    let workflow_service = DefaultWorkflowService::new(db.clone());
+
+    match workflow_service.list_workflows().await {
+        Ok(summaries) => {
+            log::info!("list_workflows returned {} workflows", summaries.len());
+            // Convert summaries to full workflows for display
+            // For now, we'll fetch the full workflows from the database if needed
+            let mut workflows = Vec::new();
+            for summary in summaries {
+                if let Ok(workflow) = workflow_service.get_workflow(&summary.id).await {
+                    workflows.push(workflow.into());
+                }
+            }
+            Ok(workflows)
         }
         Err(e) => {
             log::error!("list_workflows error: {:?}", e);
@@ -337,12 +349,11 @@ pub async fn get_workflow(
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    let workflow = service
-        .database()
-        .workflows()
-        .get(&id)
-        .await?
-        .ok_or_else(|| CommandError::workflow_not_found(&id))?;
+    #[allow(deprecated)]
+    let db = service.database();
+    let workflow_service = DefaultWorkflowService::new(db.clone());
+
+    let workflow = workflow_service.get_workflow(&id).await?;
 
     Ok(workflow.into())
 }
@@ -361,14 +372,12 @@ pub async fn get_workflow_with_tasks(
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
+    #[allow(deprecated)]
     let db = service.database();
+    let workflow_service = DefaultWorkflowService::new(db.clone());
 
     // Get the workflow
-    let workflow = db
-        .workflows()
-        .get(&id)
-        .await?
-        .ok_or_else(|| CommandError::workflow_not_found(&id))?;
+    let workflow = workflow_service.get_workflow(&id).await?;
 
     // Get tasks associated with this workflow using the service
     let filter = vertebrae_db::TaskFilter::new().include_done();
@@ -379,7 +388,7 @@ pub async fn get_workflow_with_tasks(
     let workflow_id_str = workflow
         .id
         .as_ref()
-        .map(|t| t.id.to_string())
+        .map(|t| t.id.to_raw())
         .unwrap_or_default();
 
     // We need to get full tasks to check workflow_id since TaskSummary doesn't include it
@@ -387,7 +396,7 @@ pub async fn get_workflow_with_tasks(
     for summary in all_tasks {
         if let Ok(task) = service.get_task(&summary.id).await {
             if let Some(ref wf_id) = task.workflow_id {
-                if wf_id.id.to_string() == workflow_id_str {
+                if wf_id.id.to_raw() == workflow_id_str {
                     tasks.push(summary.into());
                 }
             }

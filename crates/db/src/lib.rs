@@ -35,6 +35,10 @@ pub use surrealdb::sql::Thing;
 pub const DEFAULT_DB_PATH: &str = ".vtb/data";
 
 /// Database wrapper providing connection management for SurrealDB
+///
+/// This struct is Clone because `Surreal<Db>` uses an internal `Arc` for the
+/// connection, making clones share the same underlying connection pool.
+#[derive(Clone)]
 pub struct Database {
     /// The underlying SurrealDB client
     client: Surreal<Db>,

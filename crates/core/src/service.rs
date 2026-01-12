@@ -576,32 +576,11 @@ impl DefaultTaskService {
 
     /// Generate a unique task ID
     async fn generate_unique_id(&self, title: &str) -> ServiceResult<String> {
-        use sha2::{Digest, Sha256};
-
-        // Generate base ID from title hash
-        let mut hasher = Sha256::new();
-        hasher.update(title.as_bytes());
-        let hash = hasher.finalize();
-        let base_id = hex::encode(&hash[..3]); // 6 hex chars
-
-        // Check for collisions
-        if !self.db.tasks().exists(&base_id).await? {
-            return Ok(base_id);
-        }
-
-        // If collision, add random suffix
-        for _ in 0..100 {
-            use rand::Rng;
-            let suffix: u16 = rand::rng().random();
-            let id = format!("{}{:04x}", &base_id[..4], suffix);
-            if !self.db.tasks().exists(&id).await? {
-                return Ok(id);
-            }
-        }
-
-        Err(ServiceError::validation_failed(
-            "Failed to generate unique ID after maximum retries",
-        ))
+        let db = &self.db;
+        crate::id_generator::generate_unique_id(title, "task", |id| async move {
+            db.tasks().exists(&id).await.map_err(ServiceError::from)
+        })
+        .await
     }
 
     /// Build a TaskUpdate from UpdateTaskOptions
@@ -685,13 +664,6 @@ impl DefaultTaskService {
         // Note: search filter would require description which isn't in TaskSummary
 
         true
-    }
-}
-
-// Add hex encoding utility
-mod hex {
-    pub fn encode(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| format!("{:02x}", b)).collect()
     }
 }
 

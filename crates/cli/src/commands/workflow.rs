@@ -2,14 +2,12 @@
 //!
 //! Implements the `vtb workflow` subcommand group for creating and managing workflows.
 
-use crate::id::IdGenerator;
 use clap::{Args, Subcommand};
-use surrealdb::sql::Thing;
-use vertebrae_core::{ServiceError, TaskService};
-use vertebrae_db::{
-    AgentConfig, Database, DbError, ExecutionStatus, MigrationResult, StepExecution, Workflow,
-    WorkflowStep, WorkflowUpdate,
+use vertebrae_core::{
+    CreateWorkflowOptions, DefaultWorkflowService, ServiceError, TaskService,
+    UpdateWorkflowOptions, WorkflowService, WorkflowStepInput,
 };
+use vertebrae_db::{AgentConfig, WorkflowStep};
 
 /// Workflow management commands
 #[derive(Debug, Subcommand)]
@@ -49,21 +47,22 @@ impl WorkflowCommand {
     ///
     /// Returns `ServiceError` if the command execution fails.
     pub async fn execute(&self, service: &dyn TaskService) -> Result<String, ServiceError> {
-        let db = service.database();
-        let result = match self {
-            WorkflowCommand::Add(cmd) => cmd.execute(db).await,
-            WorkflowCommand::List(cmd) => cmd.execute(db).await,
-            WorkflowCommand::Show(cmd) => cmd.execute(db).await,
-            WorkflowCommand::Update(cmd) => cmd.execute(db).await,
-            WorkflowCommand::Delete(cmd) => cmd.execute(db).await,
-            WorkflowCommand::Assign(cmd) => cmd.execute(db).await,
-            WorkflowCommand::Unassign(cmd) => cmd.execute(db).await,
-            WorkflowCommand::Advance(cmd) => cmd.execute(db).await,
-            WorkflowCommand::Retreat(cmd) => cmd.execute(db).await,
-            WorkflowCommand::Reject(cmd) => cmd.execute(db).await,
-            WorkflowCommand::Migrate(cmd) => cmd.execute(db).await,
-        };
-        result.map_err(ServiceError::Database)
+        #[allow(deprecated)]
+        let db = service.database().clone();
+        let workflow_service = DefaultWorkflowService::new(db);
+        match self {
+            WorkflowCommand::Add(cmd) => cmd.execute(&workflow_service).await,
+            WorkflowCommand::List(cmd) => cmd.execute(&workflow_service).await,
+            WorkflowCommand::Show(cmd) => cmd.execute(&workflow_service).await,
+            WorkflowCommand::Update(cmd) => cmd.execute(&workflow_service).await,
+            WorkflowCommand::Delete(cmd) => cmd.execute(&workflow_service).await,
+            WorkflowCommand::Assign(cmd) => cmd.execute(&workflow_service).await,
+            WorkflowCommand::Unassign(cmd) => cmd.execute(&workflow_service).await,
+            WorkflowCommand::Advance(cmd) => cmd.execute(&workflow_service).await,
+            WorkflowCommand::Retreat(cmd) => cmd.execute(&workflow_service).await,
+            WorkflowCommand::Reject(cmd) => cmd.execute(&workflow_service).await,
+            WorkflowCommand::Migrate(cmd) => cmd.execute(&workflow_service).await,
+        }
     }
 }
 
@@ -134,84 +133,49 @@ impl WorkflowAddCommand {
     ///
     /// # Arguments
     ///
-    /// * `db` - Reference to the database connection
+    /// * `service` - Reference to the workflow service
     ///
     /// # Errors
     ///
-    /// Returns `DbError` if:
+    /// Returns `ServiceError` if:
     /// - The name is empty
     /// - No steps are provided
-    /// - Database operations fail
-    pub async fn execute(&self, db: &Database) -> Result<String, DbError> {
-        // Validate name is not empty
-        if self.name.trim().is_empty() {
-            return Err(DbError::InvalidPath {
-                path: std::path::PathBuf::from("name"),
-                reason: "workflow name required".to_string(),
-            });
-        }
+    /// - Service operations fail
+    pub async fn execute(&self, service: &dyn WorkflowService) -> Result<String, ServiceError> {
+        // Build the workflow steps
+        let steps: Vec<WorkflowStepInput> = self
+            .steps
+            .iter()
+            .map(|s| {
+                WorkflowStepInput::new(
+                    &s.name,
+                    s.agent_config
+                        .model
+                        .clone()
+                        .unwrap_or_else(|| "default".to_string()),
+                )
+            })
+            .collect();
 
-        // Validate at least one step is provided
-        if self.steps.is_empty() {
-            return Err(DbError::InvalidPath {
-                path: std::path::PathBuf::from("steps"),
-                reason: "at least one step is required (use --step 'name:model')".to_string(),
-            });
-        }
-
-        // Generate unique ID with collision detection
-        let id = self.generate_unique_id(db).await?;
-
-        // Create the workflow
-        let mut workflow = Workflow::new(self.name.clone());
+        // Build the create options
+        let mut options = CreateWorkflowOptions::new(&self.name, steps);
 
         if let Some(description) = &self.description {
-            workflow = workflow.with_description(description.clone());
+            options = options.with_description(description);
         }
 
-        // Add steps with order based on command line position
-        for (order, parsed_step) in self.steps.iter().enumerate() {
-            let step = WorkflowStep::new(
-                parsed_step.name.clone(),
-                parsed_step.agent_config.clone(),
-                order as u32,
-            );
-            workflow = workflow.with_step(step);
-        }
-
-        // Set pipeline chaining workflows if specified
         if let Some(on_done) = &self.on_done {
-            workflow = workflow.with_on_done_workflow(on_done.clone());
-        }
-        if let Some(on_reject) = &self.on_reject {
-            workflow = workflow.with_on_reject_workflow(on_reject.clone());
+            options = options.with_on_done_workflow(on_done);
         }
 
-        // Store the workflow in the database
-        db.workflows().create(&id, &workflow).await?;
+        if let Some(on_reject) = &self.on_reject {
+            options = options.with_on_reject_workflow(on_reject);
+        }
+
+        // Create the workflow
+        let id = service.create_workflow(options).await?;
 
         Ok(format!("Created workflow: {}", id))
-    }
-
-    /// Check if a workflow with the given ID exists.
-    async fn workflow_exists(&self, db: &Database, id: &str) -> Result<bool, DbError> {
-        db.workflows().exists(id).await
-    }
-
-    /// Generate a unique ID that doesn't collide with existing workflows.
-    async fn generate_unique_id(&self, db: &Database) -> Result<String, DbError> {
-        let mut generator = IdGenerator::new(&self.name);
-
-        while let Some(id) = generator.next_id() {
-            if !self.workflow_exists(db, &id).await? {
-                return Ok(id);
-            }
-        }
-
-        Err(DbError::InvalidPath {
-            path: std::path::PathBuf::from("id"),
-            reason: "failed to generate unique ID after maximum retries".to_string(),
-        })
     }
 }
 
@@ -254,37 +218,32 @@ impl WorkflowListCommand {
     ///
     /// # Arguments
     ///
-    /// * `db` - Reference to the database connection
+    /// * `service` - Reference to the workflow service
     ///
     /// # Errors
     ///
-    /// Returns `DbError` if database operations fail.
-    pub async fn execute(&self, db: &Database) -> Result<String, DbError> {
-        let workflows = db.workflows().list().await?;
+    /// Returns `ServiceError` if service operations fail.
+    pub async fn execute(&self, service: &dyn WorkflowService) -> Result<String, ServiceError> {
+        let summaries = service.list_workflows().await?;
 
-        if workflows.is_empty() {
+        if summaries.is_empty() {
             return Ok("No workflows found".to_string());
         }
 
-        let summaries: Vec<WorkflowSummary> = workflows
-            .into_iter()
-            .map(|w| {
-                let id =
-                    w.id.as_ref()
-                        .map(|t| t.id.to_raw())
-                        .unwrap_or_else(|| "unknown".to_string());
-                WorkflowSummary {
-                    id,
-                    name: w.name,
-                    description: w.description,
-                    step_count: w.steps.len(),
-                }
-            })
-            .collect();
-
         let output = summaries
             .iter()
-            .map(|s| s.to_string())
+            .map(|s| {
+                format!(
+                    "{} - {} ({} steps){}",
+                    s.id,
+                    s.name,
+                    s.step_count,
+                    s.description
+                        .as_ref()
+                        .map(|d| format!(" - {}", d))
+                        .unwrap_or_default()
+                )
+            })
             .collect::<Vec<_>>()
             .join("\n");
 
@@ -424,42 +383,33 @@ impl WorkflowShowCommand {
     ///
     /// # Arguments
     ///
-    /// * `db` - Reference to the database connection
+    /// * `service` - Reference to the workflow service
     ///
     /// # Errors
     ///
-    /// Returns `DbError::NotFound` if the workflow doesn't exist.
-    /// Returns `DbError` if database operations fail.
-    pub async fn execute(&self, db: &Database) -> Result<String, DbError> {
-        // Normalize ID to lowercase for case-insensitive lookup
-        let id = self.id.to_lowercase();
+    /// Returns `ServiceError::NotFound` if the workflow doesn't exist.
+    /// Returns `ServiceError` if service operations fail.
+    pub async fn execute(&self, service: &dyn WorkflowService) -> Result<String, ServiceError> {
+        let workflow = service.get_workflow(&self.id).await?;
 
-        let workflow = db.workflows().get(&id).await?;
+        let workflow_id = workflow
+            .id
+            .as_ref()
+            .map(|t| t.id.to_raw())
+            .unwrap_or_else(|| self.id.clone());
 
-        match workflow {
-            Some(w) => {
-                let detail = WorkflowDetail {
-                    id: w
-                        .id
-                        .as_ref()
-                        .map(|t| t.id.to_raw())
-                        .unwrap_or_else(|| id.clone()),
-                    name: w.name,
-                    description: w.description,
-                    steps: w.steps,
-                    metadata: w.metadata,
-                    on_done_workflow: w.on_done_workflow,
-                    on_reject_workflow: w.on_reject_workflow,
-                    created_at: w.created_at.map(|dt| dt.to_rfc3339()),
-                    updated_at: w.updated_at.map(|dt| dt.to_rfc3339()),
-                };
-                Ok(detail.to_string())
-            }
-            None => Err(DbError::NotFound {
-                entity: "workflow".to_string(),
-                id: self.id.clone(),
-            }),
-        }
+        let detail = WorkflowDetail {
+            id: workflow_id,
+            name: workflow.name,
+            description: workflow.description,
+            steps: workflow.steps,
+            metadata: workflow.metadata,
+            on_done_workflow: workflow.on_done_workflow,
+            on_reject_workflow: workflow.on_reject_workflow,
+            created_at: workflow.created_at.map(|dt| dt.to_rfc3339()),
+            updated_at: workflow.updated_at.map(|dt| dt.to_rfc3339()),
+        };
+        Ok(detail.to_string())
     }
 }
 
@@ -506,60 +456,49 @@ impl WorkflowUpdateCommand {
     ///
     /// # Arguments
     ///
-    /// * `db` - Reference to the database connection
+    /// * `service` - Reference to the workflow service
     ///
     /// # Errors
     ///
-    /// Returns `DbError::NotFound` if the workflow doesn't exist.
-    /// Returns `DbError` if database operations fail.
-    pub async fn execute(&self, db: &Database) -> Result<String, DbError> {
-        // Normalize ID to lowercase for case-insensitive lookup
-        let id = self.id.to_lowercase();
-
-        // Build the update
-        let mut updates = WorkflowUpdate::new();
+    /// Returns `ServiceError::NotFound` if the workflow doesn't exist.
+    /// Returns `ServiceError` if service operations fail.
+    pub async fn execute(&self, service: &dyn WorkflowService) -> Result<String, ServiceError> {
+        // Build the update options
+        let mut options = UpdateWorkflowOptions::new();
 
         if let Some(name) = &self.name {
-            if name.trim().is_empty() {
-                return Err(DbError::InvalidPath {
-                    path: std::path::PathBuf::from("name"),
-                    reason: "workflow name cannot be empty".to_string(),
-                });
-            }
-            updates = updates.with_name(name.clone());
+            options = options.with_name(name);
         }
 
         if let Some(description) = &self.description {
-            updates = updates.with_description(description.clone());
+            options = options.with_description(description);
         } else if self.clear_description {
-            updates = updates.clear_description();
+            options = options.clear_description();
         }
 
         if let Some(on_done) = &self.on_done {
-            updates = updates.with_on_done_workflow(on_done.clone());
+            options = options.with_on_done_workflow(on_done);
         } else if self.clear_on_done {
-            updates = updates.clear_on_done_workflow();
+            options = options.clear_on_done_workflow();
         }
 
         if let Some(on_reject) = &self.on_reject {
-            updates = updates.with_on_reject_workflow(on_reject.clone());
+            options = options.with_on_reject_workflow(on_reject);
         } else if self.clear_on_reject {
-            updates = updates.clear_on_reject_workflow();
+            options = options.clear_on_reject_workflow();
         }
 
         // Check if any updates were provided
-        if !updates.has_updates() {
-            return Err(DbError::InvalidPath {
-                path: std::path::PathBuf::from("updates"),
-                reason: "no updates specified (use --name, --description, --on-done, --on-reject, or --clear-* options)"
-                    .to_string(),
-            });
+        if !options.has_updates() {
+            return Err(ServiceError::validation_failed(
+                "no updates specified (use --name, --description, --on-done, --on-reject, or --clear-* options)",
+            ));
         }
 
         // Apply the updates
-        db.workflows().update(&id, &updates).await?;
+        service.update_workflow(&self.id, options).await?;
 
-        Ok(format!("Updated workflow: {}", id))
+        Ok(format!("Updated workflow: {}", self.id))
     }
 }
 
@@ -578,34 +517,18 @@ impl WorkflowDeleteCommand {
     ///
     /// # Arguments
     ///
-    /// * `db` - Reference to the database connection
+    /// * `service` - Reference to the workflow service
     ///
     /// # Errors
     ///
-    /// Returns `DbError::NotFound` if the workflow doesn't exist.
-    /// Returns `DbError::ConstraintViolation` if tasks are assigned to the workflow.
-    /// Returns `DbError` if database operations fail.
-    pub async fn execute(&self, db: &Database) -> Result<String, DbError> {
-        // Normalize ID to lowercase for case-insensitive lookup
-        let id = self.id.to_lowercase();
-
-        // Check if workflow exists first
-        let exists = db.workflows().exists(&id).await?;
-        if !exists {
-            return Err(DbError::NotFound {
-                entity: "workflow".to_string(),
-                id: self.id.clone(),
-            });
-        }
-
-        // TODO: When task-workflow binding is implemented, check if any tasks
-        // are assigned to this workflow and return an error if so.
-        // For now, we allow deletion since no tasks can be bound to workflows yet.
-
+    /// Returns `ServiceError::NotFound` if the workflow doesn't exist.
+    /// Returns `ServiceError::ConstraintViolation` if tasks are assigned to the workflow.
+    /// Returns `ServiceError` if service operations fail.
+    pub async fn execute(&self, service: &dyn WorkflowService) -> Result<String, ServiceError> {
         // Delete the workflow
-        db.workflows().delete(&id).await?;
+        service.delete_workflow(&self.id).await?;
 
-        Ok(format!("Deleted workflow: {}", id))
+        Ok(format!("Deleted workflow: {}", self.id))
     }
 }
 
@@ -628,59 +551,21 @@ impl WorkflowAssignCommand {
     ///
     /// # Arguments
     ///
-    /// * `db` - Reference to the database connection
+    /// * `service` - Reference to the workflow service
     ///
     /// # Errors
     ///
-    /// Returns `DbError::NotFound` if the task or workflow doesn't exist.
-    /// Returns `DbError` if database operations fail.
-    pub async fn execute(&self, db: &Database) -> Result<String, DbError> {
-        // Normalize IDs to lowercase for case-insensitive lookup
-        let task_id = self.task_id.to_lowercase();
-        let workflow_id = self.workflow_id.to_lowercase();
-
-        // Check if task exists
-        let task_exists = db.tasks().exists(&task_id).await?;
-        if !task_exists {
-            return Err(DbError::NotFound {
-                entity: "task".to_string(),
-                id: self.task_id.clone(),
-            });
-        }
-
-        // Check if workflow exists and get its info
-        let workflow = db.workflows().get(&workflow_id).await?;
-        let workflow = match workflow {
-            Some(w) => w,
-            None => {
-                return Err(DbError::NotFound {
-                    entity: "workflow".to_string(),
-                    id: self.workflow_id.clone(),
-                });
-            }
-        };
-
-        // Get the workflow Thing ID for assignment
-        let workflow_thing = workflow.id.clone().ok_or_else(|| DbError::InvalidPath {
-            path: std::path::PathBuf::from(&workflow_id),
-            reason: "workflow has no ID".to_string(),
-        })?;
-
+    /// Returns `ServiceError::NotFound` if the task or workflow doesn't exist.
+    /// Returns `ServiceError` if service operations fail.
+    pub async fn execute(&self, service: &dyn WorkflowService) -> Result<String, ServiceError> {
         // Assign the task to the workflow
-        db.tasks()
-            .assign_workflow(&task_id, &workflow_thing)
+        let result = service
+            .assign_workflow(&self.task_id, &self.workflow_id)
             .await?;
-
-        // Get the first step name for display
-        let first_step_name = workflow
-            .ordered_steps()
-            .first()
-            .map(|s| s.name.clone())
-            .unwrap_or_else(|| "Step 1".to_string());
 
         Ok(format!(
             "Assigned task {} to workflow {} at step 1: {}",
-            task_id, workflow_id, first_step_name
+            result.task_id, result.workflow_id, result.first_step_name
         ))
     }
 }
@@ -700,29 +585,17 @@ impl WorkflowUnassignCommand {
     ///
     /// # Arguments
     ///
-    /// * `db` - Reference to the database connection
+    /// * `service` - Reference to the workflow service
     ///
     /// # Errors
     ///
-    /// Returns `DbError::NotFound` if the task doesn't exist.
-    /// Returns `DbError` if database operations fail.
-    pub async fn execute(&self, db: &Database) -> Result<String, DbError> {
-        // Normalize ID to lowercase for case-insensitive lookup
-        let task_id = self.task_id.to_lowercase();
-
-        // Check if task exists
-        let task_exists = db.tasks().exists(&task_id).await?;
-        if !task_exists {
-            return Err(DbError::NotFound {
-                entity: "task".to_string(),
-                id: self.task_id.clone(),
-            });
-        }
-
+    /// Returns `ServiceError::NotFound` if the task doesn't exist.
+    /// Returns `ServiceError` if service operations fail.
+    pub async fn execute(&self, service: &dyn WorkflowService) -> Result<String, ServiceError> {
         // Unassign the workflow
-        db.tasks().unassign_workflow(&task_id).await?;
+        service.unassign_workflow(&self.task_id).await?;
 
-        Ok(format!("Unassigned workflow from task {}", task_id))
+        Ok(format!("Unassigned workflow from task {}", self.task_id))
     }
 }
 
@@ -741,178 +614,48 @@ impl WorkflowAdvanceCommand {
     ///
     /// # Arguments
     ///
-    /// * `db` - Reference to the database connection
+    /// * `service` - Reference to the workflow service
     ///
     /// # Errors
     ///
-    /// Returns `DbError::NotFound` if the task doesn't exist.
-    /// Returns `DbError::Validation` if the task is not assigned to a workflow
+    /// Returns `ServiceError::NotFound` if the task doesn't exist.
+    /// Returns `ServiceError::Validation` if the task is not assigned to a workflow
     /// or is already at the last step.
-    pub async fn execute(&self, db: &Database) -> Result<String, DbError> {
-        // Normalize ID to lowercase for case-insensitive lookup
-        let task_id = self.task_id.to_lowercase();
+    pub async fn execute(&self, service: &dyn WorkflowService) -> Result<String, ServiceError> {
+        // Advance the task to the next step
+        let result = service.advance_step(&self.task_id).await?;
 
-        // Get the task to check workflow assignment
-        let task = db.tasks().get(&task_id).await?;
-        let task = match task {
-            Some(t) => t,
-            None => {
-                return Err(DbError::NotFound {
-                    entity: "task".to_string(),
-                    id: self.task_id.clone(),
-                });
-            }
+        // Get the execution ID for display (truncated to 6 chars)
+        let exec_id = result
+            .execution_id
+            .as_deref()
+            .unwrap_or("unknown")
+            .chars()
+            .take(6)
+            .collect::<String>();
+
+        // Build output message based on whether workflow chaining occurred
+        let message = if let Some(chained_to) = &result.chained_to_workflow {
+            format!(
+                "Completed workflow {} and chained task {} to workflow {} at step 1: {} (execution: {})",
+                result.workflow_id,
+                result.task_id,
+                chained_to,
+                "Step 1", // The service returns the new step info
+                exec_id
+            )
+        } else {
+            format!(
+                "Advanced task {} to step {}/{}: {} (execution: {})",
+                result.task_id,
+                result.to_step + 1,
+                result.total_steps,
+                result.step_name,
+                exec_id
+            )
         };
 
-        // Check if task is assigned to a workflow
-        let workflow_id = match &task.workflow_id {
-            Some(wf_id) => wf_id,
-            None => {
-                return Err(DbError::ValidationError {
-                    message: format!("Task {} is not assigned to any workflow", task_id),
-                });
-            }
-        };
-
-        let current_step = task.current_step.unwrap_or(0);
-
-        // Get the workflow to check step boundaries
-        let workflow = db.workflows().get(&workflow_id.id.to_raw()).await?;
-        let workflow = match workflow {
-            Some(w) => w,
-            None => {
-                return Err(DbError::ValidationError {
-                    message: format!(
-                        "Task {} is assigned to non-existent workflow {}",
-                        task_id,
-                        workflow_id.id.to_raw()
-                    ),
-                });
-            }
-        };
-
-        let total_steps = workflow.ordered_steps().len();
-
-        // Get current step name for execution tracking
-        let current_step_name = workflow
-            .ordered_steps()
-            .get(current_step)
-            .map(|s| s.name.clone())
-            .unwrap_or_else(|| format!("Step {}", current_step + 1));
-
-        // Complete any existing execution for the current step
-        let latest_execution = db
-            .executions()
-            .get_latest_execution_for_task(&task_id)
-            .await?;
-        if let Some(exec) = latest_execution
-            && exec.step_name == current_step_name
-            && exec.status == ExecutionStatus::InProgress
-            && let Some(exec_id) = exec.id
-        {
-            db.executions()
-                .update_status(
-                    &exec_id.id.to_string(),
-                    ExecutionStatus::Completed,
-                    Some(chrono::Utc::now()),
-                )
-                .await?;
-        }
-
-        // Check if at the last step - if so, handle chaining
-        if current_step + 1 >= total_steps {
-            // Check if there's an on_done_workflow to chain to
-            if let Some(next_workflow_id) = &workflow.on_done_workflow {
-                // Verify the target workflow exists
-                let next_workflow = db.workflows().get(next_workflow_id).await?;
-                match next_workflow {
-                    Some(next_wf) => {
-                        // Get the Thing ID for assignment
-                        let next_workflow_thing =
-                            next_wf.id.clone().ok_or_else(|| DbError::InvalidPath {
-                                path: std::path::PathBuf::from(next_workflow_id),
-                                reason: "chained workflow has no ID".to_string(),
-                            })?;
-
-                        // Assign to the new workflow
-                        db.tasks()
-                            .assign_workflow(&task_id, &next_workflow_thing)
-                            .await?;
-
-                        // Get the first step name of the new workflow for display
-                        let first_step_name = next_wf
-                            .ordered_steps()
-                            .first()
-                            .map(|s| s.name.clone())
-                            .unwrap_or_else(|| "Step 1".to_string());
-
-                        // Create a new execution for the first step of the new workflow
-                        let task_thing = Thing::from(("task", task_id.as_str()));
-                        let execution =
-                            StepExecution::new(task_thing, next_workflow_thing, &first_step_name);
-                        let exec_id = db.executions().create_execution(&execution).await?;
-
-                        return Ok(format!(
-                            "Completed workflow {} and chained task {} to workflow {} at step 1: {} (execution: {})",
-                            workflow_id.id.to_raw(),
-                            task_id,
-                            next_workflow_id,
-                            first_step_name,
-                            &exec_id[..6.min(exec_id.len())]
-                        ));
-                    }
-                    None => {
-                        return Err(DbError::ValidationError {
-                            message: format!(
-                                "on_done_workflow '{}' does not exist",
-                                next_workflow_id
-                            ),
-                        });
-                    }
-                }
-            } else {
-                // No chaining configured, return error as before
-                let current_step_name = workflow
-                    .ordered_steps()
-                    .get(current_step)
-                    .map(|s| s.name.clone())
-                    .unwrap_or_else(|| format!("Step {}", current_step + 1));
-                return Err(DbError::ValidationError {
-                    message: format!(
-                        "Task {} is already at the last step: {} ({}/{}). No on_done_workflow configured for chaining.",
-                        task_id,
-                        current_step_name,
-                        current_step + 1,
-                        total_steps
-                    ),
-                });
-            }
-        }
-
-        // Advance to next step
-        let new_step = current_step + 1;
-        db.tasks().update_current_step(&task_id, new_step).await?;
-
-        // Get step names for display
-        let new_step_name = workflow
-            .ordered_steps()
-            .get(new_step)
-            .map(|s| s.name.clone())
-            .unwrap_or_else(|| format!("Step {}", new_step + 1));
-
-        // Create a new execution for the new step
-        let task_thing = Thing::from(("task", task_id.as_str()));
-        let execution = StepExecution::new(task_thing, workflow_id.clone(), &new_step_name);
-        let exec_id = db.executions().create_execution(&execution).await?;
-
-        Ok(format!(
-            "Advanced task {} to step {}/{}: {} (execution: {})",
-            task_id,
-            new_step + 1,
-            total_steps,
-            new_step_name,
-            &exec_id[..6.min(exec_id.len())]
-        ))
+        Ok(message)
     }
 }
 
@@ -931,121 +674,33 @@ impl WorkflowRetreatCommand {
     ///
     /// # Arguments
     ///
-    /// * `db` - Reference to the database connection
+    /// * `service` - Reference to the workflow service
     ///
     /// # Errors
     ///
-    /// Returns `DbError::NotFound` if the task doesn't exist.
-    /// Returns `DbError::Validation` if the task is not assigned to a workflow
+    /// Returns `ServiceError::NotFound` if the task doesn't exist.
+    /// Returns `ServiceError::Validation` if the task is not assigned to a workflow
     /// or is already at the first step.
-    pub async fn execute(&self, db: &Database) -> Result<String, DbError> {
-        // Normalize ID to lowercase for case-insensitive lookup
-        let task_id = self.task_id.to_lowercase();
+    pub async fn execute(&self, service: &dyn WorkflowService) -> Result<String, ServiceError> {
+        // Retreat the task to the previous step
+        let result = service.retreat_step(&self.task_id).await?;
 
-        // Get the task to check workflow assignment
-        let task = db.tasks().get(&task_id).await?;
-        let task = match task {
-            Some(t) => t,
-            None => {
-                return Err(DbError::NotFound {
-                    entity: "task".to_string(),
-                    id: self.task_id.clone(),
-                });
-            }
-        };
-
-        // Check if task is assigned to a workflow
-        let workflow_id = match &task.workflow_id {
-            Some(wf_id) => wf_id,
-            None => {
-                return Err(DbError::ValidationError {
-                    message: format!("Task {} is not assigned to any workflow", task_id),
-                });
-            }
-        };
-
-        let current_step = task.current_step.unwrap_or(0);
-
-        // Check if already at first step
-        if current_step == 0 {
-            // Get the workflow for step name
-            let workflow = db.workflows().get(&workflow_id.id.to_raw()).await?;
-            let step_name = workflow
-                .and_then(|w| w.ordered_steps().first().map(|s| s.name.clone()))
-                .unwrap_or_else(|| "Step 1".to_string());
-            return Err(DbError::ValidationError {
-                message: format!(
-                    "Task {} is already at the first step: {}",
-                    task_id, step_name
-                ),
-            });
-        }
-
-        // Get the workflow for step info
-        let workflow = db.workflows().get(&workflow_id.id.to_raw()).await?;
-        let workflow = match workflow {
-            Some(w) => w,
-            None => {
-                return Err(DbError::ValidationError {
-                    message: format!(
-                        "Task {} is assigned to non-existent workflow {}",
-                        task_id,
-                        workflow_id.id.to_raw()
-                    ),
-                });
-            }
-        };
-        let total_steps = workflow.ordered_steps().len();
-
-        // Get current step name for execution tracking
-        let current_step_name = workflow
-            .ordered_steps()
-            .get(current_step)
-            .map(|s| s.name.clone())
-            .unwrap_or_else(|| format!("Step {}", current_step + 1));
-
-        // Fail any existing execution for the current step (retreat implies failure/rejection)
-        let latest_execution = db
-            .executions()
-            .get_latest_execution_for_task(&task_id)
-            .await?;
-        if let Some(exec) = latest_execution
-            && exec.step_name == current_step_name
-            && exec.status == ExecutionStatus::InProgress
-            && let Some(exec_id) = exec.id
-        {
-            db.executions()
-                .update_status(
-                    &exec_id.id.to_string(),
-                    ExecutionStatus::Failed,
-                    Some(chrono::Utc::now()),
-                )
-                .await?;
-        }
-
-        // Retreat to previous step
-        let new_step = current_step - 1;
-        db.tasks().update_current_step(&task_id, new_step).await?;
-
-        // Get step name for display
-        let new_step_name = workflow
-            .ordered_steps()
-            .get(new_step)
-            .map(|s| s.name.clone())
-            .unwrap_or_else(|| format!("Step {}", new_step + 1));
-
-        // Create a new execution for the previous step
-        let task_thing = Thing::from(("task", task_id.as_str()));
-        let execution = StepExecution::new(task_thing, workflow_id.clone(), &new_step_name);
-        let exec_id = db.executions().create_execution(&execution).await?;
+        // Get the execution ID for display (truncated to 6 chars)
+        let exec_id = result
+            .execution_id
+            .as_deref()
+            .unwrap_or("unknown")
+            .chars()
+            .take(6)
+            .collect::<String>();
 
         Ok(format!(
             "Retreated task {} to step {}/{}: {} (execution: {})",
-            task_id,
-            new_step + 1,
-            total_steps,
-            new_step_name,
-            &exec_id[..6.min(exec_id.len())]
+            result.task_id,
+            result.to_step + 1,
+            result.total_steps,
+            result.step_name,
+            exec_id
         ))
     }
 }
@@ -1067,135 +722,36 @@ impl WorkflowRejectCommand {
     ///
     /// # Arguments
     ///
-    /// * `db` - Reference to the database connection
+    /// * `service` - Reference to the workflow service
     ///
     /// # Errors
     ///
-    /// Returns `DbError::NotFound` if the task doesn't exist.
-    /// Returns `DbError::Validation` if the task is not assigned to a workflow.
-    pub async fn execute(&self, db: &Database) -> Result<String, DbError> {
-        // Normalize ID to lowercase for case-insensitive lookup
-        let task_id = self.task_id.to_lowercase();
+    /// Returns `ServiceError::NotFound` if the task doesn't exist.
+    /// Returns `ServiceError::Validation` if the task is not assigned to a workflow.
+    pub async fn execute(&self, service: &dyn WorkflowService) -> Result<String, ServiceError> {
+        // Reject the task in its workflow
+        let result = service.reject_task(&self.task_id).await?;
 
-        // Get the task to check workflow assignment
-        let task = db.tasks().get(&task_id).await?;
-        let task = match task {
-            Some(t) => t,
-            None => {
-                return Err(DbError::NotFound {
-                    entity: "task".to_string(),
-                    id: self.task_id.clone(),
-                });
-            }
-        };
-
-        // Check if task is assigned to a workflow
-        let workflow_id = match &task.workflow_id {
-            Some(wf_id) => wf_id,
-            None => {
-                return Err(DbError::ValidationError {
-                    message: format!("Task {} is not assigned to any workflow", task_id),
-                });
-            }
-        };
-
-        // Get the workflow to check for on_reject_workflow
-        let workflow = db.workflows().get(&workflow_id.id.to_raw()).await?;
-        let workflow = match workflow {
-            Some(w) => w,
-            None => {
-                return Err(DbError::ValidationError {
-                    message: format!(
-                        "Task {} is assigned to non-existent workflow {}",
-                        task_id,
-                        workflow_id.id.to_raw()
-                    ),
-                });
-            }
-        };
-
-        let current_workflow_id = workflow_id.id.to_raw();
-        let current_step = task.current_step.unwrap_or(0);
-
-        // Get current step name for execution tracking
-        let current_step_name = workflow
-            .ordered_steps()
-            .get(current_step)
-            .map(|s| s.name.clone())
-            .unwrap_or_else(|| format!("Step {}", current_step + 1));
-
-        // Fail any existing execution for the current step (reject implies failure)
-        let latest_execution = db
-            .executions()
-            .get_latest_execution_for_task(&task_id)
-            .await?;
-        if let Some(exec) = latest_execution
-            && exec.step_name == current_step_name
-            && exec.status == ExecutionStatus::InProgress
-            && let Some(exec_id) = exec.id
-        {
-            db.executions()
-                .update_status(
-                    &exec_id.id.to_string(),
-                    ExecutionStatus::Failed,
-                    Some(chrono::Utc::now()),
-                )
-                .await?;
-        }
-
-        // Check if there's an on_reject_workflow to chain to
-        if let Some(reject_workflow_id) = &workflow.on_reject_workflow {
-            // Verify the target workflow exists
-            let reject_workflow = db.workflows().get(reject_workflow_id).await?;
-            match reject_workflow {
-                Some(reject_wf) => {
-                    // Get the Thing ID for assignment
-                    let reject_workflow_thing =
-                        reject_wf.id.clone().ok_or_else(|| DbError::InvalidPath {
-                            path: std::path::PathBuf::from(reject_workflow_id),
-                            reason: "reject workflow has no ID".to_string(),
-                        })?;
-
-                    // Assign to the reject workflow
-                    db.tasks()
-                        .assign_workflow(&task_id, &reject_workflow_thing)
-                        .await?;
-
-                    // Get the first step name of the reject workflow for display
-                    let first_step_name = reject_wf
-                        .ordered_steps()
-                        .first()
-                        .map(|s| s.name.clone())
-                        .unwrap_or_else(|| "Step 1".to_string());
-
-                    // Create a new execution for the first step of the reject workflow
-                    let task_thing = Thing::from(("task", task_id.as_str()));
-                    let execution =
-                        StepExecution::new(task_thing, reject_workflow_thing, &first_step_name);
-                    let exec_id = db.executions().create_execution(&execution).await?;
-
-                    Ok(format!(
-                        "Rejected task {} from workflow {} and chained to workflow {} at step 1: {} (execution: {})",
-                        task_id,
-                        current_workflow_id,
-                        reject_workflow_id,
-                        first_step_name,
-                        &exec_id[..6.min(exec_id.len())]
-                    ))
-                }
-                None => Err(DbError::ValidationError {
-                    message: format!("on_reject_workflow '{}' does not exist", reject_workflow_id),
-                }),
-            }
+        // Build output message based on whether workflow chaining occurred
+        let message = if let Some(chained_to) = &result.chained_to_workflow {
+            let first_step = result.first_step_name.as_deref().unwrap_or("Step 1");
+            let exec_id = result.execution_id.as_deref().unwrap_or("unknown");
+            format!(
+                "Rejected task {} from workflow {} and chained to workflow {} at step 1: {} (execution: {})",
+                result.task_id,
+                result.from_workflow_id,
+                chained_to,
+                first_step,
+                &exec_id[..6.min(exec_id.len())]
+            )
         } else {
-            // No on_reject_workflow configured, just unassign the workflow
-            db.tasks().unassign_workflow(&task_id).await?;
-
-            Ok(format!(
+            format!(
                 "Rejected task {} from workflow {} (no on_reject_workflow configured, workflow unassigned)",
-                task_id, current_workflow_id
-            ))
-        }
+                result.task_id, result.from_workflow_id
+            )
+        };
+
+        Ok(message)
     }
 }
 
@@ -1220,32 +776,25 @@ impl WorkflowMigrateCommand {
     ///
     /// # Arguments
     ///
-    /// * `db` - Reference to the database connection
+    /// * `service` - Reference to the workflow service
     ///
     /// # Errors
     ///
-    /// Returns `DbError::NotFound` if the default workflow doesn't exist.
-    /// Returns `DbError::Query` if database operations fail.
-    pub async fn execute(&self, db: &Database) -> Result<String, DbError> {
+    /// Returns `ServiceError::NotFound` if the default workflow doesn't exist.
+    /// Returns `ServiceError::Query` if service operations fail.
+    pub async fn execute(&self, service: &dyn WorkflowService) -> Result<String, ServiceError> {
+        let result = service.migrate_to_default_workflow(self.dry_run).await?;
+        let output = Self::format_result(&result);
+
         if self.dry_run {
-            // For dry-run, we need to count tasks without doing the migration
-            // We'll query the count ourselves
-            self.execute_dry_run(db).await
+            Ok(format!("[DRY RUN] {}", output))
         } else {
-            let result = db.workflows().migrate_to_default_workflow().await?;
-            Ok(Self::format_result(&result))
+            Ok(output)
         }
     }
 
-    /// Execute in dry-run mode - show what would be migrated without making changes.
-    async fn execute_dry_run(&self, db: &Database) -> Result<String, DbError> {
-        let result = db.workflows().dry_run_migration().await?;
-        let output = Self::format_result(&result);
-        Ok(format!("[DRY RUN] {}", output))
-    }
-
     /// Format the migration result for display.
-    fn format_result(result: &MigrationResult) -> String {
+    fn format_result(result: &vertebrae_core::MigrationResult) -> String {
         let mut output = String::new();
 
         if result.total() == 0 {
@@ -1272,12 +821,18 @@ impl WorkflowMigrateCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vertebrae_core::{Database, MigrationResult, ServiceError};
 
     /// Helper to create an in-memory test database
     async fn setup_test_db() -> Database {
         let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
         db
+    }
+
+    /// Helper to create a workflow service from a database
+    fn create_service(db: &Database) -> DefaultWorkflowService {
+        DefaultWorkflowService::new(db.clone())
     }
 
     // Step parsing tests
@@ -1376,7 +931,10 @@ mod tests {
             on_reject: None,
         };
 
-        let result = cmd.execute(&db).await.expect("Add should succeed");
+        let result = cmd
+            .execute(&create_service(&db))
+            .await
+            .expect("Add should succeed");
         assert!(
             result.starts_with("Created workflow: "),
             "Result should start with 'Created workflow: '"
@@ -1414,7 +972,10 @@ mod tests {
             on_reject: None,
         };
 
-        let result = cmd.execute(&db).await.expect("Add should succeed");
+        let result = cmd
+            .execute(&create_service(&db))
+            .await
+            .expect("Add should succeed");
         let id = extract_workflow_id(&result);
 
         let workflow = db.workflows().get(&id).await.unwrap().unwrap();
@@ -1450,7 +1011,10 @@ mod tests {
             on_reject: None,
         };
 
-        let result = cmd.execute(&db).await.expect("Add should succeed");
+        let result = cmd
+            .execute(&create_service(&db))
+            .await
+            .expect("Add should succeed");
         let id = extract_workflow_id(&result);
 
         let workflow = db.workflows().get(&id).await.unwrap().unwrap();
@@ -1480,11 +1044,11 @@ mod tests {
             on_reject: None,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&create_service(&db)).await;
         match result {
-            Err(DbError::InvalidPath { reason, .. }) => {
+            Err(ServiceError::ValidationFailed { message: reason }) => {
                 assert!(
-                    reason.contains("name required"),
+                    reason.contains("name cannot be empty"),
                     "Expected 'name required' in error, got: {}",
                     reason
                 );
@@ -1509,11 +1073,11 @@ mod tests {
             on_reject: None,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&create_service(&db)).await;
         match result {
-            Err(DbError::InvalidPath { reason, .. }) => {
+            Err(ServiceError::ValidationFailed { message: reason }) => {
                 assert!(
-                    reason.contains("name required"),
+                    reason.contains("name cannot be empty"),
                     "Expected 'name required' in error, got: {}",
                     reason
                 );
@@ -1535,12 +1099,12 @@ mod tests {
             on_reject: None,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&create_service(&db)).await;
         match result {
-            Err(DbError::InvalidPath { reason, .. }) => {
+            Err(ServiceError::ValidationFailed { message: reason }) => {
                 assert!(
-                    reason.contains("at least one step is required"),
-                    "Expected 'at least one step is required' in error, got: {}",
+                    reason.contains("at least one step"),
+                    "Expected 'at least one step' in error, got: {}",
                     reason
                 );
             }
@@ -1564,7 +1128,7 @@ mod tests {
             on_reject: None,
         };
 
-        let result = cmd.execute(&db).await.unwrap();
+        let result = cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&result);
         assert_eq!(id.len(), 6);
         assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
@@ -1588,7 +1152,7 @@ mod tests {
                 on_reject: None,
             };
 
-            let result = cmd.execute(&db).await.unwrap();
+            let result = cmd.execute(&create_service(&db)).await.unwrap();
             let id = extract_workflow_id(&result);
             assert!(ids.insert(id), "Duplicate ID generated");
         }
@@ -1597,25 +1161,16 @@ mod tests {
     #[tokio::test]
     async fn test_workflow_exists_returns_false_for_nonexistent() {
         let db = setup_test_db().await;
+        let service = create_service(&db);
 
-        let cmd = WorkflowAddCommand {
-            name: "Test".to_string(),
-            description: None,
-            steps: vec![ParsedStep {
-                name: "step1".to_string(),
-                agent_config: AgentConfig::new().with_model("agent1"),
-            }],
-            on_done: None,
-            on_reject: None,
-        };
-
-        let exists = cmd.workflow_exists(&db, "xxxxxx").await.unwrap();
+        let exists = service.workflow_exists("xxxxxx").await.unwrap();
         assert!(!exists);
     }
 
     #[tokio::test]
     async fn test_workflow_exists_returns_true_for_existing() {
         let db = setup_test_db().await;
+        let service = create_service(&db);
 
         let cmd = WorkflowAddCommand {
             name: "Existing workflow".to_string(),
@@ -1628,10 +1183,10 @@ mod tests {
             on_reject: None,
         };
 
-        let result = cmd.execute(&db).await.unwrap();
+        let result = cmd.execute(&service).await.unwrap();
         let id = extract_workflow_id(&result);
 
-        let exists = cmd.workflow_exists(&db, &id).await.unwrap();
+        let exists = service.workflow_exists(&id).await.unwrap();
         assert!(exists);
     }
 
@@ -1644,7 +1199,7 @@ mod tests {
         let db = setup_test_db().await;
 
         let cmd = WorkflowListCommand {};
-        let result = cmd.execute(&db).await.unwrap();
+        let result = cmd.execute(&create_service(&db)).await.unwrap();
 
         // Default workflow is created on db.init()
         assert!(
@@ -1674,7 +1229,7 @@ mod tests {
             on_done: None,
             on_reject: None,
         };
-        let result1 = add_cmd1.execute(&db).await.unwrap();
+        let result1 = add_cmd1.execute(&create_service(&db)).await.unwrap();
         let id1 = extract_workflow_id(&result1);
 
         // Create workflow with 3 steps
@@ -1698,11 +1253,11 @@ mod tests {
             on_done: None,
             on_reject: None,
         };
-        let result2 = add_cmd2.execute(&db).await.unwrap();
+        let result2 = add_cmd2.execute(&create_service(&db)).await.unwrap();
         let id2 = extract_workflow_id(&result2);
 
         let cmd = WorkflowListCommand {};
-        let result = cmd.execute(&db).await.unwrap();
+        let result = cmd.execute(&create_service(&db)).await.unwrap();
 
         // Should contain both workflows with step counts
         assert!(
@@ -1740,11 +1295,11 @@ mod tests {
             on_done: None,
             on_reject: None,
         };
-        let add_result = add_cmd.execute(&db).await.unwrap();
+        let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
 
         let cmd = WorkflowListCommand {};
-        let result = cmd.execute(&db).await.unwrap();
+        let result = cmd.execute(&create_service(&db)).await.unwrap();
 
         // Verify the output format: "id - name (N steps) - description"
         assert!(
@@ -1785,11 +1340,11 @@ mod tests {
             on_done: None,
             on_reject: None,
         };
-        let add_result = add_cmd.execute(&db).await.unwrap();
+        let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
 
         let show_cmd = WorkflowShowCommand { id: id.clone() };
-        let result = show_cmd.execute(&db).await.unwrap();
+        let result = show_cmd.execute(&create_service(&db)).await.unwrap();
 
         // Verify header
         assert!(
@@ -1831,13 +1386,12 @@ mod tests {
             id: "nonexistent".to_string(),
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&create_service(&db)).await;
         assert!(result.is_err(), "Should return error for nonexistent ID");
 
         match result {
-            Err(DbError::NotFound { entity, id }) => {
-                assert_eq!(entity, "workflow", "Entity should be 'workflow'");
-                assert_eq!(id, "nonexistent", "ID should be 'nonexistent'");
+            Err(ServiceError::WorkflowNotFound { workflow_id }) => {
+                assert_eq!(workflow_id, "nonexistent", "ID should be 'nonexistent'");
             }
             Err(other) => panic!("Expected NotFound error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
@@ -1858,14 +1412,14 @@ mod tests {
             on_done: None,
             on_reject: None,
         };
-        let add_result = add_cmd.execute(&db).await.unwrap();
+        let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
 
         // Try with uppercase ID
         let show_cmd = WorkflowShowCommand {
             id: id.to_uppercase(),
         };
-        let result = show_cmd.execute(&db).await;
+        let result = show_cmd.execute(&create_service(&db)).await;
 
         assert!(
             result.is_ok(),
@@ -1891,11 +1445,11 @@ mod tests {
             on_done: None,
             on_reject: None,
         };
-        let add_result = add_cmd.execute(&db).await.unwrap();
+        let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
 
         let show_cmd = WorkflowShowCommand { id: id.clone() };
-        let result = show_cmd.execute(&db).await.unwrap();
+        let result = show_cmd.execute(&create_service(&db)).await.unwrap();
 
         // Should not have a Description section
         assert!(
@@ -2110,7 +1664,7 @@ mod tests {
             on_done: None,
             on_reject: None,
         };
-        let add_result = add_cmd.execute(&db).await.unwrap();
+        let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
 
         // Update the name
@@ -2124,7 +1678,7 @@ mod tests {
             on_reject: None,
             clear_on_reject: false,
         };
-        let result = update_cmd.execute(&db).await.unwrap();
+        let result = update_cmd.execute(&create_service(&db)).await.unwrap();
         assert_eq!(result, format!("Updated workflow: {}", id));
 
         // Verify the update
@@ -2147,7 +1701,7 @@ mod tests {
             on_done: None,
             on_reject: None,
         };
-        let add_result = add_cmd.execute(&db).await.unwrap();
+        let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
 
         // Update the description
@@ -2161,7 +1715,7 @@ mod tests {
             on_reject: None,
             clear_on_reject: false,
         };
-        let result = update_cmd.execute(&db).await.unwrap();
+        let result = update_cmd.execute(&create_service(&db)).await.unwrap();
         assert_eq!(result, format!("Updated workflow: {}", id));
 
         // Verify the update
@@ -2184,7 +1738,7 @@ mod tests {
             on_done: None,
             on_reject: None,
         };
-        let add_result = add_cmd.execute(&db).await.unwrap();
+        let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
 
         // Clear the description
@@ -2198,7 +1752,7 @@ mod tests {
             on_reject: None,
             clear_on_reject: false,
         };
-        let result = update_cmd.execute(&db).await.unwrap();
+        let result = update_cmd.execute(&create_service(&db)).await.unwrap();
         assert_eq!(result, format!("Updated workflow: {}", id));
 
         // Verify the update
@@ -2221,14 +1775,13 @@ mod tests {
             clear_on_reject: false,
         };
 
-        let result = update_cmd.execute(&db).await;
+        let result = update_cmd.execute(&create_service(&db)).await;
         assert!(result.is_err());
         match result.unwrap_err() {
-            DbError::NotFound { entity, id } => {
-                assert_eq!(entity, "workflow");
-                assert_eq!(id, "nonexistent");
+            ServiceError::WorkflowNotFound { workflow_id } => {
+                assert_eq!(workflow_id, "nonexistent");
             }
-            e => panic!("Expected NotFound error, got {:?}", e),
+            e => panic!("Expected WorkflowNotFound error, got {:?}", e),
         }
     }
 
@@ -2247,7 +1800,7 @@ mod tests {
             on_done: None,
             on_reject: None,
         };
-        let add_result = add_cmd.execute(&db).await.unwrap();
+        let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
 
         // Try to update with no changes
@@ -2262,10 +1815,10 @@ mod tests {
             clear_on_reject: false,
         };
 
-        let result = update_cmd.execute(&db).await;
+        let result = update_cmd.execute(&create_service(&db)).await;
         assert!(result.is_err());
         match result.unwrap_err() {
-            DbError::InvalidPath { reason, .. } => {
+            ServiceError::ValidationFailed { message: reason } => {
                 assert!(
                     reason.contains("no updates specified"),
                     "Expected 'no updates specified' in error, got: {}",
@@ -2291,7 +1844,7 @@ mod tests {
             on_done: None,
             on_reject: None,
         };
-        let add_result = add_cmd.execute(&db).await.unwrap();
+        let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
 
         // Try to update with empty name
@@ -2306,10 +1859,10 @@ mod tests {
             clear_on_reject: false,
         };
 
-        let result = update_cmd.execute(&db).await;
+        let result = update_cmd.execute(&create_service(&db)).await;
         assert!(result.is_err());
         match result.unwrap_err() {
-            DbError::InvalidPath { reason, .. } => {
+            ServiceError::ValidationFailed { message: reason } => {
                 assert!(
                     reason.contains("name cannot be empty"),
                     "Expected 'name cannot be empty' in error, got: {}",
@@ -2335,7 +1888,7 @@ mod tests {
             on_done: None,
             on_reject: None,
         };
-        let add_result = add_cmd.execute(&db).await.unwrap();
+        let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
 
         // Update using uppercase ID
@@ -2350,7 +1903,7 @@ mod tests {
             clear_on_reject: false,
         };
 
-        let result = update_cmd.execute(&db).await;
+        let result = update_cmd.execute(&create_service(&db)).await;
         assert!(result.is_ok(), "Should update with case-insensitive ID");
 
         // Verify the update
@@ -2398,7 +1951,7 @@ mod tests {
             on_done: None,
             on_reject: None,
         };
-        let add_result = add_cmd.execute(&db).await.unwrap();
+        let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
 
         // Verify it exists
@@ -2406,7 +1959,7 @@ mod tests {
 
         // Delete it
         let delete_cmd = WorkflowDeleteCommand { id: id.clone() };
-        let result = delete_cmd.execute(&db).await.unwrap();
+        let result = delete_cmd.execute(&create_service(&db)).await.unwrap();
         assert_eq!(result, format!("Deleted workflow: {}", id));
 
         // Verify it's gone
@@ -2421,14 +1974,13 @@ mod tests {
             id: "nonexistent".to_string(),
         };
 
-        let result = delete_cmd.execute(&db).await;
+        let result = delete_cmd.execute(&create_service(&db)).await;
         assert!(result.is_err());
         match result.unwrap_err() {
-            DbError::NotFound { entity, id } => {
-                assert_eq!(entity, "workflow");
-                assert_eq!(id, "nonexistent");
+            ServiceError::WorkflowNotFound { workflow_id } => {
+                assert_eq!(workflow_id, "nonexistent");
             }
-            e => panic!("Expected NotFound error, got {:?}", e),
+            e => panic!("Expected WorkflowNotFound error, got {:?}", e),
         }
     }
 
@@ -2447,7 +1999,7 @@ mod tests {
             on_done: None,
             on_reject: None,
         };
-        let add_result = add_cmd.execute(&db).await.unwrap();
+        let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
 
         // Delete using uppercase ID
@@ -2455,7 +2007,7 @@ mod tests {
             id: id.to_uppercase(),
         };
 
-        let result = delete_cmd.execute(&db).await;
+        let result = delete_cmd.execute(&create_service(&db)).await;
         assert!(result.is_ok(), "Should delete with case-insensitive ID");
 
         // Verify it's gone
@@ -2506,7 +2058,7 @@ mod tests {
             on_done: None,
             on_reject: None,
         };
-        let add_result = add_cmd.execute(&db).await.unwrap();
+        let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let workflow_id = extract_workflow_id(&add_result);
 
         // Create a task
@@ -2517,7 +2069,7 @@ mod tests {
             task_id: "abc123".to_string(),
             workflow_id: workflow_id.clone(),
         };
-        let result = assign_cmd.execute(&db).await.unwrap();
+        let result = assign_cmd.execute(&create_service(&db)).await.unwrap();
 
         // Verify the output message
         assert!(
@@ -2552,7 +2104,7 @@ mod tests {
             on_done: None,
             on_reject: None,
         };
-        let add_result = add_cmd.execute(&db).await.unwrap();
+        let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let workflow_id = extract_workflow_id(&add_result);
 
         // Try to assign a non-existent task
@@ -2560,15 +2112,14 @@ mod tests {
             task_id: "nonexistent".to_string(),
             workflow_id: workflow_id.clone(),
         };
-        let result = assign_cmd.execute(&db).await;
+        let result = assign_cmd.execute(&create_service(&db)).await;
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            DbError::NotFound { entity, id } => {
-                assert_eq!(entity, "task");
-                assert_eq!(id, "nonexistent");
+            ServiceError::TaskNotFound { task_id } => {
+                assert_eq!(task_id, "nonexistent");
             }
-            e => panic!("Expected NotFound error, got {:?}", e),
+            e => panic!("Expected TaskNotFound error, got {:?}", e),
         }
     }
 
@@ -2584,15 +2135,14 @@ mod tests {
             task_id: "abc123".to_string(),
             workflow_id: "nonexistent".to_string(),
         };
-        let result = assign_cmd.execute(&db).await;
+        let result = assign_cmd.execute(&create_service(&db)).await;
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            DbError::NotFound { entity, id } => {
-                assert_eq!(entity, "workflow");
-                assert_eq!(id, "nonexistent");
+            ServiceError::WorkflowNotFound { workflow_id } => {
+                assert_eq!(workflow_id, "nonexistent");
             }
-            e => panic!("Expected NotFound error, got {:?}", e),
+            e => panic!("Expected WorkflowNotFound error, got {:?}", e),
         }
     }
 
@@ -2611,7 +2161,7 @@ mod tests {
             on_done: None,
             on_reject: None,
         };
-        let add_result = add_cmd.execute(&db).await.unwrap();
+        let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let workflow_id = extract_workflow_id(&add_result);
 
         // Create a task
@@ -2622,7 +2172,7 @@ mod tests {
             task_id: "DEF456".to_string(),
             workflow_id: workflow_id.to_uppercase(),
         };
-        let result = assign_cmd.execute(&db).await;
+        let result = assign_cmd.execute(&create_service(&db)).await;
         assert!(result.is_ok(), "Should assign with case-insensitive IDs");
     }
 
@@ -2660,7 +2210,7 @@ mod tests {
             on_done: None,
             on_reject: None,
         };
-        let add_result = add_cmd.execute(&db).await.unwrap();
+        let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let workflow_id = extract_workflow_id(&add_result);
 
         // Create a task and assign it
@@ -2669,7 +2219,7 @@ mod tests {
             task_id: "abc123".to_string(),
             workflow_id: workflow_id.clone(),
         };
-        assign_cmd.execute(&db).await.unwrap();
+        assign_cmd.execute(&create_service(&db)).await.unwrap();
 
         // Verify task is assigned
         let task = db.tasks().get("abc123").await.unwrap().unwrap();
@@ -2679,7 +2229,7 @@ mod tests {
         let unassign_cmd = WorkflowUnassignCommand {
             task_id: "abc123".to_string(),
         };
-        let result = unassign_cmd.execute(&db).await.unwrap();
+        let result = unassign_cmd.execute(&create_service(&db)).await.unwrap();
         assert_eq!(result, "Unassigned workflow from task abc123");
 
         // Verify task no longer has workflow assignment
@@ -2701,15 +2251,14 @@ mod tests {
         let unassign_cmd = WorkflowUnassignCommand {
             task_id: "nonexistent".to_string(),
         };
-        let result = unassign_cmd.execute(&db).await;
+        let result = unassign_cmd.execute(&create_service(&db)).await;
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            DbError::NotFound { entity, id } => {
-                assert_eq!(entity, "task");
-                assert_eq!(id, "nonexistent");
+            ServiceError::TaskNotFound { task_id } => {
+                assert_eq!(task_id, "nonexistent");
             }
-            e => panic!("Expected NotFound error, got {:?}", e),
+            e => panic!("Expected TaskNotFound error, got {:?}", e),
         }
     }
 
@@ -2724,7 +2273,7 @@ mod tests {
         let unassign_cmd = WorkflowUnassignCommand {
             task_id: "ABC123".to_string(),
         };
-        let result = unassign_cmd.execute(&db).await;
+        let result = unassign_cmd.execute(&create_service(&db)).await;
         assert!(result.is_ok(), "Should unassign with case-insensitive ID");
     }
 
@@ -2769,7 +2318,7 @@ mod tests {
             on_done: None,
             on_reject: None,
         };
-        let add_result = add_cmd.execute(&db).await.unwrap();
+        let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let workflow_id = extract_workflow_id(&add_result);
 
         // Create a task and assign it
@@ -2778,7 +2327,7 @@ mod tests {
             task_id: "abc123".to_string(),
             workflow_id: workflow_id.clone(),
         };
-        assign_cmd.execute(&db).await.unwrap();
+        assign_cmd.execute(&create_service(&db)).await.unwrap();
 
         // Verify task is at step 0
         let task = db.tasks().get("abc123").await.unwrap().unwrap();
@@ -2788,7 +2337,7 @@ mod tests {
         let advance_cmd = WorkflowAdvanceCommand {
             task_id: "abc123".to_string(),
         };
-        let result = advance_cmd.execute(&db).await.unwrap();
+        let result = advance_cmd.execute(&create_service(&db)).await.unwrap();
         assert!(result.contains("2/3"), "Should show step 2 of 3");
         assert!(result.contains("step2"), "Should show step2 name");
 
@@ -2818,7 +2367,7 @@ mod tests {
             on_done: None,
             on_reject: None,
         };
-        let add_result = add_cmd.execute(&db).await.unwrap();
+        let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let workflow_id = extract_workflow_id(&add_result);
 
         // Create a task and assign it
@@ -2827,19 +2376,19 @@ mod tests {
             task_id: "abc123".to_string(),
             workflow_id: workflow_id.clone(),
         };
-        assign_cmd.execute(&db).await.unwrap();
+        assign_cmd.execute(&create_service(&db)).await.unwrap();
 
         // Advance to last step
         let advance_cmd = WorkflowAdvanceCommand {
             task_id: "abc123".to_string(),
         };
-        advance_cmd.execute(&db).await.unwrap();
+        advance_cmd.execute(&create_service(&db)).await.unwrap();
 
         // Try to advance again - should fail
-        let result = advance_cmd.execute(&db).await;
+        let result = advance_cmd.execute(&create_service(&db)).await;
         assert!(result.is_err());
         match result.unwrap_err() {
-            DbError::ValidationError { message } => {
+            ServiceError::ValidationFailed { message } => {
                 assert!(
                     message.contains("already at the last step"),
                     "Error should mention last step: {}",
@@ -2860,13 +2409,13 @@ mod tests {
         let advance_cmd = WorkflowAdvanceCommand {
             task_id: "abc123".to_string(),
         };
-        let result = advance_cmd.execute(&db).await;
+        let result = advance_cmd.execute(&create_service(&db)).await;
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            DbError::ValidationError { message } => {
+            ServiceError::ValidationFailed { message } => {
                 assert!(
-                    message.contains("not assigned to any workflow"),
+                    message.contains("does not have a workflow assigned"),
                     "Error should mention not assigned: {}",
                     message
                 );
@@ -2882,15 +2431,14 @@ mod tests {
         let advance_cmd = WorkflowAdvanceCommand {
             task_id: "nonexistent".to_string(),
         };
-        let result = advance_cmd.execute(&db).await;
+        let result = advance_cmd.execute(&create_service(&db)).await;
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            DbError::NotFound { entity, id } => {
-                assert_eq!(entity, "task");
-                assert_eq!(id, "nonexistent");
+            ServiceError::TaskNotFound { task_id } => {
+                assert_eq!(task_id, "nonexistent");
             }
-            e => panic!("Expected NotFound error, got {:?}", e),
+            e => panic!("Expected TaskNotFound error, got {:?}", e),
         }
     }
 
@@ -2935,7 +2483,7 @@ mod tests {
             on_done: None,
             on_reject: None,
         };
-        let add_result = add_cmd.execute(&db).await.unwrap();
+        let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let workflow_id = extract_workflow_id(&add_result);
 
         // Create a task and assign it
@@ -2944,14 +2492,14 @@ mod tests {
             task_id: "abc123".to_string(),
             workflow_id: workflow_id.clone(),
         };
-        assign_cmd.execute(&db).await.unwrap();
+        assign_cmd.execute(&create_service(&db)).await.unwrap();
 
         // Advance to step 2
         let advance_cmd = WorkflowAdvanceCommand {
             task_id: "abc123".to_string(),
         };
-        advance_cmd.execute(&db).await.unwrap();
-        advance_cmd.execute(&db).await.unwrap();
+        advance_cmd.execute(&create_service(&db)).await.unwrap();
+        advance_cmd.execute(&create_service(&db)).await.unwrap();
 
         // Verify task is at step 2
         let task = db.tasks().get("abc123").await.unwrap().unwrap();
@@ -2961,7 +2509,7 @@ mod tests {
         let retreat_cmd = WorkflowRetreatCommand {
             task_id: "abc123".to_string(),
         };
-        let result = retreat_cmd.execute(&db).await.unwrap();
+        let result = retreat_cmd.execute(&create_service(&db)).await.unwrap();
         assert!(result.contains("2/3"), "Should show step 2 of 3");
         assert!(result.contains("step2"), "Should show step2 name");
 
@@ -2991,7 +2539,7 @@ mod tests {
             on_done: None,
             on_reject: None,
         };
-        let add_result = add_cmd.execute(&db).await.unwrap();
+        let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let workflow_id = extract_workflow_id(&add_result);
 
         // Create a task and assign it (starts at step 0)
@@ -3000,17 +2548,17 @@ mod tests {
             task_id: "abc123".to_string(),
             workflow_id: workflow_id.clone(),
         };
-        assign_cmd.execute(&db).await.unwrap();
+        assign_cmd.execute(&create_service(&db)).await.unwrap();
 
         // Try to retreat - should fail
         let retreat_cmd = WorkflowRetreatCommand {
             task_id: "abc123".to_string(),
         };
-        let result = retreat_cmd.execute(&db).await;
+        let result = retreat_cmd.execute(&create_service(&db)).await;
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            DbError::ValidationError { message } => {
+            ServiceError::ValidationFailed { message } => {
                 assert!(
                     message.contains("already at the first step"),
                     "Error should mention first step: {}",
@@ -3031,13 +2579,13 @@ mod tests {
         let retreat_cmd = WorkflowRetreatCommand {
             task_id: "abc123".to_string(),
         };
-        let result = retreat_cmd.execute(&db).await;
+        let result = retreat_cmd.execute(&create_service(&db)).await;
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            DbError::ValidationError { message } => {
+            ServiceError::ValidationFailed { message } => {
                 assert!(
-                    message.contains("not assigned to any workflow"),
+                    message.contains("does not have a workflow assigned"),
                     "Error should mention not assigned: {}",
                     message
                 );
@@ -3053,15 +2601,14 @@ mod tests {
         let retreat_cmd = WorkflowRetreatCommand {
             task_id: "nonexistent".to_string(),
         };
-        let result = retreat_cmd.execute(&db).await;
+        let result = retreat_cmd.execute(&create_service(&db)).await;
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            DbError::NotFound { entity, id } => {
-                assert_eq!(entity, "task");
-                assert_eq!(id, "nonexistent");
+            ServiceError::TaskNotFound { task_id } => {
+                assert_eq!(task_id, "nonexistent");
             }
-            e => panic!("Expected NotFound error, got {:?}", e),
+            e => panic!("Expected TaskNotFound error, got {:?}", e),
         }
     }
 
@@ -3096,7 +2643,7 @@ mod tests {
             on_done: None,
             on_reject: None,
         };
-        let second_result = second_workflow.execute(&db).await.unwrap();
+        let second_result = second_workflow.execute(&create_service(&db)).await.unwrap();
         let second_workflow_id = extract_workflow_id(&second_result);
 
         // Create a first workflow with on_done chaining to second
@@ -3110,7 +2657,7 @@ mod tests {
             on_done: Some(second_workflow_id.clone()),
             on_reject: None,
         };
-        let first_result = first_workflow.execute(&db).await.unwrap();
+        let first_result = first_workflow.execute(&create_service(&db)).await.unwrap();
         let first_workflow_id = extract_workflow_id(&first_result);
 
         // Create a task and assign it to the first workflow
@@ -3119,13 +2666,13 @@ mod tests {
             task_id: "abc123".to_string(),
             workflow_id: first_workflow_id.clone(),
         };
-        assign_cmd.execute(&db).await.unwrap();
+        assign_cmd.execute(&create_service(&db)).await.unwrap();
 
         // Advance - should chain to the second workflow
         let advance_cmd = WorkflowAdvanceCommand {
             task_id: "abc123".to_string(),
         };
-        let result = advance_cmd.execute(&db).await.unwrap();
+        let result = advance_cmd.execute(&create_service(&db)).await.unwrap();
 
         // Verify the chaining message
         assert!(
@@ -3169,7 +2716,10 @@ mod tests {
             on_done: None,
             on_reject: None,
         };
-        let recovery_result = recovery_workflow.execute(&db).await.unwrap();
+        let recovery_result = recovery_workflow
+            .execute(&create_service(&db))
+            .await
+            .unwrap();
         let recovery_workflow_id = extract_workflow_id(&recovery_result);
 
         // Create a main workflow with on_reject chaining
@@ -3183,7 +2733,7 @@ mod tests {
             on_done: None,
             on_reject: Some(recovery_workflow_id.clone()),
         };
-        let main_result = main_workflow.execute(&db).await.unwrap();
+        let main_result = main_workflow.execute(&create_service(&db)).await.unwrap();
         let main_workflow_id = extract_workflow_id(&main_result);
 
         // Create a task and assign it
@@ -3192,13 +2742,13 @@ mod tests {
             task_id: "abc123".to_string(),
             workflow_id: main_workflow_id.clone(),
         };
-        assign_cmd.execute(&db).await.unwrap();
+        assign_cmd.execute(&create_service(&db)).await.unwrap();
 
         // Reject - should chain to recovery workflow
         let reject_cmd = WorkflowRejectCommand {
             task_id: "abc123".to_string(),
         };
-        let result = reject_cmd.execute(&db).await.unwrap();
+        let result = reject_cmd.execute(&create_service(&db)).await.unwrap();
 
         // Verify the chaining message
         assert!(
@@ -3241,7 +2791,7 @@ mod tests {
             on_done: None,
             on_reject: None,
         };
-        let result = workflow.execute(&db).await.unwrap();
+        let result = workflow.execute(&create_service(&db)).await.unwrap();
         let workflow_id = extract_workflow_id(&result);
 
         // Create a task and assign it
@@ -3250,13 +2800,13 @@ mod tests {
             task_id: "abc123".to_string(),
             workflow_id: workflow_id.clone(),
         };
-        assign_cmd.execute(&db).await.unwrap();
+        assign_cmd.execute(&create_service(&db)).await.unwrap();
 
         // Reject - should unassign the workflow
         let reject_cmd = WorkflowRejectCommand {
             task_id: "abc123".to_string(),
         };
-        let result = reject_cmd.execute(&db).await.unwrap();
+        let result = reject_cmd.execute(&create_service(&db)).await.unwrap();
 
         // Verify the unassignment message
         assert!(
@@ -3281,13 +2831,13 @@ mod tests {
         let reject_cmd = WorkflowRejectCommand {
             task_id: "abc123".to_string(),
         };
-        let result = reject_cmd.execute(&db).await;
+        let result = reject_cmd.execute(&create_service(&db)).await;
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            DbError::ValidationError { message } => {
+            ServiceError::ValidationFailed { message } => {
                 assert!(
-                    message.contains("not assigned to any workflow"),
+                    message.contains("does not have a workflow assigned"),
                     "Error should mention not assigned: {}",
                     message
                 );
@@ -3303,15 +2853,14 @@ mod tests {
         let reject_cmd = WorkflowRejectCommand {
             task_id: "nonexistent".to_string(),
         };
-        let result = reject_cmd.execute(&db).await;
+        let result = reject_cmd.execute(&create_service(&db)).await;
 
         assert!(result.is_err());
         match result.unwrap_err() {
-            DbError::NotFound { entity, id } => {
-                assert_eq!(entity, "task");
-                assert_eq!(id, "nonexistent");
+            ServiceError::TaskNotFound { task_id } => {
+                assert_eq!(task_id, "nonexistent");
             }
-            e => panic!("Expected NotFound error, got {:?}", e),
+            e => panic!("Expected TaskNotFound error, got {:?}", e),
         }
     }
 
@@ -3330,7 +2879,7 @@ mod tests {
             on_done: None,
             on_reject: None,
         };
-        let done_result = done_workflow.execute(&db).await.unwrap();
+        let done_result = done_workflow.execute(&create_service(&db)).await.unwrap();
         let done_id = extract_workflow_id(&done_result);
 
         let reject_workflow = WorkflowAddCommand {
@@ -3343,7 +2892,7 @@ mod tests {
             on_done: None,
             on_reject: None,
         };
-        let reject_result = reject_workflow.execute(&db).await.unwrap();
+        let reject_result = reject_workflow.execute(&create_service(&db)).await.unwrap();
         let reject_id = extract_workflow_id(&reject_result);
 
         // Create a main workflow with both chaining options
@@ -3357,12 +2906,12 @@ mod tests {
             on_done: Some(done_id.clone()),
             on_reject: Some(reject_id.clone()),
         };
-        let main_result = main_workflow.execute(&db).await.unwrap();
+        let main_result = main_workflow.execute(&create_service(&db)).await.unwrap();
         let main_id = extract_workflow_id(&main_result);
 
         // Show the workflow
         let show_cmd = WorkflowShowCommand { id: main_id };
-        let result = show_cmd.execute(&db).await.unwrap();
+        let result = show_cmd.execute(&create_service(&db)).await.unwrap();
 
         // Verify chaining info is displayed
         assert!(
@@ -3403,7 +2952,7 @@ mod tests {
         let db = setup_test_db().await;
 
         let cmd = WorkflowMigrateCommand { dry_run: false };
-        let result = cmd.execute(&db).await.unwrap();
+        let result = cmd.execute(&create_service(&db)).await.unwrap();
 
         assert!(
             result.contains("No tasks found without workflow assignment"),
@@ -3421,7 +2970,7 @@ mod tests {
         create_test_task(&db, "task2", "Task 2").await;
 
         let cmd = WorkflowMigrateCommand { dry_run: false };
-        let result = cmd.execute(&db).await.unwrap();
+        let result = cmd.execute(&create_service(&db)).await.unwrap();
 
         assert!(
             result.contains("Migration complete: 2 tasks migrated"),
@@ -3445,7 +2994,7 @@ mod tests {
         create_test_task(&db, "task1", "Task 1").await;
 
         let cmd = WorkflowMigrateCommand { dry_run: true };
-        let result = cmd.execute(&db).await.unwrap();
+        let result = cmd.execute(&create_service(&db)).await.unwrap();
 
         assert!(
             result.contains("[DRY RUN]"),
@@ -3480,7 +3029,7 @@ mod tests {
         create_test_task(&db, "normal", "Normal Task").await;
 
         let cmd = WorkflowMigrateCommand { dry_run: false };
-        let result = cmd.execute(&db).await.unwrap();
+        let result = cmd.execute(&create_service(&db)).await.unwrap();
 
         assert!(
             result.contains("1 tasks migrated"),
@@ -3508,7 +3057,7 @@ mod tests {
 
         // First migration
         let cmd = WorkflowMigrateCommand { dry_run: false };
-        let result1 = cmd.execute(&db).await.unwrap();
+        let result1 = cmd.execute(&create_service(&db)).await.unwrap();
         assert!(
             result1.contains("1 tasks migrated"),
             "First run should migrate 1: {}",
@@ -3516,7 +3065,7 @@ mod tests {
         );
 
         // Second migration
-        let result2 = cmd.execute(&db).await.unwrap();
+        let result2 = cmd.execute(&create_service(&db)).await.unwrap();
         assert!(
             result2.contains("No tasks found without workflow assignment"),
             "Second run should find no tasks: {}",

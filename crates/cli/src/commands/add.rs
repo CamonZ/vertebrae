@@ -3,7 +3,9 @@
 //! Implements the `vtb add` command to create new tasks with all supported options.
 
 use clap::Args;
-use vertebrae_core::{CreateTaskOptions, ServiceError, TaskService};
+use vertebrae_core::{
+    CreateTaskOptions, DefaultWorkflowService, ServiceError, TaskService, WorkflowService,
+};
 use vertebrae_db::{Level, Priority};
 
 /// Create a new task
@@ -138,26 +140,18 @@ impl AddCommand {
             options = options.with_needs_review(true);
         }
 
-        // Determine workflow (default to "default")
-        // Note: The service layer will handle workflow assignment automatically
-        if let Some(workflow_id) = &self.workflow {
-            // For now, workflow validation still needs database access
-            // This will be handled by the service layer in the future
-            #[allow(deprecated)]
-            let db = service.database();
-            if !db.workflows().exists(workflow_id).await? {
-                return Err(ServiceError::workflow_not_found(workflow_id));
-            }
-        }
-
         // Create the task using the service layer
         // This will automatically fire MutationCallback events
         let id = service.create_task(options).await?;
 
         // Assign to custom workflow if specified
         if let Some(workflow_id) = &self.workflow {
-            let workflow_thing = surrealdb::sql::Thing::from(("workflow", workflow_id.as_str()));
-            service.assign_workflow(&id, &workflow_thing).await?;
+            #[allow(deprecated)]
+            let db = service.database().clone();
+            let workflow_service = DefaultWorkflowService::new(db);
+
+            // Validate workflow exists and assign
+            workflow_service.assign_workflow(&id, workflow_id).await?;
         }
 
         Ok(id)

@@ -41,7 +41,9 @@
 //! ```
 
 pub mod error;
+pub mod id_generator;
 pub mod service;
+pub mod workflow_service;
 
 // Re-export main types for convenience
 pub use error::{ServiceError, ServiceResult};
@@ -49,9 +51,14 @@ pub use service::{
     CreateTaskOptions, DefaultTaskService, TaskService, TaskTreeNode, TaskWithRelations,
     TransitionResult, TreeFilterOptions, UnblockedTask, UpdateTaskOptions,
 };
+pub use workflow_service::{
+    AssignResult, CreateWorkflowOptions, DefaultWorkflowService, MigrationResult, RejectResult,
+    StepTransitionResult, UpdateWorkflowOptions, WorkflowInfo, WorkflowMutationCallback,
+    WorkflowMutationEvent, WorkflowService, WorkflowStepInput, WorkflowSummary,
+};
 
 // Re-export commonly used types from vertebrae-db
 pub use vertebrae_db::{
     BlockerNode, CodeRef, Database, Level, Priority, Section, SectionType, Status, Task,
-    TaskFilter, TaskSummary, TaskUpdate,
+    TaskFilter, TaskSummary, TaskUpdate, Workflow, WorkflowStep,
 };
