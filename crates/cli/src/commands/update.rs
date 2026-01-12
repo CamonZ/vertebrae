@@ -4,12 +4,11 @@
 //! title, description, priority, tags, parent relationship, and sections.
 
 use clap::Args;
-use serde::Deserialize;
 use vertebrae_core::{ServiceError, TaskService, UpdateTaskOptions};
 use vertebrae_db::{Priority, SectionType};
 
 #[cfg(test)]
-use vertebrae_db::Database;
+use {serde::Deserialize, vertebrae_db::Database};
 
 /// Update an existing task
 #[derive(Debug, Args)]
@@ -91,7 +90,8 @@ impl UpdateCommand {
     /// Execute the update command.
     ///
     /// Builds an UpdateTaskOptions from CLI arguments and uses the service
-    /// layer to apply updates. Section handling is performed separately.
+    /// layer to apply updates. Section edits and removals are also performed
+    /// via the service layer.
     ///
     /// # Arguments
     ///
@@ -178,31 +178,7 @@ impl UpdateCommand {
         // Apply all field/tag/parent updates via service layer
         service.update_task(&id, options).await?;
 
-        // Handle section updates via service layer
-        self.apply_section_updates(service, &id).await?;
-
-        Ok(id)
-    }
-
-    /// Check if any updates were specified.
-    fn has_updates(&self) -> bool {
-        self.title.is_some()
-            || self.description.is_some()
-            || self.priority.is_some()
-            || !self.add_tags.is_empty()
-            || !self.remove_tags.is_empty()
-            || self.parent.is_some()
-            || self.edit_section.is_some()
-            || self.remove_section.is_some()
-    }
-
-    /// Apply section updates (edit and remove) via service layer.
-    async fn apply_section_updates(
-        &self,
-        service: &dyn TaskService,
-        id: &str,
-    ) -> Result<(), ServiceError> {
-        // Handle edit section
+        // Handle section edits via service layer
         if let Some(args) = &self.edit_section {
             if args.len() != 3 {
                 return Err(ServiceError::validation_failed(
@@ -222,11 +198,11 @@ impl UpdateCommand {
 
             let new_content = &args[2];
             service
-                .edit_section_by_ordinal(id, section_type, ordinal, new_content)
+                .edit_section_by_ordinal(&id, section_type, ordinal, new_content)
                 .await?;
         }
 
-        // Handle remove section
+        // Handle section removals via service layer
         if let Some(args) = &self.remove_section {
             if args.len() != 2 {
                 return Err(ServiceError::validation_failed(
@@ -245,28 +221,24 @@ impl UpdateCommand {
             })?;
 
             service
-                .remove_section_by_ordinal(id, section_type, ordinal)
+                .remove_section_by_ordinal(&id, section_type, ordinal)
                 .await?;
         }
 
-        Ok(())
+        Ok(id)
     }
-}
 
-/// Section row from database (used in tests)
-#[allow(dead_code)]
-#[derive(Debug, Deserialize, Clone)]
-struct SectionRow {
-    #[serde(rename = "type", default)]
-    section_type: Option<String>,
-    #[serde(default)]
-    content: Option<String>,
-    #[serde(default)]
-    order: Option<u32>,
-    #[serde(default)]
-    done: Option<bool>,
-    #[serde(default)]
-    done_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Check if any updates were specified.
+    fn has_updates(&self) -> bool {
+        self.title.is_some()
+            || self.description.is_some()
+            || self.priority.is_some()
+            || !self.add_tags.is_empty()
+            || !self.remove_tags.is_empty()
+            || self.parent.is_some()
+            || self.edit_section.is_some()
+            || self.remove_section.is_some()
+    }
 }
 
 #[cfg(test)]
@@ -1412,18 +1384,9 @@ mod tests {
     }
 
     /// Helper to get sections from a task
-    async fn get_sections(db: &Database, id: &str) -> Vec<SectionRow> {
+    async fn get_sections(db: &Database, id: &str) -> Vec<vertebrae_db::Section> {
         let task = db.tasks().get(id).await.unwrap().unwrap();
         task.sections
-            .into_iter()
-            .map(|s| SectionRow {
-                section_type: Some(s.section_type.to_string()),
-                content: Some(s.content),
-                order: s.order,
-                done: s.done,
-                done_at: s.done_at,
-            })
-            .collect()
     }
 
     #[tokio::test]
@@ -1464,18 +1427,18 @@ mod tests {
         assert_eq!(sections.len(), 2);
 
         // Find steps and verify renumbering
-        let mut steps: Vec<SectionRow> = sections
+        let mut steps: Vec<_> = sections
             .into_iter()
-            .filter(|s| s.section_type.as_deref() == Some("step"))
+            .filter(|s| s.section_type == SectionType::Step)
             .collect();
 
         // Sort by order to match expectation
         steps.sort_by_key(|s| s.order.unwrap_or(u32::MAX));
 
         assert_eq!(steps.len(), 2);
-        assert_eq!(steps[0].content.as_deref(), Some("Step 1"));
+        assert_eq!(steps[0].content, "Step 1");
         assert_eq!(steps[0].order, Some(1)); // Renumbered from 2 to 1
-        assert_eq!(steps[1].content.as_deref(), Some("Step 2"));
+        assert_eq!(steps[1].content, "Step 2");
         assert_eq!(steps[1].order, Some(2)); // Renumbered from 3 to 2
     }
 
@@ -1524,7 +1487,7 @@ mod tests {
         // Verify section was updated
         let sections = get_sections(service.database(), "abc123").await;
         assert_eq!(sections.len(), 1);
-        assert_eq!(sections[0].content.as_deref(), Some("Updated step content"));
+        assert_eq!(sections[0].content, "Updated step content");
     }
 
     #[tokio::test]
