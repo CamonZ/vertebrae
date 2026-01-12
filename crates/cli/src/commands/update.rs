@@ -5,7 +5,7 @@
 
 use clap::Args;
 use serde::Deserialize;
-use vertebrae_db::{Database, DbError, Priority, SectionType};
+use vertebrae_db::{Database, DbError, Priority, SectionType, TaskUpdate};
 
 /// Update an existing task
 #[derive(Debug, Args)]
@@ -81,15 +81,6 @@ fn parse_section_type(s: &str) -> Result<SectionType, String> {
             s
         )),
     }
-}
-
-/// Result from querying a task - minimal fields for update
-#[derive(Debug, Deserialize)]
-struct TaskRow {
-    #[allow(dead_code)]
-    id: surrealdb::sql::Thing,
-    #[serde(default)]
-    tags: Vec<String>,
 }
 
 impl UpdateCommand {
@@ -169,17 +160,7 @@ impl UpdateCommand {
 
     /// Check if a task with the given ID exists.
     async fn task_exists(&self, db: &Database, id: &str) -> Result<bool, DbError> {
-        #[derive(serde::Deserialize)]
-        struct IdOnly {
-            #[allow(dead_code)]
-            id: surrealdb::sql::Thing,
-        }
-
-        let query = format!("SELECT id FROM task:{} LIMIT 1", id);
-        let mut result = db.client().query(&query).await?;
-
-        let tasks: Vec<IdOnly> = result.take(0)?;
-        Ok(!tasks.is_empty())
+        db.tasks().exists(id).await
     }
 
     /// Check if any updates were specified.
@@ -196,31 +177,26 @@ impl UpdateCommand {
 
     /// Apply field updates (title, description, priority).
     async fn apply_field_updates(&self, db: &Database, id: &str) -> Result<(), DbError> {
-        let mut updates = Vec::new();
+        let mut updates = TaskUpdate::new();
 
         if let Some(title) = &self.title {
-            // Escape quotes in title
-            let escaped_title = title.replace('\"', "\\\"");
-            updates.push(format!("title = \"{}\"", escaped_title));
+            updates = updates.with_title(title.clone());
         }
 
         if let Some(description) = &self.description {
             if description.is_empty() {
-                // Empty string clears description
-                updates.push("description = NONE".to_string());
+                updates = updates.clear_description();
             } else {
-                let escaped_desc = description.replace('\"', "\\\"");
-                updates.push(format!("description = \"{}\"", escaped_desc));
+                updates = updates.with_description(description.clone());
             }
         }
 
         if let Some(priority) = &self.priority {
-            updates.push(format!("priority = \"{}\"", priority.as_str()));
+            updates = updates.with_priority(priority.clone());
         }
 
-        if !updates.is_empty() {
-            let query = format!("UPDATE task:{} SET {}", id, updates.join(", "));
-            db.client().query(&query).await?;
+        if updates.has_updates() {
+            db.tasks().update(id, &updates).await?;
         }
 
         Ok(())
@@ -232,41 +208,19 @@ impl UpdateCommand {
             return Ok(());
         }
 
-        // Fetch current tags
-        let query = format!("SELECT id, tags FROM task:{}", id);
-        let mut result = db.client().query(&query).await?;
-        let task: Option<TaskRow> = result.take(0)?;
-
-        let mut current_tags: Vec<String> = task.map(|t| t.tags).unwrap_or_default();
+        let mut updates = TaskUpdate::new();
 
         // Remove tags
         for tag in &self.remove_tags {
-            current_tags.retain(|t| t != tag);
+            updates = updates.remove_tag(tag.clone());
         }
 
-        // Add tags (avoiding duplicates)
+        // Add tags
         for tag in &self.add_tags {
-            if !current_tags.contains(tag) {
-                current_tags.push(tag.clone());
-            }
+            updates = updates.add_tag(tag.clone());
         }
 
-        // Update tags in database
-        let tags_str = if current_tags.is_empty() {
-            "[]".to_string()
-        } else {
-            format!(
-                "[{}]",
-                current_tags
-                    .iter()
-                    .map(|t| format!("\"{}\"", t.replace('\"', "\\\"")))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-        };
-
-        let update_query = format!("UPDATE task:{} SET tags = {}", id, tags_str);
-        db.client().query(&update_query).await?;
+        db.tasks().update(id, &updates).await?;
 
         Ok(())
     }
@@ -278,15 +232,14 @@ impl UpdateCommand {
         };
 
         // First, delete any existing child_of edge from this task
-        let delete_query = format!("DELETE child_of WHERE in = task:{}", id);
-        db.client().query(&delete_query).await?;
+        db.relationships().remove_child_of(id).await?;
 
         // If parent is not empty, create new edge
         if !parent_id.is_empty() {
             let parent_id_lower = parent_id.to_lowercase();
-            let create_query =
-                format!("RELATE task:{} -> child_of -> task:{}", id, parent_id_lower);
-            db.client().query(&create_query).await?;
+            db.relationships()
+                .create_child_of(id, &parent_id_lower)
+                .await?;
         }
 
         Ok(())
@@ -353,27 +306,41 @@ impl UpdateCommand {
         ordinal: u32,
         new_content: &str,
     ) -> Result<(), DbError> {
+        use vertebrae_db::Section;
+
         // Fetch current sections
         let sections = self.fetch_sections(db, id).await?;
         let type_str = section_type.as_str();
 
         // Find sections of this type and locate the one at ordinal
         let mut found = false;
-        let mut new_sections: Vec<String> = Vec::new();
+        let mut new_sections: Vec<Section> = Vec::new();
 
         for section in &sections {
             if section.section_type.as_deref() == Some(type_str) && section.order == Some(ordinal) {
                 // Replace this section's content
                 found = true;
-                let escaped_content = new_content.replace('\\', "\\\\").replace('"', "\\\"");
-                new_sections.push(format!(
-                    r#"{{ "type": "{}", "content": "{}", "order": {} }}"#,
-                    type_str, escaped_content, ordinal
-                ));
+                new_sections.push(Section {
+                    section_type: section_type.clone(),
+                    content: new_content.to_string(),
+                    order: Some(ordinal),
+                    done: Some(false),
+                    done_at: None,
+                    refs: vec![],
+                });
             } else {
                 // Keep section as-is
-                if let Some(section_str) = self.section_to_string(section) {
-                    new_sections.push(section_str);
+                if let (Some(st), Some(content)) = (&section.section_type, &section.content)
+                    && let Ok(parsed_type) = parse_section_type(st)
+                {
+                    new_sections.push(Section {
+                        section_type: parsed_type,
+                        content: content.clone(),
+                        order: section.order,
+                        done: section.done,
+                        done_at: section.done_at,
+                        refs: vec![],
+                    });
                 }
             }
         }
@@ -386,9 +353,8 @@ impl UpdateCommand {
         }
 
         // Update sections in database
-        let sections_array = format!("[{}]", new_sections.join(", "));
-        let query = format!("UPDATE task:{} SET sections = {}", id, sections_array);
-        db.client().query(&query).await?;
+        let updates = TaskUpdate::new().with_sections(new_sections);
+        db.tasks().update(id, &updates).await?;
 
         Ok(())
     }
@@ -401,6 +367,8 @@ impl UpdateCommand {
         section_type: &SectionType,
         ordinal: u32,
     ) -> Result<(), DbError> {
+        use vertebrae_db::Section;
+
         // Fetch current sections
         let sections = self.fetch_sections(db, id).await?;
         let type_str = section_type.as_str();
@@ -421,14 +389,22 @@ impl UpdateCommand {
         // 1. Keep all sections that are NOT of this type
         // 2. Keep sections of this type that don't have the target ordinal
         // 3. Renumber the remaining sections of this type
-        let mut new_sections: Vec<String> = Vec::new();
+        let mut new_sections: Vec<Section> = Vec::new();
 
         // First, add all non-matching type sections
         for s in &sections {
             if s.section_type.as_deref() != Some(type_str)
-                && let Some(section_str) = self.section_to_string(s)
+                && let (Some(st), Some(content)) = (&s.section_type, &s.content)
+                && let Ok(parsed_type) = parse_section_type(st)
             {
-                new_sections.push(section_str);
+                new_sections.push(Section {
+                    section_type: parsed_type,
+                    content: content.clone(),
+                    order: s.order,
+                    done: s.done,
+                    done_at: s.done_at,
+                    refs: vec![],
+                });
             }
         }
 
@@ -443,62 +419,51 @@ impl UpdateCommand {
 
         // Add with renumbered ordinals
         for (new_ordinal, s) in sections_of_type.iter().enumerate() {
-            if let (Some(content), Some(_)) = (&s.content, &s.section_type) {
-                let escaped_content = content.replace('\\', "\\\\").replace('"', "\\\"");
-                new_sections.push(format!(
-                    r#"{{ "type": "{}", "content": "{}", "order": {} }}"#,
-                    type_str, escaped_content, new_ordinal
-                ));
+            if let (Some(st), Some(content)) = (&s.section_type, &s.content)
+                && let Ok(parsed_type) = parse_section_type(st)
+            {
+                new_sections.push(Section {
+                    section_type: parsed_type,
+                    content: content.clone(),
+                    order: Some(new_ordinal as u32),
+                    done: s.done,
+                    done_at: s.done_at,
+                    refs: vec![],
+                });
             }
         }
 
         // Update sections in database
-        let sections_array = format!("[{}]", new_sections.join(", "));
-        let query = format!("UPDATE task:{} SET sections = {}", id, sections_array);
-        db.client().query(&query).await?;
+        let updates = TaskUpdate::new().with_sections(new_sections);
+        db.tasks().update(id, &updates).await?;
 
         Ok(())
     }
 
     /// Fetch sections from a task.
     async fn fetch_sections(&self, db: &Database, id: &str) -> Result<Vec<SectionRow>, DbError> {
-        let query = format!("SELECT sections FROM task:{}", id);
-        let mut result = db.client().query(&query).await?;
-
-        #[derive(Deserialize)]
-        struct SectionsRow {
-            #[serde(default)]
-            sections: Vec<SectionRow>,
-        }
-
-        let row: Option<SectionsRow> = result.take(0)?;
-        Ok(row.map(|r| r.sections).unwrap_or_default())
-    }
-
-    /// Convert a SectionRow to its string representation for the query.
-    fn section_to_string(&self, section: &SectionRow) -> Option<String> {
-        let section_type = section.section_type.as_ref()?;
-        let content = section.content.as_ref()?;
-        let escaped_content = content.replace('\\', "\\\\").replace('"', "\\\"");
-
-        if let Some(order) = section.order {
-            Some(format!(
-                r#"{{ "type": "{}", "content": "{}", "order": {} }}"#,
-                section_type, escaped_content, order
-            ))
+        // Get the task to access its sections
+        if let Some(task) = db.tasks().get(id).await? {
+            let sections = task
+                .sections
+                .into_iter()
+                .map(|s| SectionRow {
+                    section_type: Some(s.section_type.to_string()),
+                    content: Some(s.content),
+                    order: s.order,
+                    done: s.done,
+                    done_at: s.done_at,
+                })
+                .collect();
+            Ok(sections)
         } else {
-            Some(format!(
-                r#"{{ "type": "{}", "content": "{}" }}"#,
-                section_type, escaped_content
-            ))
+            Ok(Vec::new())
         }
     }
 
     /// Update the updated_at timestamp.
     async fn update_timestamp(&self, db: &Database, id: &str) -> Result<(), DbError> {
-        let query = format!("UPDATE task:{} SET updated_at = time::now()", id);
-        db.client().query(&query).await?;
-        Ok(())
+        db.tasks().update_timestamp(id).await
     }
 }
 
@@ -511,6 +476,10 @@ struct SectionRow {
     content: Option<String>,
     #[serde(default)]
     order: Option<u32>,
+    #[serde(default)]
+    done: Option<bool>,
+    #[serde(default)]
+    done_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[cfg(test)]
@@ -535,42 +504,57 @@ mod tests {
         priority: Option<&str>,
         tags: &[&str],
     ) {
-        let priority_str = match priority {
-            Some(p) => format!("\"{}\"", p),
-            None => "NONE".to_string(),
+        use vertebrae_db::{Level, Status, Task};
+
+        let level_enum = match level {
+            "epic" => Level::Epic,
+            "ticket" => Level::Ticket,
+            _ => Level::Task,
         };
 
-        let tags_str = if tags.is_empty() {
-            "[]".to_string()
-        } else {
-            format!(
-                "[{}]",
-                tags.iter()
-                    .map(|t| format!("\"{}\"", t))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
+        let status_enum = match status {
+            "done" => Status::Done,
+            "in_progress" => Status::InProgress,
+            "todo" => Status::Todo,
+            _ => Status::Backlog,
         };
 
-        let query = format!(
-            r#"CREATE task:{} SET
-                title = "{}",
-                level = "{}",
-                status = "{}",
-                priority = {},
-                tags = {},
-                sections = [],
-                refs = []"#,
-            id, title, level, status, priority_str, tags_str
-        );
+        let priority_enum = priority.and_then(|p| match p {
+            "low" => Some(vertebrae_db::Priority::Low),
+            "medium" => Some(vertebrae_db::Priority::Medium),
+            "high" => Some(vertebrae_db::Priority::High),
+            "critical" => Some(vertebrae_db::Priority::Critical),
+            _ => None,
+        });
 
-        db.client().query(&query).await.unwrap();
+        let task = Task {
+            title: title.to_string(),
+            description: None,
+            level: level_enum,
+            status: status_enum,
+            priority: priority_enum,
+            tags: tags.iter().map(|t| t.to_string()).collect(),
+            sections: vec![],
+            code_refs: vec![],
+            needs_human_review: None,
+            created_at: None,
+            updated_at: None,
+            started_at: None,
+            completed_at: None,
+            id: None,
+            workflow_id: None,
+            current_step: None,
+        };
+
+        db.tasks().create(id, &task).await.unwrap();
     }
 
     /// Helper to create a child_of relationship
     async fn create_child_of(db: &Database, child_id: &str, parent_id: &str) {
-        let query = format!("RELATE task:{} -> child_of -> task:{}", child_id, parent_id);
-        db.client().query(&query).await.unwrap();
+        db.relationships()
+            .create_child_of(child_id, parent_id)
+            .await
+            .unwrap();
     }
 
     /// Struct for querying task fields
@@ -581,30 +565,23 @@ mod tests {
         #[serde(default)]
         tags: Vec<String>,
         #[serde(default)]
-        updated_at: Option<surrealdb::sql::Datetime>,
+        updated_at: Option<chrono::DateTime<chrono::Utc>>,
     }
 
     /// Helper to get a task's fields
     async fn get_task(db: &Database, id: &str) -> Option<TaskFields> {
-        let query = format!("SELECT title, priority, tags, updated_at FROM task:{}", id);
-        let mut result = db.client().query(&query).await.ok()?;
-        result.take(0).ok()?
+        let task = db.tasks().get(id).await.ok()??;
+        Some(TaskFields {
+            title: task.title,
+            priority: task.priority.map(|p| p.to_string()),
+            tags: task.tags,
+            updated_at: task.updated_at,
+        })
     }
 
     /// Helper to get parent ID for a task
     async fn get_parent_id(db: &Database, id: &str) -> Option<String> {
-        #[derive(Debug, Deserialize)]
-        struct ParentRow {
-            id: surrealdb::sql::Thing,
-        }
-
-        let query = format!(
-            "SELECT id FROM task WHERE <-child_of<-task CONTAINS task:{}",
-            id
-        );
-        let mut result = db.client().query(&query).await.ok()?;
-        let parents: Vec<ParentRow> = result.take(0).ok()?;
-        parents.first().map(|p| p.id.id.to_string())
+        db.relationships().get_parent(id).await.ok()?
     }
 
     #[test]
@@ -1263,18 +1240,43 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_preserves_other_fields() {
+        use vertebrae_db::{CodeRef, Level, Section, SectionType, Status, Task};
+
         let db = setup_test_db().await;
 
         // Create task with specific values
-        let query = r#"CREATE task:abc123 SET
-            title = "Original",
-            level = "ticket",
-            status = "in_progress",
-            priority = "high",
-            tags = ["backend", "api"],
-            sections = [{ type: "goal", content: "Important goal" }],
-            refs = [{ path: "src/main.rs", line_start: 10 }]"#;
-        db.client().query(query).await.unwrap();
+        let task = Task {
+            title: "Original".to_string(),
+            description: None,
+            level: Level::Ticket,
+            status: Status::InProgress,
+            priority: Some(vertebrae_db::Priority::High),
+            tags: vec!["backend".to_string(), "api".to_string()],
+            sections: vec![Section {
+                section_type: SectionType::Goal,
+                content: "Important goal".to_string(),
+                order: None,
+                done: None,
+                done_at: None,
+                refs: vec![],
+            }],
+            code_refs: vec![CodeRef {
+                path: "src/main.rs".to_string(),
+                name: None,
+                description: None,
+                line_start: Some(10),
+                line_end: None,
+            }],
+            needs_human_review: None,
+            created_at: None,
+            updated_at: None,
+            started_at: None,
+            completed_at: None,
+            id: None,
+            workflow_id: None,
+            current_step: None,
+        };
+        db.tasks().create("abc123", &task).await.unwrap();
 
         // Only update title
         let cmd = UpdateCommand {
@@ -1293,32 +1295,14 @@ mod tests {
         assert!(result.is_ok());
 
         // Verify other fields preserved
-        #[derive(Debug, Deserialize)]
-        struct FullTask {
-            title: String,
-            level: String,
-            status: String,
-            priority: Option<String>,
-            #[serde(default)]
-            tags: Vec<String>,
-            #[serde(default)]
-            sections: Vec<serde_json::Value>,
-            #[serde(default, rename = "refs")]
-            code_refs: Vec<serde_json::Value>,
-        }
-
-        let query = "SELECT * FROM task:abc123";
-        let mut result = db.client().query(query).await.unwrap();
-        let task: Option<FullTask> = result.take(0).unwrap();
-        let task = task.unwrap();
+        let task = db.tasks().get("abc123").await.unwrap().unwrap();
 
         assert_eq!(task.title, "Updated title");
-        assert_eq!(task.level, "ticket");
-        assert_eq!(task.status, "in_progress");
-        assert_eq!(task.priority, Some("high".to_string()));
+        assert_eq!(task.level, Level::Ticket);
+        assert_eq!(task.status, Status::InProgress);
+        assert_eq!(task.priority, Some(vertebrae_db::Priority::High));
+        // Verify tags and other fields are preserved
         assert_eq!(task.tags, vec!["backend", "api"]);
-        assert_eq!(task.sections.len(), 1);
-        assert_eq!(task.code_refs.len(), 1);
     }
 
     #[test]
@@ -1397,34 +1381,36 @@ mod tests {
         assert!(result.is_ok());
 
         // Verify description was set
-        #[derive(Debug, Deserialize)]
-        struct TaskWithDesc {
-            description: Option<String>,
-        }
-
-        let query = "SELECT description FROM task:abc123";
-        let mut result = db.client().query(query).await.unwrap();
-        let task: Option<TaskWithDesc> = result.take(0).unwrap();
-        assert_eq!(
-            task.unwrap().description,
-            Some("New description".to_string())
-        );
+        let task = db.tasks().get("abc123").await.unwrap().unwrap();
+        assert_eq!(task.description, Some("New description".to_string()));
     }
 
     #[tokio::test]
     async fn test_update_clear_description() {
+        use vertebrae_db::{Level, Status, Task};
+
         let db = setup_test_db().await;
 
         // Create task with description
-        let query = r#"CREATE task:abc123 SET
-            title = "Test task",
-            description = "Original description",
-            level = "task",
-            status = "todo",
-            tags = [],
-            sections = [],
-            refs = []"#;
-        db.client().query(query).await.unwrap();
+        let task = Task {
+            title: "Test task".to_string(),
+            description: Some("Original description".to_string()),
+            level: Level::Task,
+            status: Status::Todo,
+            priority: None,
+            tags: vec![],
+            sections: vec![],
+            code_refs: vec![],
+            needs_human_review: None,
+            created_at: None,
+            updated_at: None,
+            started_at: None,
+            completed_at: None,
+            id: None,
+            workflow_id: None,
+            current_step: None,
+        };
+        db.tasks().create("abc123", &task).await.unwrap();
 
         let cmd = UpdateCommand {
             id: "abc123".to_string(),
@@ -1442,15 +1428,8 @@ mod tests {
         assert!(result.is_ok());
 
         // Verify description was cleared
-        #[derive(Debug, Deserialize)]
-        struct TaskWithDesc {
-            description: Option<String>,
-        }
-
-        let query = "SELECT description FROM task:abc123";
-        let mut result = db.client().query(query).await.unwrap();
-        let task: Option<TaskWithDesc> = result.take(0).unwrap();
-        assert!(task.unwrap().description.is_none());
+        let task = db.tasks().get("abc123").await.unwrap().unwrap();
+        assert!(task.description.is_none());
     }
 
     // ========== Section Tests ==========
@@ -1463,39 +1442,43 @@ mod tests {
         content: &str,
         order: Option<u32>,
     ) {
-        let escaped_content = content.replace('\\', "\\\\").replace('"', "\\\"");
-        let section_obj = if let Some(ord) = order {
-            format!(
-                r#"{{ "type": "{}", "content": "{}", "order": {} }}"#,
-                section_type, escaped_content, ord
-            )
-        } else {
-            format!(
-                r#"{{ "type": "{}", "content": "{}" }}"#,
-                section_type, escaped_content
-            )
-        };
+        use vertebrae_db::{Section, TaskUpdate};
 
-        let query = format!(
-            "UPDATE task:{} SET sections = array::append(sections, {})",
-            id, section_obj
-        );
-        db.client().query(&query).await.unwrap();
+        // Get current task and sections
+        let task = db.tasks().get(id).await.unwrap().unwrap();
+        let mut sections = task.sections;
+
+        // Parse section type
+        if let Ok(section_enum) = parse_section_type(section_type) {
+            // Add new section
+            sections.push(Section {
+                section_type: section_enum,
+                content: content.to_string(),
+                order,
+                done: None,
+                done_at: None,
+                refs: vec![],
+            });
+
+            // Update task with new sections
+            let update = TaskUpdate::new().with_sections(sections);
+            db.tasks().update(id, &update).await.unwrap();
+        }
     }
 
     /// Helper to get sections from a task
     async fn get_sections(db: &Database, id: &str) -> Vec<SectionRow> {
-        let query = format!("SELECT sections FROM task:{}", id);
-        let mut result = db.client().query(&query).await.unwrap();
-
-        #[derive(Deserialize)]
-        struct Row {
-            #[serde(default)]
-            sections: Vec<SectionRow>,
-        }
-
-        let row: Option<Row> = result.take(0).unwrap();
-        row.map(|r| r.sections).unwrap_or_default()
+        let task = db.tasks().get(id).await.unwrap().unwrap();
+        task.sections
+            .into_iter()
+            .map(|s| SectionRow {
+                section_type: Some(s.section_type.to_string()),
+                content: Some(s.content),
+                order: s.order,
+                done: s.done,
+                done_at: s.done_at,
+            })
+            .collect()
     }
 
     #[tokio::test]
