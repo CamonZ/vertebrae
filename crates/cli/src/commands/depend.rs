@@ -164,13 +164,6 @@ mod tests {
         DefaultTaskService::new(db)
     }
 
-    /// Helper to create a task using the service
-    async fn create_task(service: &DefaultTaskService, id: &str, title: &str) {
-        let options = CreateTaskOptions::new(title);
-        let created_id = service.create_task(options).await.unwrap();
-        assert_eq!(created_id, id, "Created ID should match requested ID");
-    }
-
     #[tokio::test]
     async fn test_create_dependency() {
         let service = setup_test_service().await;
