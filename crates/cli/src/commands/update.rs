@@ -5,7 +5,8 @@
 
 use clap::Args;
 use serde::Deserialize;
-use vertebrae_db::{Database, DbError, Priority, SectionType, TaskUpdate};
+use vertebrae_core::{ServiceError, TaskService};
+use vertebrae_db::{Database, Priority, SectionType, TaskUpdate};
 
 /// Update an existing task
 #[derive(Debug, Args)]
@@ -91,25 +92,23 @@ impl UpdateCommand {
     ///
     /// # Arguments
     ///
-    /// * `db` - Reference to the database connection
+    /// * `service` - Reference to the task service
     ///
     /// # Errors
     ///
-    /// Returns `DbError` if:
+    /// Returns `ServiceError` if:
     /// - The task with the given ID does not exist
     /// - The parent task doesn't exist (if specified)
     /// - Attempting to set self as parent
     /// - Database operations fail
-    pub async fn execute(&self, db: &Database) -> Result<String, DbError> {
+    pub async fn execute(&self, service: &dyn TaskService) -> Result<String, ServiceError> {
+        let db = service.database();
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
 
         // Verify task exists
-        if !self.task_exists(db, &id).await? {
-            return Err(DbError::InvalidPath {
-                path: std::path::PathBuf::from(&self.id),
-                reason: format!("Task '{}' not found", self.id),
-            });
+        if !service.task_exists(&id).await? {
+            return Err(ServiceError::task_not_found(&id));
         }
 
         // Check if any updates were specified
@@ -125,18 +124,14 @@ impl UpdateCommand {
 
             // Check for self-parent
             if parent_id_lower == id {
-                return Err(DbError::InvalidPath {
-                    path: std::path::PathBuf::from(parent_id),
-                    reason: "Cannot set task as its own parent".to_string(),
-                });
+                return Err(ServiceError::validation_failed(
+                    "Cannot set task as its own parent",
+                ));
             }
 
             // Check parent exists
-            if !self.task_exists(db, &parent_id_lower).await? {
-                return Err(DbError::InvalidPath {
-                    path: std::path::PathBuf::from(parent_id),
-                    reason: format!("Parent task '{}' does not exist", parent_id),
-                });
+            if !service.task_exists(&parent_id_lower).await? {
+                return Err(ServiceError::parent_not_found(&parent_id_lower));
             }
         }
 
@@ -158,11 +153,6 @@ impl UpdateCommand {
         Ok(id)
     }
 
-    /// Check if a task with the given ID exists.
-    async fn task_exists(&self, db: &Database, id: &str) -> Result<bool, DbError> {
-        db.tasks().exists(id).await
-    }
-
     /// Check if any updates were specified.
     fn has_updates(&self) -> bool {
         self.title.is_some()
@@ -176,7 +166,7 @@ impl UpdateCommand {
     }
 
     /// Apply field updates (title, description, priority).
-    async fn apply_field_updates(&self, db: &Database, id: &str) -> Result<(), DbError> {
+    async fn apply_field_updates(&self, db: &Database, id: &str) -> Result<(), ServiceError> {
         let mut updates = TaskUpdate::new();
 
         if let Some(title) = &self.title {
@@ -203,7 +193,7 @@ impl UpdateCommand {
     }
 
     /// Apply tag updates (add and remove).
-    async fn apply_tag_updates(&self, db: &Database, id: &str) -> Result<(), DbError> {
+    async fn apply_tag_updates(&self, db: &Database, id: &str) -> Result<(), ServiceError> {
         if self.add_tags.is_empty() && self.remove_tags.is_empty() {
             return Ok(());
         }
@@ -226,7 +216,7 @@ impl UpdateCommand {
     }
 
     /// Apply parent update.
-    async fn apply_parent_update(&self, db: &Database, id: &str) -> Result<(), DbError> {
+    async fn apply_parent_update(&self, db: &Database, id: &str) -> Result<(), ServiceError> {
         let Some(parent_id) = &self.parent else {
             return Ok(());
         };
@@ -246,24 +236,23 @@ impl UpdateCommand {
     }
 
     /// Apply section updates (edit and remove).
-    async fn apply_section_updates(&self, db: &Database, id: &str) -> Result<(), DbError> {
+    async fn apply_section_updates(&self, db: &Database, id: &str) -> Result<(), ServiceError> {
         // Handle edit section
         if let Some(args) = &self.edit_section {
             if args.len() != 3 {
-                return Err(DbError::InvalidPath {
-                    path: std::path::PathBuf::from(&self.id),
-                    reason: "edit-section requires: <type> <ordinal> <content>".to_string(),
-                });
+                return Err(ServiceError::validation_failed(
+                    "edit-section requires: <type> <ordinal> <content>",
+                ));
             }
 
-            let section_type = parse_section_type(&args[0]).map_err(|e| DbError::InvalidPath {
-                path: std::path::PathBuf::from(&self.id),
-                reason: e,
-            })?;
+            let section_type =
+                parse_section_type(&args[0]).map_err(ServiceError::validation_failed)?;
 
-            let ordinal: u32 = args[1].parse().map_err(|_| DbError::InvalidPath {
-                path: std::path::PathBuf::from(&self.id),
-                reason: format!("invalid ordinal '{}': expected a number", args[1]),
+            let ordinal: u32 = args[1].parse().map_err(|_| {
+                ServiceError::validation_failed(format!(
+                    "invalid ordinal '{}': expected a number",
+                    args[1]
+                ))
             })?;
 
             let new_content = &args[2];
@@ -274,20 +263,19 @@ impl UpdateCommand {
         // Handle remove section
         if let Some(args) = &self.remove_section {
             if args.len() != 2 {
-                return Err(DbError::InvalidPath {
-                    path: std::path::PathBuf::from(&self.id),
-                    reason: "remove-section requires: <type> <ordinal>".to_string(),
-                });
+                return Err(ServiceError::validation_failed(
+                    "remove-section requires: <type> <ordinal>",
+                ));
             }
 
-            let section_type = parse_section_type(&args[0]).map_err(|e| DbError::InvalidPath {
-                path: std::path::PathBuf::from(&self.id),
-                reason: e,
-            })?;
+            let section_type =
+                parse_section_type(&args[0]).map_err(ServiceError::validation_failed)?;
 
-            let ordinal: u32 = args[1].parse().map_err(|_| DbError::InvalidPath {
-                path: std::path::PathBuf::from(&self.id),
-                reason: format!("invalid ordinal '{}': expected a number", args[1]),
+            let ordinal: u32 = args[1].parse().map_err(|_| {
+                ServiceError::validation_failed(format!(
+                    "invalid ordinal '{}': expected a number",
+                    args[1]
+                ))
             })?;
 
             self.remove_section_at(db, id, &section_type, ordinal)
@@ -305,7 +293,7 @@ impl UpdateCommand {
         section_type: &SectionType,
         ordinal: u32,
         new_content: &str,
-    ) -> Result<(), DbError> {
+    ) -> Result<(), ServiceError> {
         use vertebrae_db::Section;
 
         // Fetch current sections
@@ -346,10 +334,10 @@ impl UpdateCommand {
         }
 
         if !found {
-            return Err(DbError::InvalidPath {
-                path: std::path::PathBuf::from(&self.id),
-                reason: format!("No {} section found at ordinal {}", section_type, ordinal),
-            });
+            return Err(ServiceError::validation_failed(format!(
+                "No {} section found at ordinal {}",
+                section_type, ordinal
+            )));
         }
 
         // Update sections in database
@@ -366,7 +354,7 @@ impl UpdateCommand {
         id: &str,
         section_type: &SectionType,
         ordinal: u32,
-    ) -> Result<(), DbError> {
+    ) -> Result<(), ServiceError> {
         use vertebrae_db::Section;
 
         // Fetch current sections
@@ -379,10 +367,10 @@ impl UpdateCommand {
             .any(|s| s.section_type.as_deref() == Some(type_str) && s.order == Some(ordinal));
 
         if !exists {
-            return Err(DbError::InvalidPath {
-                path: std::path::PathBuf::from(&self.id),
-                reason: format!("No {} section found at ordinal {}", section_type, ordinal),
-            });
+            return Err(ServiceError::validation_failed(format!(
+                "No {} section found at ordinal {}",
+                section_type, ordinal
+            )));
         }
 
         // Build new sections array:
@@ -441,7 +429,11 @@ impl UpdateCommand {
     }
 
     /// Fetch sections from a task.
-    async fn fetch_sections(&self, db: &Database, id: &str) -> Result<Vec<SectionRow>, DbError> {
+    async fn fetch_sections(
+        &self,
+        db: &Database,
+        id: &str,
+    ) -> Result<Vec<SectionRow>, ServiceError> {
         // Get the task to access its sections
         if let Some(task) = db.tasks().get(id).await? {
             let sections = task
@@ -462,8 +454,9 @@ impl UpdateCommand {
     }
 
     /// Update the updated_at timestamp.
-    async fn update_timestamp(&self, db: &Database, id: &str) -> Result<(), DbError> {
-        db.tasks().update_timestamp(id).await
+    async fn update_timestamp(&self, db: &Database, id: &str) -> Result<(), ServiceError> {
+        db.tasks().update_timestamp(id).await?;
+        Ok(())
     }
 }
 
@@ -486,12 +479,13 @@ struct SectionRow {
 mod tests {
     use super::*;
     use serial_test::serial;
+    use vertebrae_core::DefaultTaskService;
 
-    /// Helper to create an in-memory test database
-    async fn setup_test_db() -> Database {
+    /// Helper to create an in-memory test database wrapped in a service
+    async fn setup_test_db() -> DefaultTaskService {
         let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-        db
+        DefaultTaskService::new(db)
     }
 
     /// Helper to create a task in the database
@@ -756,7 +750,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_nonexistent_task() {
-        let db = setup_test_db().await;
+        let service = setup_test_db().await;
 
         let cmd = UpdateCommand {
             id: "nonexistent".to_string(),
@@ -770,31 +764,26 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         match result {
-            Err(DbError::InvalidPath { reason, .. }) => {
+            Err(ServiceError::TaskNotFound { task_id }) => {
                 assert!(
-                    reason.contains("not found"),
-                    "Expected 'not found' in error, got: {}",
-                    reason
-                );
-                assert!(
-                    reason.contains("nonexistent"),
+                    task_id.contains("nonexistent"),
                     "Expected task ID 'nonexistent' in error, got: {}",
-                    reason
+                    task_id
                 );
             }
-            Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
+            Err(other) => panic!("Expected TaskNotFound error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
     }
 
     #[tokio::test]
     async fn test_update_title() {
-        let db = setup_test_db().await;
+        let service = setup_test_db().await;
 
         create_task(
-            &db,
+            service.database(),
             "abc123",
             "Original title",
             "task",
@@ -816,11 +805,13 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         // Verify title was changed
-        let task = get_task(&db, "abc123").await.expect("Task should exist");
+        let task = get_task(service.database(), "abc123")
+            .await
+            .expect("Task should exist");
         assert_eq!(task.title, "New title");
 
         // Verify other fields were not changed
@@ -830,10 +821,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_priority() {
-        let db = setup_test_db().await;
+        let service = setup_test_db().await;
 
         create_task(
-            &db,
+            service.database(),
             "abc123",
             "Test task",
             "task",
@@ -855,11 +846,13 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         // Verify priority was changed
-        let task = get_task(&db, "abc123").await.expect("Task should exist");
+        let task = get_task(service.database(), "abc123")
+            .await
+            .expect("Task should exist");
         assert_eq!(task.priority, Some("high".to_string()));
 
         // Verify other fields were not changed
@@ -869,10 +862,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_add_tag() {
-        let db = setup_test_db().await;
+        let service = setup_test_db().await;
 
         create_task(
-            &db,
+            service.database(),
             "abc123",
             "Test task",
             "task",
@@ -894,20 +887,20 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
-        let task = get_task(&db, "abc123").await.unwrap();
+        let task = get_task(service.database(), "abc123").await.unwrap();
         assert!(task.tags.contains(&"initial".to_string()));
         assert!(task.tags.contains(&"urgent".to_string()));
     }
 
     #[tokio::test]
     async fn test_update_remove_tag() {
-        let db = setup_test_db().await;
+        let service = setup_test_db().await;
 
         create_task(
-            &db,
+            service.database(),
             "abc123",
             "Test task",
             "task",
@@ -929,20 +922,20 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
-        let task = get_task(&db, "abc123").await.unwrap();
+        let task = get_task(service.database(), "abc123").await.unwrap();
         assert!(task.tags.contains(&"initial".to_string()));
         assert!(!task.tags.contains(&"toremove".to_string()));
     }
 
     #[tokio::test]
     async fn test_update_add_duplicate_tag() {
-        let db = setup_test_db().await;
+        let service = setup_test_db().await;
 
         create_task(
-            &db,
+            service.database(),
             "abc123",
             "Test task",
             "task",
@@ -964,10 +957,10 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
-        let task = get_task(&db, "abc123").await.unwrap();
+        let task = get_task(service.database(), "abc123").await.unwrap();
         // Should only have one instance of the tag
         assert_eq!(task.tags.len(), 1);
         assert_eq!(task.tags[0], "existing");
@@ -975,10 +968,28 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_set_parent() {
-        let db = setup_test_db().await;
+        let service = setup_test_db().await;
 
-        create_task(&db, "parent1", "Parent task", "epic", "todo", None, &[]).await;
-        create_task(&db, "child1", "Child task", "task", "todo", None, &[]).await;
+        create_task(
+            service.database(),
+            "parent1",
+            "Parent task",
+            "epic",
+            "todo",
+            None,
+            &[],
+        )
+        .await;
+        create_task(
+            service.database(),
+            "child1",
+            "Child task",
+            "task",
+            "todo",
+            None,
+            &[],
+        )
+        .await;
 
         let cmd = UpdateCommand {
             id: "child1".to_string(),
@@ -992,21 +1003,48 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
-        let parent_id = get_parent_id(&db, "child1").await;
+        let parent_id = get_parent_id(service.database(), "child1").await;
         assert_eq!(parent_id, Some("parent1".to_string()));
     }
 
     #[tokio::test]
     async fn test_update_change_parent() {
-        let db = setup_test_db().await;
+        let service = setup_test_db().await;
 
-        create_task(&db, "parent1", "Parent 1", "epic", "todo", None, &[]).await;
-        create_task(&db, "parent2", "Parent 2", "epic", "todo", None, &[]).await;
-        create_task(&db, "child1", "Child task", "task", "todo", None, &[]).await;
-        create_child_of(&db, "child1", "parent1").await;
+        create_task(
+            service.database(),
+            "parent1",
+            "Parent 1",
+            "epic",
+            "todo",
+            None,
+            &[],
+        )
+        .await;
+        create_task(
+            service.database(),
+            "parent2",
+            "Parent 2",
+            "epic",
+            "todo",
+            None,
+            &[],
+        )
+        .await;
+        create_task(
+            service.database(),
+            "child1",
+            "Child task",
+            "task",
+            "todo",
+            None,
+            &[],
+        )
+        .await;
+        create_child_of(service.database(), "child1", "parent1").await;
 
         let cmd = UpdateCommand {
             id: "child1".to_string(),
@@ -1020,23 +1058,41 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
-        let parent_id = get_parent_id(&db, "child1").await;
+        let parent_id = get_parent_id(service.database(), "child1").await;
         assert_eq!(parent_id, Some("parent2".to_string()));
     }
 
     #[tokio::test]
     async fn test_update_remove_parent() {
-        let db = setup_test_db().await;
+        let service = setup_test_db().await;
 
-        create_task(&db, "parent1", "Parent task", "epic", "todo", None, &[]).await;
-        create_task(&db, "child1", "Child task", "task", "todo", None, &[]).await;
-        create_child_of(&db, "child1", "parent1").await;
+        create_task(
+            service.database(),
+            "parent1",
+            "Parent task",
+            "epic",
+            "todo",
+            None,
+            &[],
+        )
+        .await;
+        create_task(
+            service.database(),
+            "child1",
+            "Child task",
+            "task",
+            "todo",
+            None,
+            &[],
+        )
+        .await;
+        create_child_of(service.database(), "child1", "parent1").await;
 
         // Verify parent exists before
-        let parent_id = get_parent_id(&db, "child1").await;
+        let parent_id = get_parent_id(service.database(), "child1").await;
         assert_eq!(parent_id, Some("parent1".to_string()));
 
         let cmd = UpdateCommand {
@@ -1051,19 +1107,28 @@ mod tests {
             remove_section: None, // Empty string removes parent
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
-        let parent_id = get_parent_id(&db, "child1").await;
+        let parent_id = get_parent_id(service.database(), "child1").await;
         assert!(parent_id.is_none());
     }
 
     #[tokio::test]
     #[serial]
     async fn test_update_self_parent_fails() {
-        let db = setup_test_db().await;
+        let service = setup_test_db().await;
 
-        create_task(&db, "abc123", "Test task", "task", "todo", None, &[]).await;
+        create_task(
+            service.database(),
+            "abc123",
+            "Test task",
+            "task",
+            "todo",
+            None,
+            &[],
+        )
+        .await;
 
         let cmd = UpdateCommand {
             id: "abc123".to_string(),
@@ -1077,25 +1142,34 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         match result {
-            Err(DbError::InvalidPath { reason, .. }) => {
+            Err(ServiceError::ValidationFailed { message }) => {
                 assert!(
-                    reason.contains("own parent"),
+                    message.contains("own parent"),
                     "Expected 'own parent' in error, got: {}",
-                    reason
+                    message
                 );
             }
-            Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
+            Err(other) => panic!("Expected ValidationFailed error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
     }
 
     #[tokio::test]
     async fn test_update_nonexistent_parent_fails() {
-        let db = setup_test_db().await;
+        let service = setup_test_db().await;
 
-        create_task(&db, "abc123", "Test task", "task", "todo", None, &[]).await;
+        create_task(
+            service.database(),
+            "abc123",
+            "Test task",
+            "task",
+            "todo",
+            None,
+            &[],
+        )
+        .await;
 
         let cmd = UpdateCommand {
             id: "abc123".to_string(),
@@ -1109,30 +1183,34 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         match result {
-            Err(DbError::InvalidPath { reason, .. }) => {
+            Err(ServiceError::ParentNotFound { parent_id }) => {
                 assert!(
-                    reason.contains("does not exist"),
-                    "Expected 'does not exist' in error, got: {}",
-                    reason
-                );
-                assert!(
-                    reason.contains("nonexistent"),
+                    parent_id.contains("nonexistent"),
                     "Expected parent ID 'nonexistent' in error, got: {}",
-                    reason
+                    parent_id
                 );
             }
-            Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
+            Err(other) => panic!("Expected ParentNotFound error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
     }
 
     #[tokio::test]
     async fn test_update_timestamp_updated() {
-        let db = setup_test_db().await;
+        let service = setup_test_db().await;
 
-        create_task(&db, "abc123", "Test task", "task", "todo", None, &[]).await;
+        create_task(
+            service.database(),
+            "abc123",
+            "Test task",
+            "task",
+            "todo",
+            None,
+            &[],
+        )
+        .await;
 
         let cmd = UpdateCommand {
             id: "abc123".to_string(),
@@ -1146,18 +1224,27 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
-        let task = get_task(&db, "abc123").await.unwrap();
+        let task = get_task(service.database(), "abc123").await.unwrap();
         assert!(task.updated_at.is_some());
     }
 
     #[tokio::test]
     async fn test_update_case_insensitive_id() {
-        let db = setup_test_db().await;
+        let service = setup_test_db().await;
 
-        create_task(&db, "abc123", "Test task", "task", "todo", None, &[]).await;
+        create_task(
+            service.database(),
+            "abc123",
+            "Test task",
+            "task",
+            "todo",
+            None,
+            &[],
+        )
+        .await;
 
         let cmd = UpdateCommand {
             id: "ABC123".to_string(), // Uppercase
@@ -1171,18 +1258,27 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
-        let task = get_task(&db, "abc123").await.unwrap();
+        let task = get_task(service.database(), "abc123").await.unwrap();
         assert_eq!(task.title, "New title");
     }
 
     #[tokio::test]
     async fn test_update_no_changes() {
-        let db = setup_test_db().await;
+        let service = setup_test_db().await;
 
-        create_task(&db, "abc123", "Test task", "task", "todo", None, &[]).await;
+        create_task(
+            service.database(),
+            "abc123",
+            "Test task",
+            "task",
+            "todo",
+            None,
+            &[],
+        )
+        .await;
 
         let cmd = UpdateCommand {
             id: "abc123".to_string(),
@@ -1196,17 +1292,17 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "abc123");
     }
 
     #[tokio::test]
     async fn test_update_multiple_fields() {
-        let db = setup_test_db().await;
+        let service = setup_test_db().await;
 
         create_task(
-            &db,
+            service.database(),
             "abc123",
             "Original",
             "task",
@@ -1228,10 +1324,10 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
-        let task = get_task(&db, "abc123").await.unwrap();
+        let task = get_task(service.database(), "abc123").await.unwrap();
         assert_eq!(task.title, "Updated");
         assert_eq!(task.priority, Some("critical".to_string()));
         assert!(task.tags.contains(&"new".to_string()));
@@ -1242,7 +1338,7 @@ mod tests {
     async fn test_update_preserves_other_fields() {
         use vertebrae_db::{CodeRef, Level, Section, SectionType, Status, Task};
 
-        let db = setup_test_db().await;
+        let service = setup_test_db().await;
 
         // Create task with specific values
         let task = Task {
@@ -1276,7 +1372,12 @@ mod tests {
             workflow_id: None,
             current_step: None,
         };
-        db.tasks().create("abc123", &task).await.unwrap();
+        service
+            .database()
+            .tasks()
+            .create("abc123", &task)
+            .await
+            .unwrap();
 
         // Only update title
         let cmd = UpdateCommand {
@@ -1291,11 +1392,17 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         // Verify other fields preserved
-        let task = db.tasks().get("abc123").await.unwrap().unwrap();
+        let task = service
+            .database()
+            .tasks()
+            .get("abc123")
+            .await
+            .unwrap()
+            .unwrap();
 
         assert_eq!(task.title, "Updated title");
         assert_eq!(task.level, Level::Ticket);
@@ -1333,10 +1440,28 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_parent_case_insensitive() {
-        let db = setup_test_db().await;
+        let service = setup_test_db().await;
 
-        create_task(&db, "parent1", "Parent task", "epic", "todo", None, &[]).await;
-        create_task(&db, "child1", "Child task", "task", "todo", None, &[]).await;
+        create_task(
+            service.database(),
+            "parent1",
+            "Parent task",
+            "epic",
+            "todo",
+            None,
+            &[],
+        )
+        .await;
+        create_task(
+            service.database(),
+            "child1",
+            "Child task",
+            "task",
+            "todo",
+            None,
+            &[],
+        )
+        .await;
 
         let cmd = UpdateCommand {
             id: "CHILD1".to_string(), // Uppercase child
@@ -1350,10 +1475,10 @@ mod tests {
             remove_section: None, // Uppercase parent
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
-        let parent_id = get_parent_id(&db, "child1").await;
+        let parent_id = get_parent_id(service.database(), "child1").await;
         assert_eq!(parent_id, Some("parent1".to_string()));
     }
 
@@ -1361,9 +1486,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_description() {
-        let db = setup_test_db().await;
+        let service = setup_test_db().await;
 
-        create_task(&db, "abc123", "Test task", "task", "todo", None, &[]).await;
+        create_task(
+            service.database(),
+            "abc123",
+            "Test task",
+            "task",
+            "todo",
+            None,
+            &[],
+        )
+        .await;
 
         let cmd = UpdateCommand {
             id: "abc123".to_string(),
@@ -1377,11 +1511,17 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         // Verify description was set
-        let task = db.tasks().get("abc123").await.unwrap().unwrap();
+        let task = service
+            .database()
+            .tasks()
+            .get("abc123")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(task.description, Some("New description".to_string()));
     }
 
@@ -1389,7 +1529,7 @@ mod tests {
     async fn test_update_clear_description() {
         use vertebrae_db::{Level, Status, Task};
 
-        let db = setup_test_db().await;
+        let service = setup_test_db().await;
 
         // Create task with description
         let task = Task {
@@ -1410,7 +1550,12 @@ mod tests {
             workflow_id: None,
             current_step: None,
         };
-        db.tasks().create("abc123", &task).await.unwrap();
+        service
+            .database()
+            .tasks()
+            .create("abc123", &task)
+            .await
+            .unwrap();
 
         let cmd = UpdateCommand {
             id: "abc123".to_string(),
@@ -1424,11 +1569,17 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         // Verify description was cleared
-        let task = db.tasks().get("abc123").await.unwrap().unwrap();
+        let task = service
+            .database()
+            .tasks()
+            .get("abc123")
+            .await
+            .unwrap()
+            .unwrap();
         assert!(task.description.is_none());
     }
 
@@ -1483,12 +1634,21 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_remove_section() {
-        let db = setup_test_db().await;
+        let service = setup_test_db().await;
 
-        create_task(&db, "abc123", "Test task", "task", "todo", None, &[]).await;
-        add_section(&db, "abc123", "step", "Step 0", Some(0)).await;
-        add_section(&db, "abc123", "step", "Step 1", Some(1)).await;
-        add_section(&db, "abc123", "step", "Step 2", Some(2)).await;
+        create_task(
+            service.database(),
+            "abc123",
+            "Test task",
+            "task",
+            "todo",
+            None,
+            &[],
+        )
+        .await;
+        add_section(service.database(), "abc123", "step", "Step 0", Some(0)).await;
+        add_section(service.database(), "abc123", "step", "Step 1", Some(1)).await;
+        add_section(service.database(), "abc123", "step", "Step 2", Some(2)).await;
 
         let cmd = UpdateCommand {
             id: "abc123".to_string(),
@@ -1502,11 +1662,11 @@ mod tests {
             remove_section: Some(vec!["step".to_string(), "0".to_string()]),
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok(), "Remove section failed: {:?}", result.err());
 
         // Verify section was removed and others renumbered
-        let sections = get_sections(&db, "abc123").await;
+        let sections = get_sections(service.database(), "abc123").await;
         assert_eq!(sections.len(), 2);
 
         // Find steps and verify renumbering
@@ -1524,10 +1684,26 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_edit_section() {
-        let db = setup_test_db().await;
+        let service = setup_test_db().await;
 
-        create_task(&db, "abc123", "Test task", "task", "todo", None, &[]).await;
-        add_section(&db, "abc123", "step", "Original step", Some(0)).await;
+        create_task(
+            service.database(),
+            "abc123",
+            "Test task",
+            "task",
+            "todo",
+            None,
+            &[],
+        )
+        .await;
+        add_section(
+            service.database(),
+            "abc123",
+            "step",
+            "Original step",
+            Some(0),
+        )
+        .await;
 
         let cmd = UpdateCommand {
             id: "abc123".to_string(),
@@ -1545,20 +1721,29 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok(), "Edit section failed: {:?}", result.err());
 
         // Verify section was updated
-        let sections = get_sections(&db, "abc123").await;
+        let sections = get_sections(service.database(), "abc123").await;
         assert_eq!(sections.len(), 1);
         assert_eq!(sections[0].content.as_deref(), Some("Updated step content"));
     }
 
     #[tokio::test]
     async fn test_update_remove_nonexistent_section_fails() {
-        let db = setup_test_db().await;
+        let service = setup_test_db().await;
 
-        create_task(&db, "abc123", "Test task", "task", "todo", None, &[]).await;
+        create_task(
+            service.database(),
+            "abc123",
+            "Test task",
+            "task",
+            "todo",
+            None,
+            &[],
+        )
+        .await;
 
         let cmd = UpdateCommand {
             id: "abc123".to_string(),
@@ -1572,16 +1757,16 @@ mod tests {
             remove_section: Some(vec!["step".to_string(), "99".to_string()]),
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         match result {
-            Err(DbError::InvalidPath { reason, .. }) => {
+            Err(ServiceError::ValidationFailed { message }) => {
                 assert!(
-                    reason.contains("No step section found at ordinal 99"),
+                    message.contains("No step section found at ordinal 99"),
                     "Expected 'No step section found' in error, got: {}",
-                    reason
+                    message
                 );
             }
-            Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
+            Err(other) => panic!("Expected ValidationFailed error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
     }

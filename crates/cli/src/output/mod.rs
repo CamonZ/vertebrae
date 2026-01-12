@@ -799,7 +799,7 @@ mod tests {
         let data_parts: Vec<&str> = data_row.split_whitespace().collect();
 
         // Data parts should not contain [R] as the last element
-        let has_review_indicator = data_parts.last().map_or(false, |&s| s == "[R]");
+        let has_review_indicator = data_parts.last().is_some_and(|&s| s == "[R]");
         assert!(
             !has_review_indicator,
             "Data row should not have [R] indicator when needs_human_review is false"

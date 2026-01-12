@@ -5,7 +5,8 @@
 
 use clap::{Args, Subcommand};
 use surrealdb::sql::Thing;
-use vertebrae_db::{Database, DbError, ExecutionStatus, SessionLog};
+use vertebrae_core::{ServiceError, TaskService};
+use vertebrae_db::{ExecutionStatus, SessionLog};
 
 /// Execution management commands
 #[derive(Debug, Subcommand)]
@@ -23,16 +24,16 @@ impl ExecutionCommand {
     ///
     /// # Arguments
     ///
-    /// * `db` - Reference to the database connection
+    /// * `service` - Reference to the task service
     ///
     /// # Errors
     ///
-    /// Returns `DbError` if the command execution fails.
-    pub async fn execute(&self, db: &Database) -> Result<String, DbError> {
+    /// Returns `ServiceError` if the command execution fails.
+    pub async fn execute(&self, service: &dyn TaskService) -> Result<String, ServiceError> {
         match self {
-            ExecutionCommand::List(cmd) => cmd.execute(db).await,
-            ExecutionCommand::Show(cmd) => cmd.execute(db).await,
-            ExecutionCommand::Log(cmd) => cmd.execute(db).await,
+            ExecutionCommand::List(cmd) => cmd.execute(service).await,
+            ExecutionCommand::Show(cmd) => cmd.execute(service).await,
+            ExecutionCommand::Log(cmd) => cmd.execute(service).await,
         }
     }
 }
@@ -52,26 +53,25 @@ impl ExecutionListCommand {
     ///
     /// # Arguments
     ///
-    /// * `db` - Reference to the database connection
+    /// * `service` - Reference to the task service
     ///
     /// # Errors
     ///
-    /// Returns `DbError` if:
+    /// Returns `ServiceError` if:
     /// - The task is not found
     /// - Database operations fail
-    pub async fn execute(&self, db: &Database) -> Result<String, DbError> {
+    pub async fn execute(&self, service: &dyn TaskService) -> Result<String, ServiceError> {
         // Normalize task ID to lowercase for case-insensitive lookup
         let task_id = self.task_id.to_lowercase();
 
         // Verify the task exists
-        let task_exists = db.tasks().exists(&task_id).await?;
+        let task_exists = service.task_exists(&task_id).await?;
         if !task_exists {
-            return Err(DbError::TaskNotFound {
-                task_id: self.task_id.clone(),
-            });
+            return Err(ServiceError::task_not_found(&self.task_id));
         }
 
         // Get executions for the task
+        let db = service.database();
         let executions = db.executions().list_executions_for_task(&task_id).await?;
 
         if executions.is_empty() {
@@ -135,22 +135,25 @@ impl ExecutionShowCommand {
     ///
     /// # Arguments
     ///
-    /// * `db` - Reference to the database connection
+    /// * `service` - Reference to the task service
     ///
     /// # Errors
     ///
-    /// Returns `DbError` if:
+    /// Returns `ServiceError` if:
     /// - The execution is not found
     /// - Database operations fail
-    pub async fn execute(&self, db: &Database) -> Result<String, DbError> {
+    pub async fn execute(&self, service: &dyn TaskService) -> Result<String, ServiceError> {
         // Try to get the execution
+        let db = service.database();
         let execution = db
             .executions()
             .get_execution(&self.execution_id)
             .await?
-            .ok_or_else(|| DbError::NotFound {
-                entity: "execution".to_string(),
-                id: self.execution_id.clone(),
+            .ok_or_else(|| {
+                ServiceError::validation_failed(format!(
+                    "execution '{}' not found",
+                    self.execution_id
+                ))
             })?;
 
         let exec_id = execution
@@ -258,22 +261,25 @@ impl ExecutionLogCommand {
     ///
     /// # Arguments
     ///
-    /// * `db` - Reference to the database connection
+    /// * `service` - Reference to the task service
     ///
     /// # Errors
     ///
-    /// Returns `DbError` if:
+    /// Returns `ServiceError` if:
     /// - The execution is not found
     /// - Database operations fail
-    pub async fn execute(&self, db: &Database) -> Result<String, DbError> {
+    pub async fn execute(&self, service: &dyn TaskService) -> Result<String, ServiceError> {
         // Verify the execution exists
+        let db = service.database();
         let execution = db
             .executions()
             .get_execution(&self.execution_id)
             .await?
-            .ok_or_else(|| DbError::NotFound {
-                entity: "execution".to_string(),
-                id: self.execution_id.clone(),
+            .ok_or_else(|| {
+                ServiceError::validation_failed(format!(
+                    "execution '{}' not found",
+                    self.execution_id
+                ))
             })?;
 
         // Create the session log

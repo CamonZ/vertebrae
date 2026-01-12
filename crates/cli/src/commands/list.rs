@@ -3,7 +3,8 @@
 //! Implements the `vtb list` command to display tasks with filtering options.
 
 use clap::Args;
-use vertebrae_db::{Database, DbError, Level, Priority, Status, TaskFilter};
+use vertebrae_core::ServiceError;
+use vertebrae_db::{Database, Level, Priority, Status, TaskFilter};
 
 /// A summary of a task for display in the list
 #[derive(Debug, Clone)]
@@ -133,18 +134,18 @@ impl ListCommand {
     ///
     /// # Errors
     ///
-    /// Returns `DbError` if:
+    /// Returns `ServiceError` if:
     /// - Database query fails
     /// - Invalid filter values are provided
     /// - Search query is empty
-    pub async fn execute(&self, db: &Database) -> Result<Vec<TaskSummary>, DbError> {
+    pub async fn execute(&self, db: &Database) -> Result<Vec<TaskSummary>, ServiceError> {
         // Validate search query is not empty
         if let Some(ref search) = self.search
             && search.trim().is_empty()
         {
-            return Err(DbError::ValidationError {
-                message: "Search query cannot be empty".to_string(),
-            });
+            return Err(ServiceError::validation_failed(
+                "Search query cannot be empty",
+            ));
         }
 
         // Build the TaskFilter from command options
@@ -1272,10 +1273,10 @@ mod tests {
 
         assert!(result.is_err());
         match result {
-            Err(DbError::ValidationError { message }) => {
+            Err(ServiceError::ValidationFailed { message }) => {
                 assert_eq!(message, "Search query cannot be empty");
             }
-            _ => panic!("Expected ValidationError"),
+            _ => panic!("Expected ValidationFailed"),
         }
     }
 
@@ -1302,10 +1303,10 @@ mod tests {
 
         assert!(result.is_err());
         match result {
-            Err(DbError::ValidationError { message }) => {
+            Err(ServiceError::ValidationFailed { message }) => {
                 assert_eq!(message, "Search query cannot be empty");
             }
-            _ => panic!("Expected ValidationError"),
+            _ => panic!("Expected ValidationFailed"),
         }
     }
 

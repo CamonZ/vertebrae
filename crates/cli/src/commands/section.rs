@@ -6,7 +6,8 @@
 //! section types.
 
 use clap::Args;
-use vertebrae_db::{DbError, Section, SectionType};
+use vertebrae_core::ServiceError;
+use vertebrae_db::{Section, SectionType};
 
 /// Add a typed content section to a task
 #[derive(Debug, Args)]
@@ -97,23 +98,22 @@ impl SectionCommand {
     ///
     /// # Errors
     ///
-    /// Returns `DbError` if:
+    /// Returns `ServiceError` if:
     /// - The task with the given ID does not exist
     /// - The content is empty
     /// - Service operations fail
     pub async fn execute(
         &self,
         service: &dyn vertebrae_core::TaskService,
-    ) -> Result<SectionResult, DbError> {
+    ) -> Result<SectionResult, ServiceError> {
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
 
         // Validate content is not empty
         if self.content.trim().is_empty() {
-            return Err(DbError::InvalidPath {
-                path: std::path::PathBuf::from("content"),
-                reason: "section content cannot be empty".to_string(),
-            });
+            return Err(ServiceError::validation_failed(
+                "section content cannot be empty",
+            ));
         }
 
         // Create the section to add
@@ -127,23 +127,14 @@ impl SectionCommand {
         };
 
         // Add the section using service layer (which fires MutationCallback)
-        service
-            .add_section(&id, section)
-            .await
-            .map_err(|e| DbError::InvalidPath {
-                path: std::path::PathBuf::from("section"),
-                reason: format!("Failed to add section: {}", e),
-            })?;
+        service.add_section(&id, section).await?;
 
         // For determining ordinal, we need to fetch the task to see what was added
         // This is a read-only operation that doesn't trigger mutations
         let task = service
             .get_task(&id)
             .await
-            .map_err(|e| DbError::InvalidPath {
-                path: std::path::PathBuf::from("task"),
-                reason: format!("Failed to get task: {}", e),
-            })?;
+            .map_err(|_| ServiceError::task_not_found(&id))?;
 
         let ordinal = if !is_single_instance_type(&self.section_type) {
             task.sections

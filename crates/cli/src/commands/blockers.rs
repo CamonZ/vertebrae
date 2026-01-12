@@ -4,8 +4,8 @@
 //! recursively traversing the dependency graph.
 
 use clap::Args;
-use vertebrae_core::TaskService;
-use vertebrae_db::{DbError, Status};
+use vertebrae_core::{ServiceError, TaskService};
+use vertebrae_db::Status;
 
 /// Show all tasks blocking a given task
 #[derive(Debug, Args)]
@@ -63,20 +63,15 @@ impl BlockersCommand {
     ///
     /// # Errors
     ///
-    /// Returns `DbError` if:
+    /// Returns `ServiceError` if:
     /// - The task with the given ID does not exist
     /// - Service operations fail
-    pub async fn execute(&self, service: &dyn TaskService) -> Result<BlockersResult, DbError> {
+    pub async fn execute(&self, service: &dyn TaskService) -> Result<BlockersResult, ServiceError> {
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
 
         // Fetch the target task to verify it exists and get its title
-        let task = service
-            .get_task(&id)
-            .await
-            .map_err(|_| DbError::TaskNotFound {
-                task_id: self.id.clone(),
-            })?;
+        let task = service.get_task(&id).await?;
 
         // Build the blocker tree
         let blockers = self.build_blocker_tree(service, &id, 0).await?;
@@ -101,7 +96,7 @@ impl BlockersCommand {
         service: &dyn TaskService,
         task_id: &str,
         current_depth: usize,
-    ) -> Result<Vec<BlockerNode>, DbError> {
+    ) -> Result<Vec<BlockerNode>, ServiceError> {
         // Check depth limit
         if let Some(max_depth) = self.depth
             && current_depth >= max_depth
@@ -141,7 +136,7 @@ impl BlockersCommand {
         &self,
         service: &dyn TaskService,
         task_id: &str,
-    ) -> Result<Vec<vertebrae_db::TaskSummary>, DbError> {
+    ) -> Result<Vec<vertebrae_db::TaskSummary>, ServiceError> {
         // Get tasks that this task depends on via the depends_on relationship
         // Using service layer method that returns full task details
         let blockers = service
@@ -264,7 +259,7 @@ fn print_node(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vertebrae_core::DefaultTaskService;
+    use vertebrae_core::{DefaultTaskService, ServiceError};
     use vertebrae_db::{Database, Level};
 
     /// Helper to create an in-memory test service
@@ -500,14 +495,14 @@ mod tests {
 
         let result = cmd.execute(&service).await;
         match result {
-            Err(DbError::TaskNotFound { task_id }) => {
+            Err(ServiceError::TaskNotFound { task_id }) => {
                 assert_eq!(
                     task_id, "nonexistent",
                     "Expected task_id 'nonexistent', got: {}",
                     task_id
                 );
             }
-            Err(other) => panic!("Expected NotFound error, got {:?}", other),
+            Err(other) => panic!("Expected TaskNotFound error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
     }

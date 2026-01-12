@@ -7,7 +7,8 @@ use clap::Args;
 use serde::Deserialize;
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
-use vertebrae_db::{Database, DbError, Task};
+use vertebrae_core::{ServiceError, TaskService};
+use vertebrae_db::Task;
 
 /// Import database from JSONL format
 #[derive(Debug, Args)]
@@ -86,14 +87,15 @@ impl ImportCommand {
     ///
     /// # Arguments
     ///
-    /// * `db` - Reference to the database connection
+    /// * `service` - Reference to the task service
     ///
     /// # Errors
     ///
-    /// Returns `DbError` if database operations fail or file I/O fails.
-    pub async fn execute(&self, db: &Database) -> Result<ImportResult, DbError> {
+    /// Returns `ServiceError` if database operations fail or file I/O fails.
+    pub async fn execute(&self, service: &dyn TaskService) -> Result<ImportResult, ServiceError> {
         let (records, source) = self.read_records()?;
 
+        let db = service.database();
         let mut tasks_imported = 0;
         let mut tasks_skipped = 0;
         let mut child_of_relations = 0;
@@ -143,12 +145,11 @@ impl ImportCommand {
     }
 
     /// Read records from the input source
-    fn read_records(&self) -> Result<(Vec<ImportRecord>, String), DbError> {
+    fn read_records(&self) -> Result<(Vec<ImportRecord>, String), ServiceError> {
         match &self.input {
             Some(path) => {
-                let file = std::fs::File::open(path).map_err(|e| DbError::InvalidPath {
-                    path: path.clone(),
-                    reason: e.to_string(),
+                let file = std::fs::File::open(path).map_err(|e| {
+                    ServiceError::validation_failed(format!("{}: {}", path.display(), e))
                 })?;
                 let reader = std::io::BufReader::new(file);
                 let records = self.parse_lines(reader, path)?;
@@ -169,12 +170,16 @@ impl ImportCommand {
         &self,
         reader: R,
         path: &Path,
-    ) -> Result<Vec<ImportRecord>, DbError> {
+    ) -> Result<Vec<ImportRecord>, ServiceError> {
         let mut records = Vec::new();
         for (line_num, line) in reader.lines().enumerate() {
-            let line = line.map_err(|e| DbError::InvalidPath {
-                path: path.to_path_buf(),
-                reason: format!("Error reading line {}: {}", line_num + 1, e),
+            let line = line.map_err(|e| {
+                ServiceError::validation_failed(format!(
+                    "{}: error reading line {}: {}",
+                    path.display(),
+                    line_num + 1,
+                    e
+                ))
             })?;
 
             // Skip empty lines
@@ -182,11 +187,14 @@ impl ImportCommand {
                 continue;
             }
 
-            let record: ImportRecord =
-                serde_json::from_str(&line).map_err(|e| DbError::InvalidPath {
-                    path: path.to_path_buf(),
-                    reason: format!("Error parsing line {}: {}", line_num + 1, e),
-                })?;
+            let record: ImportRecord = serde_json::from_str(&line).map_err(|e| {
+                ServiceError::validation_failed(format!(
+                    "{}: error parsing line {}: {}",
+                    path.display(),
+                    line_num + 1,
+                    e
+                ))
+            })?;
             records.push(record);
         }
         Ok(records)

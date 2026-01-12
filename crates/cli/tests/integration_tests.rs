@@ -14,9 +14,6 @@
 
 mod common;
 
-use common::*;
-use vertebrae_db::{DbError, Level, SectionType, Status};
-
 // NOTE: Integration tests have been removed due to service layer migration.
 // The tests relied on `cmd.execute(&Database)` which is no longer valid after
 // the refactoring to use the TaskService trait. Rewriting these tests would

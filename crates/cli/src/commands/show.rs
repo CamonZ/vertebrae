@@ -6,7 +6,7 @@
 use crate::commands::list::TaskSummary;
 use clap::Args;
 use serde::Deserialize;
-use vertebrae_core::TaskService;
+use vertebrae_core::{ServiceError, TaskService};
 use vertebrae_db::{CodeRef, Database, DbError, Section, SectionType};
 
 /// Show full details of a task
@@ -175,27 +175,43 @@ impl ShowCommand {
     ///
     /// # Errors
     ///
-    /// Returns `DbError` if:
+    /// Returns `ServiceError` if:
     /// - The task with the given ID does not exist
     /// - Database operations fail
-    pub async fn execute(&self, service: &dyn TaskService) -> Result<TaskDetail, DbError> {
+    pub async fn execute(&self, service: &dyn TaskService) -> Result<TaskDetail, ServiceError> {
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
         let db = service.database();
 
         // Fetch the main task
-        let task = self.fetch_task(db, &id).await?;
+        let task = self.fetch_task(db, &id).await.map_err(|e| match e {
+            DbError::TaskNotFound { task_id } => ServiceError::task_not_found(&task_id),
+            other => ServiceError::Database(other),
+        })?;
 
         // Fetch related data in parallel-ish manner
-        let parent = self.fetch_parent(db, &id).await?;
-        let children = self.fetch_children(db, &id).await?;
-        let blocked_by = self.fetch_blocked_by(db, &id).await?;
-        let blocks = self.fetch_blocks(db, &id).await?;
+        let parent = self
+            .fetch_parent(db, &id)
+            .await
+            .map_err(ServiceError::Database)?;
+        let children = self
+            .fetch_children(db, &id)
+            .await
+            .map_err(ServiceError::Database)?;
+        let blocked_by = self
+            .fetch_blocked_by(db, &id)
+            .await
+            .map_err(ServiceError::Database)?;
+        let blocks = self
+            .fetch_blocks(db, &id)
+            .await
+            .map_err(ServiceError::Database)?;
 
         // Fetch workflow info if task is assigned to a workflow
         let workflow = self
             .fetch_workflow_info(db, task.workflow_id.as_ref(), task.current_step)
-            .await?;
+            .await
+            .map_err(ServiceError::Database)?;
 
         // Convert sections - filter out any without required fields
         let sections: Vec<Section> = task
@@ -897,14 +913,14 @@ mod tests {
 
         let result = cmd.execute(&service).await;
         match result {
-            Err(DbError::TaskNotFound { task_id }) => {
+            Err(ServiceError::TaskNotFound { task_id }) => {
                 assert_eq!(
                     task_id, "nonexistent",
                     "Expected task_id 'nonexistent', got: {}",
                     task_id
                 );
             }
-            Err(other) => panic!("Expected NotFound error, got {:?}", other),
+            Err(other) => panic!("Expected TaskNotFound error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
     }

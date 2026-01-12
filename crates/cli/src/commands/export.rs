@@ -7,7 +7,8 @@ use clap::Args;
 use serde::Serialize;
 use std::io::Write;
 use std::path::PathBuf;
-use vertebrae_db::{Database, DbError, Task};
+use vertebrae_core::{ServiceError, TaskService};
+use vertebrae_db::Task;
 
 /// Export database to JSONL format
 #[derive(Debug, Args)]
@@ -77,16 +78,17 @@ impl ExportCommand {
     ///
     /// # Arguments
     ///
-    /// * `db` - Reference to the database connection
+    /// * `service` - Reference to the task service
     ///
     /// # Errors
     ///
-    /// Returns `DbError` if database queries fail or file I/O fails.
-    pub async fn execute(&self, db: &Database) -> Result<ExportResult, DbError> {
+    /// Returns `ServiceError` if database queries fail or file I/O fails.
+    pub async fn execute(&self, service: &dyn TaskService) -> Result<ExportResult, ServiceError> {
         // Collect all records to export
         let mut records: Vec<ExportRecord> = Vec::new();
 
         // Export all tasks using repository
+        let db = service.database();
         let tasks = db.tasks().export_all().await?;
         let task_count = tasks.len();
         for (id, task) in tasks {
@@ -122,23 +124,20 @@ impl ExportCommand {
     }
 
     /// Write records to the output destination
-    fn write_records(&self, records: &[ExportRecord]) -> Result<String, DbError> {
+    fn write_records(&self, records: &[ExportRecord]) -> Result<String, ServiceError> {
         match &self.output {
             Some(path) => {
-                let file = std::fs::File::create(path).map_err(|e| DbError::InvalidPath {
-                    path: path.clone(),
-                    reason: e.to_string(),
+                let file = std::fs::File::create(path).map_err(|e| {
+                    ServiceError::validation_failed(format!("{}: {}", path.display(), e))
                 })?;
                 let mut writer = std::io::BufWriter::new(file);
 
                 for record in records {
-                    let json = serde_json::to_string(record).map_err(|e| DbError::InvalidPath {
-                        path: path.clone(),
-                        reason: format!("JSON serialization error: {}", e),
+                    let json = serde_json::to_string(record).map_err(|e| {
+                        ServiceError::validation_failed(format!("JSON serialization error: {}", e))
                     })?;
-                    writeln!(writer, "{}", json).map_err(|e| DbError::InvalidPath {
-                        path: path.clone(),
-                        reason: e.to_string(),
+                    writeln!(writer, "{}", json).map_err(|e| {
+                        ServiceError::validation_failed(format!("{}: {}", path.display(), e))
                     })?;
                 }
 
@@ -147,9 +146,8 @@ impl ExportCommand {
             None => {
                 // Write to stdout
                 for record in records {
-                    let json = serde_json::to_string(record).map_err(|e| DbError::InvalidPath {
-                        path: PathBuf::from("<stdout>"),
-                        reason: format!("JSON serialization error: {}", e),
+                    let json = serde_json::to_string(record).map_err(|e| {
+                        ServiceError::validation_failed(format!("JSON serialization error: {}", e))
                     })?;
                     println!("{}", json);
                 }

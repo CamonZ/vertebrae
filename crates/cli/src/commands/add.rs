@@ -3,7 +3,8 @@
 //! Implements the `vtb add` command to create new tasks with all supported options.
 
 use clap::Args;
-use vertebrae_db::{DbError, Level, Priority};
+use vertebrae_core::{CreateTaskOptions, ServiceError, TaskService};
+use vertebrae_db::{Level, Priority};
 
 /// Create a new task
 #[derive(Debug, Args)]
@@ -85,26 +86,22 @@ impl AddCommand {
     ///
     /// # Errors
     ///
-    /// Returns `DbError` if:
+    /// Returns `ServiceError` if:
     /// - The title is empty
     /// - Parent task doesn't exist
     /// - Dependency tasks don't exist
     /// - Specified workflow doesn't exist
     /// - Service operations fail
-    pub async fn execute(
-        &self,
-        service: &dyn vertebrae_core::TaskService,
-    ) -> Result<String, DbError> {
+    pub async fn execute(&self, service: &dyn TaskService) -> Result<String, ServiceError> {
         // Validate title is not empty
         if self.title.trim().is_empty() {
-            return Err(DbError::InvalidPath {
-                path: std::path::PathBuf::from("title"),
-                reason: "title required".to_string(),
+            return Err(ServiceError::ValidationFailed {
+                message: "title required".to_string(),
             });
         }
 
         // Build create task options using service layer API
-        let mut options = vertebrae_core::CreateTaskOptions::new(&self.title);
+        let mut options = CreateTaskOptions::new(&self.title);
 
         // Set level (defaults to Task)
         if let Some(level) = &self.level {
@@ -146,35 +143,21 @@ impl AddCommand {
         if let Some(workflow_id) = &self.workflow {
             // For now, workflow validation still needs database access
             // This will be handled by the service layer in the future
+            #[allow(deprecated)]
             let db = service.database();
             if !db.workflows().exists(workflow_id).await? {
-                return Err(DbError::NotFound {
-                    entity: "workflow".to_string(),
-                    id: workflow_id.to_string(),
-                });
+                return Err(ServiceError::workflow_not_found(workflow_id));
             }
         }
 
         // Create the task using the service layer
         // This will automatically fire MutationCallback events
-        let id = service
-            .create_task(options)
-            .await
-            .map_err(|e| DbError::InvalidPath {
-                path: std::path::PathBuf::from("task"),
-                reason: format!("Failed to create task: {}", e),
-            })?;
+        let id = service.create_task(options).await?;
 
         // Assign to custom workflow if specified
         if let Some(workflow_id) = &self.workflow {
             let workflow_thing = surrealdb::sql::Thing::from(("workflow", workflow_id.as_str()));
-            service
-                .assign_workflow(&id, &workflow_thing)
-                .await
-                .map_err(|e| DbError::InvalidPath {
-                    path: std::path::PathBuf::from("workflow"),
-                    reason: format!("Failed to assign workflow: {}", e),
-                })?;
+            service.assign_workflow(&id, &workflow_thing).await?;
         }
 
         Ok(id)

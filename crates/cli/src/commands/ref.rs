@@ -5,8 +5,8 @@
 
 use clap::Args;
 use std::path::Path;
-use vertebrae_core::TaskService;
-use vertebrae_db::{CodeRef, DbError};
+use vertebrae_core::{ServiceError, TaskService};
+use vertebrae_db::CodeRef;
 
 /// Add a code reference to a task
 #[derive(Debug, Args)]
@@ -178,18 +178,17 @@ impl RefCommand {
     ///
     /// # Errors
     ///
-    /// Returns `DbError` if:
+    /// Returns `ServiceError` if:
     /// - The task with the given ID does not exist
     /// - The file specification is invalid
     /// - Database operations fail
-    pub async fn execute(&self, service: &dyn TaskService) -> Result<RefResult, DbError> {
+    pub async fn execute(&self, service: &dyn TaskService) -> Result<RefResult, ServiceError> {
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
 
         // Parse the file specification
-        let parsed = parse_file_ref(&self.file_spec).map_err(|msg| DbError::InvalidPath {
-            path: std::path::PathBuf::from(&self.file_spec),
-            reason: msg,
+        let parsed = parse_file_ref(&self.file_spec).map_err(|msg| {
+            ServiceError::validation_failed(format!("{}: {}", self.file_spec, msg))
         })?;
 
         // Check if file exists (warning only)
@@ -209,18 +208,7 @@ impl RefCommand {
         };
 
         // Use service to append the ref (handles existence check, timestamp, and notification)
-        service
-            .append_ref(&id, &code_ref)
-            .await
-            .map_err(|e| match e {
-                vertebrae_core::ServiceError::TaskNotFound { task_id } => {
-                    DbError::TaskNotFound { task_id }
-                }
-                vertebrae_core::ServiceError::Database(db_err) => db_err,
-                other => DbError::ValidationError {
-                    message: other.to_string(),
-                },
-            })?;
+        service.append_ref(&id, &code_ref).await?;
 
         Ok(RefResult {
             id,
@@ -625,14 +613,14 @@ mod tests {
 
         let result = cmd.execute(&service).await;
         match result {
-            Err(DbError::InvalidPath { reason, .. }) => {
+            Err(ServiceError::ValidationFailed { message }) => {
                 assert!(
-                    reason.contains("invalid line range"),
+                    message.contains("invalid line range"),
                     "Expected 'invalid line range' in error, got: {}",
-                    reason
+                    message
                 );
             }
-            Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
+            Err(other) => panic!("Expected ValidationFailed error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
     }
@@ -652,14 +640,14 @@ mod tests {
 
         let result = cmd.execute(&service).await;
         match result {
-            Err(DbError::InvalidPath { reason, .. }) => {
+            Err(ServiceError::ValidationFailed { message }) => {
                 assert!(
-                    reason.contains("invalid line number"),
+                    message.contains("invalid line number"),
                     "Expected 'invalid line number' in error, got: {}",
-                    reason
+                    message
                 );
             }
-            Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
+            Err(other) => panic!("Expected ValidationFailed error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
     }

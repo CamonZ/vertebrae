@@ -4,8 +4,8 @@
 //! optionally filtered by type and grouped by positive/negative space.
 
 use clap::Args;
-use vertebrae_core::TaskService;
-use vertebrae_db::{DbError, Section, SectionType};
+use vertebrae_core::{ServiceError, TaskService};
+use vertebrae_db::{Section, SectionType};
 
 /// List all sections for a task
 #[derive(Debug, Args)]
@@ -218,10 +218,10 @@ impl SectionsCommand {
     ///
     /// # Errors
     ///
-    /// Returns `DbError` if:
+    /// Returns `ServiceError` if:
     /// - The task with the given ID does not exist
     /// - Service operations fail
-    pub async fn execute(&self, service: &dyn TaskService) -> Result<SectionsResult, DbError> {
+    pub async fn execute(&self, service: &dyn TaskService) -> Result<SectionsResult, ServiceError> {
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
 
@@ -229,9 +229,7 @@ impl SectionsCommand {
         let task = service
             .get_task(&id)
             .await
-            .map_err(|_e| DbError::TaskNotFound {
-                task_id: self.id.clone(),
-            })?;
+            .map_err(|_e| ServiceError::task_not_found(&self.id))?;
 
         // Use the task's sections directly
         let mut sections = task.sections;
@@ -656,14 +654,14 @@ mod tests {
 
         let result = cmd.execute(&service).await;
         match result {
-            Err(DbError::TaskNotFound { task_id }) => {
+            Err(ServiceError::TaskNotFound { task_id }) => {
                 assert_eq!(
                     task_id, "nonexistent",
                     "Expected task_id 'nonexistent', got: {}",
                     task_id
                 );
             }
-            Err(other) => panic!("Expected NotFound error, got {:?}", other),
+            Err(other) => panic!("Expected TaskNotFound error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
     }
@@ -761,14 +759,8 @@ mod tests {
         );
 
         // Check goal and steps appear
-        assert!(
-            lines.iter().any(|l| *l == "Goal: The goal"),
-            "Should have Goal line"
-        );
-        assert!(
-            lines.iter().any(|l| *l == "Steps:"),
-            "Should have Steps header"
-        );
+        assert!(lines.contains(&"Goal: The goal"), "Should have Goal line");
+        assert!(lines.contains(&"Steps:"), "Should have Steps header");
         assert!(
             lines.iter().any(|l| l.trim() == "[0] Step 1"),
             "Should have Step 1 with ordinal"
@@ -788,7 +780,7 @@ mod tests {
             "Undesired Behavior should come after Desired Behavior"
         );
         assert!(
-            lines.iter().any(|l| *l == "Anti-Patterns:"),
+            lines.contains(&"Anti-Patterns:"),
             "Should have Anti-Patterns header"
         );
         assert!(
@@ -813,19 +805,16 @@ mod tests {
 
         // Check Desired Behavior exists
         assert!(
-            lines.iter().any(|l| *l == "Desired Behavior"),
+            lines.contains(&"Desired Behavior"),
             "Should have Desired Behavior header"
         );
+        assert!(lines.contains(&"Goal: The goal"), "Should have Goal line");
         assert!(
-            lines.iter().any(|l| *l == "Goal: The goal"),
-            "Should have Goal line"
-        );
-        assert!(
-            lines.iter().any(|l| *l == "Context: Some context"),
+            lines.contains(&"Context: Some context"),
             "Should have Context line"
         );
         assert!(
-            !lines.iter().any(|l| *l == "Undesired Behavior"),
+            !lines.contains(&"Undesired Behavior"),
             "Should not have Undesired Behavior header"
         );
     }
@@ -845,19 +834,19 @@ mod tests {
         let lines: Vec<&str> = output.lines().collect();
 
         assert!(
-            !lines.iter().any(|l| *l == "Desired Behavior"),
+            !lines.contains(&"Desired Behavior"),
             "Should not have Desired Behavior header"
         );
         assert!(
-            lines.iter().any(|l| *l == "Undesired Behavior"),
+            lines.contains(&"Undesired Behavior"),
             "Should have Undesired Behavior header"
         );
         assert!(
-            lines.iter().any(|l| *l == "Anti-Patterns:"),
+            lines.contains(&"Anti-Patterns:"),
             "Should have Anti-Patterns header"
         );
         assert!(
-            lines.iter().any(|l| *l == "Constraints:"),
+            lines.contains(&"Constraints:"),
             "Should have Constraints header"
         );
     }

@@ -4,8 +4,7 @@
 //! between two tasks using BFS traversal of the dependency graph.
 
 use clap::Args;
-use vertebrae_core::TaskService;
-use vertebrae_db::DbError;
+use vertebrae_core::{ServiceError, TaskService};
 
 /// Find the dependency path between two tasks
 #[derive(Debug, Args)]
@@ -51,31 +50,23 @@ impl PathCommand {
     ///
     /// # Errors
     ///
-    /// Returns `DbError` if:
+    /// Returns `ServiceError` if:
     /// - Either task does not exist
     /// - Database operations fail
-    pub async fn execute(&self, service: &dyn TaskService) -> Result<PathResult, DbError> {
-        let db = service.database();
-
+    pub async fn execute(&self, service: &dyn TaskService) -> Result<PathResult, ServiceError> {
         // Normalize IDs to lowercase for case-insensitive lookup
         let from_id = self.from_id.to_lowercase();
         let to_id = self.to_id.to_lowercase();
 
-        // Validate both tasks exist using the repository
-        let from_task = db
-            .tasks()
-            .get(&from_id)
-            .await?
-            .ok_or_else(|| DbError::TaskNotFound {
-                task_id: from_id.clone(),
-            })?;
-        let _to_task = db
-            .tasks()
-            .get(&to_id)
-            .await?
-            .ok_or_else(|| DbError::TaskNotFound {
-                task_id: to_id.clone(),
-            })?;
+        // Validate both tasks exist using the service
+        let from_task = service
+            .get_task(&from_id)
+            .await
+            .map_err(|_| ServiceError::task_not_found(&from_id))?;
+        let _to_task = service
+            .get_task(&to_id)
+            .await
+            .map_err(|_| ServiceError::task_not_found(&to_id))?;
 
         // Handle same task case
         if from_id == to_id {
@@ -90,6 +81,7 @@ impl PathCommand {
         }
 
         // Find the path using the graph repository
+        let db = service.database();
         let path_ids = db.graph().find_path(&from_id, &to_id).await?;
 
         // Convert path IDs to TaskSummary with titles
@@ -97,13 +89,10 @@ impl PathCommand {
             Some(ids) => {
                 let mut summaries = Vec::new();
                 for id in ids {
-                    let task = db
-                        .tasks()
-                        .get(&id)
-                        .await?
-                        .ok_or_else(|| DbError::TaskNotFound {
-                            task_id: id.clone(),
-                        })?;
+                    let task = service
+                        .get_task(&id)
+                        .await
+                        .map_err(|_| ServiceError::task_not_found(&id))?;
                     summaries.push(TaskSummary {
                         id,
                         title: task.title,
@@ -329,14 +318,14 @@ mod tests {
 
         let result = cmd.execute(&service).await;
         match result {
-            Err(DbError::TaskNotFound { task_id }) => {
+            Err(ServiceError::TaskNotFound { task_id }) => {
                 assert_eq!(
                     task_id, "nonexistent",
                     "Expected task_id 'nonexistent', got: {}",
                     task_id
                 );
             }
-            Err(other) => panic!("Expected NotFound error, got {:?}", other),
+            Err(other) => panic!("Expected TaskNotFound error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
     }
@@ -354,14 +343,14 @@ mod tests {
 
         let result = cmd.execute(&service).await;
         match result {
-            Err(DbError::TaskNotFound { task_id }) => {
+            Err(ServiceError::TaskNotFound { task_id }) => {
                 assert_eq!(
                     task_id, "nonexistent",
                     "Expected task_id 'nonexistent', got: {}",
                     task_id
                 );
             }
-            Err(other) => panic!("Expected NotFound error, got {:?}", other),
+            Err(other) => panic!("Expected TaskNotFound error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
     }

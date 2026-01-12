@@ -4,8 +4,8 @@
 //! sorted by file path and then line number.
 
 use clap::Args;
-use vertebrae_core::TaskService;
-use vertebrae_db::{CodeRef, DbError};
+use vertebrae_core::{ServiceError, TaskService};
+use vertebrae_db::CodeRef;
 
 /// List all code references for a task
 #[derive(Debug, Args)]
@@ -126,10 +126,10 @@ impl RefsCommand {
     ///
     /// # Errors
     ///
-    /// Returns `DbError` if:
+    /// Returns `ServiceError` if:
     /// - The task with the given ID does not exist
     /// - Service operations fail
-    pub async fn execute(&self, service: &dyn TaskService) -> Result<RefsResult, DbError> {
+    pub async fn execute(&self, service: &dyn TaskService) -> Result<RefsResult, ServiceError> {
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
 
@@ -137,9 +137,7 @@ impl RefsCommand {
         let task = service
             .get_task(&id)
             .await
-            .map_err(|_e| DbError::TaskNotFound {
-                task_id: self.id.clone(),
-            })?;
+            .map_err(|_e| ServiceError::task_not_found(&self.id))?;
 
         // Use the task's code_refs directly
         let mut refs = task.code_refs;
@@ -336,14 +334,14 @@ mod tests {
 
         let result = cmd.execute(&service).await;
         match result {
-            Err(DbError::TaskNotFound { task_id }) => {
+            Err(ServiceError::TaskNotFound { task_id }) => {
                 assert_eq!(
                     task_id, "nonexistent",
                     "Expected task_id 'nonexistent', got: {}",
                     task_id
                 );
             }
-            Err(other) => panic!("Expected NotFound error, got {:?}", other),
+            Err(other) => panic!("Expected TaskNotFound error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
     }

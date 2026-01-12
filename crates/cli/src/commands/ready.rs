@@ -4,8 +4,8 @@
 //! Shows highest-level unblocked items prioritized by hierarchy (epic > ticket > task).
 
 use clap::Args;
-use vertebrae_core::TaskService;
-use vertebrae_db::{DbError, Status, TaskSummary};
+use vertebrae_core::{ServiceError, TaskService};
+use vertebrae_db::{Status, TaskSummary};
 
 #[cfg(test)]
 use {vertebrae_core::DefaultTaskService, vertebrae_db::Level};
@@ -70,8 +70,8 @@ impl ReadyCommand {
     ///
     /// # Errors
     ///
-    /// Returns `DbError` if database operations fail.
-    pub async fn execute(&self, service: &dyn TaskService) -> Result<ReadyResult, DbError> {
+    /// Returns `ServiceError` if database operations fail.
+    pub async fn execute(&self, service: &dyn TaskService) -> Result<ReadyResult, ServiceError> {
         let db = service.database();
 
         // Get ready items for todo status

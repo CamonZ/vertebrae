@@ -5,8 +5,8 @@ use tracing_subscriber::EnvFilter;
 
 use vertebrae_cli::commands::Command;
 use vertebrae_cli::notification::create_http_notification_callback;
-use vertebrae_core::DefaultTaskService;
-use vertebrae_db::{Database, DbError};
+use vertebrae_core::{DefaultTaskService, ServiceError};
+use vertebrae_db::Database;
 
 /// Environment variable name for the database path
 const VTB_DB_PATH_ENV: &str = "VTB_DB_PATH";
@@ -74,19 +74,19 @@ async fn main() {
     init_logging();
 
     if let Err(e) = run_app().await {
-        eprintln!("error: {}", e.full_message());
+        eprintln!("error: {}", e);
         process::exit(1);
     }
 }
 
 /// Main application logic - separated for testability
-async fn run_app() -> Result<(), DbError> {
+async fn run_app() -> Result<(), ServiceError> {
     let args = Args::parse();
     run_with_args(&args).await
 }
 
 /// Run the application with the given arguments
-async fn run_with_args(args: &Args) -> Result<(), DbError> {
+async fn run_with_args(args: &Args) -> Result<(), ServiceError> {
     // Determine database path using priority: CLI arg > env var > default
     let db_path = resolve_db_path(args.db.clone())?;
 

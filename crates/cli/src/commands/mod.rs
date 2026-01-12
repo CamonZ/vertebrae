@@ -58,8 +58,7 @@ pub use workflow::WorkflowCommand;
 
 use crate::output::{format_task_table, format_task_tree};
 use clap::Subcommand;
-use vertebrae_core::TaskService;
-use vertebrae_db::DbError;
+use vertebrae_core::{ServiceError, TaskService};
 
 /// Available CLI commands
 #[derive(Debug, Subcommand)]
@@ -147,9 +146,8 @@ impl Command {
     ///
     /// # Errors
     ///
-    /// Returns `DbError` if the command execution fails.
-    pub async fn execute(&self, service: &dyn TaskService) -> Result<CommandResult, DbError> {
-        let db = service.database();
+    /// Returns `ServiceError` if the command execution fails.
+    pub async fn execute(&self, service: &dyn TaskService) -> Result<CommandResult, ServiceError> {
         match self {
             Command::Add(cmd) => {
                 let id = cmd.execute(service).await?;
@@ -174,26 +172,26 @@ impl Command {
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Execution(cmd) => {
-                let result = cmd.execute(db).await?;
+                let result = cmd.execute(service).await?;
                 Ok(CommandResult::Message(result))
             }
             Command::Export(cmd) => {
-                let result = cmd.execute(db).await?;
+                let result = cmd.execute(service).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Import(cmd) => {
-                let result = cmd.execute(db).await?;
+                let result = cmd.execute(service).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Init(cmd) => {
                 // Init doesn't use the database - it creates the db directory
-                let result = cmd.execute().map_err(|e| DbError::InvalidPath {
-                    path: std::path::PathBuf::from("."),
-                    reason: e.to_string(),
-                })?;
+                let result = cmd
+                    .execute()
+                    .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::List(cmd) => {
+                let db = service.database();
                 let tasks = cmd.execute(db).await?;
                 // Use tree format if --tree is specified (or if default behavior)
                 // Use flat format if --flat is specified
@@ -266,11 +264,11 @@ impl Command {
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Update(cmd) => {
-                let id = cmd.execute(db).await?;
+                let id = cmd.execute(service).await?;
                 Ok(CommandResult::Message(format!("Updated task: {}", id)))
             }
             Command::Workflow(cmd) => {
-                let result = cmd.execute(db).await?;
+                let result = cmd.execute(service).await?;
                 Ok(CommandResult::Message(result))
             }
         }

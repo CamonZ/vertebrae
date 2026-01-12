@@ -4,8 +4,7 @@
 //! Uses the TaskService layer to ensure MutationCallback fires properly for GUI cache invalidation.
 
 use clap::Args;
-use vertebrae_core::TaskService;
-use vertebrae_db::DbError;
+use vertebrae_core::{ServiceError, TaskService};
 
 /// Remove a dependency relationship between tasks
 #[derive(Debug, Args)]
@@ -60,51 +59,29 @@ impl UndependCommand {
     ///
     /// # Errors
     ///
-    /// Returns `DbError` if:
+    /// Returns `ServiceError` if:
     /// - The source task does not exist
     /// - Service operations fail
     ///
     /// Note: Non-existent dependency is handled gracefully with a warning.
-    pub async fn execute(&self, service: &dyn TaskService) -> Result<UndependResult, DbError> {
+    pub async fn execute(&self, service: &dyn TaskService) -> Result<UndependResult, ServiceError> {
         // Normalize IDs to lowercase for case-insensitive lookup
         let task_id = self.id.to_lowercase();
         let blocker_id = self.blocker_id.to_lowercase();
 
         // Validate source task exists using service layer
-        if !service
-            .task_exists(&task_id)
-            .await
-            .map_err(|e| DbError::InvalidPath {
-                path: std::path::PathBuf::from(&self.id),
-                reason: e.to_string(),
-            })?
-        {
-            return Err(DbError::InvalidPath {
-                path: std::path::PathBuf::from(&self.id),
-                reason: format!("Task '{}' not found", self.id),
-            });
+        if !service.task_exists(&task_id).await? {
+            return Err(ServiceError::task_not_found(&self.id));
         }
 
         // Check if dependency exists using service layer
-        let with_relations = service
-            .get_task_with_relations(&task_id)
-            .await
-            .map_err(|e| DbError::InvalidPath {
-                path: std::path::PathBuf::from(&self.id),
-                reason: e.to_string(),
-            })?;
+        let with_relations = service.get_task_with_relations(&task_id).await?;
 
         let existed = with_relations.depends_on_ids.contains(&blocker_id);
 
         if existed {
             // Remove the dependency using the service layer (fires mutation callback)
-            service
-                .remove_dependency(&task_id, &blocker_id)
-                .await
-                .map_err(|e| DbError::InvalidPath {
-                    path: std::path::PathBuf::from(&self.id),
-                    reason: e.to_string(),
-                })?;
+            service.remove_dependency(&task_id, &blocker_id).await?;
         }
 
         Ok(UndependResult {
@@ -256,14 +233,14 @@ mod tests {
 
         let result = undepend_cmd.execute(&service).await;
         match result {
-            Err(DbError::InvalidPath { reason, .. }) => {
-                assert!(
-                    reason.contains("not found"),
-                    "Expected 'not found' in error, got: {}",
-                    reason
+            Err(ServiceError::TaskNotFound { task_id }) => {
+                assert_eq!(
+                    task_id, "nonexistent",
+                    "Expected task_id 'nonexistent', got: {}",
+                    task_id
                 );
             }
-            Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
+            Err(other) => panic!("Expected TaskNotFound error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
     }

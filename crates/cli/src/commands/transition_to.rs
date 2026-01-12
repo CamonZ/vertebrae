@@ -5,7 +5,8 @@
 //! done, triage, and reject commands into a single unified interface.
 
 use clap::{Args, ValueEnum};
-use vertebrae_db::{DbError, Status, TriageValidationResult};
+use vertebrae_core::ServiceError;
+use vertebrae_db::{Status, TriageValidationResult};
 
 /// Target status for the transition-to command
 #[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
@@ -213,7 +214,7 @@ impl TransitionToCommand {
     ///
     /// # Errors
     ///
-    /// Returns `DbError` if:
+    /// Returns `ServiceError` if:
     /// - The task with the given ID does not exist
     /// - The status transition is invalid
     /// - The task has incomplete children (for done transition)
@@ -221,18 +222,12 @@ impl TransitionToCommand {
     pub async fn execute(
         &self,
         service: &dyn vertebrae_core::TaskService,
-    ) -> Result<TransitionToResult, DbError> {
+    ) -> Result<TransitionToResult, ServiceError> {
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
 
         // Use service layer to perform the transition (which fires MutationCallback automatically)
-        let result = service
-            .transition_to(&id, self.target.to_status())
-            .await
-            .map_err(|e| DbError::InvalidPath {
-                path: std::path::PathBuf::from("task"),
-                reason: format!("Failed to transition task: {}", e),
-            })?;
+        let result = service.transition_to(&id, self.target.to_status()).await?;
 
         // Convert service TransitionResult to CLI TransitionToResult
         Ok(TransitionToResult {

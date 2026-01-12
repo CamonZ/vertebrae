@@ -4,7 +4,7 @@
 //! Supports removing by file path or removing all references.
 
 use clap::Args;
-use vertebrae_db::DbError;
+use vertebrae_core::ServiceError;
 
 /// Remove code references from a task
 #[derive(Debug, Args)]
@@ -74,13 +74,13 @@ impl UnrefCommand {
     ///
     /// # Errors
     ///
-    /// Returns `DbError` if:
+    /// Returns `ServiceError` if:
     /// - The task with the given ID does not exist
     /// - Service operations fail
     pub async fn execute(
         &self,
         service: &dyn vertebrae_core::TaskService,
-    ) -> Result<UnrefResult, DbError> {
+    ) -> Result<UnrefResult, ServiceError> {
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
 
@@ -88,10 +88,7 @@ impl UnrefCommand {
         let task = service
             .get_task(&id)
             .await
-            .map_err(|e| DbError::InvalidPath {
-                path: std::path::PathBuf::from("task"),
-                reason: format!("Failed to get task: {}", e),
-            })?;
+            .map_err(|_| ServiceError::task_not_found(&id))?;
 
         let code_refs = task.code_refs.clone();
         let original_count = code_refs.len();
@@ -99,13 +96,7 @@ impl UnrefCommand {
         if self.all {
             // Remove all references using service layer (which fires MutationCallback)
             if original_count > 0 {
-                service
-                    .remove_code_refs(&id, None)
-                    .await
-                    .map_err(|e| DbError::InvalidPath {
-                        path: std::path::PathBuf::from("task"),
-                        reason: format!("Failed to remove refs: {}", e),
-                    })?;
+                service.remove_code_refs(&id, None).await?;
             }
 
             Ok(UnrefResult {
@@ -129,11 +120,7 @@ impl UnrefCommand {
                 // Remove refs by index using service layer (which fires MutationCallback)
                 service
                     .remove_code_refs(&id, Some(refs_to_remove_indices))
-                    .await
-                    .map_err(|e| DbError::InvalidPath {
-                        path: std::path::PathBuf::from("task"),
-                        reason: format!("Failed to remove refs: {}", e),
-                    })?;
+                    .await?;
             }
 
             Ok(UnrefResult {

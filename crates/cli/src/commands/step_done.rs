@@ -3,7 +3,7 @@
 //! Implements the `vtb step-done` command to mark individual steps within a task as done.
 
 use clap::Args;
-use vertebrae_db::DbError;
+use vertebrae_core::ServiceError;
 
 /// Mark a step as done within a task
 #[derive(Debug, Args)]
@@ -49,33 +49,29 @@ impl StepDoneCommand {
     ///
     /// # Errors
     ///
-    /// Returns `DbError` if:
+    /// Returns `ServiceError` if:
     /// - The task does not exist
     /// - The step index is out of bounds
     /// - Service operations fail
     pub async fn execute(
         &self,
         service: &dyn vertebrae_core::TaskService,
-    ) -> Result<StepDoneResult, DbError> {
+    ) -> Result<StepDoneResult, ServiceError> {
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
 
         // Validate index is positive
         if self.index == 0 {
-            return Err(DbError::InvalidPath {
-                path: std::path::PathBuf::from(&self.id),
-                reason: "Step index must be 1 or greater".to_string(),
-            });
+            return Err(ServiceError::validation_failed(
+                "Step index must be 1 or greater",
+            ));
         }
 
         // Fetch task via service
         let task = service
             .get_task(&id)
             .await
-            .map_err(|e| DbError::InvalidPath {
-                path: std::path::PathBuf::from("task"),
-                reason: format!("Failed to get task: {}", e),
-            })?;
+            .map_err(|_| ServiceError::task_not_found(&id))?;
 
         let sections = task.sections.clone();
 
@@ -90,14 +86,11 @@ impl StepDoneCommand {
         // Find the step by index (1-based)
         let step_idx = self.index - 1;
         if step_idx >= steps.len() {
-            return Err(DbError::InvalidPath {
-                path: std::path::PathBuf::from(&self.id),
-                reason: format!(
-                    "Step {} not found. Task has {} step(s).",
-                    self.index,
-                    steps.len()
-                ),
-            });
+            return Err(ServiceError::validation_failed(format!(
+                "Step {} not found. Task has {} step(s).",
+                self.index,
+                steps.len()
+            )));
         }
 
         let (original_idx, step) = steps[step_idx];
@@ -118,17 +111,14 @@ impl StepDoneCommand {
                 &id,
                 &vertebrae_db::TaskUpdate::new().with_sections(updated_sections),
             )
-            .await?;
+            .await
+            .map_err(ServiceError::Database)?;
 
         // Trigger mutation callback by calling a dummy update through service layer
         // This is a temporary workaround - ideally the service should have an update_sections method
         service
             .update_task(&id, vertebrae_core::UpdateTaskOptions::new())
-            .await
-            .map_err(|e| DbError::InvalidPath {
-                path: std::path::PathBuf::from("task"),
-                reason: format!("Failed to update task: {}", e),
-            })?;
+            .await?;
 
         Ok(StepDoneResult {
             task_id: id,

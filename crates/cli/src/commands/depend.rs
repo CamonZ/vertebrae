@@ -7,8 +7,7 @@
 //! fires properly for GUI cache invalidation.
 
 use clap::Args;
-use vertebrae_core::TaskService;
-use vertebrae_db::DbError;
+use vertebrae_core::{ServiceError, TaskService};
 
 /// Create a dependency relationship between tasks
 #[derive(Debug, Args)]
@@ -63,61 +62,34 @@ impl DependCommand {
     ///
     /// # Errors
     ///
-    /// Returns `DbError` if:
+    /// Returns `ServiceError` if:
     /// - Either task does not exist
     /// - Self-dependency is attempted (task depends on itself)
     /// - Creating the dependency would form a cycle
     /// - Service operations fail
-    pub async fn execute(&self, service: &dyn TaskService) -> Result<DependResult, DbError> {
+    pub async fn execute(&self, service: &dyn TaskService) -> Result<DependResult, ServiceError> {
         // Normalize IDs to lowercase for case-insensitive lookup
         let task_id = self.id.to_lowercase();
         let blocker_id = self.blocker_id.to_lowercase();
 
         // Check for self-dependency
         if task_id == blocker_id {
-            return Err(DbError::InvalidPath {
-                path: std::path::PathBuf::from(&self.id),
-                reason: "Task cannot depend on itself".to_string(),
-            });
+            return Err(ServiceError::validation_failed(
+                "Task cannot depend on itself",
+            ));
         }
 
         // Validate both tasks exist using service layer
-        if !service
-            .task_exists(&task_id)
-            .await
-            .map_err(|e| DbError::InvalidPath {
-                path: std::path::PathBuf::from(&self.id),
-                reason: e.to_string(),
-            })?
-        {
-            return Err(DbError::InvalidPath {
-                path: std::path::PathBuf::from(&self.id),
-                reason: format!("Task '{}' not found", self.id),
-            });
+        if !service.task_exists(&task_id).await? {
+            return Err(ServiceError::task_not_found(&self.id));
         }
 
-        if !service
-            .task_exists(&blocker_id)
-            .await
-            .map_err(|e| DbError::InvalidPath {
-                path: std::path::PathBuf::from(&self.blocker_id),
-                reason: e.to_string(),
-            })?
-        {
-            return Err(DbError::InvalidPath {
-                path: std::path::PathBuf::from(&self.blocker_id),
-                reason: format!("Task '{}' not found", self.blocker_id),
-            });
+        if !service.task_exists(&blocker_id).await? {
+            return Err(ServiceError::task_not_found(&self.blocker_id));
         }
 
         // Check if dependency already exists (idempotent) using service layer
-        let with_relations = service
-            .get_task_with_relations(&task_id)
-            .await
-            .map_err(|e| DbError::InvalidPath {
-                path: std::path::PathBuf::from(&self.id),
-                reason: e.to_string(),
-            })?;
+        let with_relations = service.get_task_with_relations(&task_id).await?;
 
         if with_relations.depends_on_ids.contains(&blocker_id) {
             // Dependency already exists - idempotent behavior
@@ -129,19 +101,7 @@ impl DependCommand {
         }
 
         // Add the dependency using the service layer (handles cycle detection and mutation callback)
-        service
-            .add_dependency(&task_id, &blocker_id)
-            .await
-            .map_err(|e| match e {
-                vertebrae_core::error::ServiceError::CyclicDependency => DbError::InvalidPath {
-                    path: std::path::PathBuf::from(&self.id),
-                    reason: "Cycle detected: dependency would create a cycle".to_string(),
-                },
-                other => DbError::InvalidPath {
-                    path: std::path::PathBuf::from(&self.id),
-                    reason: other.to_string(),
-                },
-            })?;
+        service.add_dependency(&task_id, &blocker_id).await?;
 
         Ok(DependResult {
             task_id,
@@ -154,7 +114,7 @@ impl DependCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vertebrae_core::{CreateTaskOptions, DefaultTaskService};
+    use vertebrae_core::{CreateTaskOptions, DefaultTaskService, ServiceError};
     use vertebrae_db::Database;
 
     /// Helper to create an in-memory test service
@@ -240,11 +200,11 @@ mod tests {
 
         let result = cmd.execute(&service).await;
         match result {
-            Err(DbError::InvalidPath { reason, .. }) => {
+            Err(ServiceError::ValidationFailed { message }) => {
                 assert!(
-                    reason.contains("cannot depend on itself"),
+                    message.contains("cannot depend on itself"),
                     "Expected 'cannot depend on itself' in error, got: {}",
-                    reason
+                    message
                 );
             }
             Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
@@ -280,14 +240,10 @@ mod tests {
 
         let result = cmd2.execute(&service).await;
         match result {
-            Err(DbError::InvalidPath { reason, .. }) => {
-                assert!(
-                    reason.contains("Cycle detected"),
-                    "Expected 'Cycle detected' in error, got: {}",
-                    reason
-                );
+            Err(ServiceError::CyclicDependency) => {
+                // Expected
             }
-            Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
+            Err(other) => panic!("Expected CyclicDependency error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
     }
@@ -331,14 +287,10 @@ mod tests {
 
         let result = cmd3.execute(&service).await;
         match result {
-            Err(DbError::InvalidPath { reason, .. }) => {
-                assert!(
-                    reason.contains("Cycle detected"),
-                    "Expected 'Cycle detected' in error, got: {}",
-                    reason
-                );
+            Err(ServiceError::CyclicDependency) => {
+                // Expected
             }
-            Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
+            Err(other) => panic!("Expected CyclicDependency error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
     }
@@ -359,19 +311,14 @@ mod tests {
 
         let result = cmd.execute(&service).await;
         match result {
-            Err(DbError::InvalidPath { reason, .. }) => {
-                assert!(
-                    reason.contains("not found"),
-                    "Expected 'not found' in error, got: {}",
-                    reason
-                );
-                assert!(
-                    reason.contains("nonexistent"),
-                    "Expected task ID 'nonexistent' in error, got: {}",
-                    reason
+            Err(ServiceError::TaskNotFound { task_id }) => {
+                assert_eq!(
+                    task_id, "nonexistent",
+                    "Expected task_id 'nonexistent', got: {}",
+                    task_id
                 );
             }
-            Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
+            Err(other) => panic!("Expected TaskNotFound error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
     }
@@ -392,19 +339,14 @@ mod tests {
 
         let result = cmd.execute(&service).await;
         match result {
-            Err(DbError::InvalidPath { reason, .. }) => {
-                assert!(
-                    reason.contains("not found"),
-                    "Expected 'not found' in error, got: {}",
-                    reason
-                );
-                assert!(
-                    reason.contains("nonexistent"),
-                    "Expected task ID 'nonexistent' in error, got: {}",
-                    reason
+            Err(ServiceError::TaskNotFound { task_id }) => {
+                assert_eq!(
+                    task_id, "nonexistent",
+                    "Expected task_id 'nonexistent', got: {}",
+                    task_id
                 );
             }
-            Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
+            Err(other) => panic!("Expected TaskNotFound error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
     }
@@ -609,7 +551,10 @@ mod tests {
         .await;
 
         assert!(result.is_err(), "Should detect cycle in long chain");
-        assert!(result.unwrap_err().to_string().contains("Cycle detected"));
+        assert!(
+            matches!(result.unwrap_err(), ServiceError::CyclicDependency),
+            "Expected CyclicDependency error"
+        );
 
         // Verify all chain edges exist
         let b_relations = service.get_task_with_relations(&task_b).await.unwrap();

@@ -3,7 +3,7 @@
 //! Implements the `vtb review` command to toggle the needs_human_review flag on tasks.
 
 use clap::Args;
-use vertebrae_db::DbError;
+use vertebrae_core::ServiceError;
 
 /// Toggle the needs_human_review flag on a task
 #[derive(Debug, Args)]
@@ -29,13 +29,13 @@ impl ReviewCommand {
     ///
     /// # Errors
     ///
-    /// Returns `DbError` if:
+    /// Returns `ServiceError` if:
     /// - The task with the given ID does not exist
     /// - Service operations fail
     pub async fn execute(
         &self,
         service: &dyn vertebrae_core::TaskService,
-    ) -> Result<String, DbError> {
+    ) -> Result<String, ServiceError> {
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
 
@@ -65,14 +65,11 @@ impl ReviewCommand {
         &self,
         service: &dyn vertebrae_core::TaskService,
         id: &str,
-    ) -> Result<bool, DbError> {
+    ) -> Result<bool, ServiceError> {
         let task = service
             .get_task(id)
             .await
-            .map_err(|e| DbError::InvalidPath {
-                path: std::path::PathBuf::from("task"),
-                reason: format!("Failed to get task: {}", e),
-            })?;
+            .map_err(|_| ServiceError::task_not_found(id))?;
         Ok(task.needs_human_review.unwrap_or(false))
     }
 
@@ -82,15 +79,9 @@ impl ReviewCommand {
         service: &dyn vertebrae_core::TaskService,
         id: &str,
         value: bool,
-    ) -> Result<(), DbError> {
+    ) -> Result<(), ServiceError> {
         let options = vertebrae_core::UpdateTaskOptions::new().with_needs_human_review(value);
-        service
-            .update_task(id, options)
-            .await
-            .map_err(|e| DbError::InvalidPath {
-                path: std::path::PathBuf::from("task"),
-                reason: format!("Failed to update task: {}", e),
-            })?;
+        service.update_task(id, options).await?;
         Ok(())
     }
 }

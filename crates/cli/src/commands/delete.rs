@@ -6,6 +6,7 @@
 use clap::Args;
 use serde::Deserialize;
 use std::io::{self, Write};
+use vertebrae_core::ServiceError;
 use vertebrae_db::{Database, DbError};
 
 /// Delete a task with optional cascade behavior
@@ -55,13 +56,13 @@ impl DeleteCommand {
     ///
     /// # Errors
     ///
-    /// Returns `DbError` if:
+    /// Returns `ServiceError` if:
     /// - The task with the given ID does not exist
     /// - Service operations fail
     pub async fn execute(
         &self,
         service: &dyn vertebrae_core::TaskService,
-    ) -> Result<String, DbError> {
+    ) -> Result<String, ServiceError> {
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
 
@@ -132,18 +133,20 @@ impl DeleteCommand {
     }
 
     /// Fetch basic task info to verify existence and get title.
-    async fn fetch_task_info(&self, db: &Database, id: &str) -> Result<TaskInfo, DbError> {
+    async fn fetch_task_info(&self, db: &Database, id: &str) -> Result<TaskInfo, ServiceError> {
         let query = format!("SELECT id, title FROM task:{} LIMIT 1", id);
-        let mut result = db.client().query(&query).await?;
-        let task: Option<TaskInfo> = result.take(0)?;
+        let mut result = db.client().query(&query).await.map_err(DbError::from)?;
+        let task: Option<TaskInfo> = result.take(0).map_err(DbError::from)?;
 
-        task.ok_or_else(|| DbError::TaskNotFound {
-            task_id: self.id.clone(),
-        })
+        task.ok_or_else(|| ServiceError::task_not_found(&self.id))
     }
 
     /// Fetch IDs of all children of a task.
-    async fn fetch_children_ids(&self, db: &Database, id: &str) -> Result<Vec<String>, DbError> {
+    async fn fetch_children_ids(
+        &self,
+        db: &Database,
+        id: &str,
+    ) -> Result<Vec<String>, ServiceError> {
         #[derive(Debug, Deserialize)]
         struct IdRow {
             id: surrealdb::sql::Thing,
@@ -155,14 +158,18 @@ impl DeleteCommand {
             id
         );
 
-        let mut result = db.client().query(&query).await?;
-        let rows: Vec<IdRow> = result.take(0)?;
+        let mut result = db.client().query(&query).await.map_err(DbError::from)?;
+        let rows: Vec<IdRow> = result.take(0).map_err(DbError::from)?;
 
         Ok(rows.into_iter().map(|r| r.id.id.to_string()).collect())
     }
 
     /// Fetch tasks that depend on (are blocked by) this task.
-    async fn fetch_blocked_tasks(&self, db: &Database, id: &str) -> Result<Vec<String>, DbError> {
+    async fn fetch_blocked_tasks(
+        &self,
+        db: &Database,
+        id: &str,
+    ) -> Result<Vec<String>, ServiceError> {
         #[derive(Debug, Deserialize)]
         struct IdRow {
             id: surrealdb::sql::Thing,
@@ -174,8 +181,8 @@ impl DeleteCommand {
             id
         );
 
-        let mut result = db.client().query(&query).await?;
-        let rows: Vec<IdRow> = result.take(0)?;
+        let mut result = db.client().query(&query).await.map_err(DbError::from)?;
+        let rows: Vec<IdRow> = result.take(0).map_err(DbError::from)?;
 
         Ok(rows.into_iter().map(|r| r.id.id.to_string()).collect())
     }
@@ -185,7 +192,7 @@ impl DeleteCommand {
         &self,
         db: &Database,
         id: &str,
-    ) -> Result<Vec<String>, DbError> {
+    ) -> Result<Vec<String>, ServiceError> {
         let mut all_descendants = Vec::new();
         let mut to_process = vec![id.to_string()];
 
@@ -203,7 +210,7 @@ impl DeleteCommand {
     }
 
     /// Delete a task and all its descendants recursively.
-    async fn cascade_delete(&self, db: &Database, id: &str) -> Result<usize, DbError> {
+    async fn cascade_delete(&self, db: &Database, id: &str) -> Result<usize, ServiceError> {
         // Collect all descendants first
         let descendants = self.collect_all_descendants(db, id).await?;
 
@@ -220,55 +227,55 @@ impl DeleteCommand {
         // Delete tasks
         for task_id in &all_ids {
             let query = format!("DELETE task:{}", task_id);
-            db.client().query(&query).await?;
+            db.client().query(&query).await.map_err(DbError::from)?;
         }
 
         Ok(all_ids.len())
     }
 
     /// Make children of a task into root tasks (orphan them).
-    async fn orphan_children(&self, db: &Database, id: &str) -> Result<(), DbError> {
+    async fn orphan_children(&self, db: &Database, id: &str) -> Result<(), ServiceError> {
         // Delete child_of edges where children point to this task
         let query = format!("DELETE child_of WHERE out = task:{}", id);
-        db.client().query(&query).await?;
+        db.client().query(&query).await.map_err(DbError::from)?;
         Ok(())
     }
 
     /// Delete a single task and clean up its edges.
-    async fn delete_single_task(&self, db: &Database, id: &str) -> Result<(), DbError> {
+    async fn delete_single_task(&self, db: &Database, id: &str) -> Result<(), ServiceError> {
         // Clean up all edges
         self.delete_all_edges(db, id).await?;
 
         // Delete the task
         let query = format!("DELETE task:{}", id);
-        db.client().query(&query).await?;
+        db.client().query(&query).await.map_err(DbError::from)?;
 
         Ok(())
     }
 
     /// Delete all edges connected to a task.
-    async fn delete_all_edges(&self, db: &Database, id: &str) -> Result<(), DbError> {
+    async fn delete_all_edges(&self, db: &Database, id: &str) -> Result<(), ServiceError> {
         // Delete child_of edges where this task is the child (out direction)
         let query = format!("DELETE child_of WHERE in = task:{}", id);
-        db.client().query(&query).await?;
+        db.client().query(&query).await.map_err(DbError::from)?;
 
         // Delete child_of edges where this task is the parent (in direction)
         let query = format!("DELETE child_of WHERE out = task:{}", id);
-        db.client().query(&query).await?;
+        db.client().query(&query).await.map_err(DbError::from)?;
 
         // Delete depends_on edges where this task depends on something
         let query = format!("DELETE depends_on WHERE in = task:{}", id);
-        db.client().query(&query).await?;
+        db.client().query(&query).await.map_err(DbError::from)?;
 
         // Delete depends_on edges where something depends on this task
         let query = format!("DELETE depends_on WHERE out = task:{}", id);
-        db.client().query(&query).await?;
+        db.client().query(&query).await.map_err(DbError::from)?;
 
         Ok(())
     }
 
     /// Prompt user for action when task has children.
-    fn prompt_child_action(&self, children_count: usize) -> Result<ChildAction, DbError> {
+    fn prompt_child_action(&self, children_count: usize) -> Result<ChildAction, ServiceError> {
         print!(
             "Task has {} {}. [C]ascade delete / [O]rphan / [A]bort? ",
             children_count,
@@ -278,18 +285,14 @@ impl DeleteCommand {
                 "children"
             }
         );
-        io::stdout().flush().map_err(|e| DbError::InvalidPath {
-            path: std::path::PathBuf::from("stdout"),
-            reason: format!("Failed to flush stdout: {}", e),
+        io::stdout().flush().map_err(|e| {
+            ServiceError::validation_failed(format!("Failed to flush stdout: {}", e))
         })?;
 
         let mut input = String::new();
         io::stdin()
             .read_line(&mut input)
-            .map_err(|e| DbError::InvalidPath {
-                path: std::path::PathBuf::from("stdin"),
-                reason: format!("Failed to read input: {}", e),
-            })?;
+            .map_err(|e| ServiceError::validation_failed(format!("Failed to read input: {}", e)))?;
 
         match input.trim().to_lowercase().as_str() {
             "c" | "cascade" => Ok(ChildAction::Cascade),
@@ -300,43 +303,35 @@ impl DeleteCommand {
     }
 
     /// Confirm deletion when task blocks other tasks.
-    fn confirm_blocking(&self, blocks_count: usize) -> Result<bool, DbError> {
+    fn confirm_blocking(&self, blocks_count: usize) -> Result<bool, ServiceError> {
         print!(
             "This task blocks {} other {}. Continue? [y/N] ",
             blocks_count,
             if blocks_count == 1 { "task" } else { "tasks" }
         );
-        io::stdout().flush().map_err(|e| DbError::InvalidPath {
-            path: std::path::PathBuf::from("stdout"),
-            reason: format!("Failed to flush stdout: {}", e),
+        io::stdout().flush().map_err(|e| {
+            ServiceError::validation_failed(format!("Failed to flush stdout: {}", e))
         })?;
 
         let mut input = String::new();
         io::stdin()
             .read_line(&mut input)
-            .map_err(|e| DbError::InvalidPath {
-                path: std::path::PathBuf::from("stdin"),
-                reason: format!("Failed to read input: {}", e),
-            })?;
+            .map_err(|e| ServiceError::validation_failed(format!("Failed to read input: {}", e)))?;
 
         Ok(matches!(input.trim().to_lowercase().as_str(), "y" | "yes"))
     }
 
     /// Confirm simple deletion.
-    fn confirm_delete(&self, title: &str) -> Result<bool, DbError> {
+    fn confirm_delete(&self, title: &str) -> Result<bool, ServiceError> {
         print!("Delete task '{}'? [y/N] ", title);
-        io::stdout().flush().map_err(|e| DbError::InvalidPath {
-            path: std::path::PathBuf::from("stdout"),
-            reason: format!("Failed to flush stdout: {}", e),
+        io::stdout().flush().map_err(|e| {
+            ServiceError::validation_failed(format!("Failed to flush stdout: {}", e))
         })?;
 
         let mut input = String::new();
         io::stdin()
             .read_line(&mut input)
-            .map_err(|e| DbError::InvalidPath {
-                path: std::path::PathBuf::from("stdin"),
-                reason: format!("Failed to read input: {}", e),
-            })?;
+            .map_err(|e| ServiceError::validation_failed(format!("Failed to read input: {}", e)))?;
 
         Ok(matches!(input.trim().to_lowercase().as_str(), "y" | "yes"))
     }

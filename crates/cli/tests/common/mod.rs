@@ -3,6 +3,8 @@
 //! Provides isolated database setup/teardown and CLI command execution helpers.
 //! Each test gets its own database instance to ensure no shared state.
 
+#![allow(dead_code)] // Test helpers may not all be used yet
+
 use std::path::PathBuf;
 use vertebrae_cli::commands::{
     AddCommand, DeleteCommand, DependCommand, ExportCommand, ListCommand, RefCommand,
@@ -15,7 +17,7 @@ use vertebrae_cli::commands::{
     },
 };
 use vertebrae_core::DefaultTaskService;
-use vertebrae_db::{AgentConfig, Database, DbError, Level, SectionType};
+use vertebrae_db::{AgentConfig, Database, Level, SectionType};
 
 /// Test context containing an isolated database, service, and temp directory
 pub struct TestContext {
@@ -94,22 +96,6 @@ pub fn add_cmd(title: &str) -> AddCommand {
     AddCommand {
         title: title.to_string(),
         level: None,
-        description: None,
-        priority: None,
-        tags: vec![],
-        parent: None,
-        depends_on: vec![],
-        needs_review: false,
-        workflow: None,
-    }
-}
-
-/// Create an AddCommand with a specific level.
-#[allow(dead_code)]
-pub fn add_cmd_with_level(title: &str, level: Level) -> AddCommand {
-    AddCommand {
-        title: title.to_string(),
-        level: Some(level),
         description: None,
         priority: None,
         tags: vec![],
@@ -353,69 +339,6 @@ pub fn workflow_add_cmd(name: &str, step_name: &str, model: &str) -> WorkflowAdd
     }
 }
 
-/// Create a workflow add command with description.
-#[allow(dead_code)]
-pub fn workflow_add_cmd_with_description(
-    name: &str,
-    description: &str,
-    steps: Vec<(&str, &str)>,
-) -> WorkflowAddCommand {
-    WorkflowAddCommand {
-        name: name.to_string(),
-        description: Some(description.to_string()),
-        steps: steps
-            .into_iter()
-            .map(|(name, model)| ParsedStep {
-                name: name.to_string(),
-                agent_config: AgentConfig::new().with_model(model),
-            })
-            .collect(),
-        on_done: None,
-        on_reject: None,
-    }
-}
-
-/// Create a workflow add command with multiple steps.
-#[allow(dead_code)]
-pub fn workflow_add_cmd_multi_step(name: &str, steps: Vec<(&str, &str)>) -> WorkflowAddCommand {
-    WorkflowAddCommand {
-        name: name.to_string(),
-        description: None,
-        steps: steps
-            .into_iter()
-            .map(|(name, model)| ParsedStep {
-                name: name.to_string(),
-                agent_config: AgentConfig::new().with_model(model),
-            })
-            .collect(),
-        on_done: None,
-        on_reject: None,
-    }
-}
-
-/// Create a workflow add command with pipeline chaining.
-#[allow(dead_code)]
-pub fn workflow_add_cmd_with_chaining(
-    name: &str,
-    steps: Vec<(&str, &str)>,
-    on_done: Option<&str>,
-    on_reject: Option<&str>,
-) -> WorkflowAddCommand {
-    WorkflowAddCommand {
-        name: name.to_string(),
-        description: None,
-        steps: steps
-            .into_iter()
-            .map(|(name, model)| ParsedStep {
-                name: name.to_string(),
-                agent_config: AgentConfig::new().with_model(model),
-            })
-            .collect(),
-        on_done: on_done.map(String::from),
-        on_reject: on_reject.map(String::from),
-    }
-}
-
 /// Create a workflow list command.
 #[allow(dead_code)]
 pub fn workflow_list_cmd() -> WorkflowListCommand {
@@ -603,11 +526,6 @@ pub async fn create_depends_on(db: &Database, dependent_id: &str, dependency_id:
 // Query Helpers
 // =============================================================================
 
-/// Helper to check if a task exists.
-pub async fn task_exists(db: &Database, id: &str) -> bool {
-    db.tasks().get(id).await.unwrap().is_some()
-}
-
 /// Helper to get task status.
 pub async fn get_task_status(db: &Database, id: &str) -> Option<String> {
     db.tasks()
@@ -710,15 +628,15 @@ mod tests {
         );
 
         // Verify both are empty initially
-        assert_eq!(count_tasks(&ctx1.db()).await, 0);
-        assert_eq!(count_tasks(&ctx2.db()).await, 0);
+        assert_eq!(count_tasks(ctx1.db()).await, 0);
+        assert_eq!(count_tasks(ctx2.db()).await, 0);
 
         // Add task to ctx1
-        create_task(&ctx1.db(), "task1", "Test Task", "task", "todo").await;
+        create_task(ctx1.db(), "task1", "Test Task", "task", "todo").await;
 
         // Verify ctx1 has task but ctx2 does not
-        assert_eq!(count_tasks(&ctx1.db()).await, 1);
-        assert_eq!(count_tasks(&ctx2.db()).await, 0);
+        assert_eq!(count_tasks(ctx1.db()).await, 1);
+        assert_eq!(count_tasks(ctx2.db()).await, 0);
     }
 
     #[tokio::test]
@@ -728,50 +646,33 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_create_task_helper() {
-        let ctx = TestContext::new().await;
-
-        create_task(&ctx.db(), "abc123", "My Task", "ticket", "backlog").await;
-
-        assert!(task_exists(&ctx.db(), "abc123").await);
-        assert_eq!(
-            get_task_status(&ctx.db(), "abc123").await,
-            Some("backlog".to_string())
-        );
-        assert_eq!(
-            get_task_level(&ctx.db(), "abc123").await,
-            Some("ticket".to_string())
-        );
-    }
-
-    #[tokio::test]
     async fn test_relationship_helpers() {
         let ctx = TestContext::new().await;
 
-        create_task(&ctx.db(), "parent", "Parent", "epic", "todo").await;
-        create_task(&ctx.db(), "child", "Child", "ticket", "todo").await;
-        create_task(&ctx.db(), "blocker", "Blocker", "task", "done").await;
+        create_task(ctx.db(), "parent", "Parent", "epic", "todo").await;
+        create_task(ctx.db(), "child", "Child", "ticket", "todo").await;
+        create_task(ctx.db(), "blocker", "Blocker", "task", "done").await;
 
-        create_child_of(&ctx.db(), "child", "parent").await;
-        create_depends_on(&ctx.db(), "child", "blocker").await;
+        create_child_of(ctx.db(), "child", "parent").await;
+        create_depends_on(ctx.db(), "child", "blocker").await;
 
-        assert!(child_of_exists(&ctx.db(), "child", "parent").await);
-        assert!(dependency_exists(&ctx.db(), "child", "blocker").await);
+        assert!(child_of_exists(ctx.db(), "child", "parent").await);
+        assert!(dependency_exists(ctx.db(), "child", "blocker").await);
     }
 
     #[tokio::test]
     async fn test_count_and_get_all_helpers() {
         let ctx = TestContext::new().await;
 
-        assert_eq!(count_tasks(&ctx.db()).await, 0);
+        assert_eq!(count_tasks(ctx.db()).await, 0);
 
-        create_task(&ctx.db(), "task1", "Task 1", "task", "todo").await;
-        create_task(&ctx.db(), "task2", "Task 2", "task", "todo").await;
-        create_task(&ctx.db(), "task3", "Task 3", "task", "todo").await;
+        create_task(ctx.db(), "task1", "Task 1", "task", "todo").await;
+        create_task(ctx.db(), "task2", "Task 2", "task", "todo").await;
+        create_task(ctx.db(), "task3", "Task 3", "task", "todo").await;
 
-        assert_eq!(count_tasks(&ctx.db()).await, 3);
+        assert_eq!(count_tasks(ctx.db()).await, 3);
 
-        let ids = get_all_task_ids(&ctx.db()).await;
+        let ids = get_all_task_ids(ctx.db()).await;
         assert_eq!(ids.len(), 3);
         assert!(ids.contains(&"task1".to_string()));
         assert!(ids.contains(&"task2".to_string()));

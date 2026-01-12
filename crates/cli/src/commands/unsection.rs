@@ -6,8 +6,8 @@
 
 use clap::Args;
 use serde::Deserialize;
-use vertebrae_core::TaskService;
-use vertebrae_db::{DbError, SectionType};
+use vertebrae_core::{ServiceError, TaskService};
+use vertebrae_db::SectionType;
 
 /// Remove sections from a task
 #[derive(Debug, Args)]
@@ -146,12 +146,15 @@ impl UnsectionCommand {
     ///
     /// # Errors
     ///
-    /// Returns `DbError` if:
+    /// Returns `ServiceError` if:
     /// - The task with the given ID does not exist
     /// - The section to remove does not exist
     /// - For multi-instance types without --index or --all
     /// - Database operations fail
-    pub async fn execute(&self, service: &dyn TaskService) -> Result<UnsectionResult, DbError> {
+    pub async fn execute(
+        &self,
+        service: &dyn TaskService,
+    ) -> Result<UnsectionResult, ServiceError> {
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
 
@@ -160,19 +163,10 @@ impl UnsectionCommand {
 
         // We need to fetch task sections to determine what to remove
         // Get the service's database connection to verify task exists
-        let db_result = service.get_task(&id).await.map_err(|e| {
-            // Check if it's a task not found error and propagate it as-is
-            if e.to_string().contains("Task not found") {
-                DbError::TaskNotFound {
-                    task_id: self.id.clone(),
-                }
-            } else {
-                DbError::InvalidPath {
-                    path: std::path::PathBuf::from(&self.id),
-                    reason: format!("Failed to get task: {}", e),
-                }
-            }
-        })?;
+        let db_result = service
+            .get_task(&id)
+            .await
+            .map_err(|_| ServiceError::task_not_found(&self.id))?;
 
         // Convert task to sections for analysis
         let existing_sections: Vec<SectionRow> = db_result
@@ -216,23 +210,18 @@ impl UnsectionCommand {
                     self.remove_single_instance(service, &id, section_type, &task.sections)
                         .await?
                 } else {
-                    return Err(DbError::InvalidPath {
-                        path: std::path::PathBuf::from(&self.id),
-                        reason: format!(
-                            "Section type '{}' can have multiple instances. Use --index <n> to remove a specific one or --all to remove all",
-                            section_type
-                        ),
-                    });
+                    return Err(ServiceError::validation_failed(format!(
+                        "Section type '{}' can have multiple instances. Use --index <n> to remove a specific one or --all to remove all",
+                        section_type
+                    )));
                 }
             }
 
             // No type, no --all, with or without index: invalid
             (None, _, false) => {
-                return Err(DbError::InvalidPath {
-                    path: std::path::PathBuf::from(&self.id),
-                    reason: "Must specify a section type or use --all to remove all sections"
-                        .to_string(),
-                });
+                return Err(ServiceError::validation_failed(
+                    "Must specify a section type or use --all to remove all sections",
+                ));
             }
 
             // type + --index + --all would be caught by clap conflicts_with
@@ -248,13 +237,12 @@ impl UnsectionCommand {
     }
 
     /// Validate command arguments
-    fn validate_arguments(&self) -> Result<(), DbError> {
+    fn validate_arguments(&self) -> Result<(), ServiceError> {
         // --index without type is invalid
         if self.index.is_some() && self.section_type.is_none() {
-            return Err(DbError::InvalidPath {
-                path: std::path::PathBuf::from(&self.id),
-                reason: "--index requires a section type".to_string(),
-            });
+            return Err(ServiceError::validation_failed(
+                "--index requires a section type",
+            ));
         }
         Ok(())
     }
@@ -265,7 +253,7 @@ impl UnsectionCommand {
         service: &dyn TaskService,
         id: &str,
         existing_sections: &[SectionRow],
-    ) -> Result<usize, DbError> {
+    ) -> Result<usize, ServiceError> {
         let count = existing_sections.len();
 
         if count == 0 {
@@ -287,13 +275,7 @@ impl UnsectionCommand {
 
         // Remove all sections of each type
         for section_type in types_to_remove {
-            service
-                .remove_sections(id, section_type, None)
-                .await
-                .map_err(|e| DbError::InvalidPath {
-                    path: std::path::PathBuf::from(id),
-                    reason: format!("Failed to remove sections: {}", e),
-                })?;
+            service.remove_sections(id, section_type, None).await?;
         }
 
         Ok(count)
@@ -306,7 +288,7 @@ impl UnsectionCommand {
         id: &str,
         section_type: &SectionType,
         existing_sections: &[SectionRow],
-    ) -> Result<usize, DbError> {
+    ) -> Result<usize, ServiceError> {
         let type_str = section_type.as_str();
 
         // Count how many we'll remove
@@ -322,11 +304,7 @@ impl UnsectionCommand {
         // Use service layer to remove all sections of this type
         service
             .remove_sections(id, section_type.clone(), None)
-            .await
-            .map_err(|e| DbError::InvalidPath {
-                path: std::path::PathBuf::from(id),
-                reason: format!("Failed to remove sections: {}", e),
-            })?;
+            .await?;
 
         Ok(count)
     }
@@ -339,7 +317,7 @@ impl UnsectionCommand {
         section_type: &SectionType,
         index: u32,
         existing_sections: &[SectionRow],
-    ) -> Result<usize, DbError> {
+    ) -> Result<usize, ServiceError> {
         let type_str = section_type.as_str();
 
         // Find sections of this type and check if index exists
@@ -352,20 +330,16 @@ impl UnsectionCommand {
         let exists = matching_sections.iter().any(|s| s.order == Some(index));
 
         if !exists {
-            return Err(DbError::InvalidPath {
-                path: std::path::PathBuf::from(&self.id),
-                reason: format!("No {} section found at index {}", section_type, index),
-            });
+            return Err(ServiceError::validation_failed(format!(
+                "No {} section found at index {}",
+                section_type, index
+            )));
         }
 
         // Use service method which handles finding by ordinal and renumbering
         service
             .remove_section_by_ordinal(id, section_type.clone(), index)
-            .await
-            .map_err(|e| DbError::InvalidPath {
-                path: std::path::PathBuf::from(&self.id),
-                reason: e.to_string(),
-            })?;
+            .await?;
 
         Ok(1)
     }
@@ -377,7 +351,7 @@ impl UnsectionCommand {
         id: &str,
         section_type: &SectionType,
         existing_sections: &[SectionRow],
-    ) -> Result<usize, DbError> {
+    ) -> Result<usize, ServiceError> {
         let type_str = section_type.as_str();
 
         // Check if the section exists
@@ -386,20 +360,16 @@ impl UnsectionCommand {
             .any(|s| s.section_type.as_deref() == Some(type_str));
 
         if !exists {
-            return Err(DbError::InvalidPath {
-                path: std::path::PathBuf::from(&self.id),
-                reason: format!("No {} section found", section_type),
-            });
+            return Err(ServiceError::validation_failed(format!(
+                "No {} section found",
+                section_type
+            )));
         }
 
         // Use service layer to remove all sections of this type
         service
             .remove_sections(id, section_type.clone(), None)
-            .await
-            .map_err(|e| DbError::InvalidPath {
-                path: std::path::PathBuf::from(id),
-                reason: format!("Failed to remove section: {}", e),
-            })?;
+            .await?;
 
         Ok(1)
     }
@@ -662,14 +632,14 @@ mod tests {
 
         let result = cmd.execute(&service).await;
         match result {
-            Err(DbError::InvalidPath { reason, .. }) => {
+            Err(ServiceError::ValidationFailed { message }) => {
                 assert!(
-                    reason.contains("No goal section found"),
+                    message.contains("No goal section found"),
                     "Expected 'No goal section found' in error, got: {}",
-                    reason
+                    message
                 );
             }
-            Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
+            Err(other) => panic!("Expected ValidationFailed error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
     }
@@ -690,14 +660,14 @@ mod tests {
 
         let result = cmd.execute(&service).await;
         match result {
-            Err(DbError::InvalidPath { reason, .. }) => {
+            Err(ServiceError::ValidationFailed { message }) => {
                 assert!(
-                    reason.contains("index 99"),
+                    message.contains("index 99"),
                     "Expected 'index 99' in error, got: {}",
-                    reason
+                    message
                 );
             }
-            Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
+            Err(other) => panic!("Expected ValidationFailed error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
     }
@@ -715,14 +685,14 @@ mod tests {
 
         let result = cmd.execute(&service).await;
         match result {
-            Err(DbError::TaskNotFound { task_id }) => {
+            Err(ServiceError::TaskNotFound { task_id }) => {
                 assert_eq!(
                     task_id, "nonexistent",
                     "Expected task_id 'nonexistent', got: {}",
                     task_id
                 );
             }
-            Err(other) => panic!("Expected NotFound error, got {:?}", other),
+            Err(other) => panic!("Expected TaskNotFound error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
     }
@@ -743,19 +713,19 @@ mod tests {
 
         let result = cmd.execute(&service).await;
         match result {
-            Err(DbError::InvalidPath { reason, .. }) => {
+            Err(ServiceError::ValidationFailed { message }) => {
                 assert!(
-                    reason.contains("multiple instances"),
+                    message.contains("multiple instances"),
                     "Expected 'multiple instances' in error, got: {}",
-                    reason
+                    message
                 );
                 assert!(
-                    reason.contains("--index"),
+                    message.contains("--index"),
                     "Expected '--index' in error, got: {}",
-                    reason
+                    message
                 );
             }
-            Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
+            Err(other) => panic!("Expected ValidationFailed error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
     }
@@ -887,14 +857,14 @@ mod tests {
 
         let result = cmd.execute(&service).await;
         match result {
-            Err(DbError::InvalidPath { reason, .. }) => {
+            Err(ServiceError::ValidationFailed { message }) => {
                 assert!(
-                    reason.contains("Must specify a section type or use --all"),
+                    message.contains("Must specify a section type or use --all"),
                     "Expected 'Must specify a section type or use --all' in error, got: {}",
-                    reason
+                    message
                 );
             }
-            Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
+            Err(other) => panic!("Expected ValidationFailed error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
     }
@@ -914,14 +884,14 @@ mod tests {
 
         let result = cmd.execute(&service).await;
         match result {
-            Err(DbError::InvalidPath { reason, .. }) => {
+            Err(ServiceError::ValidationFailed { message }) => {
                 assert!(
-                    reason.contains("--index requires a section type"),
+                    message.contains("--index requires a section type"),
                     "Expected '--index requires a section type' in error, got: {}",
-                    reason
+                    message
                 );
             }
-            Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
+            Err(other) => panic!("Expected ValidationFailed error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
     }

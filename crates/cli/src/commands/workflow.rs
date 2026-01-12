@@ -5,6 +5,7 @@
 use crate::id::IdGenerator;
 use clap::{Args, Subcommand};
 use surrealdb::sql::Thing;
+use vertebrae_core::{ServiceError, TaskService};
 use vertebrae_db::{
     AgentConfig, Database, DbError, ExecutionStatus, MigrationResult, StepExecution, Workflow,
     WorkflowStep, WorkflowUpdate,
@@ -42,13 +43,14 @@ impl WorkflowCommand {
     ///
     /// # Arguments
     ///
-    /// * `db` - Reference to the database connection
+    /// * `service` - Reference to the task service
     ///
     /// # Errors
     ///
-    /// Returns `DbError` if the command execution fails.
-    pub async fn execute(&self, db: &Database) -> Result<String, DbError> {
-        match self {
+    /// Returns `ServiceError` if the command execution fails.
+    pub async fn execute(&self, service: &dyn TaskService) -> Result<String, ServiceError> {
+        let db = service.database();
+        let result = match self {
             WorkflowCommand::Add(cmd) => cmd.execute(db).await,
             WorkflowCommand::List(cmd) => cmd.execute(db).await,
             WorkflowCommand::Show(cmd) => cmd.execute(db).await,
@@ -60,7 +62,8 @@ impl WorkflowCommand {
             WorkflowCommand::Retreat(cmd) => cmd.execute(db).await,
             WorkflowCommand::Reject(cmd) => cmd.execute(db).await,
             WorkflowCommand::Migrate(cmd) => cmd.execute(db).await,
-        }
+        };
+        result.map_err(ServiceError::Database)
     }
 }
 

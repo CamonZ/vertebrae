@@ -7,8 +7,8 @@
 use crate::commands::r#ref::parse_file_ref;
 use clap::Args;
 use std::path::Path;
-use vertebrae_core::TaskService;
-use vertebrae_db::{CodeRef, DbError};
+use vertebrae_core::{ServiceError, TaskService};
+use vertebrae_db::CodeRef;
 
 /// Add a code reference to a testing criterion
 #[derive(Debug, Args)]
@@ -93,40 +93,31 @@ impl CriterionRefCommand {
     ///
     /// # Errors
     ///
-    /// Returns `DbError` if:
+    /// Returns `ServiceError` if:
     /// - The task does not exist
     /// - The criterion index is out of bounds
     /// - The section at the index is not a testing_criterion
     /// - The file specification is invalid
     /// - Database operations fail
-    pub async fn execute(&self, service: &dyn TaskService) -> Result<CriterionRefResult, DbError> {
+    pub async fn execute(
+        &self,
+        service: &dyn TaskService,
+    ) -> Result<CriterionRefResult, ServiceError> {
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
 
         // Validate index is positive
         if self.index == 0 {
-            return Err(DbError::InvalidPath {
-                path: std::path::PathBuf::from(&self.id),
-                reason: "Testing criterion index must be 1 or greater".to_string(),
-            });
+            return Err(ServiceError::validation_failed(
+                "Testing criterion index must be 1 or greater",
+            ));
         }
 
         // Parse the file specification
-        let parsed = parse_file_ref(&self.file_spec).map_err(|msg| DbError::InvalidPath {
-            path: std::path::PathBuf::from(&self.file_spec),
-            reason: msg,
-        })?;
+        let parsed = parse_file_ref(&self.file_spec).map_err(ServiceError::validation_failed)?;
 
         // Fetch the task to get sections
-        let task = service.get_task(&id).await.map_err(|e| match e {
-            vertebrae_core::ServiceError::TaskNotFound { task_id } => {
-                DbError::TaskNotFound { task_id }
-            }
-            vertebrae_core::ServiceError::Database(db_err) => db_err,
-            other => DbError::ValidationError {
-                message: other.to_string(),
-            },
-        })?;
+        let task = service.get_task(&id).await?;
 
         // Filter to only testing_criterion sections and sort by order
         let mut criteria: Vec<(usize, &vertebrae_db::Section)> = task
@@ -140,14 +131,11 @@ impl CriterionRefCommand {
         // Find the criterion by index (1-based)
         let criterion_idx = self.index - 1;
         if criterion_idx >= criteria.len() {
-            return Err(DbError::InvalidPath {
-                path: std::path::PathBuf::from(&self.id),
-                reason: format!(
-                    "Testing criterion at index {} not found. Task has {} testing criterion(s).",
-                    self.index,
-                    criteria.len()
-                ),
-            });
+            return Err(ServiceError::validation_failed(format!(
+                "Testing criterion at index {} not found. Task has {} testing criterion(s).",
+                self.index,
+                criteria.len()
+            )));
         }
 
         let (original_idx, criterion) = criteria[criterion_idx];
@@ -172,16 +160,7 @@ impl CriterionRefCommand {
         // Use service to append the section ref (handles timestamp and notification)
         service
             .append_section_ref(&id, original_idx, &code_ref)
-            .await
-            .map_err(|e| match e {
-                vertebrae_core::ServiceError::TaskNotFound { task_id } => {
-                    DbError::TaskNotFound { task_id }
-                }
-                vertebrae_core::ServiceError::Database(db_err) => db_err,
-                other => DbError::ValidationError {
-                    message: other.to_string(),
-                },
-            })?;
+            .await?;
 
         Ok(CriterionRefResult {
             task_id: id,
@@ -199,7 +178,7 @@ impl CriterionRefCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vertebrae_core::DefaultTaskService;
+    use vertebrae_core::{DefaultTaskService, ServiceError};
 
     /// Helper to create a test service with an in-memory database
     async fn setup_test_service() -> DefaultTaskService {
@@ -377,19 +356,19 @@ mod tests {
 
         let result = cmd.execute(&service).await;
         match result {
-            Err(DbError::InvalidPath { reason, .. }) => {
+            Err(ServiceError::ValidationFailed { message }) => {
                 assert!(
-                    reason.contains("Testing criterion at index 5 not found"),
+                    message.contains("Testing criterion at index 5 not found"),
                     "Expected 'Testing criterion at index 5 not found' in error, got: {}",
-                    reason
+                    message
                 );
                 assert!(
-                    reason.contains("1 testing criterion(s)"),
+                    message.contains("1 testing criterion(s)"),
                     "Expected count of criteria in error, got: {}",
-                    reason
+                    message
                 );
             }
-            Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
+            Err(other) => panic!("Expected ValidationFailed error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
     }
@@ -410,14 +389,14 @@ mod tests {
 
         let result = cmd.execute(&service).await;
         match result {
-            Err(DbError::InvalidPath { reason, .. }) => {
+            Err(ServiceError::ValidationFailed { message }) => {
                 assert!(
-                    reason.contains("1 or greater"),
+                    message.contains("1 or greater"),
                     "Expected '1 or greater' in error, got: {}",
-                    reason
+                    message
                 );
             }
-            Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
+            Err(other) => panic!("Expected ValidationFailed error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
     }
@@ -436,14 +415,14 @@ mod tests {
 
         let result = cmd.execute(&service).await;
         match result {
-            Err(DbError::TaskNotFound { task_id }) => {
+            Err(ServiceError::TaskNotFound { task_id }) => {
                 assert_eq!(
                     task_id, "nonexistent",
                     "Expected task_id 'nonexistent', got: {}",
                     task_id
                 );
             }
-            Err(other) => panic!("Expected NotFound error, got {:?}", other),
+            Err(other) => panic!("Expected TaskNotFound error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
     }
@@ -464,14 +443,14 @@ mod tests {
 
         let result = cmd.execute(&service).await;
         match result {
-            Err(DbError::InvalidPath { reason, .. }) => {
+            Err(ServiceError::ValidationFailed { message }) => {
                 assert!(
-                    reason.contains("invalid line range"),
+                    message.contains("invalid line range"),
                     "Expected 'invalid line range' in error, got: {}",
-                    reason
+                    message
                 );
             }
-            Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
+            Err(other) => panic!("Expected ValidationFailed error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
     }
