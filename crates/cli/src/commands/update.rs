@@ -6,7 +6,10 @@
 use clap::Args;
 use serde::Deserialize;
 use vertebrae_core::{ServiceError, TaskService, UpdateTaskOptions};
-use vertebrae_db::{Database, Priority, SectionType, TaskUpdate};
+use vertebrae_db::{Priority, SectionType};
+
+#[cfg(test)]
+use vertebrae_db::Database;
 
 /// Update an existing task
 #[derive(Debug, Args)]
@@ -175,8 +178,8 @@ impl UpdateCommand {
         // Apply all field/tag/parent updates via service layer
         service.update_task(&id, options).await?;
 
-        // Handle section updates (separate for now - ticket b09ca2 will refactor)
-        self.apply_section_updates(service.database(), &id).await?;
+        // Handle section updates via service layer
+        self.apply_section_updates(service, &id).await?;
 
         Ok(id)
     }
@@ -193,8 +196,12 @@ impl UpdateCommand {
             || self.remove_section.is_some()
     }
 
-    /// Apply section updates (edit and remove).
-    async fn apply_section_updates(&self, db: &Database, id: &str) -> Result<(), ServiceError> {
+    /// Apply section updates (edit and remove) via service layer.
+    async fn apply_section_updates(
+        &self,
+        service: &dyn TaskService,
+        id: &str,
+    ) -> Result<(), ServiceError> {
         // Handle edit section
         if let Some(args) = &self.edit_section {
             if args.len() != 3 {
@@ -214,7 +221,8 @@ impl UpdateCommand {
             })?;
 
             let new_content = &args[2];
-            self.edit_section_at(db, id, &section_type, ordinal, new_content)
+            service
+                .edit_section_by_ordinal(id, section_type, ordinal, new_content)
                 .await?;
         }
 
@@ -236,183 +244,17 @@ impl UpdateCommand {
                 ))
             })?;
 
-            self.remove_section_at(db, id, &section_type, ordinal)
+            service
+                .remove_section_by_ordinal(id, section_type, ordinal)
                 .await?;
         }
 
         Ok(())
     }
-
-    /// Edit a section at a specific ordinal.
-    async fn edit_section_at(
-        &self,
-        db: &Database,
-        id: &str,
-        section_type: &SectionType,
-        ordinal: u32,
-        new_content: &str,
-    ) -> Result<(), ServiceError> {
-        use vertebrae_db::Section;
-
-        // Fetch current sections
-        let sections = self.fetch_sections(db, id).await?;
-        let type_str = section_type.as_str();
-
-        // Find sections of this type and locate the one at ordinal
-        let mut found = false;
-        let mut new_sections: Vec<Section> = Vec::new();
-
-        for section in &sections {
-            if section.section_type.as_deref() == Some(type_str) && section.order == Some(ordinal) {
-                // Replace this section's content
-                found = true;
-                new_sections.push(Section {
-                    section_type: section_type.clone(),
-                    content: new_content.to_string(),
-                    order: Some(ordinal),
-                    done: Some(false),
-                    done_at: None,
-                    refs: vec![],
-                });
-            } else {
-                // Keep section as-is
-                if let (Some(st), Some(content)) = (&section.section_type, &section.content)
-                    && let Ok(parsed_type) = parse_section_type(st)
-                {
-                    new_sections.push(Section {
-                        section_type: parsed_type,
-                        content: content.clone(),
-                        order: section.order,
-                        done: section.done,
-                        done_at: section.done_at,
-                        refs: vec![],
-                    });
-                }
-            }
-        }
-
-        if !found {
-            return Err(ServiceError::validation_failed(format!(
-                "No {} section found at ordinal {}",
-                section_type, ordinal
-            )));
-        }
-
-        // Update sections in database
-        let updates = TaskUpdate::new().with_sections(new_sections);
-        db.tasks().update(id, &updates).await?;
-
-        Ok(())
-    }
-
-    /// Remove a section at a specific ordinal.
-    async fn remove_section_at(
-        &self,
-        db: &Database,
-        id: &str,
-        section_type: &SectionType,
-        ordinal: u32,
-    ) -> Result<(), ServiceError> {
-        use vertebrae_db::Section;
-
-        // Fetch current sections
-        let sections = self.fetch_sections(db, id).await?;
-        let type_str = section_type.as_str();
-
-        // Check if the section exists at this ordinal
-        let exists = sections
-            .iter()
-            .any(|s| s.section_type.as_deref() == Some(type_str) && s.order == Some(ordinal));
-
-        if !exists {
-            return Err(ServiceError::validation_failed(format!(
-                "No {} section found at ordinal {}",
-                section_type, ordinal
-            )));
-        }
-
-        // Build new sections array:
-        // 1. Keep all sections that are NOT of this type
-        // 2. Keep sections of this type that don't have the target ordinal
-        // 3. Renumber the remaining sections of this type
-        let mut new_sections: Vec<Section> = Vec::new();
-
-        // First, add all non-matching type sections
-        for s in &sections {
-            if s.section_type.as_deref() != Some(type_str)
-                && let (Some(st), Some(content)) = (&s.section_type, &s.content)
-                && let Ok(parsed_type) = parse_section_type(st)
-            {
-                new_sections.push(Section {
-                    section_type: parsed_type,
-                    content: content.clone(),
-                    order: s.order,
-                    done: s.done,
-                    done_at: s.done_at,
-                    refs: vec![],
-                });
-            }
-        }
-
-        // Collect matching sections (excluding the one at ordinal) and renumber
-        let mut sections_of_type: Vec<&SectionRow> = sections
-            .iter()
-            .filter(|s| s.section_type.as_deref() == Some(type_str) && s.order != Some(ordinal))
-            .collect();
-
-        // Sort by original order
-        sections_of_type.sort_by_key(|s| s.order.unwrap_or(u32::MAX));
-
-        // Add with renumbered ordinals
-        for (new_ordinal, s) in sections_of_type.iter().enumerate() {
-            if let (Some(st), Some(content)) = (&s.section_type, &s.content)
-                && let Ok(parsed_type) = parse_section_type(st)
-            {
-                new_sections.push(Section {
-                    section_type: parsed_type,
-                    content: content.clone(),
-                    order: Some(new_ordinal as u32),
-                    done: s.done,
-                    done_at: s.done_at,
-                    refs: vec![],
-                });
-            }
-        }
-
-        // Update sections in database
-        let updates = TaskUpdate::new().with_sections(new_sections);
-        db.tasks().update(id, &updates).await?;
-
-        Ok(())
-    }
-
-    /// Fetch sections from a task.
-    async fn fetch_sections(
-        &self,
-        db: &Database,
-        id: &str,
-    ) -> Result<Vec<SectionRow>, ServiceError> {
-        // Get the task to access its sections
-        if let Some(task) = db.tasks().get(id).await? {
-            let sections = task
-                .sections
-                .into_iter()
-                .map(|s| SectionRow {
-                    section_type: Some(s.section_type.to_string()),
-                    content: Some(s.content),
-                    order: s.order,
-                    done: s.done,
-                    done_at: s.done_at,
-                })
-                .collect();
-            Ok(sections)
-        } else {
-            Ok(Vec::new())
-        }
-    }
 }
 
-/// Section row from database
+/// Section row from database (used in tests)
+#[allow(dead_code)]
 #[derive(Debug, Deserialize, Clone)]
 struct SectionRow {
     #[serde(rename = "type", default)]
@@ -1598,9 +1440,9 @@ mod tests {
             &[],
         )
         .await;
-        add_section(service.database(), "abc123", "step", "Step 0", Some(0)).await;
-        add_section(service.database(), "abc123", "step", "Step 1", Some(1)).await;
-        add_section(service.database(), "abc123", "step", "Step 2", Some(2)).await;
+        add_section(service.database(), "abc123", "step", "Step 0", Some(1)).await;
+        add_section(service.database(), "abc123", "step", "Step 1", Some(2)).await;
+        add_section(service.database(), "abc123", "step", "Step 2", Some(3)).await;
 
         let cmd = UpdateCommand {
             id: "abc123".to_string(),
@@ -1611,7 +1453,7 @@ mod tests {
             remove_tags: vec![],
             parent: None,
             edit_section: None,
-            remove_section: Some(vec!["step".to_string(), "0".to_string()]),
+            remove_section: Some(vec!["step".to_string(), "1".to_string()]),
         };
 
         let result = cmd.execute(&service).await;
@@ -1622,16 +1464,19 @@ mod tests {
         assert_eq!(sections.len(), 2);
 
         // Find steps and verify renumbering
-        let steps: Vec<&SectionRow> = sections
-            .iter()
+        let mut steps: Vec<SectionRow> = sections
+            .into_iter()
             .filter(|s| s.section_type.as_deref() == Some("step"))
             .collect();
 
+        // Sort by order to match expectation
+        steps.sort_by_key(|s| s.order.unwrap_or(u32::MAX));
+
         assert_eq!(steps.len(), 2);
         assert_eq!(steps[0].content.as_deref(), Some("Step 1"));
-        assert_eq!(steps[0].order, Some(0)); // Renumbered from 1 to 0
+        assert_eq!(steps[0].order, Some(1)); // Renumbered from 2 to 1
         assert_eq!(steps[1].content.as_deref(), Some("Step 2"));
-        assert_eq!(steps[1].order, Some(1)); // Renumbered from 2 to 1
+        assert_eq!(steps[1].order, Some(2)); // Renumbered from 3 to 2
     }
 
     #[tokio::test]
@@ -1711,14 +1556,17 @@ mod tests {
 
         let result = cmd.execute(&service).await;
         match result {
-            Err(ServiceError::ValidationFailed { message }) => {
+            Err(ServiceError::Database(db_error)) => {
+                // Database error contains the validation message from the repository
                 assert!(
-                    message.contains("No step section found at ordinal 99"),
-                    "Expected 'No step section found' in error, got: {}",
-                    message
+                    db_error
+                        .to_string()
+                        .contains("No section of type 'step' with ordinal 99"),
+                    "Expected 'No section of type' in error, got: {}",
+                    db_error
                 );
             }
-            Err(other) => panic!("Expected ValidationFailed error, got {:?}", other),
+            Err(other) => panic!("Expected Database error, got {:?}", other),
             Ok(_) => panic!("Expected error, got success"),
         }
     }
