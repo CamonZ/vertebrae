@@ -4,8 +4,8 @@
 //! recursively traversing the dependency graph.
 
 use clap::Args;
-use serde::Deserialize;
-use vertebrae_db::{Database, DbError};
+use vertebrae_core::TaskService;
+use vertebrae_db::{DbError, Status};
 
 /// Show all tasks blocking a given task
 #[derive(Debug, Args)]
@@ -51,15 +51,6 @@ pub struct BlockersResult {
     pub total_count: usize,
 }
 
-/// Result from querying a task
-#[derive(Debug, Deserialize)]
-struct TaskRow {
-    id: surrealdb::sql::Thing,
-    title: String,
-    level: String,
-    status: String,
-}
-
 impl BlockersCommand {
     /// Execute the blockers command.
     ///
@@ -68,22 +59,27 @@ impl BlockersCommand {
     ///
     /// # Arguments
     ///
-    /// * `db` - Reference to the database connection
+    /// * `service` - Reference to the task service
     ///
     /// # Errors
     ///
     /// Returns `DbError` if:
     /// - The task with the given ID does not exist
-    /// - Database operations fail
-    pub async fn execute(&self, db: &Database) -> Result<BlockersResult, DbError> {
+    /// - Service operations fail
+    pub async fn execute(&self, service: &dyn TaskService) -> Result<BlockersResult, DbError> {
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
 
         // Fetch the target task to verify it exists and get its title
-        let task = self.fetch_task(db, &id).await?;
+        let task = service
+            .get_task(&id)
+            .await
+            .map_err(|_| DbError::TaskNotFound {
+                task_id: self.id.clone(),
+            })?;
 
         // Build the blocker tree
-        let blockers = self.build_blocker_tree(db, &id, 0).await?;
+        let blockers = self.build_blocker_tree(service, &id, 0).await?;
 
         // Count total blockers
         let total_count = count_nodes(&blockers);
@@ -96,25 +92,13 @@ impl BlockersCommand {
         })
     }
 
-    /// Fetch a task by ID.
-    async fn fetch_task(&self, db: &Database, id: &str) -> Result<TaskRow, DbError> {
-        let query = format!("SELECT id, title, level, status FROM task:{}", id);
-
-        let mut result = db.client().query(&query).await?;
-        let task: Option<TaskRow> = result.take(0)?;
-
-        task.ok_or_else(|| DbError::TaskNotFound {
-            task_id: self.id.clone(),
-        })
-    }
-
     /// Build the blocker tree recursively.
     ///
-    /// Uses BFS with depth tracking to build the tree structure while respecting
+    /// Uses depth tracking to build the tree structure while respecting
     /// the optional depth limit.
     async fn build_blocker_tree(
         &self,
-        db: &Database,
+        service: &dyn TaskService,
         task_id: &str,
         current_depth: usize,
     ) -> Result<Vec<BlockerNode>, DbError> {
@@ -126,22 +110,22 @@ impl BlockersCommand {
         }
 
         // Get direct blockers (tasks that this task depends on)
-        let direct_blockers = self.fetch_direct_blockers(db, task_id).await?;
+        let direct_blockers = self.fetch_direct_blockers(service, task_id).await?;
 
         // Build nodes for each direct blocker
         let mut nodes = Vec::new();
         for blocker in direct_blockers {
-            let blocker_id = blocker.id.id.to_string();
+            let blocker_id = blocker.id.clone();
 
             // Recursively get children (blockers of this blocker)
             let children =
-                Box::pin(self.build_blocker_tree(db, &blocker_id, current_depth + 1)).await?;
+                Box::pin(self.build_blocker_tree(service, &blocker_id, current_depth + 1)).await?;
 
             nodes.push(BlockerNode {
                 id: blocker_id,
                 title: blocker.title,
-                level: blocker.level,
-                status: blocker.status,
+                level: blocker.level.to_string(),
+                status: blocker.status.to_string(),
                 children,
             });
         }
@@ -155,27 +139,40 @@ impl BlockersCommand {
     /// When `--all` flag is set, returns all blockers including completed ones.
     async fn fetch_direct_blockers(
         &self,
-        db: &Database,
+        service: &dyn TaskService,
         task_id: &str,
-    ) -> Result<Vec<TaskRow>, DbError> {
-        // Get tasks that this task depends on via the depends_on edge
-        // By default, filter out completed blockers (status = done)
-        let query = if self.all {
-            format!(
-                "SELECT id, title, level, status FROM task WHERE <-depends_on<-task CONTAINS task:{}",
-                task_id
-            )
-        } else {
-            format!(
-                r#"SELECT id, title, level, status FROM task WHERE <-depends_on<-task CONTAINS task:{} AND status != "done""#,
-                task_id
-            )
-        };
+    ) -> Result<Vec<vertebrae_db::TaskSummary>, DbError> {
+        // Get tasks that this task depends on via the depends_on relationship
+        // Using service layer method that returns full task details
+        let blockers = service
+            .database()
+            .relationships()
+            .get_dependencies(task_id)
+            .await?;
 
-        let mut result = db.client().query(&query).await?;
-        let blockers: Vec<TaskRow> = result.take(0)?;
+        // Fetch full task details for each blocker
+        let mut result = Vec::new();
+        for blocker_id in blockers {
+            // Get the blocker task summary
+            if let Ok(task) = service.get_task(&blocker_id).await {
+                // By default, filter out completed blockers (status = done)
+                if !self.all && task.status == Status::Done {
+                    continue;
+                }
 
-        Ok(blockers)
+                result.push(vertebrae_db::TaskSummary {
+                    id: blocker_id,
+                    title: task.title,
+                    level: task.level,
+                    status: task.status,
+                    priority: task.priority,
+                    tags: task.tags,
+                    needs_human_review: task.needs_human_review,
+                });
+            }
+        }
+
+        Ok(result)
     }
 }
 
@@ -267,44 +264,55 @@ fn print_node(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vertebrae_core::DefaultTaskService;
+    use vertebrae_db::{Database, Level};
 
-    /// Helper to create an in-memory test database
-    async fn setup_test_db() -> Database {
+    /// Helper to create an in-memory test service
+    async fn setup_test_service() -> DefaultTaskService {
         let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-        db
+        DefaultTaskService::new(db)
     }
 
-    /// Helper to create a task in the database
-    async fn create_task(db: &Database, id: &str, title: &str, level: &str, status: &str) {
-        let query = format!(
-            r#"CREATE task:{} SET
-                title = "{}",
-                level = "{}",
-                status = "{}",
-                tags = [],
-                sections = [],
-                refs = []"#,
-            id, title, level, status
-        );
+    /// Helper to create a task with a specific ID in the test database
+    async fn create_task(
+        service: &DefaultTaskService,
+        id: &str,
+        title: &str,
+        level: &str,
+        status: &str,
+    ) {
+        use vertebrae_db::Task;
 
-        db.client().query(&query).await.unwrap();
+        let level_enum = match level {
+            "epic" => Level::Epic,
+            "ticket" => Level::Ticket,
+            _ => Level::Task,
+        };
+
+        let status_enum = match status {
+            "todo" => vertebrae_db::Status::Todo,
+            "in_progress" => vertebrae_db::Status::InProgress,
+            "pending_review" => vertebrae_db::Status::PendingReview,
+            "done" => vertebrae_db::Status::Done,
+            _ => vertebrae_db::Status::Backlog,
+        };
+
+        let db = service.database();
+        let task = Task::new(title, level_enum).with_status(status_enum);
+        db.tasks().create(id, &task).await.unwrap();
     }
 
     /// Helper to create a depends_on relationship
-    async fn create_depends_on(db: &Database, task_id: &str, blocker_id: &str) {
-        let query = format!(
-            "RELATE task:{} -> depends_on -> task:{}",
-            task_id, blocker_id
-        );
-        db.client().query(&query).await.unwrap();
+    async fn create_depends_on(service: &DefaultTaskService, task_id: &str, blocker_id: &str) {
+        service.add_dependency(task_id, blocker_id).await.unwrap();
     }
 
     #[tokio::test]
     async fn test_blockers_no_blockers() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "task1", "Independent Task", "task", "todo").await;
+        create_task(&service, "task1", "Independent Task", "task", "todo").await;
 
         let cmd = BlockersCommand {
             id: "task1".to_string(),
@@ -312,7 +320,7 @@ mod tests {
             all: false,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok(), "Blockers failed: {:?}", result.err());
 
         let blockers_result = result.unwrap();
@@ -325,11 +333,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_blockers_single_blocker() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "blocker1", "Blocker Task", "task", "todo").await;
-        create_task(&db, "task1", "Dependent Task", "task", "backlog").await;
-        create_depends_on(&db, "task1", "blocker1").await;
+        create_task(&service, "blocker1", "Blocker Task", "task", "todo").await;
+        create_task(&service, "task1", "Dependent Task", "task", "backlog").await;
+        create_depends_on(&service, "task1", "blocker1").await;
 
         let cmd = BlockersCommand {
             id: "task1".to_string(),
@@ -337,7 +345,7 @@ mod tests {
             all: false,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         let blockers_result = result.unwrap();
@@ -348,15 +356,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_blockers_transitive() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
         // Create chain: task1 -> blocker1 -> blocker2
-        create_task(&db, "blocker2", "Root Blocker", "task", "todo").await;
-        create_task(&db, "blocker1", "Intermediate Blocker", "task", "todo").await;
-        create_task(&db, "task1", "Final Task", "task", "backlog").await;
+        create_task(&service, "blocker2", "Root Blocker", "task", "todo").await;
+        create_task(&service, "blocker1", "Intermediate Blocker", "task", "todo").await;
+        create_task(&service, "task1", "Final Task", "task", "backlog").await;
 
-        create_depends_on(&db, "task1", "blocker1").await;
-        create_depends_on(&db, "blocker1", "blocker2").await;
+        create_depends_on(&service, "task1", "blocker1").await;
+        create_depends_on(&service, "blocker1", "blocker2").await;
 
         let cmd = BlockersCommand {
             id: "task1".to_string(),
@@ -364,7 +372,7 @@ mod tests {
             all: false,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         let blockers_result = result.unwrap();
@@ -377,14 +385,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_blockers_multiple_direct() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "blocker1", "Blocker 1", "task", "todo").await;
-        create_task(&db, "blocker2", "Blocker 2", "task", "in_progress").await;
-        create_task(&db, "task1", "Dependent Task", "task", "backlog").await;
+        create_task(&service, "blocker1", "Blocker 1", "task", "todo").await;
+        create_task(&service, "blocker2", "Blocker 2", "task", "in_progress").await;
+        create_task(&service, "task1", "Dependent Task", "task", "backlog").await;
 
-        create_depends_on(&db, "task1", "blocker1").await;
-        create_depends_on(&db, "task1", "blocker2").await;
+        create_depends_on(&service, "task1", "blocker1").await;
+        create_depends_on(&service, "task1", "blocker2").await;
 
         let cmd = BlockersCommand {
             id: "task1".to_string(),
@@ -392,7 +400,7 @@ mod tests {
             all: false,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         let blockers_result = result.unwrap();
@@ -412,17 +420,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_blockers_depth_limit() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
         // Create chain: task1 -> blocker1 -> blocker2 -> blocker3
-        create_task(&db, "blocker3", "Deep Blocker", "task", "todo").await;
-        create_task(&db, "blocker2", "Mid Blocker", "task", "todo").await;
-        create_task(&db, "blocker1", "Direct Blocker", "task", "todo").await;
-        create_task(&db, "task1", "Main Task", "task", "backlog").await;
+        create_task(&service, "blocker3", "Deep Blocker", "task", "todo").await;
+        create_task(&service, "blocker2", "Mid Blocker", "task", "todo").await;
+        create_task(&service, "blocker1", "Direct Blocker", "task", "todo").await;
+        create_task(&service, "task1", "Main Task", "task", "backlog").await;
 
-        create_depends_on(&db, "task1", "blocker1").await;
-        create_depends_on(&db, "blocker1", "blocker2").await;
-        create_depends_on(&db, "blocker2", "blocker3").await;
+        create_depends_on(&service, "task1", "blocker1").await;
+        create_depends_on(&service, "blocker1", "blocker2").await;
+        create_depends_on(&service, "blocker2", "blocker3").await;
 
         // Test with depth 1 - should only show direct blocker
         let cmd = BlockersCommand {
@@ -431,7 +439,7 @@ mod tests {
             all: false,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         let blockers_result = result.unwrap();
@@ -447,7 +455,7 @@ mod tests {
             all: false,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         let blockers_result = result.unwrap();
@@ -459,11 +467,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_blockers_depth_zero() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "blocker1", "Blocker", "task", "todo").await;
-        create_task(&db, "task1", "Main Task", "task", "backlog").await;
-        create_depends_on(&db, "task1", "blocker1").await;
+        create_task(&service, "blocker1", "Blocker", "task", "todo").await;
+        create_task(&service, "task1", "Main Task", "task", "backlog").await;
+        create_depends_on(&service, "task1", "blocker1").await;
 
         // Depth 0 should show no blockers
         let cmd = BlockersCommand {
@@ -472,7 +480,7 @@ mod tests {
             all: false,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         let blockers_result = result.unwrap();
@@ -482,7 +490,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_blockers_nonexistent_task() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
         let cmd = BlockersCommand {
             id: "nonexistent".to_string(),
@@ -490,7 +498,7 @@ mod tests {
             all: false,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         match result {
             Err(DbError::TaskNotFound { task_id }) => {
                 assert_eq!(
@@ -506,9 +514,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_blockers_case_insensitive() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "task1", "Test Task", "task", "todo").await;
+        create_task(&service, "task1", "Test Task", "task", "todo").await;
 
         let cmd = BlockersCommand {
             id: "TASK1".to_string(),
@@ -516,24 +524,24 @@ mod tests {
             all: false,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok(), "Case-insensitive lookup should work");
     }
 
     #[tokio::test]
     async fn test_blockers_diamond_structure() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
         // Diamond: task1 -> (blocker1, blocker2) -> shared_blocker
-        create_task(&db, "shared", "Shared Blocker", "task", "todo").await;
-        create_task(&db, "blocker1", "Blocker 1", "task", "todo").await;
-        create_task(&db, "blocker2", "Blocker 2", "task", "todo").await;
-        create_task(&db, "task1", "Main Task", "task", "backlog").await;
+        create_task(&service, "shared", "Shared Blocker", "task", "todo").await;
+        create_task(&service, "blocker1", "Blocker 1", "task", "todo").await;
+        create_task(&service, "blocker2", "Blocker 2", "task", "todo").await;
+        create_task(&service, "task1", "Main Task", "task", "backlog").await;
 
-        create_depends_on(&db, "task1", "blocker1").await;
-        create_depends_on(&db, "task1", "blocker2").await;
-        create_depends_on(&db, "blocker1", "shared").await;
-        create_depends_on(&db, "blocker2", "shared").await;
+        create_depends_on(&service, "task1", "blocker1").await;
+        create_depends_on(&service, "task1", "blocker2").await;
+        create_depends_on(&service, "blocker1", "shared").await;
+        create_depends_on(&service, "blocker2", "shared").await;
 
         let cmd = BlockersCommand {
             id: "task1".to_string(),
@@ -541,7 +549,7 @@ mod tests {
             all: false,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         let blockers_result = result.unwrap();
@@ -562,14 +570,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_blockers_filters_completed_by_default() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "done_blocker", "Done Blocker", "ticket", "done").await;
-        create_task(&db, "todo_blocker", "Todo Blocker", "task", "todo").await;
-        create_task(&db, "task1", "Main Task", "task", "backlog").await;
+        create_task(&service, "done_blocker", "Done Blocker", "ticket", "done").await;
+        create_task(&service, "todo_blocker", "Todo Blocker", "task", "todo").await;
+        create_task(&service, "task1", "Main Task", "task", "backlog").await;
 
-        create_depends_on(&db, "task1", "done_blocker").await;
-        create_depends_on(&db, "task1", "todo_blocker").await;
+        create_depends_on(&service, "task1", "done_blocker").await;
+        create_depends_on(&service, "task1", "todo_blocker").await;
 
         // By default, completed blockers should be filtered out
         let cmd = BlockersCommand {
@@ -578,7 +586,7 @@ mod tests {
             all: false,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         let blockers_result = result.unwrap();
@@ -603,14 +611,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_blockers_all_flag_includes_completed() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "done_blocker", "Done Blocker", "ticket", "done").await;
-        create_task(&db, "todo_blocker", "Todo Blocker", "task", "todo").await;
-        create_task(&db, "task1", "Main Task", "task", "backlog").await;
+        create_task(&service, "done_blocker", "Done Blocker", "ticket", "done").await;
+        create_task(&service, "todo_blocker", "Todo Blocker", "task", "todo").await;
+        create_task(&service, "task1", "Main Task", "task", "backlog").await;
 
-        create_depends_on(&db, "task1", "done_blocker").await;
-        create_depends_on(&db, "task1", "todo_blocker").await;
+        create_depends_on(&service, "task1", "done_blocker").await;
+        create_depends_on(&service, "task1", "todo_blocker").await;
 
         // With --all flag, should include completed blockers
         let cmd = BlockersCommand {
@@ -619,7 +627,7 @@ mod tests {
             all: true,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         let blockers_result = result.unwrap();
@@ -660,18 +668,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_blockers_transitive_filters_completed() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
         // Create chain: task1 -> blocker1 (todo) -> blocker2 (done) -> blocker3 (todo)
         // By default, blocker2 and its children should be filtered out
-        create_task(&db, "blocker3", "Deep Blocker", "task", "todo").await;
-        create_task(&db, "blocker2", "Done Blocker", "task", "done").await;
-        create_task(&db, "blocker1", "Direct Blocker", "task", "todo").await;
-        create_task(&db, "task1", "Main Task", "task", "backlog").await;
+        create_task(&service, "blocker3", "Deep Blocker", "task", "todo").await;
+        create_task(&service, "blocker2", "Done Blocker", "task", "done").await;
+        create_task(&service, "blocker1", "Direct Blocker", "task", "todo").await;
+        create_task(&service, "task1", "Main Task", "task", "backlog").await;
 
-        create_depends_on(&db, "task1", "blocker1").await;
-        create_depends_on(&db, "blocker1", "blocker2").await;
-        create_depends_on(&db, "blocker2", "blocker3").await;
+        create_depends_on(&service, "task1", "blocker1").await;
+        create_depends_on(&service, "blocker1", "blocker2").await;
+        create_depends_on(&service, "blocker2", "blocker3").await;
 
         // Default behavior: should stop at completed blocker
         let cmd = BlockersCommand {
@@ -680,7 +688,7 @@ mod tests {
             all: false,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         let blockers_result = result.unwrap();
@@ -698,7 +706,7 @@ mod tests {
             all: true,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         let blockers_result = result.unwrap();
@@ -716,14 +724,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_blockers_no_blockers_when_all_completed() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "done_blocker1", "Done Blocker 1", "task", "done").await;
-        create_task(&db, "done_blocker2", "Done Blocker 2", "task", "done").await;
-        create_task(&db, "task1", "Main Task", "task", "backlog").await;
+        create_task(&service, "done_blocker1", "Done Blocker 1", "task", "done").await;
+        create_task(&service, "done_blocker2", "Done Blocker 2", "task", "done").await;
+        create_task(&service, "task1", "Main Task", "task", "backlog").await;
 
-        create_depends_on(&db, "task1", "done_blocker1").await;
-        create_depends_on(&db, "task1", "done_blocker2").await;
+        create_depends_on(&service, "task1", "done_blocker1").await;
+        create_depends_on(&service, "task1", "done_blocker2").await;
 
         // Default: should show no blockers since all are done
         let cmd = BlockersCommand {
@@ -732,7 +740,7 @@ mod tests {
             all: false,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         let blockers_result = result.unwrap();
@@ -749,7 +757,7 @@ mod tests {
             all: true,
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         let blockers_result = result.unwrap();

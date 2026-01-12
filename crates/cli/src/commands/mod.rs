@@ -172,7 +172,7 @@ impl Command {
                 Ok(CommandResult::Message(format!("Created task: {}", id)))
             }
             Command::Blockers(cmd) => {
-                let result = cmd.execute(db).await?;
+                let result = cmd.execute(service).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::CriterionRef(cmd) => {
