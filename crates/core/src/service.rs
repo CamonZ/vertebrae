@@ -462,6 +462,17 @@ pub trait TaskService: Send + Sync {
         indices: Option<Vec<usize>>,
     ) -> ServiceResult<()>;
 
+    /// Remove a section by its ordinal (order field value)
+    ///
+    /// This method removes a specific section identified by its ordinal and
+    /// renumbers remaining sections of the same type.
+    async fn remove_section_by_ordinal(
+        &self,
+        id: &str,
+        section_type: vertebrae_db::SectionType,
+        ordinal: u32,
+    ) -> ServiceResult<()>;
+
     /// Add a code reference to a task
     async fn add_code_ref(&self, id: &str, code_ref: CodeRef) -> ServiceResult<()>;
 
@@ -1252,6 +1263,26 @@ impl TaskService for DefaultTaskService {
 
         let update = TaskUpdate::new().with_sections(sections);
         self.db.tasks().update(&id, &update).await?;
+
+        // Fire mutation callback
+        self.on_mutation(MutationEvent::TaskUpdated { id: id.clone() });
+
+        Ok(())
+    }
+
+    async fn remove_section_by_ordinal(
+        &self,
+        id: &str,
+        section_type: vertebrae_db::SectionType,
+        ordinal: u32,
+    ) -> ServiceResult<()> {
+        let id = id.to_lowercase();
+
+        // Use repository method which handles finding by ordinal and renumbering
+        self.db
+            .tasks()
+            .remove_section(&id, section_type, ordinal)
+            .await?;
 
         // Fire mutation callback
         self.on_mutation(MutationEvent::TaskUpdated { id: id.clone() });
