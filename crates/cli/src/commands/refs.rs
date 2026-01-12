@@ -4,8 +4,8 @@
 //! sorted by file path and then line number.
 
 use clap::Args;
-use serde::Deserialize;
-use vertebrae_db::{CodeRef, Database, DbError};
+use vertebrae_core::TaskService;
+use vertebrae_db::{CodeRef, DbError};
 
 /// List all code references for a task
 #[derive(Debug, Args)]
@@ -114,31 +114,6 @@ fn format_lines(line_start: Option<u32>, line_end: Option<u32>) -> String {
     }
 }
 
-/// Result from querying a task's refs
-#[derive(Debug, Deserialize)]
-struct TaskRefsRow {
-    #[allow(dead_code)]
-    id: surrealdb::sql::Thing,
-    title: String,
-    #[serde(default, rename = "refs")]
-    code_refs: Vec<CodeRefRow>,
-}
-
-/// Code reference row from database
-#[derive(Debug, Deserialize, Clone)]
-struct CodeRefRow {
-    #[serde(default)]
-    path: Option<String>,
-    #[serde(default)]
-    line_start: Option<u32>,
-    #[serde(default)]
-    line_end: Option<u32>,
-    #[serde(default)]
-    name: Option<String>,
-    #[serde(default)]
-    description: Option<String>,
-}
-
 impl RefsCommand {
     /// Execute the refs command.
     ///
@@ -147,42 +122,27 @@ impl RefsCommand {
     ///
     /// # Arguments
     ///
-    /// * `db` - Reference to the database connection
+    /// * `service` - Reference to the task service
     ///
     /// # Errors
     ///
     /// Returns `DbError` if:
     /// - The task with the given ID does not exist
-    /// - Database operations fail
-    pub async fn execute(&self, db: &Database) -> Result<RefsResult, DbError> {
+    /// - Service operations fail
+    pub async fn execute(&self, service: &dyn TaskService) -> Result<RefsResult, DbError> {
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
 
-        // Fetch task refs
-        let task = self.fetch_task_refs(db, &id).await?;
+        // Fetch task using service
+        let task = service
+            .get_task(&id)
+            .await
+            .map_err(|_e| DbError::TaskNotFound {
+                task_id: self.id.clone(),
+            })?;
 
-        // Convert code refs, filtering out any without required fields
-        let mut refs: Vec<CodeRef> = task
-            .code_refs
-            .into_iter()
-            .filter_map(|r| {
-                let path = r.path?;
-                let mut code_ref = if let (Some(start), Some(end)) = (r.line_start, r.line_end) {
-                    CodeRef::range(path, start, end)
-                } else if let Some(line) = r.line_start {
-                    CodeRef::line(path, line)
-                } else {
-                    CodeRef::file(path)
-                };
-                if let Some(name) = r.name {
-                    code_ref = code_ref.with_name(name);
-                }
-                if let Some(desc) = r.description {
-                    code_ref = code_ref.with_description(desc);
-                }
-                Some(code_ref)
-            })
-            .collect();
+        // Use the task's code_refs directly
+        let mut refs = task.code_refs;
 
         // Sort by file path, then by line_start
         refs.sort_by(|a, b| {
@@ -203,83 +163,37 @@ impl RefsCommand {
             refs,
         })
     }
-
-    /// Fetch the task by ID and return its refs.
-    async fn fetch_task_refs(&self, db: &Database, id: &str) -> Result<TaskRefsRow, DbError> {
-        let query = format!("SELECT id, title, refs FROM task:{}", id);
-        let mut result = db.client().query(&query).await?;
-        let task: Option<TaskRefsRow> = result.take(0)?;
-
-        task.ok_or_else(|| DbError::TaskNotFound {
-            task_id: self.id.clone(),
-        })
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vertebrae_core::{CreateTaskOptions, DefaultTaskService};
+    use vertebrae_db::Database;
 
-    /// Helper to create an in-memory test database
-    async fn setup_test_db() -> Database {
+    /// Helper to create a test service with in-memory database
+    async fn setup_test_service() -> DefaultTaskService {
         let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-        db
+        DefaultTaskService::new(db)
     }
 
-    /// Helper to create a task in the database
-    async fn create_task(db: &Database, id: &str, title: &str) {
-        let query = format!(
-            r#"CREATE task:{} SET
-                title = "{}",
-                level = "task",
-                status = "todo",
-                tags = [],
-                sections = [],
-                refs = []"#,
-            id, title
-        );
-        db.client().query(&query).await.unwrap();
-    }
+    /// Helper to create a task with the service
+    async fn create_task_with_ref(
+        service: &DefaultTaskService,
+        _id: &str,
+        title: &str,
+        code_ref: Option<CodeRef>,
+    ) -> String {
+        let options = CreateTaskOptions::new(title);
+        let created_id = service.create_task(options).await.unwrap();
 
-    /// Helper to add a code reference to a task
-    async fn add_ref(
-        db: &Database,
-        id: &str,
-        path: &str,
-        line_start: Option<u32>,
-        line_end: Option<u32>,
-        name: Option<&str>,
-        description: Option<&str>,
-    ) {
-        let escaped_path = path.replace('\\', "\\\\").replace('"', "\\\"");
-        let mut ref_parts = vec![format!(r#""path": "{}""#, escaped_path)];
-
-        if let Some(start) = line_start {
-            ref_parts.push(format!(r#""line_start": {}"#, start));
+        // If a code ref was provided, add it
+        if let Some(ref_to_add) = code_ref {
+            service.append_ref(&created_id, &ref_to_add).await.unwrap();
         }
 
-        if let Some(end) = line_end {
-            ref_parts.push(format!(r#""line_end": {}"#, end));
-        }
-
-        if let Some(n) = name {
-            let escaped_name = n.replace('\\', "\\\\").replace('"', "\\\"");
-            ref_parts.push(format!(r#""name": "{}""#, escaped_name));
-        }
-
-        if let Some(d) = description {
-            let escaped_desc = d.replace('\\', "\\\\").replace('"', "\\\"");
-            ref_parts.push(format!(r#""description": "{}""#, escaped_desc));
-        }
-
-        let ref_obj = format!("{{ {} }}", ref_parts.join(", "));
-
-        let query = format!(
-            "UPDATE task:{} SET refs = array::append(refs, {})",
-            id, ref_obj
-        );
-        db.client().query(&query).await.unwrap();
+        created_id
     }
 
     #[test]
@@ -299,49 +213,43 @@ mod tests {
 
     #[tokio::test]
     async fn test_refs_all() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "task1", "Implement auth").await;
-        add_ref(
-            &db,
-            "task1",
-            "config/auth.exs",
-            None,
-            None,
-            Some("config"),
-            None,
-        )
-        .await;
-        add_ref(
-            &db,
-            "task1",
-            "src/lib/auth.ex",
-            Some(45),
-            Some(67),
-            Some("hash_password"),
-            None,
-        )
-        .await;
-        add_ref(
-            &db,
-            "task1",
-            "src/lib/auth.ex",
-            Some(120),
-            None,
-            Some("authenticate"),
-            Some("Entry point for auth"),
-        )
-        .await;
+        let task_id = create_task_with_ref(&service, "task1", "Implement auth", None).await;
+
+        // Add code references
+        service
+            .append_ref(
+                &task_id,
+                &CodeRef::file("config/auth.exs").with_name("config"),
+            )
+            .await
+            .unwrap();
+        service
+            .append_ref(
+                &task_id,
+                &CodeRef::range("src/lib/auth.ex", 45, 67).with_name("hash_password"),
+            )
+            .await
+            .unwrap();
+        service
+            .append_ref(
+                &task_id,
+                &CodeRef::line("src/lib/auth.ex", 120)
+                    .with_name("authenticate")
+                    .with_description("Entry point for auth"),
+            )
+            .await
+            .unwrap();
 
         let cmd = RefsCommand {
-            id: "task1".to_string(),
+            id: task_id.clone(),
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok(), "Refs command failed: {:?}", result.err());
 
         let refs_result = result.unwrap();
-        assert_eq!(refs_result.id, "task1");
         assert_eq!(refs_result.title, "Implement auth");
         assert_eq!(refs_result.refs.len(), 3);
 
@@ -355,37 +263,35 @@ mod tests {
 
     #[tokio::test]
     async fn test_refs_sorted_by_file_then_line() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "task1", "Test Task").await;
+        let task_id = create_task_with_ref(&service, "task1", "Test Task", None).await;
+
         // Add in reverse order to test sorting
-        add_ref(&db, "task1", "src/b.ex", Some(10), None, None, None).await;
-        add_ref(
-            &db,
-            "task1",
-            "src/a.ex",
-            Some(50),
-            Some(60),
-            Some("function"),
-            None,
-        )
-        .await;
-        add_ref(
-            &db,
-            "task1",
-            "src/a.ex",
-            Some(20),
-            None,
-            None,
-            Some("Important"),
-        )
-        .await;
+        service
+            .append_ref(&task_id, &CodeRef::line("src/b.ex", 10))
+            .await
+            .unwrap();
+        service
+            .append_ref(
+                &task_id,
+                &CodeRef::range("src/a.ex", 50, 60).with_name("function"),
+            )
+            .await
+            .unwrap();
+        service
+            .append_ref(
+                &task_id,
+                &CodeRef::line("src/a.ex", 20).with_name("Important"),
+            )
+            .await
+            .unwrap();
 
         let cmd = RefsCommand {
-            id: "task1".to_string(),
+            id: task_id.clone(),
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         let refs_result = result.unwrap();
@@ -401,15 +307,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_refs_empty() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "task1", "Empty Task").await;
+        let task_id = create_task_with_ref(&service, "task1", "Empty Task", None).await;
 
         let cmd = RefsCommand {
-            id: "task1".to_string(),
+            id: task_id.clone(),
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         let refs_result = result.unwrap();
@@ -422,13 +328,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_refs_nonexistent_task() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
         let cmd = RefsCommand {
             id: "nonexistent".to_string(),
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         match result {
             Err(DbError::TaskNotFound { task_id }) => {
                 assert_eq!(
@@ -444,16 +350,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_refs_case_insensitive_id() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "task1", "Test Task").await;
-        add_ref(&db, "task1", "src/main.rs", None, None, None, None).await;
+        let task_id = create_task_with_ref(&service, "task1", "Test Task", None).await;
+        service
+            .append_ref(&task_id, &CodeRef::file("src/main.rs"))
+            .await
+            .unwrap();
 
         let cmd = RefsCommand {
-            id: "TASK1".to_string(),
+            id: task_id.to_uppercase(),
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok(), "Case-insensitive lookup should work");
 
         let refs_result = result.unwrap();
@@ -532,25 +441,24 @@ mod tests {
 
     #[tokio::test]
     async fn test_refs_preserves_all_fields() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "task1", "Test Task").await;
-        add_ref(
-            &db,
-            "task1",
-            "src/main.rs",
-            Some(10),
-            Some(20),
-            Some("test_fn"),
-            Some("Test function"),
-        )
-        .await;
+        let task_id = create_task_with_ref(&service, "task1", "Test Task", None).await;
+        service
+            .append_ref(
+                &task_id,
+                &CodeRef::range("src/main.rs", 10, 20)
+                    .with_name("test_fn")
+                    .with_description("Test function"),
+            )
+            .await
+            .unwrap();
 
         let cmd = RefsCommand {
-            id: "task1".to_string(),
+            id: task_id.clone(),
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         let refs_result = result.unwrap();
@@ -566,16 +474,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_refs_file_only() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "task1", "Test Task").await;
-        add_ref(&db, "task1", "README.md", None, None, None, None).await;
+        let task_id = create_task_with_ref(&service, "task1", "Test Task", None).await;
+        service
+            .append_ref(&task_id, &CodeRef::file("README.md"))
+            .await
+            .unwrap();
 
         let cmd = RefsCommand {
-            id: "task1".to_string(),
+            id: task_id.clone(),
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         let refs_result = result.unwrap();
