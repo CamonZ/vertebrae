@@ -345,14 +345,24 @@ impl TreeFilterOptions {
 #[async_trait]
 pub trait TaskService: Send + Sync {
     // =========================================================================
-    // Database Access
+    // Database Access (DEPRECATED - DO NOT USE)
     // =========================================================================
 
     /// Get a reference to the underlying database
     ///
-    /// This is provided during the migration period to allow CLI commands
-    /// to access database functionality not yet exposed through the service.
-    /// New code should prefer using service methods when available.
+    /// **DEPRECATED**: This method is a bypass that avoids the service layer.
+    /// It should NOT be used and will be removed.
+    ///
+    /// Using this method prevents:
+    /// - Mutations from being captured by MutationCallback
+    /// - Notifications being triggered for GUI cache invalidation
+    /// - Proper transaction handling and atomicity
+    ///
+    /// All code must be refactored to use proper service methods instead.
+    #[deprecated(
+        since = "0.1.0",
+        note = "this database bypass will be removed; use service methods instead"
+    )]
     fn database(&self) -> &Database;
 
     // =========================================================================

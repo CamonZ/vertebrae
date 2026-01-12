@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 pub mod commands;
 pub mod events;
 pub mod live_queries;

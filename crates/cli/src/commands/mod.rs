@@ -2,6 +2,8 @@
 //!
 //! This module contains all subcommand implementations for the vtb CLI.
 
+#![allow(deprecated)]
+
 pub mod add;
 pub mod blockers;
 pub mod criterion_ref;
