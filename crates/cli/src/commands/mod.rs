@@ -21,7 +21,6 @@ pub mod review;
 pub mod section;
 pub mod sections;
 pub mod show;
-pub mod start;
 pub mod step_done;
 pub mod transition_to;
 pub mod undepend;
@@ -49,7 +48,6 @@ pub use review::ReviewCommand;
 pub use section::SectionCommand;
 pub use sections::SectionsCommand;
 pub use show::ShowCommand;
-pub use start::StartCommand;
 pub use step_done::StepDoneCommand;
 pub use transition_to::TransitionToCommand;
 pub use undepend::UndependCommand;
@@ -107,8 +105,6 @@ pub enum Command {
     Sections(SectionsCommand),
     /// Show full details of a task
     Show(ShowCommand),
-    /// Start a task (transition from todo to in_progress)
-    Start(StartCommand),
     /// Remove a dependency relationship between tasks
     Undepend(UndependCommand),
     /// Remove code references from a task
@@ -264,12 +260,6 @@ impl Command {
                 // Service handles notification via callback if needed
                 let detail = cmd.execute(service).await?;
                 Ok(CommandResult::Message(format!("{}", detail)))
-            }
-            Command::Start(cmd) => {
-                let result = cmd.execute(db).await?;
-                notification::notify_task_changed(format!("task:{}", cmd.id), "StatusChanged")
-                    .await;
-                Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Undepend(cmd) => {
                 // Service handles notification via callback
