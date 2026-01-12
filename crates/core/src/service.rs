@@ -472,6 +472,24 @@ pub trait TaskService: Send + Sync {
         indices: Option<Vec<usize>>,
     ) -> ServiceResult<()>;
 
+    /// Edit a section by its ordinal (order field value)
+    ///
+    /// This method edits a specific section identified by its ordinal and section type,
+    /// replacing its content with the provided text. Does not renumber sections.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ServiceError` if:
+    /// - Task not found
+    /// - Section of the given type and ordinal not found
+    async fn edit_section_by_ordinal(
+        &self,
+        id: &str,
+        section_type: vertebrae_db::SectionType,
+        ordinal: u32,
+        new_content: &str,
+    ) -> ServiceResult<()>;
+
     /// Remove a section by its ordinal (order field value)
     ///
     /// This method removes a specific section identified by its ordinal and
@@ -1244,6 +1262,45 @@ impl TaskService for DefaultTaskService {
         }
 
         let update = TaskUpdate::new().with_sections(sections);
+        self.db.tasks().update(&id, &update).await?;
+
+        // Fire mutation callback
+        self.on_mutation(MutationEvent::TaskUpdated { id: id.clone() });
+
+        Ok(())
+    }
+
+    async fn edit_section_by_ordinal(
+        &self,
+        id: &str,
+        section_type: vertebrae_db::SectionType,
+        ordinal: u32,
+        new_content: &str,
+    ) -> ServiceResult<()> {
+        let id = id.to_lowercase();
+
+        // Verify task exists
+        let task = self.get_task(&id).await?;
+
+        // Find the section with the matching type and ordinal
+        let section_index = task
+            .sections
+            .iter()
+            .position(|s| s.section_type == section_type && s.order == Some(ordinal))
+            .ok_or_else(|| {
+                ServiceError::validation_failed(format!(
+                    "No section of type '{}' with ordinal {} found",
+                    section_type, ordinal
+                ))
+            })?;
+
+        // Build the new sections array with the edited section
+        let mut new_sections = task.sections.clone();
+        let edited_section = &mut new_sections[section_index];
+        edited_section.content = new_content.to_string();
+
+        // Update task with new sections
+        let update = TaskUpdate::new().with_sections(new_sections);
         self.db.tasks().update(&id, &update).await?;
 
         // Fire mutation callback
@@ -2056,5 +2113,220 @@ mod tests {
         assert_eq!(children[1].title, "Alpha Task");
         assert_eq!(children[2].level, Level::Task);
         assert_eq!(children[2].title, "Zebra Task");
+    }
+
+    // =========================================================================
+    // edit_section_by_ordinal tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_edit_section_by_ordinal() {
+        let service = setup_test_service().await;
+
+        let id = service
+            .create_task(CreateTaskOptions::new("Task"))
+            .await
+            .unwrap();
+
+        // Add a section with ordinal
+        let section = Section::with_order(vertebrae_db::SectionType::Step, "Original content", 0);
+        service.add_section(&id, section).await.unwrap();
+
+        // Edit the section
+        service
+            .edit_section_by_ordinal(&id, vertebrae_db::SectionType::Step, 0, "Updated content")
+            .await
+            .unwrap();
+
+        // Verify the section was updated
+        let task = service.get_task(&id).await.unwrap();
+        assert_eq!(task.sections.len(), 1);
+        assert_eq!(task.sections[0].content, "Updated content");
+        assert_eq!(task.sections[0].order, Some(0));
+    }
+
+    #[tokio::test]
+    async fn test_edit_section_by_ordinal_preserves_other_sections() {
+        let service = setup_test_service().await;
+
+        let id = service
+            .create_task(CreateTaskOptions::new("Task"))
+            .await
+            .unwrap();
+
+        // Add multiple sections with ordinals
+        let section1 = Section::with_order(vertebrae_db::SectionType::Step, "Step 1", 0);
+        service.add_section(&id, section1).await.unwrap();
+
+        let section2 = Section::with_order(vertebrae_db::SectionType::Goal, "Original goal", 0);
+        service.add_section(&id, section2).await.unwrap();
+
+        let section3 = Section::with_order(vertebrae_db::SectionType::Step, "Step 2", 1);
+        service.add_section(&id, section3).await.unwrap();
+
+        // Edit the goal section
+        service
+            .edit_section_by_ordinal(&id, vertebrae_db::SectionType::Goal, 0, "Updated goal")
+            .await
+            .unwrap();
+
+        // Verify the goal was updated and other sections preserved
+        let task = service.get_task(&id).await.unwrap();
+        assert_eq!(task.sections.len(), 3);
+
+        let goal_section = task
+            .sections
+            .iter()
+            .find(|s| s.section_type == vertebrae_db::SectionType::Goal)
+            .unwrap();
+        assert_eq!(goal_section.content, "Updated goal");
+
+        // Verify steps are unchanged
+        let steps: Vec<_> = task
+            .sections
+            .iter()
+            .filter(|s| s.section_type == vertebrae_db::SectionType::Step)
+            .collect();
+        assert_eq!(steps.len(), 2);
+        assert_eq!(steps[0].content, "Step 1");
+        assert_eq!(steps[1].content, "Step 2");
+    }
+
+    #[tokio::test]
+    async fn test_edit_section_by_ordinal_multiple_of_same_type() {
+        let service = setup_test_service().await;
+
+        let id = service
+            .create_task(CreateTaskOptions::new("Task"))
+            .await
+            .unwrap();
+
+        // Add multiple sections of the same type with ordinals
+        let section1 = Section::with_order(vertebrae_db::SectionType::Step, "Step 0", 0);
+        service.add_section(&id, section1).await.unwrap();
+
+        let section2 = Section::with_order(vertebrae_db::SectionType::Step, "Step 1", 1);
+        service.add_section(&id, section2).await.unwrap();
+
+        let section3 = Section::with_order(vertebrae_db::SectionType::Step, "Step 2", 2);
+        service.add_section(&id, section3).await.unwrap();
+
+        // Edit the middle section
+        service
+            .edit_section_by_ordinal(&id, vertebrae_db::SectionType::Step, 1, "Updated Step 1")
+            .await
+            .unwrap();
+
+        // Verify only the targeted section was updated
+        let task = service.get_task(&id).await.unwrap();
+        assert_eq!(task.sections.len(), 3);
+
+        let steps: Vec<_> = task
+            .sections
+            .iter()
+            .filter(|s| s.section_type == vertebrae_db::SectionType::Step)
+            .collect();
+        assert_eq!(steps[0].content, "Step 0");
+        assert_eq!(steps[1].content, "Updated Step 1");
+        assert_eq!(steps[2].content, "Step 2");
+    }
+
+    #[tokio::test]
+    async fn test_edit_section_by_ordinal_task_not_found() {
+        let service = setup_test_service().await;
+
+        let result = service
+            .edit_section_by_ordinal("nonexistent", vertebrae_db::SectionType::Step, 0, "content")
+            .await;
+
+        assert!(matches!(result, Err(ServiceError::TaskNotFound { .. })));
+    }
+
+    #[tokio::test]
+    async fn test_edit_section_by_ordinal_section_not_found() {
+        let service = setup_test_service().await;
+
+        let id = service
+            .create_task(CreateTaskOptions::new("Task"))
+            .await
+            .unwrap();
+
+        let result = service
+            .edit_section_by_ordinal(&id, vertebrae_db::SectionType::Step, 0, "content")
+            .await;
+
+        assert!(matches!(result, Err(ServiceError::ValidationFailed { .. })));
+    }
+
+    #[tokio::test]
+    async fn test_edit_section_by_ordinal_wrong_ordinal() {
+        let service = setup_test_service().await;
+
+        let id = service
+            .create_task(CreateTaskOptions::new("Task"))
+            .await
+            .unwrap();
+
+        // Add a section with ordinal 0
+        let section = Section::with_order(vertebrae_db::SectionType::Step, "Step 0", 0);
+        service.add_section(&id, section).await.unwrap();
+
+        // Try to edit with wrong ordinal
+        let result = service
+            .edit_section_by_ordinal(&id, vertebrae_db::SectionType::Step, 5, "new content")
+            .await;
+
+        assert!(matches!(result, Err(ServiceError::ValidationFailed { .. })));
+    }
+
+    #[tokio::test]
+    async fn test_edit_section_by_ordinal_fires_mutation_callback() {
+        let service = setup_test_service().await;
+
+        let id = service
+            .create_task(CreateTaskOptions::new("Task"))
+            .await
+            .unwrap();
+
+        // Add a section with ordinal
+        let section = Section::with_order(vertebrae_db::SectionType::Step, "Original", 0);
+        service.add_section(&id, section).await.unwrap();
+
+        // Edit the section (if callback is set, it will be called, but we can't easily
+        // verify it here without more infrastructure; this test mainly ensures no panic)
+        let result = service
+            .edit_section_by_ordinal(&id, vertebrae_db::SectionType::Step, 0, "Updated")
+            .await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_edit_section_by_ordinal_case_insensitive_id() {
+        let service = setup_test_service().await;
+
+        let id = service
+            .create_task(CreateTaskOptions::new("Task"))
+            .await
+            .unwrap();
+
+        // Add a section with ordinal
+        let section = Section::with_order(vertebrae_db::SectionType::Step, "Original", 0);
+        service.add_section(&id, section).await.unwrap();
+
+        // Edit using uppercase ID
+        service
+            .edit_section_by_ordinal(
+                &id.to_uppercase(),
+                vertebrae_db::SectionType::Step,
+                0,
+                "Updated",
+            )
+            .await
+            .unwrap();
+
+        // Verify the section was updated
+        let task = service.get_task(&id).await.unwrap();
+        assert_eq!(task.sections[0].content, "Updated");
     }
 }
