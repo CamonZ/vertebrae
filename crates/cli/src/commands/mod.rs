@@ -7,7 +7,6 @@ pub mod blockers;
 pub mod criterion_ref;
 pub mod delete;
 pub mod depend;
-pub mod done;
 pub mod execution;
 pub mod export;
 pub mod import;
@@ -34,7 +33,6 @@ pub use blockers::BlockersCommand;
 pub use criterion_ref::CriterionRefCommand;
 pub use delete::DeleteCommand;
 pub use depend::DependCommand;
-pub use done::DoneCommand;
 pub use execution::ExecutionCommand;
 pub use export::ExportCommand;
 pub use import::ImportCommand;
@@ -76,8 +74,6 @@ pub enum Command {
     Delete(DeleteCommand),
     /// Create a dependency relationship between tasks
     Depend(DependCommand),
-    /// Complete a task (transition from pending_review to done)
-    Done(DoneCommand),
     /// Execution history commands
     #[command(subcommand)]
     Execution(ExecutionCommand),
@@ -180,12 +176,6 @@ impl Command {
             Command::Depend(cmd) => {
                 // Service handles notification via callback
                 let result = cmd.execute(service).await?;
-                Ok(CommandResult::Message(format!("{}", result)))
-            }
-            Command::Done(cmd) => {
-                let result = cmd.execute(db).await?;
-                notification::notify_task_changed(format!("task:{}", cmd.id), "StatusChanged")
-                    .await;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Execution(cmd) => {

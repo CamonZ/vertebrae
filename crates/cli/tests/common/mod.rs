@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 use vertebrae_cli::commands::{
-    AddCommand, DeleteCommand, DependCommand, DoneCommand, ExportCommand, ListCommand, RefCommand,
+    AddCommand, DeleteCommand, DependCommand, ExportCommand, ListCommand, RefCommand,
     SectionCommand, TransitionToCommand,
     transition_to::TargetStatus,
     workflow::{
@@ -512,15 +512,6 @@ pub fn extract_workflow_id(msg: &str) -> String {
 #[allow(dead_code)]
 pub async fn workflow_exists(db: &Database, id: &str) -> bool {
     db.workflows().exists(id).await.unwrap_or(false)
-}
-
-// =============================================================================
-// Backwards Compatibility Command Helpers (standalone start/done/triage)
-// =============================================================================
-
-/// Create a standalone done command (backwards compatibility).
-pub fn standalone_done_cmd(id: &str) -> DoneCommand {
-    DoneCommand { id: id.to_string() }
 }
 
 // =============================================================================

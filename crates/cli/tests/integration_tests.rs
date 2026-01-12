@@ -316,28 +316,6 @@ mod lifecycle {
         assert!(task.started_at.is_some());
         assert!(task.completed_at.is_some());
     }
-
-    // =========================================================================
-    // BACKWARDS COMPATIBILITY TESTS (standalone done/submit/triage)
-    // =========================================================================
-
-    #[tokio::test]
-    async fn test_standalone_done_with_incomplete_children_fails() {
-        let ctx = TestContext::new().await;
-
-        create_task(ctx.db(), "parent", "Parent", "ticket", "pending_review").await;
-        create_task(ctx.db(), "child", "Child", "task", "todo").await;
-        create_child_of(ctx.db(), "child", "parent").await;
-
-        let result = standalone_done_cmd("parent").execute(ctx.db()).await;
-        match result {
-            Err(DbError::IncompleteChildren { task_id, children }) => {
-                assert_eq!(task_id, "parent");
-                assert_eq!(children.len(), 1);
-            }
-            _ => panic!("Expected IncompleteChildren error"),
-        }
-    }
 }
 
 // =============================================================================
