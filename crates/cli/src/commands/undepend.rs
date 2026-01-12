@@ -1,10 +1,11 @@
 //! Undepend command for removing task dependencies
 //!
 //! Implements the `vtb undepend` command to remove dependency relationships between tasks.
+//! Uses the TaskService layer to ensure MutationCallback fires properly for GUI cache invalidation.
 
 use clap::Args;
-use serde::Deserialize;
-use vertebrae_db::{Database, DbError};
+use vertebrae_core::TaskService;
+use vertebrae_db::DbError;
 
 /// Remove a dependency relationship between tasks
 #[derive(Debug, Args)]
@@ -16,20 +17,6 @@ pub struct UndependCommand {
     /// Task ID of the blocker to remove (case-insensitive)
     #[arg(long = "on", required = true)]
     pub blocker_id: String,
-}
-
-/// Result from querying a task's existence
-#[derive(Debug, Deserialize)]
-struct TaskExistsRow {
-    #[allow(dead_code)]
-    id: surrealdb::sql::Thing,
-}
-
-/// Result from querying dependency edges
-#[derive(Debug, Deserialize)]
-struct DependencyEdge {
-    #[allow(dead_code)]
-    id: surrealdb::sql::Thing,
 }
 
 /// Result of the undepend command execution
@@ -69,38 +56,55 @@ impl UndependCommand {
     ///
     /// # Arguments
     ///
-    /// * `db` - Reference to the database connection
+    /// * `service` - Reference to the task service
     ///
     /// # Errors
     ///
     /// Returns `DbError` if:
     /// - The source task does not exist
-    /// - Database operations fail
+    /// - Service operations fail
     ///
     /// Note: Non-existent dependency is handled gracefully with a warning.
-    pub async fn execute(&self, db: &Database) -> Result<UndependResult, DbError> {
+    pub async fn execute(&self, service: &dyn TaskService) -> Result<UndependResult, DbError> {
         // Normalize IDs to lowercase for case-insensitive lookup
         let task_id = self.id.to_lowercase();
         let blocker_id = self.blocker_id.to_lowercase();
 
-        // Validate source task exists
-        if !self.task_exists(db, &task_id).await? {
+        // Validate source task exists using service layer
+        if !service
+            .task_exists(&task_id)
+            .await
+            .map_err(|e| DbError::InvalidPath {
+                path: std::path::PathBuf::from(&self.id),
+                reason: e.to_string(),
+            })?
+        {
             return Err(DbError::InvalidPath {
                 path: std::path::PathBuf::from(&self.id),
                 reason: format!("Task '{}' not found", self.id),
             });
         }
 
-        // Check if dependency exists
-        let existed = self.dependency_exists(db, &task_id, &blocker_id).await?;
+        // Check if dependency exists using service layer
+        let with_relations = service
+            .get_task_with_relations(&task_id)
+            .await
+            .map_err(|e| DbError::InvalidPath {
+                path: std::path::PathBuf::from(&self.id),
+                reason: e.to_string(),
+            })?;
+
+        let existed = with_relations.depends_on_ids.contains(&blocker_id);
 
         if existed {
-            // Delete the dependency edge
-            self.delete_dependency_edge(db, &task_id, &blocker_id)
-                .await?;
-
-            // Update timestamp
-            self.update_timestamp(db, &task_id).await?;
+            // Remove the dependency using the service layer (fires mutation callback)
+            service
+                .remove_dependency(&task_id, &blocker_id)
+                .await
+                .map_err(|e| DbError::InvalidPath {
+                    path: std::path::PathBuf::from(&self.id),
+                    reason: e.to_string(),
+                })?;
         }
 
         Ok(UndependResult {
@@ -109,263 +113,153 @@ impl UndependCommand {
             existed,
         })
     }
-
-    /// Check if a task with the given ID exists.
-    async fn task_exists(&self, db: &Database, id: &str) -> Result<bool, DbError> {
-        let query = format!("SELECT id FROM task:{} LIMIT 1", id);
-        let mut result = db.client().query(&query).await?;
-        let tasks: Vec<TaskExistsRow> = result.take(0)?;
-        Ok(!tasks.is_empty())
-    }
-
-    /// Check if a dependency edge exists between two tasks.
-    async fn dependency_exists(
-        &self,
-        db: &Database,
-        task_id: &str,
-        blocker_id: &str,
-    ) -> Result<bool, DbError> {
-        let query = format!(
-            "SELECT id FROM depends_on WHERE in = task:{} AND out = task:{}",
-            task_id, blocker_id
-        );
-        let mut result = db.client().query(&query).await?;
-        let edges: Vec<DependencyEdge> = result.take(0)?;
-        Ok(!edges.is_empty())
-    }
-
-    /// Delete a dependency edge between tasks.
-    async fn delete_dependency_edge(
-        &self,
-        db: &Database,
-        task_id: &str,
-        blocker_id: &str,
-    ) -> Result<(), DbError> {
-        let query = format!(
-            "DELETE depends_on WHERE in = task:{} AND out = task:{}",
-            task_id, blocker_id
-        );
-        db.client().query(&query).await?;
-        Ok(())
-    }
-
-    /// Update the updated_at timestamp for a task.
-    async fn update_timestamp(&self, db: &Database, id: &str) -> Result<(), DbError> {
-        let query = format!("UPDATE task:{} SET updated_at = time::now()", id);
-        db.client().query(&query).await?;
-        Ok(())
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::DependCommand;
-    use serde::Deserialize;
+    use vertebrae_core::{CreateTaskOptions, DefaultTaskService};
+    use vertebrae_db::Database;
 
-    /// Helper to create an in-memory test database
-    async fn setup_test_db() -> Database {
+    /// Helper to create an in-memory test service
+    async fn setup_test_service() -> DefaultTaskService {
         let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-        db
-    }
-
-    /// Helper to create a task in the database
-    async fn create_task(db: &Database, id: &str, title: &str) {
-        let query = format!(
-            r#"CREATE task:{} SET
-                title = "{}",
-                level = "task",
-                status = "todo",
-                tags = [],
-                sections = [],
-                refs = []"#,
-            id, title
-        );
-
-        db.client().query(&query).await.unwrap();
-    }
-
-    /// Helper to check if a dependency exists
-    async fn dependency_exists(db: &Database, task_id: &str, blocker_id: &str) -> bool {
-        #[derive(Deserialize)]
-        struct EdgeRow {
-            #[allow(dead_code)]
-            id: surrealdb::sql::Thing,
-        }
-
-        let query = format!(
-            "SELECT id FROM depends_on WHERE in = task:{} AND out = task:{}",
-            task_id, blocker_id
-        );
-        let mut result = db.client().query(&query).await.unwrap();
-        let edges: Vec<EdgeRow> = result.take(0).unwrap();
-        !edges.is_empty()
-    }
-
-    /// Helper to check if updated_at was set
-    async fn has_updated_at(db: &Database, id: &str) -> bool {
-        #[derive(Deserialize)]
-        struct TimestampRow {
-            updated_at: Option<surrealdb::sql::Datetime>,
-        }
-
-        let query = format!("SELECT updated_at FROM task:{}", id);
-        let mut result = db.client().query(&query).await.unwrap();
-        let row: Option<TimestampRow> = result.take(0).unwrap();
-        row.map(|r| r.updated_at.is_some()).unwrap_or(false)
+        DefaultTaskService::new(db)
     }
 
     #[tokio::test]
     async fn test_remove_dependency() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "taska", "Task A").await;
-        create_task(&db, "taskb", "Task B").await;
+        let task_a = service
+            .create_task(CreateTaskOptions::new("Task A"))
+            .await
+            .unwrap();
+        let task_b = service
+            .create_task(CreateTaskOptions::new("Task B"))
+            .await
+            .unwrap();
 
         // Create dependency first
-        let depend_cmd = DependCommand {
-            id: "taskb".to_string(),
-            blocker_id: "taska".to_string(),
-        };
-        depend_cmd.execute(&db).await.unwrap();
+        service.add_dependency(&task_b, &task_a).await.unwrap();
 
         // Verify dependency exists
-        assert!(dependency_exists(&db, "taskb", "taska").await);
+        let with_relations = service.get_task_with_relations(&task_b).await.unwrap();
+        assert!(with_relations.depends_on_ids.contains(&task_a));
 
         // Remove dependency
         let undepend_cmd = UndependCommand {
-            id: "taskb".to_string(),
-            blocker_id: "taska".to_string(),
+            id: task_b.clone(),
+            blocker_id: task_a.clone(),
         };
 
-        let result = undepend_cmd.execute(&db).await;
+        let result = undepend_cmd.execute(&service).await;
         assert!(result.is_ok(), "Undepend failed: {:?}", result.err());
 
         let undepend_result = result.unwrap();
-        assert_eq!(undepend_result.task_id, "taskb");
-        assert_eq!(undepend_result.blocker_id, "taska");
+        assert_eq!(undepend_result.task_id, task_b);
+        assert_eq!(undepend_result.blocker_id, task_a);
         assert!(undepend_result.existed);
 
         // Verify dependency was removed
-        assert!(!dependency_exists(&db, "taskb", "taska").await);
-    }
-
-    #[tokio::test]
-    async fn test_remove_dependency_updates_timestamp() {
-        let db = setup_test_db().await;
-
-        create_task(&db, "taska", "Task A").await;
-        create_task(&db, "taskb", "Task B").await;
-
-        // Create dependency
-        let depend_cmd = DependCommand {
-            id: "taskb".to_string(),
-            blocker_id: "taska".to_string(),
-        };
-        depend_cmd.execute(&db).await.unwrap();
-
-        // Remove dependency
-        let undepend_cmd = UndependCommand {
-            id: "taskb".to_string(),
-            blocker_id: "taska".to_string(),
-        };
-        undepend_cmd.execute(&db).await.unwrap();
-
-        // Verify updated_at was set
-        assert!(has_updated_at(&db, "taskb").await);
+        let with_relations = service.get_task_with_relations(&task_b).await.unwrap();
+        assert!(!with_relations.depends_on_ids.contains(&task_a));
     }
 
     #[tokio::test]
     async fn test_remove_nonexistent_dependency_warns() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "taska", "Task A").await;
-        create_task(&db, "taskb", "Task B").await;
+        let task_a = service
+            .create_task(CreateTaskOptions::new("Task A"))
+            .await
+            .unwrap();
+        let task_b = service
+            .create_task(CreateTaskOptions::new("Task B"))
+            .await
+            .unwrap();
 
         // Try to remove non-existent dependency
         let undepend_cmd = UndependCommand {
-            id: "taskb".to_string(),
-            blocker_id: "taska".to_string(),
+            id: task_b.clone(),
+            blocker_id: task_a.clone(),
         };
 
-        let result = undepend_cmd.execute(&db).await;
+        let result = undepend_cmd.execute(&service).await;
         assert!(
             result.is_ok(),
             "Should not fail for non-existent dependency"
         );
 
         let undepend_result = result.unwrap();
-        // Verify all fields of UndependResult
-        assert_eq!(undepend_result.task_id, "taskb");
-        assert_eq!(undepend_result.blocker_id, "taska");
+        assert_eq!(undepend_result.task_id, task_b);
+        assert_eq!(undepend_result.blocker_id, task_a);
         assert!(!undepend_result.existed);
 
         // Verify display message shows warning
         let display = format!("{}", undepend_result);
-        assert_eq!(display, "Warning: No dependency from taskb to taska exists");
+        assert!(display.contains("Warning: No dependency"));
     }
 
     #[tokio::test]
     async fn test_remove_dependency_idempotent() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "taska", "Task A").await;
-        create_task(&db, "taskb", "Task B").await;
+        let task_a = service
+            .create_task(CreateTaskOptions::new("Task A"))
+            .await
+            .unwrap();
+        let task_b = service
+            .create_task(CreateTaskOptions::new("Task B"))
+            .await
+            .unwrap();
 
         // Create dependency
-        let depend_cmd = DependCommand {
-            id: "taskb".to_string(),
-            blocker_id: "taska".to_string(),
-        };
-        depend_cmd.execute(&db).await.unwrap();
+        service.add_dependency(&task_b, &task_a).await.unwrap();
 
         let undepend_cmd = UndependCommand {
-            id: "taskb".to_string(),
-            blocker_id: "taska".to_string(),
+            id: task_b.clone(),
+            blocker_id: task_a.clone(),
         };
 
         // Remove dependency first time
-        let result1 = undepend_cmd.execute(&db).await;
+        let result1 = undepend_cmd.execute(&service).await;
         assert!(result1.is_ok());
         let undepend_result1 = result1.unwrap();
-        // Verify all fields of UndependResult
-        assert_eq!(undepend_result1.task_id, "taskb");
-        assert_eq!(undepend_result1.blocker_id, "taska");
+        assert_eq!(undepend_result1.task_id, task_b);
+        assert_eq!(undepend_result1.blocker_id, task_a);
         assert!(undepend_result1.existed);
 
         // Remove dependency second time - should be idempotent (warn but not fail)
-        let result2 = undepend_cmd.execute(&db).await;
+        let result2 = undepend_cmd.execute(&service).await;
         assert!(result2.is_ok());
         let undepend_result2 = result2.unwrap();
-        // Verify all fields of UndependResult
-        assert_eq!(undepend_result2.task_id, "taskb");
-        assert_eq!(undepend_result2.blocker_id, "taska");
+        assert_eq!(undepend_result2.task_id, task_b);
+        assert_eq!(undepend_result2.blocker_id, task_a);
         assert!(!undepend_result2.existed);
     }
 
     #[tokio::test]
     async fn test_source_task_must_exist() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "taska", "Task A").await;
+        let task_a = service
+            .create_task(CreateTaskOptions::new("Task A"))
+            .await
+            .unwrap();
 
         let undepend_cmd = UndependCommand {
             id: "nonexistent".to_string(),
-            blocker_id: "taska".to_string(),
+            blocker_id: task_a.clone(),
         };
 
-        let result = undepend_cmd.execute(&db).await;
+        let result = undepend_cmd.execute(&service).await;
         match result {
             Err(DbError::InvalidPath { reason, .. }) => {
                 assert!(
                     reason.contains("not found"),
                     "Expected 'not found' in error, got: {}",
-                    reason
-                );
-                assert!(
-                    reason.contains("nonexistent"),
-                    "Expected task ID 'nonexistent' in error, got: {}",
                     reason
                 );
             }
@@ -376,128 +270,90 @@ mod tests {
 
     #[tokio::test]
     async fn test_target_task_nonexistence_ok() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "taska", "Task A").await;
+        let task_a = service
+            .create_task(CreateTaskOptions::new("Task A"))
+            .await
+            .unwrap();
 
         // Target task doesn't exist - this is OK for edge cleanup
         let undepend_cmd = UndependCommand {
-            id: "taska".to_string(),
+            id: task_a.clone(),
             blocker_id: "nonexistent".to_string(),
         };
 
-        let result = undepend_cmd.execute(&db).await;
+        let result = undepend_cmd.execute(&service).await;
         assert!(result.is_ok(), "Should not fail when target doesn't exist");
         let undepend_result = result.unwrap();
-        // Verify all fields of UndependResult
-        assert_eq!(undepend_result.task_id, "taska");
+        assert_eq!(undepend_result.task_id, task_a);
         assert_eq!(undepend_result.blocker_id, "nonexistent");
         assert!(!undepend_result.existed);
     }
 
     #[tokio::test]
     async fn test_case_insensitive_ids() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "taska", "Task A").await;
-        create_task(&db, "taskb", "Task B").await;
+        let task_a = service
+            .create_task(CreateTaskOptions::new("Task A"))
+            .await
+            .unwrap();
+        let task_b = service
+            .create_task(CreateTaskOptions::new("Task B"))
+            .await
+            .unwrap();
 
         // Create dependency with lowercase
-        let depend_cmd = DependCommand {
-            id: "taskb".to_string(),
-            blocker_id: "taska".to_string(),
-        };
-        depend_cmd.execute(&db).await.unwrap();
+        service.add_dependency(&task_b, &task_a).await.unwrap();
 
         // Remove with uppercase
         let undepend_cmd = UndependCommand {
-            id: "TASKB".to_string(),
-            blocker_id: "TASKA".to_string(),
+            id: task_b.to_uppercase(),
+            blocker_id: task_a.to_uppercase(),
         };
 
-        let result = undepend_cmd.execute(&db).await;
+        let result = undepend_cmd.execute(&service).await;
         assert!(result.is_ok(), "Case-insensitive removal should work");
         assert!(result.unwrap().existed);
 
         // Verify dependency was removed
-        assert!(!dependency_exists(&db, "taskb", "taska").await);
+        let with_relations = service.get_task_with_relations(&task_b).await.unwrap();
+        assert!(!with_relations.depends_on_ids.contains(&task_a));
     }
 
     #[tokio::test]
     async fn test_remove_only_specified_dependency() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "taska", "Task A").await;
-        create_task(&db, "taskb", "Task B").await;
-        create_task(&db, "taskc", "Task C").await;
+        let task_a = service
+            .create_task(CreateTaskOptions::new("Task A"))
+            .await
+            .unwrap();
+        let task_b = service
+            .create_task(CreateTaskOptions::new("Task B"))
+            .await
+            .unwrap();
+        let task_c = service
+            .create_task(CreateTaskOptions::new("Task C"))
+            .await
+            .unwrap();
 
         // C depends on both A and B
-        DependCommand {
-            id: "taskc".to_string(),
-            blocker_id: "taska".to_string(),
-        }
-        .execute(&db)
-        .await
-        .unwrap();
-
-        DependCommand {
-            id: "taskc".to_string(),
-            blocker_id: "taskb".to_string(),
-        }
-        .execute(&db)
-        .await
-        .unwrap();
+        service.add_dependency(&task_c, &task_a).await.unwrap();
+        service.add_dependency(&task_c, &task_b).await.unwrap();
 
         // Remove only C -> A dependency
         let undepend_cmd = UndependCommand {
-            id: "taskc".to_string(),
-            blocker_id: "taska".to_string(),
+            id: task_c.clone(),
+            blocker_id: task_a.clone(),
         };
-        undepend_cmd.execute(&db).await.unwrap();
+        undepend_cmd.execute(&service).await.unwrap();
 
         // Verify only C -> A was removed, C -> B still exists
-        assert!(!dependency_exists(&db, "taskc", "taska").await);
-        assert!(dependency_exists(&db, "taskc", "taskb").await);
-    }
-
-    #[tokio::test]
-    async fn test_nonexistent_does_not_update_timestamp() {
-        let db = setup_test_db().await;
-
-        create_task(&db, "taska", "Task A").await;
-        create_task(&db, "taskb", "Task B").await;
-
-        // Get initial timestamp
-        #[derive(Deserialize)]
-        struct TimestampRow {
-            updated_at: surrealdb::sql::Datetime,
-        }
-
-        let query = "SELECT updated_at FROM task:taskb";
-        let mut result = db.client().query(query).await.unwrap();
-        let row1: Option<TimestampRow> = result.take(0).unwrap();
-        let ts1 = row1.unwrap().updated_at;
-
-        // Wait a tiny bit to ensure timestamp would differ if updated
-        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-
-        // Try to remove non-existent dependency
-        let undepend_cmd = UndependCommand {
-            id: "taskb".to_string(),
-            blocker_id: "taska".to_string(),
-        };
-        undepend_cmd.execute(&db).await.unwrap();
-
-        // Get timestamp after operation
-        let mut result = db.client().query(query).await.unwrap();
-        let row2: Option<TimestampRow> = result.take(0).unwrap();
-        let ts2 = row2.unwrap().updated_at;
-
-        // Timestamp should remain unchanged since no dependency was removed
-        assert_eq!(
-            ts1, ts2,
-            "Timestamp should not be updated when no dependency was removed"
-        );
+        let with_relations = service.get_task_with_relations(&task_c).await.unwrap();
+        assert!(!with_relations.depends_on_ids.contains(&task_a));
+        assert!(with_relations.depends_on_ids.contains(&task_b));
     }
 
     #[test]

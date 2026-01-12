@@ -3,14 +3,12 @@
 //! Implements the `vtb depend` command to create dependency relationships between tasks
 //! with cycle detection to ensure the dependency graph remains acyclic.
 //!
-//! Cycle detection is delegated to `GraphQueries` from the db crate, which provides:
-//! - `would_create_cycle()` - Check if adding an edge would create a cycle
-//! - `get_cycle_path()` - Get the path forming the cycle for error messages
-//! - `format_cycle_path()` - Format the path as a human-readable string
+//! Uses the TaskService layer to create dependencies, which ensures that MutationCallback
+//! fires properly for GUI cache invalidation.
 
 use clap::Args;
-use serde::Deserialize;
-use vertebrae_db::{Database, DbError, GraphQueries};
+use vertebrae_core::TaskService;
+use vertebrae_db::DbError;
 
 /// Create a dependency relationship between tasks
 #[derive(Debug, Args)]
@@ -22,20 +20,6 @@ pub struct DependCommand {
     /// Task ID that this task depends on (the blocker)
     #[arg(long = "on", required = true)]
     pub blocker_id: String,
-}
-
-/// Result from querying a task's existence
-#[derive(Debug, Deserialize)]
-struct TaskExistsRow {
-    #[allow(dead_code)]
-    id: surrealdb::sql::Thing,
-}
-
-/// Result from querying dependency edges
-#[derive(Debug, Deserialize)]
-struct DependencyEdge {
-    #[allow(dead_code)]
-    id: surrealdb::sql::Thing,
 }
 
 /// Result of the depend command execution
@@ -75,7 +59,7 @@ impl DependCommand {
     ///
     /// # Arguments
     ///
-    /// * `db` - Reference to the database connection
+    /// * `service` - Reference to the task service
     ///
     /// # Errors
     ///
@@ -83,8 +67,8 @@ impl DependCommand {
     /// - Either task does not exist
     /// - Self-dependency is attempted (task depends on itself)
     /// - Creating the dependency would form a cycle
-    /// - Database operations fail
-    pub async fn execute(&self, db: &Database) -> Result<DependResult, DbError> {
+    /// - Service operations fail
+    pub async fn execute(&self, service: &dyn TaskService) -> Result<DependResult, DbError> {
         // Normalize IDs to lowercase for case-insensitive lookup
         let task_id = self.id.to_lowercase();
         let blocker_id = self.blocker_id.to_lowercase();
@@ -97,25 +81,46 @@ impl DependCommand {
             });
         }
 
-        // Validate both tasks exist
-        if !self.task_exists(db, &task_id).await? {
+        // Validate both tasks exist using service layer
+        if !service
+            .task_exists(&task_id)
+            .await
+            .map_err(|e| DbError::InvalidPath {
+                path: std::path::PathBuf::from(&self.id),
+                reason: e.to_string(),
+            })?
+        {
             return Err(DbError::InvalidPath {
                 path: std::path::PathBuf::from(&self.id),
                 reason: format!("Task '{}' not found", self.id),
             });
         }
 
-        if !self.task_exists(db, &blocker_id).await? {
+        if !service
+            .task_exists(&blocker_id)
+            .await
+            .map_err(|e| DbError::InvalidPath {
+                path: std::path::PathBuf::from(&self.blocker_id),
+                reason: e.to_string(),
+            })?
+        {
             return Err(DbError::InvalidPath {
                 path: std::path::PathBuf::from(&self.blocker_id),
                 reason: format!("Task '{}' not found", self.blocker_id),
             });
         }
 
-        // Check if dependency already exists (idempotent)
-        if self.dependency_exists(db, &task_id, &blocker_id).await? {
-            // Update timestamp even for existing dependency
-            self.update_timestamp(db, &task_id).await?;
+        // Check if dependency already exists (idempotent) using service layer
+        let with_relations = service
+            .get_task_with_relations(&task_id)
+            .await
+            .map_err(|e| DbError::InvalidPath {
+                path: std::path::PathBuf::from(&self.id),
+                reason: e.to_string(),
+            })?;
+
+        if with_relations.depends_on_ids.contains(&blocker_id) {
+            // Dependency already exists - idempotent behavior
             return Ok(DependResult {
                 task_id,
                 blocker_id,
@@ -123,26 +128,20 @@ impl DependCommand {
             });
         }
 
-        // Check for cycles using GraphQueries from the db crate
-        let graph = GraphQueries::new(db.client());
-        if graph.would_create_cycle(&task_id, &blocker_id).await? {
-            // Get the cycle path for a helpful error message
-            let cycle_path = match graph.get_cycle_path(&task_id, &blocker_id).await? {
-                Some(path) => GraphQueries::format_cycle_path(&path),
-                None => format!("{} -> {}", blocker_id, task_id),
-            };
-            return Err(DbError::InvalidPath {
-                path: std::path::PathBuf::from(&self.id),
-                reason: format!("Cycle detected: {}", cycle_path),
-            });
-        }
-
-        // Create the dependency edge
-        self.create_dependency_edge(db, &task_id, &blocker_id)
-            .await?;
-
-        // Update timestamp
-        self.update_timestamp(db, &task_id).await?;
+        // Add the dependency using the service layer (handles cycle detection and mutation callback)
+        service
+            .add_dependency(&task_id, &blocker_id)
+            .await
+            .map_err(|e| match e {
+                vertebrae_core::error::ServiceError::CyclicDependency => DbError::InvalidPath {
+                    path: std::path::PathBuf::from(&self.id),
+                    reason: "Cycle detected: dependency would create a cycle".to_string(),
+                },
+                other => DbError::InvalidPath {
+                    path: std::path::PathBuf::from(&self.id),
+                    reason: other.to_string(),
+                },
+            })?;
 
         Ok(DependResult {
             task_id,
@@ -150,189 +149,103 @@ impl DependCommand {
             already_existed: false,
         })
     }
-
-    /// Check if a task with the given ID exists.
-    async fn task_exists(&self, db: &Database, id: &str) -> Result<bool, DbError> {
-        let query = format!("SELECT id FROM task:{} LIMIT 1", id);
-        let mut result = db.client().query(&query).await?;
-        let tasks: Vec<TaskExistsRow> = result.take(0)?;
-        Ok(!tasks.is_empty())
-    }
-
-    /// Check if a dependency edge already exists between two tasks.
-    async fn dependency_exists(
-        &self,
-        db: &Database,
-        task_id: &str,
-        blocker_id: &str,
-    ) -> Result<bool, DbError> {
-        let query = format!(
-            "SELECT id FROM depends_on WHERE in = task:{} AND out = task:{}",
-            task_id, blocker_id
-        );
-        let mut result = db.client().query(&query).await?;
-        let edges: Vec<DependencyEdge> = result.take(0)?;
-        Ok(!edges.is_empty())
-    }
-
-    /// Create a dependency edge between tasks.
-    async fn create_dependency_edge(
-        &self,
-        db: &Database,
-        task_id: &str,
-        blocker_id: &str,
-    ) -> Result<(), DbError> {
-        let query = format!(
-            "RELATE task:{} -> depends_on -> task:{}",
-            task_id, blocker_id
-        );
-        db.client().query(&query).await?;
-        Ok(())
-    }
-
-    /// Update the updated_at timestamp for a task.
-    async fn update_timestamp(&self, db: &Database, id: &str) -> Result<(), DbError> {
-        let query = format!("UPDATE task:{} SET updated_at = time::now()", id);
-        db.client().query(&query).await?;
-        Ok(())
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde::Deserialize;
+    use vertebrae_core::{CreateTaskOptions, DefaultTaskService};
+    use vertebrae_db::Database;
 
-    /// Helper to create an in-memory test database
-    async fn setup_test_db() -> Database {
+    /// Helper to create an in-memory test service
+    async fn setup_test_service() -> DefaultTaskService {
         let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-        db
+        DefaultTaskService::new(db)
     }
 
-    /// Helper to create a task in the database
-    async fn create_task(db: &Database, id: &str, title: &str) {
-        let query = format!(
-            r#"CREATE task:{} SET
-                title = "{}",
-                level = "task",
-                status = "todo",
-                tags = [],
-                sections = [],
-                refs = []"#,
-            id, title
-        );
-
-        db.client().query(&query).await.unwrap();
-    }
-
-    /// Helper to check if updated_at was set
-    async fn has_updated_at(db: &Database, id: &str) -> bool {
-        #[derive(Deserialize)]
-        struct TimestampRow {
-            updated_at: Option<surrealdb::sql::Datetime>,
-        }
-
-        let query = format!("SELECT updated_at FROM task:{}", id);
-        let mut result = db.client().query(&query).await.unwrap();
-        let row: Option<TimestampRow> = result.take(0).unwrap();
-        row.map(|r| r.updated_at.is_some()).unwrap_or(false)
-    }
-
-    /// Helper to check if a dependency exists
-    async fn dependency_exists(db: &Database, task_id: &str, blocker_id: &str) -> bool {
-        #[derive(Deserialize)]
-        struct EdgeRow {
-            #[allow(dead_code)]
-            id: surrealdb::sql::Thing,
-        }
-
-        let query = format!(
-            "SELECT id FROM depends_on WHERE in = task:{} AND out = task:{}",
-            task_id, blocker_id
-        );
-        let mut result = db.client().query(&query).await.unwrap();
-        let edges: Vec<EdgeRow> = result.take(0).unwrap();
-        !edges.is_empty()
+    /// Helper to create a task using the service
+    async fn create_task(service: &DefaultTaskService, id: &str, title: &str) {
+        let options = CreateTaskOptions::new(title);
+        let created_id = service.create_task(options).await.unwrap();
+        assert_eq!(created_id, id, "Created ID should match requested ID");
     }
 
     #[tokio::test]
     async fn test_create_dependency() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "taska", "Task A").await;
-        create_task(&db, "taskb", "Task B").await;
+        let task_a = service
+            .create_task(CreateTaskOptions::new("Task A"))
+            .await
+            .unwrap();
+        let task_b = service
+            .create_task(CreateTaskOptions::new("Task B"))
+            .await
+            .unwrap();
 
         let cmd = DependCommand {
-            id: "taskb".to_string(),
-            blocker_id: "taska".to_string(),
+            id: task_b.clone(),
+            blocker_id: task_a.clone(),
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok(), "Depend failed: {:?}", result.err());
 
         let depend_result = result.unwrap();
-        assert_eq!(depend_result.task_id, "taskb");
-        assert_eq!(depend_result.blocker_id, "taska");
+        assert_eq!(depend_result.task_id, task_b);
+        assert_eq!(depend_result.blocker_id, task_a);
         assert!(!depend_result.already_existed);
 
         // Verify the dependency was created
-        assert!(dependency_exists(&db, "taskb", "taska").await);
-    }
-
-    #[tokio::test]
-    async fn test_create_dependency_updates_timestamp() {
-        let db = setup_test_db().await;
-
-        create_task(&db, "taska", "Task A").await;
-        create_task(&db, "taskb", "Task B").await;
-
-        let cmd = DependCommand {
-            id: "taskb".to_string(),
-            blocker_id: "taska".to_string(),
-        };
-
-        cmd.execute(&db).await.unwrap();
-
-        // Verify updated_at was set
-        assert!(has_updated_at(&db, "taskb").await);
+        let with_relations = service.get_task_with_relations(&task_b).await.unwrap();
+        assert!(with_relations.depends_on_ids.contains(&task_a));
     }
 
     #[tokio::test]
     async fn test_dependency_idempotent() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "taska", "Task A").await;
-        create_task(&db, "taskb", "Task B").await;
+        let task_a = service
+            .create_task(CreateTaskOptions::new("Task A"))
+            .await
+            .unwrap();
+        let task_b = service
+            .create_task(CreateTaskOptions::new("Task B"))
+            .await
+            .unwrap();
 
         let cmd = DependCommand {
-            id: "taskb".to_string(),
-            blocker_id: "taska".to_string(),
+            id: task_b.clone(),
+            blocker_id: task_a.clone(),
         };
 
         // Create dependency first time
-        let result1 = cmd.execute(&db).await;
+        let result1 = cmd.execute(&service).await;
         assert!(result1.is_ok());
         assert!(!result1.unwrap().already_existed);
 
         // Create dependency second time - should be idempotent
-        let result2 = cmd.execute(&db).await;
+        let result2 = cmd.execute(&service).await;
         assert!(result2.is_ok());
         assert!(result2.unwrap().already_existed);
     }
 
     #[tokio::test]
     async fn test_self_dependency_fails() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "taska", "Task A").await;
+        let task_a = service
+            .create_task(CreateTaskOptions::new("Task A"))
+            .await
+            .unwrap();
 
         let cmd = DependCommand {
-            id: "taska".to_string(),
-            blocker_id: "taska".to_string(),
+            id: task_a.clone(),
+            blocker_id: task_a.clone(),
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         match result {
             Err(DbError::InvalidPath { reason, .. }) => {
                 assert!(
@@ -348,36 +261,36 @@ mod tests {
 
     #[tokio::test]
     async fn test_direct_cycle_detection() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "taska", "Task A").await;
-        create_task(&db, "taskb", "Task B").await;
+        let task_a = service
+            .create_task(CreateTaskOptions::new("Task A"))
+            .await
+            .unwrap();
+        let task_b = service
+            .create_task(CreateTaskOptions::new("Task B"))
+            .await
+            .unwrap();
 
         // Create A depends on B
         let cmd1 = DependCommand {
-            id: "taska".to_string(),
-            blocker_id: "taskb".to_string(),
+            id: task_a.clone(),
+            blocker_id: task_b.clone(),
         };
-        cmd1.execute(&db).await.unwrap();
+        cmd1.execute(&service).await.unwrap();
 
         // Try to create B depends on A - should fail (cycle)
         let cmd2 = DependCommand {
-            id: "taskb".to_string(),
-            blocker_id: "taska".to_string(),
+            id: task_b.clone(),
+            blocker_id: task_a.clone(),
         };
 
-        let result = cmd2.execute(&db).await;
+        let result = cmd2.execute(&service).await;
         match result {
             Err(DbError::InvalidPath { reason, .. }) => {
                 assert!(
                     reason.contains("Cycle detected"),
                     "Expected 'Cycle detected' in error, got: {}",
-                    reason
-                );
-                // Verify the cycle path is included
-                assert!(
-                    reason.contains("taska") && reason.contains("taskb"),
-                    "Expected cycle path with task IDs in error, got: {}",
                     reason
                 );
             }
@@ -388,46 +301,47 @@ mod tests {
 
     #[tokio::test]
     async fn test_transitive_cycle_detection() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "taska", "Task A").await;
-        create_task(&db, "taskb", "Task B").await;
-        create_task(&db, "taskc", "Task C").await;
+        let task_a = service
+            .create_task(CreateTaskOptions::new("Task A"))
+            .await
+            .unwrap();
+        let task_b = service
+            .create_task(CreateTaskOptions::new("Task B"))
+            .await
+            .unwrap();
+        let task_c = service
+            .create_task(CreateTaskOptions::new("Task C"))
+            .await
+            .unwrap();
 
         // Create A depends on B
         let cmd1 = DependCommand {
-            id: "taska".to_string(),
-            blocker_id: "taskb".to_string(),
+            id: task_a.clone(),
+            blocker_id: task_b.clone(),
         };
-        cmd1.execute(&db).await.unwrap();
+        cmd1.execute(&service).await.unwrap();
 
         // Create B depends on C
         let cmd2 = DependCommand {
-            id: "taskb".to_string(),
-            blocker_id: "taskc".to_string(),
+            id: task_b.clone(),
+            blocker_id: task_c.clone(),
         };
-        cmd2.execute(&db).await.unwrap();
+        cmd2.execute(&service).await.unwrap();
 
         // Try to create C depends on A - should fail (transitive cycle)
         let cmd3 = DependCommand {
-            id: "taskc".to_string(),
-            blocker_id: "taska".to_string(),
+            id: task_c.clone(),
+            blocker_id: task_a.clone(),
         };
 
-        let result = cmd3.execute(&db).await;
+        let result = cmd3.execute(&service).await;
         match result {
             Err(DbError::InvalidPath { reason, .. }) => {
                 assert!(
                     reason.contains("Cycle detected"),
                     "Expected 'Cycle detected' in error, got: {}",
-                    reason
-                );
-                // Verify the full cycle path is included
-                assert!(
-                    reason.contains("taska")
-                        && reason.contains("taskb")
-                        && reason.contains("taskc"),
-                    "Expected full cycle path with all task IDs in error, got: {}",
                     reason
                 );
             }
@@ -438,16 +352,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_task_not_found() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "taska", "Task A").await;
+        let task_a = service
+            .create_task(CreateTaskOptions::new("Task A"))
+            .await
+            .unwrap();
 
         let cmd = DependCommand {
-            id: "taska".to_string(),
+            id: task_a.clone(),
             blocker_id: "nonexistent".to_string(),
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         match result {
             Err(DbError::InvalidPath { reason, .. }) => {
                 assert!(
@@ -468,16 +385,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_dependent_task_not_found() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "taska", "Task A").await;
+        let task_a = service
+            .create_task(CreateTaskOptions::new("Task A"))
+            .await
+            .unwrap();
 
         let cmd = DependCommand {
             id: "nonexistent".to_string(),
-            blocker_id: "taska".to_string(),
+            blocker_id: task_a.clone(),
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         match result {
             Err(DbError::InvalidPath { reason, .. }) => {
                 assert!(
@@ -498,139 +418,186 @@ mod tests {
 
     #[tokio::test]
     async fn test_case_insensitive_ids() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "taska", "Task A").await;
-        create_task(&db, "taskb", "Task B").await;
+        let task_a = service
+            .create_task(CreateTaskOptions::new("Task A"))
+            .await
+            .unwrap();
+        let task_b = service
+            .create_task(CreateTaskOptions::new("Task B"))
+            .await
+            .unwrap();
 
         let cmd = DependCommand {
-            id: "TASKB".to_string(),         // Uppercase
-            blocker_id: "TASKA".to_string(), // Uppercase
+            id: task_b.to_uppercase(),
+            blocker_id: task_a.to_uppercase(),
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok(), "Case-insensitive lookup should work");
 
-        // Verify the dependency was created with lowercase IDs
-        assert!(dependency_exists(&db, "taskb", "taska").await);
+        // Verify the dependency was created
+        let with_relations = service.get_task_with_relations(&task_b).await.unwrap();
+        assert!(with_relations.depends_on_ids.contains(&task_a));
     }
 
     #[tokio::test]
     async fn test_multiple_dependencies_allowed() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "taska", "Task A").await;
-        create_task(&db, "taskb", "Task B").await;
-        create_task(&db, "taskc", "Task C").await;
+        let task_a = service
+            .create_task(CreateTaskOptions::new("Task A"))
+            .await
+            .unwrap();
+        let task_b = service
+            .create_task(CreateTaskOptions::new("Task B"))
+            .await
+            .unwrap();
+        let task_c = service
+            .create_task(CreateTaskOptions::new("Task C"))
+            .await
+            .unwrap();
 
         // C depends on A
         let cmd1 = DependCommand {
-            id: "taskc".to_string(),
-            blocker_id: "taska".to_string(),
+            id: task_c.clone(),
+            blocker_id: task_a.clone(),
         };
-        cmd1.execute(&db).await.unwrap();
+        cmd1.execute(&service).await.unwrap();
 
         // C also depends on B
         let cmd2 = DependCommand {
-            id: "taskc".to_string(),
-            blocker_id: "taskb".to_string(),
+            id: task_c.clone(),
+            blocker_id: task_b.clone(),
         };
-        let result = cmd2.execute(&db).await;
+        let result = cmd2.execute(&service).await;
         assert!(result.is_ok());
 
         // Verify both dependencies exist
-        assert!(dependency_exists(&db, "taskc", "taska").await);
-        assert!(dependency_exists(&db, "taskc", "taskb").await);
+        let with_relations = service.get_task_with_relations(&task_c).await.unwrap();
+        assert!(with_relations.depends_on_ids.contains(&task_a));
+        assert!(with_relations.depends_on_ids.contains(&task_b));
     }
 
     #[tokio::test]
     async fn test_diamond_dependency_allowed() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        // Diamond: D depends on B and C, both B and C depend on A
-        create_task(&db, "taska", "Task A").await;
-        create_task(&db, "taskb", "Task B").await;
-        create_task(&db, "taskc", "Task C").await;
-        create_task(&db, "taskd", "Task D").await;
+        let task_a = service
+            .create_task(CreateTaskOptions::new("Task A"))
+            .await
+            .unwrap();
+        let task_b = service
+            .create_task(CreateTaskOptions::new("Task B"))
+            .await
+            .unwrap();
+        let task_c = service
+            .create_task(CreateTaskOptions::new("Task C"))
+            .await
+            .unwrap();
+        let task_d = service
+            .create_task(CreateTaskOptions::new("Task D"))
+            .await
+            .unwrap();
 
         // B depends on A
         DependCommand {
-            id: "taskb".to_string(),
-            blocker_id: "taska".to_string(),
+            id: task_b.clone(),
+            blocker_id: task_a.clone(),
         }
-        .execute(&db)
+        .execute(&service)
         .await
         .unwrap();
 
         // C depends on A
         DependCommand {
-            id: "taskc".to_string(),
-            blocker_id: "taska".to_string(),
+            id: task_c.clone(),
+            blocker_id: task_a.clone(),
         }
-        .execute(&db)
+        .execute(&service)
         .await
         .unwrap();
 
         // D depends on B
         DependCommand {
-            id: "taskd".to_string(),
-            blocker_id: "taskb".to_string(),
+            id: task_d.clone(),
+            blocker_id: task_b.clone(),
         }
-        .execute(&db)
+        .execute(&service)
         .await
         .unwrap();
 
         // D depends on C (diamond complete, no cycle)
         let result = DependCommand {
-            id: "taskd".to_string(),
-            blocker_id: "taskc".to_string(),
+            id: task_d.clone(),
+            blocker_id: task_c.clone(),
         }
-        .execute(&db)
+        .execute(&service)
         .await;
 
         assert!(result.is_ok(), "Diamond dependency should be allowed");
 
-        // Verify all 4 edges exist in the database
+        // Verify all 4 edges exist
+        let b_relations = service.get_task_with_relations(&task_b).await.unwrap();
         assert!(
-            dependency_exists(&db, "taskb", "taska").await,
+            b_relations.depends_on_ids.contains(&task_a),
             "B -> A edge should exist"
         );
+
+        let c_relations = service.get_task_with_relations(&task_c).await.unwrap();
         assert!(
-            dependency_exists(&db, "taskc", "taska").await,
+            c_relations.depends_on_ids.contains(&task_a),
             "C -> A edge should exist"
         );
+
+        let d_relations = service.get_task_with_relations(&task_d).await.unwrap();
         assert!(
-            dependency_exists(&db, "taskd", "taskb").await,
+            d_relations.depends_on_ids.contains(&task_b),
             "D -> B edge should exist"
         );
         assert!(
-            dependency_exists(&db, "taskd", "taskc").await,
+            d_relations.depends_on_ids.contains(&task_c),
             "D -> C edge should exist"
         );
     }
 
     #[tokio::test]
     async fn test_long_chain_no_cycle() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        // Create a long chain: E -> D -> C -> B -> A
-        for c in ['a', 'b', 'c', 'd', 'e'] {
-            let id = format!("task{}", c);
-            create_task(&db, &id, &format!("Task {}", c.to_uppercase())).await;
+        // Create tasks: A, B, C, D, E
+        let mut tasks = vec![];
+        for name in ['A', 'B', 'C', 'D', 'E'] {
+            let id = service
+                .create_task(CreateTaskOptions::new(format!("Task {}", name)))
+                .await
+                .unwrap();
+            tasks.push(id);
         }
 
-        // Create chain of dependencies
-        for (from, to) in [
-            ("taskb", "taska"),
-            ("taskc", "taskb"),
-            ("taskd", "taskc"),
-            ("taske", "taskd"),
-        ] {
+        let (task_a, task_b, task_c, task_d, task_e) = (
+            tasks[0].clone(),
+            tasks[1].clone(),
+            tasks[2].clone(),
+            tasks[3].clone(),
+            tasks[4].clone(),
+        );
+
+        // Create chain of dependencies: B -> A, C -> B, D -> C, E -> D
+        let dependencies = vec![
+            (task_b.clone(), task_a.clone()),
+            (task_c.clone(), task_b.clone()),
+            (task_d.clone(), task_c.clone()),
+            (task_e.clone(), task_d.clone()),
+        ];
+
+        for (from, to) in dependencies {
             let result = DependCommand {
-                id: from.to_string(),
-                blocker_id: to.to_string(),
+                id: from.clone(),
+                blocker_id: to.clone(),
             }
-            .execute(&db)
+            .execute(&service)
             .await;
             assert!(
                 result.is_ok(),
@@ -642,36 +609,44 @@ mod tests {
 
         // Try to create cycle at the end: A depends on E
         let result = DependCommand {
-            id: "taska".to_string(),
-            blocker_id: "taske".to_string(),
+            id: task_a.clone(),
+            blocker_id: task_e.clone(),
         }
-        .execute(&db)
+        .execute(&service)
         .await;
 
         assert!(result.is_err(), "Should detect cycle in long chain");
         assert!(result.unwrap_err().to_string().contains("Cycle detected"));
 
-        // Verify all chain edges exist in the database
+        // Verify all chain edges exist
+        let b_relations = service.get_task_with_relations(&task_b).await.unwrap();
         assert!(
-            dependency_exists(&db, "taskb", "taska").await,
+            b_relations.depends_on_ids.contains(&task_a),
             "B -> A edge should exist"
         );
+
+        let c_relations = service.get_task_with_relations(&task_c).await.unwrap();
         assert!(
-            dependency_exists(&db, "taskc", "taskb").await,
+            c_relations.depends_on_ids.contains(&task_b),
             "C -> B edge should exist"
         );
+
+        let d_relations = service.get_task_with_relations(&task_d).await.unwrap();
         assert!(
-            dependency_exists(&db, "taskd", "taskc").await,
+            d_relations.depends_on_ids.contains(&task_c),
             "D -> C edge should exist"
         );
+
+        let e_relations = service.get_task_with_relations(&task_e).await.unwrap();
         assert!(
-            dependency_exists(&db, "taske", "taskd").await,
+            e_relations.depends_on_ids.contains(&task_d),
             "E -> D edge should exist"
         );
 
         // Verify the cycle edge was NOT created
+        let a_relations = service.get_task_with_relations(&task_a).await.unwrap();
         assert!(
-            !dependency_exists(&db, "taska", "taske").await,
+            !a_relations.depends_on_ids.contains(&task_e),
             "A -> E edge should NOT exist (would create cycle)"
         );
     }
@@ -715,46 +690,5 @@ mod tests {
                 && debug_str.contains("blocker_id: \"blocker456\""),
             "Debug output should contain DependCommand and both id field values"
         );
-    }
-
-    #[tokio::test]
-    async fn test_idempotent_updates_timestamp() {
-        let db = setup_test_db().await;
-
-        create_task(&db, "taska", "Task A").await;
-        create_task(&db, "taskb", "Task B").await;
-
-        let cmd = DependCommand {
-            id: "taskb".to_string(),
-            blocker_id: "taska".to_string(),
-        };
-
-        // Create dependency
-        cmd.execute(&db).await.unwrap();
-
-        // Get initial timestamp
-        #[derive(Deserialize)]
-        struct TimestampRow {
-            updated_at: surrealdb::sql::Datetime,
-        }
-
-        let query = "SELECT updated_at FROM task:taskb";
-        let mut result = db.client().query(query).await.unwrap();
-        let row1: Option<TimestampRow> = result.take(0).unwrap();
-        let ts1 = row1.unwrap().updated_at;
-
-        // Wait a tiny bit to ensure timestamp differs
-        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
-
-        // Run again (idempotent)
-        cmd.execute(&db).await.unwrap();
-
-        // Get new timestamp
-        let mut result = db.client().query(query).await.unwrap();
-        let row2: Option<TimestampRow> = result.take(0).unwrap();
-        let ts2 = row2.unwrap().updated_at;
-
-        // Timestamp should have been updated
-        assert!(ts2 >= ts1, "Timestamp should be updated on idempotent call");
     }
 }

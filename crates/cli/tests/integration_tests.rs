@@ -650,7 +650,7 @@ mod relationships {
         create_task(ctx.db(), "dependent", "Dependent", "task", "todo").await;
 
         let result = depend_cmd("dependent", "blocker")
-            .execute(ctx.db())
+            .execute(&ctx.service)
             .await
             .unwrap();
 
@@ -669,13 +669,13 @@ mod relationships {
         create_task(ctx.db(), "dependent", "Dependent", "task", "todo").await;
 
         let result1 = depend_cmd("dependent", "blocker")
-            .execute(ctx.db())
+            .execute(&ctx.service)
             .await
             .unwrap();
         assert!(!result1.already_existed);
 
         let result2 = depend_cmd("dependent", "blocker")
-            .execute(ctx.db())
+            .execute(&ctx.service)
             .await
             .unwrap();
         assert!(result2.already_existed);
@@ -686,7 +686,7 @@ mod relationships {
         let ctx = TestContext::new().await;
         create_task(ctx.db(), "task1", "Task 1", "task", "todo").await;
 
-        let result = depend_cmd("task1", "task1").execute(ctx.db()).await;
+        let result = depend_cmd("task1", "task1").execute(&ctx.service).await;
         assert!(result.is_err());
     }
 
@@ -698,10 +698,10 @@ mod relationships {
         create_task(ctx.db(), "b", "Task B", "task", "todo").await;
 
         // A depends on B
-        depend_cmd("a", "b").execute(ctx.db()).await.unwrap();
+        depend_cmd("a", "b").execute(&ctx.service).await.unwrap();
 
         // B depends on A - should fail (creates A -> B -> A cycle)
-        let result = depend_cmd("b", "a").execute(ctx.db()).await;
+        let result = depend_cmd("b", "a").execute(&ctx.service).await;
         assert!(result.is_err());
 
         // Verify the cycle-creating edge was NOT added
@@ -717,11 +717,11 @@ mod relationships {
         create_task(ctx.db(), "c", "Task C", "task", "todo").await;
 
         // A -> B -> C chain
-        depend_cmd("a", "b").execute(ctx.db()).await.unwrap();
-        depend_cmd("b", "c").execute(ctx.db()).await.unwrap();
+        depend_cmd("a", "b").execute(&ctx.service).await.unwrap();
+        depend_cmd("b", "c").execute(&ctx.service).await.unwrap();
 
         // C -> A would create cycle
-        let result = depend_cmd("c", "a").execute(ctx.db()).await;
+        let result = depend_cmd("c", "a").execute(&ctx.service).await;
         assert!(result.is_err());
     }
 
@@ -735,10 +735,10 @@ mod relationships {
         create_task(ctx.db(), "c", "Task C", "task", "todo").await;
         create_task(ctx.db(), "d", "Task D", "task", "todo").await;
 
-        depend_cmd("b", "a").execute(ctx.db()).await.unwrap();
-        depend_cmd("c", "a").execute(ctx.db()).await.unwrap();
-        depend_cmd("d", "b").execute(ctx.db()).await.unwrap();
-        depend_cmd("d", "c").execute(ctx.db()).await.unwrap(); // Should succeed
+        depend_cmd("b", "a").execute(&ctx.service).await.unwrap();
+        depend_cmd("c", "a").execute(&ctx.service).await.unwrap();
+        depend_cmd("d", "b").execute(&ctx.service).await.unwrap();
+        depend_cmd("d", "c").execute(&ctx.service).await.unwrap(); // Should succeed
 
         // Verify all 4 edges exist
         assert!(dependency_exists(ctx.db(), "b", "a").await);
