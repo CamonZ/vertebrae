@@ -1236,41 +1236,8 @@ impl WorkflowMigrateCommand {
 
     /// Execute in dry-run mode - show what would be migrated without making changes.
     async fn execute_dry_run(&self, db: &Database) -> Result<String, DbError> {
-        use serde::Deserialize;
-        use vertebrae_db::Status;
-
-        // Query tasks without workflow_id
-        #[derive(Debug, Deserialize)]
-        struct TaskWithStatus {
-            #[allow(dead_code)]
-            id: surrealdb::sql::Thing,
-            status: Status,
-        }
-
-        let query = "SELECT id, status FROM task WHERE workflow_id IS NONE";
-        let mut result = db.client().query(query).await?;
-        let tasks: Vec<TaskWithStatus> = result.take(0)?;
-
-        let mut would_migrate = 0;
-        let mut would_skip = 0;
-        let mut skipped_ids = Vec::new();
-
-        for task in &tasks {
-            if task.status.default_workflow_step().is_some() {
-                would_migrate += 1;
-            } else {
-                would_skip += 1;
-                skipped_ids.push(task.id.id.to_raw());
-            }
-        }
-
-        let dry_run_result = MigrationResult {
-            migrated: would_migrate,
-            skipped: would_skip,
-            skipped_ids,
-        };
-
-        let output = Self::format_result(&dry_run_result);
+        let result = db.workflows().dry_run_migration().await?;
+        let output = Self::format_result(&result);
         Ok(format!("[DRY RUN] {}", output))
     }
 

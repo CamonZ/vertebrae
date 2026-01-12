@@ -479,6 +479,80 @@ impl<'a> WorkflowRepository<'a> {
         Ok(true)
     }
 
+    /// Perform a dry-run check to see what would be migrated without making changes.
+    ///
+    /// This method analyzes all tasks without a workflow assignment and determines
+    /// how many would be migrated vs skipped, without actually performing the migration.
+    ///
+    /// Tasks with `Rejected` status are counted as skipped since that status is not
+    /// part of the default workflow.
+    ///
+    /// # Returns
+    ///
+    /// A `MigrationResult` containing counts of tasks that would be migrated and skipped.
+    ///
+    /// # Errors
+    ///
+    /// Returns `DbError::Query` if database operations fail.
+    pub async fn dry_run_migration(&self) -> DbResult<MigrationResult> {
+        use crate::models::Status;
+
+        debug!("Starting dry-run migration check");
+
+        // Find all tasks without workflow_id
+        #[derive(Debug, Deserialize)]
+        struct TaskWithStatus {
+            id: surrealdb::sql::Thing,
+            status: Status,
+        }
+
+        let query = "SELECT id, status FROM task WHERE workflow_id IS NONE";
+        let mut result = self
+            .client
+            .query(query)
+            .await
+            .map_err(|e| DbError::Query(Box::new(e)))?;
+        let tasks: Vec<TaskWithStatus> = result.take(0)?;
+
+        debug!(
+            "Found {} tasks without workflow assignment for dry-run check",
+            tasks.len()
+        );
+
+        let mut would_migrate = 0;
+        let mut would_skip = 0;
+        let mut skipped_ids = Vec::new();
+
+        for task in tasks {
+            let task_id = task.id.id.to_raw();
+
+            // Get the step index for this status
+            if task.status.default_workflow_step().is_some() {
+                trace!("Task {} would be migrated", task_id);
+                would_migrate += 1;
+            } else {
+                // Status not in default workflow (e.g., Rejected)
+                debug!(
+                    "Task {} would be skipped (status {:?} not in default workflow)",
+                    task_id, task.status
+                );
+                skipped_ids.push(task_id);
+                would_skip += 1;
+            }
+        }
+
+        debug!(
+            "Dry-run check complete: {} would migrate, {} would skip",
+            would_migrate, would_skip
+        );
+
+        Ok(MigrationResult {
+            migrated: would_migrate,
+            skipped: would_skip,
+            skipped_ids,
+        })
+    }
+
     /// Migrate existing tasks to use the default workflow.
     ///
     /// Finds all tasks without a workflow assignment and assigns them to the
@@ -1446,6 +1520,88 @@ mod tests {
         let result = workflow_repo.migrate_to_default_workflow().await.unwrap();
         assert_eq!(result.migrated, 1);
         assert_eq!(result.skipped, 0);
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_dry_run_migration_no_tasks() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = WorkflowRepository::new(db.client());
+
+        // No tasks exist, dry run should report 0
+        let result = repo.dry_run_migration().await.unwrap();
+        assert_eq!(result.migrated, 0);
+        assert_eq!(result.skipped, 0);
+        assert!(result.skipped_ids.is_empty());
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_dry_run_migration_mixed_tasks() {
+        use crate::models::{Level, Status, Task};
+        use crate::repository::TaskRepository;
+
+        let (db, temp_dir) = setup_test_db().await;
+        let workflow_repo = WorkflowRepository::new(db.client());
+        let task_repo = TaskRepository::new(db.client());
+
+        // Create tasks with different statuses
+        let task1 = Task::new("Backlog Task", Level::Task).with_status(Status::Backlog);
+        let task2 = Task::new("Rejected Task", Level::Task).with_status(Status::Rejected);
+        let task3 = Task::new("Todo Task", Level::Task).with_status(Status::Todo);
+
+        task_repo.create("t1", &task1).await.unwrap();
+        task_repo.create("t2", &task2).await.unwrap();
+        task_repo.create("t3", &task3).await.unwrap();
+
+        // Run dry-run
+        let result = workflow_repo.dry_run_migration().await.unwrap();
+        assert_eq!(result.migrated, 2);
+        assert_eq!(result.skipped, 1);
+        assert!(result.skipped_ids.contains(&"t2".to_string()));
+
+        // Verify no tasks were actually migrated
+        let t1 = task_repo.get("t1").await.unwrap().unwrap();
+        assert!(t1.workflow_id.is_none());
+        let t2 = task_repo.get("t2").await.unwrap().unwrap();
+        assert!(t2.workflow_id.is_none());
+        let t3 = task_repo.get("t3").await.unwrap().unwrap();
+        assert!(t3.workflow_id.is_none());
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_dry_run_migration_does_not_modify_tasks() {
+        use crate::models::{Level, Status, Task};
+        use crate::repository::TaskRepository;
+
+        let (db, temp_dir) = setup_test_db().await;
+        let workflow_repo = WorkflowRepository::new(db.client());
+        let task_repo = TaskRepository::new(db.client());
+
+        // Create a task
+        let task = Task::new("Test Task", Level::Task).with_status(Status::InProgress);
+        task_repo.create("test", &task).await.unwrap();
+
+        // Get original task state
+        let original = task_repo.get("test").await.unwrap().unwrap();
+        assert!(original.workflow_id.is_none());
+
+        // Run dry-run multiple times
+        let result1 = workflow_repo.dry_run_migration().await.unwrap();
+        let result2 = workflow_repo.dry_run_migration().await.unwrap();
+
+        // Both runs should return same results
+        assert_eq!(result1.migrated, 1);
+        assert_eq!(result2.migrated, 1);
+
+        // Verify task state unchanged
+        let after = task_repo.get("test").await.unwrap().unwrap();
+        assert!(after.workflow_id.is_none());
+        assert_eq!(after.status, original.status);
 
         cleanup(&temp_dir);
     }
