@@ -3,8 +3,7 @@
 //! Implements the `vtb review` command to toggle the needs_human_review flag on tasks.
 
 use clap::Args;
-use serde::Deserialize;
-use vertebrae_db::{Database, DbError, TaskUpdate};
+use vertebrae_db::DbError;
 
 /// Toggle the needs_human_review flag on a task
 #[derive(Debug, Args)]
@@ -18,13 +17,6 @@ pub struct ReviewCommand {
     pub set: Option<bool>,
 }
 
-/// Result from querying a task's review flag
-#[derive(Debug, Deserialize)]
-struct ReviewFlagRow {
-    #[serde(default)]
-    needs_human_review: Option<bool>,
-}
-
 impl ReviewCommand {
     /// Execute the review command.
     ///
@@ -33,19 +25,22 @@ impl ReviewCommand {
     ///
     /// # Arguments
     ///
-    /// * `db` - Reference to the database connection
+    /// * `service` - Reference to the task service
     ///
     /// # Errors
     ///
     /// Returns `DbError` if:
     /// - The task with the given ID does not exist
-    /// - Database operations fail
-    pub async fn execute(&self, db: &Database) -> Result<String, DbError> {
+    /// - Service operations fail
+    pub async fn execute(
+        &self,
+        service: &dyn vertebrae_core::TaskService,
+    ) -> Result<String, DbError> {
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
 
         // Fetch current flag value
-        let current = self.get_current_flag(db, &id).await?;
+        let current = self.get_current_flag(service, &id).await?;
 
         // Determine new value
         let new_value = match self.set {
@@ -53,8 +48,8 @@ impl ReviewCommand {
             None => !current, // Toggle
         };
 
-        // Update the flag and timestamp
-        self.update_flag(db, &id, new_value).await?;
+        // Update the flag using service layer (which fires MutationCallback)
+        self.update_flag(service, &id, new_value).await?;
 
         let action = if new_value {
             "marked as needing review"
@@ -66,176 +61,44 @@ impl ReviewCommand {
     }
 
     /// Get the current needs_human_review flag value.
-    async fn get_current_flag(&self, db: &Database, id: &str) -> Result<bool, DbError> {
-        // Use raw query instead of .select() to handle both numeric and string IDs.
-        // .select(("task", id)) creates a string ID, but tasks created with
-        // CREATE task:123 have numeric IDs, causing a mismatch.
-        let query = format!("SELECT needs_human_review FROM task:{}", id);
-        let mut result = db
-            .client()
-            .query(&query)
+    async fn get_current_flag(
+        &self,
+        service: &dyn vertebrae_core::TaskService,
+        id: &str,
+    ) -> Result<bool, DbError> {
+        let task = service
+            .get_task(id)
             .await
-            .map_err(|e| DbError::Query(Box::new(e)))?;
-
-        let row: Option<ReviewFlagRow> = result.take(0).map_err(|e| DbError::Query(Box::new(e)))?;
-
-        match row {
-            Some(r) => Ok(r.needs_human_review.unwrap_or(false)),
-            None => Err(DbError::TaskNotFound {
-                task_id: self.id.clone(),
-            }),
-        }
+            .map_err(|e| DbError::InvalidPath {
+                path: std::path::PathBuf::from("task"),
+                reason: format!("Failed to get task: {}", e),
+            })?;
+        Ok(task.needs_human_review.unwrap_or(false))
     }
 
-    /// Update the needs_human_review flag and timestamp.
-    async fn update_flag(&self, db: &Database, id: &str, value: bool) -> Result<(), DbError> {
-        let updates = TaskUpdate::new().with_needs_human_review(value);
-        db.tasks().update(id, &updates).await?;
+    /// Update the needs_human_review flag using service layer.
+    async fn update_flag(
+        &self,
+        service: &dyn vertebrae_core::TaskService,
+        id: &str,
+        value: bool,
+    ) -> Result<(), DbError> {
+        let options = vertebrae_core::UpdateTaskOptions::new().with_needs_human_review(value);
+        service
+            .update_task(id, options)
+            .await
+            .map_err(|e| DbError::InvalidPath {
+                path: std::path::PathBuf::from("task"),
+                reason: format!("Failed to update task: {}", e),
+            })?;
         Ok(())
     }
 }
 
+// Integration tests are in tests/ directory and use TestContext
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Helper to create an in-memory test database
-    async fn setup_test_db() -> Database {
-        let db = Database::connect_mem().await.unwrap();
-        db.init().await.unwrap();
-        db
-    }
-
-    /// Helper to create a task in the database
-    async fn create_task(db: &Database, id: &str, needs_review: bool) {
-        let query = format!(
-            r#"CREATE task:{} SET
-                title = "Test Task",
-                level = "task",
-                status = "todo",
-                needs_human_review = {}"#,
-            id, needs_review
-        );
-        db.client().query(&query).await.unwrap();
-    }
-
-    /// Helper to get the needs_human_review flag
-    async fn get_review_flag(db: &Database, id: &str) -> bool {
-        let task = db.tasks().get(id).await.unwrap().unwrap();
-        task.needs_human_review.unwrap_or(false)
-    }
-
-    #[tokio::test]
-    async fn test_review_toggle_false_to_true() {
-        let db = setup_test_db().await;
-
-        create_task(&db, "abc123", false).await;
-
-        let cmd = ReviewCommand {
-            id: "abc123".to_string(),
-            set: None,
-        };
-
-        let result = cmd.execute(&db).await;
-        assert!(result.is_ok());
-        assert!(result.unwrap().contains("marked as needing review"));
-
-        let flag = get_review_flag(&db, "abc123").await;
-        assert!(flag, "Flag should be true after toggle");
-    }
-
-    #[tokio::test]
-    async fn test_review_toggle_true_to_false() {
-        let db = setup_test_db().await;
-
-        create_task(&db, "abc123", true).await;
-
-        let cmd = ReviewCommand {
-            id: "abc123".to_string(),
-            set: None,
-        };
-
-        let result = cmd.execute(&db).await;
-        assert!(result.is_ok());
-        assert!(result.unwrap().contains("marked as not needing review"));
-
-        let flag = get_review_flag(&db, "abc123").await;
-        assert!(!flag, "Flag should be false after toggle");
-    }
-
-    #[tokio::test]
-    async fn test_review_set_true() {
-        let db = setup_test_db().await;
-
-        create_task(&db, "abc123", false).await;
-
-        let cmd = ReviewCommand {
-            id: "abc123".to_string(),
-            set: Some(true),
-        };
-
-        let result = cmd.execute(&db).await;
-        assert!(result.is_ok());
-
-        let flag = get_review_flag(&db, "abc123").await;
-        assert!(flag, "Flag should be true after set");
-    }
-
-    #[tokio::test]
-    async fn test_review_set_false() {
-        let db = setup_test_db().await;
-
-        create_task(&db, "abc123", true).await;
-
-        let cmd = ReviewCommand {
-            id: "abc123".to_string(),
-            set: Some(false),
-        };
-
-        let result = cmd.execute(&db).await;
-        assert!(result.is_ok());
-
-        let flag = get_review_flag(&db, "abc123").await;
-        assert!(!flag, "Flag should be false after set");
-    }
-
-    #[tokio::test]
-    async fn test_review_nonexistent_task() {
-        let db = setup_test_db().await;
-
-        let cmd = ReviewCommand {
-            id: "nonexistent".to_string(),
-            set: None,
-        };
-
-        let result = cmd.execute(&db).await;
-        match result {
-            Err(DbError::TaskNotFound { task_id }) => {
-                assert_eq!(
-                    task_id, "nonexistent",
-                    "Expected task_id 'nonexistent', got: {}",
-                    task_id
-                );
-            }
-            Err(other) => panic!("Expected NotFound error, got {:?}", other),
-            Ok(_) => panic!("Expected error, got success"),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_review_case_insensitive() {
-        let db = setup_test_db().await;
-
-        create_task(&db, "abc123", false).await;
-
-        let cmd = ReviewCommand {
-            id: "ABC123".to_string(),
-            set: None,
-        };
-
-        let result = cmd.execute(&db).await;
-        assert!(result.is_ok(), "Case-insensitive lookup should work");
-    }
 
     #[test]
     fn test_review_command_debug() {

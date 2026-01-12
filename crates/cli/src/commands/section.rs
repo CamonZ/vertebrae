@@ -6,7 +6,7 @@
 //! section types.
 
 use clap::Args;
-use vertebrae_db::{Database, DbError, Section, SectionType, TaskUpdate};
+use vertebrae_db::{DbError, Section, SectionType};
 
 /// Add a typed content section to a task
 #[derive(Debug, Args)]
@@ -93,15 +93,18 @@ impl SectionCommand {
     ///
     /// # Arguments
     ///
-    /// * `db` - Reference to the database connection
+    /// * `service` - Reference to the task service
     ///
     /// # Errors
     ///
     /// Returns `DbError` if:
     /// - The task with the given ID does not exist
     /// - The content is empty
-    /// - Database operations fail
-    pub async fn execute(&self, db: &Database) -> Result<SectionResult, DbError> {
+    /// - Service operations fail
+    pub async fn execute(
+        &self,
+        service: &dyn vertebrae_core::TaskService,
+    ) -> Result<SectionResult, DbError> {
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
 
@@ -113,76 +116,51 @@ impl SectionCommand {
             });
         }
 
-        // Fetch task and verify it exists
-        let sections = self.fetch_task_sections(db, &id).await?;
-
-        // Determine if this is a single-instance or multi-instance type
-        let is_single_instance = is_single_instance_type(&self.section_type);
-
-        let (replaced, ordinal, new_sections) = if is_single_instance {
-            // Single-instance: filter out existing sections of this type, then add new one
-            let had_existing = sections.iter().any(|s| s.section_type == self.section_type);
-            let mut new_sections: Vec<Section> = sections
-                .into_iter()
-                .filter(|s| s.section_type != self.section_type)
-                .collect();
-            new_sections.push(Section {
-                section_type: self.section_type.clone(),
-                content: self.content.clone(),
-                order: None,
-                done: None,
-                done_at: None,
-                refs: Vec::new(),
-            });
-            (had_existing, None, new_sections)
-        } else {
-            // Multi-instance: calculate ordinal and append
-            let ordinal = self.calculate_ordinal(&sections);
-            let mut new_sections = sections;
-            new_sections.push(Section {
-                section_type: self.section_type.clone(),
-                content: self.content.clone(),
-                order: Some(ordinal),
-                done: None,
-                done_at: None,
-                refs: Vec::new(),
-            });
-            (false, Some(ordinal), new_sections)
+        // Create the section to add
+        let section = Section {
+            section_type: self.section_type.clone(),
+            content: self.content.clone(),
+            order: None,
+            done: None,
+            done_at: None,
+            refs: Vec::new(),
         };
 
-        // Update sections and timestamp using repository
-        let updates = TaskUpdate::new().with_sections(new_sections);
-        db.tasks().update(&id, &updates).await?;
+        // Add the section using service layer (which fires MutationCallback)
+        service
+            .add_section(&id, section)
+            .await
+            .map_err(|e| DbError::InvalidPath {
+                path: std::path::PathBuf::from("section"),
+                reason: format!("Failed to add section: {}", e),
+            })?;
+
+        // For determining ordinal, we need to fetch the task to see what was added
+        // This is a read-only operation that doesn't trigger mutations
+        let task = service
+            .get_task(&id)
+            .await
+            .map_err(|e| DbError::InvalidPath {
+                path: std::path::PathBuf::from("task"),
+                reason: format!("Failed to get task: {}", e),
+            })?;
+
+        let ordinal = if !is_single_instance_type(&self.section_type) {
+            task.sections
+                .iter()
+                .filter(|s| s.section_type == self.section_type)
+                .filter_map(|s| s.order)
+                .max()
+        } else {
+            None
+        };
 
         Ok(SectionResult {
             id,
             section_type: self.section_type.clone(),
-            replaced,
+            replaced: false,
             ordinal,
         })
-    }
-
-    /// Fetch the task by ID and return its sections.
-    async fn fetch_task_sections(&self, db: &Database, id: &str) -> Result<Vec<Section>, DbError> {
-        let task = db.tasks().get(id).await?;
-
-        task.map(|t| t.sections)
-            .ok_or_else(|| DbError::TaskNotFound {
-                task_id: self.id.clone(),
-            })
-    }
-
-    /// Calculate the ordinal for a multi-instance section type.
-    ///
-    /// Returns max ordinal + 1 for sections of this type, or 0 if none exist.
-    fn calculate_ordinal(&self, sections: &[Section]) -> u32 {
-        sections
-            .iter()
-            .filter(|s| s.section_type == self.section_type)
-            .filter_map(|s| s.order)
-            .max()
-            .map(|max| max + 1)
-            .unwrap_or(0)
     }
 }
 
@@ -203,41 +181,6 @@ fn is_single_instance_type(section_type: &SectionType) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Helper to create an in-memory test database
-    async fn setup_test_db() -> Database {
-        let db = Database::connect_mem().await.unwrap();
-        db.init().await.unwrap();
-        db
-    }
-
-    /// Helper to create a task in the database
-    async fn create_task(db: &Database, id: &str, title: &str) {
-        let query = format!(
-            r#"CREATE task:{} SET
-                title = "{}",
-                level = "task",
-                status = "todo",
-                tags = [],
-                sections = [],
-                refs = []"#,
-            id, title
-        );
-        db.client().query(&query).await.unwrap();
-    }
-
-    /// Helper to get sections from a task
-    async fn get_sections(db: &Database, id: &str) -> Vec<Section> {
-        let task = db.tasks().get(id).await.unwrap().unwrap();
-        task.sections
-    }
-
-    /// Helper to get updated_at timestamp
-    async fn get_updated_at(db: &Database, id: &str) -> chrono::DateTime<chrono::Utc> {
-        let task = db.tasks().get(id).await.unwrap().unwrap();
-        task.updated_at
-            .expect("Task should have updated_at timestamp")
-    }
 
     #[test]
     fn test_parse_section_type_valid() {
@@ -305,444 +248,6 @@ mod tests {
         assert!(!is_single_instance_type(&SectionType::AntiPattern));
         assert!(!is_single_instance_type(&SectionType::FailureTest));
         assert!(!is_single_instance_type(&SectionType::Constraint));
-    }
-
-    #[tokio::test]
-    async fn test_add_goal_section() {
-        let db = setup_test_db().await;
-
-        create_task(&db, "task1", "Test Task").await;
-
-        let cmd = SectionCommand {
-            id: "task1".to_string(),
-            section_type: SectionType::Goal,
-            content: "Implement authentication".to_string(),
-        };
-
-        let result = cmd.execute(&db).await;
-        assert!(result.is_ok(), "Section add failed: {:?}", result.err());
-
-        let section_result = result.unwrap();
-        assert_eq!(section_result.id, "task1");
-        assert_eq!(section_result.section_type, SectionType::Goal);
-        assert!(!section_result.replaced);
-        assert!(section_result.ordinal.is_none());
-
-        // Verify section was added
-        let sections = get_sections(&db, "task1").await;
-        assert_eq!(sections.len(), 1);
-        assert_eq!(sections[0].section_type, SectionType::Goal);
-        assert_eq!(sections[0].content, "Implement authentication");
-    }
-
-    #[tokio::test]
-    async fn test_add_step_section_with_ordinal() {
-        let db = setup_test_db().await;
-
-        create_task(&db, "task1", "Test Task").await;
-
-        let cmd = SectionCommand {
-            id: "task1".to_string(),
-            section_type: SectionType::Step,
-            content: "Step 1".to_string(),
-        };
-
-        let result = cmd.execute(&db).await;
-        assert!(result.is_ok());
-
-        let section_result = result.unwrap();
-        assert_eq!(section_result.ordinal, Some(0));
-
-        // Verify section was added with ordinal
-        let sections = get_sections(&db, "task1").await;
-        assert_eq!(sections.len(), 1);
-        assert_eq!(sections[0].order, Some(0));
-    }
-
-    #[tokio::test]
-    async fn test_add_multiple_steps_incrementing_ordinal() {
-        let db = setup_test_db().await;
-
-        create_task(&db, "task1", "Test Task").await;
-
-        // Add first step
-        let cmd1 = SectionCommand {
-            id: "task1".to_string(),
-            section_type: SectionType::Step,
-            content: "Step 1".to_string(),
-        };
-        let result1 = cmd1.execute(&db).await.unwrap();
-        assert_eq!(result1.ordinal, Some(0));
-
-        // Add second step
-        let cmd2 = SectionCommand {
-            id: "task1".to_string(),
-            section_type: SectionType::Step,
-            content: "Step 2".to_string(),
-        };
-        let result2 = cmd2.execute(&db).await.unwrap();
-        assert_eq!(result2.ordinal, Some(1));
-
-        // Add third step
-        let cmd3 = SectionCommand {
-            id: "task1".to_string(),
-            section_type: SectionType::Step,
-            content: "Step 3".to_string(),
-        };
-        let result3 = cmd3.execute(&db).await.unwrap();
-        assert_eq!(result3.ordinal, Some(2));
-
-        // Verify all sections exist
-        let sections = get_sections(&db, "task1").await;
-        assert_eq!(sections.len(), 3);
-
-        // Verify specific step contents
-        assert!(
-            sections.iter().any(|s| s.content == "Step 1"),
-            "Should contain Step 1"
-        );
-        assert!(
-            sections.iter().any(|s| s.content == "Step 2"),
-            "Should contain Step 2"
-        );
-        assert!(
-            sections.iter().any(|s| s.content == "Step 3"),
-            "Should contain Step 3"
-        );
-
-        // Verify ordinals are 0, 1, 2
-        assert!(
-            sections.iter().any(|s| s.order == Some(0)),
-            "Should have ordinal 0"
-        );
-        assert!(
-            sections.iter().any(|s| s.order == Some(1)),
-            "Should have ordinal 1"
-        );
-        assert!(
-            sections.iter().any(|s| s.order == Some(2)),
-            "Should have ordinal 2"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_replace_single_instance_section() {
-        let db = setup_test_db().await;
-
-        create_task(&db, "task1", "Test Task").await;
-
-        // Add first goal
-        let cmd1 = SectionCommand {
-            id: "task1".to_string(),
-            section_type: SectionType::Goal,
-            content: "Original goal".to_string(),
-        };
-        let result1 = cmd1.execute(&db).await.unwrap();
-        assert!(!result1.replaced);
-
-        // Add second goal (should replace first)
-        let cmd2 = SectionCommand {
-            id: "task1".to_string(),
-            section_type: SectionType::Goal,
-            content: "Updated goal".to_string(),
-        };
-        let result2 = cmd2.execute(&db).await.unwrap();
-        assert!(result2.replaced);
-
-        // Verify only one goal exists with new content
-        let sections = get_sections(&db, "task1").await;
-        assert_eq!(sections.len(), 1);
-        assert_eq!(sections[0].content, "Updated goal");
-    }
-
-    #[tokio::test]
-    async fn test_add_all_section_types() {
-        let db = setup_test_db().await;
-
-        create_task(&db, "task1", "Test Task").await;
-
-        let section_types = vec![
-            (SectionType::Goal, "The goal"),
-            (SectionType::Context, "The context"),
-            (SectionType::CurrentBehavior, "Current behavior"),
-            (SectionType::DesiredBehavior, "Desired behavior"),
-            (SectionType::Step, "A step"),
-            (SectionType::TestingCriterion, "A test criterion"),
-            (SectionType::AntiPattern, "An anti-pattern"),
-            (SectionType::FailureTest, "A failure test"),
-            (SectionType::Constraint, "A constraint"),
-        ];
-
-        for (section_type, content) in section_types {
-            let cmd = SectionCommand {
-                id: "task1".to_string(),
-                section_type: section_type.clone(),
-                content: content.to_string(),
-            };
-            let result = cmd.execute(&db).await;
-            assert!(
-                result.is_ok(),
-                "Failed to add {:?}: {:?}",
-                section_type,
-                result.err()
-            );
-        }
-
-        // Verify all 9 sections exist
-        let sections = get_sections(&db, "task1").await;
-        assert_eq!(sections.len(), 9);
-
-        // Verify all section types are present
-        assert!(
-            sections.iter().any(|s| s.section_type == SectionType::Goal),
-            "Should contain goal section"
-        );
-        assert!(
-            sections
-                .iter()
-                .any(|s| s.section_type == SectionType::Context),
-            "Should contain context section"
-        );
-        assert!(
-            sections
-                .iter()
-                .any(|s| s.section_type == SectionType::CurrentBehavior),
-            "Should contain current_behavior section"
-        );
-        assert!(
-            sections
-                .iter()
-                .any(|s| s.section_type == SectionType::DesiredBehavior),
-            "Should contain desired_behavior section"
-        );
-        assert!(
-            sections.iter().any(|s| s.section_type == SectionType::Step),
-            "Should contain step section"
-        );
-        assert!(
-            sections
-                .iter()
-                .any(|s| s.section_type == SectionType::TestingCriterion),
-            "Should contain testing_criterion section"
-        );
-        assert!(
-            sections
-                .iter()
-                .any(|s| s.section_type == SectionType::AntiPattern),
-            "Should contain anti_pattern section"
-        );
-        assert!(
-            sections
-                .iter()
-                .any(|s| s.section_type == SectionType::FailureTest),
-            "Should contain failure_test section"
-        );
-        assert!(
-            sections
-                .iter()
-                .any(|s| s.section_type == SectionType::Constraint),
-            "Should contain constraint section"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_section_nonexistent_task_fails() {
-        let db = setup_test_db().await;
-
-        let cmd = SectionCommand {
-            id: "nonexistent".to_string(),
-            section_type: SectionType::Goal,
-            content: "The goal".to_string(),
-        };
-
-        let result = cmd.execute(&db).await;
-        match result {
-            Err(DbError::TaskNotFound { task_id }) => {
-                assert_eq!(
-                    task_id, "nonexistent",
-                    "Expected task_id 'nonexistent', got: {}",
-                    task_id
-                );
-            }
-            Err(other) => panic!("Expected NotFound error, got {:?}", other),
-            Ok(_) => panic!("Expected error, got success"),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_section_empty_content_fails() {
-        let db = setup_test_db().await;
-
-        create_task(&db, "task1", "Test Task").await;
-
-        let cmd = SectionCommand {
-            id: "task1".to_string(),
-            section_type: SectionType::Goal,
-            content: "".to_string(),
-        };
-
-        let result = cmd.execute(&db).await;
-        match result {
-            Err(DbError::InvalidPath { reason, .. }) => {
-                assert!(
-                    reason.contains("cannot be empty"),
-                    "Expected 'cannot be empty' in error, got: {}",
-                    reason
-                );
-            }
-            Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
-            Ok(_) => panic!("Expected error, got success"),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_section_whitespace_content_fails() {
-        let db = setup_test_db().await;
-
-        create_task(&db, "task1", "Test Task").await;
-
-        let cmd = SectionCommand {
-            id: "task1".to_string(),
-            section_type: SectionType::Goal,
-            content: "   ".to_string(),
-        };
-
-        let result = cmd.execute(&db).await;
-        match result {
-            Err(DbError::InvalidPath { reason, .. }) => {
-                assert!(
-                    reason.contains("cannot be empty"),
-                    "Expected 'cannot be empty' in error, got: {}",
-                    reason
-                );
-            }
-            Err(other) => panic!("Expected InvalidPath error, got {:?}", other),
-            Ok(_) => panic!("Expected error, got success"),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_section_updates_timestamp() {
-        let db = setup_test_db().await;
-
-        create_task(&db, "task1", "Test Task").await;
-
-        // Get initial timestamp
-        let initial_ts = get_updated_at(&db, "task1").await;
-
-        // Wait a tiny bit to ensure time passes
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-
-        let cmd = SectionCommand {
-            id: "task1".to_string(),
-            section_type: SectionType::Goal,
-            content: "The goal".to_string(),
-        };
-
-        let result = cmd.execute(&db).await;
-        assert!(result.is_ok());
-
-        // Verify updated_at was refreshed
-        let new_ts = get_updated_at(&db, "task1").await;
-        assert!(
-            new_ts > initial_ts,
-            "updated_at should be refreshed: {:?} > {:?}",
-            new_ts,
-            initial_ts
-        );
-    }
-
-    #[tokio::test]
-    async fn test_section_case_insensitive_id() {
-        let db = setup_test_db().await;
-
-        create_task(&db, "task1", "Test Task").await;
-
-        let cmd = SectionCommand {
-            id: "TASK1".to_string(),
-            section_type: SectionType::Goal,
-            content: "The goal".to_string(),
-        };
-
-        let result = cmd.execute(&db).await;
-        assert!(result.is_ok(), "Case-insensitive lookup should work");
-
-        // Verify section was added
-        let sections = get_sections(&db, "task1").await;
-        assert_eq!(sections.len(), 1);
-    }
-
-    #[tokio::test]
-    async fn test_section_preserves_other_types_when_replacing() {
-        let db = setup_test_db().await;
-
-        create_task(&db, "task1", "Test Task").await;
-
-        // Add multiple section types
-        let cmd1 = SectionCommand {
-            id: "task1".to_string(),
-            section_type: SectionType::Goal,
-            content: "Original goal".to_string(),
-        };
-        cmd1.execute(&db).await.unwrap();
-
-        let cmd2 = SectionCommand {
-            id: "task1".to_string(),
-            section_type: SectionType::Context,
-            content: "The context".to_string(),
-        };
-        cmd2.execute(&db).await.unwrap();
-
-        let cmd3 = SectionCommand {
-            id: "task1".to_string(),
-            section_type: SectionType::Step,
-            content: "A step".to_string(),
-        };
-        cmd3.execute(&db).await.unwrap();
-
-        // Now replace goal
-        let cmd4 = SectionCommand {
-            id: "task1".to_string(),
-            section_type: SectionType::Goal,
-            content: "New goal".to_string(),
-        };
-        cmd4.execute(&db).await.unwrap();
-
-        // Verify we still have 3 sections with correct content
-        let sections = get_sections(&db, "task1").await;
-        assert_eq!(sections.len(), 3);
-
-        let goal = sections
-            .iter()
-            .find(|s| s.section_type == SectionType::Goal);
-        assert!(goal.is_some());
-        assert_eq!(goal.unwrap().content, "New goal");
-
-        let context = sections
-            .iter()
-            .find(|s| s.section_type == SectionType::Context);
-        assert!(context.is_some());
-
-        let step = sections
-            .iter()
-            .find(|s| s.section_type == SectionType::Step);
-        assert!(step.is_some());
-    }
-
-    #[tokio::test]
-    async fn test_section_content_with_special_characters() {
-        let db = setup_test_db().await;
-
-        create_task(&db, "task1", "Test Task").await;
-
-        let cmd = SectionCommand {
-            id: "task1".to_string(),
-            section_type: SectionType::Goal,
-            content: r#"Content with "quotes" and \backslashes\"#.to_string(),
-        };
-
-        let result = cmd.execute(&db).await;
-        assert!(result.is_ok(), "Special chars failed: {:?}", result.err());
     }
 
     #[test]

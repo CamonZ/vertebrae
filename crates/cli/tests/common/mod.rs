@@ -155,12 +155,6 @@ pub fn add_cmd_full(
     }
 }
 
-/// Execute add command and return the task ID.
-#[allow(dead_code)]
-pub async fn execute_add(db: &Database, cmd: AddCommand) -> Result<String, DbError> {
-    cmd.execute(db).await
-}
-
 /// Create a transition-to command for triage (backlog -> todo).
 /// By default skips validation for test convenience. Use `triage_cmd_with_validation` for validation tests.
 pub fn triage_cmd(id: &str) -> TransitionToCommand {

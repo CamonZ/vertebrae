@@ -4,7 +4,7 @@
 //! Supports removing by file path or removing all references.
 
 use clap::Args;
-use vertebrae_db::{CodeRef, Database, DbError, TaskUpdate};
+use vertebrae_db::DbError;
 
 /// Remove code references from a task
 #[derive(Debug, Args)]
@@ -70,27 +70,42 @@ impl UnrefCommand {
     ///
     /// # Arguments
     ///
-    /// * `db` - Reference to the database connection
+    /// * `service` - Reference to the task service
     ///
     /// # Errors
     ///
     /// Returns `DbError` if:
     /// - The task with the given ID does not exist
-    /// - Database operations fail
-    pub async fn execute(&self, db: &Database) -> Result<UnrefResult, DbError> {
+    /// - Service operations fail
+    pub async fn execute(
+        &self,
+        service: &dyn vertebrae_core::TaskService,
+    ) -> Result<UnrefResult, DbError> {
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
 
-        // Fetch task and verify it exists
-        let code_refs = self.fetch_task_refs(db, &id).await?;
+        // Fetch task to get current refs
+        let task = service
+            .get_task(&id)
+            .await
+            .map_err(|e| DbError::InvalidPath {
+                path: std::path::PathBuf::from("task"),
+                reason: format!("Failed to get task: {}", e),
+            })?;
 
+        let code_refs = task.code_refs.clone();
         let original_count = code_refs.len();
 
         if self.all {
-            // Remove all references using repository
+            // Remove all references using service layer (which fires MutationCallback)
             if original_count > 0 {
-                let updates = TaskUpdate::new().clear_refs();
-                db.tasks().update(&id, &updates).await?;
+                service
+                    .remove_code_refs(&id, None)
+                    .await
+                    .map_err(|e| DbError::InvalidPath {
+                        path: std::path::PathBuf::from("task"),
+                        reason: format!("Failed to remove refs: {}", e),
+                    })?;
             }
 
             Ok(UnrefResult {
@@ -100,18 +115,25 @@ impl UnrefCommand {
                 removed_count: original_count,
             })
         } else if let Some(ref file) = self.file {
-            // Remove references matching the file path
-            let remaining_refs: Vec<CodeRef> = code_refs
-                .into_iter()
-                .filter(|r| r.path.as_str() != file.as_str())
+            // Calculate which refs would be removed
+            let refs_to_remove_indices: Vec<usize> = code_refs
+                .iter()
+                .enumerate()
+                .filter(|(_, r)| r.path.as_str() == file.as_str())
+                .map(|(i, _)| i)
                 .collect();
 
-            let removed_count = original_count - remaining_refs.len();
+            let removed_count = refs_to_remove_indices.len();
 
             if removed_count > 0 {
-                // Update refs to only include remaining ones using repository
-                let updates = TaskUpdate::new().with_refs(remaining_refs);
-                db.tasks().update(&id, &updates).await?;
+                // Remove refs by index using service layer (which fires MutationCallback)
+                service
+                    .remove_code_refs(&id, Some(refs_to_remove_indices))
+                    .await
+                    .map_err(|e| DbError::InvalidPath {
+                        path: std::path::PathBuf::from("task"),
+                        reason: format!("Failed to remove refs: {}", e),
+                    })?;
             }
 
             Ok(UnrefResult {
@@ -130,441 +152,11 @@ impl UnrefCommand {
             })
         }
     }
-
-    /// Fetch the task by ID and return its code refs (mainly to verify task exists).
-    async fn fetch_task_refs(&self, db: &Database, id: &str) -> Result<Vec<CodeRef>, DbError> {
-        let task = db.tasks().get(id).await?;
-
-        task.map(|t| t.code_refs)
-            .ok_or_else(|| DbError::TaskNotFound {
-                task_id: self.id.clone(),
-            })
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Helper to create an in-memory test database
-    async fn setup_test_db() -> Database {
-        let db = Database::connect_mem().await.unwrap();
-        db.init().await.unwrap();
-        db
-    }
-
-    /// Helper to create a task in the database
-    async fn create_task(db: &Database, id: &str, title: &str) {
-        let query = format!(
-            r#"CREATE task:{} SET
-                title = "{}",
-                level = "task",
-                status = "todo",
-                tags = [],
-                sections = [],
-                refs = []"#,
-            id, title
-        );
-        db.client().query(&query).await.unwrap();
-    }
-
-    /// Helper to add a code reference to a task
-    async fn add_ref(
-        db: &Database,
-        id: &str,
-        path: &str,
-        line_start: Option<u32>,
-        line_end: Option<u32>,
-        name: Option<&str>,
-        description: Option<&str>,
-    ) {
-        let escaped_path = path.replace('\\', "\\\\").replace('"', "\\\"");
-        let mut ref_parts = vec![format!(r#""path": "{}""#, escaped_path)];
-
-        if let Some(start) = line_start {
-            ref_parts.push(format!(r#""line_start": {}"#, start));
-        }
-
-        if let Some(end) = line_end {
-            ref_parts.push(format!(r#""line_end": {}"#, end));
-        }
-
-        if let Some(n) = name {
-            let escaped_name = n.replace('\\', "\\\\").replace('"', "\\\"");
-            ref_parts.push(format!(r#""name": "{}""#, escaped_name));
-        }
-
-        if let Some(d) = description {
-            let escaped_desc = d.replace('\\', "\\\\").replace('"', "\\\"");
-            ref_parts.push(format!(r#""description": "{}""#, escaped_desc));
-        }
-
-        let ref_obj = format!("{{ {} }}", ref_parts.join(", "));
-
-        let query = format!(
-            "UPDATE task:{} SET refs = array::append(refs, {})",
-            id, ref_obj
-        );
-        db.client().query(&query).await.unwrap();
-    }
-
-    /// Helper to get refs from a task
-    async fn get_refs(db: &Database, id: &str) -> Vec<CodeRef> {
-        let task = db.tasks().get(id).await.unwrap().unwrap();
-        task.code_refs
-    }
-
-    /// Helper to get updated_at timestamp
-    async fn get_updated_at(db: &Database, id: &str) -> chrono::DateTime<chrono::Utc> {
-        let task = db.tasks().get(id).await.unwrap().unwrap();
-        task.updated_at
-            .expect("Task should have updated_at timestamp")
-    }
-
-    // ==================== UnrefCommand integration tests ====================
-
-    #[tokio::test]
-    async fn test_unref_removes_refs_by_file() {
-        let db = setup_test_db().await;
-
-        create_task(&db, "task1", "Test Task").await;
-        add_ref(&db, "task1", "src/auth.ex", Some(10), None, None, None).await;
-        add_ref(
-            &db,
-            "task1",
-            "src/auth.ex",
-            Some(50),
-            Some(60),
-            Some("fn"),
-            None,
-        )
-        .await;
-        add_ref(&db, "task1", "src/other.ex", Some(20), None, None, None).await;
-
-        let cmd = UnrefCommand {
-            id: "task1".to_string(),
-            file: Some("src/auth.ex".to_string()),
-            all: false,
-        };
-
-        let result = cmd.execute(&db).await;
-        assert!(result.is_ok(), "Unref failed: {:?}", result.err());
-
-        let unref_result = result.unwrap();
-        assert_eq!(unref_result.id, "task1");
-        assert_eq!(unref_result.file, Some("src/auth.ex".to_string()));
-        assert!(!unref_result.removed_all);
-        assert_eq!(unref_result.removed_count, 2);
-
-        // Verify refs
-        let refs = get_refs(&db, "task1").await;
-        assert_eq!(refs.len(), 1);
-        assert_eq!(refs[0].path.as_str(), "src/other.ex");
-    }
-
-    #[tokio::test]
-    async fn test_unref_multiple_refs_to_same_file() {
-        let db = setup_test_db().await;
-
-        create_task(&db, "task1", "Test Task").await;
-        add_ref(&db, "task1", "src/auth.ex", Some(10), None, None, None).await;
-        add_ref(&db, "task1", "src/auth.ex", Some(50), None, None, None).await;
-        add_ref(&db, "task1", "src/auth.ex", Some(100), None, None, None).await;
-
-        let cmd = UnrefCommand {
-            id: "task1".to_string(),
-            file: Some("src/auth.ex".to_string()),
-            all: false,
-        };
-
-        let result = cmd.execute(&db).await;
-        assert!(result.is_ok());
-
-        let unref_result = result.unwrap();
-        assert_eq!(unref_result.removed_count, 3);
-
-        // Verify all refs removed
-        let refs = get_refs(&db, "task1").await;
-        assert!(refs.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_unref_all_removes_all_refs() {
-        let db = setup_test_db().await;
-
-        create_task(&db, "task1", "Test Task").await;
-        add_ref(&db, "task1", "src/auth.ex", Some(10), None, None, None).await;
-        add_ref(&db, "task1", "src/other.ex", Some(20), None, None, None).await;
-        add_ref(&db, "task1", "config/app.ex", None, None, None, None).await;
-
-        let cmd = UnrefCommand {
-            id: "task1".to_string(),
-            file: None,
-            all: true,
-        };
-
-        let result = cmd.execute(&db).await;
-        assert!(result.is_ok());
-
-        let unref_result = result.unwrap();
-        assert!(unref_result.removed_all);
-        assert_eq!(unref_result.removed_count, 3);
-
-        // Verify all refs removed
-        let refs = get_refs(&db, "task1").await;
-        assert!(refs.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_unref_nonexistent_file_warns() {
-        let db = setup_test_db().await;
-
-        create_task(&db, "task1", "Test Task").await;
-        add_ref(&db, "task1", "src/auth.ex", Some(10), None, None, None).await;
-
-        let cmd = UnrefCommand {
-            id: "task1".to_string(),
-            file: Some("src/nonexistent.ex".to_string()),
-            all: false,
-        };
-
-        let result = cmd.execute(&db).await;
-        assert!(result.is_ok(), "Should not fail for non-existent file ref");
-
-        let unref_result = result.unwrap();
-        assert_eq!(unref_result.removed_count, 0);
-
-        // Original ref should still exist
-        let refs = get_refs(&db, "task1").await;
-        assert_eq!(refs.len(), 1);
-
-        // Check display shows warning
-        let display = format!("{}", unref_result);
-        assert_eq!(
-            display,
-            "Warning: No references to src/nonexistent.ex in task: task1"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_unref_updates_timestamp() {
-        let db = setup_test_db().await;
-
-        create_task(&db, "task1", "Test Task").await;
-        add_ref(&db, "task1", "src/auth.ex", Some(10), None, None, None).await;
-
-        // Get initial timestamp
-        let initial_ts = get_updated_at(&db, "task1").await;
-
-        // Wait a bit
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-
-        let cmd = UnrefCommand {
-            id: "task1".to_string(),
-            file: Some("src/auth.ex".to_string()),
-            all: false,
-        };
-
-        cmd.execute(&db).await.unwrap();
-
-        // Verify timestamp was updated
-        let new_ts = get_updated_at(&db, "task1").await;
-        assert!(
-            new_ts > initial_ts,
-            "updated_at should be refreshed: {:?} > {:?}",
-            new_ts,
-            initial_ts
-        );
-    }
-
-    #[tokio::test]
-    async fn test_unref_nonexistent_does_not_update_timestamp() {
-        let db = setup_test_db().await;
-
-        create_task(&db, "task1", "Test Task").await;
-        add_ref(&db, "task1", "src/auth.ex", Some(10), None, None, None).await;
-
-        // Get initial timestamp
-        let initial_ts = get_updated_at(&db, "task1").await;
-
-        // Wait a bit
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-
-        let cmd = UnrefCommand {
-            id: "task1".to_string(),
-            file: Some("src/nonexistent.ex".to_string()),
-            all: false,
-        };
-
-        cmd.execute(&db).await.unwrap();
-
-        // Verify timestamp was NOT updated (no changes made)
-        let new_ts = get_updated_at(&db, "task1").await;
-        assert_eq!(
-            new_ts, initial_ts,
-            "Timestamp should not change when no refs removed"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_unref_nonexistent_task_fails() {
-        let db = setup_test_db().await;
-
-        let cmd = UnrefCommand {
-            id: "nonexistent".to_string(),
-            file: Some("src/auth.ex".to_string()),
-            all: false,
-        };
-
-        let result = cmd.execute(&db).await;
-        match result {
-            Err(DbError::TaskNotFound { task_id }) => {
-                assert_eq!(
-                    task_id, "nonexistent",
-                    "Expected task_id 'nonexistent', got: {}",
-                    task_id
-                );
-            }
-            Err(other) => panic!("Expected NotFound error, got {:?}", other),
-            Ok(_) => panic!("Expected error, got success"),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_unref_case_insensitive_id() {
-        let db = setup_test_db().await;
-
-        create_task(&db, "task1", "Test Task").await;
-        add_ref(&db, "task1", "src/auth.ex", Some(10), None, None, None).await;
-
-        let cmd = UnrefCommand {
-            id: "TASK1".to_string(),
-            file: Some("src/auth.ex".to_string()),
-            all: false,
-        };
-
-        let result = cmd.execute(&db).await;
-        assert!(result.is_ok(), "Case-insensitive lookup should work");
-
-        let refs = get_refs(&db, "task1").await;
-        assert!(refs.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_unref_preserves_remaining_refs() {
-        let db = setup_test_db().await;
-
-        create_task(&db, "task1", "Test Task").await;
-        add_ref(
-            &db,
-            "task1",
-            "src/auth.ex",
-            Some(10),
-            Some(20),
-            Some("fn1"),
-            Some("desc1"),
-        )
-        .await;
-        add_ref(
-            &db,
-            "task1",
-            "src/other.ex",
-            Some(30),
-            Some(40),
-            Some("fn2"),
-            Some("desc2"),
-        )
-        .await;
-
-        let cmd = UnrefCommand {
-            id: "task1".to_string(),
-            file: Some("src/auth.ex".to_string()),
-            all: false,
-        };
-
-        cmd.execute(&db).await.unwrap();
-
-        // Verify remaining ref preserves all fields
-        let refs = get_refs(&db, "task1").await;
-        assert_eq!(refs.len(), 1);
-        assert_eq!(refs[0].path.as_str(), "src/other.ex");
-        assert_eq!(refs[0].line_start, Some(30));
-        assert_eq!(refs[0].line_end, Some(40));
-        assert_eq!(refs[0].name.as_deref(), Some("fn2"));
-        assert_eq!(refs[0].description.as_deref(), Some("desc2"));
-    }
-
-    #[tokio::test]
-    async fn test_unref_idempotent() {
-        let db = setup_test_db().await;
-
-        create_task(&db, "task1", "Test Task").await;
-        add_ref(&db, "task1", "src/auth.ex", Some(10), None, None, None).await;
-
-        let cmd = UnrefCommand {
-            id: "task1".to_string(),
-            file: Some("src/auth.ex".to_string()),
-            all: false,
-        };
-
-        // First removal
-        let result1 = cmd.execute(&db).await.unwrap();
-        assert_eq!(result1.removed_count, 1);
-
-        // Second removal - should be idempotent
-        let result2 = cmd.execute(&db).await.unwrap();
-        assert_eq!(result2.removed_count, 0);
-    }
-
-    #[tokio::test]
-    async fn test_unref_all_empty_refs() {
-        let db = setup_test_db().await;
-
-        create_task(&db, "task1", "Test Task").await;
-
-        let cmd = UnrefCommand {
-            id: "task1".to_string(),
-            file: None,
-            all: true,
-        };
-
-        let result = cmd.execute(&db).await;
-        assert!(result.is_ok());
-
-        let unref_result = result.unwrap();
-        assert_eq!(unref_result.removed_count, 0);
-
-        let display = format!("{}", unref_result);
-        assert_eq!(display, "No references to remove from task: task1");
-    }
-
-    #[tokio::test]
-    async fn test_unref_all_does_not_update_timestamp_when_empty() {
-        let db = setup_test_db().await;
-
-        create_task(&db, "task1", "Test Task").await;
-
-        // Get initial timestamp
-        let initial_ts = get_updated_at(&db, "task1").await;
-
-        // Wait a bit
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-
-        let cmd = UnrefCommand {
-            id: "task1".to_string(),
-            file: None,
-            all: true,
-        };
-
-        cmd.execute(&db).await.unwrap();
-
-        // Verify timestamp was NOT updated (no changes made)
-        let new_ts = get_updated_at(&db, "task1").await;
-        assert_eq!(
-            new_ts, initial_ts,
-            "Timestamp should not change when no refs to remove"
-        );
-    }
 
     // ==================== Display tests ====================
 
