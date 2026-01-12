@@ -4,10 +4,8 @@
 //! of children and dependencies.
 
 use clap::Args;
-use serde::Deserialize;
 use std::io::{self, Write};
 use vertebrae_core::ServiceError;
-use vertebrae_db::{Database, DbError};
 
 /// Delete a task with optional cascade behavior
 #[derive(Debug, Args)]
@@ -36,14 +34,6 @@ pub enum ChildAction {
     Cancel,
 }
 
-/// Information about a task for deletion
-#[derive(Debug, Deserialize)]
-struct TaskInfo {
-    #[allow(dead_code)]
-    id: surrealdb::sql::Thing,
-    title: String,
-}
-
 impl DeleteCommand {
     /// Execute the delete command.
     ///
@@ -66,19 +56,11 @@ impl DeleteCommand {
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
 
-        // Need database access for detailed operations
-        let db = service.database();
-
-        // Verify task exists
-        let task_info = self.fetch_task_info(db, &id).await?;
-
-        // Get children count
-        let children = self.fetch_children_ids(db, &id).await?;
-        let children_count = children.len();
-
-        // Get tasks that this task blocks
-        let blocked_tasks = self.fetch_blocked_tasks(db, &id).await?;
-        let blocks_count = blocked_tasks.len();
+        // Get task with all its relationships
+        let task_with_relations = service.get_task_with_relations(&id).await?;
+        let task_title = &task_with_relations.task.title;
+        let children_count = task_with_relations.children_ids.len();
+        let blocks_count = task_with_relations.dependent_ids.len();
 
         // Determine action for children
         let child_action = if children_count > 0 {
@@ -107,20 +89,22 @@ impl DeleteCommand {
         }
 
         // If not --force and no children, just confirm deletion
-        if !self.force && children_count == 0 && !self.confirm_delete(&task_info.title)? {
+        if !self.force && children_count == 0 && !self.confirm_delete(task_title)? {
             return Ok("Deletion cancelled".to_string());
         }
 
-        // Perform the deletion
-        let deleted_count = match child_action {
-            ChildAction::Cascade => self.cascade_delete(db, &id).await?,
-            ChildAction::Orphan => {
-                self.orphan_children(db, &id).await?;
-                self.delete_single_task(db, &id).await?;
-                1
-            }
-            ChildAction::Cancel => unreachable!(), // Already handled above
+        // Determine if we should cascade
+        let cascade = child_action == ChildAction::Cascade;
+
+        // Count descendants for message (if cascading)
+        let deleted_count = if cascade {
+            self.count_descendants(service, &id).await? + 1
+        } else {
+            1
         };
+
+        // Perform the deletion via service
+        service.delete_task(&id, cascade).await?;
 
         if deleted_count == 1 {
             Ok(format!("Deleted task: {}", id))
@@ -132,146 +116,20 @@ impl DeleteCommand {
         }
     }
 
-    /// Fetch basic task info to verify existence and get title.
-    async fn fetch_task_info(&self, db: &Database, id: &str) -> Result<TaskInfo, ServiceError> {
-        let query = format!("SELECT id, title FROM task:{} LIMIT 1", id);
-        let mut result = db.client().query(&query).await.map_err(DbError::from)?;
-        let task: Option<TaskInfo> = result.take(0).map_err(DbError::from)?;
-
-        task.ok_or_else(|| ServiceError::task_not_found(&self.id))
-    }
-
-    /// Fetch IDs of all children of a task.
-    async fn fetch_children_ids(
+    /// Count all descendants of a task recursively.
+    async fn count_descendants(
         &self,
-        db: &Database,
+        service: &dyn vertebrae_core::TaskService,
         id: &str,
-    ) -> Result<Vec<String>, ServiceError> {
-        #[derive(Debug, Deserialize)]
-        struct IdRow {
-            id: surrealdb::sql::Thing,
+    ) -> Result<usize, ServiceError> {
+        let relations = service.get_task_with_relations(id).await?;
+        let mut count = relations.children_ids.len();
+
+        for child_id in &relations.children_ids {
+            count += Box::pin(self.count_descendants(service, child_id)).await?;
         }
 
-        // Children are tasks that have a child_of edge pointing to this task
-        let query = format!(
-            "SELECT id FROM task WHERE ->child_of->task CONTAINS task:{}",
-            id
-        );
-
-        let mut result = db.client().query(&query).await.map_err(DbError::from)?;
-        let rows: Vec<IdRow> = result.take(0).map_err(DbError::from)?;
-
-        Ok(rows.into_iter().map(|r| r.id.id.to_string()).collect())
-    }
-
-    /// Fetch tasks that depend on (are blocked by) this task.
-    async fn fetch_blocked_tasks(
-        &self,
-        db: &Database,
-        id: &str,
-    ) -> Result<Vec<String>, ServiceError> {
-        #[derive(Debug, Deserialize)]
-        struct IdRow {
-            id: surrealdb::sql::Thing,
-        }
-
-        // Tasks that depend on this task (this task blocks them)
-        let query = format!(
-            "SELECT id FROM task WHERE ->depends_on->task CONTAINS task:{}",
-            id
-        );
-
-        let mut result = db.client().query(&query).await.map_err(DbError::from)?;
-        let rows: Vec<IdRow> = result.take(0).map_err(DbError::from)?;
-
-        Ok(rows.into_iter().map(|r| r.id.id.to_string()).collect())
-    }
-
-    /// Recursively collect all descendant IDs (children, grandchildren, etc.)
-    async fn collect_all_descendants(
-        &self,
-        db: &Database,
-        id: &str,
-    ) -> Result<Vec<String>, ServiceError> {
-        let mut all_descendants = Vec::new();
-        let mut to_process = vec![id.to_string()];
-
-        while let Some(current_id) = to_process.pop() {
-            let children = self.fetch_children_ids(db, &current_id).await?;
-            for child_id in children {
-                if !all_descendants.contains(&child_id) {
-                    all_descendants.push(child_id.clone());
-                    to_process.push(child_id);
-                }
-            }
-        }
-
-        Ok(all_descendants)
-    }
-
-    /// Delete a task and all its descendants recursively.
-    async fn cascade_delete(&self, db: &Database, id: &str) -> Result<usize, ServiceError> {
-        // Collect all descendants first
-        let descendants = self.collect_all_descendants(db, id).await?;
-
-        // Delete all tasks (root + descendants)
-        let all_ids: Vec<&str> = std::iter::once(id)
-            .chain(descendants.iter().map(|s| s.as_str()))
-            .collect();
-
-        // Delete edges first
-        for task_id in &all_ids {
-            self.delete_all_edges(db, task_id).await?;
-        }
-
-        // Delete tasks
-        for task_id in &all_ids {
-            let query = format!("DELETE task:{}", task_id);
-            db.client().query(&query).await.map_err(DbError::from)?;
-        }
-
-        Ok(all_ids.len())
-    }
-
-    /// Make children of a task into root tasks (orphan them).
-    async fn orphan_children(&self, db: &Database, id: &str) -> Result<(), ServiceError> {
-        // Delete child_of edges where children point to this task
-        let query = format!("DELETE child_of WHERE out = task:{}", id);
-        db.client().query(&query).await.map_err(DbError::from)?;
-        Ok(())
-    }
-
-    /// Delete a single task and clean up its edges.
-    async fn delete_single_task(&self, db: &Database, id: &str) -> Result<(), ServiceError> {
-        // Clean up all edges
-        self.delete_all_edges(db, id).await?;
-
-        // Delete the task
-        let query = format!("DELETE task:{}", id);
-        db.client().query(&query).await.map_err(DbError::from)?;
-
-        Ok(())
-    }
-
-    /// Delete all edges connected to a task.
-    async fn delete_all_edges(&self, db: &Database, id: &str) -> Result<(), ServiceError> {
-        // Delete child_of edges where this task is the child (out direction)
-        let query = format!("DELETE child_of WHERE in = task:{}", id);
-        db.client().query(&query).await.map_err(DbError::from)?;
-
-        // Delete child_of edges where this task is the parent (in direction)
-        let query = format!("DELETE child_of WHERE out = task:{}", id);
-        db.client().query(&query).await.map_err(DbError::from)?;
-
-        // Delete depends_on edges where this task depends on something
-        let query = format!("DELETE depends_on WHERE in = task:{}", id);
-        db.client().query(&query).await.map_err(DbError::from)?;
-
-        // Delete depends_on edges where something depends on this task
-        let query = format!("DELETE depends_on WHERE out = task:{}", id);
-        db.client().query(&query).await.map_err(DbError::from)?;
-
-        Ok(())
+        Ok(count)
     }
 
     /// Prompt user for action when task has children.
