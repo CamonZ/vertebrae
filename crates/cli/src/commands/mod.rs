@@ -237,7 +237,7 @@ impl Command {
                 Ok(CommandResult::Table(output))
             }
             Command::Path(cmd) => {
-                let result = cmd.execute(db).await?;
+                let result = cmd.execute(service).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Ready(cmd) => {

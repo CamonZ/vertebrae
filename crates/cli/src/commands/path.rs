@@ -4,9 +4,8 @@
 //! between two tasks using BFS traversal of the dependency graph.
 
 use clap::Args;
-use serde::Deserialize;
-use std::collections::{HashMap, HashSet, VecDeque};
-use vertebrae_db::{Database, DbError};
+use vertebrae_core::TaskService;
+use vertebrae_db::DbError;
 
 /// Find the dependency path between two tasks
 #[derive(Debug, Args)]
@@ -40,14 +39,6 @@ pub struct PathResult {
     pub path: Option<Vec<TaskSummary>>,
 }
 
-/// Result from querying a task
-#[derive(Debug, Deserialize)]
-struct TaskRow {
-    #[allow(dead_code)]
-    id: surrealdb::sql::Thing,
-    title: String,
-}
-
 impl PathCommand {
     /// Execute the path command.
     ///
@@ -56,21 +47,35 @@ impl PathCommand {
     ///
     /// # Arguments
     ///
-    /// * `db` - Reference to the database connection
+    /// * `service` - Reference to the task service
     ///
     /// # Errors
     ///
     /// Returns `DbError` if:
     /// - Either task does not exist
     /// - Database operations fail
-    pub async fn execute(&self, db: &Database) -> Result<PathResult, DbError> {
+    pub async fn execute(&self, service: &dyn TaskService) -> Result<PathResult, DbError> {
+        let db = service.database();
+
         // Normalize IDs to lowercase for case-insensitive lookup
         let from_id = self.from_id.to_lowercase();
         let to_id = self.to_id.to_lowercase();
 
-        // Validate both tasks exist
-        let from_task = self.fetch_task(db, &from_id).await?;
-        let _to_task = self.fetch_task(db, &to_id).await?;
+        // Validate both tasks exist using the repository
+        let from_task = db
+            .tasks()
+            .get(&from_id)
+            .await?
+            .ok_or_else(|| DbError::TaskNotFound {
+                task_id: from_id.clone(),
+            })?;
+        let _to_task = db
+            .tasks()
+            .get(&to_id)
+            .await?
+            .ok_or_else(|| DbError::TaskNotFound {
+                task_id: to_id.clone(),
+            })?;
 
         // Handle same task case
         if from_id == to_id {
@@ -84,131 +89,36 @@ impl PathCommand {
             });
         }
 
-        // Find the path using BFS
-        let path = self.find_path_bfs(db, &from_id, &to_id).await?;
+        // Find the path using the graph repository
+        let path_ids = db.graph().find_path(&from_id, &to_id).await?;
+
+        // Convert path IDs to TaskSummary with titles
+        let path = match path_ids {
+            Some(ids) => {
+                let mut summaries = Vec::new();
+                for id in ids {
+                    let task = db
+                        .tasks()
+                        .get(&id)
+                        .await?
+                        .ok_or_else(|| DbError::TaskNotFound {
+                            task_id: id.clone(),
+                        })?;
+                    summaries.push(TaskSummary {
+                        id,
+                        title: task.title,
+                    });
+                }
+                Some(summaries)
+            }
+            None => None,
+        };
 
         Ok(PathResult {
             from_id,
             to_id,
             path,
         })
-    }
-
-    /// Fetch a task by ID.
-    async fn fetch_task(&self, db: &Database, id: &str) -> Result<TaskRow, DbError> {
-        let query = format!("SELECT id, title FROM task:{}", id);
-
-        let mut result = db.client().query(&query).await?;
-        let task: Option<TaskRow> = result.take(0)?;
-
-        task.ok_or_else(|| DbError::TaskNotFound {
-            task_id: id.to_string(),
-        })
-    }
-
-    /// Find the shortest path from source to target using BFS.
-    ///
-    /// Traverses the dependency graph following `depends_on` edges.
-    /// Returns None if no path exists.
-    async fn find_path_bfs(
-        &self,
-        db: &Database,
-        from_id: &str,
-        to_id: &str,
-    ) -> Result<Option<Vec<TaskSummary>>, DbError> {
-        let mut visited = HashSet::new();
-        let mut queue = VecDeque::new();
-        let mut parent_map: HashMap<String, String> = HashMap::new();
-        let mut task_titles: HashMap<String, String> = HashMap::new();
-
-        // Get the title for the source task
-        let from_task = self.fetch_task(db, from_id).await?;
-        task_titles.insert(from_id.to_string(), from_task.title);
-
-        // Start BFS from the source
-        queue.push_back(from_id.to_string());
-        visited.insert(from_id.to_string());
-
-        while let Some(current) = queue.pop_front() {
-            // Get all tasks that the current task depends on
-            let query = format!("SELECT VALUE out FROM task:{}->depends_on", current);
-            let mut result = db.client().query(&query).await?;
-            let deps: Vec<surrealdb::sql::Thing> = result.take(0)?;
-
-            for dep in deps {
-                let dep_id = dep.id.to_string();
-
-                // If we haven't visited this task yet
-                if visited.insert(dep_id.clone()) {
-                    // Record the parent for path reconstruction
-                    parent_map.insert(dep_id.clone(), current.clone());
-
-                    // Fetch and store the task title
-                    if let Ok(task) = self.fetch_task(db, &dep_id).await {
-                        task_titles.insert(dep_id.clone(), task.title);
-                    }
-
-                    // If we found the target, reconstruct the path
-                    if dep_id == to_id {
-                        return Ok(Some(self.reconstruct_path(
-                            from_id,
-                            to_id,
-                            &parent_map,
-                            &task_titles,
-                        )));
-                    }
-
-                    queue.push_back(dep_id);
-                }
-            }
-        }
-
-        // No path found
-        Ok(None)
-    }
-
-    /// Reconstruct the path from source to target using the parent map.
-    fn reconstruct_path(
-        &self,
-        from_id: &str,
-        to_id: &str,
-        parent_map: &HashMap<String, String>,
-        task_titles: &HashMap<String, String>,
-    ) -> Vec<TaskSummary> {
-        let mut path = Vec::new();
-
-        // Build path from target to source
-        let mut current = to_id.to_string();
-        while current != from_id {
-            let title = task_titles
-                .get(&current)
-                .cloned()
-                .unwrap_or_else(|| "Unknown".to_string());
-            path.push(TaskSummary {
-                id: current.clone(),
-                title,
-            });
-
-            if let Some(parent) = parent_map.get(&current) {
-                current = parent.clone();
-            } else {
-                break;
-            }
-        }
-
-        // Add the source task
-        let from_title = task_titles
-            .get(from_id)
-            .cloned()
-            .unwrap_or_else(|| "Unknown".to_string());
-        path.push(TaskSummary {
-            id: from_id.to_string(),
-            title: from_title,
-        });
-
-        // Reverse to get path from source to target
-        path.reverse();
-        path
     }
 }
 
@@ -253,51 +163,45 @@ impl std::fmt::Display for PathResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vertebrae_core::DefaultTaskService;
+    use vertebrae_db::{Database, Status};
 
-    /// Helper to create an in-memory test database
-    async fn setup_test_db() -> Database {
+    /// Helper to create an in-memory test service
+    async fn setup_test_service() -> DefaultTaskService {
         let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-        db
+        DefaultTaskService::new(db)
     }
 
     /// Helper to create a task in the database
-    async fn create_task(db: &Database, id: &str, title: &str) {
-        let query = format!(
-            r#"CREATE task:{} SET
-                title = "{}",
-                level = "task",
-                status = "todo",
-                tags = [],
-                sections = [],
-                refs = []"#,
-            id, title
-        );
-
-        db.client().query(&query).await.unwrap();
+    async fn create_task(service: &DefaultTaskService, id: &str, title: &str) {
+        let db = service.database();
+        let task =
+            vertebrae_db::Task::new(title, vertebrae_db::Level::Task).with_status(Status::Todo);
+        db.tasks().create(id, &task).await.unwrap();
     }
 
     /// Helper to create a depends_on relationship
-    async fn create_depends_on(db: &Database, task_id: &str, blocker_id: &str) {
-        let query = format!(
-            "RELATE task:{} -> depends_on -> task:{}",
-            task_id, blocker_id
-        );
-        db.client().query(&query).await.unwrap();
+    async fn create_depends_on(service: &DefaultTaskService, task_id: &str, blocker_id: &str) {
+        let db = service.database();
+        db.relationships()
+            .create_depends_on(task_id, blocker_id)
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
     async fn test_path_same_task() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "taska", "Task A").await;
+        create_task(&service, "taska", "Task A").await;
 
         let cmd = PathCommand {
             from_id: "taska".to_string(),
             to_id: "taska".to_string(),
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok(), "Path command failed: {:?}", result.err());
 
         let path_result = result.unwrap();
@@ -313,18 +217,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_path_direct_dependency() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "taska", "Task A").await;
-        create_task(&db, "taskb", "Task B").await;
-        create_depends_on(&db, "taska", "taskb").await;
+        create_task(&service, "taska", "Task A").await;
+        create_task(&service, "taskb", "Task B").await;
+        create_depends_on(&service, "taska", "taskb").await;
 
         let cmd = PathCommand {
             from_id: "taska".to_string(),
             to_id: "taskb".to_string(),
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         let path_result = result.unwrap();
@@ -341,21 +245,21 @@ mod tests {
 
     #[tokio::test]
     async fn test_path_transitive_dependency() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
         // Create chain: A -> B -> C
-        create_task(&db, "taska", "Task A").await;
-        create_task(&db, "taskb", "Task B").await;
-        create_task(&db, "taskc", "Task C").await;
-        create_depends_on(&db, "taska", "taskb").await;
-        create_depends_on(&db, "taskb", "taskc").await;
+        create_task(&service, "taska", "Task A").await;
+        create_task(&service, "taskb", "Task B").await;
+        create_task(&service, "taskc", "Task C").await;
+        create_depends_on(&service, "taska", "taskb").await;
+        create_depends_on(&service, "taskb", "taskc").await;
 
         let cmd = PathCommand {
             from_id: "taska".to_string(),
             to_id: "taskc".to_string(),
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         let path_result = result.unwrap();
@@ -369,10 +273,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_path_no_path() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "taska", "Task A").await;
-        create_task(&db, "taskb", "Task B").await;
+        create_task(&service, "taska", "Task A").await;
+        create_task(&service, "taskb", "Task B").await;
         // No dependency between them
 
         let cmd = PathCommand {
@@ -380,7 +284,7 @@ mod tests {
             to_id: "taskb".to_string(),
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         let path_result = result.unwrap();
@@ -393,11 +297,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_path_wrong_direction() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "taska", "Task A").await;
-        create_task(&db, "taskb", "Task B").await;
-        create_depends_on(&db, "taska", "taskb").await;
+        create_task(&service, "taska", "Task A").await;
+        create_task(&service, "taskb", "Task B").await;
+        create_depends_on(&service, "taska", "taskb").await;
 
         // Try to find path in reverse direction (should not exist)
         let cmd = PathCommand {
@@ -405,7 +309,7 @@ mod tests {
             to_id: "taska".to_string(),
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         let path_result = result.unwrap();
@@ -414,16 +318,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_path_nonexistent_from_task() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "taskb", "Task B").await;
+        create_task(&service, "taskb", "Task B").await;
 
         let cmd = PathCommand {
             from_id: "nonexistent".to_string(),
             to_id: "taskb".to_string(),
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         match result {
             Err(DbError::TaskNotFound { task_id }) => {
                 assert_eq!(
@@ -439,16 +343,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_path_nonexistent_to_task() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "taska", "Task A").await;
+        create_task(&service, "taska", "Task A").await;
 
         let cmd = PathCommand {
             from_id: "taska".to_string(),
             to_id: "nonexistent".to_string(),
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         match result {
             Err(DbError::TaskNotFound { task_id }) => {
                 assert_eq!(
@@ -464,18 +368,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_path_case_insensitive() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
-        create_task(&db, "taska", "Task A").await;
-        create_task(&db, "taskb", "Task B").await;
-        create_depends_on(&db, "taska", "taskb").await;
+        create_task(&service, "taska", "Task A").await;
+        create_task(&service, "taskb", "Task B").await;
+        create_depends_on(&service, "taska", "taskb").await;
 
         let cmd = PathCommand {
             from_id: "TASKA".to_string(),
             to_id: "TASKB".to_string(),
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok(), "Case-insensitive lookup should work");
 
         let path_result = result.unwrap();
@@ -484,26 +388,26 @@ mod tests {
 
     #[tokio::test]
     async fn test_path_shortest_path() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
         // Create a diamond: A -> B -> D and A -> C -> D
         // Both paths have equal length, BFS should find one of them
-        create_task(&db, "taska", "Task A").await;
-        create_task(&db, "taskb", "Task B").await;
-        create_task(&db, "taskc", "Task C").await;
-        create_task(&db, "taskd", "Task D").await;
+        create_task(&service, "taska", "Task A").await;
+        create_task(&service, "taskb", "Task B").await;
+        create_task(&service, "taskc", "Task C").await;
+        create_task(&service, "taskd", "Task D").await;
 
-        create_depends_on(&db, "taska", "taskb").await;
-        create_depends_on(&db, "taska", "taskc").await;
-        create_depends_on(&db, "taskb", "taskd").await;
-        create_depends_on(&db, "taskc", "taskd").await;
+        create_depends_on(&service, "taska", "taskb").await;
+        create_depends_on(&service, "taska", "taskc").await;
+        create_depends_on(&service, "taskb", "taskd").await;
+        create_depends_on(&service, "taskc", "taskd").await;
 
         let cmd = PathCommand {
             from_id: "taska".to_string(),
             to_id: "taskd".to_string(),
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         let path_result = result.unwrap();
@@ -517,12 +421,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_path_long_chain() {
-        let db = setup_test_db().await;
+        let service = setup_test_service().await;
 
         // Create chain: a -> b -> c -> d -> e
         for c in ['a', 'b', 'c', 'd', 'e'] {
             let id = format!("task{}", c);
-            create_task(&db, &id, &format!("Task {}", c.to_uppercase())).await;
+            create_task(&service, &id, &format!("Task {}", c.to_uppercase())).await;
         }
 
         for (from, to) in [
@@ -531,7 +435,7 @@ mod tests {
             ("taskc", "taskd"),
             ("taskd", "taske"),
         ] {
-            create_depends_on(&db, from, to).await;
+            create_depends_on(&service, from, to).await;
         }
 
         let cmd = PathCommand {
@@ -539,7 +443,7 @@ mod tests {
             to_id: "taske".to_string(),
         };
 
-        let result = cmd.execute(&db).await;
+        let result = cmd.execute(&service).await;
         assert!(result.is_ok());
 
         let path_result = result.unwrap();
