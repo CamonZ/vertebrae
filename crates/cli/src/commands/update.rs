@@ -5,7 +5,7 @@
 
 use clap::Args;
 use serde::Deserialize;
-use vertebrae_core::{ServiceError, TaskService};
+use vertebrae_core::{ServiceError, TaskService, UpdateTaskOptions};
 use vertebrae_db::{Database, Priority, SectionType, TaskUpdate};
 
 /// Update an existing task
@@ -87,8 +87,8 @@ fn parse_section_type(s: &str) -> Result<SectionType, String> {
 impl UpdateCommand {
     /// Execute the update command.
     ///
-    /// Fetches the existing task, applies the specified changes,
-    /// and updates the task in the database.
+    /// Builds an UpdateTaskOptions from CLI arguments and uses the service
+    /// layer to apply updates. Section handling is performed separately.
     ///
     /// # Arguments
     ///
@@ -100,9 +100,8 @@ impl UpdateCommand {
     /// - The task with the given ID does not exist
     /// - The parent task doesn't exist (if specified)
     /// - Attempting to set self as parent
-    /// - Database operations fail
+    /// - Service operations fail
     pub async fn execute(&self, service: &dyn TaskService) -> Result<String, ServiceError> {
-        let db = service.database();
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
 
@@ -116,7 +115,7 @@ impl UpdateCommand {
             return Ok(id);
         }
 
-        // Validate parent if specified
+        // Validate parent if specified (for field/tag updates)
         if let Some(parent_id) = &self.parent
             && !parent_id.is_empty()
         {
@@ -135,20 +134,49 @@ impl UpdateCommand {
             }
         }
 
-        // Apply field updates
-        self.apply_field_updates(db, &id).await?;
+        // Build UpdateTaskOptions from CLI arguments
+        let mut options = UpdateTaskOptions::new();
 
-        // Handle tag updates
-        self.apply_tag_updates(db, &id).await?;
+        if let Some(title) = &self.title {
+            options = options.with_title(title.clone());
+        }
 
-        // Handle parent update
-        self.apply_parent_update(db, &id).await?;
+        if let Some(description) = &self.description {
+            if description.is_empty() {
+                options = options.clear_description();
+            } else {
+                options = options.with_description(description.clone());
+            }
+        }
 
-        // Handle section updates
-        self.apply_section_updates(db, &id).await?;
+        if let Some(priority) = &self.priority {
+            options = options.with_priority(priority.clone());
+        }
 
-        // Update timestamp
-        self.update_timestamp(db, &id).await?;
+        // Add tags
+        for tag in &self.add_tags {
+            options = options.add_tag(tag.clone());
+        }
+
+        // Remove tags
+        for tag in &self.remove_tags {
+            options = options.remove_tag(tag.clone());
+        }
+
+        // Handle parent
+        if let Some(parent_id) = &self.parent {
+            if parent_id.is_empty() {
+                options = options.clear_parent();
+            } else {
+                options = options.with_parent(parent_id.to_lowercase());
+            }
+        }
+
+        // Apply all field/tag/parent updates via service layer
+        service.update_task(&id, options).await?;
+
+        // Handle section updates (separate for now - ticket b09ca2 will refactor)
+        self.apply_section_updates(service.database(), &id).await?;
 
         Ok(id)
     }
@@ -163,76 +191,6 @@ impl UpdateCommand {
             || self.parent.is_some()
             || self.edit_section.is_some()
             || self.remove_section.is_some()
-    }
-
-    /// Apply field updates (title, description, priority).
-    async fn apply_field_updates(&self, db: &Database, id: &str) -> Result<(), ServiceError> {
-        let mut updates = TaskUpdate::new();
-
-        if let Some(title) = &self.title {
-            updates = updates.with_title(title.clone());
-        }
-
-        if let Some(description) = &self.description {
-            if description.is_empty() {
-                updates = updates.clear_description();
-            } else {
-                updates = updates.with_description(description.clone());
-            }
-        }
-
-        if let Some(priority) = &self.priority {
-            updates = updates.with_priority(priority.clone());
-        }
-
-        if updates.has_updates() {
-            db.tasks().update(id, &updates).await?;
-        }
-
-        Ok(())
-    }
-
-    /// Apply tag updates (add and remove).
-    async fn apply_tag_updates(&self, db: &Database, id: &str) -> Result<(), ServiceError> {
-        if self.add_tags.is_empty() && self.remove_tags.is_empty() {
-            return Ok(());
-        }
-
-        let mut updates = TaskUpdate::new();
-
-        // Remove tags
-        for tag in &self.remove_tags {
-            updates = updates.remove_tag(tag.clone());
-        }
-
-        // Add tags
-        for tag in &self.add_tags {
-            updates = updates.add_tag(tag.clone());
-        }
-
-        db.tasks().update(id, &updates).await?;
-
-        Ok(())
-    }
-
-    /// Apply parent update.
-    async fn apply_parent_update(&self, db: &Database, id: &str) -> Result<(), ServiceError> {
-        let Some(parent_id) = &self.parent else {
-            return Ok(());
-        };
-
-        // First, delete any existing child_of edge from this task
-        db.relationships().remove_child_of(id).await?;
-
-        // If parent is not empty, create new edge
-        if !parent_id.is_empty() {
-            let parent_id_lower = parent_id.to_lowercase();
-            db.relationships()
-                .create_child_of(id, &parent_id_lower)
-                .await?;
-        }
-
-        Ok(())
     }
 
     /// Apply section updates (edit and remove).
@@ -451,12 +409,6 @@ impl UpdateCommand {
         } else {
             Ok(Vec::new())
         }
-    }
-
-    /// Update the updated_at timestamp.
-    async fn update_timestamp(&self, db: &Database, id: &str) -> Result<(), ServiceError> {
-        db.tasks().update_timestamp(id).await?;
-        Ok(())
     }
 }
 
