@@ -387,27 +387,8 @@ mod lifecycle {
     }
 
     #[tokio::test]
-    async fn test_standalone_triage_works_identically_to_transition_to() {
-        // Test that `vtb triage` produces the same behavior as `vtb transition-to <id> todo`
-        let ctx = TestContext::new().await;
-        create_task(ctx.db(), "task1", "Backlog Task", "task", "backlog").await;
-
-        // Use the standalone triage command
-        standalone_triage_cmd("task1")
-            .execute(ctx.db())
-            .await
-            .unwrap();
-
-        // Verify same outcome as transition-to
-        assert_eq!(
-            get_task_status(ctx.db(), "task1").await,
-            Some("todo".to_string())
-        );
-    }
-
-    #[tokio::test]
     async fn test_standalone_commands_complete_happy_path() {
-        // Test complete lifecycle using only standalone commands
+        // Test complete lifecycle using standalone commands
         let ctx = TestContext::new().await;
 
         // 1. Add task (creates in backlog)
@@ -420,11 +401,8 @@ mod lifecycle {
             Some("backlog".to_string())
         );
 
-        // 2. Triage using standalone command
-        standalone_triage_cmd(&task_id)
-            .execute(ctx.db())
-            .await
-            .unwrap();
+        // 2. Transition to todo using transition-to command
+        triage_cmd(&task_id).execute(ctx.db()).await.unwrap();
         assert_eq!(
             get_task_status(ctx.db(), &task_id).await,
             Some("todo".to_string())

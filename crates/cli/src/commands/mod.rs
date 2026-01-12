@@ -25,7 +25,6 @@ pub mod start;
 pub mod step_done;
 pub mod submit;
 pub mod transition_to;
-pub mod triage;
 pub mod undepend;
 pub mod unref;
 pub mod unsection;
@@ -55,7 +54,6 @@ pub use start::StartCommand;
 pub use step_done::StepDoneCommand;
 pub use submit::SubmitCommand;
 pub use transition_to::TransitionToCommand;
-pub use triage::TriageCommand;
 pub use undepend::UndependCommand;
 pub use unref::UnrefCommand;
 pub use unsection::UnsectionCommand;
@@ -127,8 +125,6 @@ pub enum Command {
     /// Transition a task to a specific status
     #[command(name = "transition-to")]
     TransitionTo(TransitionToCommand),
-    /// Triage a task (transition from backlog to todo)
-    Triage(TriageCommand),
     /// Update an existing task
     Update(UpdateCommand),
     /// Workflow management commands
@@ -309,10 +305,6 @@ impl Command {
                 let result = cmd.execute(db).await?;
                 notification::notify_task_changed(format!("task:{}", result.id), "StatusChanged")
                     .await;
-                Ok(CommandResult::Message(format!("{}", result)))
-            }
-            Command::Triage(cmd) => {
-                let result = cmd.execute(db).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Update(cmd) => {

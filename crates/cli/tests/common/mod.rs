@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 use vertebrae_cli::commands::{
     AddCommand, DeleteCommand, DependCommand, DoneCommand, ExportCommand, ListCommand, RefCommand,
-    SectionCommand, StartCommand, SubmitCommand, TransitionToCommand, TriageCommand,
+    SectionCommand, StartCommand, SubmitCommand, TransitionToCommand,
     transition_to::TargetStatus,
     workflow::{
         ParsedStep, WorkflowAddCommand, WorkflowAdvanceCommand, WorkflowAssignCommand,
@@ -517,26 +517,6 @@ pub async fn workflow_exists(db: &Database, id: &str) -> bool {
 // =============================================================================
 // Backwards Compatibility Command Helpers (standalone start/done/submit/triage)
 // =============================================================================
-
-/// Create a standalone triage command (backwards compatibility).
-/// By default skips validation for test convenience.
-pub fn standalone_triage_cmd(id: &str) -> TriageCommand {
-    TriageCommand {
-        id: id.to_string(),
-        force: false,
-        skip_validation: true,
-    }
-}
-
-/// Create a standalone triage command with validation enabled (backwards compatibility).
-#[allow(dead_code)]
-pub fn standalone_triage_cmd_with_validation(id: &str) -> TriageCommand {
-    TriageCommand {
-        id: id.to_string(),
-        force: false,
-        skip_validation: false,
-    }
-}
 
 /// Create a standalone start command (backwards compatibility).
 pub fn standalone_start_cmd(id: &str) -> StartCommand {
