@@ -897,6 +897,7 @@ mod tests {
             priority: Some(Priority::Medium),
             tags: vec!["test".to_string()],
             needs_human_review: Some(true),
+            created_at: chrono::Utc::now(),
         };
 
         let summary = TaskSummary::from(db_summary);

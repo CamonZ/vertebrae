@@ -568,7 +568,11 @@ tags: string[];
 /**
  * Whether this task needs human review
  */
-needs_human_review: boolean | null }
+needs_human_review: boolean | null; 
+/**
+ * When the task was created (ISO 8601 format)
+ */
+created_at: string }
 /**
  * Task with its relations (parent, children, dependencies)
  */

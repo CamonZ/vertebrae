@@ -6,6 +6,7 @@
 
 use crate::error::{ServiceError, ServiceResult};
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use vertebrae_db::{
@@ -276,6 +277,8 @@ pub struct TaskTreeNode {
     pub has_blockers: bool,
     /// Number of incomplete dependencies
     pub blocker_count: usize,
+    /// When the task was created
+    pub created_at: DateTime<Utc>,
     /// Child nodes in the hierarchy
     pub children: Vec<TaskTreeNode>,
 }
@@ -293,6 +296,7 @@ impl TaskTreeNode {
             needs_human_review: summary.needs_human_review,
             has_blockers,
             blocker_count,
+            created_at: summary.created_at,
             children: Vec::new(),
         }
     }

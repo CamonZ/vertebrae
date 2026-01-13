@@ -111,6 +111,32 @@ function truncateId(id: string): string {
 }
 
 /**
+ * Format ISO 8601 date as relative time or short date
+ */
+function formatCreatedAt(isoDate: string): string {
+  const date = new Date(isoDate);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffSecs = Math.floor(diffMs / 1000);
+  const diffMins = Math.floor(diffSecs / 60);
+  const diffHours = Math.floor(diffMins / 60);
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffDays > 30) {
+    // Show short date for older items
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  } else if (diffDays > 0) {
+    return `${diffDays}d ago`;
+  } else if (diffHours > 0) {
+    return `${diffHours}h ago`;
+  } else if (diffMins > 0) {
+    return `${diffMins}m ago`;
+  } else {
+    return 'just now';
+  }
+}
+
+/**
  * TaskRow component displays a single task in the task list.
  * Features neural-inspired styling with glowing active states and resizable columns.
  */
@@ -205,6 +231,13 @@ export function TaskRow({ task, isSelected = false, onClick, columnWidths = {} }
         ) : (
           <span className="text-text-muted">-</span>
         )}
+      </td>
+
+      {/* Created column */}
+      <td style={{ width: columnWidths['created'] ? `${columnWidths['created']}px` : '90px' }} className="whitespace-nowrap px-2 py-3">
+        <span className="text-xs text-text-muted" title={new Date(task.created_at).toLocaleString()}>
+          {formatCreatedAt(task.created_at)}
+        </span>
       </td>
 
       {/* Tags column */}

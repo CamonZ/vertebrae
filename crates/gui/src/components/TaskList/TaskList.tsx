@@ -121,6 +121,7 @@ const COLUMN_CONFIG = {
   level: { columnId: 'level', label: 'Level', defaultWidth: 70, minWidth: 50 },
   status: { columnId: 'status', label: 'Status', defaultWidth: 90, minWidth: 50 },
   priority: { columnId: 'priority', label: 'Priority', defaultWidth: 70, minWidth: 30 },
+  created: { columnId: 'created', label: 'Created', defaultWidth: 90, minWidth: 70 },
   tags: { columnId: 'tags', label: 'Tags', defaultWidth: 150, minWidth: 80 },
 };
 

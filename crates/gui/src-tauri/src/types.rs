@@ -201,6 +201,8 @@ pub struct TaskSummary {
     pub tags: Vec<String>,
     /// Whether this task needs human review
     pub needs_human_review: Option<bool>,
+    /// When the task was created (ISO 8601 format)
+    pub created_at: String,
 }
 
 impl From<vertebrae_db::TaskSummary> for TaskSummary {
@@ -213,6 +215,7 @@ impl From<vertebrae_db::TaskSummary> for TaskSummary {
             priority: summary.priority.map(Into::into),
             tags: summary.tags,
             needs_human_review: summary.needs_human_review,
+            created_at: summary.created_at.to_rfc3339(),
         }
     }
 }

@@ -26,6 +26,8 @@ pub struct TaskSummary {
     pub tags: Vec<String>,
     /// Whether this task needs human review
     pub needs_human_review: Option<bool>,
+    /// When the task was created
+    pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
 /// Internal row type for deserializing from SurrealDB
@@ -40,8 +42,7 @@ struct TaskRow {
     tags: Vec<String>,
     #[serde(default)]
     needs_human_review: Option<bool>,
-    /// Created timestamp - used by SQL ORDER BY for sorting, must be selected to match query
-    #[allow(dead_code)]
+    /// Created timestamp - used by SQL ORDER BY for sorting and display
     created_at: surrealdb::sql::Datetime,
 }
 
@@ -56,6 +57,7 @@ impl TaskRow {
             priority: self.priority.as_deref().map(parse_priority),
             tags: self.tags,
             needs_human_review: self.needs_human_review,
+            created_at: self.created_at.0,
         }
     }
 }
@@ -597,6 +599,7 @@ impl<'a> TaskLister<'a> {
                 priority: task.priority.map(|p| parse_priority(&p)),
                 tags: task.tags,
                 needs_human_review: task.needs_human_review,
+                created_at: task.created_at.0,
             })
             .collect();
 
@@ -893,6 +896,7 @@ mod tests {
             priority: Some(Priority::High),
             tags: vec!["backend".to_string()],
             needs_human_review: Some(true),
+            created_at: chrono::Utc::now(),
         };
 
         let cloned = summary.clone();
@@ -909,6 +913,7 @@ mod tests {
             priority: Some(Priority::High),
             tags: vec!["backend".to_string()],
             needs_human_review: None,
+            created_at: chrono::Utc::now(),
         };
 
         let debug_str = format!("{:?}", summary);
@@ -919,6 +924,7 @@ mod tests {
 
     #[test]
     fn test_task_summary_eq() {
+        let now = chrono::Utc::now();
         let summary1 = TaskSummary {
             id: "123".to_string(),
             title: "Test".to_string(),
@@ -927,6 +933,7 @@ mod tests {
             priority: None,
             tags: vec![],
             needs_human_review: None,
+            created_at: now,
         };
 
         let summary2 = TaskSummary {
@@ -937,6 +944,7 @@ mod tests {
             priority: None,
             tags: vec![],
             needs_human_review: None,
+            created_at: now,
         };
 
         assert_eq!(summary1, summary2);

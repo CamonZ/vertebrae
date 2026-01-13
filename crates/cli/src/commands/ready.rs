@@ -195,6 +195,7 @@ mod tests {
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
+                created_at: chrono::Utc::now(),
             }],
             backlog_ready: vec![],
         };
@@ -218,6 +219,7 @@ mod tests {
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
+                created_at: chrono::Utc::now(),
             }],
         };
 
@@ -230,6 +232,7 @@ mod tests {
 
     #[test]
     fn test_ready_result_display_both_sections() {
+        let now = chrono::Utc::now();
         let result = ReadyResult {
             todo_ready: vec![TaskSummary {
                 id: "abc123".to_string(),
@@ -239,6 +242,7 @@ mod tests {
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
+                created_at: now,
             }],
             backlog_ready: vec![TaskSummary {
                 id: "def456".to_string(),
@@ -248,6 +252,7 @@ mod tests {
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
+                created_at: now,
             }],
         };
 

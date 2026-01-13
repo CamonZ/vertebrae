@@ -304,6 +304,7 @@ fn convert_tree_node(node: &vertebrae_core::TaskTreeNode) -> TaskHierarchyNode {
             priority: node.priority.clone().map(Into::into),
             tags: node.tags.clone(),
             needs_human_review: node.needs_human_review,
+            created_at: node.created_at.to_rfc3339(),
         },
         children: node.children.iter().map(convert_tree_node).collect(),
     }

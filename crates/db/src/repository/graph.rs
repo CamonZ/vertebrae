@@ -754,10 +754,11 @@ impl<'a> GraphQueries<'a> {
             tags: Vec<String>,
             #[serde(default)]
             needs_human_review: Option<bool>,
+            created_at: surrealdb::sql::Datetime,
         }
 
         let query = format!(
-            r#"SELECT id, title, level, status, priority, tags, needs_human_review FROM task
+            r#"SELECT id, title, level, status, priority, tags, needs_human_review, created_at FROM task
                WHERE <-depends_on<-task CONTAINS task:{}
                AND status != "done""#,
             task_id
@@ -776,6 +777,7 @@ impl<'a> GraphQueries<'a> {
                 priority: row.priority.as_deref().map(Self::parse_priority),
                 tags: row.tags,
                 needs_human_review: row.needs_human_review,
+                created_at: row.created_at.0,
             })
             .collect())
     }

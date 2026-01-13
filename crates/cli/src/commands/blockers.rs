@@ -163,6 +163,7 @@ impl BlockersCommand {
                     priority: task.priority,
                     tags: task.tags,
                     needs_human_review: task.needs_human_review,
+                    created_at: task.created_at.unwrap_or_else(chrono::Utc::now),
                 });
             }
         }
