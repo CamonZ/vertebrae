@@ -287,14 +287,21 @@ pub async fn get_task_hierarchy(
             }
         }
         None => {
-            // Return all root nodes converted to TaskHierarchyNode
-            Ok(tree.iter().map(convert_tree_node).collect())
+            // Return all root nodes converted to TaskHierarchyNode, sorted by newest first
+            let mut nodes: Vec<TaskHierarchyNode> = tree.iter().map(convert_tree_node).collect();
+            nodes.sort_by(|a, b| b.task.created_at.cmp(&a.task.created_at));
+            Ok(nodes)
         }
     }
 }
 
 /// Helper function to convert TaskTreeNode to TaskHierarchyNode
+/// Children are sorted by created_at descending (newest first)
 fn convert_tree_node(node: &vertebrae_core::TaskTreeNode) -> TaskHierarchyNode {
+    let mut children: Vec<TaskHierarchyNode> =
+        node.children.iter().map(convert_tree_node).collect();
+    children.sort_by(|a, b| b.task.created_at.cmp(&a.task.created_at));
+
     TaskHierarchyNode {
         task: TaskSummary {
             id: node.id.clone(),
@@ -306,7 +313,7 @@ fn convert_tree_node(node: &vertebrae_core::TaskTreeNode) -> TaskHierarchyNode {
             needs_human_review: node.needs_human_review,
             created_at: node.created_at.to_rfc3339(),
         },
-        children: node.children.iter().map(convert_tree_node).collect(),
+        children,
     }
 }
 

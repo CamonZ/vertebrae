@@ -153,23 +153,10 @@ export function TaskTreeView({
 
   return (
     <div className="overflow-x-auto">
-      {/* Tree header with column names */}
-      <div className="sticky top-0 z-10 flex items-center border-b border-border bg-bg-secondary/50 px-4 py-2.5 backdrop-blur-sm">
-        {/* Spacer for expand button */}
-        <div className="w-5 shrink-0" />
-        {/* Column headers */}
-        <span className="w-16 shrink-0 font-mono text-[10px] font-medium uppercase tracking-wider text-text-muted">
-          Created
-        </span>
-        <span className="w-14 shrink-0 font-mono text-[10px] font-medium uppercase tracking-wider text-text-muted">
-          ID
-        </span>
-        <span className="flex-1 font-mono text-[10px] font-medium uppercase tracking-wider text-text-muted">
-          Title
-        </span>
-        {/* Total count on the right */}
-        <span className="ml-auto shrink-0 font-mono text-[10px] text-text-muted">
-          {totalTasks} task{totalTasks !== 1 ? "s" : ""}
+      {/* Tree header with task count */}
+      <div className="sticky top-0 z-10 flex items-center justify-end border-b border-border bg-bg-secondary/50 px-4 py-2 backdrop-blur-sm">
+        <span className="font-mono text-[10px] text-text-muted">
+          {hierarchy.length} root{hierarchy.length !== 1 ? "s" : ""} / {totalTasks} total
         </span>
       </div>
 
