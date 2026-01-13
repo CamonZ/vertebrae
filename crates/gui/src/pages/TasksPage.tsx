@@ -73,14 +73,6 @@ export function TasksPage() {
     setViewMode(mode);
   }, []);
 
-  const handleRefresh = useCallback(() => {
-    if (viewMode === 'tree') {
-      refetchHierarchy();
-    } else {
-      refetch();
-    }
-  }, [viewMode, refetch, refetchHierarchy]);
-
   // Count active tasks - works for both list and tree views
   const activeCount = tasks.filter((t) => t.status === "in_progress").length;
 
@@ -102,44 +94,19 @@ export function TasksPage() {
           {/* Neural grid background */}
           <div className="neural-grid pointer-events-none absolute inset-0 opacity-20" />
 
-          <div className="relative mb-4 flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <h1 className="text-lg font-semibold text-text-primary">Tasks</h1>
-              {activeCount > 0 && (
-                <div className="flex items-center gap-2 rounded-full border border-warning/30 bg-warning/10 px-3 py-1">
-                  <span className="relative flex h-2 w-2">
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-warning opacity-75" />
-                    <span className="relative inline-flex h-2 w-2 rounded-full bg-warning" />
-                  </span>
-                  <span className="text-xs font-medium text-warning">
-                    {activeCount} active
-                  </span>
-                </div>
-              )}
-            </div>
-            <button
-              type="button"
-              onClick={handleRefresh}
-              disabled={currentIsLoading}
-              className="flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/10 px-4 py-2 text-sm font-medium text-primary transition-all hover:border-primary hover:bg-primary hover:text-bg-primary hover:shadow-glow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
-              aria-label="Refresh task list"
-            >
-              <svg
-                className={`h-4 w-4 ${currentIsLoading ? "animate-spin" : ""}`}
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={1.5}
-                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                />
-              </svg>
-              {currentIsLoading ? "Loading..." : "Refresh"}
-            </button>
+          <div className="relative mb-4 flex items-center gap-4">
+            <h1 className="text-lg font-semibold text-text-primary">Tasks</h1>
+            {activeCount > 0 && (
+              <div className="flex items-center gap-2 rounded-full border border-warning/30 bg-warning/10 px-3 py-1">
+                <span className="relative flex h-2 w-2">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-warning opacity-75" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-warning" />
+                </span>
+                <span className="text-xs font-medium text-warning">
+                  {activeCount} active
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Filter controls */}
