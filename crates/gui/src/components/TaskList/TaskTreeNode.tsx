@@ -7,6 +7,7 @@ import type {
   TaskPriority,
 } from "../../bindings";
 import type { useExpandedNodes } from "../../hooks/useExpandedNodes";
+import { RelativeTime } from "../RelativeTime";
 
 interface TaskTreeNodeProps {
   node: TaskHierarchyNode;
@@ -267,6 +268,9 @@ export function TaskTreeNode({
             />
           </svg>
         </button>
+
+        {/* Created timestamp */}
+        <RelativeTime date={task.created_at} className="shrink-0 w-16" />
 
         {/* Task ID */}
         <code className="shrink-0 font-mono text-xs text-text-muted">

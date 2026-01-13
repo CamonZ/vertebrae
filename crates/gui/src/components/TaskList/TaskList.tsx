@@ -116,12 +116,12 @@ function ErrorState({ error }: { error: string }) {
 
 // Column configuration with default and minimum widths
 const COLUMN_CONFIG = {
+  created: { columnId: 'created', label: 'Created', defaultWidth: 90, minWidth: 70 },
   id: { columnId: 'id', label: 'ID', defaultWidth: 70, minWidth: 50 },
   title: { columnId: 'title', label: 'Title', defaultWidth: 300, minWidth: 150 },
   level: { columnId: 'level', label: 'Level', defaultWidth: 70, minWidth: 50 },
   status: { columnId: 'status', label: 'Status', defaultWidth: 90, minWidth: 50 },
   priority: { columnId: 'priority', label: 'Priority', defaultWidth: 70, minWidth: 30 },
-  created: { columnId: 'created', label: 'Created', defaultWidth: 90, minWidth: 70 },
   tags: { columnId: 'tags', label: 'Tags', defaultWidth: 150, minWidth: 80 },
 };
 
