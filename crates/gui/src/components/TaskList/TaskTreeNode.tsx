@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useCallback } from "react";
 import type {
   TaskHierarchyNode,
   TaskSummary,
@@ -6,6 +6,7 @@ import type {
   TaskLevel,
   TaskPriority,
 } from "../../bindings";
+import type { useExpandedNodes } from "../../hooks/useExpandedNodes";
 
 interface TaskTreeNodeProps {
   node: TaskHierarchyNode;
@@ -13,7 +14,7 @@ interface TaskTreeNodeProps {
   isSelected?: boolean;
   selectedTaskId?: string | null;
   onTaskSelect?: (task: TaskSummary) => void;
-  defaultExpanded?: boolean;
+  expandedNodes?: ReturnType<typeof useExpandedNodes>;
 }
 
 /**
@@ -150,13 +151,15 @@ export function TaskTreeNode({
   depth,
   selectedTaskId,
   onTaskSelect,
-  defaultExpanded = true,
+  expandedNodes,
 }: TaskTreeNodeProps) {
-  const [isExpanded, setIsExpanded] = useState(defaultExpanded);
   const task = node.task;
   const hasChildren = node.children.length > 0;
   const isSelected = selectedTaskId === task.id;
   const isActive = task.status === "in_progress";
+
+  // Determine if this node is expanded - default to true if no expandedNodes provided
+  const isExpanded = expandedNodes ? expandedNodes.isNodeExpanded(task.id) : true;
 
   const handleClick = useCallback(() => {
     onTaskSelect?.(task);
@@ -175,9 +178,9 @@ export function TaskTreeNode({
   const handleToggleExpand = useCallback(
     (event: React.MouseEvent) => {
       event.stopPropagation();
-      setIsExpanded(!isExpanded);
+      expandedNodes?.toggleNode(task.id);
     },
-    [isExpanded]
+    [expandedNodes, task.id]
   );
 
   const handleToggleKeyDown = useCallback(
@@ -185,10 +188,10 @@ export function TaskTreeNode({
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
         event.stopPropagation();
-        setIsExpanded(!isExpanded);
+        expandedNodes?.toggleNode(task.id);
       }
     },
-    [isExpanded]
+    [expandedNodes, task.id]
   );
 
   const statusStyles = getStatusStyles(task.status);
@@ -356,7 +359,7 @@ export function TaskTreeNode({
               depth={depth + 1}
               selectedTaskId={selectedTaskId}
               onTaskSelect={onTaskSelect}
-              defaultExpanded={defaultExpanded}
+              expandedNodes={expandedNodes}
             />
           ))}
         </div>

@@ -3,6 +3,7 @@ import type { TaskFilterOptions, TaskSummary, TaskHierarchyNode } from "../bindi
 import { useTasks } from "../hooks/useTasks";
 import { useTaskHierarchy } from "../hooks/useTaskHierarchy";
 import { useTaskChangeListener } from "../hooks/useTaskChangeListener";
+import { useExpandedNodes } from "../hooks/useExpandedNodes";
 import { TaskList, TaskFilters, TaskTreeView, type ViewMode } from "../components/TaskList";
 import { TaskDetailPanel } from "../components/TaskDetail";
 
@@ -37,6 +38,9 @@ export function TasksPage() {
   const [filters, setFilters] = useState<TaskFilterOptions>(INITIAL_FILTERS);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('list');
+
+  // Use expanded nodes hook to preserve tree collapse state across updates
+  const expandedNodes = useExpandedNodes();
 
   const memoizedFilters = useMemo(() => filters, [filters]);
   const { tasks, isLoading, error, refetch } = useTasks(memoizedFilters);
@@ -129,6 +133,7 @@ export function TasksPage() {
               error={hierarchyError}
               selectedTaskId={selectedTaskId}
               onTaskSelect={handleTaskSelect}
+              expandedNodes={expandedNodes}
             />
           ) : (
             <TaskList

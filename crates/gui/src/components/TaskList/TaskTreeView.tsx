@@ -1,5 +1,6 @@
 import type { TaskHierarchyNode, TaskSummary } from "../../bindings";
 import { TaskTreeNode } from "./TaskTreeNode";
+import type { useExpandedNodes } from "../../hooks/useExpandedNodes";
 
 interface TaskTreeViewProps {
   hierarchy: TaskHierarchyNode[];
@@ -7,6 +8,7 @@ interface TaskTreeViewProps {
   error: string | null;
   selectedTaskId?: string | null;
   onTaskSelect?: (task: TaskSummary) => void;
+  expandedNodes?: ReturnType<typeof useExpandedNodes>;
 }
 
 /**
@@ -133,6 +135,7 @@ export function TaskTreeView({
   error,
   selectedTaskId,
   onTaskSelect,
+  expandedNodes,
 }: TaskTreeViewProps) {
   if (error) {
     return <ErrorState error={error} />;
@@ -170,7 +173,7 @@ export function TaskTreeView({
             depth={0}
             selectedTaskId={selectedTaskId}
             onTaskSelect={onTaskSelect}
-            defaultExpanded={true}
+            expandedNodes={expandedNodes}
           />
         ))}
       </div>

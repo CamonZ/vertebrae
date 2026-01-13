@@ -8,3 +8,4 @@ export { useWorkflows } from "./useWorkflows";
 export { useWorkflow } from "./useWorkflow";
 export { useWorkflowChangeListener } from "./useWorkflowChangeListener";
 export { useTheme } from "./useTheme";
+export { useExpandedNodes } from "./useExpandedNodes";
