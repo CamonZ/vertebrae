@@ -190,14 +190,14 @@ export function TaskRow({ task, isSelected = false, onClick, columnWidths = {} }
       </td>
 
       {/* Status column */}
-      <td style={{ width: columnWidths['status'] ? `${columnWidths['status']}px` : '120px' }} className="whitespace-nowrap px-4 py-3">
-        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${statusStyles.bg} ${statusStyles.text} ${statusStyles.glow ?? ''}`}>
+      <td style={{ width: columnWidths['status'] ? `${columnWidths['status']}px` : '90px' }} className="whitespace-nowrap px-2 py-3">
+        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${statusStyles.bg} ${statusStyles.text} ${statusStyles.glow ?? ''}`}>
           {formatStatus(task.status)}
         </span>
       </td>
 
       {/* Priority column */}
-      <td style={{ width: columnWidths['priority'] ? `${columnWidths['priority']}px` : '80px' }} className="whitespace-nowrap px-4 py-3">
+      <td style={{ width: columnWidths['priority'] ? `${columnWidths['priority']}px` : '70px' }} className="whitespace-nowrap px-2 py-3 text-center">
         {priorityIndicator ? (
           <span className={`font-mono text-sm font-bold ${priorityIndicator.color}`}>
             {priorityIndicator.icon}

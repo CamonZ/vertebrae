@@ -116,12 +116,12 @@ function ErrorState({ error }: { error: string }) {
 
 // Column configuration with default and minimum widths
 const COLUMN_CONFIG = {
-  id: { columnId: 'id', label: 'ID', defaultWidth: 80, minWidth: 60 },
+  id: { columnId: 'id', label: 'ID', defaultWidth: 70, minWidth: 50 },
   title: { columnId: 'title', label: 'Title', defaultWidth: 300, minWidth: 150 },
-  level: { columnId: 'level', label: 'Level', defaultWidth: 100, minWidth: 80 },
-  status: { columnId: 'status', label: 'Status', defaultWidth: 120, minWidth: 100 },
-  priority: { columnId: 'priority', label: 'Priority', defaultWidth: 80, minWidth: 60 },
-  tags: { columnId: 'tags', label: 'Tags', defaultWidth: 200, minWidth: 100 },
+  level: { columnId: 'level', label: 'Level', defaultWidth: 70, minWidth: 50 },
+  status: { columnId: 'status', label: 'Status', defaultWidth: 90, minWidth: 50 },
+  priority: { columnId: 'priority', label: 'Priority', defaultWidth: 70, minWidth: 30 },
+  tags: { columnId: 'tags', label: 'Tags', defaultWidth: 150, minWidth: 80 },
 };
 
 /**
@@ -178,7 +178,9 @@ export function TaskList({
       key={config.columnId}
       scope="col"
       style={{ width: `${columns[config.columnId]}px` }}
-      className="relative whitespace-nowrap px-4 py-2.5 text-left font-mono text-[10px] font-medium uppercase tracking-wider text-text-muted"
+      className={`relative whitespace-nowrap py-2.5 text-left font-mono text-[10px] font-medium uppercase tracking-wider text-text-muted ${
+        config.columnId === 'priority' || config.columnId === 'status' ? 'px-2' : 'px-4'
+      } ${!isLastColumn ? 'after:absolute after:right-0 after:top-1/4 after:h-1/2 after:w-px after:bg-border/50' : ''}`}
     >
       {config.label}
       {!isLastColumn && <ColumnResizer onResizeStart={handleResizeStart(config.columnId)} />}
@@ -187,7 +189,7 @@ export function TaskList({
 
   return (
     <div className="overflow-x-auto">
-      <table className="table-auto" role="grid" style={{ width: 'fit-content', minWidth: '100%' }}>
+      <table className="table-fixed" role="grid" style={{ width: 'fit-content', minWidth: '100%' }}>
         <thead>
           <tr className="border-b border-border bg-bg-secondary/50">
             {Object.entries(COLUMN_CONFIG).map(([, config], index, arr) =>

@@ -8,14 +8,14 @@ interface ColumnResizerProps {
 export function ColumnResizer({ onResizeStart }: ColumnResizerProps) {
   return (
     <div
-      className="group absolute right-0 top-0 h-full w-1 cursor-col-resize select-none bg-transparent transition-colors hover:bg-primary/50"
+      className="absolute -right-1 top-0 h-full w-2 cursor-col-resize select-none"
       onMouseDown={onResizeStart}
       role="separator"
       aria-label="Column resize handle"
       aria-orientation="vertical"
     >
-      {/* Visual indicator on hover */}
-      <div className="absolute right-0 top-1/2 h-4 w-1 -translate-y-1/2 rounded-sm bg-primary/30 opacity-0 transition-opacity group-hover:opacity-100" />
+      {/* Thin line visible on hover only */}
+      <div className="absolute left-1/2 top-1/4 h-1/2 w-px -translate-x-1/2 bg-border opacity-0 transition-opacity hover:opacity-100" />
     </div>
   );
 }
