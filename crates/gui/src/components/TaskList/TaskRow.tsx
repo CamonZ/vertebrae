@@ -4,6 +4,7 @@ interface TaskRowProps {
   task: TaskSummary;
   isSelected?: boolean;
   onClick?: (task: TaskSummary) => void;
+  columnWidths?: Record<string, number>;
 }
 
 /**
@@ -111,9 +112,9 @@ function truncateId(id: string): string {
 
 /**
  * TaskRow component displays a single task in the task list.
- * Features neural-inspired styling with glowing active states.
+ * Features neural-inspired styling with glowing active states and resizable columns.
  */
-export function TaskRow({ task, isSelected = false, onClick }: TaskRowProps) {
+export function TaskRow({ task, isSelected = false, onClick, columnWidths = {} }: TaskRowProps) {
   const handleClick = () => {
     onClick?.(task);
   };
@@ -144,15 +145,21 @@ export function TaskRow({ task, isSelected = false, onClick }: TaskRowProps) {
       }`}
     >
       {/* ID column */}
-      <td className={`whitespace-nowrap px-4 py-3 ${isSelected ? 'border-l-2 border-primary' : 'border-l-2 border-transparent'}`}>
+      <td
+        style={{ width: columnWidths['id'] ? `${columnWidths['id']}px` : '80px' }}
+        className={`whitespace-nowrap px-4 py-3 ${isSelected ? 'border-l-2 border-primary' : 'border-l-2 border-transparent'}`}
+      >
         <code className="font-mono text-xs text-text-muted">
           {truncateId(task.id)}
         </code>
       </td>
 
       {/* Title column */}
-      <td className="max-w-md px-4 py-3">
-        <div className="flex items-center gap-2">
+      <td
+        style={{ width: columnWidths['title'] ? `${columnWidths['title']}px` : '300px' }}
+        className="px-4 py-3"
+      >
+        <div className="flex items-center gap-2 overflow-hidden">
           {/* Active pulse indicator */}
           {isActive && (
             <span className="relative flex h-2 w-2 shrink-0">
@@ -160,7 +167,7 @@ export function TaskRow({ task, isSelected = false, onClick }: TaskRowProps) {
               <span className="relative inline-flex h-2 w-2 rounded-full bg-warning" />
             </span>
           )}
-          <span className={`truncate text-sm font-medium ${isSelected ? 'text-text-primary' : 'text-text-primary group-hover:text-text-primary'}`}>
+          <span className={`break-words text-sm font-medium ${isSelected ? 'text-text-primary' : 'text-text-primary group-hover:text-text-primary'}`}>
             {task.title}
           </span>
           {task.needs_human_review && (
@@ -176,21 +183,21 @@ export function TaskRow({ task, isSelected = false, onClick }: TaskRowProps) {
       </td>
 
       {/* Level column */}
-      <td className="whitespace-nowrap px-4 py-3">
+      <td style={{ width: columnWidths['level'] ? `${columnWidths['level']}px` : '100px' }} className="whitespace-nowrap px-4 py-3">
         <span className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider ${levelStyles.bg} ${levelStyles.text} ${levelStyles.border}`}>
           {formatLevel(task.level)}
         </span>
       </td>
 
       {/* Status column */}
-      <td className="whitespace-nowrap px-4 py-3">
+      <td style={{ width: columnWidths['status'] ? `${columnWidths['status']}px` : '120px' }} className="whitespace-nowrap px-4 py-3">
         <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${statusStyles.bg} ${statusStyles.text} ${statusStyles.glow ?? ''}`}>
           {formatStatus(task.status)}
         </span>
       </td>
 
       {/* Priority column */}
-      <td className="whitespace-nowrap px-4 py-3">
+      <td style={{ width: columnWidths['priority'] ? `${columnWidths['priority']}px` : '80px' }} className="whitespace-nowrap px-4 py-3">
         {priorityIndicator ? (
           <span className={`font-mono text-sm font-bold ${priorityIndicator.color}`}>
             {priorityIndicator.icon}
@@ -201,7 +208,7 @@ export function TaskRow({ task, isSelected = false, onClick }: TaskRowProps) {
       </td>
 
       {/* Tags column */}
-      <td className="px-4 py-3">
+      <td style={{ width: columnWidths['tags'] ? `${columnWidths['tags']}px` : '200px' }} className="px-4 py-3">
         {task.tags.length > 0 ? (
           <div className="flex flex-wrap gap-1">
             {task.tags.slice(0, 3).map((tag) => (

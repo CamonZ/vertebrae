@@ -1,5 +1,7 @@
 import type { TaskSummary } from '../../bindings';
 import { TaskRow } from './TaskRow';
+import { ColumnResizer } from './ColumnResizer';
+import { useResizableColumns } from '../../hooks/useResizableColumns';
 
 interface TaskListProps {
   tasks: TaskSummary[];
@@ -112,8 +114,19 @@ function ErrorState({ error }: { error: string }) {
   );
 }
 
+// Column configuration with default and minimum widths
+const COLUMN_CONFIG = {
+  id: { columnId: 'id', label: 'ID', defaultWidth: 80, minWidth: 60 },
+  title: { columnId: 'title', label: 'Title', defaultWidth: 300, minWidth: 150 },
+  level: { columnId: 'level', label: 'Level', defaultWidth: 100, minWidth: 80 },
+  status: { columnId: 'status', label: 'Status', defaultWidth: 120, minWidth: 100 },
+  priority: { columnId: 'priority', label: 'Priority', defaultWidth: 80, minWidth: 60 },
+  tags: { columnId: 'tags', label: 'Tags', defaultWidth: 200, minWidth: 100 },
+};
+
 /**
  * TaskList component displays a table of tasks with loading and empty states.
+ * Supports resizable columns with width persistence in localStorage.
  * Uses the Neural Pathways design system.
  */
 export function TaskList({
@@ -123,6 +136,27 @@ export function TaskList({
   selectedTaskId,
   onTaskSelect,
 }: TaskListProps) {
+  // Initialize column widths management
+  const columnIds = Object.keys(COLUMN_CONFIG);
+  const defaultWidths = Object.fromEntries(
+    Object.entries(COLUMN_CONFIG).map(([, config]) => [
+      config.columnId,
+      config.defaultWidth,
+    ])
+  );
+  const minWidths = Object.fromEntries(
+    Object.entries(COLUMN_CONFIG).map(([, config]) => [
+      config.columnId,
+      config.minWidth,
+    ])
+  );
+
+  const { columns, handleResizeStart } = useResizableColumns(
+    columnIds,
+    defaultWidths,
+    minWidths
+  );
+
   if (error) {
     return <ErrorState error={error} />;
   }
@@ -135,47 +169,30 @@ export function TaskList({
     return <EmptyState />;
   }
 
+  // Helper function to render table header with resizer
+  const renderHeaderCell = (
+    config: (typeof COLUMN_CONFIG)[keyof typeof COLUMN_CONFIG],
+    isLastColumn: boolean
+  ) => (
+    <th
+      key={config.columnId}
+      scope="col"
+      style={{ width: `${columns[config.columnId]}px` }}
+      className="relative whitespace-nowrap px-4 py-2.5 text-left font-mono text-[10px] font-medium uppercase tracking-wider text-text-muted"
+    >
+      {config.label}
+      {!isLastColumn && <ColumnResizer onResizeStart={handleResizeStart(config.columnId)} />}
+    </th>
+  );
+
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-full table-auto" role="grid">
+      <table className="table-auto" role="grid" style={{ width: 'fit-content', minWidth: '100%' }}>
         <thead>
           <tr className="border-b border-border bg-bg-secondary/50">
-            <th
-              scope="col"
-              className="whitespace-nowrap px-4 py-2.5 text-left font-mono text-[10px] font-medium uppercase tracking-wider text-text-muted"
-            >
-              ID
-            </th>
-            <th
-              scope="col"
-              className="whitespace-nowrap px-4 py-2.5 text-left font-mono text-[10px] font-medium uppercase tracking-wider text-text-muted"
-            >
-              Title
-            </th>
-            <th
-              scope="col"
-              className="whitespace-nowrap px-4 py-2.5 text-left font-mono text-[10px] font-medium uppercase tracking-wider text-text-muted"
-            >
-              Level
-            </th>
-            <th
-              scope="col"
-              className="whitespace-nowrap px-4 py-2.5 text-left font-mono text-[10px] font-medium uppercase tracking-wider text-text-muted"
-            >
-              Status
-            </th>
-            <th
-              scope="col"
-              className="whitespace-nowrap px-4 py-2.5 text-left font-mono text-[10px] font-medium uppercase tracking-wider text-text-muted"
-            >
-              Priority
-            </th>
-            <th
-              scope="col"
-              className="whitespace-nowrap px-4 py-2.5 text-left font-mono text-[10px] font-medium uppercase tracking-wider text-text-muted"
-            >
-              Tags
-            </th>
+            {Object.entries(COLUMN_CONFIG).map(([, config], index, arr) =>
+              renderHeaderCell(config, index === arr.length - 1)
+            )}
           </tr>
         </thead>
         <tbody className="divide-y divide-border">
@@ -185,6 +202,7 @@ export function TaskList({
               task={task}
               isSelected={selectedTaskId === task.id}
               onClick={onTaskSelect}
+              columnWidths={columns}
             />
           ))}
         </tbody>

@@ -9,3 +9,4 @@ export { useWorkflow } from "./useWorkflow";
 export { useWorkflowChangeListener } from "./useWorkflowChangeListener";
 export { useTheme } from "./useTheme";
 export { useExpandedNodes } from "./useExpandedNodes";
+export { useResizableColumns } from "./useResizableColumns";
