@@ -38,11 +38,18 @@ export function TasksPage() {
   const [filters, setFilters] = useState<TaskFilterOptions>(INITIAL_FILTERS);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('list');
+  const [showDone, setShowDone] = useState(false);
 
   // Use expanded nodes hook to preserve tree collapse state across updates
   const expandedNodes = useExpandedNodes();
 
-  const memoizedFilters = useMemo(() => filters, [filters]);
+  const memoizedFilters = useMemo(
+    () => ({
+      ...filters,
+      include_done: showDone,
+    }),
+    [filters, showDone]
+  );
   const { tasks, isLoading, error, refetch } = useTasks(memoizedFilters);
   const { hierarchy, isLoading: isHierarchyLoading, error: hierarchyError, refetch: refetchHierarchy } = useTaskHierarchy(null, memoizedFilters);
 
@@ -120,6 +127,8 @@ export function TasksPage() {
               onFiltersChange={handleFiltersChange}
               viewMode={viewMode}
               onViewModeChange={handleViewModeChange}
+              showDone={showDone}
+              onShowDoneChange={setShowDone}
             />
           </div>
         </div>

@@ -8,6 +8,8 @@ interface TaskFiltersProps {
   onFiltersChange: (filters: TaskFilterOptions) => void;
   viewMode?: ViewMode;
   onViewModeChange?: (mode: ViewMode) => void;
+  showDone?: boolean;
+  onShowDoneChange?: (showDone: boolean) => void;
 }
 
 /** Available status options for filtering */
@@ -16,7 +18,6 @@ const STATUS_OPTIONS: { value: TaskStatus; label: string }[] = [
   { value: 'todo', label: 'Todo' },
   { value: 'in_progress', label: 'Active' },
   { value: 'pending_review', label: 'Review' },
-  { value: 'done', label: 'Done' },
   { value: 'rejected', label: 'Rejected' },
 ];
 
@@ -29,9 +30,16 @@ const LEVEL_OPTIONS: { value: TaskLevel; label: string }[] = [
 
 /**
  * TaskFilters component with neural-pathway design.
- * Includes status dropdown, level dropdown, search, view mode toggle, and toggles.
+ * Includes status dropdown, level dropdown, search, view mode toggle, and show done toggle.
  */
-export function TaskFilters({ filters, onFiltersChange, viewMode = 'list', onViewModeChange }: TaskFiltersProps) {
+export function TaskFilters({
+  filters,
+  onFiltersChange,
+  viewMode = 'list',
+  onViewModeChange,
+  showDone = false,
+  onShowDoneChange,
+}: TaskFiltersProps) {
   const handleStatusChange = useCallback(
     (event: React.ChangeEvent<HTMLSelectElement>) => {
       const value = event.target.value;
@@ -71,6 +79,10 @@ export function TaskFilters({ filters, onFiltersChange, viewMode = 'list', onVie
       search: null,
     });
   }, [onFiltersChange]);
+
+  const handleToggleDone = useCallback(() => {
+    onShowDoneChange?.(!showDone);
+  }, [showDone, onShowDoneChange]);
 
   const hasActiveFilters =
     filters.statuses ||
@@ -184,6 +196,35 @@ export function TaskFilters({ filters, onFiltersChange, viewMode = 'list', onVie
           Clear
         </button>
       )}
+
+      {/* Show done toggle */}
+      <button
+        type="button"
+        onClick={handleToggleDone}
+        className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-all ${
+          showDone
+            ? 'border-primary/30 bg-primary/10 text-primary hover:border-primary/50 hover:bg-primary/20'
+            : 'border-border bg-bg-tertiary/50 text-text-muted hover:border-border/80 hover:bg-bg-tertiary'
+        } focus:outline-none focus:ring-2 focus:ring-primary/20`}
+        aria-label="Toggle show done tasks"
+        aria-pressed={showDone}
+      >
+        <svg
+          className="h-4 w-4"
+          fill={showDone ? 'currentColor' : 'none'}
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={1.5}
+            d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+          />
+        </svg>
+        Done
+      </button>
 
       {/* View mode toggle */}
       {onViewModeChange && (
