@@ -37,7 +37,7 @@ function countHierarchyTasks(nodes: TaskHierarchyNode[]): number {
 export function TasksPage() {
   const [filters, setFilters] = useState<TaskFilterOptions>(INITIAL_FILTERS);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>('list');
+  const [viewMode, setViewMode] = useState<ViewMode>('tree');
   const [showDone, setShowDone] = useState(false);
 
   // Use expanded nodes hook to preserve tree collapse state across updates

@@ -231,33 +231,6 @@ export function TaskFilters({
         <div className="ml-auto flex items-center rounded-lg border border-border bg-bg-tertiary/50 p-1">
           <button
             type="button"
-            onClick={() => onViewModeChange('list')}
-            className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-all ${
-              viewMode === 'list'
-                ? 'bg-primary/10 text-primary'
-                : 'text-text-muted hover:text-text-primary'
-            }`}
-            aria-label="List view"
-            aria-pressed={viewMode === 'list'}
-          >
-            <svg
-              className="h-4 w-4"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={1.5}
-                d="M4 6h16M4 10h16M4 14h16M4 18h16"
-              />
-            </svg>
-            List
-          </button>
-          <button
-            type="button"
             onClick={() => onViewModeChange('tree')}
             className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-all ${
               viewMode === 'tree'
@@ -282,6 +255,33 @@ export function TaskFilters({
               />
             </svg>
             Tree
+          </button>
+          <button
+            type="button"
+            onClick={() => onViewModeChange('list')}
+            className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-all ${
+              viewMode === 'list'
+                ? 'bg-primary/10 text-primary'
+                : 'text-text-muted hover:text-text-primary'
+            }`}
+            aria-label="List view"
+            aria-pressed={viewMode === 'list'}
+          >
+            <svg
+              className="h-4 w-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={1.5}
+                d="M4 6h16M4 10h16M4 14h16M4 18h16"
+              />
+            </svg>
+            List
           </button>
         </div>
       )}
