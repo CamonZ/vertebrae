@@ -48,8 +48,9 @@ pub mod workflow_service;
 // Re-export main types for convenience
 pub use error::{ServiceError, ServiceResult};
 pub use service::{
-    CreateTaskOptions, DefaultTaskService, TaskService, TaskTreeNode, TaskWithRelations,
-    TransitionResult, TreeFilterOptions, UnblockedTask, UpdateTaskOptions,
+    CreateTaskOptions, DefaultTaskService, MutationCallback, MutationEvent, TaskService,
+    TaskTreeNode, TaskWithRelations, TransitionResult, TreeFilterOptions, UnblockedTask,
+    UpdateTaskOptions,
 };
 pub use workflow_service::{
     AssignResult, CreateWorkflowOptions, DefaultWorkflowService, MigrationResult, RejectResult,

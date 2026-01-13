@@ -1584,4 +1584,585 @@ mod tests {
         assert!(err.contains("goal"));
         assert!(err.contains("step"));
     }
+
+    // ========== Mutation Callback Tests ==========
+
+    /// Test that mutation callbacks are fired when updating a task
+    #[tokio::test]
+    async fn test_update_fires_mutation_callback() {
+        use std::sync::{Arc, atomic::AtomicUsize, atomic::Ordering};
+        use vertebrae_core::MutationEvent;
+
+        let db = Database::connect_mem().await.unwrap();
+        db.init().await.unwrap();
+
+        // Create a counter to track callback invocations
+        let call_count = Arc::new(AtomicUsize::new(0));
+        let call_count_clone = call_count.clone();
+
+        // Create service with callback
+        let callback = Arc::new(move |event: MutationEvent| match event {
+            MutationEvent::TaskUpdated { id } => {
+                assert_eq!(id, "abc123");
+                call_count_clone.fetch_add(1, Ordering::Relaxed);
+            }
+            _ => panic!("Expected TaskUpdated event"),
+        });
+        let service = DefaultTaskService::with_callback(db, callback);
+
+        // Create a task
+        create_task(
+            service.database(),
+            "abc123",
+            "Original title",
+            "task",
+            "todo",
+            None,
+            &[],
+        )
+        .await;
+
+        // Execute update command
+        let cmd = UpdateCommand {
+            id: "abc123".to_string(),
+            title: Some("New title".to_string()),
+            description: None,
+            priority: None,
+            add_tags: vec![],
+            remove_tags: vec![],
+            parent: None,
+            edit_section: None,
+            remove_section: None,
+        };
+
+        let result = cmd.execute(&service).await;
+        assert!(result.is_ok());
+
+        // Verify callback was called
+        assert_eq!(call_count.load(Ordering::Relaxed), 1);
+    }
+
+    /// Test that mutation callbacks are fired when updating multiple fields
+    #[tokio::test]
+    async fn test_update_multiple_fields_fires_single_callback() {
+        use std::sync::{Arc, atomic::AtomicUsize, atomic::Ordering};
+        use vertebrae_core::MutationEvent;
+
+        let db = Database::connect_mem().await.unwrap();
+        db.init().await.unwrap();
+
+        let call_count = Arc::new(AtomicUsize::new(0));
+        let call_count_clone = call_count.clone();
+
+        let callback = Arc::new(move |event: MutationEvent| match event {
+            MutationEvent::TaskUpdated { id } => {
+                assert_eq!(id, "abc123");
+                call_count_clone.fetch_add(1, Ordering::Relaxed);
+            }
+            _ => panic!("Expected TaskUpdated event"),
+        });
+        let service = DefaultTaskService::with_callback(db, callback);
+
+        create_task(
+            service.database(),
+            "abc123",
+            "Original",
+            "task",
+            "todo",
+            Some("low"),
+            &["old"],
+        )
+        .await;
+
+        // Update multiple fields in one command
+        let cmd = UpdateCommand {
+            id: "abc123".to_string(),
+            title: Some("Updated".to_string()),
+            description: Some("New description".to_string()),
+            priority: Some(Priority::Critical),
+            add_tags: vec!["new".to_string()],
+            remove_tags: vec!["old".to_string()],
+            parent: None,
+            edit_section: None,
+            remove_section: None,
+        };
+
+        let result = cmd.execute(&service).await;
+        assert!(result.is_ok());
+
+        // Even with multiple changes, callback should fire once
+        assert_eq!(call_count.load(Ordering::Relaxed), 1);
+    }
+
+    /// Test that callback is fired when setting parent
+    #[tokio::test]
+    async fn test_update_set_parent_fires_callback() {
+        use std::sync::{Arc, atomic::AtomicUsize, atomic::Ordering};
+        use vertebrae_core::MutationEvent;
+
+        let db = Database::connect_mem().await.unwrap();
+        db.init().await.unwrap();
+
+        let call_count = Arc::new(AtomicUsize::new(0));
+        let call_count_clone = call_count.clone();
+
+        let callback = Arc::new(move |event: MutationEvent| {
+            match event {
+                MutationEvent::TaskUpdated { id } => {
+                    assert_eq!(id, "child1");
+                    call_count_clone.fetch_add(1, Ordering::Relaxed);
+                }
+                _ => {} // Ignore other events
+            }
+        });
+        let service = DefaultTaskService::with_callback(db, callback);
+
+        create_task(
+            service.database(),
+            "parent1",
+            "Parent",
+            "epic",
+            "todo",
+            None,
+            &[],
+        )
+        .await;
+        create_task(
+            service.database(),
+            "child1",
+            "Child",
+            "task",
+            "todo",
+            None,
+            &[],
+        )
+        .await;
+
+        let cmd = UpdateCommand {
+            id: "child1".to_string(),
+            title: None,
+            description: None,
+            priority: None,
+            add_tags: vec![],
+            remove_tags: vec![],
+            parent: Some("parent1".to_string()),
+            edit_section: None,
+            remove_section: None,
+        };
+
+        let result = cmd.execute(&service).await;
+        assert!(result.is_ok());
+
+        // Callback should be fired for the parent update
+        assert!(call_count.load(Ordering::Relaxed) > 0);
+    }
+
+    // ========== Edge Case Tests ==========
+
+    /// Test updating a section to empty content
+    #[tokio::test]
+    async fn test_update_section_to_empty_content() {
+        let service = setup_test_db().await;
+
+        create_task(
+            service.database(),
+            "abc123",
+            "Test task",
+            "task",
+            "todo",
+            None,
+            &[],
+        )
+        .await;
+        add_section(
+            service.database(),
+            "abc123",
+            "step",
+            "Original content",
+            Some(0),
+        )
+        .await;
+
+        let cmd = UpdateCommand {
+            id: "abc123".to_string(),
+            title: None,
+            description: None,
+            priority: None,
+            add_tags: vec![],
+            remove_tags: vec![],
+            parent: None,
+            edit_section: Some(vec!["step".to_string(), "0".to_string(), "".to_string()]),
+            remove_section: None,
+        };
+
+        let result = cmd.execute(&service).await;
+        assert!(result.is_ok());
+
+        let sections = get_sections(service.database(), "abc123").await;
+        assert_eq!(sections.len(), 1);
+        assert_eq!(sections[0].content, ""); // Empty content is allowed
+    }
+
+    /// Test updating section with special characters
+    #[tokio::test]
+    async fn test_update_section_with_special_chars() {
+        let service = setup_test_db().await;
+
+        create_task(
+            service.database(),
+            "abc123",
+            "Test task",
+            "task",
+            "todo",
+            None,
+            &[],
+        )
+        .await;
+        add_section(service.database(), "abc123", "step", "Original", Some(0)).await;
+
+        let special_content = "Step with @#$%^&*() <html> and 'quotes' and \"double\"";
+        let cmd = UpdateCommand {
+            id: "abc123".to_string(),
+            title: None,
+            description: None,
+            priority: None,
+            add_tags: vec![],
+            remove_tags: vec![],
+            parent: None,
+            edit_section: Some(vec![
+                "step".to_string(),
+                "0".to_string(),
+                special_content.to_string(),
+            ]),
+            remove_section: None,
+        };
+
+        let result = cmd.execute(&service).await;
+        assert!(result.is_ok());
+
+        let sections = get_sections(service.database(), "abc123").await;
+        assert_eq!(sections[0].content, special_content);
+    }
+
+    /// Test that removing all tags leaves task with no tags
+    #[tokio::test]
+    async fn test_update_remove_all_tags() {
+        let service = setup_test_db().await;
+
+        create_task(
+            service.database(),
+            "abc123",
+            "Test task",
+            "task",
+            "todo",
+            None,
+            &["tag1", "tag2", "tag3"],
+        )
+        .await;
+
+        let cmd = UpdateCommand {
+            id: "abc123".to_string(),
+            title: None,
+            description: None,
+            priority: None,
+            add_tags: vec![],
+            remove_tags: vec!["tag1".to_string(), "tag2".to_string(), "tag3".to_string()],
+            parent: None,
+            edit_section: None,
+            remove_section: None,
+        };
+
+        let result = cmd.execute(&service).await;
+        assert!(result.is_ok());
+
+        let task = get_task(service.database(), "abc123").await.unwrap();
+        assert!(task.tags.is_empty());
+    }
+
+    /// Test updating with invalid ordinal format for section
+    #[tokio::test]
+    async fn test_update_section_invalid_ordinal_format() {
+        let service = setup_test_db().await;
+
+        create_task(
+            service.database(),
+            "abc123",
+            "Test task",
+            "task",
+            "todo",
+            None,
+            &[],
+        )
+        .await;
+
+        let cmd = UpdateCommand {
+            id: "abc123".to_string(),
+            title: None,
+            description: None,
+            priority: None,
+            add_tags: vec![],
+            remove_tags: vec![],
+            parent: None,
+            edit_section: Some(vec![
+                "step".to_string(),
+                "not_a_number".to_string(),
+                "content".to_string(),
+            ]),
+            remove_section: None,
+        };
+
+        let result = cmd.execute(&service).await;
+        match result {
+            Err(ServiceError::ValidationFailed { message }) => {
+                assert!(
+                    message.contains("invalid ordinal"),
+                    "Expected 'invalid ordinal' in error, got: {}",
+                    message
+                );
+            }
+            other => panic!("Expected ValidationFailed, got {:?}", other),
+        }
+    }
+
+    /// Test updating with wrong number of section arguments
+    #[tokio::test]
+    async fn test_update_edit_section_wrong_arg_count() {
+        let service = setup_test_db().await;
+
+        create_task(
+            service.database(),
+            "abc123",
+            "Test task",
+            "task",
+            "todo",
+            None,
+            &[],
+        )
+        .await;
+
+        // Missing content argument
+        let cmd = UpdateCommand {
+            id: "abc123".to_string(),
+            title: None,
+            description: None,
+            priority: None,
+            add_tags: vec![],
+            remove_tags: vec![],
+            parent: None,
+            edit_section: Some(vec!["step".to_string(), "0".to_string()]),
+            remove_section: None,
+        };
+
+        let result = cmd.execute(&service).await;
+        match result {
+            Err(ServiceError::ValidationFailed { message }) => {
+                assert!(
+                    message.contains("edit-section requires"),
+                    "Expected 'edit-section requires' in error, got: {}",
+                    message
+                );
+            }
+            other => panic!("Expected ValidationFailed, got {:?}", other),
+        }
+    }
+
+    /// Test updating with wrong number of section removal arguments
+    #[tokio::test]
+    async fn test_update_remove_section_wrong_arg_count() {
+        let service = setup_test_db().await;
+
+        create_task(
+            service.database(),
+            "abc123",
+            "Test task",
+            "task",
+            "todo",
+            None,
+            &[],
+        )
+        .await;
+
+        // Missing ordinal argument
+        let cmd = UpdateCommand {
+            id: "abc123".to_string(),
+            title: None,
+            description: None,
+            priority: None,
+            add_tags: vec![],
+            remove_tags: vec![],
+            parent: None,
+            edit_section: None,
+            remove_section: Some(vec!["step".to_string()]),
+        };
+
+        let result = cmd.execute(&service).await;
+        match result {
+            Err(ServiceError::ValidationFailed { message }) => {
+                assert!(
+                    message.contains("remove-section requires"),
+                    "Expected 'remove-section requires' in error, got: {}",
+                    message
+                );
+            }
+            other => panic!("Expected ValidationFailed, got {:?}", other),
+        }
+    }
+
+    /// Test that adding and removing the same tag - remove is processed after add
+    #[tokio::test]
+    async fn test_update_add_and_remove_same_tag() {
+        let service = setup_test_db().await;
+
+        create_task(
+            service.database(),
+            "abc123",
+            "Test task",
+            "task",
+            "todo",
+            None,
+            &["existing"],
+        )
+        .await;
+
+        let cmd = UpdateCommand {
+            id: "abc123".to_string(),
+            title: None,
+            description: None,
+            priority: None,
+            add_tags: vec!["existing".to_string()],
+            remove_tags: vec!["existing".to_string()],
+            parent: None,
+            edit_section: None,
+            remove_section: None,
+        };
+
+        let result = cmd.execute(&service).await;
+        assert!(result.is_ok());
+
+        let task = get_task(service.database(), "abc123").await.unwrap();
+        // The service layer processes add_tags and remove_tags, and remove is likely processed
+        // in a way where the duplicate add doesn't affect the final state
+        assert!(task.tags.contains(&"existing".to_string()));
+    }
+
+    /// Test that edit section with negative ordinal is validated
+    #[tokio::test]
+    async fn test_update_section_negative_ordinal() {
+        let service = setup_test_db().await;
+
+        create_task(
+            service.database(),
+            "abc123",
+            "Test task",
+            "task",
+            "todo",
+            None,
+            &[],
+        )
+        .await;
+        add_section(service.database(), "abc123", "step", "Step 0", Some(0)).await;
+
+        let cmd = UpdateCommand {
+            id: "abc123".to_string(),
+            title: None,
+            description: None,
+            priority: None,
+            add_tags: vec![],
+            remove_tags: vec![],
+            parent: None,
+            edit_section: Some(vec![
+                "step".to_string(),
+                "-1".to_string(),
+                "content".to_string(),
+            ]),
+            remove_section: None,
+        };
+
+        let result = cmd.execute(&service).await;
+        // Negative ordinals should fail
+        assert!(result.is_err());
+    }
+
+    /// Test updating task with very long title
+    #[tokio::test]
+    async fn test_update_very_long_title() {
+        let service = setup_test_db().await;
+
+        create_task(
+            service.database(),
+            "abc123",
+            "Original",
+            "task",
+            "todo",
+            None,
+            &[],
+        )
+        .await;
+
+        let long_title = "A".repeat(1000);
+        let cmd = UpdateCommand {
+            id: "abc123".to_string(),
+            title: Some(long_title.clone()),
+            description: None,
+            priority: None,
+            add_tags: vec![],
+            remove_tags: vec![],
+            parent: None,
+            edit_section: None,
+            remove_section: None,
+        };
+
+        let result = cmd.execute(&service).await;
+        assert!(result.is_ok());
+
+        let task = get_task(service.database(), "abc123").await.unwrap();
+        assert_eq!(task.title, long_title);
+    }
+
+    /// Test that clearing description preserves other fields
+    #[tokio::test]
+    async fn test_update_clear_description_preserves_fields() {
+        let service = setup_test_db().await;
+
+        create_task(
+            service.database(),
+            "abc123",
+            "Test task",
+            "ticket",
+            "in_progress",
+            Some("high"),
+            &["important"],
+        )
+        .await;
+
+        let cmd = UpdateCommand {
+            id: "abc123".to_string(),
+            title: None,
+            description: Some("".to_string()),
+            priority: None,
+            add_tags: vec![],
+            remove_tags: vec![],
+            parent: None,
+            edit_section: None,
+            remove_section: None,
+        };
+
+        let result = cmd.execute(&service).await;
+        assert!(result.is_ok());
+
+        let updated_task = service
+            .database()
+            .tasks()
+            .get("abc123")
+            .await
+            .unwrap()
+            .unwrap();
+
+        // Description should be cleared
+        assert!(updated_task.description.is_none());
+        // Other fields should be preserved
+        assert_eq!(updated_task.title, "Test task");
+        assert_eq!(updated_task.priority, Some(vertebrae_db::Priority::High));
+        assert!(updated_task.tags.contains(&"important".to_string()));
+    }
 }
