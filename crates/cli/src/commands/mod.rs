@@ -191,19 +191,19 @@ impl Command {
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::List(cmd) => {
-                let db = service.database();
-                let tasks = cmd.execute(db).await?;
-                // Use tree format if --tree is specified (or if default behavior)
+                let tasks = cmd.execute(service).await?;
+                // Use tree format by default
                 // Use flat format if --flat is specified
-                let output = if cmd.tree {
+                let output = if cmd.flat {
+                    format_task_table(&tasks)
+                } else {
                     // Get all parent-child relationships for tree rendering
+                    let db = service.database();
                     let parent_relations = db.relationships().export_all_child_of().await?;
                     // Build a map from child_id to parent_id
                     let parent_map: std::collections::HashMap<String, String> =
                         parent_relations.into_iter().collect();
                     format_task_tree(&tasks, &parent_map)
-                } else {
-                    format_task_table(&tasks)
                 };
                 Ok(CommandResult::Table(output))
             }
@@ -538,12 +538,12 @@ mod tests {
     }
 
     #[test]
-    fn test_command_list_with_children() {
-        let cli = TestCli::try_parse_from(["test", "list", "--children", "abc123"]);
+    fn test_command_list_with_parent() {
+        let cli = TestCli::try_parse_from(["test", "list", "--parent", "abc123"]);
         assert!(cli.is_ok());
         match cli.unwrap().command {
             Command::List(cmd) => {
-                assert_eq!(cmd.children, Some("abc123".to_string()));
+                assert_eq!(cmd.parent, Some("abc123".to_string()));
             }
             _ => panic!("Expected List command"),
         }

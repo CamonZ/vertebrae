@@ -3,8 +3,8 @@
 //! Implements the `vtb list` command to display tasks with filtering options.
 
 use clap::Args;
-use vertebrae_core::ServiceError;
-use vertebrae_db::{Database, Level, Priority, Status, TaskFilter};
+use vertebrae_core::{ServiceError, TaskService};
+use vertebrae_db::{Level, Priority, Status, TaskFilter};
 
 /// A summary of a task for display in the list
 #[derive(Debug, Clone)]
@@ -48,9 +48,9 @@ pub struct ListCommand {
     #[arg(long)]
     pub root: bool,
 
-    /// Show children of a specific task
+    /// Show children of a specific parent task
     #[arg(long)]
-    pub children: Option<String>,
+    pub parent: Option<String>,
 
     /// Include done items (excluded by default)
     #[arg(long)]
@@ -60,11 +60,7 @@ pub struct ListCommand {
     #[arg(long)]
     pub search: Option<String>,
 
-    /// Display tasks as a hierarchical tree (showing parent-child relationships)
-    #[arg(long)]
-    pub tree: bool,
-
-    /// Display tasks as a flat table (default behavior)
+    /// Display tasks as a flat table (tree is default)
     #[arg(long)]
     pub flat: bool,
 }
@@ -124,21 +120,24 @@ impl From<vertebrae_db::TaskSummary> for TaskSummary {
 impl ListCommand {
     /// Execute the list command.
     ///
-    /// Queries tasks from the database with the specified filters and returns
-    /// a list of task summaries. Uses the repository pattern to delegate
-    /// query building to the database layer.
+    /// Queries tasks from the service layer with the specified filters and returns
+    /// a list of task summaries. Uses the service layer to ensure mutations are
+    /// properly handled and cache invalidation is triggered.
     ///
     /// # Arguments
     ///
-    /// * `db` - Reference to the database connection
+    /// * `service` - Reference to the task service
     ///
     /// # Errors
     ///
     /// Returns `ServiceError` if:
-    /// - Database query fails
+    /// - Service query fails
     /// - Invalid filter values are provided
     /// - Search query is empty
-    pub async fn execute(&self, db: &Database) -> Result<Vec<TaskSummary>, ServiceError> {
+    pub async fn execute(
+        &self,
+        service: &dyn TaskService,
+    ) -> Result<Vec<TaskSummary>, ServiceError> {
         // Validate search query is not empty
         if let Some(ref search) = self.search
             && search.trim().is_empty()
@@ -151,17 +150,17 @@ impl ListCommand {
         // Build the TaskFilter from command options
         let filter = self.build_filter();
 
-        // Use the repository to execute the query
-        let results = db.list_tasks().list(&filter).await?;
+        // Use the service layer to execute the query
+        let results = service.list_tasks(&filter).await?;
 
-        // Convert repository TaskSummary to CLI TaskSummary
+        // Convert service TaskSummary to CLI TaskSummary
         Ok(results.into_iter().map(TaskSummary::from).collect())
     }
 
     /// Build a TaskFilter from the command options.
     ///
     /// Converts the CLI arguments into a TaskFilter that can be passed
-    /// to the repository layer.
+    /// to the service layer.
     fn build_filter(&self) -> TaskFilter {
         let mut filter = TaskFilter::new();
 
@@ -190,7 +189,7 @@ impl ListCommand {
             filter = filter.root_only();
         }
 
-        if let Some(ref parent_id) = self.children {
+        if let Some(ref parent_id) = self.parent {
             filter = filter.children_of(parent_id);
         }
 
@@ -211,6 +210,8 @@ impl ListCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vertebrae_core::DefaultTaskService;
+    use vertebrae_db::Database;
 
     /// Helper to create an in-memory test database
     async fn setup_test_db() -> Database {
@@ -357,14 +358,15 @@ mod tests {
             priorities: vec![],
             tags: vec![],
             root: false,
-            children: None,
+            parent: None,
             all: false,
             search: None,
-            tree: false,
             flat: false,
         };
 
-        let result = cmd.execute(&db).await.unwrap();
+        let service = vertebrae_core::DefaultTaskService::new(db);
+
+        let result = cmd.execute(&service).await.unwrap();
 
         // Should have 2 tasks (excluding done)
         assert_eq!(result.len(), 2);
@@ -392,14 +394,15 @@ mod tests {
             priorities: vec![],
             tags: vec![],
             root: false,
-            children: None,
+            parent: None,
             all: true,
             search: None,
-            tree: false,
             flat: false,
         };
 
-        let result = cmd.execute(&db).await.unwrap();
+        let service = vertebrae_core::DefaultTaskService::new(db);
+
+        let result = cmd.execute(&service).await.unwrap();
 
         // Should have all 2 tasks
         assert_eq!(result.len(), 2);
@@ -428,14 +431,15 @@ mod tests {
             priorities: vec![],
             tags: vec![],
             root: false,
-            children: None,
+            parent: None,
             all: false,
             search: None,
-            tree: false,
             flat: false,
         };
 
-        let result = cmd.execute(&db).await.unwrap();
+        let service = vertebrae_core::DefaultTaskService::new(db);
+
+        let result = cmd.execute(&service).await.unwrap();
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].level, "epic");
@@ -455,14 +459,15 @@ mod tests {
             priorities: vec![],
             tags: vec![],
             root: false,
-            children: None,
+            parent: None,
             all: false,
             search: None,
-            tree: false,
             flat: false,
         };
 
-        let result = cmd.execute(&db).await.unwrap();
+        let service = vertebrae_core::DefaultTaskService::new(db);
+
+        let result = cmd.execute(&service).await.unwrap();
 
         assert_eq!(result.len(), 2);
         assert!(
@@ -496,14 +501,15 @@ mod tests {
             priorities: vec![],
             tags: vec![],
             root: false,
-            children: None,
+            parent: None,
             all: false,
             search: None,
-            tree: false,
             flat: false,
         };
 
-        let result = cmd.execute(&db).await.unwrap();
+        let service = vertebrae_core::DefaultTaskService::new(db);
+
+        let result = cmd.execute(&service).await.unwrap();
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].status, "backlog");
@@ -523,14 +529,15 @@ mod tests {
             priorities: vec![Priority::High],
             tags: vec![],
             root: false,
-            children: None,
+            parent: None,
             all: false,
             search: None,
-            tree: false,
             flat: false,
         };
 
-        let result = cmd.execute(&db).await.unwrap();
+        let service = vertebrae_core::DefaultTaskService::new(db);
+
+        let result = cmd.execute(&service).await.unwrap();
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].priority, Some("high".to_string()));
@@ -559,14 +566,15 @@ mod tests {
             priorities: vec![],
             tags: vec!["backend".to_string()],
             root: false,
-            children: None,
+            parent: None,
             all: false,
             search: None,
-            tree: false,
             flat: false,
         };
 
-        let result = cmd.execute(&db).await.unwrap();
+        let service = vertebrae_core::DefaultTaskService::new(db);
+
+        let result = cmd.execute(&service).await.unwrap();
 
         assert_eq!(result.len(), 2);
         assert!(
@@ -610,14 +618,15 @@ mod tests {
             priorities: vec![],
             tags: vec![],
             root: true,
-            children: None,
+            parent: None,
             all: false,
             search: None,
-            tree: false,
             flat: false,
         };
 
-        let result = cmd.execute(&db).await.unwrap();
+        let service = vertebrae_core::DefaultTaskService::new(db);
+
+        let result = cmd.execute(&service).await.unwrap();
 
         // Should have 2 root tasks (parent1 and orphan1, but not child1)
         assert_eq!(result.len(), 2);
@@ -646,14 +655,15 @@ mod tests {
             priorities: vec![],
             tags: vec![],
             root: false,
-            children: Some("parent1".to_string()),
+            parent: Some("parent1".to_string()),
             all: false,
             search: None,
-            tree: false,
             flat: false,
         };
 
-        let result = cmd.execute(&db).await.unwrap();
+        let service = vertebrae_core::DefaultTaskService::new(db);
+
+        let result = cmd.execute(&service).await.unwrap();
 
         // Should have 2 children
         assert_eq!(result.len(), 2);
@@ -673,14 +683,15 @@ mod tests {
             priorities: vec![],
             tags: vec![],
             root: false,
-            children: Some("nonexistent".to_string()),
+            parent: Some("nonexistent".to_string()),
             all: false,
             search: None,
-            tree: false,
             flat: false,
         };
 
-        let result = cmd.execute(&db).await.unwrap();
+        let service = vertebrae_core::DefaultTaskService::new(db);
+
+        let result = cmd.execute(&service).await.unwrap();
 
         // Should return empty list
         assert!(result.is_empty());
@@ -696,14 +707,15 @@ mod tests {
             priorities: vec![],
             tags: vec![],
             root: false,
-            children: None,
+            parent: None,
             all: false,
             search: None,
-            tree: false,
             flat: false,
         };
 
-        let result = cmd.execute(&db).await.unwrap();
+        let service = vertebrae_core::DefaultTaskService::new(db);
+
+        let result = cmd.execute(&service).await.unwrap();
 
         assert!(result.is_empty());
     }
@@ -759,14 +771,15 @@ mod tests {
             priorities: vec![Priority::High],
             tags: vec!["backend".to_string()],
             root: false,
-            children: None,
+            parent: None,
             all: false,
             search: None,
-            tree: false,
             flat: false,
         };
 
-        let result = cmd.execute(&db).await.unwrap();
+        let service = vertebrae_core::DefaultTaskService::new(db);
+
+        let result = cmd.execute(&service).await.unwrap();
 
         // Should match task1 only (epic + high priority + backend tag + not done)
         assert_eq!(result.len(), 1);
@@ -786,14 +799,15 @@ mod tests {
             priorities: vec![],
             tags: vec![],
             root: true,
-            children: None,
+            parent: None,
             all: false,
             search: None,
-            tree: false,
             flat: false,
         };
 
-        let result = cmd.execute(&db).await.unwrap();
+        let service = vertebrae_core::DefaultTaskService::new(db);
+
+        let result = cmd.execute(&service).await.unwrap();
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].level, "epic");
@@ -807,10 +821,9 @@ mod tests {
             priorities: vec![Priority::High],
             tags: vec!["backend".to_string(), "api".to_string()],
             root: true,
-            children: None,
+            parent: None,
             all: true,
             search: Some("test query".to_string()),
-            tree: false,
             flat: false,
         };
 
@@ -827,17 +840,16 @@ mod tests {
     }
 
     #[test]
-    fn test_build_filter_with_children() {
+    fn test_build_filter_with_parent() {
         let cmd = ListCommand {
             levels: vec![],
             statuses: vec![],
             priorities: vec![],
             tags: vec![],
             root: false,
-            children: Some("parent123".to_string()),
+            parent: Some("parent123".to_string()),
             all: false,
             search: None,
-            tree: false,
             flat: false,
         };
 
@@ -857,10 +869,9 @@ mod tests {
             priorities: vec![],
             tags: vec![],
             root: false,
-            children: None,
+            parent: None,
             all: false,
             search: None,
-            tree: false,
             flat: false,
         };
 
@@ -956,10 +967,9 @@ mod tests {
             priorities: vec![Priority::High],
             tags: vec!["backend".to_string()],
             root: true,
-            children: Some("parent123".to_string()),
+            parent: Some("parent123".to_string()),
             all: true,
             search: Some("test query".to_string()),
-            tree: false,
             flat: false,
         };
 
@@ -1049,14 +1059,15 @@ mod tests {
             priorities: vec![],
             tags: vec![],
             root: false,
-            children: None,
+            parent: None,
             all: false,
             search: Some("auth".to_string()),
-            tree: false,
             flat: false,
         };
 
-        let result = cmd.execute(&db).await.unwrap();
+        let service = vertebrae_core::DefaultTaskService::new(db);
+
+        let result = cmd.execute(&service).await.unwrap();
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].id, "task1");
@@ -1092,14 +1103,15 @@ mod tests {
             priorities: vec![],
             tags: vec![],
             root: false,
-            children: None,
+            parent: None,
             all: false,
             search: Some("authentication".to_string()),
-            tree: false,
             flat: false,
         };
 
-        let result = cmd.execute(&db).await.unwrap();
+        let service = vertebrae_core::DefaultTaskService::new(db);
+
+        let result = cmd.execute(&service).await.unwrap();
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].id, "task1");
@@ -1128,14 +1140,15 @@ mod tests {
             priorities: vec![],
             tags: vec![],
             root: false,
-            children: None,
+            parent: None,
             all: false,
             search: Some("authentication".to_string()),
-            tree: false,
             flat: false,
         };
 
-        let result = cmd.execute(&db).await.unwrap();
+        let service = vertebrae_core::DefaultTaskService::new(db);
+
+        let result = cmd.execute(&service).await.unwrap();
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].id, "task1");
@@ -1147,14 +1160,13 @@ mod tests {
             priorities: vec![],
             tags: vec![],
             root: false,
-            children: None,
+            parent: None,
             all: false,
             search: Some("AUTHENTICATION".to_string()),
-            tree: false,
             flat: false,
         };
 
-        let result2 = cmd2.execute(&db).await.unwrap();
+        let result2 = cmd2.execute(&service).await.unwrap();
 
         assert_eq!(result2.len(), 1);
         assert_eq!(result2[0].id, "task1");
@@ -1173,14 +1185,15 @@ mod tests {
             priorities: vec![],
             tags: vec![],
             root: false,
-            children: None,
+            parent: None,
             all: false,
             search: Some("nonexistent".to_string()),
-            tree: false,
             flat: false,
         };
 
-        let result = cmd.execute(&db).await.unwrap();
+        let service = vertebrae_core::DefaultTaskService::new(db);
+
+        let result = cmd.execute(&service).await.unwrap();
 
         assert!(result.is_empty());
     }
@@ -1209,14 +1222,15 @@ mod tests {
             priorities: vec![],
             tags: vec![],
             root: false,
-            children: None,
+            parent: None,
             all: false,
             search: Some("auth".to_string()),
-            tree: false,
             flat: false,
         };
 
-        let result = cmd.execute(&db).await.unwrap();
+        let service = vertebrae_core::DefaultTaskService::new(db);
+
+        let result = cmd.execute(&service).await.unwrap();
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].id, "task2");
@@ -1237,14 +1251,15 @@ mod tests {
             priorities: vec![],
             tags: vec![],
             root: false,
-            children: None,
+            parent: None,
             all: false,
             search: Some("auth".to_string()),
-            tree: false,
             flat: false,
         };
 
-        let result = cmd.execute(&db).await.unwrap();
+        let service = vertebrae_core::DefaultTaskService::new(db);
+
+        let result = cmd.execute(&service).await.unwrap();
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].id, "epic1");
@@ -1262,14 +1277,15 @@ mod tests {
             priorities: vec![],
             tags: vec![],
             root: false,
-            children: None,
+            parent: None,
             all: false,
             search: Some("".to_string()),
-            tree: false,
             flat: false,
         };
 
-        let result = cmd.execute(&db).await;
+        let service = vertebrae_core::DefaultTaskService::new(db);
+
+        let result = cmd.execute(&service).await;
 
         assert!(result.is_err());
         match result {
@@ -1292,14 +1308,15 @@ mod tests {
             priorities: vec![],
             tags: vec![],
             root: false,
-            children: None,
+            parent: None,
             all: false,
             search: Some("   ".to_string()),
-            tree: false,
             flat: false,
         };
 
-        let result = cmd.execute(&db).await;
+        let service = vertebrae_core::DefaultTaskService::new(db);
+
+        let result = cmd.execute(&service).await;
 
         assert!(result.is_err());
         match result {
@@ -1326,14 +1343,15 @@ mod tests {
             priorities: vec![],
             tags: vec![],
             root: true,
-            children: None,
+            parent: None,
             all: false,
             search: Some("auth".to_string()),
-            tree: false,
             flat: false,
         };
 
-        let result = cmd.execute(&db).await.unwrap();
+        let service = vertebrae_core::DefaultTaskService::new(db);
+
+        let result = cmd.execute(&service).await.unwrap();
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].id, "parent1");
@@ -1356,14 +1374,15 @@ mod tests {
             priorities: vec![],
             tags: vec![],
             root: false,
-            children: Some("parent1".to_string()),
+            parent: Some("parent1".to_string()),
             all: false,
             search: Some("auth".to_string()),
-            tree: false,
             flat: false,
         };
 
-        let result = cmd.execute(&db).await.unwrap();
+        let service = vertebrae_core::DefaultTaskService::new(db);
+
+        let result = cmd.execute(&service).await.unwrap();
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].id, "child1");
@@ -1382,14 +1401,15 @@ mod tests {
             priorities: vec![],
             tags: vec![],
             root: false,
-            children: None,
+            parent: None,
             all: false,
             search: Some("test\" OR 1=1 --".to_string()),
-            tree: false,
             flat: false,
         };
 
-        let result = cmd.execute(&db).await.unwrap();
+        let service = vertebrae_core::DefaultTaskService::new(db);
+
+        let result = cmd.execute(&service).await.unwrap();
 
         // Should return empty (no SQL injection)
         assert!(result.is_empty());
@@ -1411,14 +1431,15 @@ mod tests {
             priorities: vec![],
             tags: vec![],
             root: false,
-            children: None,
+            parent: None,
             all: false,
             search: Some("auth".to_string()),
-            tree: false,
             flat: false,
         };
 
-        let result = cmd.execute(&db).await.unwrap();
+        let service = vertebrae_core::DefaultTaskService::new(db);
+
+        let result = cmd.execute(&service).await.unwrap();
 
         // Should find both tasks (one in title, one in description)
         assert_eq!(result.len(), 2);
@@ -1453,14 +1474,15 @@ mod tests {
             priorities: vec![],
             tags: vec!["backend".to_string(), "frontend".to_string()],
             root: false,
-            children: None,
+            parent: None,
             all: false,
             search: None,
-            tree: false,
             flat: false,
         };
 
-        let result = cmd.execute(&db).await.unwrap();
+        let service = vertebrae_core::DefaultTaskService::new(db);
+
+        let result = cmd.execute(&service).await.unwrap();
 
         // Should find 3 tasks (task1, task2, task3 - any with backend OR frontend)
         assert_eq!(result.len(), 3);

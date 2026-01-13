@@ -292,10 +292,9 @@ pub fn list_cmd() -> ListCommand {
         priorities: vec![],
         tags: vec![],
         root: false,
-        children: None,
+        parent: None,
         all: false,
         search: None,
-        tree: false,
         flat: false,
     }
 }
@@ -308,10 +307,9 @@ pub fn list_cmd_with_search(search: &str) -> ListCommand {
         priorities: vec![],
         tags: vec![],
         root: false,
-        children: None,
+        parent: None,
         all: false,
         search: Some(search.to_string()),
-        tree: false,
         flat: false,
     }
 }
