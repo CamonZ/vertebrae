@@ -209,7 +209,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_run_with_add_command() {
         let temp_dir = env::temp_dir().join(format!(
             "vtb-main-add-test-{}-{:?}-{}",
@@ -237,7 +237,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_run_with_add_command_all_options() {
         let temp_dir = env::temp_dir().join(format!(
             "vtb-main-add-full-test-{}-{:?}-{}",

@@ -86,9 +86,8 @@ pub async fn notify_workflow_changed(workflow_id: String, change_type: &str) {
 /// The callback converts `MutationEvent` types to HTTP POST requests to the Tauri notification
 /// endpoint at `http://127.0.0.1:17273/api/notify-change`.
 ///
-/// Since the callback signature is synchronous (`Fn(MutationEvent)`) but HTTP notifications
-/// are async, this spawns a tokio task for each notification. Notifications are fire-and-forget
-/// and failures are logged but don't block the caller.
+/// The callback blocks until the HTTP notification completes, ensuring notifications are sent
+/// before the CLI exits. Failures are logged but don't fail the caller.
 ///
 /// # Example
 ///
@@ -109,9 +108,11 @@ pub fn create_http_notification_callback() -> MutationCallback {
             MutationEvent::TaskStatusChanged { id, .. } => (id, "StatusChanged"),
         };
 
-        // Spawn async notification task - fire and forget
-        tokio::spawn(async move {
-            notify_task_changed(task_id, change_type).await;
+        // Block on the notification - ensures it completes before CLI exits
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                notify_task_changed(task_id, change_type).await;
+            });
         });
     })
 }
@@ -232,7 +233,7 @@ mod tests {
         assert_send_sync(&callback);
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_callback_handles_all_event_variants() {
         use vertebrae_db::Status;
 

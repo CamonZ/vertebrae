@@ -1,9 +1,24 @@
 import { useEffect, useRef, useCallback } from "react";
-import { events, type TaskChangedEvent } from "../bindings";
-import { useTaskStore } from "../stores";
+import { events, type TaskChangedEvent, type TaskChangeType } from "../bindings";
+import { useTaskStore, useToastStore } from "../stores";
 
 /** Debounce delay in milliseconds for batching rapid events */
 const DEBOUNCE_MS = 100;
+
+/** Get toast message for task change type */
+function getTaskChangeMessage(changeType: TaskChangeType, taskId: string): string {
+  const shortId = taskId.slice(0, 6);
+  switch (changeType) {
+    case "Created":
+      return `Task ${shortId} created`;
+    case "Updated":
+      return `Task ${shortId} updated`;
+    case "Deleted":
+      return `Task ${shortId} deleted`;
+    case "StatusChanged":
+      return `Task ${shortId} status changed`;
+  }
+}
 
 /** Options for the task change listener hook */
 interface UseTaskChangeListenerOptions {
@@ -28,6 +43,7 @@ interface UseTaskChangeListenerOptions {
 export function useTaskChangeListener(options: UseTaskChangeListenerOptions = {}) {
   const { onTaskListChange, onTaskChange, enabled = true } = options;
   const { selectedTaskId } = useTaskStore();
+  const addToast = useToastStore((state) => state.addToast);
 
   // Track pending refetch requests for debouncing
   const pendingListRefetch = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -48,6 +64,13 @@ export function useTaskChangeListener(options: UseTaskChangeListenerOptions = {}
       console.debug(
         `[TaskChangeListener] Received ${change_type} event for task ${task_id.slice(0, 6)}`
       );
+
+      // Show toast notification with appropriate color
+      // Created: green (success), Updated/StatusChanged: blue (info), Deleted: red (error)
+      const toastType = change_type === "Created" ? "success"
+        : change_type === "Deleted" ? "error"
+        : "info";
+      addToast(getTaskChangeMessage(change_type, task_id), toastType);
 
       // Debounce task list refetch
       if (onTaskListChangeRef.current) {
@@ -82,7 +105,7 @@ export function useTaskChangeListener(options: UseTaskChangeListenerOptions = {}
         }
       }
     },
-    [selectedTaskId]
+    [selectedTaskId, addToast]
   );
 
   useEffect(() => {

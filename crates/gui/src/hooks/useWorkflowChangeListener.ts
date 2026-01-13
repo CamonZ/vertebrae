@@ -1,9 +1,22 @@
 import { useEffect, useRef, useCallback } from "react";
-import { events, type WorkflowChangedEvent } from "../bindings";
-import { useWorkflowStore } from "../stores";
+import { events, type WorkflowChangedEvent, type WorkflowChangeType } from "../bindings";
+import { useWorkflowStore, useToastStore } from "../stores";
 
 /** Debounce delay in milliseconds for batching rapid events */
 const DEBOUNCE_MS = 100;
+
+/** Get toast message for workflow change type */
+function getWorkflowChangeMessage(changeType: WorkflowChangeType, workflowId: string): string {
+  const shortId = workflowId.slice(0, 6);
+  switch (changeType) {
+    case "Created":
+      return `Workflow ${shortId} created`;
+    case "Updated":
+      return `Workflow ${shortId} updated`;
+    case "Deleted":
+      return `Workflow ${shortId} deleted`;
+  }
+}
 
 /** Options for the workflow change listener hook */
 interface UseWorkflowChangeListenerOptions {
@@ -30,6 +43,7 @@ export function useWorkflowChangeListener(
 ) {
   const { onWorkflowListChange, onWorkflowChange, enabled = true } = options;
   const { currentWorkflow } = useWorkflowStore();
+  const addToast = useToastStore((state) => state.addToast);
 
   // Get the current workflow ID for comparison
   const currentWorkflowId = currentWorkflow?.workflow?.id ?? null;
@@ -55,6 +69,13 @@ export function useWorkflowChangeListener(
       console.debug(
         `[WorkflowChangeListener] Received ${change_type} event for workflow ${workflow_id.slice(0, 6)}`
       );
+
+      // Show toast notification with appropriate color
+      // Created: green (success), Updated: blue (info), Deleted: red (error)
+      const toastType = change_type === "Created" ? "success"
+        : change_type === "Deleted" ? "error"
+        : "info";
+      addToast(getWorkflowChangeMessage(change_type, workflow_id), toastType);
 
       // Debounce workflow list refetch
       if (onWorkflowListChangeRef.current) {
@@ -89,7 +110,7 @@ export function useWorkflowChangeListener(
         }
       }
     },
-    [currentWorkflowId]
+    [currentWorkflowId, addToast]
   );
 
   useEffect(() => {

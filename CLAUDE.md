@@ -1,6 +1,6 @@
 # Vertebrae
 
-A task management CLI tool written in Rust.
+A task management system written in Rust with CLI and GUI interfaces.
 
 ## IMPORTANT: Use Vertebrae for All Implementation Work
 
@@ -179,31 +179,133 @@ cargo clippy -- -D warnings
 
 ```
 vertebrae/
-├── Cargo.toml          # Package manifest with dependencies
-├── Cargo.lock          # Locked dependency versions
-├── CLAUDE.md           # This file - Claude Code instructions
+├── Cargo.toml              # Workspace manifest
+├── Cargo.lock              # Locked dependency versions
+├── CLAUDE.md               # This file - Claude Code instructions
 ├── .claude/
-│   └── settings.json   # Claude Code hooks configuration
+│   └── settings.json       # Claude Code hooks configuration
 ├── .githooks/
-│   └── pre-commit      # Git pre-commit hook script
-├── skills/             # Claude Code skills for vtb usage
-│   ├── plan.md         # /plan - Create implementation plans
-│   ├── status.md       # /status - Check task state
-│   ├── next.md         # /next - Complete and continue
-│   ├── add.md          # /add - Create tasks
-│   ├── depend.md       # /depend - Manage dependencies
-│   ├── section.md      # /section - Add structured content
-│   ├── ref.md          # /ref - Link to code locations
-│   ├── list.md         # /list - Filter and list tasks
-│   ├── blockers.md     # /blockers - Show dependency chain
-│   ├── update.md       # /update - Modify task fields
-│   ├── delete.md       # /delete - Remove tasks
-│   └── vtb-show.md     # /vtb-show - Display task details
-├── src/
-│   └── main.rs         # CLI entry point
+│   └── pre-commit          # Git pre-commit hook script
+├── skills/                 # Claude Code skills for vtb usage
+│   ├── plan.md             # /plan - Create implementation plans
+│   ├── status.md           # /status - Check task state
+│   ├── next.md             # /next - Complete and continue
+│   ├── add.md              # /add - Create tasks
+│   ├── depend.md           # /depend - Manage dependencies
+│   ├── section.md          # /section - Add structured content
+│   ├── ref.md              # /ref - Link to code locations
+│   ├── list.md             # /list - Filter and list tasks
+│   ├── blockers.md         # /blockers - Show dependency chain
+│   ├── update.md           # /update - Modify task fields
+│   ├── delete.md           # /delete - Remove tasks
+│   └── vtb-show.md         # /vtb-show - Display task details
+├── crates/
+│   ├── db/                 # vertebrae-db: Database layer
+│   │   └── src/
+│   │       ├── lib.rs          # Database connection & repository accessors
+│   │       ├── schema.rs       # SurrealDB schema definitions
+│   │       ├── models.rs       # Domain models (Task, Workflow, etc.)
+│   │       ├── error.rs        # DbError types
+│   │       └── repository/     # Repository implementations
+│   │           ├── task.rs         # TaskRepository (CRUD)
+│   │           ├── workflow.rs     # WorkflowRepository
+│   │           ├── relationship.rs # RelationshipRepository (edges)
+│   │           ├── graph.rs        # GraphQueries (traversals)
+│   │           ├── filter.rs       # TaskLister & TaskFilter
+│   │           └── execution.rs    # StepExecutionRepository
+│   ├── core/               # vertebrae-core: Service layer
+│   │   └── src/
+│   │       ├── lib.rs          # Module exports
+│   │       ├── service.rs      # TaskService trait & DefaultTaskService
+│   │       ├── workflow_service.rs # WorkflowService trait
+│   │       ├── error.rs        # ServiceError types
+│   │       └── id_generator.rs # ID generation utilities
+│   ├── cli/                # vertebrae-cli: CLI binary (vtb)
+│   │   └── src/
+│   │       ├── main.rs         # Entry point & arg parsing
+│   │       ├── commands/       # 26 subcommand implementations
+│   │       ├── output/         # Table & tree formatters
+│   │       ├── notification.rs # HTTP notification for GUI sync
+│   │       └── error.rs        # CLI error handling
+│   └── gui/                # Tauri + React desktop application
+│       ├── src/                # React frontend (TypeScript)
+│       │   ├── main.tsx            # App entry point
+│       │   ├── router.tsx          # React Router config
+│       │   ├── bindings.ts         # Auto-generated Tauri bindings
+│       │   ├── components/         # React components
+│       │   ├── pages/              # Page components
+│       │   ├── hooks/              # Custom React hooks
+│       │   └── stores/             # Zustand state stores
+│       ├── src-tauri/          # Rust backend
+│       │   └── src/
+│       │       ├── commands.rs     # Tauri command handlers
+│       │       ├── events.rs       # Event definitions
+│       │       ├── live_queries.rs # SurrealDB LIVE streaming
+│       │       └── notification_server.rs # HTTP bridge for CLI
+│       ├── package.json        # Frontend dependencies
+│       └── vite.config.ts      # Build configuration
 ├── docs/
-│   └── tickets/        # Feature tickets and specs
-└── target/             # Build artifacts (git-ignored)
+│   └── tickets/            # Feature tickets and specs
+└── target/                 # Build artifacts (git-ignored)
+```
+
+## Architecture Overview
+
+```mermaid
+flowchart TB
+    subgraph "User Interfaces"
+        CLI["CLI (vtb binary)<br/>crates/cli"]
+        GUI["Tauri Desktop App<br/>crates/gui"]
+        React["React Frontend<br/>crates/gui/src"]
+    end
+
+    subgraph "Service Layer (crates/core)"
+        TS["TaskService trait"]
+        WS["WorkflowService trait"]
+        DTS["DefaultTaskService"]
+        DWS["DefaultWorkflowService"]
+    end
+
+    subgraph "Repository Layer (crates/db)"
+        TR["TaskRepository"]
+        WR["WorkflowRepository"]
+        RR["RelationshipRepository"]
+        GQ["GraphQueries"]
+        TL["TaskLister"]
+        ER["StepExecutionRepository"]
+    end
+
+    subgraph "Database"
+        SDB["SurrealDB"]
+        KV["SurrealKv (Production)"]
+        Mem["Mem (Testing)"]
+    end
+
+    subgraph "Data"
+        Tasks[(task table)]
+        Workflows[(workflow table)]
+        ChildOf[(child_of edges)]
+        DependsOn[(depends_on edges)]
+        Executions[(step_execution)]
+    end
+
+    CLI --> TS & WS
+    GUI --> TS & WS
+    React <--> GUI
+
+    TS --> DTS
+    WS --> DWS
+
+    DTS --> TR & RR & GQ & TL
+    DWS --> WR & ER
+
+    TR & WR & RR & GQ & TL & ER --> SDB
+    SDB --> KV & Mem
+
+    SDB --> Tasks & Workflows & ChildOf & DependsOn & Executions
+
+    GUI -.->|"LIVE queries"| SDB
+    CLI -.->|"HTTP notify<br/>port 17273"| GUI
 ```
 
 ## Architectural Patterns
@@ -213,15 +315,84 @@ vertebrae/
 - Uses `clap` with derive macros for argument parsing
 - Binary name is `vtb` (short for vertebrae)
 - Follows Rust 2024 edition conventions
+- 26 subcommands organized in `crates/cli/src/commands/`
+- Commands accept `&dyn TaskService` trait object (dependency injection)
+- Output modes: table (flat) or tree (hierarchical, default)
+- Mutation callbacks notify GUI of changes via HTTP
+
+### Service Layer Architecture
+
+The service layer (`crates/core`) provides business logic via trait-based abstraction:
+
+**TaskService trait** - Primary task operations:
+- CRUD: `create_task()`, `get_task()`, `update_task()`, `delete_task()`
+- Status: `transition_to()` with validation and unblocking
+- Relationships: `set_parent()`, `add_dependency()`, `get_blockers()`
+- Sections: `add_section()`, `remove_section_by_ordinal()`, `edit_section_by_ordinal()`
+- Code refs: `add_code_ref()`, `append_ref()`, `append_section_ref()`
+
+**WorkflowService trait** - Workflow management:
+- CRUD: `create_workflow()`, `get_workflow()`, `update_workflow()`
+- Assignment: `assign_workflow()`, `unassign_workflow()`
+- Progression: `advance_step()`, `retreat_step()`, `reject_task()`
+- Workflow chaining: `on_done_workflow`, `on_reject_workflow`
+
+**Key patterns:**
+- All operations are async (tokio runtime)
+- Mutation callbacks fire after successful operations for cache invalidation
+- Case-insensitive ID handling (auto-lowercased)
+- Cycle detection for dependencies
+- Hierarchical task trees with ancestor preservation
 
 ### Database Layer Architecture
 
-- **Commands must only use repository methods** - Never execute raw queries in the command layer
+- **Commands must only use service or repository methods** - Never execute raw queries in command/GUI layer
 - Use `db.tasks()` for task CRUD operations via `TaskRepository`
+- Use `db.workflows()` for workflow CRUD operations via `WorkflowRepository`
 - Use `db.graph()` for hierarchy and dependency operations via `GraphQueries`
 - Use `db.relationships()` for managing task relationships via `RelationshipRepository`
 - Use `db.list_tasks()` for filtering and listing via `TaskLister`
+- Use `db.executions()` for workflow step execution tracking via `StepExecutionRepository`
 - If a command needs new database functionality, add it to the appropriate repository first
+
+**Repository responsibilities:**
+
+| Repository | Purpose |
+|------------|---------|
+| `TaskRepository` | Task CRUD, status updates, section/ref management |
+| `WorkflowRepository` | Workflow CRUD, default workflow, migrations |
+| `RelationshipRepository` | Parent-child (`child_of`) and dependency (`depends_on`) edges |
+| `GraphQueries` | Blockers, cycle detection, path finding, descendants, progress |
+| `TaskLister` | Filtered queries with `TaskFilter` builder pattern |
+| `StepExecutionRepository` | Workflow execution history and session logs |
+
+### GUI Architecture
+
+The GUI uses a **dual real-time architecture** for synchronization:
+
+1. **LIVE Queries (SurrealDB)** - Direct database streaming for changes made within GUI
+2. **HTTP Notification Server (port 17273)** - Receives POST from CLI mutations, emits Tauri events
+
+**Frontend stack:**
+- React 19 with React Router 7
+- Zustand 5 for state management
+- Tailwind CSS 4 with custom neural-pathways theme
+- XYFlow React 12 for graph visualization
+- Type-safe bindings via Specta (`npm run generate:types`)
+
+**Backend (Tauri):**
+- Commands delegate to `vertebrae-core` services
+- LIVE query registry for real-time updates
+- Event emission for `TaskChangedEvent` and `WorkflowChangedEvent`
+
+**Data flow:**
+```
+CLI mutation → HTTP POST to :17273 → Tauri notification_server
+            → Emit TaskChangedEvent → React hooks → Refetch data
+
+GUI mutation → Service layer → Database → LIVE query
+            → Tauri event → React hooks → Update state
+```
 
 ### Test Database Backend
 
@@ -271,9 +442,30 @@ git commit --no-verify -m "emergency fix"
 
 ## Dependencies
 
-### Runtime Dependencies
+### Core Runtime Dependencies
 
-- `clap` (v4) - Command-line argument parsing with derive macros
+| Crate | Version | Purpose |
+|-------|---------|---------|
+| `surrealdb` | v2 | Embedded database with graph capabilities |
+| `tokio` | v1 | Async runtime |
+| `clap` | v4 | CLI argument parsing with derive macros |
+| `serde` / `serde_json` | v1 | Serialization/deserialization |
+| `chrono` | v0.4 | Date/time handling |
+| `thiserror` | v2 | Error type derivation |
+| `async-trait` | v0.1 | Async trait support |
+| `tracing` | v0.1 | Structured logging |
+
+### GUI Dependencies
+
+| Crate/Package | Version | Purpose |
+|---------------|---------|---------|
+| `tauri` | v2.9 | Desktop application framework |
+| `specta` / `tauri-specta` | v2 | Type-safe Rust-to-TypeScript bindings |
+| `axum` | v0.8 | HTTP server for notification bridge |
+| React | v19 | Frontend UI library |
+| Zustand | v5 | State management |
+| Vite | v6 | Build tooling |
+| Tailwind CSS | v4 | Styling |
 
 ### Development Tools (install separately)
 

@@ -210,7 +210,6 @@ impl ListCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vertebrae_core::DefaultTaskService;
     use vertebrae_db::Database;
 
     /// Helper to create an in-memory test database

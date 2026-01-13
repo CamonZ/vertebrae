@@ -11,14 +11,55 @@ use axum::{
     Router,
 };
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::net::TcpListener;
+use vertebrae_core::DefaultTaskService;
+use vertebrae_db::Database;
 
+use crate::commands::AppState;
 use crate::events::{TaskChangeType, TaskChangedEvent, WorkflowChangeType, WorkflowChangedEvent};
 
 /// Default port for the notification server
 pub const DEFAULT_NOTIFICATION_PORT: u16 = 17273;
+
+/// Reconnect to the database to pick up changes from external processes (like CLI)
+///
+/// SurrealKV doesn't support concurrent access from multiple processes well,
+/// so we need to reconnect to see changes made by the CLI.
+async fn reconnect_database(app_handle: &AppHandle) -> Result<(), String> {
+    let state = app_handle.state::<AppState>();
+
+    // Get current project path
+    let project_path = state
+        .project_config
+        .get_current_project()
+        .ok_or_else(|| "No project selected".to_string())?;
+
+    let db_path = PathBuf::from(&project_path).join(".vtb/data");
+    log::info!(
+        "[NotificationServer] Reconnecting to database at: {:?}",
+        db_path
+    );
+
+    // Connect to database
+    let db = Database::connect(&db_path)
+        .await
+        .map_err(|e| format!("Failed to connect to database: {}", e))?;
+
+    db.init()
+        .await
+        .map_err(|e| format!("Failed to initialize database: {}", e))?;
+
+    // Update the service in AppState
+    let new_service = DefaultTaskService::new(db);
+    let mut service_guard = state.service.write().await;
+    *service_guard = Some(new_service);
+
+    log::info!("[NotificationServer] Database reconnected successfully");
+    Ok(())
+}
 
 /// Payload received from CLI for cache invalidation
 #[derive(Debug, Deserialize)]
@@ -72,6 +113,12 @@ async fn handle_notify_change(
         return Err(ErrorResponse {
             error: "Must provide either task_id or workflow_id".to_string(),
         });
+    }
+
+    // Reconnect to database to see CLI changes
+    if let Err(e) = reconnect_database(&app_handle).await {
+        log::warn!("[NotificationServer] Failed to reconnect database: {}", e);
+        // Continue anyway - the event will still be emitted
     }
 
     // Handle task changes

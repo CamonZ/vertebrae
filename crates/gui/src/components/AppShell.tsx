@@ -2,6 +2,7 @@ import { ReactNode, useState, useCallback } from "react";
 import { Sidebar } from "./Sidebar";
 import { Header } from "./Header";
 import { ContentArea } from "./ContentArea";
+import { ToastContainer } from "./Toast";
 
 interface AppShellProps {
   children: ReactNode;
@@ -30,6 +31,7 @@ export function AppShell({
         <Header title={title} subtitle={subtitle} />
         <ContentArea>{children}</ContentArea>
       </div>
+      <ToastContainer />
     </div>
   );
 }

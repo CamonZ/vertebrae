@@ -7,3 +7,6 @@ export type { WorkflowStore } from "./workflowStore";
 
 export { useUIStore } from "./uiStore";
 export type { UIStore } from "./uiStore";
+
+export { useToastStore } from "./toastStore";
+export type { ToastStore } from "./toastStore";
