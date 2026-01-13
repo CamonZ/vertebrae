@@ -8,6 +8,8 @@ use serde::Serialize;
 use std::sync::Arc;
 use vertebrae_core::service::MutationCallback;
 pub use vertebrae_core::service::MutationEvent;
+use vertebrae_core::workflow_service::WorkflowMutationCallback;
+pub use vertebrae_core::workflow_service::WorkflowMutationEvent;
 
 /// Default port that the Tauri notification server listens on
 pub const NOTIFICATION_PORT: u16 = 17273;
@@ -112,6 +114,57 @@ pub fn create_http_notification_callback() -> MutationCallback {
         tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
                 notify_task_changed(task_id, change_type).await;
+            });
+        });
+    })
+}
+
+/// Create a WorkflowMutationCallback that bridges service layer events to HTTP notifications
+///
+/// This function creates a callback suitable for passing to `DefaultWorkflowService::with_callback()`.
+/// The callback converts `WorkflowMutationEvent` types to HTTP POST requests to the Tauri notification
+/// endpoint at `http://127.0.0.1:17273/api/notify-change`.
+///
+/// The callback blocks until the HTTP notification completes, ensuring notifications are sent
+/// before the CLI exits. Failures are logged but don't fail the caller.
+///
+/// # Example
+///
+/// ```ignore
+/// use vertebrae_cli::notification::create_workflow_http_notification_callback;
+/// use vertebrae_core::workflow_service::DefaultWorkflowService;
+///
+/// let callback = create_workflow_http_notification_callback();
+/// let service = DefaultWorkflowService::with_callback(db, callback);
+/// ```
+pub fn create_workflow_http_notification_callback() -> WorkflowMutationCallback {
+    Arc::new(move |event: WorkflowMutationEvent| {
+        // Extract workflow_id and change_type from the event
+        let (workflow_id, change_type) = match event {
+            WorkflowMutationEvent::WorkflowCreated { id } => (id, "Created"),
+            WorkflowMutationEvent::WorkflowUpdated { id } => (id, "Updated"),
+            WorkflowMutationEvent::WorkflowDeleted { id } => (id, "Deleted"),
+            WorkflowMutationEvent::TaskAssignedToWorkflow { workflow_id, .. } => {
+                (workflow_id, "TaskAssigned")
+            }
+            WorkflowMutationEvent::TaskUnassignedFromWorkflow { task_id } => {
+                (task_id, "TaskUnassigned")
+            }
+            WorkflowMutationEvent::TaskStepAdvanced { workflow_id, .. } => {
+                (workflow_id, "StepAdvanced")
+            }
+            WorkflowMutationEvent::TaskStepRetreated { workflow_id, .. } => {
+                (workflow_id, "StepRetreated")
+            }
+            WorkflowMutationEvent::TaskRejected {
+                from_workflow_id, ..
+            } => (from_workflow_id, "TaskRejected"),
+        };
+
+        // Block on the notification - ensures it completes before CLI exits
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                notify_workflow_changed(workflow_id, change_type).await;
             });
         });
     })
@@ -257,6 +310,74 @@ mod tests {
                 id: "abc123".to_string(),
                 old_status: Status::Backlog,
                 new_status: Status::Todo,
+            },
+        ];
+
+        // Call the callback with each event - should not panic
+        // (the actual HTTP calls will fail since no server is running,
+        // but that's logged and ignored)
+        for event in events {
+            callback(event);
+        }
+
+        // Give spawned tasks a moment to execute (they'll fail silently due to no server)
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+
+    #[test]
+    fn test_create_workflow_http_notification_callback_returns_arc() {
+        // Verify the callback can be created and is Send + Sync
+        let callback = create_workflow_http_notification_callback();
+
+        // The callback should be clonable (Arc)
+        let _cloned = Arc::clone(&callback);
+
+        // Verify it's Send + Sync by moving to a function that requires it
+        fn assert_send_sync<T: Send + Sync>(_: &T) {}
+        assert_send_sync(&callback);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_workflow_callback_handles_all_event_variants() {
+        // This test verifies that the callback handles all WorkflowMutationEvent variants
+        // without panicking. We can't easily test the HTTP call itself without
+        // a mock server, but we can verify the callback processes each variant.
+        let callback = create_workflow_http_notification_callback();
+
+        // Create all event variants
+        let events = vec![
+            WorkflowMutationEvent::WorkflowCreated {
+                id: "wf1".to_string(),
+            },
+            WorkflowMutationEvent::WorkflowUpdated {
+                id: "wf1".to_string(),
+            },
+            WorkflowMutationEvent::WorkflowDeleted {
+                id: "wf1".to_string(),
+            },
+            WorkflowMutationEvent::TaskAssignedToWorkflow {
+                task_id: "task1".to_string(),
+                workflow_id: "wf1".to_string(),
+            },
+            WorkflowMutationEvent::TaskUnassignedFromWorkflow {
+                task_id: "task1".to_string(),
+            },
+            WorkflowMutationEvent::TaskStepAdvanced {
+                task_id: "task1".to_string(),
+                workflow_id: "wf1".to_string(),
+                from_step: 0,
+                to_step: 1,
+            },
+            WorkflowMutationEvent::TaskStepRetreated {
+                task_id: "task1".to_string(),
+                workflow_id: "wf1".to_string(),
+                from_step: 1,
+                to_step: 0,
+            },
+            WorkflowMutationEvent::TaskRejected {
+                task_id: "task1".to_string(),
+                from_workflow_id: "wf1".to_string(),
+                to_workflow_id: None,
             },
         ];
 

@@ -2,6 +2,7 @@
 //!
 //! Implements the `vtb workflow` subcommand group for creating and managing workflows.
 
+use crate::notification::create_workflow_http_notification_callback;
 use clap::{Args, Subcommand};
 use vertebrae_core::{
     CreateWorkflowOptions, DefaultWorkflowService, ServiceError, TaskService,
@@ -49,7 +50,9 @@ impl WorkflowCommand {
     pub async fn execute(&self, service: &dyn TaskService) -> Result<String, ServiceError> {
         #[allow(deprecated)]
         let db = service.database().clone();
-        let workflow_service = DefaultWorkflowService::new(db);
+        // Create the workflow service with HTTP notification callback for GUI sync
+        let callback = create_workflow_http_notification_callback();
+        let workflow_service = DefaultWorkflowService::with_callback(db, callback);
         match self {
             WorkflowCommand::Add(cmd) => cmd.execute(&workflow_service).await,
             WorkflowCommand::List(cmd) => cmd.execute(&workflow_service).await,
