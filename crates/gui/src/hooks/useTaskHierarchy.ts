@@ -134,7 +134,7 @@ export function useTaskHierarchy(
     setIsLoading(true);
     setError(null);
     try {
-      const result = await commands.getTaskHierarchy(rootId ?? null);
+      const result = await commands.getTaskHierarchy(rootId ?? null, filter ?? null);
       if (result.status === "ok") {
         setRawHierarchy(result.data);
       } else {
@@ -145,7 +145,7 @@ export function useTaskHierarchy(
     } finally {
       setIsLoading(false);
     }
-  }, [rootId]);
+  }, [rootId, filter]);
 
   useEffect(() => {
     fetchHierarchy();

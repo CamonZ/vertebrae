@@ -114,9 +114,9 @@ async getTask(id: string) : Promise<Result<TaskWithRelations, CommandError>> {
  * Returns a tree structure of tasks starting from the given root.
  * If no root_id is provided, returns all root-level tasks with their hierarchies.
  */
-async getTaskHierarchy(rootId: string | null) : Promise<Result<TaskHierarchyNode[], CommandError>> {
+async getTaskHierarchy(rootId: string | null, filter: TaskFilterOptions | null) : Promise<Result<TaskHierarchyNode[], CommandError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("get_task_hierarchy", { rootId }) };
+    return { status: "ok", data: await TAURI_INVOKE("get_task_hierarchy", { rootId, filter }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
