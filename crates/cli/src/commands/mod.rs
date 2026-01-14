@@ -19,6 +19,7 @@ pub mod ready;
 pub mod r#ref;
 pub mod refs;
 pub mod review;
+pub mod run;
 pub mod section;
 pub mod sections;
 pub mod show;
@@ -45,6 +46,7 @@ pub use ready::ReadyCommand;
 pub use r#ref::RefCommand;
 pub use refs::RefsCommand;
 pub use review::ReviewCommand;
+pub use run::RunCommand;
 pub use section::SectionCommand;
 pub use sections::SectionsCommand;
 pub use show::ShowCommand;
@@ -95,6 +97,8 @@ pub enum Command {
     Refs(RefsCommand),
     /// Toggle or set the needs_human_review flag on a task
     Review(ReviewCommand),
+    /// Run a workflow for a task
+    Run(RunCommand),
     /// Add a typed content section to a task
     Section(SectionCommand),
     /// List all sections for a task
@@ -227,6 +231,12 @@ impl Command {
             Command::Review(cmd) => {
                 let result = cmd.execute(service).await?;
                 Ok(CommandResult::Message(result))
+            }
+            Command::Run(cmd) => {
+                cmd.execute(service).await?;
+                Ok(CommandResult::Message(
+                    "Workflow execution started".to_string(),
+                ))
             }
             Command::Section(cmd) => {
                 let result = cmd.execute(service).await?;

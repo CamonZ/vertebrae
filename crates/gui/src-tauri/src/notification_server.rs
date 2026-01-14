@@ -202,7 +202,7 @@ pub struct RunWorkflowPayload {
 
 /// Handle POST /api/run-workflow request
 async fn handle_run_workflow(
-    axum::extract::State(_app_handle): axum::extract::State<Arc<AppHandle>>,
+    axum::extract::State(app_handle): axum::extract::State<Arc<AppHandle>>,
     Json(payload): Json<RunWorkflowPayload>,
 ) -> Result<SuccessResponse, ErrorResponse> {
     log::info!(
@@ -210,9 +210,28 @@ async fn handle_run_workflow(
         payload.task_id
     );
 
-    // TODO: Implement workflow execution via actor system
+    // Get database from app state
+    let state = app_handle.state::<AppState>();
+    let service_guard = state.service.read().await;
+    let service = service_guard.as_ref().ok_or_else(|| ErrorResponse {
+        error: "No project selected".to_string(),
+    })?;
+
+    let db = service.database().clone();
+    let task_id = payload.task_id.clone();
+    let app_handle_clone = app_handle.as_ref().clone();
+
+    // Spawn execution in background
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) =
+            crate::workflow_runner::execute_workflow(task_id, db, app_handle_clone).await
+        {
+            log::error!("[NotificationServer] Workflow execution failed: {}", e);
+        }
+    });
+
     log::info!(
-        "[NotificationServer] Workflow execution queued for task: {}",
+        "[NotificationServer] Workflow execution started for task: {}",
         payload.task_id
     );
     Ok(SuccessResponse {

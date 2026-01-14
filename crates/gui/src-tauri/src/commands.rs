@@ -511,7 +511,11 @@ pub async fn get_execution_logs(
 /// Start a workflow execution for a task
 #[tauri::command]
 #[specta::specta]
-pub async fn run_workflow(state: State<'_, AppState>, task_id: String) -> Result<(), CommandError> {
+pub async fn run_workflow(
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+    task_id: String,
+) -> Result<(), CommandError> {
     log::info!("run_workflow called for task: {}", task_id);
 
     let service_guard = state.service.read().await;
@@ -531,7 +535,18 @@ pub async fn run_workflow(state: State<'_, AppState>, task_id: String) -> Result
         });
     }
 
-    // TODO: Implement workflow execution via actor system
-    log::info!("Workflow execution queued for task: {}", task_id);
+    // Spawn execution in background
+    let db = service.database().clone();
+    let task_id_clone = task_id.clone();
+
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) =
+            crate::workflow_runner::execute_workflow(task_id_clone, db, app_handle).await
+        {
+            log::error!("Workflow execution failed: {}", e);
+        }
+    });
+
+    log::info!("Workflow execution started for task: {}", task_id);
     Ok(())
 }

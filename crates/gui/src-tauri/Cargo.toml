@@ -54,3 +54,6 @@ axum = "0.7"
 
 # Actor framework for workflow execution
 ractor = "0.12"
+
+# Date/time handling
+chrono = { version = "0.4", features = ["serde"] }
