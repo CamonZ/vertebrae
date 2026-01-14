@@ -2,6 +2,15 @@ import { memo } from 'react';
 import { Handle, Position, type NodeProps, type Node } from '@xyflow/react';
 import type { WorkflowStep } from '../../bindings';
 
+export type TaskExecutionStatus = 'waiting' | 'in_progress' | 'completed' | 'failed';
+
+export interface ExecutingTask {
+  id: string;
+  title: string;
+  status: TaskExecutionStatus;
+  error?: string;
+}
+
 /**
  * Data passed to StepNode
  */
@@ -9,6 +18,9 @@ export type StepNodeData = {
   step: WorkflowStep;
   isFirst: boolean;
   isLast: boolean;
+  tasks?: ExecutingTask[];
+  onPlayClick?: (taskId: string) => void;
+  isExecuting?: boolean;
 };
 
 export type StepNodeType = Node<StepNodeData, 'stepNode'>;
@@ -18,12 +30,38 @@ export type StepNodeType = Node<StepNodeData, 'stepNode'>;
  * Features neural-pathway-inspired design with glowing connections.
  */
 function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
-  const { step, isFirst, isLast } = data;
+  const { step, isFirst, isLast, tasks = [] } = data;
   const hasSystemPrompt = Boolean(
     step.agent_config.system_prompt || step.agent_config.append_system_prompt
   );
   const toolCount =
     step.agent_config.tools.length + step.agent_config.allowed_tools.length;
+
+  const getTaskStatusColor = (status: TaskExecutionStatus) => {
+    switch (status) {
+      case 'in_progress':
+        return 'border-accent bg-accent/10';
+      case 'completed':
+        return 'border-success bg-success/10';
+      case 'failed':
+        return 'border-error bg-error/10';
+      default:
+        return 'border-border bg-bg-tertiary';
+    }
+  };
+
+  const getTaskStatusIcon = (status: TaskExecutionStatus) => {
+    switch (status) {
+      case 'in_progress':
+        return '⟳';
+      case 'completed':
+        return '✓';
+      case 'failed':
+        return '✕';
+      default:
+        return '◯';
+    }
+  };
 
   return (
     <div
@@ -69,6 +107,49 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
           )}
         </div>
       </div>
+
+      {/* Executing tasks display */}
+      {tasks.length > 0 && (
+        <div className="relative mb-3 max-h-[120px] space-y-1.5 overflow-y-auto border-t border-b border-border py-2">
+          {tasks.map((task) => (
+            <div
+              key={task.id}
+              className={`rounded-lg border px-2 py-1.5 transition-all duration-200 ${getTaskStatusColor(
+                task.status
+              )}`}
+            >
+              <div className="flex items-start gap-2">
+                <span
+                  className={`mt-0.5 flex-shrink-0 text-xs font-bold ${
+                    task.status === 'in_progress'
+                      ? 'animate-spin text-accent'
+                      : task.status === 'completed'
+                        ? 'text-success'
+                        : task.status === 'failed'
+                          ? 'text-error'
+                          : 'text-text-muted'
+                  }`}
+                >
+                  {getTaskStatusIcon(task.status)}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="truncate text-xs font-medium text-text-primary" title={task.title}>
+                    {task.title}
+                  </p>
+                  <code className="block truncate font-mono text-[10px] text-text-muted">
+                    {task.id.slice(0, 8)}
+                  </code>
+                </div>
+              </div>
+              {task.error && (
+                <p className="mt-1 text-[10px] text-error truncate" title={task.error}>
+                  Error: {task.error}
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Agent config indicators */}
       <div className="relative flex flex-wrap gap-1.5">

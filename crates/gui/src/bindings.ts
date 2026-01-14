@@ -188,6 +188,17 @@ async getExecutionLogs(executionId: string) : Promise<Result<SessionLog[], Comma
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+/**
+ * Start a workflow execution for a task
+ */
+async runWorkflow(taskId: string) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("run_workflow", { taskId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -196,10 +207,12 @@ async getExecutionLogs(executionId: string) : Promise<Result<SessionLog[], Comma
 
 export const events = __makeEvents__<{
 taskChangedEvent: TaskChangedEvent,
-workflowChangedEvent: WorkflowChangedEvent
+workflowChangedEvent: WorkflowChangedEvent,
+workflowExecutionEvent: WorkflowExecutionEvent
 }>({
 taskChangedEvent: "task-changed-event",
-workflowChangedEvent: "workflow-changed-event"
+workflowChangedEvent: "workflow-changed-event",
+workflowExecutionEvent: "workflow-execution-event"
 })
 
 /** user-defined constants **/
@@ -646,6 +659,43 @@ export type WorkflowChangeType = "Created" | "Updated" | "Deleted"
  * Emitted when a workflow is created, updated, or deleted.
  */
 export type WorkflowChangedEvent = { workflow_id: string; change_type: WorkflowChangeType }
+/**
+ * Event payload for workflow execution progress.
+ * Emitted during workflow step execution to track progress.
+ */
+export type WorkflowExecutionEvent = { task_id: string; workflow_id: string; event_type: WorkflowExecutionEventType }
+/**
+ * The type of execution event that occurred.
+ */
+export type WorkflowExecutionEventType = 
+/**
+ * Workflow execution started
+ */
+"Started" | 
+/**
+ * A step execution started
+ */
+{ StepStarted: { execution_id: string; step_name: string } } | 
+/**
+ * Step produced output
+ */
+{ StepProgress: { execution_id: string; output_lines: string[] } } | 
+/**
+ * A step completed successfully
+ */
+{ StepCompleted: { execution_id: string } } | 
+/**
+ * A step failed
+ */
+{ StepFailed: { execution_id: string; error: string } } | 
+/**
+ * Entire workflow completed successfully
+ */
+"Completed" | 
+/**
+ * Workflow failed
+ */
+{ Failed: { error: string } }
 /**
  * Workflow step - mirrors db::WorkflowStep
  */
