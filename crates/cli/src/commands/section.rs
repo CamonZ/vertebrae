@@ -116,11 +116,29 @@ impl SectionCommand {
             ));
         }
 
-        // Create the section to add
+        // Fetch the task first to count existing sections of this type
+        let task = service
+            .get_task(&id)
+            .await
+            .map_err(|_| ServiceError::task_not_found(&id))?;
+
+        // Calculate the ordinal for multi-instance section types
+        let ordinal = if !is_single_instance_type(&self.section_type) {
+            let count = task
+                .sections
+                .iter()
+                .filter(|s| s.section_type == self.section_type)
+                .count();
+            Some(count as u32)
+        } else {
+            None
+        };
+
+        // Create the section with the calculated order
         let section = Section {
             section_type: self.section_type.clone(),
             content: self.content.clone(),
-            order: None,
+            order: ordinal,
             done: None,
             done_at: None,
             refs: Vec::new(),
@@ -128,23 +146,6 @@ impl SectionCommand {
 
         // Add the section using service layer (which fires MutationCallback)
         service.add_section(&id, section).await?;
-
-        // For determining ordinal, we need to fetch the task to see what was added
-        // This is a read-only operation that doesn't trigger mutations
-        let task = service
-            .get_task(&id)
-            .await
-            .map_err(|_| ServiceError::task_not_found(&id))?;
-
-        let ordinal = if !is_single_instance_type(&self.section_type) {
-            task.sections
-                .iter()
-                .filter(|s| s.section_type == self.section_type)
-                .filter_map(|s| s.order)
-                .max()
-        } else {
-            None
-        };
 
         Ok(SectionResult {
             id,

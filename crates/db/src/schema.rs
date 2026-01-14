@@ -4,6 +4,7 @@
 //! and graph edges (hierarchy and dependencies).
 
 use crate::error::DbError;
+use crate::models::Task;
 use surrealdb::Surreal;
 use surrealdb::engine::local::Db;
 
@@ -108,6 +109,60 @@ mod sql {
     "#;
 }
 
+/// Backfill section order values for existing sections with order: None.
+///
+/// This migration assigns sequential 0-based ordinals to sections that don't have one,
+/// counting only sections of the same type that appear before them in the array.
+/// This is idempotent - sections that already have ordinals are left unchanged.
+async fn backfill_section_orders(client: &Surreal<Db>) -> Result<(), DbError> {
+    // Query all tasks
+    let mut result = client
+        .query("SELECT * FROM task")
+        .await
+        .map_err(|e| DbError::Schema(Box::new(e)))?;
+
+    let tasks: Vec<Task> = result.take(0).map_err(|e| DbError::Schema(Box::new(e)))?;
+
+    for task in tasks {
+        let mut modified = false;
+        let mut sections = task.sections.clone();
+
+        // Track count of each section type as we iterate
+        let mut type_counts: std::collections::HashMap<crate::models::SectionType, u32> =
+            std::collections::HashMap::new();
+
+        for section in &mut sections {
+            if section.order.is_none() {
+                // Assign ordinal based on count of same type seen so far
+                let count = type_counts.entry(section.section_type.clone()).or_insert(0);
+                section.order = Some(*count);
+                modified = true;
+            }
+            // Increment count for this type
+            *type_counts.entry(section.section_type.clone()).or_insert(0) += 1;
+        }
+
+        if modified {
+            // Update the task with the new sections
+            let sections_json =
+                serde_json::to_string(&sections).map_err(|e| DbError::ValidationError {
+                    message: format!("Failed to serialize sections: {}", e),
+                })?;
+            let query = format!(
+                "UPDATE {} SET sections = {}",
+                task.id.as_ref().map(|t| t.to_string()).unwrap_or_default(),
+                sections_json
+            );
+            client
+                .query(&query)
+                .await
+                .map_err(|e| DbError::Schema(Box::new(e)))?;
+        }
+    }
+
+    Ok(())
+}
+
 /// Initialize the database schema.
 ///
 /// Creates the task table, workflow table, step_execution table, session_log table,
@@ -159,6 +214,9 @@ pub async fn init_schema(client: &Surreal<Db>) -> Result<(), DbError> {
         .query(sql::DEFINE_SESSION_LOG_TABLE)
         .await
         .map_err(|e| DbError::Schema(Box::new(e)))?;
+
+    // Migration: Backfill section order values for existing sections with order: None
+    backfill_section_orders(client).await?;
 
     Ok(())
 }

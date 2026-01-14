@@ -210,7 +210,7 @@ impl std::fmt::Display for Priority {
 ///
 /// Defines the different types of content sections that can be
 /// embedded in a task document.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SectionType {
     Goal,
