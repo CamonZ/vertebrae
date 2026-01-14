@@ -193,6 +193,33 @@ async fn handle_notify_change(
     })
 }
 
+/// Payload for workflow execution request from CLI
+#[derive(Debug, Deserialize)]
+pub struct RunWorkflowPayload {
+    /// Task ID to run workflow for
+    pub task_id: String,
+}
+
+/// Handle POST /api/run-workflow request
+async fn handle_run_workflow(
+    axum::extract::State(_app_handle): axum::extract::State<Arc<AppHandle>>,
+    Json(payload): Json<RunWorkflowPayload>,
+) -> Result<SuccessResponse, ErrorResponse> {
+    log::info!(
+        "[NotificationServer] Received workflow execution request for task: {}",
+        payload.task_id
+    );
+
+    // TODO: Implement workflow execution via actor system
+    log::info!(
+        "[NotificationServer] Workflow execution queued for task: {}",
+        payload.task_id
+    );
+    Ok(SuccessResponse {
+        status: "ok".to_string(),
+    })
+}
+
 /// Start the HTTP server for mutation notifications
 ///
 /// Spawns an async task that listens on localhost:port for POST /api/notify-change requests.
@@ -207,6 +234,7 @@ pub fn start_notification_server(app_handle: AppHandle, port: u16) {
 
         let app = Router::new()
             .route("/api/notify-change", post(handle_notify_change))
+            .route("/api/run-workflow", post(handle_run_workflow))
             .with_state(app_handle.clone());
 
         let listener = match TcpListener::bind(format!("127.0.0.1:{}", port)).await {

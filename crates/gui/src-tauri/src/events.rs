@@ -34,3 +34,37 @@ pub enum WorkflowChangeType {
     Updated,
     Deleted,
 }
+
+/// Event payload for workflow execution progress.
+/// Emitted during workflow step execution to track progress.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct WorkflowExecutionEvent {
+    pub task_id: String,
+    pub workflow_id: String,
+    pub event_type: WorkflowExecutionEventType,
+}
+
+/// The type of execution event that occurred.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub enum WorkflowExecutionEventType {
+    /// Workflow execution started
+    Started,
+    /// A step execution started
+    StepStarted {
+        execution_id: String,
+        step_name: String,
+    },
+    /// Step produced output
+    StepProgress {
+        execution_id: String,
+        output_lines: Vec<String>,
+    },
+    /// A step completed successfully
+    StepCompleted { execution_id: String },
+    /// A step failed
+    StepFailed { execution_id: String, error: String },
+    /// Entire workflow completed successfully
+    Completed,
+    /// Workflow failed
+    Failed { error: String },
+}

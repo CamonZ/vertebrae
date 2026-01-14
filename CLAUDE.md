@@ -149,14 +149,20 @@ npm run generate:types   # Generate TypeScript types from Rust
 # Run all tests
 cargo test
 
+# Run tests quietly (only show failures)
+cargo test --quiet
+
 # Run tests with output
 cargo test -- --nocapture
 
 # Run tests with coverage (requires cargo-llvm-cov)
 cargo llvm-cov
 
+# Run tests with coverage quietly (only show failures)
+cargo llvm-cov --quiet
+
 # Run tests with coverage threshold check
-cargo llvm-cov --fail-under-lines 85
+cargo llvm-cov --quiet --fail-under-lines 85
 ```
 
 ## Linting and Formatting
@@ -431,8 +437,8 @@ The pre-commit hook runs the following checks:
 
 1. `cargo fmt --check` - Ensures code is properly formatted
 2. `cargo clippy -- -D warnings` - Ensures no linting warnings
-3. `cargo test` - Ensures all tests pass
-4. `cargo llvm-cov --fail-under-lines 85` - Ensures coverage >= 85%
+3. `cargo test --quiet` - Ensures all tests pass
+4. `cargo llvm-cov --quiet --fail-under-lines 85` - Ensures coverage >= 85%
 
 To bypass hooks in emergencies:
 

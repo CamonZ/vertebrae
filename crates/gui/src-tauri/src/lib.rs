@@ -6,6 +6,7 @@ pub mod live_queries;
 pub mod notification_server;
 pub mod project_config;
 pub mod types;
+pub mod workflow_runner;
 
 use std::path::PathBuf;
 use tokio::sync::RwLock;
@@ -17,7 +18,7 @@ use vertebrae_core::DefaultTaskService;
 use vertebrae_db::Database;
 
 use commands::AppState;
-use events::{TaskChangedEvent, WorkflowChangedEvent};
+use events::{TaskChangedEvent, WorkflowChangedEvent, WorkflowExecutionEvent};
 use project_config::ProjectConfig;
 
 /// Example command that will be exported with type definitions.
@@ -63,8 +64,14 @@ fn create_builder() -> Builder {
             // Execution commands
             commands::get_task_executions,
             commands::get_execution_logs,
+            // Workflow execution commands
+            commands::run_workflow,
         ])
-        .events(collect_events![TaskChangedEvent, WorkflowChangedEvent])
+        .events(collect_events![
+            TaskChangedEvent,
+            WorkflowChangedEvent,
+            WorkflowExecutionEvent
+        ])
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

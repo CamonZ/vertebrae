@@ -13,9 +13,9 @@ echo "==> Running clippy linter..."
 cargo clippy -- -D warnings
 
 echo "==> Running tests..."
-cargo test
+cargo test --quiet
 
 echo "==> Checking code coverage (threshold: 85%)..."
-cargo llvm-cov --fail-under-lines 85
+cargo llvm-cov --quiet --fail-under-lines 85
 
 echo "All pre-commit checks passed!"

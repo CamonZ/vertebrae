@@ -503,3 +503,35 @@ pub async fn get_execution_logs(
         }
     }
 }
+
+// ============================================================================
+// Workflow Execution Commands
+// ============================================================================
+
+/// Start a workflow execution for a task
+#[tauri::command]
+#[specta::specta]
+pub async fn run_workflow(state: State<'_, AppState>, task_id: String) -> Result<(), CommandError> {
+    log::info!("run_workflow called for task: {}", task_id);
+
+    let service_guard = state.service.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    // Verify task has a workflow assigned
+    let task = service
+        .get_task(&task_id)
+        .await
+        .map_err(CommandError::from)?;
+
+    if task.workflow_id.is_none() {
+        return Err(CommandError {
+            message: format!("Task {} has no assigned workflow", task_id),
+        });
+    }
+
+    // TODO: Implement workflow execution via actor system
+    log::info!("Workflow execution queued for task: {}", task_id);
+    Ok(())
+}
