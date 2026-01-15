@@ -431,6 +431,99 @@ pub async fn get_workflow_with_tasks(
     })
 }
 
+/// Get a workflow with its associated tasks including full details and relations
+///
+/// Returns the workflow along with all tasks that reference this workflow,
+/// including full task details (sections, refs) and relations (parent, children, dependencies).
+/// This is more efficient than calling get_task() for each task individually.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_workflow_with_task_details(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<crate::types::WorkflowWithTaskDetails, CommandError> {
+    log::info!(
+        "[get_workflow_with_task_details] Starting for workflow: {}",
+        id
+    );
+    let start_time = std::time::Instant::now();
+
+    let service_guard = state.service.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    #[allow(deprecated)]
+    let db = service.database();
+    let workflow_service = DefaultWorkflowService::new(db.clone());
+
+    // Get the workflow
+    let wf_start = std::time::Instant::now();
+    let workflow = workflow_service.get_workflow(&id).await?;
+    log::info!(
+        "[get_workflow_with_task_details] get_workflow took {}ms",
+        wf_start.elapsed().as_millis()
+    );
+
+    // Get tasks associated with this workflow using the service
+    let filter_start = std::time::Instant::now();
+    let filter = vertebrae_db::TaskFilter::new().include_done();
+    let all_tasks = service.list_tasks(&filter).await?;
+    log::info!(
+        "[get_workflow_with_task_details] list_tasks returned {} tasks in {}ms",
+        all_tasks.len(),
+        filter_start.elapsed().as_millis()
+    );
+
+    // Filter tasks that have this workflow_id and fetch their full details with relations
+    let workflow_id_str = workflow
+        .id
+        .as_ref()
+        .map(|t| t.id.to_raw())
+        .unwrap_or_default();
+
+    let fetch_relations_start = std::time::Instant::now();
+    let mut tasks = Vec::new();
+    let mut filtered_count = 0;
+    for summary in all_tasks {
+        if let Ok(task) = service.get_task(&summary.id).await {
+            if let Some(ref wf_id) = task.workflow_id {
+                if wf_id.id.to_raw() == workflow_id_str {
+                    filtered_count += 1;
+                    // Get full task with relations
+                    if let Ok(task_with_relations) =
+                        service.get_task_with_relations(&summary.id).await
+                    {
+                        tasks.push(TaskWithRelations {
+                            task: task_with_relations.task.into(),
+                            parent_id: task_with_relations.parent_id,
+                            children_ids: task_with_relations.children_ids,
+                            depends_on_ids: task_with_relations.depends_on_ids,
+                            dependent_ids: task_with_relations.dependent_ids,
+                        });
+                    }
+                }
+            }
+        }
+    }
+    log::info!(
+        "[get_workflow_with_task_details] Found {} matching tasks, fetched {} with relations in {}ms",
+        filtered_count,
+        tasks.len(),
+        fetch_relations_start.elapsed().as_millis()
+    );
+
+    log::info!(
+        "[get_workflow_with_task_details] Total time: {}ms",
+        start_time.elapsed().as_millis()
+    );
+
+    Ok(crate::types::WorkflowWithTaskDetails {
+        workflow: workflow.into(),
+        tasks,
+    })
+}
+
 // ============================================================================
 // Execution Commands
 // ============================================================================

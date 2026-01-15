@@ -61,6 +61,7 @@ fn create_builder() -> Builder {
             commands::list_workflows,
             commands::get_workflow,
             commands::get_workflow_with_tasks,
+            commands::get_workflow_with_task_details,
             // Execution commands
             commands::get_task_executions,
             commands::get_execution_logs,

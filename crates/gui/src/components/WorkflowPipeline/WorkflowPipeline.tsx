@@ -1,4 +1,4 @@
-import { useMemo, useCallback } from 'react';
+import { useMemo, useCallback, useEffect } from 'react';
 import {
   ReactFlow,
   MiniMap,
@@ -64,6 +64,7 @@ export function WorkflowPipeline({
   onPlayClick,
   isExecuting,
 }: WorkflowPipelineProps) {
+
   // Sort steps by order to ensure correct layout
   const sortedSteps = useMemo(
     () => [...workflow.steps].sort((a, b) => a.order - b.order),
@@ -315,14 +316,27 @@ export function WorkflowPipeline({
   // Combine all edges
   const allEdges = useMemo(() => [...dependencyEdges, ...stepEdges], [dependencyEdges, stepEdges]);
 
-  const [nodes, , onNodesChange] = useNodesState(allNodes);
-  const [edges, , onEdgesChange] = useEdgesState(allEdges);
+  const [nodes, setNodes, onNodesChange] = useNodesState(allNodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(allEdges);
 
-  // Calculate initial viewport to fit all nodes
+  // Update nodes when allNodes changes
+  useEffect(() => {
+    setNodes(allNodes);
+  }, [allNodes, setNodes]);
+
+  // Update edges when allEdges changes
+  useEffect(() => {
+    setEdges(allEdges);
+  }, [allEdges, setEdges]);
+
+  // Calculate initial viewport to fit all nodes (including tasks on the left at x: -550)
   const defaultViewport = useMemo(() => {
     const totalWidth = sortedSteps.length * NODE_SPACING_X;
-    const zoom = totalWidth > 800 ? Math.max(0.5, 800 / totalWidth) : 0.8;
-    return { x: -200, y: 40, zoom };
+    // Tasks are at x: -550, steps start at x: 0, so total range is ~550 + totalWidth
+    const fullWidth = 550 + totalWidth;
+    const zoom = fullWidth > 800 ? Math.max(0.5, 800 / fullWidth) : 0.8;
+    // Center the viewport to show both tasks and steps
+    return { x: -400, y: 40, zoom };
   }, [sortedSteps.length]);
 
   // Minimap node color
@@ -370,9 +384,8 @@ export function WorkflowPipeline({
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         nodeTypes={nodeTypes}
-        defaultViewport={defaultViewport}
         fitView
-        fitViewOptions={{ padding: 0.3 }}
+        fitViewOptions={{ padding: 0.2, minZoom: 0.5, maxZoom: 1.5 }}
         minZoom={0.25}
         maxZoom={2}
         colorMode="dark"

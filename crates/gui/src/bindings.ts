@@ -162,6 +162,21 @@ async getWorkflowWithTasks(id: string) : Promise<Result<WorkflowWithTasks, Comma
 }
 },
 /**
+ * Get a workflow with its associated tasks including full details and relations
+ * 
+ * Returns the workflow along with all tasks that reference this workflow,
+ * including full task details (sections, refs) and relations (parent, children, dependencies).
+ * This is more efficient than calling get_task() for each task individually.
+ */
+async getWorkflowWithTaskDetails(id: string) : Promise<Result<WorkflowWithTaskDetails, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_workflow_with_task_details", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Get all step executions for a task
  * 
  * Returns a chronological list of all step executions for the given task.
@@ -712,6 +727,18 @@ agent_config: AgentConfig;
  * Ordering index for sequential execution (0-based)
  */
 order: number }
+/**
+ * Workflow with its associated tasks including full details and relations
+ */
+export type WorkflowWithTaskDetails = { 
+/**
+ * The workflow itself
+ */
+workflow: Workflow; 
+/**
+ * Tasks associated with this workflow with full details and relations
+ */
+tasks: TaskWithRelations[] }
 /**
  * Workflow with its associated tasks
  */

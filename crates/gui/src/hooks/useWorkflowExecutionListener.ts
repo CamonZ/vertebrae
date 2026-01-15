@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useCallback, useRef } from 'react';
 import { events } from '../bindings';
 
 export interface WorkflowExecutionEventHandler {
@@ -20,48 +20,67 @@ export function useWorkflowExecutionListener(
   workflowId: string,
   handlers: WorkflowExecutionEventHandler
 ) {
+  // Use refs to avoid effect re-runs when handlers change
+  const onStartedRef = useRef(handlers.onStarted);
+  const onStepStartedRef = useRef(handlers.onStepStarted);
+  const onStepProgressRef = useRef(handlers.onStepProgress);
+  const onStepCompletedRef = useRef(handlers.onStepCompleted);
+  const onStepFailedRef = useRef(handlers.onStepFailed);
+  const onCompletedRef = useRef(handlers.onCompleted);
+  const onFailedRef = useRef(handlers.onFailed);
+
+  // Update refs when handlers change
+  onStartedRef.current = handlers.onStarted;
+  onStepStartedRef.current = handlers.onStepStarted;
+  onStepProgressRef.current = handlers.onStepProgress;
+  onStepCompletedRef.current = handlers.onStepCompleted;
+  onStepFailedRef.current = handlers.onStepFailed;
+  onCompletedRef.current = handlers.onCompleted;
+  onFailedRef.current = handlers.onFailed;
+
+  const handleExecutionEvent = useCallback(
+    (event: { payload: any }) => {
+      // Only process events for this workflow
+      if (event.payload.workflow_id !== workflowId) return;
+
+      const { event_type } = event.payload;
+
+      // Handle each event type (discriminated union)
+      if (event_type === 'Started' && onStartedRef.current) {
+        onStartedRef.current(event.payload.task_id);
+      } else if (typeof event_type === 'object' && event_type !== null) {
+        if ('StepStarted' in event_type && onStepStartedRef.current) {
+          const data = event_type.StepStarted;
+          onStepStartedRef.current(event.payload.task_id, data.step_name);
+        } else if ('StepProgress' in event_type && onStepProgressRef.current) {
+          const data = event_type.StepProgress;
+          onStepProgressRef.current(data.execution_id, data.output_lines);
+        } else if ('StepCompleted' in event_type && onStepCompletedRef.current) {
+          onStepCompletedRef.current(event_type.StepCompleted.execution_id);
+        } else if ('StepFailed' in event_type && onStepFailedRef.current) {
+          const data = event_type.StepFailed;
+          onStepFailedRef.current(data.execution_id, data.error);
+        } else if ('Completed' in event_type && onCompletedRef.current) {
+          onCompletedRef.current(event.payload.task_id);
+        } else if ('Failed' in event_type && onFailedRef.current) {
+          onFailedRef.current(event.payload.task_id, event_type.Failed.error);
+        }
+      }
+    },
+    [workflowId]
+  );
+
   useEffect(() => {
     if (!workflowId) return;
 
-    let unlisten: (() => void) | null = null;
+    // Subscribe to workflow execution events
+    const unlistenPromise = events.workflowExecutionEvent.listen(handleExecutionEvent);
 
-    const setupListener = async () => {
-      unlisten = await events.workflowExecutionEvent.listen((event) => {
-        // Only process events for this workflow
-        if (event.payload.workflow_id !== workflowId) return;
-
-        const { event_type } = event.payload;
-
-        // Handle each event type (discriminated union)
-        if (event_type === 'Started' && handlers.onStarted) {
-          handlers.onStarted(event.payload.task_id);
-        } else if (typeof event_type === 'object' && event_type !== null) {
-          if ('StepStarted' in event_type && handlers.onStepStarted) {
-            const data = event_type.StepStarted;
-            handlers.onStepStarted(event.payload.task_id, data.step_name);
-          } else if ('StepProgress' in event_type && handlers.onStepProgress) {
-            const data = event_type.StepProgress;
-            handlers.onStepProgress(data.execution_id, data.output_lines);
-          } else if ('StepCompleted' in event_type && handlers.onStepCompleted) {
-            handlers.onStepCompleted(event_type.StepCompleted.execution_id);
-          } else if ('StepFailed' in event_type && handlers.onStepFailed) {
-            const data = event_type.StepFailed;
-            handlers.onStepFailed(data.execution_id, data.error);
-          } else if ('Completed' in event_type && handlers.onCompleted) {
-            handlers.onCompleted(event.payload.task_id);
-          } else if ('Failed' in event_type && handlers.onFailed) {
-            handlers.onFailed(event.payload.task_id, event_type.Failed.error);
-          }
-        }
+    // Cleanup on unmount or when workflowId changes
+    return () => {
+      unlistenPromise.then((unlisten) => unlisten()).catch((error) => {
+        console.error('Failed to unlisten from workflow execution event:', error);
       });
     };
-
-    setupListener();
-
-    return () => {
-      if (unlisten) {
-        unlisten();
-      }
-    };
-  }, [workflowId, handlers]);
+  }, [workflowId, handleExecutionEvent]);
 }

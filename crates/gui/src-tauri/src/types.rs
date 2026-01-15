@@ -516,6 +516,15 @@ pub struct WorkflowWithTasks {
     pub tasks: Vec<TaskSummary>,
 }
 
+/// Workflow with its associated tasks including full details and relations
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct WorkflowWithTaskDetails {
+    /// The workflow itself
+    pub workflow: Workflow,
+    /// Tasks associated with this workflow with full details and relations
+    pub tasks: Vec<TaskWithRelations>,
+}
+
 // ============================================================================
 // Execution Types
 // ============================================================================

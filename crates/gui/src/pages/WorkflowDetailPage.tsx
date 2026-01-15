@@ -32,40 +32,45 @@ export function WorkflowDetailPage() {
   const addToast = useToastStore((state) => state.addToast);
 
   // State for fetched task relationships
-  const [tasksWithRelations, setTasksWithRelations] = useState<TaskWithRelations[]>([]);
+  const [tasksWithRelations, setTasksWithRelations] = useState<
+    TaskWithRelations[]
+  >([]);
 
-  // Fetch full task relationships for all tasks in this workflow
+  // Fetch workflow with all task details in a single call
   useEffect(() => {
-    const fetchTaskRelationships = async () => {
-      if (!workflowWithTasks?.tasks || workflowWithTasks.tasks.length === 0) {
+    const fetchWorkflowWithTaskDetails = async () => {
+      if (!id) {
         setTasksWithRelations([]);
         return;
       }
 
       try {
-        const tasksWithRels: TaskWithRelations[] = [];
-        for (const task of workflowWithTasks.tasks) {
-          const result = await commands.getTask(task.id);
-          if (result.status === 'ok') {
-            tasksWithRels.push(result.data);
-          }
+        const result = await commands.getWorkflowWithTaskDetails(id);
+        if (result.status === "ok") {
+          setTasksWithRelations(result.data.tasks);
+        } else {
+          addToast(`Failed to load workflow tasks: ${result.error.message}`, "error");
+          setTasksWithRelations([]);
         }
-        setTasksWithRelations(tasksWithRels);
       } catch (err) {
-        addToast(`Failed to load task relationships: ${String(err)}`, 'error');
+        addToast(`Failed to load workflow tasks: ${String(err)}`, "error");
+        setTasksWithRelations([]);
       }
     };
 
-    fetchTaskRelationships();
-  }, [workflowWithTasks?.tasks, addToast]);
+    fetchWorkflowWithTaskDetails();
+  }, [id, addToast]);
 
   // Execution state: Map of taskId -> { currentStep, status, error }
   // Initialize with all tasks in "waiting" status
   const initialExecutionState = useMemo(() => {
-    const state = new Map<string, { currentStep: string | number; status: string; error?: string }>();
+    const state = new Map<
+      string,
+      { currentStep: string | number; status: string; error?: string }
+    >();
     if (tasksWithRelations.length > 0) {
       for (const tr of tasksWithRelations) {
-        state.set(tr.task.id!, { currentStep: 'queue', status: 'waiting' });
+        state.set(tr.task.id!, { currentStep: "queue", status: "waiting" });
       }
     }
     return state;
@@ -107,7 +112,11 @@ export function WorkflowDetailPage() {
         const next = new Map(prev);
         const state = next.get(taskId);
         if (state) {
-          next.set(taskId, { ...state, currentStep: stepName, status: "in_progress" });
+          next.set(taskId, {
+            ...state,
+            currentStep: stepName,
+            status: "in_progress",
+          });
         }
         return next;
       });
@@ -148,40 +157,38 @@ export function WorkflowDetailPage() {
   // Get all waiting tasks (only active tasks, not done/rejected)
   const waitingTasks = useMemo(() => {
     return tasksWithRelations.filter((tr) => {
-      const isActive = tr.task.status !== 'done' && tr.task.status !== 'rejected';
+      const isActive =
+        tr.task.status !== "done" && tr.task.status !== "rejected";
       const state = executionState.get(tr.task.id!);
-      return isActive && state?.status === 'waiting';
+      return isActive && state?.status === "waiting";
     });
   }, [tasksWithRelations, executionState]);
 
   // Execute all waiting tasks
-  const handlePlayClick = useCallback(
-    async () => {
-      if (waitingTasks.length === 0) return;
+  const handlePlayClick = useCallback(async () => {
+    if (waitingTasks.length === 0) return;
 
-      try {
-        setIsExecuting(true);
-        for (const tr of waitingTasks) {
-          // Reset execution state for this task
-          setExecutionState((prev) => {
-            const next = new Map(prev);
-            next.set(tr.task.id!, { currentStep: "queue", status: "waiting" });
-            return next;
-          });
-          // Start execution
-          await commands.runWorkflow(tr.task.id!);
-        }
-        addToast(
-          `Workflow started for ${waitingTasks.length} task${waitingTasks.length !== 1 ? 's' : ''}`,
-          "success"
-        );
-      } catch (err) {
-        setIsExecuting(false);
-        addToast(`Failed to start workflow: ${String(err)}`, "error");
+    try {
+      setIsExecuting(true);
+      for (const tr of waitingTasks) {
+        // Reset execution state for this task
+        setExecutionState((prev) => {
+          const next = new Map(prev);
+          next.set(tr.task.id!, { currentStep: "queue", status: "waiting" });
+          return next;
+        });
+        // Start execution
+        await commands.runWorkflow(tr.task.id!);
       }
-    },
-    [waitingTasks, addToast]
-  );
+      addToast(
+        `Workflow started for ${waitingTasks.length} task${waitingTasks.length !== 1 ? "s" : ""}`,
+        "success"
+      );
+    } catch (err) {
+      setIsExecuting(false);
+      addToast(`Failed to start workflow: ${String(err)}`, "error");
+    }
+  }, [waitingTasks, addToast]);
 
   if (isLoading) {
     return (
@@ -377,7 +384,9 @@ export function WorkflowDetailPage() {
                     d="M13 7l5 5m0 0l-5 5m5-5H6"
                   />
                 </svg>
-                <span>On done: {truncateId(workflowData.on_done_workflow)}</span>
+                <span>
+                  On done: {truncateId(workflowData.on_done_workflow)}
+                </span>
               </div>
             )}
             {workflowData.on_reject_workflow && (
@@ -415,7 +424,7 @@ export function WorkflowDetailPage() {
               onClick={handlePlayClick}
               disabled={isExecuting}
               className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white transition-all hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed"
-              title={`Execute ${waitingTasks.length} waiting task${waitingTasks.length !== 1 ? 's' : ''}`}
+              title={`Execute ${waitingTasks.length} waiting task${waitingTasks.length !== 1 ? "s" : ""}`}
             >
               <span>▶</span>
               <span>Execute ({waitingTasks.length})</span>
