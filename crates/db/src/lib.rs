@@ -17,8 +17,9 @@ pub use models::{
 pub use repository::{
     BlockerNode, DEFAULT_WORKFLOW_ID, GraphQueries, MigrationResult, Progress,
     RelationshipRepository, SectionRule, StepExecutionRepository, TaskFilter, TaskLister,
-    TaskRepository, TaskSummary, TaskUpdate, TriageValidationConfig, TriageValidationResult,
-    TriageValidator, ValidationIssue, ValidationSeverity, WorkflowRepository, WorkflowUpdate,
+    TaskRepository, TaskSummary, TaskUpdate, TaskWithRelationsData, TriageValidationConfig,
+    TriageValidationResult, TriageValidator, ValidationIssue, ValidationSeverity,
+    WorkflowRepository, WorkflowUpdate,
 };
 
 use std::path::{Path, PathBuf};

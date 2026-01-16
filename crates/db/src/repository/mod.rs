@@ -12,7 +12,7 @@ mod validation;
 mod workflow;
 
 pub use execution::StepExecutionRepository;
-pub use filter::{TaskFilter, TaskLister, TaskSummary};
+pub use filter::{TaskFilter, TaskLister, TaskSummary, TaskWithRelationsData};
 pub use graph::{BlockerNode, GraphQueries, Progress};
 pub use relationship::RelationshipRepository;
 pub use task::{TaskRepository, TaskUpdate};

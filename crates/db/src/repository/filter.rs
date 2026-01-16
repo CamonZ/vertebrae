@@ -30,6 +30,41 @@ pub struct TaskSummary {
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
+/// Task data with all related information for constructing full task objects
+#[derive(Debug, Clone)]
+pub struct TaskWithRelationsData {
+    /// The task ID
+    pub id: String,
+    /// Task title
+    pub title: String,
+    /// Hierarchy level
+    pub level: Level,
+    /// Current status
+    pub status: Status,
+    /// Optional priority
+    pub priority: Option<Priority>,
+    /// Tags for categorization
+    pub tags: Vec<String>,
+    /// Whether this task needs human review
+    pub needs_human_review: Option<bool>,
+    /// Task description
+    pub description: Option<String>,
+    /// Sections (stored as raw JSON for flexibility)
+    pub sections: Vec<serde_json::Value>,
+    /// Code references (stored as raw JSON for flexibility)
+    pub refs: Vec<serde_json::Value>,
+    /// When the task was created
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    /// Parent task ID (if any)
+    pub parent_id: Option<String>,
+    /// Child task IDs
+    pub children_ids: Vec<String>,
+    /// Task IDs this task depends on
+    pub depends_on_ids: Vec<String>,
+    /// Task IDs that depend on this task
+    pub dependent_ids: Vec<String>,
+}
+
 /// Internal row type for deserializing from SurrealDB
 #[derive(Debug, Deserialize)]
 struct TaskRow {
@@ -60,6 +95,35 @@ impl TaskRow {
             created_at: self.created_at.0,
         }
     }
+}
+
+/// Internal row type for deserializing full task data with relationships from SurrealDB
+#[derive(Debug, Deserialize)]
+struct TaskWithRelationsRow {
+    id: surrealdb::sql::Thing,
+    title: String,
+    level: String,
+    status: String,
+    priority: Option<String>,
+    #[serde(default)]
+    tags: Vec<String>,
+    #[serde(default)]
+    needs_human_review: Option<bool>,
+    created_at: surrealdb::sql::Datetime,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    sections: Vec<serde_json::Value>,
+    #[serde(default)]
+    refs: Vec<serde_json::Value>,
+    #[serde(default)]
+    parent_id: Option<surrealdb::sql::Thing>,
+    #[serde(default)]
+    children_ids: Vec<surrealdb::sql::Thing>,
+    #[serde(default)]
+    depends_on_ids: Vec<surrealdb::sql::Thing>,
+    #[serde(default)]
+    dependent_ids: Vec<surrealdb::sql::Thing>,
 }
 
 /// Parse a level string into a Level enum
@@ -113,6 +177,8 @@ pub struct TaskFilter {
     pub include_done: bool,
     /// Search text in title and description (case-insensitive)
     pub search: Option<String>,
+    /// Filter by workflow_id (tasks assigned to a specific workflow)
+    pub workflow_id: Option<String>,
 }
 
 impl TaskFilter {
@@ -193,6 +259,12 @@ impl TaskFilter {
         self
     }
 
+    /// Filter by workflow_id (tasks assigned to a specific workflow)
+    pub fn with_workflow_id(mut self, workflow_id: impl Into<String>) -> Self {
+        self.workflow_id = Some(workflow_id.into());
+        self
+    }
+
     /// Check if this filter has any structural constraints (root or children_of)
     #[allow(dead_code)] // Useful for future optimizations and tests
     fn has_structural_filter(&self) -> bool {
@@ -240,6 +312,93 @@ impl<'a> TaskLister<'a> {
 
         // Build and execute the standard query
         self.query_tasks(filter).await
+    }
+
+    /// List tasks matching a filter, including all relationships (parent, children, dependencies)
+    /// in a single optimized query using graph traversal.
+    ///
+    /// This is significantly more efficient than calling `list()` and then fetching
+    /// relationships separately for each task.
+    ///
+    /// # Arguments
+    ///
+    /// * `filter` - The filter criteria to apply
+    ///
+    /// # Returns
+    ///
+    /// A vector of tasks with full relationship data, sorted by creation time (newest first).
+    ///
+    /// # Errors
+    ///
+    /// Returns `DbError::Query` if the database query fails.
+    pub async fn list_with_relations(
+        &self,
+        filter: &TaskFilter,
+    ) -> DbResult<Vec<TaskWithRelationsData>> {
+        let conditions = self.build_filter_conditions(filter);
+
+        let query = if conditions.is_empty() {
+            r#"SELECT
+                id, title, level, status, priority, tags, needs_human_review,
+                created_at, description, sections, refs,
+                (->child_of->task)[0].id AS parent_id,
+                <-child_of<-task.id AS children_ids,
+                ->depends_on->task.id AS depends_on_ids,
+                <-depends_on<-task.id AS dependent_ids
+            FROM task
+            ORDER BY created_at DESC"#
+                .to_string()
+        } else {
+            format!(
+                r#"SELECT
+                    id, title, level, status, priority, tags, needs_human_review,
+                    created_at, description, sections, refs,
+                    (->child_of->task)[0].id AS parent_id,
+                    <-child_of<-task.id AS children_ids,
+                    ->depends_on->task.id AS depends_on_ids,
+                    <-depends_on<-task.id AS dependent_ids
+                FROM task
+                WHERE {}
+                ORDER BY created_at DESC"#,
+                conditions.join(" AND ")
+            )
+        };
+
+        let mut result = self.client.query(&query).await?;
+        let rows: Vec<TaskWithRelationsRow> = result.take(0)?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| TaskWithRelationsData {
+                id: row.id.id.to_string(),
+                title: row.title,
+                level: parse_level(&row.level),
+                status: parse_status(&row.status),
+                priority: row.priority.as_deref().map(parse_priority),
+                tags: row.tags,
+                needs_human_review: row.needs_human_review,
+                description: row.description,
+                sections: row.sections,
+                refs: row.refs,
+                created_at: row.created_at.0,
+                parent_id: row.parent_id.map(|t| t.id.to_string()),
+                children_ids: row
+                    .children_ids
+                    .into_iter()
+                    .map(|t| t.id.to_string())
+                    .collect(),
+                depends_on_ids: row
+                    .depends_on_ids
+                    .into_iter()
+                    .map(|t| t.id.to_string())
+                    .collect(),
+                dependent_ids: row
+                    .dependent_ids
+                    .into_iter()
+                    .map(|t| t.id.to_string())
+                    .collect(),
+            })
+            .collect())
     }
 
     /// Query tasks with standard filters
@@ -360,6 +519,15 @@ impl<'a> TaskLister<'a> {
         // Search filter (case-insensitive, searches title and description)
         if let Some(ref search) = filter.search {
             conditions.push(Self::build_search_condition(search));
+        }
+
+        // Workflow ID filter
+        // workflow_id field is a record<workflow>, so compare to workflow:<id>
+        if let Some(ref workflow_id) = filter.workflow_id {
+            conditions.push(format!(
+                "workflow_id = workflow:{}",
+                workflow_id.replace('\"', "\\\"")
+            ));
         }
 
         conditions
@@ -730,6 +898,24 @@ mod tests {
     /// Helper to create a child_of relationship
     async fn create_child_of(db: &Database, child_id: &str, parent_id: &str) {
         let query = format!("RELATE task:{} -> child_of -> task:{}", child_id, parent_id);
+        db.client().query(&query).await.unwrap();
+    }
+
+    /// Helper to create a depends_on relationship
+    async fn create_depends_on(db: &Database, dependent_id: &str, blocker_id: &str) {
+        let query = format!(
+            "RELATE task:{} -> depends_on -> task:{}",
+            dependent_id, blocker_id
+        );
+        db.client().query(&query).await.unwrap();
+    }
+
+    /// Helper to assign a workflow to a task
+    async fn assign_workflow(db: &Database, task_id: &str, workflow_id: &str) {
+        let query = format!(
+            "UPDATE task:{} SET workflow_id = workflow:{}",
+            task_id, workflow_id
+        );
         db.client().query(&query).await.unwrap();
     }
 
@@ -2087,6 +2273,192 @@ mod tests {
             result[1].id, "child_ticket_old",
             "Older ticket should be second"
         );
+
+        cleanup(&temp_dir);
+    }
+
+    // ========================================
+    // list_with_relations tests
+    // ========================================
+
+    #[tokio::test]
+    async fn test_list_with_relations_basic() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        // Create tasks
+        create_task(&db, "task1", "Task 1", "task", "todo", None, &[]).await;
+        create_task(&db, "task2", "Task 2", "task", "todo", None, &[]).await;
+
+        let lister = TaskLister::new(db.client());
+        let filter = TaskFilter::new().include_done();
+        let result = lister.list_with_relations(&filter).await.unwrap();
+
+        assert_eq!(result.len(), 2);
+        assert!(result.iter().any(|t| t.id == "task1"));
+        assert!(result.iter().any(|t| t.id == "task2"));
+
+        // Verify all tasks have no relationships
+        for task in &result {
+            assert!(task.parent_id.is_none());
+            assert!(task.children_ids.is_empty());
+            assert!(task.depends_on_ids.is_empty());
+            assert!(task.dependent_ids.is_empty());
+        }
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_list_with_relations_with_workflow_id_filter() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        // Create tasks
+        create_task(&db, "task1", "Task 1", "task", "todo", None, &[]).await;
+        create_task(&db, "task2", "Task 2", "task", "todo", None, &[]).await;
+        create_task(&db, "task3", "Task 3", "task", "todo", None, &[]).await;
+
+        // Assign tasks to workflows
+        assign_workflow(&db, "task1", "workflow1").await;
+        assign_workflow(&db, "task2", "workflow1").await;
+        assign_workflow(&db, "task3", "workflow2").await;
+
+        let lister = TaskLister::new(db.client());
+
+        // Query tasks for workflow1
+        let filter = TaskFilter::new()
+            .include_done()
+            .with_workflow_id("workflow1");
+        let result = lister.list_with_relations(&filter).await.unwrap();
+
+        assert_eq!(result.len(), 2, "Should return 2 tasks for workflow1");
+        let ids: HashSet<_> = result.iter().map(|t| t.id.as_str()).collect();
+        assert!(ids.contains("task1"));
+        assert!(ids.contains("task2"));
+        assert!(!ids.contains("task3"));
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_list_with_relations_includes_parent() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        // Create parent and child tasks
+        create_task(&db, "parent", "Parent Task", "ticket", "todo", None, &[]).await;
+        create_task(&db, "child", "Child Task", "task", "todo", None, &[]).await;
+
+        // Create parent-child relationship
+        create_child_of(&db, "child", "parent").await;
+
+        let lister = TaskLister::new(db.client());
+        let filter = TaskFilter::new().include_done();
+        let result = lister.list_with_relations(&filter).await.unwrap();
+
+        assert_eq!(result.len(), 2);
+
+        // Find parent and child in results
+        let parent_result = result.iter().find(|t| t.id == "parent").unwrap();
+        let child_result = result.iter().find(|t| t.id == "child").unwrap();
+
+        // Parent should have the child
+        assert_eq!(parent_result.children_ids.len(), 1);
+        assert_eq!(parent_result.children_ids[0], "child");
+        assert!(parent_result.parent_id.is_none());
+
+        // Child should have the parent
+        assert_eq!(child_result.parent_id, Some("parent".to_string()));
+        assert!(child_result.children_ids.is_empty());
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_list_with_relations_includes_dependencies() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        // Create tasks
+        create_task(&db, "task1", "Task 1", "task", "todo", None, &[]).await;
+        create_task(&db, "task2", "Task 2", "task", "todo", None, &[]).await;
+        create_task(&db, "task3", "Task 3", "task", "todo", None, &[]).await;
+
+        // Create dependency: task2 depends on task1
+        create_depends_on(&db, "task2", "task1").await;
+        // Create dependency: task3 depends on task1
+        create_depends_on(&db, "task3", "task1").await;
+
+        let lister = TaskLister::new(db.client());
+        let filter = TaskFilter::new().include_done();
+        let result = lister.list_with_relations(&filter).await.unwrap();
+
+        assert_eq!(result.len(), 3);
+
+        // Task 1 should have 2 dependents
+        let task1 = result.iter().find(|t| t.id == "task1").unwrap();
+        assert_eq!(task1.depends_on_ids.len(), 0);
+        assert_eq!(task1.dependent_ids.len(), 2);
+        assert!(task1.dependent_ids.contains(&"task2".to_string()));
+        assert!(task1.dependent_ids.contains(&"task3".to_string()));
+
+        // Task 2 should depend on task1
+        let task2 = result.iter().find(|t| t.id == "task2").unwrap();
+        assert_eq!(task2.depends_on_ids.len(), 1);
+        assert_eq!(task2.depends_on_ids[0], "task1");
+        assert!(task2.dependent_ids.is_empty());
+
+        // Task 3 should depend on task1
+        let task3 = result.iter().find(|t| t.id == "task3").unwrap();
+        assert_eq!(task3.depends_on_ids.len(), 1);
+        assert_eq!(task3.depends_on_ids[0], "task1");
+        assert!(task3.dependent_ids.is_empty());
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_list_with_relations_combined_workflow_and_relationships() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        // Create tasks
+        create_task(&db, "parent", "Parent", "ticket", "todo", None, &[]).await;
+        create_task(&db, "child1", "Child 1", "task", "todo", None, &[]).await;
+        create_task(&db, "child2", "Child 2", "task", "todo", None, &[]).await;
+        create_task(&db, "other", "Other Task", "task", "todo", None, &[]).await;
+
+        // Create relationships
+        create_child_of(&db, "child1", "parent").await;
+        create_child_of(&db, "child2", "parent").await;
+        create_depends_on(&db, "child2", "child1").await;
+
+        // Assign to workflows
+        assign_workflow(&db, "parent", "workflow1").await;
+        assign_workflow(&db, "child1", "workflow1").await;
+        assign_workflow(&db, "child2", "workflow1").await;
+        assign_workflow(&db, "other", "workflow2").await;
+
+        let lister = TaskLister::new(db.client());
+        let filter = TaskFilter::new()
+            .include_done()
+            .with_workflow_id("workflow1");
+        let result = lister.list_with_relations(&filter).await.unwrap();
+
+        // Should only get 3 tasks from workflow1
+        assert_eq!(result.len(), 3);
+        let ids: HashSet<_> = result.iter().map(|t| t.id.as_str()).collect();
+        assert!(ids.contains("parent"));
+        assert!(ids.contains("child1"));
+        assert!(ids.contains("child2"));
+        assert!(!ids.contains("other"));
+
+        // Verify relationships are preserved
+        let parent = result.iter().find(|t| t.id == "parent").unwrap();
+        assert_eq!(parent.children_ids.len(), 2);
+        assert!(parent.children_ids.contains(&"child1".to_string()));
+        assert!(parent.children_ids.contains(&"child2".to_string()));
+
+        let child2 = result.iter().find(|t| t.id == "child2").unwrap();
+        assert_eq!(child2.parent_id, Some("parent".to_string()));
+        assert_eq!(child2.depends_on_ids.len(), 1);
+        assert_eq!(child2.depends_on_ids[0], "child1");
 
         cleanup(&temp_dir);
     }

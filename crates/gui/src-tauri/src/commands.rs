@@ -435,7 +435,7 @@ pub async fn get_workflow_with_tasks(
 ///
 /// Returns the workflow along with all tasks that reference this workflow,
 /// including full task details (sections, refs) and relations (parent, children, dependencies).
-/// This is more efficient than calling get_task() for each task individually.
+/// Uses optimized single-query database access via graph traversal.
 #[tauri::command]
 #[specta::specta]
 pub async fn get_workflow_with_task_details(
@@ -465,52 +465,77 @@ pub async fn get_workflow_with_task_details(
         wf_start.elapsed().as_millis()
     );
 
-    // Get tasks associated with this workflow using the service
-    let filter_start = std::time::Instant::now();
-    let filter = vertebrae_db::TaskFilter::new().include_done();
-    let all_tasks = service.list_tasks(&filter).await?;
-    log::info!(
-        "[get_workflow_with_task_details] list_tasks returned {} tasks in {}ms",
-        all_tasks.len(),
-        filter_start.elapsed().as_millis()
-    );
-
-    // Filter tasks that have this workflow_id and fetch their full details with relations
+    // Get the workflow_id string for filtering
     let workflow_id_str = workflow
         .id
         .as_ref()
         .map(|t| t.id.to_raw())
         .unwrap_or_default();
 
-    let fetch_relations_start = std::time::Instant::now();
+    // Query tasks with relations in a single optimized query
+    let query_start = std::time::Instant::now();
+    let filter = vertebrae_db::TaskFilter::new()
+        .include_done()
+        .with_workflow_id(workflow_id_str);
+    let tasks_with_relations_data = db.list_tasks().list_with_relations(&filter).await?;
+    log::info!(
+        "[get_workflow_with_task_details] Fetched {} tasks with relations in {}ms",
+        tasks_with_relations_data.len(),
+        query_start.elapsed().as_millis()
+    );
+
+    // Convert TaskWithRelationsData to TaskWithRelations for the GUI
+    let convert_start = std::time::Instant::now();
     let mut tasks = Vec::new();
-    let mut filtered_count = 0;
-    for summary in all_tasks {
-        if let Ok(task) = service.get_task(&summary.id).await {
-            if let Some(ref wf_id) = task.workflow_id {
-                if wf_id.id.to_raw() == workflow_id_str {
-                    filtered_count += 1;
-                    // Get full task with relations
-                    if let Ok(task_with_relations) =
-                        service.get_task_with_relations(&summary.id).await
-                    {
-                        tasks.push(TaskWithRelations {
-                            task: task_with_relations.task.into(),
-                            parent_id: task_with_relations.parent_id,
-                            children_ids: task_with_relations.children_ids,
-                            depends_on_ids: task_with_relations.depends_on_ids,
-                            dependent_ids: task_with_relations.dependent_ids,
-                        });
-                    }
-                }
-            }
-        }
+    for data in tasks_with_relations_data {
+        // Reconstruct sections and refs from JSON
+        let sections: Vec<vertebrae_db::Section> = data
+            .sections
+            .iter()
+            .filter_map(|v| serde_json::from_value(v.clone()).ok())
+            .collect();
+
+        let code_refs: Vec<vertebrae_db::CodeRef> = data
+            .refs
+            .iter()
+            .filter_map(|v| serde_json::from_value(v.clone()).ok())
+            .collect();
+
+        // Construct Task object
+        let task = vertebrae_db::Task {
+            id: Some(surrealdb::sql::Thing::from((
+                "task".to_string(),
+                data.id.clone(),
+            ))),
+            title: data.title,
+            description: data.description,
+            level: data.level,
+            status: data.status,
+            priority: data.priority,
+            tags: data.tags,
+            created_at: Some(data.created_at),
+            updated_at: None,
+            started_at: None,
+            completed_at: None,
+            sections,
+            code_refs,
+            needs_human_review: data.needs_human_review,
+            workflow_id: None,
+            current_step: None,
+        };
+
+        tasks.push(TaskWithRelations {
+            task: task.into(),
+            parent_id: data.parent_id,
+            children_ids: data.children_ids,
+            depends_on_ids: data.depends_on_ids,
+            dependent_ids: data.dependent_ids,
+        });
     }
     log::info!(
-        "[get_workflow_with_task_details] Found {} matching tasks, fetched {} with relations in {}ms",
-        filtered_count,
+        "[get_workflow_with_task_details] Converted {} tasks to GUI types in {}ms",
         tasks.len(),
-        fetch_relations_start.elapsed().as_millis()
+        convert_start.elapsed().as_millis()
     );
 
     log::info!(
