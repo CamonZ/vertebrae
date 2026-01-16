@@ -1,6 +1,7 @@
 import { memo } from 'react';
 import { Handle, Position, type NodeProps, type Node } from '@xyflow/react';
 import type { Task } from '../../bindings';
+import { NODE_SIZING, NODE_SHADOW_STYLE, HANDLE_SIZING } from './nodeConstants';
 
 export type TaskExecutionStatus = 'waiting' | 'in_progress' | 'completed' | 'failed';
 
@@ -52,7 +53,7 @@ function TaskNodeComponent({ data, selected }: NodeProps<TaskNodeType>) {
 
   return (
     <div
-      className={`relative min-w-[180px] rounded-lg border p-3 transition-all duration-200 ${getStatusColor(
+      className={`relative ${NODE_SIZING.minWidthClass} ${NODE_SIZING.borderRadiusClass} border ${NODE_SIZING.paddingClass} transition-all duration-200 ${getStatusColor(
         status
       )} ${
         selected
@@ -60,8 +61,7 @@ function TaskNodeComponent({ data, selected }: NodeProps<TaskNodeType>) {
           : 'hover:border-primary/50 hover:shadow-glow-sm'
       }`}
       style={{
-        // Add box-shadow to create 3D stacked appearance
-        boxShadow: '3px 3px 0px rgba(0, 0, 0, 0.3), 4px 4px 8px rgba(0, 0, 0, 0.2)',
+        boxShadow: NODE_SHADOW_STYLE.boxShadow,
       }}
     >
       {/* Input handles for dependencies */}
@@ -69,7 +69,7 @@ function TaskNodeComponent({ data, selected }: NodeProps<TaskNodeType>) {
         <Handle
           type="target"
           position={Position.Left}
-          className="!-left-1.5 !h-2.5 !w-2.5 !rounded-full !border-2 !border-warning !bg-bg-primary"
+          className={`!-left-1.5 ${HANDLE_SIZING.heightClass} ${HANDLE_SIZING.widthClass} ${HANDLE_SIZING.roundedClass} ${HANDLE_SIZING.borderClass} !border-warning ${HANDLE_SIZING.bgClass}`}
         />
       )}
 
@@ -126,7 +126,7 @@ function TaskNodeComponent({ data, selected }: NodeProps<TaskNodeType>) {
         <Handle
           type="source"
           position={Position.Right}
-          className="!-right-1.5 !h-2.5 !w-2.5 !rounded-full !border-2 !border-info !bg-bg-primary"
+          className={`!-right-1.5 ${HANDLE_SIZING.heightClass} ${HANDLE_SIZING.widthClass} ${HANDLE_SIZING.roundedClass} ${HANDLE_SIZING.borderClass} !border-info ${HANDLE_SIZING.bgClass}`}
         />
       )}
     </div>

@@ -1,6 +1,7 @@
 import { memo } from 'react';
 import { Handle, Position, type NodeProps, type Node } from '@xyflow/react';
 import type { WorkflowStep } from '../../bindings';
+import { NODE_SIZING, NODE_SHADOW_STYLE, HANDLE_SIZING } from './nodeConstants';
 
 export type TaskExecutionStatus = 'waiting' | 'in_progress' | 'completed' | 'failed';
 
@@ -65,21 +66,24 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
 
   return (
     <div
-      className={`relative min-w-[200px] rounded-xl border bg-bg-secondary p-4 transition-all duration-200 ${
+      className={`relative ${NODE_SIZING.minWidthClass} ${NODE_SIZING.borderRadiusClass} border bg-bg-secondary ${NODE_SIZING.paddingClass} transition-all duration-200 ${
         selected
           ? 'border-primary shadow-glow'
           : 'border-border hover:border-primary/50 hover:shadow-glow-sm'
       }`}
+      style={{
+        boxShadow: NODE_SHADOW_STYLE.boxShadow,
+      }}
     >
       {/* Subtle inner glow effect */}
-      <div className="pointer-events-none absolute inset-0 rounded-xl bg-gradient-to-br from-primary/5 to-transparent" />
+      <div className={`pointer-events-none absolute inset-0 ${NODE_SIZING.borderRadiusClass} bg-gradient-to-br from-primary/5 to-transparent`} />
 
       {/* Input handle - hidden for first step */}
       {!isFirst && (
         <Handle
           type="target"
           position={Position.Left}
-          className="!-left-1 !h-3 !w-3 !rounded-full !border-2 !border-primary !bg-bg-primary !shadow-glow-sm"
+          className={`!-left-1.5 ${HANDLE_SIZING.heightClass} ${HANDLE_SIZING.widthClass} ${HANDLE_SIZING.roundedClass} ${HANDLE_SIZING.borderClass} !border-primary ${HANDLE_SIZING.bgClass} !shadow-glow-sm`}
         />
       )}
 
@@ -222,7 +226,7 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
         <Handle
           type="source"
           position={Position.Right}
-          className="!-right-1 !h-3 !w-3 !rounded-full !border-2 !border-primary !bg-bg-primary !shadow-glow-sm"
+          className={`!-right-1.5 ${HANDLE_SIZING.heightClass} ${HANDLE_SIZING.widthClass} ${HANDLE_SIZING.roundedClass} ${HANDLE_SIZING.borderClass} !border-primary ${HANDLE_SIZING.bgClass} !shadow-glow-sm`}
         />
       )}
     </div>
