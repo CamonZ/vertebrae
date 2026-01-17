@@ -85,7 +85,7 @@ impl<'a> StepExecutionRepository<'a> {
             message: "No ID returned from create operation".to_string(),
         })?;
 
-        let id_str = id.id.id.to_string();
+        let id_str = id.id.id.to_raw();
         debug!("Created step execution with ID: {}", id_str);
         Ok(id_str)
     }
@@ -133,7 +133,7 @@ impl<'a> StepExecutionRepository<'a> {
             message: "No ID returned from create operation".to_string(),
         })?;
 
-        let id_str = id.id.id.to_string();
+        let id_str = id.id.id.to_raw();
         debug!("Created session log with ID: {}", id_str);
         Ok(id_str)
     }

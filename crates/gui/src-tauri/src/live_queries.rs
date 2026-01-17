@@ -252,7 +252,7 @@ fn handle_task_notification(
     app_handle: &AppHandle,
 ) {
     // Extract task ID from the notification data
-    let task_id = notification.data.id.id.to_string();
+    let task_id = notification.data.id.id.to_raw();
 
     // Convert SurrealDB action to our TaskChangeType
     let change_type = match notification.action {
@@ -308,7 +308,7 @@ fn handle_workflow_notification(
     app_handle: &AppHandle,
 ) {
     // Extract workflow ID from the notification data
-    let workflow_id = notification.data.id.id.to_string();
+    let workflow_id = notification.data.id.id.to_raw();
 
     // Convert SurrealDB action to our WorkflowChangeType
     let change_type = match notification.action {

@@ -142,7 +142,7 @@ impl<'a> GraphQueries<'a> {
         // Build nodes for each direct blocker
         let mut nodes = Vec::new();
         for blocker in direct_blockers {
-            let blocker_id = blocker.id.id.to_string();
+            let blocker_id = blocker.id.id.to_raw();
 
             // Recursively get children (blockers of this blocker)
             let children =
@@ -214,7 +214,7 @@ impl<'a> GraphQueries<'a> {
             let deps: Vec<surrealdb::sql::Thing> = result.take(0)?;
 
             for dep in deps {
-                let dep_id = dep.id.to_string();
+                let dep_id = dep.id.to_raw();
 
                 // If we haven't visited this task yet
                 if visited.insert(dep_id.clone()) {
@@ -310,7 +310,7 @@ impl<'a> GraphQueries<'a> {
             let deps: Vec<surrealdb::sql::Thing> = result.take(0)?;
 
             for dep in deps {
-                let dep_id = dep.id.to_string();
+                let dep_id = dep.id.to_raw();
 
                 // If we can reach task_id from depends_on_id, creating task_id -> depends_on_id
                 // would form a cycle
@@ -370,7 +370,7 @@ impl<'a> GraphQueries<'a> {
             let deps: Vec<surrealdb::sql::Thing> = result.take(0)?;
 
             for dep in deps {
-                let dep_id = dep.id.to_string();
+                let dep_id = dep.id.to_raw();
 
                 if dep_id == task_id {
                     // Found the path - reconstruct it
@@ -501,7 +501,7 @@ impl<'a> GraphQueries<'a> {
 
         // Recursively check each dependency
         for dep in deps {
-            let dep_id = dep.id.to_string();
+            let dep_id = dep.id.to_raw();
             if let Some(cycle) =
                 Box::pin(self.detect_cycle_dfs(&dep_id, visited, path, path_set)).await?
             {
@@ -560,7 +560,7 @@ impl<'a> GraphQueries<'a> {
         let mut result = self.client.query(&query).await?;
         let rows: Vec<TaskIdRow> = result.take(0)?;
 
-        Ok(rows.into_iter().map(|r| r.id.id.to_string()).collect())
+        Ok(rows.into_iter().map(|r| r.id.id.to_raw()).collect())
     }
 
     /// Get the ancestor chain from a task to the root.
@@ -587,7 +587,7 @@ impl<'a> GraphQueries<'a> {
 
             match parents.first() {
                 Some(parent) => {
-                    let parent_id = parent.id.to_string();
+                    let parent_id = parent.id.to_raw();
                     ancestors.push(parent_id.clone());
                     current_id = parent_id;
                 }
@@ -684,7 +684,7 @@ impl<'a> GraphQueries<'a> {
         Ok(incomplete
             .into_iter()
             .map(|row| crate::error::IncompleteChildInfo {
-                id: row.id.id.to_string(),
+                id: row.id.id.to_raw(),
                 title: row.title,
                 status: row.status,
                 level: row.level,
@@ -714,7 +714,7 @@ impl<'a> GraphQueries<'a> {
         let mut result = self.client.query(&query).await?;
         let blockers: Vec<TaskIdRow> = result.take(0)?;
 
-        Ok(blockers.into_iter().map(|r| r.id.id.to_string()).collect())
+        Ok(blockers.into_iter().map(|r| r.id.id.to_raw()).collect())
     }
 
     /// Get all incomplete blockers for a task with full details.
@@ -770,7 +770,7 @@ impl<'a> GraphQueries<'a> {
         Ok(blockers
             .into_iter()
             .map(|row| TaskSummary {
-                id: row.id.id.to_string(),
+                id: row.id.id.to_raw(),
                 title: row.title,
                 level: Self::parse_level(&row.level),
                 status: Self::parse_status(&row.status),
@@ -835,7 +835,7 @@ impl<'a> GraphQueries<'a> {
 
         Ok(deps
             .into_iter()
-            .map(|r| (r.id.id.to_string(), r.title, r.status))
+            .map(|r| (r.id.id.to_raw(), r.title, r.status))
             .collect())
     }
 
@@ -880,7 +880,7 @@ impl<'a> GraphQueries<'a> {
         let mut unblocked = Vec::new();
 
         for dependent in dependents {
-            let dep_id = dependent.id.id.to_string();
+            let dep_id = dependent.id.id.to_raw();
 
             // Count incomplete dependencies for this task (excluding the current task which we're completing)
             // GROUP ALL ensures we get a single aggregated count instead of one row per match

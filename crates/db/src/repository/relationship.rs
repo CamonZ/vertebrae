@@ -89,7 +89,7 @@ impl<'a> RelationshipRepository<'a> {
         let mut result = self.client.query(&query).await?;
         let parents: Vec<surrealdb::sql::Thing> = result.take(0)?;
 
-        Ok(parents.first().map(|thing| thing.id.to_string()))
+        Ok(parents.first().map(|thing| thing.id.to_raw()))
     }
 
     /// Get all children of a task.
@@ -111,7 +111,7 @@ impl<'a> RelationshipRepository<'a> {
         let mut result = self.client.query(&query).await?;
         let rows: Vec<TaskIdRow> = result.take(0)?;
 
-        Ok(rows.into_iter().map(|r| r.id.id.to_string()).collect())
+        Ok(rows.into_iter().map(|r| r.id.id.to_raw()).collect())
     }
 
     /// Remove all child_of edges pointing to a parent task.
@@ -211,7 +211,7 @@ impl<'a> RelationshipRepository<'a> {
         let mut result = self.client.query(&query).await?;
         let deps: Vec<surrealdb::sql::Thing> = result.take(0)?;
 
-        Ok(deps.into_iter().map(|thing| thing.id.to_string()).collect())
+        Ok(deps.into_iter().map(|thing| thing.id.to_raw()).collect())
     }
 
     /// Get all tasks that depend on a task (its dependents).
@@ -235,7 +235,7 @@ impl<'a> RelationshipRepository<'a> {
         let mut result = self.client.query(&query).await?;
         let rows: Vec<TaskIdRow> = result.take(0)?;
 
-        Ok(rows.into_iter().map(|r| r.id.id.to_string()).collect())
+        Ok(rows.into_iter().map(|r| r.id.id.to_raw()).collect())
     }
 
     /// Remove all depends_on edges from a task (where task is the dependent).

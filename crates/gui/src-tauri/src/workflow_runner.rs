@@ -67,12 +67,12 @@ pub async fn execute_workflow(
 
     let workflow = db
         .workflows()
-        .get(&workflow_id.id.to_string())
+        .get(&workflow_id.id.to_raw())
         .await
         .map_err(|e| format!("Failed to get workflow: {}", e))?
         .ok_or_else(|| "Workflow not found".to_string())?;
 
-    let workflow_id_str = workflow_id.id.to_string();
+    let workflow_id_str = workflow_id.id.to_raw();
 
     // 2. Emit started event
     let _ = app_handle.emit(

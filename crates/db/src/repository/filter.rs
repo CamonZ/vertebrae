@@ -85,7 +85,7 @@ impl TaskRow {
     /// Convert a TaskRow to a TaskSummary
     fn into_summary(self) -> TaskSummary {
         TaskSummary {
-            id: self.id.id.to_string(),
+            id: self.id.id.to_raw(),
             title: self.title,
             level: parse_level(&self.level),
             status: parse_status(&self.status),
@@ -370,7 +370,7 @@ impl<'a> TaskLister<'a> {
         Ok(rows
             .into_iter()
             .map(|row| TaskWithRelationsData {
-                id: row.id.id.to_string(),
+                id: row.id.id.to_raw(),
                 title: row.title,
                 level: parse_level(&row.level),
                 status: parse_status(&row.status),
@@ -381,21 +381,21 @@ impl<'a> TaskLister<'a> {
                 sections: row.sections,
                 refs: row.refs,
                 created_at: row.created_at.0,
-                parent_id: row.parent_id.map(|t| t.id.to_string()),
+                parent_id: row.parent_id.map(|t| t.id.to_raw()),
                 children_ids: row
                     .children_ids
                     .into_iter()
-                    .map(|t| t.id.to_string())
+                    .map(|t| t.id.to_raw())
                     .collect(),
                 depends_on_ids: row
                     .depends_on_ids
                     .into_iter()
-                    .map(|t| t.id.to_string())
+                    .map(|t| t.id.to_raw())
                     .collect(),
                 dependent_ids: row
                     .dependent_ids
                     .into_iter()
-                    .map(|t| t.id.to_string())
+                    .map(|t| t.id.to_raw())
                     .collect(),
             })
             .collect())
@@ -669,21 +669,21 @@ impl<'a> TaskLister<'a> {
         // Set of tasks that have incomplete blockers
         let blocked_tasks: HashSet<String> = blocker_rows
             .iter()
-            .map(|r| r.dependent_id.id.to_string())
+            .map(|r| r.dependent_id.id.to_raw())
             .collect();
 
         // Map of parent_id -> [child_ids]
         let mut children_map: HashMap<String, Vec<String>> = HashMap::new();
         for row in &child_of_rows {
-            let parent_id = row.parent_id.id.to_string();
-            let child_id = row.child_id.id.to_string();
+            let parent_id = row.parent_id.id.to_raw();
+            let child_id = row.child_id.id.to_raw();
             children_map.entry(parent_id).or_default().push(child_id);
         }
 
         // Map of task_id -> status (for checking work started)
         let task_statuses: HashMap<String, String> = all_tasks
             .iter()
-            .map(|t| (t.id.id.to_string(), t.status.clone()))
+            .map(|t| (t.id.id.to_raw(), t.status.clone()))
             .collect();
 
         // Helper: Check if any descendant has work started (BFS in memory)
@@ -724,7 +724,7 @@ impl<'a> TaskLister<'a> {
                         // Parent has same status - check if parent has work started
                         // If parent has work started, it's not a valid entry point,
                         // so this child becomes an entry point
-                        let parent_id_str = parent_id.id.to_string();
+                        let parent_id_str = parent_id.id.to_raw();
                         has_work_started_in_descendants(&parent_id_str)
                     }
                 }
@@ -735,7 +735,7 @@ impl<'a> TaskLister<'a> {
         let mut ready_tasks: Vec<TaskSummary> = all_tasks
             .into_iter()
             .filter(|task| {
-                let task_id = task.id.id.to_string();
+                let task_id = task.id.id.to_raw();
 
                 // Must have target status
                 if task.status != status_str {
@@ -760,7 +760,7 @@ impl<'a> TaskLister<'a> {
                 true
             })
             .map(|task| TaskSummary {
-                id: task.id.id.to_string(),
+                id: task.id.id.to_raw(),
                 title: task.title,
                 level: parse_level(&task.level),
                 status: parse_status(&task.status),
@@ -2459,6 +2459,59 @@ mod tests {
         assert_eq!(child2.parent_id, Some("parent".to_string()));
         assert_eq!(child2.depends_on_ids.len(), 1);
         assert_eq!(child2.depends_on_ids[0], "child1");
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_all_numeric_task_id_has_no_backticks() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        // Create a task with an all-numeric ID
+        // This tests that the ID is returned without backticks or other escape characters
+        create_task(&db, "123456", "Numeric ID Task", "task", "todo", None, &[]).await;
+
+        let lister = TaskLister::new(db.client());
+        let filter = TaskFilter::new();
+        let result = lister.list(&filter).await.unwrap();
+
+        assert_eq!(result.len(), 1);
+        // The ID should be exactly "123456" without any backticks, angle brackets, or parentheses
+        assert_eq!(result[0].id, "123456");
+        // Verify no escape characters
+        assert!(!result[0].id.contains('`'));
+        assert!(!result[0].id.contains('('));
+        assert!(!result[0].id.contains(')'));
+        assert!(!result[0].id.contains('<'));
+        assert!(!result[0].id.contains('>'));
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_all_numeric_id_with_relations() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        // Create tasks with all-numeric IDs
+        create_task(&db, "111111", "Parent Task", "epic", "todo", None, &[]).await;
+        create_task(&db, "222222", "Child Task", "task", "todo", None, &[]).await;
+
+        // Create parent-child relationship
+        create_child_of(&db, "222222", "111111").await;
+
+        let lister = TaskLister::new(db.client());
+        let filter = TaskFilter::new();
+        let result = lister.list_with_relations(&filter).await.unwrap();
+
+        // Verify parent ID
+        let parent = result.iter().find(|t| t.id == "111111").unwrap();
+        assert_eq!(parent.id, "111111");
+        assert!(parent.children_ids.contains(&"222222".to_string()));
+
+        // Verify child's parent_id is clean
+        let child = result.iter().find(|t| t.id == "222222").unwrap();
+        assert_eq!(child.id, "222222");
+        assert_eq!(child.parent_id, Some("111111".to_string()));
 
         cleanup(&temp_dir);
     }

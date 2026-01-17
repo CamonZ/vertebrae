@@ -607,7 +607,7 @@ pub async fn get_all_task_ids(db: &Database) -> Vec<String> {
     let query = "SELECT id FROM task";
     let mut result = db.client().query(query).await.unwrap();
     let rows: Vec<IdRow> = result.take(0).unwrap();
-    rows.into_iter().map(|r| r.id.id.to_string()).collect()
+    rows.into_iter().map(|r| r.id.id.to_raw()).collect()
 }
 
 #[cfg(test)]

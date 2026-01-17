@@ -90,7 +90,7 @@ impl ExecutionListCommand {
             let exec_id = execution
                 .id
                 .as_ref()
-                .map(|t| t.id.to_string())
+                .map(|t| t.id.to_raw())
                 .unwrap_or_else(|| "?".to_string());
             let short_id = if exec_id.len() > 6 {
                 &exec_id[..6]
@@ -159,11 +159,11 @@ impl ExecutionShowCommand {
         let exec_id = execution
             .id
             .as_ref()
-            .map(|t| t.id.to_string())
+            .map(|t| t.id.to_raw())
             .unwrap_or_else(|| "?".to_string());
 
-        let task_id = execution.task_id.id.to_string();
-        let workflow_id = execution.workflow_id.id.to_string();
+        let task_id = execution.task_id.id.to_raw();
+        let workflow_id = execution.workflow_id.id.to_raw();
 
         let status_str = match execution.status {
             ExecutionStatus::InProgress => "IN_PROGRESS",
@@ -226,7 +226,7 @@ impl ExecutionShowCommand {
                 let log_id = log
                     .id
                     .as_ref()
-                    .map(|t| t.id.to_string())
+                    .map(|t| t.id.to_raw())
                     .unwrap_or_else(|| "?".to_string());
                 output.push_str(&format!("\n[{}] Log {} ({})\n", i + 1, created, log_id));
                 output.push_str(&"-".repeat(20));
@@ -286,7 +286,7 @@ impl ExecutionLogCommand {
         let exec_id = execution
             .id
             .as_ref()
-            .map(|t| t.id.to_string())
+            .map(|t| t.id.to_raw())
             .unwrap_or_else(|| self.execution_id.clone());
         let step_execution_thing = Thing::from(("step_execution", exec_id.as_str()));
         let log = SessionLog::new(step_execution_thing, &self.content);

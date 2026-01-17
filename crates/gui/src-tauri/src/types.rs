@@ -260,7 +260,7 @@ pub struct Task {
 impl From<vertebrae_db::Task> for Task {
     fn from(task: vertebrae_db::Task) -> Self {
         Task {
-            id: task.id.map(|t| t.id.to_string()),
+            id: task.id.map(|t| t.id.to_raw()),
             title: task.title,
             description: task.description,
             level: task.level.into(),
@@ -274,7 +274,7 @@ impl From<vertebrae_db::Task> for Task {
             sections: task.sections.into_iter().map(Into::into).collect(),
             code_refs: task.code_refs.into_iter().map(Into::into).collect(),
             needs_human_review: task.needs_human_review,
-            workflow_id: task.workflow_id.map(|t| t.id.to_string()),
+            workflow_id: task.workflow_id.map(|t| t.id.to_raw()),
             current_step: task.current_step.map(|s| s as u32),
         }
     }
@@ -500,7 +500,7 @@ pub struct Workflow {
 impl From<vertebrae_db::Workflow> for Workflow {
     fn from(workflow: vertebrae_db::Workflow) -> Self {
         Workflow {
-            id: workflow.id.map(|t| t.id.to_string()),
+            id: workflow.id.map(|t| t.id.to_raw()),
             name: workflow.name,
             description: workflow.description,
             steps: workflow.steps.into_iter().map(Into::into).collect(),
@@ -576,9 +576,9 @@ pub struct StepExecution {
 impl From<vertebrae_db::StepExecution> for StepExecution {
     fn from(exec: vertebrae_db::StepExecution) -> Self {
         StepExecution {
-            id: exec.id.map(|t| t.id.to_string()),
-            task_id: exec.task_id.id.to_string(),
-            workflow_id: exec.workflow_id.id.to_string(),
+            id: exec.id.map(|t| t.id.to_raw()),
+            task_id: exec.task_id.id.to_raw(),
+            workflow_id: exec.workflow_id.id.to_raw(),
             step_name: exec.step_name,
             started_at: exec.started_at.to_rfc3339(),
             completed_at: exec.completed_at.map(|dt| dt.to_rfc3339()),
@@ -603,8 +603,8 @@ pub struct SessionLog {
 impl From<vertebrae_db::SessionLog> for SessionLog {
     fn from(log: vertebrae_db::SessionLog) -> Self {
         SessionLog {
-            id: log.id.map(|t| t.id.to_string()),
-            step_execution_id: log.step_execution_id.id.to_string(),
+            id: log.id.map(|t| t.id.to_raw()),
+            step_execution_id: log.step_execution_id.id.to_raw(),
             content: log.content,
             created_at: log.created_at.to_rfc3339(),
         }

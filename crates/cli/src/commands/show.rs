@@ -135,7 +135,7 @@ struct RelatedTaskRow {
 impl From<RelatedTaskRow> for TaskSummary {
     fn from(row: RelatedTaskRow) -> Self {
         TaskSummary {
-            id: row.id.id.to_string(),
+            id: row.id.id.to_raw(),
             title: row.title,
             level: row.level,
             status: row.status,
@@ -270,7 +270,7 @@ impl ShowCommand {
             .collect();
 
         Ok(TaskDetail {
-            id: task.id.id.to_string(),
+            id: task.id.id.to_raw(),
             title: task.title,
             description: task.description,
             level: task.level,
