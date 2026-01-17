@@ -879,9 +879,14 @@ impl TaskService for DefaultTaskService {
     }
 
     async fn get_task_tree(&self, options: &TreeFilterOptions) -> ServiceResult<Vec<TaskTreeNode>> {
-        // Step 1: Get all tasks (include_done based on filter)
-        let all_filter = TaskFilter::new().include_done();
-        let all_tasks = self.db.list_tasks().list(&all_filter).await?;
+        // Step 1: Fetch tasks with workflow_id filter applied at DB level
+        // Other filters (level, status, etc.) are applied in memory since they
+        // might need ancestor tasks for preserve_ancestors to work correctly.
+        let mut fetch_filter = TaskFilter::new().include_done();
+        if let Some(ref workflow_id) = options.filter.workflow_id {
+            fetch_filter = fetch_filter.with_workflow_id(workflow_id.clone());
+        }
+        let all_tasks = self.db.list_tasks().list(&fetch_filter).await?;
 
         if all_tasks.is_empty() {
             return Ok(vec![]);
@@ -999,10 +1004,17 @@ impl TaskService for DefaultTaskService {
             Some(node)
         }
 
-        // Step 6: Find root tasks (orphans - no parent)
+        // Step 6: Find root tasks (orphans - no parent, or parent not in result set)
         let root_ids: Vec<String> = all_tasks
             .iter()
-            .filter(|t| !parent_map.contains_key(&t.id) && ids_to_include.contains(&t.id))
+            .filter(|t| {
+                let is_included = ids_to_include.contains(&t.id);
+                let has_no_parent = !parent_map.contains_key(&t.id);
+                let parent_not_in_results = parent_map
+                    .get(&t.id)
+                    .is_some_and(|parent_id| !ids_to_include.contains(parent_id));
+                is_included && (has_no_parent || parent_not_in_results)
+            })
             .map(|t| t.id.clone())
             .collect();
 
@@ -2332,5 +2344,214 @@ mod tests {
         // Verify the section was updated
         let task = service.get_task(&id).await.unwrap();
         assert_eq!(task.sections[0].content, "Updated");
+    }
+
+    // =========================================================================
+    // get_task_tree workflow_id filter tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_get_task_tree_filter_by_workflow_id() {
+        let service = setup_test_service().await;
+
+        // Create tasks for workflow 1
+        let w1_task1 = service
+            .create_task(CreateTaskOptions::new("Workflow 1 Task A"))
+            .await
+            .unwrap();
+
+        let w1_task2 = service
+            .create_task(CreateTaskOptions::new("Workflow 1 Task B"))
+            .await
+            .unwrap();
+
+        // Create tasks for workflow 2
+        let w2_task1 = service
+            .create_task(CreateTaskOptions::new("Workflow 2 Task A"))
+            .await
+            .unwrap();
+
+        // Create task not assigned to any workflow
+        let no_wf_task = service
+            .create_task(CreateTaskOptions::new("No Workflow Task"))
+            .await
+            .unwrap();
+
+        // Create workflow IDs (simulating workflow records)
+        let workflow1_id = Thing::from(("workflow", "workflow1"));
+        let workflow2_id = Thing::from(("workflow", "workflow2"));
+
+        // Assign tasks to workflows
+        service
+            .assign_workflow(&w1_task1, &workflow1_id)
+            .await
+            .unwrap();
+        service
+            .assign_workflow(&w1_task2, &workflow1_id)
+            .await
+            .unwrap();
+        service
+            .assign_workflow(&w2_task1, &workflow2_id)
+            .await
+            .unwrap();
+
+        // Test 1: Filter by workflow1 - should only return tasks for workflow1
+        let filter = TaskFilter::new().with_workflow_id("workflow1");
+        let options = TreeFilterOptions::new(filter);
+        let tree = service.get_task_tree(&options).await.unwrap();
+
+        assert_eq!(tree.len(), 2, "Should return 2 tasks for workflow1");
+        let ids: std::collections::HashSet<_> = tree.iter().map(|n| n.id.as_str()).collect();
+        assert!(ids.contains(w1_task1.as_str()), "Should contain w1_task1");
+        assert!(ids.contains(w1_task2.as_str()), "Should contain w1_task2");
+        assert!(
+            !ids.contains(w2_task1.as_str()),
+            "Should not contain w2_task1"
+        );
+        assert!(
+            !ids.contains(no_wf_task.as_str()),
+            "Should not contain no_wf_task"
+        );
+
+        // Test 2: Filter by workflow2 - should only return tasks for workflow2
+        let filter = TaskFilter::new().with_workflow_id("workflow2");
+        let options = TreeFilterOptions::new(filter);
+        let tree = service.get_task_tree(&options).await.unwrap();
+
+        assert_eq!(tree.len(), 1, "Should return 1 task for workflow2");
+        assert_eq!(tree[0].id, w2_task1);
+
+        // Test 3: Filter by non-existent workflow - should return empty
+        let filter = TaskFilter::new().with_workflow_id("nonexistent");
+        let options = TreeFilterOptions::new(filter);
+        let tree = service.get_task_tree(&options).await.unwrap();
+
+        assert!(
+            tree.is_empty(),
+            "Should return empty for nonexistent workflow"
+        );
+
+        // Test 4: No filter - should return all tasks
+        let options = TreeFilterOptions::default();
+        let tree = service.get_task_tree(&options).await.unwrap();
+
+        assert_eq!(tree.len(), 4, "Should return all 4 tasks without filter");
+    }
+
+    #[tokio::test]
+    async fn test_get_task_tree_workflow_filter_with_hierarchy() {
+        let service = setup_test_service().await;
+
+        // Create a hierarchy: epic -> ticket -> task, all in workflow1
+        let epic_id = service
+            .create_task(CreateTaskOptions::new("Epic in WF1").with_level(Level::Epic))
+            .await
+            .unwrap();
+
+        let ticket_id = service
+            .create_task(
+                CreateTaskOptions::new("Ticket in WF1")
+                    .with_level(Level::Ticket)
+                    .with_parent(&epic_id),
+            )
+            .await
+            .unwrap();
+
+        let task_id = service
+            .create_task(CreateTaskOptions::new("Task in WF1").with_parent(&ticket_id))
+            .await
+            .unwrap();
+
+        // Create another epic NOT in any workflow
+        let other_epic = service
+            .create_task(CreateTaskOptions::new("Epic without workflow").with_level(Level::Epic))
+            .await
+            .unwrap();
+
+        // Assign only the first hierarchy to workflow1
+        let workflow1_id = Thing::from(("workflow", "workflow1"));
+        service
+            .assign_workflow(&epic_id, &workflow1_id)
+            .await
+            .unwrap();
+        service
+            .assign_workflow(&ticket_id, &workflow1_id)
+            .await
+            .unwrap();
+        service
+            .assign_workflow(&task_id, &workflow1_id)
+            .await
+            .unwrap();
+
+        // Filter by workflow1 - should return hierarchy but not the other epic
+        let filter = TaskFilter::new().with_workflow_id("workflow1");
+        let options = TreeFilterOptions::new(filter);
+        let tree = service.get_task_tree(&options).await.unwrap();
+
+        // Should have only the epic from workflow1 at root
+        assert_eq!(tree.len(), 1, "Should return 1 root for workflow1");
+        assert_eq!(tree[0].id, epic_id);
+        assert_eq!(tree[0].title, "Epic in WF1");
+
+        // Verify the other epic is not included
+        assert!(
+            !tree.iter().any(|n| n.id == other_epic),
+            "Should not include epic without workflow"
+        );
+
+        // Verify hierarchy is preserved within workflow
+        assert_eq!(tree[0].children.len(), 1);
+        assert_eq!(tree[0].children[0].id, ticket_id);
+        assert_eq!(tree[0].children[0].children.len(), 1);
+        assert_eq!(tree[0].children[0].children[0].id, task_id);
+    }
+
+    #[tokio::test]
+    async fn test_get_task_tree_workflow_filter_partial_hierarchy() {
+        let service = setup_test_service().await;
+
+        // Create a hierarchy: epic -> ticket -> task
+        // Only assign ticket and task to workflow, NOT epic
+        let epic_id = service
+            .create_task(CreateTaskOptions::new("Epic NOT in WF").with_level(Level::Epic))
+            .await
+            .unwrap();
+
+        let ticket_id = service
+            .create_task(
+                CreateTaskOptions::new("Ticket in WF")
+                    .with_level(Level::Ticket)
+                    .with_parent(&epic_id),
+            )
+            .await
+            .unwrap();
+
+        let task_id = service
+            .create_task(CreateTaskOptions::new("Task in WF").with_parent(&ticket_id))
+            .await
+            .unwrap();
+
+        // Assign only ticket and task to workflow, leaving epic unassigned
+        let workflow_id = Thing::from(("workflow", "partial_wf"));
+        service
+            .assign_workflow(&ticket_id, &workflow_id)
+            .await
+            .unwrap();
+        service
+            .assign_workflow(&task_id, &workflow_id)
+            .await
+            .unwrap();
+
+        // Filter by workflow - epic should NOT appear (not assigned)
+        let filter = TaskFilter::new().with_workflow_id("partial_wf");
+        let options = TreeFilterOptions::new(filter).with_preserve_ancestors(false);
+        let tree = service.get_task_tree(&options).await.unwrap();
+
+        // Should only have ticket and task (epic not in workflow)
+        // Ticket becomes root since its parent (epic) is not in the result
+        assert_eq!(tree.len(), 1, "Should return 1 root (ticket)");
+        assert_eq!(tree[0].id, ticket_id);
+        assert_eq!(tree[0].children.len(), 1);
+        assert_eq!(tree[0].children[0].id, task_id);
     }
 }

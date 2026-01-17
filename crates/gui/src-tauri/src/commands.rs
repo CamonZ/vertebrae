@@ -245,20 +245,11 @@ pub async fn get_task_hierarchy(
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    // Build the filter based on options
-    let mut db_filter = vertebrae_db::TaskFilter::new();
-
-    // Apply include_done setting (default to true if not specified)
-    if let Some(ref options) = filter {
-        if !options.include_done.unwrap_or(true) {
-            // If include_done is explicitly false, don't include done tasks
-            // Don't call include_done(), which would include them
-        } else {
-            db_filter = db_filter.include_done();
-        }
-    } else {
-        db_filter = db_filter.include_done();
-    }
+    // Convert filter options to db filter, applying all fields (statuses, levels, workflow_id, etc.)
+    let db_filter: vertebrae_db::TaskFilter = match filter {
+        Some(opts) => opts.into(),
+        None => vertebrae_db::TaskFilter::new().include_done(),
+    };
 
     let tree_options = vertebrae_core::TreeFilterOptions::new(db_filter);
     let tree = service.get_task_tree(&tree_options).await?;
