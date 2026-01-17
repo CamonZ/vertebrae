@@ -14,6 +14,7 @@ import "@xyflow/react/dist/style.css";
 
 import {
   commands,
+  type TaskLevel,
   type TaskWithRelations,
   type Workflow,
   type WorkflowStep,
@@ -99,6 +100,19 @@ const TaskZoneNode = memo(function TaskZoneNode({
     }
   };
 
+  const getLevelDotColor = (level: TaskLevel) => {
+    switch (level) {
+      case "epic":
+        return "bg-info";
+      case "ticket":
+        return "bg-primary";
+      case "task":
+        return "bg-text-secondary";
+      default:
+        return "bg-text-muted";
+    }
+  };
+
   const handleZoneClick = () => {
     if (step && onZoneClick) {
       onZoneClick(step);
@@ -158,12 +172,18 @@ const TaskZoneNode = memo(function TaskZoneNode({
                   {getStatusIcon(status)}
                 </span>
                 <div className="flex-1 min-w-0">
-                  <p
-                    className="truncate text-xs font-medium text-text-primary"
-                    title={tr.task.title}
-                  >
-                    {tr.task.title}
-                  </p>
+                  <div className="flex items-center gap-1.5">
+                    <span
+                      className={`flex-shrink-0 w-2 h-2 rounded-full ${getLevelDotColor(tr.task.level)}`}
+                      title={tr.task.level}
+                    />
+                    <p
+                      className="truncate text-xs font-medium text-text-primary"
+                      title={tr.task.title}
+                    >
+                      {tr.task.title}
+                    </p>
+                  </div>
                   <code className="block truncate font-mono text-[10px] text-text-muted">
                     {(tr.task.id ?? "").slice(0, 8)}
                   </code>
