@@ -17,6 +17,7 @@ export type WorkflowZoneNodeType = Node<WorkflowZoneNodeData, "workflowZoneNode"
 /**
  * Custom node component for displaying a workflow zone with dashed borders.
  * Acts as a visual container for the workflow's step nodes and task zones.
+ * Click on step zone headers (e.g., "backlog", "todo") to view filtered tasks.
  */
 function WorkflowZoneNodeComponent({
   data,
@@ -25,7 +26,7 @@ function WorkflowZoneNodeComponent({
 
   return (
     <div
-      className="relative rounded-xl bg-bg-secondary/30"
+      className="relative rounded-xl bg-bg-secondary/30 transition-all"
       style={{
         width: `${width}px`,
         height: `${height}px`,

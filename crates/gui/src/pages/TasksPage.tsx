@@ -1,4 +1,5 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import type { TaskFilterOptions, TaskSummary, TaskHierarchyNode } from "../bindings";
 import { useTasks } from "../hooks/useTasks";
 import { useTaskHierarchy } from "../hooks/useTaskHierarchy";
@@ -18,6 +19,7 @@ const INITIAL_FILTERS: TaskFilterOptions = {
   children_of: null,
   include_done: true, // Include done tasks by default when showing 'All' statuses
   search: null,
+  workflow_id: null,
 };
 
 /**
@@ -35,6 +37,7 @@ function countHierarchyTasks(nodes: TaskHierarchyNode[]): number {
  * Supports both flat list and hierarchical tree views.
  */
 export function TasksPage() {
+  const [searchParams] = useSearchParams();
   const [filters, setFilters] = useState<TaskFilterOptions>(INITIAL_FILTERS);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('tree');
@@ -42,6 +45,17 @@ export function TasksPage() {
 
   // Use expanded nodes hook to preserve tree collapse state across updates
   const expandedNodes = useExpandedNodes();
+
+  // Initialize filters from URL parameters on mount and when URL changes
+  useEffect(() => {
+    const workflowId = searchParams.get("workflowId");
+    if (workflowId) {
+      setFilters((prev) => ({
+        ...prev,
+        workflow_id: workflowId,
+      }));
+    }
+  }, [searchParams]);
 
   const memoizedFilters = useMemo(
     () => ({

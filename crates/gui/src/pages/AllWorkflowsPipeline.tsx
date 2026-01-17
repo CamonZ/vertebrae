@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, memo } from "react";
 import {
   ReactFlow,
   Controls,
@@ -12,15 +12,24 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
-import { commands, type TaskWithRelations, type Workflow, type WorkflowStep } from "../bindings";
+import {
+  commands,
+  type TaskWithRelations,
+  type Workflow,
+  type WorkflowStep,
+} from "../bindings";
 import { useWorkflows } from "../hooks/useWorkflows";
 import { useWorkflowChangeListener } from "../hooks/useWorkflowChangeListener";
 import { useTaskChangeListener } from "../hooks/useTaskChangeListener";
 import { useToastStore } from "../stores";
 import { StepNode, type StepNodeData } from "../components/WorkflowPipeline";
-import { WorkflowZoneNode, type WorkflowZoneNodeData } from "../components/WorkflowPipeline";
+import {
+  WorkflowZoneNode,
+  type WorkflowZoneNodeData,
+} from "../components/WorkflowPipeline";
 import { TaskDetailPanel } from "../components/TaskDetail";
 import { StepDetailPanel } from "../components/StepDetail";
+import { FilteredTasksPanel } from "../components/FilteredTasks/FilteredTasksPanel";
 
 /**
  * Zone node data type for task containers within workflow zones
@@ -34,14 +43,30 @@ type TaskZoneNodeData = {
   >;
   onTaskClick?: (taskId: string) => void;
   selectedTaskId?: string | null;
+  onZoneClick?: (step: WorkflowStep) => void;
+  step?: WorkflowStep;
+  isZoneActive?: boolean;
   [key: string]: unknown;
 };
 
 /**
  * Custom zone node component - scrollable container for tasks
  */
-function TaskZoneNode({ data }: NodeProps<Node<TaskZoneNodeData>>) {
-  const { label, tasks = [], executionState, onTaskClick, selectedTaskId } = data;
+const TaskZoneNode = memo(function TaskZoneNode({
+  data,
+}: NodeProps<Node<TaskZoneNodeData>>) {
+  const {
+    label,
+    tasks = [],
+    executionState,
+    onTaskClick,
+    selectedTaskId,
+    onZoneClick,
+    step,
+  } = data;
+
+  // Determine if this zone is active (currently showing filtered tasks panel)
+  const isZoneActive = data.isZoneActive ?? false;
 
   const getStatusColor = (status: string, isSelected: boolean) => {
     if (isSelected) {
@@ -74,11 +99,31 @@ function TaskZoneNode({ data }: NodeProps<Node<TaskZoneNodeData>>) {
     }
   };
 
+  const handleZoneClick = () => {
+    if (step && onZoneClick) {
+      onZoneClick(step);
+    }
+  };
+
+  // Determine title styles based on active state (hover via CSS)
+  const getTitleClassName = () => {
+    const base =
+      "text-xs font-semibold uppercase tracking-wider mb-2 px-1 transition-colors cursor-pointer rounded text-left";
+    if (isZoneActive) {
+      return `${base} text-primary font-bold`;
+    }
+    return `${base} text-text-muted hover:text-warning`;
+  };
+
   return (
-    <div className="flex flex-col w-[280px] h-[280px]">
-      <div className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-2 px-1">
+    <div className="flex flex-col w-[280px] h-[280px] text-left">
+      <button
+        type="button"
+        onClick={handleZoneClick}
+        className={getTitleClassName()}
+      >
         {label}
-      </div>
+      </button>
       <div className="flex-1 overflow-y-auto overflow-x-hidden space-y-1.5 pr-1 scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
         {tasks.map((tr) => {
           const execState = executionState?.get(tr.task.id!);
@@ -92,8 +137,11 @@ function TaskZoneNode({ data }: NodeProps<Node<TaskZoneNodeData>>) {
             <button
               key={tr.task.id}
               type="button"
-              onClick={() => onTaskClick?.(tr.task.id!)}
-              className={`w-full text-left rounded-lg border p-2 transition-all duration-200 ${getStatusColor(status, isSelected)} hover:border-primary/50 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primary`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onTaskClick?.(tr.task.id!);
+              }}
+              className={`w-full text-left rounded-lg border p-2 transition-all duration-200 ${getStatusColor(status, isSelected)} hover:border-primary/50 cursor-pointer`}
             >
               <div className="flex items-start gap-2">
                 <span
@@ -130,7 +178,7 @@ function TaskZoneNode({ data }: NodeProps<Node<TaskZoneNodeData>>) {
       </div>
     </div>
   );
-}
+});
 
 /**
  * Node type mapping for React Flow
@@ -163,7 +211,12 @@ function calculateWorkflowZoneWidth(stepCount: number): number {
  * Calculate the height needed for a workflow zone
  */
 function calculateWorkflowZoneHeight(): number {
-  return WORKFLOW_ZONE_HEADER_HEIGHT + TASK_ZONE_Y_OFFSET + 280 + WORKFLOW_ZONE_PADDING;
+  return (
+    WORKFLOW_ZONE_HEADER_HEIGHT +
+    TASK_ZONE_Y_OFFSET +
+    280 +
+    WORKFLOW_ZONE_PADDING
+  );
 }
 
 /**
@@ -182,8 +235,10 @@ function groupTasksByStep(
   });
 
   tasks.forEach((tr) => {
+    const taskStatus = tr.task.status?.toLowerCase();
+
     // Done/rejected tasks go to the last step zone
-    if (tr.task.status === "done" || tr.task.status === "rejected") {
+    if (taskStatus === "done" || taskStatus === "rejected") {
       const lastStep = sortedSteps[sortedSteps.length - 1];
       if (lastStep) {
         groups.get(lastStep.name.toLowerCase())?.push(tr);
@@ -191,7 +246,13 @@ function groupTasksByStep(
       return;
     }
 
-    // Default to first step if no execution state
+    // Match task status to step name
+    if (taskStatus && groups.has(taskStatus)) {
+      groups.get(taskStatus)!.push(tr);
+      return;
+    }
+
+    // Fall back to first step if status doesn't match any step
     const firstStep = sortedSteps[0]?.name?.toLowerCase();
     if (firstStep && groups.has(firstStep)) {
       groups.get(firstStep)!.push(tr);
@@ -221,6 +282,12 @@ export function AllWorkflowsPipeline() {
   // State for selected step (for step config panel)
   const [selectedStep, setSelectedStep] = useState<WorkflowStep | null>(null);
 
+  // State for selected zone (workflow ID + step for filtered tasks panel)
+  const [selectedZone, setSelectedZone] = useState<{
+    workflowId: string;
+    step: WorkflowStep;
+  } | null>(null);
+
   // Task selection handlers
   const handleTaskClick = useCallback((taskId: string) => {
     setSelectedTaskId(taskId);
@@ -244,6 +311,20 @@ export function AllWorkflowsPipeline() {
 
   const handleCloseStepPanel = useCallback(() => {
     setSelectedStep(null);
+  }, []);
+
+  // Zone selection handlers (for filtered tasks panel)
+  const handleZoneClick = useCallback(
+    (workflowId: string, step: WorkflowStep) => {
+      setSelectedZone({ workflowId, step });
+      setSelectedTaskId(null); // Clear task selection
+      setSelectedStep(null); // Clear step config selection
+    },
+    []
+  );
+
+  const handleCloseZonePanel = useCallback(() => {
+    setSelectedZone(null);
   }, []);
 
   // Fetch task details for all workflows
@@ -331,7 +412,9 @@ export function AllWorkflowsPipeline() {
 
       // Add step nodes within this workflow zone
       sortedSteps.forEach((step, index) => {
-        const isStepSelected = selectedStep?.name === step.name && selectedStep?.order === step.order;
+        const isStepSelected =
+          selectedStep?.name === step.name &&
+          selectedStep?.order === step.order;
         nodes.push({
           id: `step-${workflow.id}-${step.order}`,
           type: "stepNode",
@@ -351,6 +434,9 @@ export function AllWorkflowsPipeline() {
 
         // Add task zone node below each step
         const stepTasks = tasksByStep.get(step.name.toLowerCase()) || [];
+        const isZoneActive =
+          selectedZone?.workflowId === workflow.id &&
+          selectedZone?.step.order === step.order;
         nodes.push({
           id: `task-zone-${workflow.id}-${step.order}`,
           type: "taskZoneNode",
@@ -363,6 +449,9 @@ export function AllWorkflowsPipeline() {
             tasks: stepTasks,
             onTaskClick: handleTaskClick,
             selectedTaskId,
+            step,
+            onZoneClick: () => handleZoneClick(workflow.id, step),
+            isZoneActive,
           } as TaskZoneNodeData,
           style: {
             background: "rgba(15, 15, 18, 0.8)",
@@ -371,6 +460,7 @@ export function AllWorkflowsPipeline() {
             padding: "8px",
           },
           draggable: false,
+          selectable: true,
         });
       });
 
@@ -379,7 +469,16 @@ export function AllWorkflowsPipeline() {
     });
 
     return nodes;
-  }, [workflows, workflowTasksMap, handleTaskClick, selectedTaskId, handleStepClick, selectedStep]);
+  }, [
+    workflows,
+    workflowTasksMap,
+    handleTaskClick,
+    selectedTaskId,
+    handleStepClick,
+    selectedStep,
+    handleZoneClick,
+    selectedZone,
+  ]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(allNodes);
   const [edges, , onEdgesChange] = useEdgesState([]);
@@ -480,7 +579,8 @@ export function AllWorkflowsPipeline() {
               Workflow Pipelines
             </h1>
             <p className="mt-1 text-sm text-text-muted">
-              {workflows.length} workflow{workflows.length !== 1 ? "s" : ""} visualized
+              {workflows.length} workflow{workflows.length !== 1 ? "s" : ""}{" "}
+              visualized
             </p>
           </div>
         </div>
@@ -528,11 +628,42 @@ export function AllWorkflowsPipeline() {
 
       {/* Step Detail Panel */}
       {selectedStep && (
-        <StepDetailPanel
-          step={selectedStep}
-          onClose={handleCloseStepPanel}
-        />
+        <StepDetailPanel step={selectedStep} onClose={handleCloseStepPanel} />
       )}
+
+      {/* Filtered Tasks Panel */}
+      {selectedZone &&
+        (() => {
+          const allWorkflowTasks =
+            workflowTasksMap.get(selectedZone.workflowId) || [];
+          // Get workflow object to access steps
+          const workflow = workflows.find(
+            (w) => w.id === selectedZone.workflowId
+          );
+          if (!workflow) return null;
+
+          // Group tasks by step
+          const tasksByStep = groupTasksByStep(
+            allWorkflowTasks,
+            workflow.steps
+          );
+          // Get tasks for selected step
+          const stepTasks =
+            tasksByStep.get(selectedZone.step.name.toLowerCase()) || [];
+          // Convert TaskWithRelations to TaskSummary for the panel
+          const taskSummaries = stepTasks.map((tr) => tr.task);
+
+          return (
+            <FilteredTasksPanel
+              step={selectedZone.step}
+              tasks={taskSummaries}
+              workflowId={selectedZone.workflowId}
+              onClose={handleCloseZonePanel}
+              onTaskSelect={handleRelatedTaskSelect}
+              selectedTaskId={selectedTaskId}
+            />
+          );
+        })()}
     </div>
   );
 }

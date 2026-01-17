@@ -166,7 +166,7 @@ async getWorkflowWithTasks(id: string) : Promise<Result<WorkflowWithTasks, Comma
  * 
  * Returns the workflow along with all tasks that reference this workflow,
  * including full task details (sections, refs) and relations (parent, children, dependencies).
- * This is more efficient than calling get_task() for each task individually.
+ * Uses optimized single-query database access via graph traversal.
  */
 async getWorkflowWithTaskDetails(id: string) : Promise<Result<WorkflowWithTaskDetails, CommandError>> {
     try {
@@ -540,7 +540,11 @@ include_done: boolean | null;
 /**
  * Search text in title and description
  */
-search: string | null }
+search: string | null; 
+/**
+ * Filter by workflow_id (tasks assigned to a specific workflow)
+ */
+workflow_id: string | null }
 /**
  * Task hierarchy node for tree views
  */

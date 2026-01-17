@@ -77,6 +77,7 @@ export function TaskFilters({
       children_of: null,
       include_done: true, // Include done tasks when showing 'All' statuses
       search: null,
+      workflow_id: null,
     });
   }, [onFiltersChange]);
 

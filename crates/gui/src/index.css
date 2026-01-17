@@ -616,6 +616,21 @@ body {
   box-shadow: var(--shadow-glow);
 }
 
+/* Remove focus/selection glow from step and task zone nodes */
+.react-flow__node-stepNode:focus,
+.react-flow__node-stepNode.selected,
+.react-flow__node-taskZoneNode:focus,
+.react-flow__node-taskZoneNode.selected {
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+/* Hover glow for task zone nodes */
+.react-flow__node-taskZoneNode:hover {
+  box-shadow: var(--shadow-glow-sm);
+  transition: box-shadow 0.2s ease;
+}
+
 /* Edge styling */
 .react-flow__edge-path {
   stroke: var(--color-border) !important;

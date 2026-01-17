@@ -321,6 +321,8 @@ pub struct TaskFilterOptions {
     pub include_done: Option<bool>,
     /// Search text in title and description
     pub search: Option<String>,
+    /// Filter by workflow_id (tasks assigned to a specific workflow)
+    pub workflow_id: Option<String>,
 }
 
 impl From<TaskFilterOptions> for vertebrae_db::TaskFilter {
@@ -361,6 +363,10 @@ impl From<TaskFilterOptions> for vertebrae_db::TaskFilter {
 
         if let Some(search) = opts.search {
             filter = filter.with_search(search);
+        }
+
+        if let Some(workflow_id) = opts.workflow_id {
+            filter = filter.with_workflow_id(workflow_id);
         }
 
         filter

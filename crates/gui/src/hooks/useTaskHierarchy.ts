@@ -22,6 +22,11 @@ function filterHierarchyBySearch(
   nodes: TaskHierarchyNode[],
   search: string
 ): TaskHierarchyNode[] {
+  // Guard against undefined nodes
+  if (!nodes) {
+    return [];
+  }
+
   if (!search || search.trim() === "") {
     return nodes;
   }
@@ -79,6 +84,11 @@ function filterHierarchyByFilters(
   nodes: TaskHierarchyNode[],
   filters: TaskFilterOptions
 ): TaskHierarchyNode[] {
+  // Guard against undefined nodes
+  if (!nodes) {
+    return [];
+  }
+
   const hasFilters =
     (filters.statuses && filters.statuses.length > 0) ||
     (filters.levels && filters.levels.length > 0);
