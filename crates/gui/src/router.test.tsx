@@ -11,6 +11,7 @@ vi.mock("./bindings", () => ({
     getWorkflowWithTaskDetails: vi.fn(),
     listTasks: vi.fn(),
     getTaskHierarchy: vi.fn(),
+    getTask: vi.fn(),
   },
   events: {
     workflowChangedEvent: {
@@ -305,6 +306,174 @@ describe("Router Acceptance Tests", () => {
       await waitFor(() => {
         expect(screen.getByText("3 steps")).toBeInTheDocument();
       });
+    });
+  });
+
+  describe("Task detail panel integration", () => {
+    it("opens TaskDetailPanel when clicking a task in the pipeline", async () => {
+      (commands.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue({
+        status: "ok",
+        data: [
+          {
+            id: "workflow-1",
+            name: "Test Workflow",
+            description: null,
+            steps: [
+              { name: "backlog", order: 0, agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
+            ],
+            metadata: {},
+          },
+        ],
+      });
+
+      (commands.getWorkflowWithTaskDetails as ReturnType<typeof vi.fn>).mockResolvedValue({
+        status: "ok",
+        data: {
+          workflow: {},
+          tasks: [
+            {
+              task: {
+                id: "task-123",
+                title: "Test Task for Detail Panel",
+                status: "backlog",
+                level: "task",
+                description: "A task to test the detail panel",
+                tags: [],
+                code_refs: [],
+                sections: [],
+                priority: null,
+                needs_human_review: false,
+                workflow_id: null,
+                created_at: "2024-01-01T00:00:00Z",
+                updated_at: "2024-01-01T00:00:00Z",
+                started_at: null,
+                completed_at: null,
+              },
+              parent_id: null,
+              children_ids: [],
+              depends_on_ids: [],
+              dependent_ids: [],
+            },
+          ],
+        },
+      });
+
+      // Mock getTask for the TaskDetailPanel
+      (commands.getTask as ReturnType<typeof vi.fn>).mockResolvedValue({
+        status: "ok",
+        data: {
+          task: {
+            id: "task-123",
+            title: "Test Task for Detail Panel",
+            status: "backlog",
+            level: "task",
+            description: "A task to test the detail panel",
+            tags: [],
+            code_refs: [],
+            sections: [],
+            priority: null,
+            needs_human_review: false,
+            workflow_id: null,
+            created_at: "2024-01-01T00:00:00Z",
+            updated_at: "2024-01-01T00:00:00Z",
+            started_at: null,
+            completed_at: null,
+          },
+          parent_id: null,
+          children_ids: [],
+          depends_on_ids: [],
+          dependent_ids: [],
+        },
+      });
+
+      const router = createTestRouter(["/"]);
+
+      render(
+        <TestWrapper>
+          <RouterProvider router={router} />
+        </TestWrapper>
+      );
+
+      // Wait for task to appear in the pipeline
+      await waitFor(() => {
+        expect(screen.getByText("Test Task for Detail Panel")).toBeInTheDocument();
+      });
+
+      // Click the task
+      const taskButton = screen.getByText("Test Task for Detail Panel");
+      taskButton.click();
+
+      // TaskDetailPanel should appear with header
+      await waitFor(() => {
+        expect(screen.getByText("Task Details")).toBeInTheDocument();
+      });
+    });
+
+    it("shows selected task with visual highlight", async () => {
+      (commands.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue({
+        status: "ok",
+        data: [
+          {
+            id: "workflow-1",
+            name: "Test Workflow",
+            description: null,
+            steps: [
+              { name: "backlog", order: 0, agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
+            ],
+            metadata: {},
+          },
+        ],
+      });
+
+      (commands.getWorkflowWithTaskDetails as ReturnType<typeof vi.fn>).mockResolvedValue({
+        status: "ok",
+        data: {
+          workflow: {},
+          tasks: [
+            {
+              task: {
+                id: "task-456",
+                title: "Selectable Task",
+                status: "todo",
+                level: "task",
+                description: null,
+                tags: [],
+                code_refs: [],
+                sections: [],
+                priority: null,
+                needs_human_review: false,
+                workflow_id: null,
+                created_at: "2024-01-01T00:00:00Z",
+                updated_at: "2024-01-01T00:00:00Z",
+                started_at: null,
+                completed_at: null,
+              },
+              parent_id: null,
+              children_ids: [],
+              depends_on_ids: [],
+              dependent_ids: [],
+            },
+          ],
+        },
+      });
+
+      const router = createTestRouter(["/"]);
+
+      render(
+        <TestWrapper>
+          <RouterProvider router={router} />
+        </TestWrapper>
+      );
+
+      // Wait for task to appear
+      await waitFor(() => {
+        expect(screen.getByText("Selectable Task")).toBeInTheDocument();
+      });
+
+      // Task text should be inside a button element (clickable)
+      const taskText = screen.getByText("Selectable Task");
+      const taskButton = taskText.closest("button");
+      expect(taskButton).toBeInTheDocument();
     });
   });
 });

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import {
   ReactFlow,
   Controls,
@@ -19,6 +19,7 @@ import { useTaskChangeListener } from "../hooks/useTaskChangeListener";
 import { useToastStore } from "../stores";
 import { StepNode, type StepNodeData } from "../components/WorkflowPipeline";
 import { WorkflowZoneNode, type WorkflowZoneNodeData } from "../components/WorkflowPipeline";
+import { TaskDetailPanel } from "../components/TaskDetail";
 
 /**
  * Zone node data type for task containers within workflow zones
@@ -30,6 +31,8 @@ type TaskZoneNodeData = {
     string,
     { currentStep: string | number; status: string; error?: string }
   >;
+  onTaskClick?: (taskId: string) => void;
+  selectedTaskId?: string | null;
   [key: string]: unknown;
 };
 
@@ -37,9 +40,12 @@ type TaskZoneNodeData = {
  * Custom zone node component - scrollable container for tasks
  */
 function TaskZoneNode({ data }: NodeProps<Node<TaskZoneNodeData>>) {
-  const { label, tasks = [], executionState } = data;
+  const { label, tasks = [], executionState, onTaskClick, selectedTaskId } = data;
 
-  const getStatusColor = (status: string) => {
+  const getStatusColor = (status: string, isSelected: boolean) => {
+    if (isSelected) {
+      return "border-primary bg-primary/20 ring-1 ring-primary/50";
+    }
     switch (status) {
       case "in_progress":
         return "border-accent bg-accent/10";
@@ -79,11 +85,14 @@ function TaskZoneNode({ data }: NodeProps<Node<TaskZoneNodeData>>) {
             tr.task.status === "done" || tr.task.status === "rejected"
               ? "done"
               : execState?.status || "waiting";
+          const isSelected = selectedTaskId === tr.task.id;
 
           return (
-            <div
+            <button
               key={tr.task.id}
-              className={`rounded-lg border p-2 transition-all duration-200 ${getStatusColor(status)} hover:border-primary/50`}
+              type="button"
+              onClick={() => onTaskClick?.(tr.task.id!)}
+              className={`w-full text-left rounded-lg border p-2 transition-all duration-200 ${getStatusColor(status, isSelected)} hover:border-primary/50 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primary`}
             >
               <div className="flex items-start gap-2">
                 <span
@@ -111,7 +120,7 @@ function TaskZoneNode({ data }: NodeProps<Node<TaskZoneNodeData>>) {
                   </code>
                 </div>
               </div>
-            </div>
+            </button>
           );
         })}
         {tasks.length === 0 && (
@@ -204,6 +213,22 @@ export function AllWorkflowsPipeline() {
   const [workflowTasksMap, setWorkflowTasksMap] = useState<
     Map<string, TaskWithRelations[]>
   >(new Map());
+
+  // State for selected task (for detail panel)
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+
+  // Task selection handlers
+  const handleTaskClick = useCallback((taskId: string) => {
+    setSelectedTaskId(taskId);
+  }, []);
+
+  const handleClosePanel = useCallback(() => {
+    setSelectedTaskId(null);
+  }, []);
+
+  const handleRelatedTaskSelect = useCallback((taskId: string) => {
+    setSelectedTaskId(taskId);
+  }, []);
 
   // Fetch task details for all workflows
   useEffect(() => {
@@ -317,6 +342,8 @@ export function AllWorkflowsPipeline() {
           data: {
             label: `${step.name} (${stepTasks.length})`,
             tasks: stepTasks,
+            onTaskClick: handleTaskClick,
+            selectedTaskId,
           } as TaskZoneNodeData,
           style: {
             background: "rgba(15, 15, 18, 0.8)",
@@ -333,7 +360,7 @@ export function AllWorkflowsPipeline() {
     });
 
     return nodes;
-  }, [workflows, workflowTasksMap]);
+  }, [workflows, workflowTasksMap, handleTaskClick, selectedTaskId]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(allNodes);
   const [edges, , onEdgesChange] = useEdgesState([]);
@@ -423,50 +450,62 @@ export function AllWorkflowsPipeline() {
   }
 
   return (
-    <div className="relative flex-1 flex flex-col overflow-hidden">
-      {/* Header */}
-      <div className="relative border-b border-border bg-bg-primary px-6 py-4">
-        <div className="neural-grid pointer-events-none absolute inset-0 opacity-20" />
-        <div className="relative">
-          <h1 className="text-lg font-semibold text-text-primary">
-            Workflow Pipelines
-          </h1>
-          <p className="mt-1 text-sm text-text-muted">
-            {workflows.length} workflow{workflows.length !== 1 ? "s" : ""} visualized
-          </p>
+    <div className="flex min-h-0 flex-1">
+      {/* Main content area */}
+      <div className="relative flex-1 flex flex-col overflow-hidden">
+        {/* Header */}
+        <div className="relative border-b border-border bg-bg-primary px-6 py-4">
+          <div className="neural-grid pointer-events-none absolute inset-0 opacity-20" />
+          <div className="relative">
+            <h1 className="text-lg font-semibold text-text-primary">
+              Workflow Pipelines
+            </h1>
+            <p className="mt-1 text-sm text-text-muted">
+              {workflows.length} workflow{workflows.length !== 1 ? "s" : ""} visualized
+            </p>
+          </div>
+        </div>
+
+        {/* React Flow Canvas */}
+        <div className="flex-1 relative">
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            nodeTypes={nodeTypes}
+            fitView
+            fitViewOptions={{ padding: 0.1, minZoom: 0.3, maxZoom: 1.5 }}
+            minZoom={0.1}
+            maxZoom={2}
+            colorMode="dark"
+            attributionPosition="bottom-left"
+            proOptions={{ hideAttribution: true }}
+            style={{ backgroundColor: "#0c0c0e" }}
+          >
+            <Controls
+              showInteractive={false}
+              className="!rounded-lg !border-border !bg-bg-elevated !shadow-lg"
+            />
+            <Background
+              variant={BackgroundVariant.Dots}
+              gap={24}
+              size={1}
+              color="#57534e"
+              bgColor="#0c0c0e"
+            />
+          </ReactFlow>
         </div>
       </div>
 
-      {/* React Flow Canvas */}
-      <div className="flex-1 relative">
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          nodeTypes={nodeTypes}
-          fitView
-          fitViewOptions={{ padding: 0.1, minZoom: 0.3, maxZoom: 1.5 }}
-          minZoom={0.1}
-          maxZoom={2}
-          colorMode="dark"
-          attributionPosition="bottom-left"
-          proOptions={{ hideAttribution: true }}
-          style={{ backgroundColor: "#0c0c0e" }}
-        >
-          <Controls
-            showInteractive={false}
-            className="!rounded-lg !border-border !bg-bg-elevated !shadow-lg"
-          />
-          <Background
-            variant={BackgroundVariant.Dots}
-            gap={24}
-            size={1}
-            color="#57534e"
-            bgColor="#0c0c0e"
-          />
-        </ReactFlow>
-      </div>
+      {/* Task Detail Panel */}
+      {selectedTaskId && (
+        <TaskDetailPanel
+          taskId={selectedTaskId}
+          onClose={handleClosePanel}
+          onTaskSelect={handleRelatedTaskSelect}
+        />
+      )}
     </div>
   );
 }
