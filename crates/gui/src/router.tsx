@@ -76,7 +76,7 @@ export const router = createBrowserRouter([
         index: true,
         element: (
           <ProjectGuard>
-            <Navigate to="/tasks" replace />
+            <AllWorkflowsPipeline />
           </ProjectGuard>
         ),
       },
