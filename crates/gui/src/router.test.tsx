@@ -217,4 +217,94 @@ describe("Router Acceptance Tests", () => {
       expect(screen.queryByText("Workflow Pipelines")).not.toBeInTheDocument();
     });
   });
+
+  describe("Unified canvas with workflow zones", () => {
+    it("displays multiple workflows as zones in a single canvas", async () => {
+      (commands.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue({
+        status: "ok",
+        data: [
+          {
+            id: "workflow-1",
+            name: "Development Workflow",
+            description: "Main dev workflow",
+            steps: [
+              { name: "backlog", order: 0, agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
+              { name: "in_progress", order: 1, agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
+            ],
+            metadata: {},
+          },
+          {
+            id: "workflow-2",
+            name: "QA Workflow",
+            description: "Quality assurance",
+            steps: [
+              { name: "review", order: 0, agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
+            ],
+            metadata: {},
+          },
+        ],
+      });
+
+      (commands.getWorkflowWithTaskDetails as ReturnType<typeof vi.fn>).mockResolvedValue({
+        status: "ok",
+        data: { workflow: {}, tasks: [] },
+      });
+
+      const router = createTestRouter(["/"]);
+
+      render(
+        <TestWrapper>
+          <RouterProvider router={router} />
+        </TestWrapper>
+      );
+
+      // Both workflows should be visible in the unified canvas
+      await waitFor(() => {
+        expect(screen.getByText("Development Workflow")).toBeInTheDocument();
+        expect(screen.getByText("QA Workflow")).toBeInTheDocument();
+      });
+
+      // Header should show workflow count
+      await waitFor(() => {
+        expect(screen.getByText("2 workflows visualized")).toBeInTheDocument();
+      });
+    });
+
+    it("displays workflow zones with step counts", async () => {
+      (commands.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue({
+        status: "ok",
+        data: [
+          {
+            id: "workflow-1",
+            name: "Test Workflow",
+            description: null,
+            steps: [
+              { name: "step1", order: 0, agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
+              { name: "step2", order: 1, agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
+              { name: "step3", order: 2, agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
+            ],
+            metadata: {},
+          },
+        ],
+      });
+
+      (commands.getWorkflowWithTaskDetails as ReturnType<typeof vi.fn>).mockResolvedValue({
+        status: "ok",
+        data: { workflow: {}, tasks: [] },
+      });
+
+      const router = createTestRouter(["/"]);
+
+      render(
+        <TestWrapper>
+          <RouterProvider router={router} />
+        </TestWrapper>
+      );
+
+      // Workflow zone should show step count
+      await waitFor(() => {
+        expect(screen.getByText("3 steps")).toBeInTheDocument();
+      });
+    });
+  });
 });
