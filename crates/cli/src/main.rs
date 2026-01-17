@@ -75,6 +75,9 @@ async fn main() {
 
     if let Err(e) = run_app().await {
         eprintln!("error: {}", e);
+        if let Some(hint) = e.hint() {
+            eprintln!("{}", hint);
+        }
         process::exit(1);
     }
 }

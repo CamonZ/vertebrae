@@ -117,10 +117,7 @@ impl SectionCommand {
         }
 
         // Fetch the task first to count existing sections of this type
-        let task = service
-            .get_task(&id)
-            .await
-            .map_err(|_| ServiceError::task_not_found(&id))?;
+        let task = service.get_task(&id).await?;
 
         // Calculate the ordinal for multi-instance section types
         let ordinal = if !is_single_instance_type(&self.section_type) {

@@ -59,14 +59,8 @@ impl PathCommand {
         let to_id = self.to_id.to_lowercase();
 
         // Validate both tasks exist using the service
-        let from_task = service
-            .get_task(&from_id)
-            .await
-            .map_err(|_| ServiceError::task_not_found(&from_id))?;
-        let _to_task = service
-            .get_task(&to_id)
-            .await
-            .map_err(|_| ServiceError::task_not_found(&to_id))?;
+        let from_task = service.get_task(&from_id).await?;
+        let _to_task = service.get_task(&to_id).await?;
 
         // Handle same task case
         if from_id == to_id {
@@ -89,10 +83,7 @@ impl PathCommand {
             Some(ids) => {
                 let mut summaries = Vec::new();
                 for id in ids {
-                    let task = service
-                        .get_task(&id)
-                        .await
-                        .map_err(|_| ServiceError::task_not_found(&id))?;
+                    let task = service.get_task(&id).await?;
                     summaries.push(TaskSummary {
                         id,
                         title: task.title,

@@ -66,10 +66,7 @@ impl ReviewCommand {
         service: &dyn vertebrae_core::TaskService,
         id: &str,
     ) -> Result<bool, ServiceError> {
-        let task = service
-            .get_task(id)
-            .await
-            .map_err(|_| ServiceError::task_not_found(id))?;
+        let task = service.get_task(id).await?;
         Ok(task.needs_human_review.unwrap_or(false))
     }
 

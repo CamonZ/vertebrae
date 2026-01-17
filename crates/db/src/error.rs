@@ -104,6 +104,45 @@ impl DbError {
             other => other.to_string(),
         }
     }
+
+    /// Get a user-friendly hint for how to resolve this error.
+    ///
+    /// Returns `None` if no specific guidance is available.
+    pub fn hint(&self) -> Option<&'static str> {
+        match self {
+            DbError::Connection { .. } => Some(
+                "Hint: Check that the database path is accessible and you have write permissions",
+            ),
+            DbError::InvalidPath { .. } => {
+                Some("Hint: Verify the database path exists and is a valid directory")
+            }
+            DbError::TaskNotFound { .. } => {
+                Some("Hint: Check the task ID with 'vtb list' or use a prefix of the full ID")
+            }
+            DbError::NotFound { entity, .. } => {
+                if entity == "workflow" {
+                    Some("Hint: List available workflows with 'vtb workflow list'")
+                } else {
+                    Some("Hint: Verify the ID is correct with 'vtb list'")
+                }
+            }
+            DbError::InvalidStatusTransition { .. } => Some(
+                "Hint: Valid transitions are: backlog→todo, todo→in_progress/rejected, in_progress→pending_review/done/rejected",
+            ),
+            DbError::IncompleteChildren { .. } => {
+                Some("Hint: Complete or cancel all child tasks before completing the parent")
+            }
+            DbError::TriageValidationFailed { .. } => {
+                Some("Hint: Add required sections (steps, testing criteria) before triaging")
+            }
+            DbError::Query(_) => {
+                Some("Hint: This may be a temporary database issue. Try the command again")
+            }
+            DbError::Schema(_)
+            | DbError::CreateDirectory { .. }
+            | DbError::ValidationError { .. } => None,
+        }
+    }
 }
 
 /// Result type alias for database operations
@@ -375,5 +414,56 @@ mod tests {
                 && debug_str.contains("error_count: 2"),
             "Debug output should contain TriageValidationFailed and field values"
         );
+    }
+
+    #[test]
+    fn test_hint_task_not_found() {
+        let err = DbError::TaskNotFound {
+            task_id: "abc123".to_string(),
+        };
+        let hint = err.hint();
+        assert!(hint.is_some());
+        assert!(hint.unwrap().contains("vtb list"));
+    }
+
+    #[test]
+    fn test_hint_workflow_not_found() {
+        let err = DbError::NotFound {
+            entity: "workflow".to_string(),
+            id: "default".to_string(),
+        };
+        let hint = err.hint();
+        assert!(hint.is_some());
+        assert!(hint.unwrap().contains("vtb workflow list"));
+    }
+
+    #[test]
+    fn test_hint_invalid_status_transition() {
+        let err = DbError::InvalidStatusTransition {
+            task_id: "task123".to_string(),
+            from_status: "backlog".to_string(),
+            to_status: "done".to_string(),
+            message: "Invalid transition".to_string(),
+        };
+        let hint = err.hint();
+        assert!(hint.is_some());
+        assert!(hint.unwrap().contains("Valid transitions"));
+    }
+
+    #[test]
+    fn test_hint_query_error() {
+        let sdb_err = surrealdb::Error::Api(surrealdb::error::Api::Query("test".to_string()));
+        let err = DbError::Query(Box::new(sdb_err));
+        let hint = err.hint();
+        assert!(hint.is_some());
+        assert!(hint.unwrap().contains("temporary"));
+    }
+
+    #[test]
+    fn test_hint_validation_error_returns_none() {
+        let err = DbError::ValidationError {
+            message: "Some validation error".to_string(),
+        };
+        assert!(err.hint().is_none());
     }
 }

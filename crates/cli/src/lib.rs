@@ -9,4 +9,3 @@ pub mod notification;
 pub mod output;
 
 pub use commands::*;
-pub use error::service_error_to_db_error;

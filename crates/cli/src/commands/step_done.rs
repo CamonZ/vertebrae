@@ -68,10 +68,7 @@ impl StepDoneCommand {
         }
 
         // Fetch task via service
-        let task = service
-            .get_task(&id)
-            .await
-            .map_err(|_| ServiceError::task_not_found(&id))?;
+        let task = service.get_task(&id).await?;
 
         let sections = task.sections.clone();
 

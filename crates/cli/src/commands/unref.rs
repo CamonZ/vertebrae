@@ -85,10 +85,7 @@ impl UnrefCommand {
         let id = self.id.to_lowercase();
 
         // Fetch task to get current refs
-        let task = service
-            .get_task(&id)
-            .await
-            .map_err(|_| ServiceError::task_not_found(&id))?;
+        let task = service.get_task(&id).await?;
 
         let code_refs = task.code_refs.clone();
         let original_count = code_refs.len();

@@ -163,10 +163,7 @@ impl UnsectionCommand {
 
         // We need to fetch task sections to determine what to remove
         // Get the service's database connection to verify task exists
-        let db_result = service
-            .get_task(&id)
-            .await
-            .map_err(|_| ServiceError::task_not_found(&self.id))?;
+        let db_result = service.get_task(&id).await?;
 
         // Convert task to sections for analysis
         let existing_sections: Vec<SectionRow> = db_result
