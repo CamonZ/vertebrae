@@ -12,6 +12,8 @@ export type StepNodeData = {
   isLast: boolean;
   onPlayClick?: (taskId: string) => void;
   isExecuting?: boolean;
+  onStepClick?: (step: WorkflowStep) => void;
+  isSelected?: boolean;
 };
 
 export type StepNodeType = Node<StepNodeData, 'stepNode'>;
@@ -21,18 +23,27 @@ export type StepNodeType = Node<StepNodeData, 'stepNode'>;
  * Features neural-pathway-inspired design with glowing connections.
  */
 function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
-  const { step, isFirst, isLast } = data;
+  const { step, isFirst, isLast, onStepClick, isSelected } = data;
+
+  const handleClick = () => {
+    onStepClick?.(step);
+  };
   const hasSystemPrompt = Boolean(
     step.agent_config.system_prompt || step.agent_config.append_system_prompt
   );
   const toolCount =
     step.agent_config.tools.length + step.agent_config.allowed_tools.length;
 
+  // Use isSelected from data prop if available, otherwise fall back to ReactFlow's selected
+  const isNodeSelected = isSelected ?? selected;
+
   return (
-    <div
-      className={`relative ${NODE_SIZING.widthClass} ${NODE_SIZING.stepHeightClass} ${NODE_SIZING.borderRadiusClass} border bg-bg-secondary ${NODE_SIZING.paddingClass} ${NODE_SIZING.overflowClass} flex flex-col transition-all duration-200 ${
-        selected
-          ? 'border-primary shadow-glow'
+    <button
+      type="button"
+      onClick={handleClick}
+      className={`relative ${NODE_SIZING.widthClass} ${NODE_SIZING.stepHeightClass} ${NODE_SIZING.borderRadiusClass} border bg-bg-secondary ${NODE_SIZING.paddingClass} ${NODE_SIZING.overflowClass} flex flex-col transition-all duration-200 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primary text-left ${
+        isNodeSelected
+          ? 'border-primary shadow-glow ring-1 ring-primary/50'
           : 'border-border hover:border-primary/50 hover:shadow-glow-sm'
       }`}
       style={{
@@ -150,7 +161,7 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
           className={`!-right-1.5 ${HANDLE_SIZING.heightClass} ${HANDLE_SIZING.widthClass} ${HANDLE_SIZING.roundedClass} ${HANDLE_SIZING.borderClass} !border-primary ${HANDLE_SIZING.bgClass} !shadow-glow-sm`}
         />
       )}
-    </div>
+    </button>
   );
 }
 

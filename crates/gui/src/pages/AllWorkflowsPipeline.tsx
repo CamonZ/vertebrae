@@ -12,7 +12,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
-import { commands, type TaskWithRelations, type Workflow } from "../bindings";
+import { commands, type TaskWithRelations, type Workflow, type WorkflowStep } from "../bindings";
 import { useWorkflows } from "../hooks/useWorkflows";
 import { useWorkflowChangeListener } from "../hooks/useWorkflowChangeListener";
 import { useTaskChangeListener } from "../hooks/useTaskChangeListener";
@@ -20,6 +20,7 @@ import { useToastStore } from "../stores";
 import { StepNode, type StepNodeData } from "../components/WorkflowPipeline";
 import { WorkflowZoneNode, type WorkflowZoneNodeData } from "../components/WorkflowPipeline";
 import { TaskDetailPanel } from "../components/TaskDetail";
+import { StepDetailPanel } from "../components/StepDetail";
 
 /**
  * Zone node data type for task containers within workflow zones
@@ -217,17 +218,32 @@ export function AllWorkflowsPipeline() {
   // State for selected task (for detail panel)
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
 
+  // State for selected step (for step config panel)
+  const [selectedStep, setSelectedStep] = useState<WorkflowStep | null>(null);
+
   // Task selection handlers
   const handleTaskClick = useCallback((taskId: string) => {
     setSelectedTaskId(taskId);
+    setSelectedStep(null); // Clear step selection when task is selected
   }, []);
 
-  const handleClosePanel = useCallback(() => {
+  const handleCloseTaskPanel = useCallback(() => {
     setSelectedTaskId(null);
   }, []);
 
   const handleRelatedTaskSelect = useCallback((taskId: string) => {
     setSelectedTaskId(taskId);
+    setSelectedStep(null);
+  }, []);
+
+  // Step selection handlers
+  const handleStepClick = useCallback((step: WorkflowStep) => {
+    setSelectedStep(step);
+    setSelectedTaskId(null); // Clear task selection when step is selected
+  }, []);
+
+  const handleCloseStepPanel = useCallback(() => {
+    setSelectedStep(null);
   }, []);
 
   // Fetch task details for all workflows
@@ -315,6 +331,7 @@ export function AllWorkflowsPipeline() {
 
       // Add step nodes within this workflow zone
       sortedSteps.forEach((step, index) => {
+        const isStepSelected = selectedStep?.name === step.name && selectedStep?.order === step.order;
         nodes.push({
           id: `step-${workflow.id}-${step.order}`,
           type: "stepNode",
@@ -326,6 +343,8 @@ export function AllWorkflowsPipeline() {
             step,
             isFirst: index === 0,
             isLast: index === sortedSteps.length - 1,
+            onStepClick: handleStepClick,
+            isSelected: isStepSelected,
           } as StepNodeData,
           draggable: false,
         });
@@ -360,7 +379,7 @@ export function AllWorkflowsPipeline() {
     });
 
     return nodes;
-  }, [workflows, workflowTasksMap, handleTaskClick, selectedTaskId]);
+  }, [workflows, workflowTasksMap, handleTaskClick, selectedTaskId, handleStepClick, selectedStep]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(allNodes);
   const [edges, , onEdgesChange] = useEdgesState([]);
@@ -502,8 +521,16 @@ export function AllWorkflowsPipeline() {
       {selectedTaskId && (
         <TaskDetailPanel
           taskId={selectedTaskId}
-          onClose={handleClosePanel}
+          onClose={handleCloseTaskPanel}
           onTaskSelect={handleRelatedTaskSelect}
+        />
+      )}
+
+      {/* Step Detail Panel */}
+      {selectedStep && (
+        <StepDetailPanel
+          step={selectedStep}
+          onClose={handleCloseStepPanel}
         />
       )}
     </div>
