@@ -1,33 +1,118 @@
-import { useMemo, useCallback, useEffect } from 'react';
+import { useMemo, useEffect } from "react";
 import {
   ReactFlow,
-  MiniMap,
   Controls,
   Background,
   BackgroundVariant,
   useNodesState,
   useEdgesState,
   type Node,
-  type Edge,
   type NodeTypes,
-} from '@xyflow/react';
-import '@xyflow/react/dist/style.css';
+  type NodeProps,
+} from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
 
-import { StepNode, type StepNodeData, type ExecutingTask } from './StepNode';
-import { TaskNode, type TaskNodeData } from './TaskNode';
-import {
-  calculateTaskLayout,
-  getTaskNodePosition,
-  getExecutingTaskPosition,
-} from './layoutUtils';
-import type { Workflow, TaskWithRelations } from '../../bindings';
+import { StepNode, type StepNodeData } from "./StepNode";
+import type { Workflow, TaskWithRelations } from "../../bindings";
+
+/**
+ * Zone node data type
+ */
+type ZoneNodeData = {
+  label: string;
+  tasks: TaskWithRelations[];
+  executionState?: Map<string, { currentStep: string | number; status: string; error?: string }>;
+  [key: string]: unknown;
+};
+
+/**
+ * Custom zone node component - scrollable container for tasks
+ */
+function ZoneNode({ data }: NodeProps<Node<ZoneNodeData>>) {
+  const { label, tasks = [], executionState } = data;
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case "in_progress":
+        return "border-accent bg-accent/10";
+      case "completed":
+      case "done":
+        return "border-success/50 bg-success/5";
+      case "failed":
+        return "border-error bg-error/10";
+      default:
+        return "border-border bg-bg-tertiary";
+    }
+  };
+
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case "in_progress":
+        return "⟳";
+      case "completed":
+      case "done":
+        return "✓";
+      case "failed":
+        return "✕";
+      default:
+        return "○";
+    }
+  };
+
+  return (
+    <div className="flex flex-col w-[280px] h-[280px]">
+      <div className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-2 px-1">
+        {label}
+      </div>
+      <div className="flex-1 overflow-y-auto overflow-x-hidden space-y-1.5 pr-1 scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
+        {tasks.map((tr) => {
+          const execState = executionState?.get(tr.task.id!);
+          const status = tr.task.status === "done" || tr.task.status === "rejected"
+            ? "done"
+            : (execState?.status || "waiting");
+
+          return (
+            <div
+              key={tr.task.id}
+              className={`rounded-lg border p-2 transition-all duration-200 ${getStatusColor(status)} hover:border-primary/50`}
+            >
+              <div className="flex items-start gap-2">
+                <span className={`flex-shrink-0 text-xs font-bold ${
+                  status === "in_progress" ? "animate-spin text-accent" :
+                  status === "done" ? "text-success" :
+                  status === "failed" ? "text-error" : "text-text-muted"
+                }`}>
+                  {getStatusIcon(status)}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="truncate text-xs font-medium text-text-primary" title={tr.task.title}>
+                    {tr.task.title}
+                  </p>
+                  <code className="block truncate font-mono text-[10px] text-text-muted">
+                    {(tr.task.id ?? "").slice(0, 8)}
+                  </code>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+        {tasks.length === 0 && (
+          <div className="text-xs text-text-muted italic px-1">No tasks</div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 /**
  * Props for WorkflowPipeline component
  */
 interface WorkflowPipelineProps {
   workflow: Workflow;
-  executionState?: Map<string, { currentStep: string | number; status: string; error?: string }>;
+  executionState?: Map<
+    string,
+    { currentStep: string | number; status: string; error?: string }
+  >;
   tasksWithRelations?: TaskWithRelations[];
   onPlayClick?: (taskId: string) => void;
   isExecuting?: boolean;
@@ -38,7 +123,7 @@ interface WorkflowPipelineProps {
  */
 const nodeTypes: NodeTypes = {
   stepNode: StepNode,
-  taskNode: TaskNode,
+  zoneNode: ZoneNode,
 };
 
 /**
@@ -64,285 +149,121 @@ export function WorkflowPipeline({
   onPlayClick,
   isExecuting,
 }: WorkflowPipelineProps) {
-
   // Sort steps by order to ensure correct layout
   const sortedSteps = useMemo(
     () => [...workflow.steps].sort((a, b) => a.order - b.order),
     [workflow.steps]
   );
 
-  // Build a map of step names to step index for easier lookup
-  const stepNameToIndex = useMemo(
-    () =>
-      new Map(
-        sortedSteps.map((step, index) => [
-          step.name.toLowerCase(),
-          index,
-        ])
-      ),
-    [sortedSteps]
-  );
+  // Zone positioning constants
+  const STEP_ZONE_Y = 220; // Below step nodes (80 + 130 + 10 padding)
 
-  // Separate done/rejected tasks from others
-  const { activeTasks, doneTasks } = useMemo(() => {
-    const active = tasksWithRelations.filter(
-      (tr) => tr.task.status !== 'done' && tr.task.status !== 'rejected'
-    );
-    const done = tasksWithRelations.filter(
-      (tr) => tr.task.status === 'done' || tr.task.status === 'rejected'
-    );
-    return { activeTasks: active, doneTasks: done };
-  }, [tasksWithRelations]);
+  // Group tasks by their current step
+  const tasksByStep = useMemo(() => {
+    const groups: Map<string, TaskWithRelations[]> = new Map();
 
-  // Calculate task layout based on dependencies (only for active tasks)
-  const taskLayout = useMemo(() => {
-    if (activeTasks.length === 0) return new Map();
+    // Initialize groups for each step
+    sortedSteps.forEach((step) => {
+      groups.set(step.name.toLowerCase(), []);
+    });
 
-    return calculateTaskLayout(
-      activeTasks.map((tr) => ({
-        id: tr.task.id!,
-        dependsOnIds: tr.depends_on_ids,
-        dependentIds: tr.dependent_ids,
-      }))
-    );
-  }, [activeTasks]);
+    tasksWithRelations.forEach((tr) => {
+      // Done/rejected tasks go to the "done" step zone
+      if (tr.task.status === "done" || tr.task.status === "rejected") {
+        if (groups.has("done")) {
+          groups.get("done")!.push(tr);
+          return;
+        }
+      }
 
-  // Convert active tasks to React Flow nodes (left side - dependency graph)
-  const taskNodes: Node<TaskNodeData>[] = useMemo(
-    () =>
-      activeTasks.map((tr) => {
-        const layout = taskLayout.get(tr.task.id!);
-        const executionStatus = executionState?.get(tr.task.id!);
+      const execState = executionState?.get(tr.task.id!);
 
-        // Determine node status
-        let status: 'waiting' | 'in_progress' | 'completed' | 'failed' = 'waiting';
-        let error: string | undefined;
-
-        if (executionStatus) {
-          status = (executionStatus.status as 'waiting' | 'in_progress' | 'completed' | 'failed') || 'waiting';
-          error = executionStatus.error;
+      // Check execution state for current step
+      if (execState) {
+        let stepName: string | undefined;
+        if (typeof execState.currentStep === "number") {
+          stepName = sortedSteps[execState.currentStep]?.name?.toLowerCase();
+        } else if (typeof execState.currentStep === "string") {
+          stepName = execState.currentStep.toLowerCase();
         }
 
-        // Calculate position
-        let position = layout
-          ? getTaskNodePosition(layout)
-          : { x: -550, y: 0 };
-
-        // If task is executing, animate towards the step it's in
-        if (executionStatus && executionStatus.status === 'in_progress') {
-          const stepIndex = typeof executionStatus.currentStep === 'number'
-            ? executionStatus.currentStep
-            : stepNameToIndex.get(
-                (executionStatus.currentStep as string)?.toLowerCase() || ''
-              ) ?? 0;
-
-          if (layout) {
-            position = getExecutingTaskPosition(
-              stepIndex,
-              0,
-              NODE_Y_POSITION,
-              layout.depth,
-              sortedSteps.length
-            );
-          }
+        if (stepName && groups.has(stepName)) {
+          groups.get(stepName)!.push(tr);
+          return;
         }
+      }
 
-        return {
-          id: `task-${tr.task.id}`,
-          type: 'taskNode',
-          position,
-          data: {
-            task: tr.task,
-            status: status as 'waiting' | 'in_progress' | 'completed' | 'failed',
-            error,
-            hasBlockers: tr.depends_on_ids.length > 0,
-            isBlocking: tr.dependent_ids.length > 0,
-          },
-        };
-      }),
-    [
-      activeTasks,
-      taskLayout,
-      executionState,
-      sortedSteps.length,
-      stepNameToIndex,
-    ]
-  );
+      // Default to first step if no execution state
+      const firstStep = sortedSteps[0]?.name?.toLowerCase();
+      if (firstStep && groups.has(firstStep)) {
+        groups.get(firstStep)!.push(tr);
+      }
+    });
 
-  // Create done tasks stack nodes (right side, after last step)
-  const doneTasksNodes: Node<TaskNodeData>[] = useMemo(() => {
-    if (doneTasks.length === 0) return [];
+    return groups;
+  }, [tasksWithRelations, executionState, sortedSteps]);
 
-    const doneX = (sortedSteps.length) * 320 + 200; // Position after last step
-
-    return doneTasks.map((tr, index) => ({
-      id: `done-task-${tr.task.id}`,
-      type: 'taskNode',
-      position: {
-        x: doneX,
-        y: 40 + index * 15, // Stack with slight offset
-      },
-      data: {
-        task: tr.task,
-        status: 'completed' as const,
-        error: undefined,
-        hasBlockers: false,
-        isBlocking: false,
-      },
-    }));
-  }, [doneTasks, sortedSteps.length]);
-
-  // Convert workflow steps to React Flow nodes (right side)
+  // Convert workflow steps to React Flow nodes (positioned horizontally)
   const stepNodes: Node<StepNodeData>[] = useMemo(
     () =>
-      sortedSteps.map((step, index) => {
-        // Find tasks for this step
-        const stepTasks: ExecutingTask[] = [];
-        if (executionState && activeTasks.length > 0) {
-          for (const tr of activeTasks) {
-            const state = executionState.get(tr.task.id!);
-            if (state && state.status === 'in_progress') {
-              // Handle both numeric step index and step name
-              let taskStepIndex: number | undefined;
-              if (typeof state.currentStep === 'number') {
-                taskStepIndex = state.currentStep;
-              } else if (typeof state.currentStep === 'string') {
-                taskStepIndex = stepNameToIndex.get(state.currentStep.toLowerCase());
-              }
-
-              if (taskStepIndex === index) {
-                stepTasks.push({
-                  id: tr.task.id!,
-                  title: tr.task.title,
-                  status: (state.status as 'waiting' | 'in_progress' | 'completed' | 'failed') || 'waiting',
-                  error: state.error,
-                });
-              }
-            }
-          }
-        }
-
-        return {
-          id: `step-${step.order}`,
-          type: 'stepNode',
-          position: { x: index * NODE_SPACING_X, y: NODE_Y_POSITION },
-          data: {
-            step,
-            isFirst: index === 0,
-            isLast: index === sortedSteps.length - 1,
-            tasks: stepTasks,
-            onPlayClick,
-            isExecuting,
-          },
-        };
-      }),
-    [
-      sortedSteps,
-      executionState,
-      activeTasks,
-      stepNameToIndex,
-      onPlayClick,
-      isExecuting,
-    ]
-  );
-
-  // Combine all nodes (active tasks, steps, and done tasks)
-  const allNodes = useMemo(
-    () => [...taskNodes, ...stepNodes, ...doneTasksNodes],
-    [taskNodes, stepNodes, doneTasksNodes]
-  );
-
-  // Create edges for task stack dependencies
-  const dependencyEdges: Edge[] = useMemo(
-    () => {
-      const edges: Edge[] = [];
-      const activeTaskIds = new Set(activeTasks.map((tr) => tr.task.id));
-      const seenStackEdges = new Set<string>();
-
-      activeTasks.forEach((tr) => {
-        const layout = taskLayout.get(tr.task.id!);
-        if (!layout) return;
-
-        // Create edges from dependencies to this task (only if both are active)
-        tr.depends_on_ids.forEach((depId) => {
-          if (activeTaskIds.has(depId)) {
-            const depLayout = taskLayout.get(depId);
-            if (depLayout) {
-              // Create stack-level edge if stacks are different
-              const stackEdgeId = `stack-${depLayout.stackIndex}-${layout.stackIndex}`;
-              if (depLayout.stackIndex !== layout.stackIndex && !seenStackEdges.has(stackEdgeId)) {
-                seenStackEdges.add(stackEdgeId);
-
-                // Use first task in each stack for edge routing
-                edges.push({
-                  id: stackEdgeId,
-                  source: `task-${depId}`,
-                  target: `task-${tr.task.id}`,
-                  type: 'smoothstep',
-                  style: {
-                    strokeWidth: 2.5,
-                    stroke: 'var(--color-warning)',
-                    opacity: 0.8,
-                  },
-                });
-              }
-            }
-          }
-        });
-      });
-
-      return edges;
-    },
-    [activeTasks, taskLayout]
-  );
-
-  // Create edges connecting sequential steps (between step nodes)
-  const stepEdges: Edge[] = useMemo(
-    () =>
-      sortedSteps.slice(0, -1).map((step, index) => ({
-        id: `edge-${step.order}-${sortedSteps[index + 1].order}`,
-        source: `step-${step.order}`,
-        target: `step-${sortedSteps[index + 1].order}`,
-        type: 'smoothstep',
-        animated: true,
-        style: {
-          strokeWidth: 2,
-          stroke: 'var(--color-primary)',
+      sortedSteps.map((step, index) => ({
+        id: `step-${step.order}`,
+        type: "stepNode",
+        position: { x: index * NODE_SPACING_X, y: NODE_Y_POSITION },
+        data: {
+          step,
+          isFirst: index === 0,
+          isLast: index === sortedSteps.length - 1,
+          onPlayClick,
+          isExecuting,
         },
       })),
-    [sortedSteps]
+    [sortedSteps, onPlayClick, isExecuting]
   );
 
-  // Combine all edges
-  const allEdges = useMemo(() => [...dependencyEdges, ...stepEdges], [dependencyEdges, stepEdges]);
+  // Create zone nodes with tasks inside (scrollable containers)
+  // Zone has 8px padding + 1px border on each side = 18px extra width
+  // Offset by half to center under step node
+  const ZONE_CENTER_OFFSET = 9;
+  const zoneNodes = useMemo(() => {
+    return sortedSteps.map((step, index) => {
+      const stepTasks = tasksByStep.get(step.name.toLowerCase()) || [];
+      return {
+        id: `zone-step-${step.order}`,
+        type: "zoneNode",
+        position: {
+          x: index * NODE_SPACING_X - ZONE_CENTER_OFFSET, // Center under step node
+          y: STEP_ZONE_Y,
+        },
+        data: {
+          label: `${step.name} (${stepTasks.length})`,
+          tasks: stepTasks,
+          executionState,
+        },
+        style: {
+          background: "rgba(15, 15, 18, 0.8)",
+          border: "1px solid rgba(100, 116, 139, 0.3)",
+          borderRadius: "8px",
+          padding: "8px",
+        },
+        draggable: false,
+      };
+    });
+  }, [tasksByStep, sortedSteps, executionState]);
+
+  // Combine all nodes (zones and steps)
+  const allNodes = useMemo(
+    () => [...zoneNodes, ...stepNodes],
+    [zoneNodes, stepNodes]
+  );
 
   const [nodes, setNodes, onNodesChange] = useNodesState(allNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(allEdges);
+  const [edges, , onEdgesChange] = useEdgesState([]);
 
   // Update nodes when allNodes changes
   useEffect(() => {
     setNodes(allNodes);
   }, [allNodes, setNodes]);
-
-  // Update edges when allEdges changes
-  useEffect(() => {
-    setEdges(allEdges);
-  }, [allEdges, setEdges]);
-
-  // Calculate initial viewport to fit all nodes (including tasks on the left at x: -550)
-  const defaultViewport = useMemo(() => {
-    const totalWidth = sortedSteps.length * NODE_SPACING_X;
-    // Tasks are at x: -550, steps start at x: 0, so total range is ~550 + totalWidth
-    const fullWidth = 550 + totalWidth;
-    const zoom = fullWidth > 800 ? Math.max(0.5, 800 / fullWidth) : 0.8;
-    // Center the viewport to show both tasks and steps
-    return { x: -400, y: 40, zoom };
-  }, [sortedSteps.length]);
-
-  // Minimap node color
-  const minimapNodeColor = useCallback(() => {
-    return 'var(--color-primary)';
-  }, []);
 
   if (sortedSteps.length === 0) {
     return (
@@ -364,7 +285,9 @@ export function WorkflowPipeline({
               d="M13 10V3L4 14h7v7l9-11h-7z"
             />
           </svg>
-          <p className="mt-3 text-sm font-medium text-text-primary">No steps defined</p>
+          <p className="mt-3 text-sm font-medium text-text-primary">
+            No steps defined
+          </p>
           <p className="mt-1 text-xs text-text-muted">
             Add steps to this workflow to create a pipeline
           </p>
@@ -391,19 +314,11 @@ export function WorkflowPipeline({
         colorMode="dark"
         attributionPosition="bottom-left"
         proOptions={{ hideAttribution: true }}
-        style={{ backgroundColor: '#0c0c0e' }}
+        style={{ backgroundColor: "#0c0c0e" }}
       >
         <Controls
           showInteractive={false}
           className="!rounded-lg !border-border !bg-bg-elevated !shadow-lg"
-        />
-        <MiniMap
-          nodeColor={minimapNodeColor}
-          maskColor="rgba(0, 0, 0, 0.6)"
-          bgColor="#1f1f23"
-          pannable
-          zoomable
-          className="!rounded-lg !border-border"
         />
         <Background
           variant={BackgroundVariant.Dots}

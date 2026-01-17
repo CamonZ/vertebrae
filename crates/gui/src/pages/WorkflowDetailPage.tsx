@@ -439,49 +439,6 @@ export function WorkflowDetailPage() {
         />
       </div>
 
-      {/* Associated Tasks */}
-      {tasks.length > 0 && (
-        <div className="relative">
-          <h2 className="mb-3 font-mono text-[10px] uppercase tracking-wider text-text-muted">
-            Associated Tasks ({tasks.length})
-          </h2>
-          <div className="rounded-xl border border-border bg-bg-secondary">
-            <ul className="divide-y divide-border">
-              {tasks.map((task) => (
-                <li
-                  key={task.id}
-                  className="group transition-colors hover:bg-bg-hover"
-                >
-                  <Link
-                    to={`/tasks?task=${task.id}`}
-                    className="flex items-center justify-between p-4"
-                  >
-                    <div className="flex items-center gap-3">
-                      <span
-                        className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                          task.status === "done"
-                            ? "bg-success/10 text-success"
-                            : task.status === "in_progress"
-                              ? "bg-warning/10 text-warning"
-                              : "bg-bg-tertiary text-text-muted"
-                        }`}
-                      >
-                        {task.status.replace("_", " ")}
-                      </span>
-                      <span className="text-sm text-text-primary group-hover:text-primary">
-                        {task.title}
-                      </span>
-                    </div>
-                    <code className="font-mono text-xs text-text-muted">
-                      {truncateId(task.id)}
-                    </code>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

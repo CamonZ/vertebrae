@@ -21,4 +21,4 @@ Thumbs.db
 /docs
 /scratch
 /.claude
-
+/crates/gui/coverage

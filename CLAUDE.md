@@ -127,6 +127,11 @@ npm run tauri:dev        # Start Tauri + Vite with hot reload
 npm run build            # Build frontend (TypeScript + Vite)
 npm run tauri:build      # Build production Tauri app
 
+# Testing
+npm run test             # Run tests once
+npm run test:watch       # Run tests in watch mode
+npm run test:coverage    # Run tests with coverage report
+
 # Code Quality
 npm run lint             # Run ESLint
 npm run format           # Format with Prettier
@@ -144,6 +149,8 @@ npm run generate:types   # Generate TypeScript types from Rust
 4. Run `npm run generate:types` after changing Rust command signatures
 
 ## Test Commands
+
+### Rust Tests
 
 ```bash
 # Run all tests
@@ -163,6 +170,21 @@ cargo llvm-cov --quiet
 
 # Run tests with coverage threshold check
 cargo llvm-cov --quiet --fail-under-lines 85
+```
+
+### GUI Tests (React)
+
+```bash
+cd crates/gui
+
+# Run tests once
+npm run test
+
+# Run tests in watch mode
+npm run test:watch
+
+# Run tests with coverage report
+npm run test:coverage
 ```
 
 ## Linting and Formatting
@@ -423,22 +445,36 @@ GUI mutation → Service layer → Database → LIVE query
 
 ## Git Hooks Setup
 
-To enable the project's git hooks:
+Run the setup script to configure git hooks and install dependencies:
+
+```bash
+./scripts/setup.sh
+```
+
+This script:
+- Configures git to use the hooks in `.githooks/`
+- Installs GUI npm dependencies (required for pre-commit tests)
+- Verifies Rust toolchain and cargo-llvm-cov
+
+Alternatively, configure hooks manually:
 
 ```bash
 git config core.hooksPath .githooks
+cd crates/gui && npm install
 ```
-
-This configures git to use the hooks in `.githooks/` directory instead of `.git/hooks/`.
 
 ### Pre-commit Hook
 
 The pre-commit hook runs the following checks:
 
+**Rust:**
 1. `cargo fmt --check` - Ensures code is properly formatted
 2. `cargo clippy -- -D warnings` - Ensures no linting warnings
-3. `cargo test --quiet` - Ensures all tests pass
+3. `cargo test --quiet` - Ensures all Rust tests pass
 4. `cargo llvm-cov --quiet --fail-under-lines 85` - Ensures coverage >= 85%
+
+**GUI (React):**
+5. `npm run test` - Ensures all React/TypeScript tests pass
 
 To bypass hooks in emergencies:
 
@@ -472,6 +508,8 @@ git commit --no-verify -m "emergency fix"
 | Zustand | v5 | State management |
 | Vite | v6 | Build tooling |
 | Tailwind CSS | v4 | Styling |
+| Vitest | v4 | Test runner |
+| @testing-library/react | v16 | Component testing utilities |
 
 ### Development Tools (install separately)
 

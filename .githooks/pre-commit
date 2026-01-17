@@ -6,16 +6,21 @@ set -e
 
 echo "Running pre-commit checks..."
 
-echo "==> Checking code formatting..."
+# Rust checks
+echo "==> Checking Rust code formatting..."
 cargo fmt --check
 
 echo "==> Running clippy linter..."
 cargo clippy -- -D warnings
 
-echo "==> Running tests..."
+echo "==> Running Rust tests..."
 cargo test --quiet
 
-echo "==> Checking code coverage (threshold: 85%)..."
+echo "==> Checking Rust code coverage (threshold: 85%)..."
 cargo llvm-cov --quiet --fail-under-lines 85
+
+# GUI/React checks
+echo "==> Running GUI tests..."
+(cd crates/gui && npm run test)
 
 echo "All pre-commit checks passed!"

@@ -14,6 +14,7 @@ export type TaskNodeData = {
   error?: string;
   hasBlockers: boolean;
   isBlocking: boolean;
+  isDoneStack?: boolean;
 };
 
 export type TaskNodeType = Node<TaskNodeData, 'taskNode'>;
@@ -23,7 +24,7 @@ export type TaskNodeType = Node<TaskNodeData, 'taskNode'>;
  * Shows task title, ID, execution status, and dependency indicators.
  */
 function TaskNodeComponent({ data, selected }: NodeProps<TaskNodeType>) {
-  const { task, status, error, hasBlockers, isBlocking } = data;
+  const { task, status, error, hasBlockers, isBlocking, isDoneStack } = data;
 
   const getStatusColor = (status: TaskExecutionStatus) => {
     switch (status) {
@@ -53,9 +54,9 @@ function TaskNodeComponent({ data, selected }: NodeProps<TaskNodeType>) {
 
   return (
     <div
-      className={`relative ${NODE_SIZING.minWidthClass} ${NODE_SIZING.borderRadiusClass} border ${NODE_SIZING.paddingClass} transition-all duration-200 ${getStatusColor(
-        status
-      )} ${
+      className={`relative ${NODE_SIZING.widthClass} ${NODE_SIZING.heightClass} ${NODE_SIZING.borderRadiusClass} border ${NODE_SIZING.paddingClass} ${NODE_SIZING.overflowClass} flex flex-col transition-all duration-200 ${
+        isDoneStack ? 'border-border bg-bg-tertiary' : getStatusColor(status)
+      } ${
         selected
           ? 'shadow-glow-sm ring-2 ring-primary'
           : 'hover:border-primary/50 hover:shadow-glow-sm'
