@@ -214,6 +214,55 @@ async runWorkflow(taskId: string) : Promise<Result<null, CommandError>> {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+/**
+ * Create a new PTY session running Claude CLI
+ * 
+ * Returns the session ID on success. The PTY will emit PtyOutputEvent for output
+ * and PtyExitEvent when the session ends.
+ */
+async createPtySession(sessionId: string, cols: number, rows: number, workingDir: string | null) : Promise<Result<null, PtyError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("create_pty_session", { sessionId, cols, rows, workingDir }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Write data to a PTY session
+ * 
+ * The data should be base64-encoded bytes.
+ */
+async writePty(sessionId: string, data: string) : Promise<Result<null, PtyError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("write_pty", { sessionId, data }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Resize a PTY session
+ */
+async resizePty(sessionId: string, cols: number, rows: number) : Promise<Result<null, PtyError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("resize_pty", { sessionId, cols, rows }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Close a PTY session
+ */
+async closePtySession(sessionId: string) : Promise<Result<null, PtyError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("close_pty_session", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -221,10 +270,14 @@ async runWorkflow(taskId: string) : Promise<Result<null, CommandError>> {
 
 
 export const events = __makeEvents__<{
+ptyExitEvent: PtyExitEvent,
+ptyOutputEvent: PtyOutputEvent,
 taskChangedEvent: TaskChangedEvent,
 workflowChangedEvent: WorkflowChangedEvent,
 workflowExecutionEvent: WorkflowExecutionEvent
 }>({
+ptyExitEvent: "pty-exit-event",
+ptyOutputEvent: "pty-output-event",
 taskChangedEvent: "task-changed-event",
 workflowChangedEvent: "workflow-changed-event",
 workflowExecutionEvent: "workflow-execution-event"
@@ -328,6 +381,30 @@ export type ExecutionStatus = "in_progress" | "completed" | "failed"
  * Permission mode for agent sessions - mirrors db::PermissionMode
  */
 export type PermissionMode = "accept_edits" | "bypass_permissions" | "default" | "delegate" | "dont_ask" | "plan"
+/**
+ * PTY operation errors
+ */
+export type PtyError = { SpawnFailed: string } | { SessionNotFound: string } | { WriteFailed: string } | { ResizeFailed: string }
+/**
+ * Event emitted when PTY session ends
+ */
+export type PtyExitEvent = { session_id: string; 
+/**
+ * Exit code if process exited normally
+ */
+exit_code: number | null; 
+/**
+ * Error message if process failed
+ */
+error: string | null }
+/**
+ * Event emitted when PTY produces output
+ */
+export type PtyOutputEvent = { session_id: string; 
+/**
+ * Raw output bytes encoded as base64 to preserve binary data
+ */
+data: string }
 /**
  * A saved project in the project list
  */

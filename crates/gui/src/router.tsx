@@ -2,7 +2,7 @@ import { createBrowserRouter, Navigate, Outlet, useNavigate } from "react-router
 import { useEffect, useState } from "react";
 import { AppShell } from "./components";
 import { useTheme } from "./hooks";
-import { ProjectSetupPage, TasksPage, WorkflowsPage, WorkflowDetailPage, AllWorkflowsPipeline } from "./pages";
+import { ProjectSetupPage, TasksPage, WorkflowsPage, WorkflowDetailPage, AllWorkflowsPipeline, ChatPage } from "./pages";
 import { commands } from "./bindings";
 
 function RootLayout() {
@@ -109,6 +109,14 @@ export const router = createBrowserRouter([
         element: (
           <ProjectGuard>
             <WorkflowDetailPage />
+          </ProjectGuard>
+        ),
+      },
+      {
+        path: "chat",
+        element: (
+          <ProjectGuard>
+            <ChatPage />
           </ProjectGuard>
         ),
       },
