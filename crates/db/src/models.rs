@@ -620,6 +620,98 @@ impl WorkflowStep {
     }
 }
 
+/// A first-class workflow step entity
+///
+/// Unlike [`WorkflowStep`] which is embedded within a workflow, `Step` is a
+/// standalone database entity that can be referenced by ID. Steps belong to a
+/// workflow and can define transitions to other steps, enabling graph-based
+/// workflow navigation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Step {
+    /// Unique identifier (SurrealDB record ID)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<Thing>,
+
+    /// Display name for this step
+    pub name: String,
+
+    /// Reference to the workflow this step belongs to
+    pub workflow_id: Thing,
+
+    /// Agent configuration for this step
+    #[serde(default)]
+    pub agent_config: AgentConfig,
+
+    /// Whether this is a final step (no outgoing transitions)
+    #[serde(default)]
+    pub is_final: bool,
+
+    /// List of step IDs this step can transition to
+    #[serde(default)]
+    pub transitions_to: Vec<Thing>,
+
+    /// Ordering index for sequential fallback (0-based)
+    #[serde(default)]
+    pub order: i32,
+
+    /// Creation timestamp
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<DateTime<Utc>>,
+
+    /// Last update timestamp
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<DateTime<Utc>>,
+}
+
+impl Step {
+    /// Create a new step with the given name and workflow ID
+    pub fn new(name: impl Into<String>, workflow_id: Thing) -> Self {
+        Self {
+            id: None,
+            name: name.into(),
+            workflow_id,
+            agent_config: AgentConfig::default(),
+            is_final: false,
+            transitions_to: Vec::new(),
+            order: 0,
+            created_at: None,
+            updated_at: None,
+        }
+    }
+
+    /// Set the agent configuration for this step
+    pub fn with_agent_config(mut self, agent_config: AgentConfig) -> Self {
+        self.agent_config = agent_config;
+        self
+    }
+
+    /// Mark this step as final (no outgoing transitions)
+    pub fn with_is_final(mut self, is_final: bool) -> Self {
+        self.is_final = is_final;
+        self
+    }
+
+    /// Add a transition to another step
+    pub fn with_transition(mut self, step_id: Thing) -> Self {
+        self.transitions_to.push(step_id);
+        self
+    }
+
+    /// Set the order for this step
+    pub fn with_order(mut self, order: i32) -> Self {
+        self.order = order;
+        self
+    }
+}
+
+impl PartialEq for Step {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Eq for Step {}
+
 /// A workflow definition
 ///
 /// Workflows define a sequence of steps to be executed by agents.
@@ -4153,5 +4245,73 @@ mod tests {
     fn test_format_float_removes_trailing_zeros() {
         assert_eq!(format_float(5.50), "5.5");
         assert_eq!(format_float(10.100), "10.1");
+    }
+
+    // Step model tests
+    #[test]
+    fn test_step_new() {
+        let workflow_id = Thing::from(("workflow", "test"));
+        let step = Step::new("Review", workflow_id.clone());
+
+        assert!(step.id.is_none());
+        assert_eq!(step.name, "Review");
+        assert_eq!(step.workflow_id, workflow_id);
+        assert_eq!(step.agent_config, AgentConfig::default());
+        assert!(!step.is_final);
+        assert!(step.transitions_to.is_empty());
+        assert_eq!(step.order, 0);
+        assert!(step.created_at.is_none());
+        assert!(step.updated_at.is_none());
+    }
+
+    #[test]
+    fn test_step_builder_pattern() {
+        let workflow_id = Thing::from(("workflow", "test"));
+        let transition_id = Thing::from(("step", "next"));
+        let agent_config = AgentConfig::new().with_model("opus");
+
+        let step = Step::new("Build", workflow_id.clone())
+            .with_agent_config(agent_config.clone())
+            .with_is_final(true)
+            .with_transition(transition_id.clone())
+            .with_order(1);
+
+        assert_eq!(step.name, "Build");
+        assert_eq!(step.workflow_id, workflow_id);
+        assert_eq!(step.agent_config, agent_config);
+        assert!(step.is_final);
+        assert_eq!(step.transitions_to.len(), 1);
+        assert_eq!(step.transitions_to[0], transition_id);
+        assert_eq!(step.order, 1);
+    }
+
+    #[test]
+    fn test_step_equality_by_id() {
+        let workflow_id = Thing::from(("workflow", "test"));
+
+        let mut step1 = Step::new("Step 1", workflow_id.clone());
+        step1.id = Some(Thing::from(("step", "same")));
+
+        let mut step2 = Step::new("Step 2", workflow_id.clone());
+        step2.id = Some(Thing::from(("step", "same")));
+
+        // Same ID means equal, even if other fields differ
+        assert_eq!(step1, step2);
+
+        step2.id = Some(Thing::from(("step", "different")));
+        assert_ne!(step1, step2);
+    }
+
+    #[test]
+    fn test_step_serialization() {
+        let workflow_id = Thing::from(("workflow", "test"));
+        let step = Step::new("Test Step", workflow_id)
+            .with_order(5)
+            .with_is_final(true);
+
+        let json = serde_json::to_string(&step).unwrap();
+        assert!(json.contains("\"name\":\"Test Step\""));
+        assert!(json.contains("\"is_final\":true"));
+        assert!(json.contains("\"order\":5"));
     }
 }

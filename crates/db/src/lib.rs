@@ -12,7 +12,7 @@ pub use error::{DbError, DbResult, IncompleteChildInfo};
 #[allow(unused_imports)]
 pub use models::{
     AgentConfig, ChatMessage, ChatSession, CodeRef, ExecutionStatus, Level, PermissionMode,
-    Priority, Section, SectionType, SessionLog, Status, StepExecution, Task, Workflow,
+    Priority, Section, SectionType, SessionLog, Status, Step, StepExecution, Task, Workflow,
     WorkflowStep,
 };
 pub use repository::{
