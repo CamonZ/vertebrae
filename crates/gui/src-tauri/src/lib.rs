@@ -2,7 +2,6 @@
 
 pub mod commands;
 pub mod events;
-pub mod live_queries;
 pub mod notification_server;
 pub mod project_config;
 pub mod types;
@@ -110,64 +109,29 @@ pub fn run() {
 
             // Check if there's a current project set
             let current_project = project_config.get_current_project();
-            let (service, live_registry) = if let Some(ref project_path) = current_project {
+            let service = if let Some(ref project_path) = current_project {
                 let db_path = PathBuf::from(project_path).join(".vtb/data");
                 log::info!("Connecting to database at: {:?}", db_path);
-
-                let app_handle = app.handle().clone();
 
                 tauri::async_runtime::block_on(async {
                     match Database::connect(&db_path).await {
                         Ok(db) => {
                             if let Err(e) = db.init().await {
                                 log::error!("Failed to initialize database: {}", e);
-                                (None, live_queries::LiveQueryRegistry::new())
+                                None
                             } else {
-                                // Clone the database client for LIVE queries
-                                let client = db.client().clone();
-
-                                // Start LIVE query for task table changes
-                                log::info!("[STARTUP] Initializing LIVE queries");
-                                let mut registry = live_queries::LiveQueryRegistry::new();
-                                log::info!("[STARTUP] Starting task LIVE query");
-                                if let Err(e) = registry
-                                    .start_task_live_query(client.clone(), app_handle.clone())
-                                    .await
-                                {
-                                    log::error!("[STARTUP] Failed to start task LIVE query: {}", e);
-                                    log::info!("App will continue with polling fallback");
-                                } else {
-                                    log::info!("[STARTUP] Task LIVE query started successfully");
-                                }
-
-                                // Start LIVE query for workflow table changes
-                                log::info!("[STARTUP] Starting workflow LIVE query");
-                                if let Err(e) =
-                                    registry.start_workflow_live_query(client, app_handle).await
-                                {
-                                    log::error!(
-                                        "[STARTUP] Failed to start workflow LIVE query: {}",
-                                        e
-                                    );
-                                    log::info!("App will continue with polling fallback");
-                                } else {
-                                    log::info!(
-                                        "[STARTUP] Workflow LIVE query started successfully"
-                                    );
-                                }
-
-                                (Some(DefaultTaskService::new(db)), registry)
+                                Some(DefaultTaskService::new(db))
                             }
                         }
                         Err(e) => {
                             log::error!("Failed to connect to database: {}", e);
-                            (None, live_queries::LiveQueryRegistry::new())
+                            None
                         }
                     }
                 })
             } else {
                 log::info!("No project selected, starting without database connection");
-                (None, live_queries::LiveQueryRegistry::new())
+                None
             };
 
             // Manage application state with optional task service
@@ -175,9 +139,6 @@ pub fn run() {
                 service: RwLock::new(service),
                 project_config,
             });
-
-            // Store LIVE query registry to keep streams alive for app lifetime
-            app.manage(RwLock::new(live_registry));
 
             Ok(())
         })
