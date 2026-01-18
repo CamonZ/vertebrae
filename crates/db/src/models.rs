@@ -481,9 +481,13 @@ pub struct Task {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workflow_id: Option<Thing>,
 
-    /// Current step index in the assigned workflow (0-based)
+    /// Current step index in the assigned workflow (0-based, legacy)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current_step: Option<usize>,
+
+    /// Reference to the current step in the workflow (new first-class steps)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_step_id: Option<Thing>,
 }
 
 impl Task {
@@ -506,6 +510,7 @@ impl Task {
             needs_human_review: None,
             workflow_id: None,
             current_step: None,
+            current_step_id: None,
         }
     }
 
@@ -568,6 +573,13 @@ impl Task {
     pub fn without_workflow(mut self) -> Self {
         self.workflow_id = None;
         self.current_step = None;
+        self.current_step_id = None;
+        self
+    }
+
+    /// Set the current step reference (new first-class step)
+    pub fn with_current_step_id(mut self, step_id: Thing) -> Self {
+        self.current_step_id = Some(step_id);
         self
     }
 }

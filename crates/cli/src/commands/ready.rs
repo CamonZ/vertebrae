@@ -141,6 +141,7 @@ mod tests {
             needs_human_review: None,
             workflow_id: None,
             current_step: None,
+            current_step_id: None,
         };
 
         db.tasks().create(id, &task).await.unwrap();

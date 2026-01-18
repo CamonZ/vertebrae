@@ -304,6 +304,7 @@ mod tests {
             id: None,
             workflow_id: None,
             current_step: None,
+            current_step_id: None,
         };
 
         db.tasks().create(id, &task).await.unwrap();
@@ -1137,6 +1138,7 @@ mod tests {
             id: None,
             workflow_id: None,
             current_step: None,
+            current_step_id: None,
         };
         service
             .database()
@@ -1315,6 +1317,7 @@ mod tests {
             id: None,
             workflow_id: None,
             current_step: None,
+            current_step_id: None,
         };
         service
             .database()

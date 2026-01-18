@@ -513,6 +513,7 @@ pub async fn get_workflow_with_task_details(
             needs_human_review: data.needs_human_review,
             workflow_id: None,
             current_step: None,
+            current_step_id: None,
         };
 
         tasks.push(TaskWithRelations {
