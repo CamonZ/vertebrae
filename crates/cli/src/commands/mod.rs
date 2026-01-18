@@ -23,6 +23,7 @@ pub mod run;
 pub mod section;
 pub mod sections;
 pub mod show;
+pub mod step;
 pub mod step_done;
 pub mod transition_to;
 pub mod undepend;
@@ -50,6 +51,7 @@ pub use run::RunCommand;
 pub use section::SectionCommand;
 pub use sections::SectionsCommand;
 pub use show::ShowCommand;
+pub use step::StepCommand;
 pub use step_done::StepDoneCommand;
 pub use transition_to::TransitionToCommand;
 pub use undepend::UndependCommand;
@@ -111,6 +113,9 @@ pub enum Command {
     Unref(UnrefCommand),
     /// Remove sections from a task
     Unsection(UnsectionCommand),
+    /// First-class workflow step management commands
+    #[command(subcommand)]
+    Step(StepCommand),
     /// Mark a step as done within a task
     #[command(name = "step-done")]
     StepDone(StepDoneCommand),
@@ -264,6 +269,10 @@ impl Command {
                 // Service handles notification via callback
                 let result = cmd.execute(service).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
+            }
+            Command::Step(cmd) => {
+                let result = cmd.execute(service).await?;
+                Ok(CommandResult::Message(result))
             }
             Command::StepDone(cmd) => {
                 let result = cmd.execute(service).await?;
