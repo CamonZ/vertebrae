@@ -1,7 +1,7 @@
 //! Repository modules for database operations
 //!
 //! Provides repository pattern implementations for task, workflow, step, relationship,
-//! chat, status_schema, and execution operations, encapsulating database queries.
+//! chat, status_schema, validation_gate, and execution operations, encapsulating database queries.
 
 mod chat;
 mod execution;
@@ -12,6 +12,7 @@ mod status_schema;
 mod step;
 mod task;
 mod validation;
+mod validation_gate;
 mod workflow;
 
 pub use chat::ChatSessionRepository;
@@ -26,6 +27,7 @@ pub use validation::{
     SectionRule, TriageValidationConfig, TriageValidationResult, TriageValidator, ValidationIssue,
     ValidationSeverity,
 };
+pub use validation_gate::{ValidationGateRepository, ValidationGateUpdate};
 pub use workflow::{
     DEFAULT_WORKFLOW_ID, MigrationResult, StepMigrationResult, WorkflowRepository, WorkflowUpdate,
 };

@@ -771,6 +771,10 @@ pub struct Workflow {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub on_reject_workflow: Option<String>,
 
+    /// Optional validation gate for workflow completion
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub validation_gate_id: Option<Thing>,
+
     /// Creation timestamp
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_at: Option<DateTime<Utc>>,
@@ -792,6 +796,7 @@ impl Workflow {
             metadata: std::collections::HashMap::new(),
             on_done_workflow: None,
             on_reject_workflow: None,
+            validation_gate_id: None,
             created_at: None,
             updated_at: None,
         }
@@ -839,6 +844,12 @@ impl Workflow {
         self
     }
 
+    /// Set the validation gate for workflow completion
+    pub fn with_validation_gate(mut self, gate_id: Thing) -> Self {
+        self.validation_gate_id = Some(gate_id);
+        self
+    }
+
     /// Get steps in order (sorted by order field)
     pub fn ordered_steps(&self) -> Vec<&WorkflowStep> {
         let mut steps: Vec<_> = self.steps.iter().collect();
@@ -878,6 +889,7 @@ impl PartialEq for Workflow {
             && self.metadata == other.metadata
             && self.on_done_workflow == other.on_done_workflow
             && self.on_reject_workflow == other.on_reject_workflow
+            && self.validation_gate_id == other.validation_gate_id
     }
 }
 
@@ -2020,6 +2032,424 @@ impl PartialEq for StatusSchema {
 }
 
 impl Eq for StatusSchema {}
+
+/// Type of validation gate
+///
+/// Defines how the validation gate performs its validation:
+/// - CommandExecution: Runs a shell command and checks exit code
+/// - AgentClassification: Uses an LLM agent to classify pass/fail
+/// - ManualApproval: Requires human approval
+/// - Composite: Combines multiple gates with a validation mechanism
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ValidationGateType {
+    /// Run a shell command and check exit code (0 = pass)
+    CommandExecution,
+    /// Use an LLM agent to classify the result as pass/fail
+    AgentClassification,
+    /// Require manual human approval
+    ManualApproval,
+    /// Combine multiple gates with a mechanism
+    Composite,
+}
+
+impl ValidationGateType {
+    /// Returns the string representation used in the database
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ValidationGateType::CommandExecution => "command_execution",
+            ValidationGateType::AgentClassification => "agent_classification",
+            ValidationGateType::ManualApproval => "manual_approval",
+            ValidationGateType::Composite => "composite",
+        }
+    }
+
+    /// Parse a gate type string into a ValidationGateType enum.
+    ///
+    /// Returns `None` if the string doesn't match any known type.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "command_execution" => Some(ValidationGateType::CommandExecution),
+            "agent_classification" => Some(ValidationGateType::AgentClassification),
+            "manual_approval" => Some(ValidationGateType::ManualApproval),
+            "composite" => Some(ValidationGateType::Composite),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for ValidationGateType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+/// Validation mechanism for composite gates
+///
+/// Defines how multiple validation gates are combined:
+/// - AllMustPass: All gates must pass for the composite to pass
+/// - AnyMustPass: At least one gate must pass for the composite to pass
+/// - Weighted: Gates have weights, and a threshold determines pass/fail
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ValidationMechanism {
+    /// All component gates must pass
+    #[default]
+    AllMustPass,
+    /// At least one component gate must pass
+    AnyMustPass,
+    /// Weighted voting with a pass threshold
+    Weighted,
+}
+
+impl ValidationMechanism {
+    /// Returns the string representation used in the database
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ValidationMechanism::AllMustPass => "all_must_pass",
+            ValidationMechanism::AnyMustPass => "any_must_pass",
+            ValidationMechanism::Weighted => "weighted",
+        }
+    }
+
+    /// Parse a mechanism string into a ValidationMechanism enum.
+    ///
+    /// Returns `None` if the string doesn't match any known mechanism.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "all_must_pass" => Some(ValidationMechanism::AllMustPass),
+            "any_must_pass" => Some(ValidationMechanism::AnyMustPass),
+            "weighted" => Some(ValidationMechanism::Weighted),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for ValidationMechanism {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+/// Result of executing a validation gate
+///
+/// Contains pass/fail status and optional feedback message on failure.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ValidationResult {
+    /// Whether the validation passed
+    pub passed: bool,
+
+    /// Optional message explaining the result (especially useful on failure)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+impl ValidationResult {
+    /// Create a passing validation result
+    pub fn pass() -> Self {
+        Self {
+            passed: true,
+            message: None,
+        }
+    }
+
+    /// Create a passing validation result with a message
+    pub fn pass_with_message(message: impl Into<String>) -> Self {
+        Self {
+            passed: true,
+            message: Some(message.into()),
+        }
+    }
+
+    /// Create a failing validation result with a message
+    pub fn fail(message: impl Into<String>) -> Self {
+        Self {
+            passed: false,
+            message: Some(message.into()),
+        }
+    }
+
+    /// Create a failing validation result without a message
+    pub fn fail_silent() -> Self {
+        Self {
+            passed: false,
+            message: None,
+        }
+    }
+}
+
+/// A validation gate for workflow completion
+///
+/// ValidationGate defines how workflow completion is validated before status transition.
+/// Gates can be simple (command execution, manual approval) or composite (combining multiple gates).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ValidationGate {
+    /// Unique identifier (SurrealDB record ID)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<Thing>,
+
+    /// Human-readable name for this gate
+    pub name: String,
+
+    /// Optional description of what this gate validates
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+
+    /// The type of validation this gate performs
+    pub gate_type: ValidationGateType,
+
+    /// For Composite gates: how to combine child gate results
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mechanism: Option<ValidationMechanism>,
+
+    /// For Composite gates: list of child gate IDs
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub child_gates: Vec<Thing>,
+
+    /// For Weighted mechanism: the pass threshold (0.0 to 1.0)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pass_threshold: Option<f64>,
+
+    /// For CommandExecution: the shell command to run
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+
+    /// For CommandExecution: timeout in seconds (default: 30)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout_seconds: Option<u32>,
+
+    /// For AgentClassification: the agent configuration to use
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_config: Option<AgentConfig>,
+
+    /// For AgentClassification: the classification prompt
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub classification_prompt: Option<String>,
+
+    /// Creation timestamp
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<DateTime<Utc>>,
+
+    /// Last update timestamp
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<DateTime<Utc>>,
+}
+
+impl ValidationGate {
+    /// Create a new validation gate with the given name and type
+    pub fn new(name: impl Into<String>, gate_type: ValidationGateType) -> Self {
+        Self {
+            id: None,
+            name: name.into(),
+            description: None,
+            gate_type,
+            mechanism: None,
+            child_gates: Vec::new(),
+            pass_threshold: None,
+            command: None,
+            timeout_seconds: None,
+            agent_config: None,
+            classification_prompt: None,
+            created_at: None,
+            updated_at: None,
+        }
+    }
+
+    /// Create a command execution gate
+    pub fn command_execution(name: impl Into<String>, command: impl Into<String>) -> Self {
+        Self {
+            id: None,
+            name: name.into(),
+            description: None,
+            gate_type: ValidationGateType::CommandExecution,
+            mechanism: None,
+            child_gates: Vec::new(),
+            pass_threshold: None,
+            command: Some(command.into()),
+            timeout_seconds: Some(30),
+            agent_config: None,
+            classification_prompt: None,
+            created_at: None,
+            updated_at: None,
+        }
+    }
+
+    /// Create a manual approval gate
+    pub fn manual_approval(name: impl Into<String>) -> Self {
+        Self {
+            id: None,
+            name: name.into(),
+            description: None,
+            gate_type: ValidationGateType::ManualApproval,
+            mechanism: None,
+            child_gates: Vec::new(),
+            pass_threshold: None,
+            command: None,
+            timeout_seconds: None,
+            agent_config: None,
+            classification_prompt: None,
+            created_at: None,
+            updated_at: None,
+        }
+    }
+
+    /// Create an agent classification gate
+    pub fn agent_classification(
+        name: impl Into<String>,
+        prompt: impl Into<String>,
+        config: AgentConfig,
+    ) -> Self {
+        Self {
+            id: None,
+            name: name.into(),
+            description: None,
+            gate_type: ValidationGateType::AgentClassification,
+            mechanism: None,
+            child_gates: Vec::new(),
+            pass_threshold: None,
+            command: None,
+            timeout_seconds: None,
+            agent_config: Some(config),
+            classification_prompt: Some(prompt.into()),
+            created_at: None,
+            updated_at: None,
+        }
+    }
+
+    /// Create a composite gate with the given mechanism
+    pub fn composite(name: impl Into<String>, mechanism: ValidationMechanism) -> Self {
+        Self {
+            id: None,
+            name: name.into(),
+            description: None,
+            gate_type: ValidationGateType::Composite,
+            mechanism: Some(mechanism),
+            child_gates: Vec::new(),
+            pass_threshold: None,
+            command: None,
+            timeout_seconds: None,
+            agent_config: None,
+            classification_prompt: None,
+            created_at: None,
+            updated_at: None,
+        }
+    }
+
+    /// Set the description for this gate
+    pub fn with_description(mut self, description: impl Into<String>) -> Self {
+        self.description = Some(description.into());
+        self
+    }
+
+    /// Add a child gate (for Composite gates)
+    pub fn with_child_gate(mut self, gate_id: Thing) -> Self {
+        self.child_gates.push(gate_id);
+        self
+    }
+
+    /// Set the pass threshold (for Weighted mechanism, 0.0 to 1.0)
+    pub fn with_pass_threshold(mut self, threshold: f64) -> Self {
+        self.pass_threshold = Some(threshold);
+        self
+    }
+
+    /// Set the command (for CommandExecution gates)
+    pub fn with_command(mut self, command: impl Into<String>) -> Self {
+        self.command = Some(command.into());
+        self
+    }
+
+    /// Set the timeout in seconds (for CommandExecution gates)
+    pub fn with_timeout_seconds(mut self, seconds: u32) -> Self {
+        self.timeout_seconds = Some(seconds);
+        self
+    }
+
+    /// Set the agent config (for AgentClassification gates)
+    pub fn with_agent_config(mut self, config: AgentConfig) -> Self {
+        self.agent_config = Some(config);
+        self
+    }
+
+    /// Set the classification prompt (for AgentClassification gates)
+    pub fn with_classification_prompt(mut self, prompt: impl Into<String>) -> Self {
+        self.classification_prompt = Some(prompt.into());
+        self
+    }
+
+    /// Validate the gate configuration.
+    ///
+    /// Checks that required fields are present based on gate type:
+    /// - CommandExecution: requires command
+    /// - AgentClassification: requires classification_prompt and agent_config
+    /// - Composite: requires mechanism and at least one child gate
+    /// - ManualApproval: no additional requirements
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if validation passes, or a descriptive error message.
+    pub fn validate(&self) -> Result<(), String> {
+        match self.gate_type {
+            ValidationGateType::CommandExecution => {
+                if self.command.is_none() {
+                    return Err("CommandExecution gate requires a command".to_string());
+                }
+            }
+            ValidationGateType::AgentClassification => {
+                if self.classification_prompt.is_none() {
+                    return Err(
+                        "AgentClassification gate requires a classification_prompt".to_string()
+                    );
+                }
+                if self.agent_config.is_none() {
+                    return Err("AgentClassification gate requires an agent_config".to_string());
+                }
+            }
+            ValidationGateType::Composite => {
+                if self.mechanism.is_none() {
+                    return Err("Composite gate requires a mechanism".to_string());
+                }
+                if self.child_gates.is_empty() {
+                    return Err("Composite gate requires at least one child gate".to_string());
+                }
+                if let Some(ValidationMechanism::Weighted) = self.mechanism {
+                    if self.pass_threshold.is_none() {
+                        return Err(
+                            "Composite gate with Weighted mechanism requires a pass_threshold"
+                                .to_string(),
+                        );
+                    }
+                    if let Some(threshold) = self.pass_threshold
+                        && !(0.0..=1.0).contains(&threshold)
+                    {
+                        return Err("pass_threshold must be between 0.0 and 1.0".to_string());
+                    }
+                }
+            }
+            ValidationGateType::ManualApproval => {
+                // No additional validation needed
+            }
+        }
+        Ok(())
+    }
+}
+
+impl PartialEq for ValidationGate {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+            && self.description == other.description
+            && self.gate_type == other.gate_type
+            && self.mechanism == other.mechanism
+            && self.child_gates == other.child_gates
+            && float_option_eq(self.pass_threshold, other.pass_threshold)
+            && self.command == other.command
+            && self.timeout_seconds == other.timeout_seconds
+            && self.agent_config == other.agent_config
+            && self.classification_prompt == other.classification_prompt
+    }
+}
+
+impl Eq for ValidationGate {}
 
 #[cfg(test)]
 mod tests {
@@ -5052,5 +5482,438 @@ mod tests {
 
         let schema3 = StatusSchema::new("different");
         assert_ne!(schema1, schema3);
+    }
+
+    // ========================================
+    // ValidationGateType tests
+    // ========================================
+
+    #[test]
+    fn test_validation_gate_type_as_str() {
+        assert_eq!(
+            ValidationGateType::CommandExecution.as_str(),
+            "command_execution"
+        );
+        assert_eq!(
+            ValidationGateType::AgentClassification.as_str(),
+            "agent_classification"
+        );
+        assert_eq!(
+            ValidationGateType::ManualApproval.as_str(),
+            "manual_approval"
+        );
+        assert_eq!(ValidationGateType::Composite.as_str(), "composite");
+    }
+
+    #[test]
+    fn test_validation_gate_type_display() {
+        assert_eq!(
+            format!("{}", ValidationGateType::CommandExecution),
+            "command_execution"
+        );
+        assert_eq!(
+            format!("{}", ValidationGateType::AgentClassification),
+            "agent_classification"
+        );
+        assert_eq!(
+            format!("{}", ValidationGateType::ManualApproval),
+            "manual_approval"
+        );
+        assert_eq!(format!("{}", ValidationGateType::Composite), "composite");
+    }
+
+    #[test]
+    fn test_validation_gate_type_parse() {
+        assert_eq!(
+            ValidationGateType::parse("command_execution"),
+            Some(ValidationGateType::CommandExecution)
+        );
+        assert_eq!(
+            ValidationGateType::parse("agent_classification"),
+            Some(ValidationGateType::AgentClassification)
+        );
+        assert_eq!(
+            ValidationGateType::parse("manual_approval"),
+            Some(ValidationGateType::ManualApproval)
+        );
+        assert_eq!(
+            ValidationGateType::parse("composite"),
+            Some(ValidationGateType::Composite)
+        );
+        assert_eq!(ValidationGateType::parse("unknown"), None);
+    }
+
+    #[test]
+    fn test_validation_gate_type_serialize() {
+        assert_eq!(
+            serde_json::to_string(&ValidationGateType::CommandExecution).unwrap(),
+            "\"command_execution\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ValidationGateType::AgentClassification).unwrap(),
+            "\"agent_classification\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ValidationGateType::ManualApproval).unwrap(),
+            "\"manual_approval\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ValidationGateType::Composite).unwrap(),
+            "\"composite\""
+        );
+    }
+
+    #[test]
+    fn test_validation_gate_type_deserialize() {
+        assert_eq!(
+            serde_json::from_str::<ValidationGateType>("\"command_execution\"").unwrap(),
+            ValidationGateType::CommandExecution
+        );
+        assert_eq!(
+            serde_json::from_str::<ValidationGateType>("\"agent_classification\"").unwrap(),
+            ValidationGateType::AgentClassification
+        );
+        assert_eq!(
+            serde_json::from_str::<ValidationGateType>("\"manual_approval\"").unwrap(),
+            ValidationGateType::ManualApproval
+        );
+        assert_eq!(
+            serde_json::from_str::<ValidationGateType>("\"composite\"").unwrap(),
+            ValidationGateType::Composite
+        );
+    }
+
+    #[test]
+    fn test_validation_gate_type_clone_and_eq() {
+        let gate_type = ValidationGateType::CommandExecution;
+        let cloned = gate_type.clone();
+        assert_eq!(gate_type, cloned);
+    }
+
+    // ========================================
+    // ValidationMechanism tests
+    // ========================================
+
+    #[test]
+    fn test_validation_mechanism_as_str() {
+        assert_eq!(ValidationMechanism::AllMustPass.as_str(), "all_must_pass");
+        assert_eq!(ValidationMechanism::AnyMustPass.as_str(), "any_must_pass");
+        assert_eq!(ValidationMechanism::Weighted.as_str(), "weighted");
+    }
+
+    #[test]
+    fn test_validation_mechanism_display() {
+        assert_eq!(
+            format!("{}", ValidationMechanism::AllMustPass),
+            "all_must_pass"
+        );
+        assert_eq!(
+            format!("{}", ValidationMechanism::AnyMustPass),
+            "any_must_pass"
+        );
+        assert_eq!(format!("{}", ValidationMechanism::Weighted), "weighted");
+    }
+
+    #[test]
+    fn test_validation_mechanism_parse() {
+        assert_eq!(
+            ValidationMechanism::parse("all_must_pass"),
+            Some(ValidationMechanism::AllMustPass)
+        );
+        assert_eq!(
+            ValidationMechanism::parse("any_must_pass"),
+            Some(ValidationMechanism::AnyMustPass)
+        );
+        assert_eq!(
+            ValidationMechanism::parse("weighted"),
+            Some(ValidationMechanism::Weighted)
+        );
+        assert_eq!(ValidationMechanism::parse("unknown"), None);
+    }
+
+    #[test]
+    fn test_validation_mechanism_serialize() {
+        assert_eq!(
+            serde_json::to_string(&ValidationMechanism::AllMustPass).unwrap(),
+            "\"all_must_pass\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ValidationMechanism::AnyMustPass).unwrap(),
+            "\"any_must_pass\""
+        );
+        assert_eq!(
+            serde_json::to_string(&ValidationMechanism::Weighted).unwrap(),
+            "\"weighted\""
+        );
+    }
+
+    #[test]
+    fn test_validation_mechanism_deserialize() {
+        assert_eq!(
+            serde_json::from_str::<ValidationMechanism>("\"all_must_pass\"").unwrap(),
+            ValidationMechanism::AllMustPass
+        );
+        assert_eq!(
+            serde_json::from_str::<ValidationMechanism>("\"any_must_pass\"").unwrap(),
+            ValidationMechanism::AnyMustPass
+        );
+        assert_eq!(
+            serde_json::from_str::<ValidationMechanism>("\"weighted\"").unwrap(),
+            ValidationMechanism::Weighted
+        );
+    }
+
+    #[test]
+    fn test_validation_mechanism_default() {
+        let mechanism: ValidationMechanism = Default::default();
+        assert_eq!(mechanism, ValidationMechanism::AllMustPass);
+    }
+
+    #[test]
+    fn test_validation_mechanism_clone_and_eq() {
+        let mechanism = ValidationMechanism::Weighted;
+        let cloned = mechanism.clone();
+        assert_eq!(mechanism, cloned);
+    }
+
+    // ========================================
+    // ValidationResult tests
+    // ========================================
+
+    #[test]
+    fn test_validation_result_pass() {
+        let result = ValidationResult::pass();
+        assert!(result.passed);
+        assert!(result.message.is_none());
+    }
+
+    #[test]
+    fn test_validation_result_pass_with_message() {
+        let result = ValidationResult::pass_with_message("All tests passed");
+        assert!(result.passed);
+        assert_eq!(result.message, Some("All tests passed".to_string()));
+    }
+
+    #[test]
+    fn test_validation_result_fail() {
+        let result = ValidationResult::fail("Test failed: expected 1 got 2");
+        assert!(!result.passed);
+        assert_eq!(
+            result.message,
+            Some("Test failed: expected 1 got 2".to_string())
+        );
+    }
+
+    #[test]
+    fn test_validation_result_fail_silent() {
+        let result = ValidationResult::fail_silent();
+        assert!(!result.passed);
+        assert!(result.message.is_none());
+    }
+
+    #[test]
+    fn test_validation_result_serialize() {
+        let pass = ValidationResult::pass();
+        let json = serde_json::to_string(&pass).unwrap();
+        assert_eq!(json, r#"{"passed":true}"#);
+
+        let fail = ValidationResult::fail("error");
+        let json = serde_json::to_string(&fail).unwrap();
+        assert_eq!(json, r#"{"passed":false,"message":"error"}"#);
+    }
+
+    #[test]
+    fn test_validation_result_deserialize() {
+        let result: ValidationResult = serde_json::from_str(r#"{"passed":true}"#).unwrap();
+        assert!(result.passed);
+        assert!(result.message.is_none());
+
+        let result: ValidationResult =
+            serde_json::from_str(r#"{"passed":false,"message":"failed"}"#).unwrap();
+        assert!(!result.passed);
+        assert_eq!(result.message, Some("failed".to_string()));
+    }
+
+    // ========================================
+    // ValidationGate tests
+    // ========================================
+
+    #[test]
+    fn test_validation_gate_new() {
+        let gate = ValidationGate::new("Test Gate", ValidationGateType::ManualApproval);
+        assert!(gate.id.is_none());
+        assert_eq!(gate.name, "Test Gate");
+        assert!(gate.description.is_none());
+        assert_eq!(gate.gate_type, ValidationGateType::ManualApproval);
+        assert!(gate.mechanism.is_none());
+        assert!(gate.child_gates.is_empty());
+    }
+
+    #[test]
+    fn test_validation_gate_command_execution() {
+        let gate = ValidationGate::command_execution("Test Runner", "cargo test");
+        assert_eq!(gate.name, "Test Runner");
+        assert_eq!(gate.gate_type, ValidationGateType::CommandExecution);
+        assert_eq!(gate.command, Some("cargo test".to_string()));
+        assert_eq!(gate.timeout_seconds, Some(30));
+    }
+
+    #[test]
+    fn test_validation_gate_manual_approval() {
+        let gate = ValidationGate::manual_approval("Code Review");
+        assert_eq!(gate.name, "Code Review");
+        assert_eq!(gate.gate_type, ValidationGateType::ManualApproval);
+    }
+
+    #[test]
+    fn test_validation_gate_agent_classification() {
+        let config = AgentConfig::new().with_model("sonnet");
+        let gate = ValidationGate::agent_classification(
+            "Quality Check",
+            "Does this code follow best practices?",
+            config,
+        );
+        assert_eq!(gate.name, "Quality Check");
+        assert_eq!(gate.gate_type, ValidationGateType::AgentClassification);
+        assert_eq!(
+            gate.classification_prompt,
+            Some("Does this code follow best practices?".to_string())
+        );
+        assert!(gate.agent_config.is_some());
+    }
+
+    #[test]
+    fn test_validation_gate_composite() {
+        let gate = ValidationGate::composite("All Checks", ValidationMechanism::AllMustPass);
+        assert_eq!(gate.name, "All Checks");
+        assert_eq!(gate.gate_type, ValidationGateType::Composite);
+        assert_eq!(gate.mechanism, Some(ValidationMechanism::AllMustPass));
+    }
+
+    #[test]
+    fn test_validation_gate_builder_pattern() {
+        let child_id = Thing::from(("validation_gate", "child1"));
+        let gate = ValidationGate::composite("Combined", ValidationMechanism::Weighted)
+            .with_description("Combined validation")
+            .with_child_gate(child_id.clone())
+            .with_pass_threshold(0.8);
+
+        assert_eq!(gate.description, Some("Combined validation".to_string()));
+        assert_eq!(gate.child_gates, vec![child_id]);
+        assert_eq!(gate.pass_threshold, Some(0.8));
+    }
+
+    #[test]
+    fn test_validation_gate_validate_command_execution_success() {
+        let gate = ValidationGate::command_execution("Test", "cargo test");
+        assert!(gate.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validation_gate_validate_command_execution_missing_command() {
+        let gate = ValidationGate::new("Test", ValidationGateType::CommandExecution);
+        let result = gate.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("requires a command"));
+    }
+
+    #[test]
+    fn test_validation_gate_validate_agent_classification_success() {
+        let config = AgentConfig::new().with_model("sonnet");
+        let gate = ValidationGate::agent_classification("Test", "Check quality", config);
+        assert!(gate.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validation_gate_validate_agent_classification_missing_prompt() {
+        let gate = ValidationGate::new("Test", ValidationGateType::AgentClassification)
+            .with_agent_config(AgentConfig::new());
+        let result = gate.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("classification_prompt"));
+    }
+
+    #[test]
+    fn test_validation_gate_validate_composite_success() {
+        let child_id = Thing::from(("validation_gate", "child1"));
+        let gate = ValidationGate::composite("Test", ValidationMechanism::AllMustPass)
+            .with_child_gate(child_id);
+        assert!(gate.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validation_gate_validate_composite_missing_mechanism() {
+        let child_id = Thing::from(("validation_gate", "child1"));
+        let mut gate = ValidationGate::new("Test", ValidationGateType::Composite);
+        gate.child_gates.push(child_id);
+        let result = gate.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("requires a mechanism"));
+    }
+
+    #[test]
+    fn test_validation_gate_validate_composite_missing_children() {
+        let gate = ValidationGate::composite("Test", ValidationMechanism::AllMustPass);
+        let result = gate.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("at least one child gate"));
+    }
+
+    #[test]
+    fn test_validation_gate_validate_weighted_missing_threshold() {
+        let child_id = Thing::from(("validation_gate", "child1"));
+        let gate = ValidationGate::composite("Test", ValidationMechanism::Weighted)
+            .with_child_gate(child_id);
+        let result = gate.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("pass_threshold"));
+    }
+
+    #[test]
+    fn test_validation_gate_validate_weighted_invalid_threshold() {
+        let child_id = Thing::from(("validation_gate", "child1"));
+        let gate = ValidationGate::composite("Test", ValidationMechanism::Weighted)
+            .with_child_gate(child_id)
+            .with_pass_threshold(1.5);
+        let result = gate.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("between 0.0 and 1.0"));
+    }
+
+    #[test]
+    fn test_validation_gate_validate_manual_approval() {
+        let gate = ValidationGate::manual_approval("Review");
+        assert!(gate.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validation_gate_serialize() {
+        let gate =
+            ValidationGate::command_execution("Test", "cargo test").with_description("Run tests");
+        let json = serde_json::to_string(&gate).unwrap();
+        assert!(json.contains("\"name\":\"Test\""));
+        assert!(json.contains("\"gate_type\":\"command_execution\""));
+        assert!(json.contains("\"command\":\"cargo test\""));
+    }
+
+    #[test]
+    fn test_validation_gate_deserialize() {
+        let json = r#"{
+            "name": "Test Gate",
+            "gate_type": "manual_approval"
+        }"#;
+        let gate: ValidationGate = serde_json::from_str(json).unwrap();
+        assert_eq!(gate.name, "Test Gate");
+        assert_eq!(gate.gate_type, ValidationGateType::ManualApproval);
+    }
+
+    #[test]
+    fn test_validation_gate_equality() {
+        let gate1 = ValidationGate::command_execution("Test", "cargo test");
+        let gate2 = ValidationGate::command_execution("Test", "cargo test");
+        let gate3 = ValidationGate::command_execution("Test", "cargo build");
+
+        assert_eq!(gate1, gate2);
+        assert_ne!(gate1, gate3);
     }
 }

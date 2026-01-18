@@ -11,6 +11,7 @@ pub mod delete;
 pub mod depend;
 pub mod execution;
 pub mod export;
+pub mod gate;
 pub mod import;
 pub mod init;
 pub mod list;
@@ -40,6 +41,7 @@ pub use delete::DeleteCommand;
 pub use depend::DependCommand;
 pub use execution::ExecutionCommand;
 pub use export::ExportCommand;
+pub use gate::GateCommand;
 pub use import::ImportCommand;
 pub use init::InitCommand;
 pub use list::ListCommand;
@@ -85,6 +87,9 @@ pub enum Command {
     Execution(ExecutionCommand),
     /// Export all tasks and relationships to JSONL format
     Export(ExportCommand),
+    /// Validation gate management commands
+    #[command(subcommand)]
+    Gate(GateCommand),
     /// Import tasks and relationships from JSONL format
     Import(ImportCommand),
     /// Initialize vertebrae in the current project
@@ -192,6 +197,10 @@ impl Command {
             Command::Export(cmd) => {
                 let result = cmd.execute(service).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
+            }
+            Command::Gate(cmd) => {
+                let result = cmd.execute(service).await?;
+                Ok(CommandResult::Message(result))
             }
             Command::Import(cmd) => {
                 let result = cmd.execute(service).await?;

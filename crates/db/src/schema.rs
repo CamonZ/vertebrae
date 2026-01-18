@@ -183,6 +183,45 @@ mod sql {
 
         DEFINE FIELD updated_at ON status_schema TYPE datetime DEFAULT time::now();
     "#;
+
+    /// Define the validation_gate table for workflow completion validation
+    ///
+    /// ValidationGate defines how workflow completion is validated before status transition.
+    /// Gates can be simple (command execution, manual approval) or composite (combining multiple gates).
+    pub const DEFINE_VALIDATION_GATE_TABLE: &str = r#"
+        DEFINE TABLE IF NOT EXISTS validation_gate SCHEMAFULL;
+
+        DEFINE FIELD name ON validation_gate TYPE string;
+
+        DEFINE FIELD description ON validation_gate TYPE option<string>;
+
+        DEFINE FIELD gate_type ON validation_gate TYPE string
+            ASSERT $value IN ["command_execution", "agent_classification", "manual_approval", "composite"];
+
+        DEFINE FIELD mechanism ON validation_gate TYPE option<string>
+            ASSERT $value IN [NONE, "all_must_pass", "any_must_pass", "weighted"];
+
+        DEFINE FIELD child_gates ON validation_gate TYPE array<record<validation_gate>> DEFAULT [];
+
+        DEFINE FIELD pass_threshold ON validation_gate TYPE option<float>;
+
+        DEFINE FIELD command ON validation_gate TYPE option<string>;
+
+        DEFINE FIELD timeout_seconds ON validation_gate TYPE option<int>;
+
+        DEFINE FIELD agent_config ON validation_gate FLEXIBLE TYPE option<object>;
+
+        DEFINE FIELD classification_prompt ON validation_gate TYPE option<string>;
+
+        DEFINE FIELD created_at ON validation_gate TYPE datetime DEFAULT time::now();
+
+        DEFINE FIELD updated_at ON validation_gate TYPE datetime DEFAULT time::now();
+    "#;
+
+    /// Add validation_gate_id field to workflow table (migration)
+    pub const ADD_VALIDATION_GATE_TO_WORKFLOW: &str = r#"
+        DEFINE FIELD validation_gate_id ON workflow TYPE option<record<validation_gate>>;
+    "#;
 }
 
 /// Backfill section order values for existing sections with order: None.
@@ -242,8 +281,8 @@ async fn backfill_section_orders(client: &Surreal<Db>) -> Result<(), DbError> {
 /// Initialize the database schema.
 ///
 /// Creates the task table, workflow table, step table, step_execution table, session_log table,
-/// chat_session table, chat_message table, status_schema table, child_of relation,
-/// and depends_on relation with all required fields and constraints.
+/// chat_session table, chat_message table, status_schema table, validation_gate table,
+/// child_of relation, and depends_on relation with all required fields and constraints.
 ///
 /// This function is idempotent - it can be called multiple times safely
 /// as it uses `IF NOT EXISTS` clauses.
@@ -313,6 +352,18 @@ pub async fn init_schema(client: &Surreal<Db>) -> Result<(), DbError> {
     // Define the status_schema table for configurable status definitions
     client
         .query(sql::DEFINE_STATUS_SCHEMA_TABLE)
+        .await
+        .map_err(|e| DbError::Schema(Box::new(e)))?;
+
+    // Define the validation_gate table for workflow completion validation
+    client
+        .query(sql::DEFINE_VALIDATION_GATE_TABLE)
+        .await
+        .map_err(|e| DbError::Schema(Box::new(e)))?;
+
+    // Add validation_gate_id field to workflow table (migration)
+    client
+        .query(sql::ADD_VALIDATION_GATE_TO_WORKFLOW)
         .await
         .map_err(|e| DbError::Schema(Box::new(e)))?;
 
@@ -2798,5 +2849,244 @@ mod tests {
         assert_eq!(rows[0].name, "agile");
         assert_eq!(rows[1].name, "default");
         assert_eq!(rows[2].name, "kanban");
+    }
+
+    // ========================================
+    // ValidationGate table tests
+    // ========================================
+
+    #[test]
+    fn test_validation_gate_sql_constant_defined() {
+        assert!(!sql::DEFINE_VALIDATION_GATE_TABLE.is_empty());
+    }
+
+    #[test]
+    fn test_validation_gate_sql_contains_expected_definitions() {
+        let sql = sql::DEFINE_VALIDATION_GATE_TABLE;
+        assert!(sql.contains("DEFINE TABLE IF NOT EXISTS validation_gate"));
+        assert!(sql.contains("DEFINE FIELD name ON validation_gate"));
+        assert!(sql.contains("DEFINE FIELD gate_type ON validation_gate"));
+        assert!(sql.contains("DEFINE FIELD mechanism ON validation_gate"));
+        assert!(sql.contains("DEFINE FIELD child_gates ON validation_gate"));
+        assert!(sql.contains("DEFINE FIELD command ON validation_gate"));
+        assert!(sql.contains("DEFINE FIELD agent_config ON validation_gate"));
+    }
+
+    #[tokio::test]
+    async fn test_validation_gate_table_accepts_command_execution() {
+        let client = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // Create a command execution gate
+        let result = client
+            .query(
+                r#"
+                CREATE validation_gate:test_cmd SET
+                    name = "Test Runner",
+                    gate_type = "command_execution",
+                    command = "cargo test",
+                    timeout_seconds = 60
+            "#,
+            )
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "Valid command execution gate insert failed: {:?}",
+            result.err()
+        );
+
+        // Verify the data
+        #[derive(Debug, serde::Deserialize)]
+        struct GateRow {
+            name: String,
+            gate_type: String,
+            command: Option<String>,
+            timeout_seconds: Option<i64>,
+        }
+
+        let mut result = client
+            .query("SELECT name, gate_type, command, timeout_seconds FROM validation_gate:test_cmd")
+            .await
+            .unwrap();
+
+        let row: Option<GateRow> = result.take(0).unwrap();
+        let row = row.expect("Gate should exist");
+
+        assert_eq!(row.name, "Test Runner");
+        assert_eq!(row.gate_type, "command_execution");
+        assert_eq!(row.command, Some("cargo test".to_string()));
+        assert_eq!(row.timeout_seconds, Some(60));
+    }
+
+    #[tokio::test]
+    async fn test_validation_gate_table_accepts_manual_approval() {
+        let client = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // Create a manual approval gate
+        let result = client
+            .query(
+                r#"
+                CREATE validation_gate:test_manual SET
+                    name = "Code Review",
+                    gate_type = "manual_approval",
+                    description = "Requires human approval before proceeding"
+            "#,
+            )
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "Valid manual approval gate insert failed: {:?}",
+            result.err()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_validation_gate_table_accepts_composite() {
+        let client = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // Create child gates first
+        client
+            .query(
+                r#"
+                CREATE validation_gate:child1 SET
+                    name = "Child Gate 1",
+                    gate_type = "manual_approval";
+                CREATE validation_gate:child2 SET
+                    name = "Child Gate 2",
+                    gate_type = "command_execution",
+                    command = "echo test"
+            "#,
+            )
+            .await
+            .unwrap();
+
+        // Create a composite gate
+        let result = client
+            .query(
+                r#"
+                CREATE validation_gate:composite SET
+                    name = "Combined Gate",
+                    gate_type = "composite",
+                    mechanism = "all_must_pass",
+                    child_gates = [validation_gate:child1, validation_gate:child2]
+            "#,
+            )
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "Valid composite gate insert failed: {:?}",
+            result.err()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_validation_gate_table_rejects_invalid_gate_type() {
+        let client = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // Try to create gate with invalid type
+        let result = client
+            .query(
+                r#"
+                CREATE validation_gate:invalid SET
+                    name = "Invalid",
+                    gate_type = "invalid_type"
+            "#,
+            )
+            .await;
+
+        // The query should fail due to ASSERT constraint
+        assert!(
+            result.is_err() || {
+                let mut r = result.unwrap();
+                let check: Result<Option<serde_json::Value>, _> = r.take(0);
+                check.is_err()
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn test_validation_gate_table_rejects_invalid_mechanism() {
+        let client = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // Try to create gate with invalid mechanism
+        let result = client
+            .query(
+                r#"
+                CREATE validation_gate:invalid SET
+                    name = "Invalid",
+                    gate_type = "composite",
+                    mechanism = "invalid_mechanism"
+            "#,
+            )
+            .await;
+
+        // The query should fail due to ASSERT constraint
+        assert!(
+            result.is_err() || {
+                let mut r = result.unwrap();
+                let check: Result<Option<serde_json::Value>, _> = r.take(0);
+                check.is_err()
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn test_workflow_validation_gate_id_field() {
+        let client = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // Create a validation gate
+        client
+            .query(
+                r#"
+                CREATE validation_gate:test_gate SET
+                    name = "Test Gate",
+                    gate_type = "manual_approval"
+            "#,
+            )
+            .await
+            .unwrap();
+
+        // Create a workflow with the validation_gate_id
+        let result = client
+            .query(
+                r#"
+                CREATE workflow:test_workflow SET
+                    name = "Test Workflow",
+                    validation_gate_id = validation_gate:test_gate
+            "#,
+            )
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "Workflow with validation_gate_id failed: {:?}",
+            result.err()
+        );
+
+        // Verify the workflow has the gate reference
+        #[derive(Debug, serde::Deserialize)]
+        struct WorkflowRow {
+            name: String,
+            validation_gate_id: Option<surrealdb::sql::Thing>,
+        }
+
+        let mut result = client
+            .query("SELECT name, validation_gate_id FROM workflow:test_workflow")
+            .await
+            .unwrap();
+
+        let row: Option<WorkflowRow> = result.take(0).unwrap();
+        let row = row.expect("Workflow should exist");
+
+        assert_eq!(row.name, "Test Workflow");
+        assert!(row.validation_gate_id.is_some());
     }
 }

@@ -13,7 +13,8 @@ pub use error::{DbError, DbResult, IncompleteChildInfo};
 pub use models::{
     AgentConfig, ChatMessage, ChatSession, CodeRef, ExecutionStatus, Level, PermissionMode,
     Priority, Section, SectionType, SessionLog, Status, StatusDefinition, StatusProgression,
-    StatusSchema, Step, StepExecution, Task, Workflow, WorkflowStep,
+    StatusSchema, Step, StepExecution, Task, ValidationGate, ValidationGateType,
+    ValidationMechanism, ValidationResult, Workflow, WorkflowStep,
 };
 pub use repository::{
     BlockerNode, ChatSessionRepository, DEFAULT_STATUS_SCHEMA_ID, DEFAULT_WORKFLOW_ID,
@@ -21,7 +22,8 @@ pub use repository::{
     StatusSchemaRepository, StatusSchemaUpdate, StepExecutionRepository, StepRepository,
     StepUpdate, TaskFilter, TaskLister, TaskRepository, TaskSummary, TaskUpdate,
     TaskWithRelationsData, TriageValidationConfig, TriageValidationResult, TriageValidator,
-    ValidationIssue, ValidationSeverity, WorkflowRepository, WorkflowUpdate,
+    ValidationGateRepository, ValidationGateUpdate, ValidationIssue, ValidationSeverity,
+    WorkflowRepository, WorkflowUpdate,
 };
 
 use std::path::{Path, PathBuf};
@@ -170,6 +172,11 @@ impl Database {
     /// Get a status schema repository for CRUD operations on status schemas.
     pub fn status_schemas(&self) -> StatusSchemaRepository<'_> {
         StatusSchemaRepository::new(&self.client)
+    }
+
+    /// Get a validation gate repository for CRUD operations on validation gates.
+    pub fn validation_gates(&self) -> ValidationGateRepository<'_> {
+        ValidationGateRepository::new(&self.client)
     }
 
     /// Get a task lister for filtering and listing tasks.
