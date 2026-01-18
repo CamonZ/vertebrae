@@ -268,6 +268,54 @@ function TaskDetailsTab({ taskData }: { taskData: TaskWithRelations }) {
           </div>
         </div>
       )}
+
+      {/* Revision Feedback Banner */}
+      {task.revision_feedback && (
+        <div className="p-4">
+          <div className="rounded-lg border border-warning/30 bg-warning/10 p-4">
+            <div className="flex items-start gap-3">
+              <div className="flex-shrink-0">
+                <svg
+                  className="h-5 w-5 text-warning"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              <div className="min-w-0 flex-1">
+                <h4 className="text-sm font-semibold text-warning">Revision Required</h4>
+                <p className="mt-1 whitespace-pre-wrap text-sm text-text-secondary">{task.revision_feedback}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Rejection Reason Banner */}
+      {task.rejection_reason && (
+        <div className="p-4">
+          <div className="rounded-lg border border-error/30 bg-error/10 p-4">
+            <div className="flex items-start gap-3">
+              <div className="flex-shrink-0">
+                <svg
+                  className="h-5 w-5 text-error"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                </svg>
+              </div>
+              <div className="min-w-0 flex-1">
+                <h4 className="text-sm font-semibold text-error">Rejection Reason</h4>
+                <p className="mt-1 whitespace-pre-wrap text-sm text-text-secondary">{task.rejection_reason}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

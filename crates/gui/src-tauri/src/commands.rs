@@ -511,6 +511,8 @@ pub async fn get_workflow_with_task_details(
             sections,
             code_refs,
             needs_human_review: data.needs_human_review,
+            revision_feedback: None,
+            rejection_reason: None,
             workflow_id: None,
             current_step: None,
             current_step_id: None,

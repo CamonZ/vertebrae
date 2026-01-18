@@ -43,6 +43,10 @@ mod sql {
 
         DEFINE FIELD needs_human_review ON task TYPE option<bool> DEFAULT NONE;
 
+        DEFINE FIELD revision_feedback ON task TYPE option<string>;
+
+        DEFINE FIELD rejection_reason ON task TYPE option<string>;
+
         DEFINE FIELD workflow_id ON task TYPE option<record<workflow>>;
 
         DEFINE FIELD current_step ON task TYPE option<int>;

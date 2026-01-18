@@ -477,6 +477,14 @@ pub struct Task {
     #[serde(default)]
     pub needs_human_review: Option<bool>,
 
+    /// Feedback to address when a validation gate fails (prompt/reason to send back)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revision_feedback: Option<String>,
+
+    /// Reason why the task was rejected (terminal status explanation)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rejection_reason: Option<String>,
+
     /// The workflow this task is assigned to (if any)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workflow_id: Option<Thing>,
@@ -508,6 +516,8 @@ impl Task {
             sections: Vec::new(),
             code_refs: Vec::new(),
             needs_human_review: None,
+            revision_feedback: None,
+            rejection_reason: None,
             workflow_id: None,
             current_step: None,
             current_step_id: None,

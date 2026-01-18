@@ -779,6 +779,14 @@ code_refs: CodeRef[];
  */
 needs_human_review: boolean | null; 
 /**
+ * Feedback to address when a validation gate fails
+ */
+revision_feedback: string | null; 
+/**
+ * Reason why the task was rejected
+ */
+rejection_reason: string | null; 
+/**
  * Workflow ID (string form)
  */
 workflow_id: string | null; 

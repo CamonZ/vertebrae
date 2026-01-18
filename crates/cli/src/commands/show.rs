@@ -44,6 +44,10 @@ pub struct TaskDetail {
     pub completed_at: Option<String>,
     /// Whether this task needs human review
     pub needs_human_review: Option<bool>,
+    /// Feedback to address when a validation gate fails
+    pub revision_feedback: Option<String>,
+    /// Reason why the task was rejected
+    pub rejection_reason: Option<String>,
     /// Workflow assignment information
     pub workflow: Option<WorkflowInfo>,
     /// Embedded sections
@@ -80,6 +84,10 @@ struct TaskRow {
     completed_at: Option<surrealdb::sql::Datetime>,
     #[serde(default)]
     needs_human_review: Option<bool>,
+    #[serde(default)]
+    revision_feedback: Option<String>,
+    #[serde(default)]
+    rejection_reason: Option<String>,
     #[serde(default)]
     workflow_id: Option<surrealdb::sql::Thing>,
     #[serde(default)]
@@ -281,6 +289,8 @@ impl ShowCommand {
             updated_at: task.updated_at.map(|dt| dt.to_string()),
             completed_at: task.completed_at.map(|dt| dt.to_string()),
             needs_human_review: task.needs_human_review,
+            revision_feedback: task.revision_feedback,
+            rejection_reason: task.rejection_reason,
             workflow,
             sections,
             code_refs,
@@ -317,6 +327,8 @@ impl ShowCommand {
             updated_at: task.updated_at.map(surrealdb::sql::Datetime::from),
             completed_at: task.completed_at.map(surrealdb::sql::Datetime::from),
             needs_human_review: task.needs_human_review,
+            revision_feedback: task.revision_feedback,
+            rejection_reason: task.rejection_reason,
             workflow_id: task.workflow_id,
             current_step: task.current_step,
             sections: task
@@ -504,6 +516,22 @@ impl std::fmt::Display for TaskDetail {
             None => "False",
         };
         writeln!(f, "Human Review: {}\n\n", review_status)?;
+
+        // Revision feedback (prominently displayed when present)
+        if let Some(ref feedback) = self.revision_feedback {
+            writeln!(f, "!! REVISION REQUIRED !!")?;
+            writeln!(f, "{}", "-".repeat(40))?;
+            writeln!(f, "{}", feedback)?;
+            writeln!(f)?;
+        }
+
+        // Rejection reason (prominently displayed when present)
+        if let Some(ref reason) = self.rejection_reason {
+            writeln!(f, "!! REJECTION REASON !!")?;
+            writeln!(f, "{}", "-".repeat(40))?;
+            writeln!(f, "{}", reason)?;
+            writeln!(f)?;
+        }
 
         // Timestamps
         writeln!(
@@ -1312,6 +1340,8 @@ mod tests {
             updated_at: Some("2024-01-15T11:00:00Z".to_string()),
             completed_at: None,
             needs_human_review: Some(false),
+            revision_feedback: None,
+            rejection_reason: None,
             workflow: None,
             sections: vec![
                 Section::new(SectionType::Goal, "The goal"),
@@ -1364,6 +1394,8 @@ mod tests {
             updated_at: None,
             completed_at: None,
             needs_human_review: Some(false),
+            revision_feedback: None,
+            rejection_reason: None,
             workflow: None,
             sections: vec![],
             code_refs: vec![],
@@ -1404,6 +1436,8 @@ mod tests {
             updated_at: None,
             completed_at: None,
             needs_human_review: Some(true),
+            revision_feedback: None,
+            rejection_reason: None,
             workflow: None,
             sections: vec![],
             code_refs: vec![],
@@ -1432,6 +1466,8 @@ mod tests {
             updated_at: None,
             completed_at: None,
             needs_human_review: Some(false),
+            revision_feedback: None,
+            rejection_reason: None,
             workflow: None,
             sections: vec![
                 Section::with_order(SectionType::Step, "First step", 1),
@@ -1478,6 +1514,8 @@ mod tests {
             updated_at: None,
             completed_at: None,
             needs_human_review: Some(false),
+            revision_feedback: None,
+            rejection_reason: None,
             workflow: None,
             sections: vec![],
             code_refs: vec![],
@@ -1522,6 +1560,8 @@ mod tests {
             updated_at: None,
             completed_at: None,
             needs_human_review: None,
+            revision_feedback: None,
+            rejection_reason: None,
             workflow: Some(WorkflowInfo {
                 id: "wf123".to_string(),
                 name: "Code Review".to_string(),
@@ -1562,6 +1602,8 @@ mod tests {
             updated_at: None,
             completed_at: None,
             needs_human_review: None,
+            revision_feedback: None,
+            rejection_reason: None,
             workflow: Some(WorkflowInfo {
                 id: "wf123".to_string(),
                 name: "Simple Workflow".to_string(),
@@ -1604,5 +1646,103 @@ mod tests {
                 && debug_str.contains("Test Workflow"),
             "Debug output should contain WorkflowInfo and field values"
         );
+    }
+
+    #[test]
+    fn test_task_detail_display_with_revision_feedback() {
+        let detail = TaskDetail {
+            id: "abc123".to_string(),
+            title: "Task Needing Revision".to_string(),
+            description: None,
+            level: "task".to_string(),
+            status: "todo".to_string(),
+            priority: None,
+            tags: vec![],
+            created_at: None,
+            updated_at: None,
+            completed_at: None,
+            needs_human_review: None,
+            revision_feedback: Some(
+                "Please fix the failing tests and add documentation.".to_string(),
+            ),
+            rejection_reason: None,
+            workflow: None,
+            sections: vec![],
+            code_refs: vec![],
+            parent: None,
+            children: vec![],
+            blocked_by: vec![],
+            blocks: vec![],
+        };
+
+        let output = format!("{}", detail);
+
+        assert!(output.contains("!! REVISION REQUIRED !!"));
+        assert!(output.contains("Please fix the failing tests and add documentation."));
+    }
+
+    #[test]
+    fn test_task_detail_display_with_rejection_reason() {
+        let detail = TaskDetail {
+            id: "abc123".to_string(),
+            title: "Rejected Task".to_string(),
+            description: None,
+            level: "task".to_string(),
+            status: "rejected".to_string(),
+            priority: None,
+            tags: vec![],
+            created_at: None,
+            updated_at: None,
+            completed_at: None,
+            needs_human_review: None,
+            revision_feedback: None,
+            rejection_reason: Some("Out of scope for current sprint.".to_string()),
+            workflow: None,
+            sections: vec![],
+            code_refs: vec![],
+            parent: None,
+            children: vec![],
+            blocked_by: vec![],
+            blocks: vec![],
+        };
+
+        let output = format!("{}", detail);
+
+        assert!(output.contains("!! REJECTION REASON !!"));
+        assert!(output.contains("Out of scope for current sprint."));
+    }
+
+    #[test]
+    fn test_task_detail_display_with_both_feedback_fields() {
+        let detail = TaskDetail {
+            id: "abc123".to_string(),
+            title: "Task with Both".to_string(),
+            description: None,
+            level: "task".to_string(),
+            status: "rejected".to_string(),
+            priority: None,
+            tags: vec![],
+            created_at: None,
+            updated_at: None,
+            completed_at: None,
+            needs_human_review: None,
+            revision_feedback: Some("Previous revision needed more tests.".to_string()),
+            rejection_reason: Some("Could not meet deadline after revisions.".to_string()),
+            workflow: None,
+            sections: vec![],
+            code_refs: vec![],
+            parent: None,
+            children: vec![],
+            blocked_by: vec![],
+            blocks: vec![],
+        };
+
+        let output = format!("{}", detail);
+
+        // Both should be displayed
+        assert!(output.contains("!! REVISION REQUIRED !!"));
+        assert!(output.contains("Previous revision needed more tests."));
+        assert!(output.contains("!! REJECTION REASON !!"));
+        assert!(output.contains("Could not meet deadline after revisions."));
     }
 }

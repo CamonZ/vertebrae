@@ -139,6 +139,8 @@ mod tests {
             started_at: None,
             completed_at: None,
             needs_human_review: None,
+            revision_feedback: None,
+            rejection_reason: None,
             workflow_id: None,
             current_step: None,
             current_step_id: None,

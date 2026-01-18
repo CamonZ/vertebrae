@@ -251,6 +251,10 @@ pub struct Task {
     pub code_refs: Vec<CodeRef>,
     /// Whether this task needs human review
     pub needs_human_review: Option<bool>,
+    /// Feedback to address when a validation gate fails
+    pub revision_feedback: Option<String>,
+    /// Reason why the task was rejected
+    pub rejection_reason: Option<String>,
     /// Workflow ID (string form)
     pub workflow_id: Option<String>,
     /// Current step in workflow (0-indexed)
@@ -274,6 +278,8 @@ impl From<vertebrae_db::Task> for Task {
             sections: task.sections.into_iter().map(Into::into).collect(),
             code_refs: task.code_refs.into_iter().map(Into::into).collect(),
             needs_human_review: task.needs_human_review,
+            revision_feedback: task.revision_feedback,
+            rejection_reason: task.rejection_reason,
             workflow_id: task.workflow_id.map(|t| t.id.to_raw()),
             current_step: task.current_step.map(|s| s as u32),
         }
