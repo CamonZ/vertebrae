@@ -12,3 +12,9 @@ export {
 } from "./TaskDetail";
 export { WorkflowCard, WorkflowGrid } from "./WorkflowGrid";
 export { ToastContainer } from "./Toast";
+export { Terminal } from "./Terminal";
+export type {
+  TerminalHandle,
+  TerminalProps,
+  TerminalDimensions,
+} from "./Terminal";
