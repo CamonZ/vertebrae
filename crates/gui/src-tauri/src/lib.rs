@@ -4,6 +4,7 @@ pub mod commands;
 pub mod events;
 pub mod notification_server;
 pub mod project_config;
+pub mod pty_manager;
 pub mod types;
 pub mod workflow_runner;
 
@@ -19,6 +20,7 @@ use vertebrae_db::Database;
 use commands::AppState;
 use events::{TaskChangedEvent, WorkflowChangedEvent, WorkflowExecutionEvent};
 use project_config::ProjectConfig;
+use pty_manager::{PtyExitEvent, PtyManager, PtyOutputEvent};
 
 /// Example command that will be exported with type definitions.
 /// This serves as a template for future Tauri commands.
@@ -66,11 +68,18 @@ fn create_builder() -> Builder {
             commands::get_execution_logs,
             // Workflow execution commands
             commands::run_workflow,
+            // PTY commands
+            commands::create_pty_session,
+            commands::write_pty,
+            commands::resize_pty,
+            commands::close_pty_session,
         ])
         .events(collect_events![
             TaskChangedEvent,
             WorkflowChangedEvent,
-            WorkflowExecutionEvent
+            WorkflowExecutionEvent,
+            PtyOutputEvent,
+            PtyExitEvent
         ])
 }
 
@@ -139,6 +148,10 @@ pub fn run() {
                 service: RwLock::new(service),
                 project_config,
             });
+
+            // Initialize PTY manager for terminal sessions
+            app.manage(PtyManager::new());
+            log::info!("[STARTUP] PTY manager initialized");
 
             Ok(())
         })

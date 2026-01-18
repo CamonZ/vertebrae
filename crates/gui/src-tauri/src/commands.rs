@@ -659,3 +659,83 @@ pub async fn run_workflow(
     log::info!("Workflow execution started for task: {}", task_id);
     Ok(())
 }
+
+// ============================================================================
+// PTY Commands
+// ============================================================================
+
+/// Create a new PTY session running Claude CLI
+///
+/// Returns the session ID on success. The PTY will emit PtyOutputEvent for output
+/// and PtyExitEvent when the session ends.
+#[tauri::command]
+#[specta::specta]
+pub async fn create_pty_session(
+    pty_manager: State<'_, crate::pty_manager::PtyManager>,
+    app_handle: tauri::AppHandle,
+    session_id: String,
+    cols: u16,
+    rows: u16,
+    working_dir: Option<String>,
+) -> Result<(), crate::pty_manager::PtyError> {
+    log::info!(
+        "create_pty_session called: session_id={}, cols={}, rows={}, working_dir={:?}",
+        session_id,
+        cols,
+        rows,
+        working_dir
+    );
+
+    pty_manager
+        .spawn_claude_pty(session_id, cols, rows, working_dir, app_handle)
+        .await
+}
+
+/// Write data to a PTY session
+///
+/// The data should be base64-encoded bytes.
+#[tauri::command]
+#[specta::specta]
+pub async fn write_pty(
+    pty_manager: State<'_, crate::pty_manager::PtyManager>,
+    session_id: String,
+    data: String,
+) -> Result<(), crate::pty_manager::PtyError> {
+    use base64::Engine;
+    let decoder = base64::engine::general_purpose::STANDARD;
+
+    let bytes = decoder
+        .decode(&data)
+        .map_err(|e| crate::pty_manager::PtyError::WriteFailed(format!("Invalid base64: {}", e)))?;
+
+    pty_manager.write_to_pty(&session_id, &bytes).await
+}
+
+/// Resize a PTY session
+#[tauri::command]
+#[specta::specta]
+pub async fn resize_pty(
+    pty_manager: State<'_, crate::pty_manager::PtyManager>,
+    session_id: String,
+    cols: u16,
+    rows: u16,
+) -> Result<(), crate::pty_manager::PtyError> {
+    log::info!(
+        "resize_pty called: session_id={}, cols={}, rows={}",
+        session_id,
+        cols,
+        rows
+    );
+    pty_manager.resize_pty(&session_id, cols, rows).await
+}
+
+/// Close a PTY session
+#[tauri::command]
+#[specta::specta]
+pub async fn close_pty_session(
+    pty_manager: State<'_, crate::pty_manager::PtyManager>,
+    session_id: String,
+) -> Result<(), crate::pty_manager::PtyError> {
+    log::info!("close_pty_session called: session_id={}", session_id);
+    pty_manager.close_session(&session_id).await
+}
