@@ -2,6 +2,7 @@ export { AppShell } from "./AppShell";
 export { Sidebar } from "./Sidebar";
 export { Header } from "./Header";
 export { ContentArea } from "./ContentArea";
+export { ChatPanel } from "./ChatPanel";
 export { TaskList, TaskFilters, TaskRow } from "./TaskList";
 export {
   TaskDetailPanel,

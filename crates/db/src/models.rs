@@ -959,6 +959,112 @@ impl PartialEq for SessionLog {
 
 impl Eq for SessionLog {}
 
+/// A Claude PTY chat session
+///
+/// ChatSession represents a user's interaction session with Claude via the PTY terminal.
+/// It tracks when the session started and ended, and optionally stores a title and
+/// working directory.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatSession {
+    /// Unique identifier (SurrealDB record ID)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<Thing>,
+
+    /// Optional title for the session (e.g., derived from first message)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+
+    /// The working directory where the session was started
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub working_dir: Option<String>,
+
+    /// When this session was started
+    pub started_at: DateTime<Utc>,
+
+    /// When this session ended (None if still active)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ended_at: Option<DateTime<Utc>>,
+}
+
+impl ChatSession {
+    /// Create a new chat session
+    ///
+    /// The session is created with the current timestamp as started_at.
+    pub fn new(working_dir: Option<String>) -> Self {
+        Self {
+            id: None,
+            title: None,
+            working_dir,
+            started_at: Utc::now(),
+            ended_at: None,
+        }
+    }
+
+    /// Set a title for the session
+    pub fn with_title(mut self, title: impl Into<String>) -> Self {
+        self.title = Some(title.into());
+        self
+    }
+
+    /// Get the session ID as a string if it exists
+    pub fn id_string(&self) -> Option<String> {
+        self.id.as_ref().map(|t| t.id.to_raw())
+    }
+}
+
+impl PartialEq for ChatSession {
+    fn eq(&self, other: &Self) -> bool {
+        self.title == other.title
+            && self.working_dir == other.working_dir
+            && self.started_at == other.started_at
+            && self.ended_at == other.ended_at
+    }
+}
+
+impl Eq for ChatSession {}
+
+/// A message within a chat session
+///
+/// ChatMessage stores the raw terminal output from a PTY session, including
+/// ANSI escape codes for full terminal replay capability.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatMessage {
+    /// Unique identifier (SurrealDB record ID)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<Thing>,
+
+    /// Reference to the chat session this message belongs to
+    pub session_id: Thing,
+
+    /// The raw terminal content (including ANSI codes)
+    pub content: String,
+
+    /// When this message was created
+    pub created_at: DateTime<Utc>,
+}
+
+impl ChatMessage {
+    /// Create a new chat message
+    ///
+    /// The message is created with the current timestamp.
+    pub fn new(session_id: Thing, content: impl Into<String>) -> Self {
+        Self {
+            id: None,
+            session_id,
+            content: content.into(),
+            created_at: Utc::now(),
+        }
+    }
+}
+
+impl PartialEq for ChatMessage {
+    fn eq(&self, other: &Self) -> bool {
+        self.session_id == other.session_id && self.content == other.content
+    }
+}
+
+impl Eq for ChatMessage {}
+
 /// Permission mode for Claude CLI execution
 ///
 /// Defines how permissions are handled during agent execution.

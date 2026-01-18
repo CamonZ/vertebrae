@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { commands, events, type PtyOutputEvent, type PtyExitEvent } from "../bindings";
 import type { TerminalDimensions } from "../components/Terminal/Terminal";
+import { useChatStore } from "../stores";
 
 /**
  * Session state for PTY session management
@@ -32,6 +33,9 @@ export function usePtySession(options: PtySessionOptions = {}) {
   const [state, setState] = useState<PtySessionState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [exitCode, setExitCode] = useState<number | null>(null);
+
+  // Sync state to global chat store for sidebar indicator
+  const setGlobalSessionState = useChatStore((s) => s.setSessionState);
 
   // Store callbacks in refs to avoid re-subscribing on every render
   const onOutputRef = useRef(onOutput);
@@ -155,10 +159,11 @@ export function usePtySession(options: PtySessionOptions = {}) {
   useEffect(() => {
     let outputUnlisten: (() => void) | null = null;
     let exitUnlisten: (() => void) | null = null;
+    let isCancelled = false;
 
     const setupListeners = async () => {
       // Listen for PTY output events
-      outputUnlisten = await events.ptyOutputEvent.listen(
+      const outputUn = await events.ptyOutputEvent.listen(
         (event: { payload: PtyOutputEvent }) => {
           const { session_id, data } = event.payload;
           if (session_id === sessionIdRef.current) {
@@ -167,8 +172,15 @@ export function usePtySession(options: PtySessionOptions = {}) {
         }
       );
 
+      // If component unmounted while we were setting up, clean up immediately
+      if (isCancelled) {
+        outputUn();
+        return;
+      }
+      outputUnlisten = outputUn;
+
       // Listen for PTY exit events
-      exitUnlisten = await events.ptyExitEvent.listen(
+      const exitUn = await events.ptyExitEvent.listen(
         (event: { payload: PtyExitEvent }) => {
           const { session_id, exit_code, error } = event.payload;
           if (session_id === sessionIdRef.current) {
@@ -181,15 +193,29 @@ export function usePtySession(options: PtySessionOptions = {}) {
           }
         }
       );
+
+      // If component unmounted while we were setting up, clean up immediately
+      if (isCancelled) {
+        exitUn();
+        outputUnlisten?.();
+        return;
+      }
+      exitUnlisten = exitUn;
     };
 
     setupListeners();
 
     return () => {
+      isCancelled = true;
       outputUnlisten?.();
       exitUnlisten?.();
     };
   }, []);
+
+  // Sync state to global chat store for sidebar indicator
+  useEffect(() => {
+    setGlobalSessionState(state);
+  }, [state, setGlobalSessionState]);
 
   // Cleanup session on unmount
   useEffect(() => {

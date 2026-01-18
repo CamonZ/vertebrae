@@ -107,6 +107,30 @@ mod sql {
 
         DEFINE FIELD created_at ON session_log TYPE datetime DEFAULT time::now();
     "#;
+
+    /// Define the chat_session table for storing Claude PTY chat sessions
+    pub const DEFINE_CHAT_SESSION_TABLE: &str = r#"
+        DEFINE TABLE IF NOT EXISTS chat_session SCHEMAFULL;
+
+        DEFINE FIELD title ON chat_session TYPE option<string>;
+
+        DEFINE FIELD working_dir ON chat_session TYPE option<string>;
+
+        DEFINE FIELD started_at ON chat_session TYPE datetime DEFAULT time::now();
+
+        DEFINE FIELD ended_at ON chat_session TYPE option<datetime>;
+    "#;
+
+    /// Define the chat_message table for storing conversation history within a chat session
+    pub const DEFINE_CHAT_MESSAGE_TABLE: &str = r#"
+        DEFINE TABLE IF NOT EXISTS chat_message SCHEMAFULL;
+
+        DEFINE FIELD session_id ON chat_message TYPE record<chat_session>;
+
+        DEFINE FIELD content ON chat_message TYPE string;
+
+        DEFINE FIELD created_at ON chat_message TYPE datetime DEFAULT time::now();
+    "#;
 }
 
 /// Backfill section order values for existing sections with order: None.
@@ -166,7 +190,8 @@ async fn backfill_section_orders(client: &Surreal<Db>) -> Result<(), DbError> {
 /// Initialize the database schema.
 ///
 /// Creates the task table, workflow table, step_execution table, session_log table,
-/// child_of relation, and depends_on relation with all required fields and constraints.
+/// chat_session table, chat_message table, child_of relation, and depends_on relation
+/// with all required fields and constraints.
 ///
 /// This function is idempotent - it can be called multiple times safely
 /// as it uses `IF NOT EXISTS` clauses.
@@ -212,6 +237,18 @@ pub async fn init_schema(client: &Surreal<Db>) -> Result<(), DbError> {
     // Define the session_log table for storing Claude session content
     client
         .query(sql::DEFINE_SESSION_LOG_TABLE)
+        .await
+        .map_err(|e| DbError::Schema(Box::new(e)))?;
+
+    // Define the chat_session table for storing PTY chat sessions
+    client
+        .query(sql::DEFINE_CHAT_SESSION_TABLE)
+        .await
+        .map_err(|e| DbError::Schema(Box::new(e)))?;
+
+    // Define the chat_message table for storing conversation history
+    client
+        .query(sql::DEFINE_CHAT_MESSAGE_TABLE)
         .await
         .map_err(|e| DbError::Schema(Box::new(e)))?;
 

@@ -1,8 +1,9 @@
 //! Repository modules for database operations
 //!
 //! Provides repository pattern implementations for task, workflow, relationship,
-//! and execution operations, encapsulating database queries.
+//! chat, and execution operations, encapsulating database queries.
 
+mod chat;
 mod execution;
 mod filter;
 mod graph;
@@ -11,6 +12,7 @@ mod task;
 mod validation;
 mod workflow;
 
+pub use chat::ChatSessionRepository;
 pub use execution::StepExecutionRepository;
 pub use filter::{TaskFilter, TaskLister, TaskSummary, TaskWithRelationsData};
 pub use graph::{BlockerNode, GraphQueries, Progress};

@@ -65,8 +65,8 @@ impl PtyManager {
         }
     }
 
-    /// Spawn a new Claude PTY session
-    pub async fn spawn_claude_pty(
+    /// Spawn a new shell PTY session
+    pub async fn spawn_shell_pty(
         &self,
         session_id: String,
         cols: u16,
@@ -136,9 +136,11 @@ impl PtyManager {
             }
         };
 
-        // Build command
-        let mut cmd = CommandBuilder::new("claude");
-        cmd.args(["--dangerously-skip-permissions"]);
+        // Build command - use user's default shell
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+        let mut cmd = CommandBuilder::new(&shell);
+        // Start as login shell for proper environment
+        cmd.args(["-l"]);
         if let Some(dir) = working_dir {
             cmd.cwd(dir);
         }

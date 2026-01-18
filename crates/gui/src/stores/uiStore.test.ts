@@ -5,63 +5,26 @@ describe("uiStore", () => {
   beforeEach(() => {
     // Reset store state before each test
     useUIStore.setState({
-      sidebarCollapsed: false,
       theme: "system",
+      chatPanelOpen: false,
+      chatPanelWidth: 480,
     });
   });
 
   describe("initial state", () => {
-    it("has sidebar expanded by default", () => {
-      const state = useUIStore.getState();
-      expect(state.sidebarCollapsed).toBe(false);
-    });
-
     it("has system theme by default", () => {
       const state = useUIStore.getState();
       expect(state.theme).toBe("system");
     });
-  });
 
-  describe("toggleSidebar", () => {
-    it("collapses sidebar when expanded", () => {
-      useUIStore.getState().toggleSidebar();
-
-      expect(useUIStore.getState().sidebarCollapsed).toBe(true);
+    it("has chat panel closed by default", () => {
+      const state = useUIStore.getState();
+      expect(state.chatPanelOpen).toBe(false);
     });
 
-    it("expands sidebar when collapsed", () => {
-      useUIStore.setState({ sidebarCollapsed: true });
-
-      useUIStore.getState().toggleSidebar();
-
-      expect(useUIStore.getState().sidebarCollapsed).toBe(false);
-    });
-
-    it("toggles multiple times correctly", () => {
-      useUIStore.getState().toggleSidebar();
-      expect(useUIStore.getState().sidebarCollapsed).toBe(true);
-
-      useUIStore.getState().toggleSidebar();
-      expect(useUIStore.getState().sidebarCollapsed).toBe(false);
-
-      useUIStore.getState().toggleSidebar();
-      expect(useUIStore.getState().sidebarCollapsed).toBe(true);
-    });
-  });
-
-  describe("setSidebarCollapsed", () => {
-    it("sets sidebar to collapsed", () => {
-      useUIStore.getState().setSidebarCollapsed(true);
-
-      expect(useUIStore.getState().sidebarCollapsed).toBe(true);
-    });
-
-    it("sets sidebar to expanded", () => {
-      useUIStore.setState({ sidebarCollapsed: true });
-
-      useUIStore.getState().setSidebarCollapsed(false);
-
-      expect(useUIStore.getState().sidebarCollapsed).toBe(false);
+    it("has default chat panel width", () => {
+      const state = useUIStore.getState();
+      expect(state.chatPanelWidth).toBe(480);
     });
   });
 
@@ -84,6 +47,63 @@ describe("uiStore", () => {
       useUIStore.getState().setTheme("system");
 
       expect(useUIStore.getState().theme).toBe("system");
+    });
+  });
+
+  describe("toggleChatPanel", () => {
+    it("opens chat panel when closed", () => {
+      useUIStore.getState().toggleChatPanel();
+
+      expect(useUIStore.getState().chatPanelOpen).toBe(true);
+    });
+
+    it("closes chat panel when open", () => {
+      useUIStore.setState({ chatPanelOpen: true });
+
+      useUIStore.getState().toggleChatPanel();
+
+      expect(useUIStore.getState().chatPanelOpen).toBe(false);
+    });
+
+    it("toggles multiple times correctly", () => {
+      useUIStore.getState().toggleChatPanel();
+      expect(useUIStore.getState().chatPanelOpen).toBe(true);
+
+      useUIStore.getState().toggleChatPanel();
+      expect(useUIStore.getState().chatPanelOpen).toBe(false);
+
+      useUIStore.getState().toggleChatPanel();
+      expect(useUIStore.getState().chatPanelOpen).toBe(true);
+    });
+  });
+
+  describe("setChatPanelOpen", () => {
+    it("sets chat panel to open", () => {
+      useUIStore.getState().setChatPanelOpen(true);
+
+      expect(useUIStore.getState().chatPanelOpen).toBe(true);
+    });
+
+    it("sets chat panel to closed", () => {
+      useUIStore.setState({ chatPanelOpen: true });
+
+      useUIStore.getState().setChatPanelOpen(false);
+
+      expect(useUIStore.getState().chatPanelOpen).toBe(false);
+    });
+  });
+
+  describe("setChatPanelWidth", () => {
+    it("sets chat panel width", () => {
+      useUIStore.getState().setChatPanelWidth(600);
+
+      expect(useUIStore.getState().chatPanelWidth).toBe(600);
+    });
+
+    it("allows setting width to minimum", () => {
+      useUIStore.getState().setChatPanelWidth(300);
+
+      expect(useUIStore.getState().chatPanelWidth).toBe(300);
     });
   });
 });

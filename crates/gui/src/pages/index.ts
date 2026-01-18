@@ -3,4 +3,3 @@ export { TasksPage } from "./TasksPage";
 export { WorkflowsPage } from "./WorkflowsPage";
 export { WorkflowDetailPage } from "./WorkflowDetailPage";
 export { AllWorkflowsPipeline } from "./AllWorkflowsPipeline";
-export { ChatPage } from "./ChatPage";

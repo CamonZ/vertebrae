@@ -3,20 +3,27 @@ import { persist } from "zustand/middleware";
 
 type Theme = "light" | "dark" | "system";
 
+// Default chat panel width in pixels (approximately 1/4 of a 1920px screen)
+const DEFAULT_CHAT_PANEL_WIDTH = 480;
+
 interface UIState {
-  /** Whether the sidebar is collapsed */
-  sidebarCollapsed: boolean;
   /** Current theme preference */
   theme: Theme;
+  /** Whether the chat panel is open */
+  chatPanelOpen: boolean;
+  /** Width of the chat panel in pixels */
+  chatPanelWidth: number;
 }
 
 interface UIActions {
-  /** Toggle the sidebar collapsed state */
-  toggleSidebar: () => void;
-  /** Set the sidebar collapsed state explicitly */
-  setSidebarCollapsed: (collapsed: boolean) => void;
   /** Set the theme preference */
   setTheme: (theme: Theme) => void;
+  /** Toggle the chat panel open/closed */
+  toggleChatPanel: () => void;
+  /** Set the chat panel open state explicitly */
+  setChatPanelOpen: (open: boolean) => void;
+  /** Set the chat panel width */
+  setChatPanelWidth: (width: number) => void;
 }
 
 export type UIStore = UIState & UIActions;
@@ -25,23 +32,26 @@ export const useUIStore = create<UIStore>()(
   persist(
     (set) => ({
       // Initial state
-      sidebarCollapsed: false,
       theme: "system",
+      chatPanelOpen: false,
+      chatPanelWidth: DEFAULT_CHAT_PANEL_WIDTH,
 
       // Actions
-      toggleSidebar: () =>
-        set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
-
-      setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
-
       setTheme: (theme) => set({ theme }),
+
+      toggleChatPanel: () =>
+        set((state) => ({ chatPanelOpen: !state.chatPanelOpen })),
+
+      setChatPanelOpen: (open) => set({ chatPanelOpen: open }),
+
+      setChatPanelWidth: (width) => set({ chatPanelWidth: width }),
     }),
     {
       name: "vertebrae-ui-storage",
       // Only persist UI preferences, not transient state
       partialize: (state) => ({
-        sidebarCollapsed: state.sidebarCollapsed,
         theme: state.theme,
+        chatPanelWidth: state.chatPanelWidth,
       }),
     }
   )

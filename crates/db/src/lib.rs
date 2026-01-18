@@ -11,12 +11,13 @@ pub mod schema;
 pub use error::{DbError, DbResult, IncompleteChildInfo};
 #[allow(unused_imports)]
 pub use models::{
-    AgentConfig, CodeRef, ExecutionStatus, Level, PermissionMode, Priority, Section, SectionType,
-    SessionLog, Status, StepExecution, Task, Workflow, WorkflowStep,
+    AgentConfig, ChatMessage, ChatSession, CodeRef, ExecutionStatus, Level, PermissionMode,
+    Priority, Section, SectionType, SessionLog, Status, StepExecution, Task, Workflow,
+    WorkflowStep,
 };
 pub use repository::{
-    BlockerNode, DEFAULT_WORKFLOW_ID, GraphQueries, MigrationResult, Progress,
-    RelationshipRepository, SectionRule, StepExecutionRepository, TaskFilter, TaskLister,
+    BlockerNode, ChatSessionRepository, DEFAULT_WORKFLOW_ID, GraphQueries, MigrationResult,
+    Progress, RelationshipRepository, SectionRule, StepExecutionRepository, TaskFilter, TaskLister,
     TaskRepository, TaskSummary, TaskUpdate, TaskWithRelationsData, TriageValidationConfig,
     TriageValidationResult, TriageValidator, ValidationIssue, ValidationSeverity,
     WorkflowRepository, WorkflowUpdate,
@@ -149,6 +150,11 @@ impl Database {
     /// Get a step execution repository for tracking workflow executions.
     pub fn executions(&self) -> StepExecutionRepository<'_> {
         StepExecutionRepository::new(&self.client)
+    }
+
+    /// Get a chat session repository for managing PTY chat sessions.
+    pub fn chat_sessions(&self) -> ChatSessionRepository<'_> {
+        ChatSessionRepository::new(&self.client)
     }
 
     /// Get a task lister for filtering and listing tasks.

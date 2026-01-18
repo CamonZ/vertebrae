@@ -664,7 +664,7 @@ pub async fn run_workflow(
 // PTY Commands
 // ============================================================================
 
-/// Create a new PTY session running Claude CLI
+/// Create a new PTY session with the user's default shell
 ///
 /// Returns the session ID on success. The PTY will emit PtyOutputEvent for output
 /// and PtyExitEvent when the session ends.
@@ -687,7 +687,7 @@ pub async fn create_pty_session(
     );
 
     pty_manager
-        .spawn_claude_pty(session_id, cols, rows, working_dir, app_handle)
+        .spawn_shell_pty(session_id, cols, rows, working_dir, app_handle)
         .await
 }
 
@@ -738,4 +738,235 @@ pub async fn close_pty_session(
 ) -> Result<(), crate::pty_manager::PtyError> {
     log::info!("close_pty_session called: session_id={}", session_id);
     pty_manager.close_session(&session_id).await
+}
+
+// ============================================================================
+// Chat Session Management Commands
+// ============================================================================
+
+/// Create a new chat session
+#[tauri::command]
+#[specta::specta]
+pub async fn create_chat_session(
+    state: State<'_, AppState>,
+    working_dir: Option<String>,
+) -> Result<crate::types::ChatSession, CommandError> {
+    log::info!(
+        "create_chat_session called with working_dir: {:?}",
+        working_dir
+    );
+
+    let guard = state.service.read().await;
+    let service = guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    let db_session = vertebrae_db::ChatSession::new(working_dir);
+    let created = service
+        .database()
+        .chat_sessions()
+        .create_session(&db_session)
+        .await?;
+
+    Ok(created.into())
+}
+
+/// Get a chat session by ID
+#[tauri::command]
+#[specta::specta]
+pub async fn get_chat_session(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<Option<crate::types::ChatSession>, CommandError> {
+    log::info!("get_chat_session called with session_id: {}", session_id);
+
+    let guard = state.service.read().await;
+    let service = guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    let session = service
+        .database()
+        .chat_sessions()
+        .get_session(&session_id)
+        .await?;
+
+    Ok(session.map(|s| s.into()))
+}
+
+/// List chat sessions (most recent first)
+#[tauri::command]
+#[specta::specta]
+pub async fn list_chat_sessions(
+    state: State<'_, AppState>,
+    limit: Option<u32>,
+) -> Result<Vec<crate::types::ChatSession>, CommandError> {
+    log::info!("list_chat_sessions called with limit: {:?}", limit);
+
+    let guard = state.service.read().await;
+    let service = guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    let sessions = service
+        .database()
+        .chat_sessions()
+        .list_sessions(limit.map(|l| l as usize))
+        .await?;
+
+    Ok(sessions.into_iter().map(|s| s.into()).collect())
+}
+
+/// End a chat session
+#[tauri::command]
+#[specta::specta]
+pub async fn end_chat_session(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<(), CommandError> {
+    log::info!("end_chat_session called with session_id: {}", session_id);
+
+    let guard = state.service.read().await;
+    let service = guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    let ended_at = chrono::Utc::now();
+    service
+        .database()
+        .chat_sessions()
+        .end_session(&session_id, ended_at)
+        .await?;
+
+    Ok(())
+}
+
+/// Update chat session title
+#[tauri::command]
+#[specta::specta]
+pub async fn update_chat_session_title(
+    state: State<'_, AppState>,
+    session_id: String,
+    title: String,
+) -> Result<(), CommandError> {
+    log::info!(
+        "update_chat_session_title called with session_id: {}, title: {}",
+        session_id,
+        title
+    );
+
+    let guard = state.service.read().await;
+    let service = guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    service
+        .database()
+        .chat_sessions()
+        .update_title(&session_id, &title)
+        .await?;
+
+    Ok(())
+}
+
+/// Add a message to a chat session
+#[tauri::command]
+#[specta::specta]
+pub async fn add_chat_message(
+    state: State<'_, AppState>,
+    session_id: String,
+    content: String,
+) -> Result<String, CommandError> {
+    log::debug!(
+        "add_chat_message called with session_id: {}, content length: {}",
+        session_id,
+        content.len()
+    );
+
+    let guard = state.service.read().await;
+    let service = guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    let session_thing = surrealdb::sql::Thing::from(("chat_session", session_id.as_str()));
+    let message = vertebrae_db::ChatMessage::new(session_thing, content);
+    let id = service
+        .database()
+        .chat_sessions()
+        .add_message(&message)
+        .await?;
+
+    Ok(id)
+}
+
+/// Get all messages for a chat session
+#[tauri::command]
+#[specta::specta]
+pub async fn get_chat_messages(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<Vec<crate::types::ChatMessage>, CommandError> {
+    log::info!("get_chat_messages called with session_id: {}", session_id);
+
+    let guard = state.service.read().await;
+    let service = guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    let messages = service
+        .database()
+        .chat_sessions()
+        .list_messages(&session_id)
+        .await?;
+
+    Ok(messages.into_iter().map(|m| m.into()).collect())
+}
+
+/// Get all message content concatenated for session replay
+#[tauri::command]
+#[specta::specta]
+pub async fn get_chat_session_content(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<String, CommandError> {
+    log::info!(
+        "get_chat_session_content called with session_id: {}",
+        session_id
+    );
+
+    let guard = state.service.read().await;
+    let service = guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    let content = service
+        .database()
+        .chat_sessions()
+        .get_session_content(&session_id)
+        .await?;
+
+    Ok(content)
+}
+
+/// Delete a chat session and all its messages
+#[tauri::command]
+#[specta::specta]
+pub async fn delete_chat_session(
+    state: State<'_, AppState>,
+    session_id: String,
+) -> Result<(), CommandError> {
+    log::info!("delete_chat_session called with session_id: {}", session_id);
+
+    let guard = state.service.read().await;
+    let service = guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    service
+        .database()
+        .chat_sessions()
+        .delete_session(&session_id)
+        .await?;
+
+    Ok(())
 }
