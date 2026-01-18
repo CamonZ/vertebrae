@@ -108,6 +108,27 @@ mod sql {
         DEFINE FIELD created_at ON session_log TYPE datetime DEFAULT time::now();
     "#;
 
+    /// Define the step table for first-class workflow steps
+    pub const DEFINE_STEP_TABLE: &str = r#"
+        DEFINE TABLE IF NOT EXISTS step SCHEMAFULL;
+
+        DEFINE FIELD name ON step TYPE string;
+
+        DEFINE FIELD workflow_id ON step TYPE record<workflow>;
+
+        DEFINE FIELD agent_config ON step FLEXIBLE TYPE object DEFAULT {};
+
+        DEFINE FIELD is_final ON step TYPE bool DEFAULT false;
+
+        DEFINE FIELD transitions_to ON step TYPE array<record<step>> DEFAULT [];
+
+        DEFINE FIELD order ON step TYPE int DEFAULT 0;
+
+        DEFINE FIELD created_at ON step TYPE datetime DEFAULT time::now();
+
+        DEFINE FIELD updated_at ON step TYPE datetime DEFAULT time::now();
+    "#;
+
     /// Define the chat_session table for storing Claude PTY chat sessions
     pub const DEFINE_CHAT_SESSION_TABLE: &str = r#"
         DEFINE TABLE IF NOT EXISTS chat_session SCHEMAFULL;
@@ -189,7 +210,7 @@ async fn backfill_section_orders(client: &Surreal<Db>) -> Result<(), DbError> {
 
 /// Initialize the database schema.
 ///
-/// Creates the task table, workflow table, step_execution table, session_log table,
+/// Creates the task table, workflow table, step table, step_execution table, session_log table,
 /// chat_session table, chat_message table, child_of relation, and depends_on relation
 /// with all required fields and constraints.
 ///
@@ -225,6 +246,12 @@ pub async fn init_schema(client: &Surreal<Db>) -> Result<(), DbError> {
     // Define the workflow table
     client
         .query(sql::DEFINE_WORKFLOW_TABLE)
+        .await
+        .map_err(|e| DbError::Schema(Box::new(e)))?;
+
+    // Define the step table for first-class workflow steps
+    client
+        .query(sql::DEFINE_STEP_TABLE)
         .await
         .map_err(|e| DbError::Schema(Box::new(e)))?;
 
@@ -1809,5 +1836,463 @@ mod tests {
             3,
             "Should have 3 logs attached to one execution"
         );
+    }
+
+    // ========================================
+    // Step Table Schema Tests
+    // ========================================
+
+    #[test]
+    fn test_step_sql_constant_defined() {
+        assert!(!sql::DEFINE_STEP_TABLE.is_empty());
+    }
+
+    #[test]
+    fn test_step_sql_contains_expected_definitions() {
+        assert!(sql::DEFINE_STEP_TABLE.contains("DEFINE TABLE"));
+        assert!(sql::DEFINE_STEP_TABLE.contains("step"));
+        assert!(sql::DEFINE_STEP_TABLE.contains("SCHEMAFULL"));
+        assert!(sql::DEFINE_STEP_TABLE.contains("name"));
+        assert!(sql::DEFINE_STEP_TABLE.contains("workflow_id"));
+        assert!(sql::DEFINE_STEP_TABLE.contains("agent_config"));
+        assert!(sql::DEFINE_STEP_TABLE.contains("is_final"));
+        assert!(sql::DEFINE_STEP_TABLE.contains("transitions_to"));
+        assert!(sql::DEFINE_STEP_TABLE.contains("order"));
+        assert!(sql::DEFINE_STEP_TABLE.contains("created_at"));
+        assert!(sql::DEFINE_STEP_TABLE.contains("updated_at"));
+    }
+
+    #[tokio::test]
+    async fn test_step_table_accepts_valid_data() {
+        let client = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // First create a workflow to reference
+        client
+            .query(
+                r#"
+                CREATE workflow:step_test SET
+                    name = "Test Workflow"
+            "#,
+            )
+            .await
+            .unwrap();
+
+        // Insert a valid step
+        let result = client
+            .query(
+                r#"
+                CREATE step SET
+                    name = "Review",
+                    workflow_id = workflow:step_test,
+                    agent_config = { model: "opus", temperature: 0.7 },
+                    is_final = false,
+                    order = 0
+            "#,
+            )
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "Valid step insert failed: {:?}",
+            result.err()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_step_table_accepts_minimal_data() {
+        let client = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // Create a workflow first
+        client
+            .query(
+                r#"
+                CREATE workflow:minimal_step SET
+                    name = "Minimal Workflow"
+            "#,
+            )
+            .await
+            .unwrap();
+
+        // Insert with only required fields
+        let result = client
+            .query(
+                r#"
+                CREATE step SET
+                    name = "Basic Step",
+                    workflow_id = workflow:minimal_step
+            "#,
+            )
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "Minimal step insert failed: {:?}",
+            result.err()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_step_default_values() {
+        let client = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // Create workflow
+        client
+            .query(
+                r#"
+                CREATE workflow:default_step SET
+                    name = "Default Step Workflow"
+            "#,
+            )
+            .await
+            .unwrap();
+
+        // Insert step with minimal fields to check defaults
+        client
+            .query(
+                r#"
+                CREATE step:defaults SET
+                    name = "Default Test",
+                    workflow_id = workflow:default_step
+            "#,
+            )
+            .await
+            .unwrap();
+
+        // Query the step to verify defaults
+        #[derive(Debug, serde::Deserialize)]
+        struct StepRow {
+            is_final: bool,
+            order: i32,
+            agent_config: serde_json::Value,
+            transitions_to: Vec<serde_json::Value>,
+            created_at: String,
+            updated_at: String,
+        }
+
+        let mut result = client
+            .query("SELECT is_final, order, agent_config, transitions_to, created_at, updated_at FROM step:defaults")
+            .await
+            .unwrap();
+
+        let step: Option<StepRow> = result.take(0).unwrap();
+        let step = step.expect("Step should exist");
+
+        // Check defaults
+        assert!(!step.is_final, "is_final should default to false");
+        assert_eq!(step.order, 0, "order should default to 0");
+        assert!(
+            step.agent_config.as_object().is_none_or(|m| m.is_empty()),
+            "agent_config should default to empty object"
+        );
+        assert!(
+            step.transitions_to.is_empty(),
+            "transitions_to should default to empty array"
+        );
+        assert!(!step.created_at.is_empty(), "created_at should be set");
+        assert!(!step.updated_at.is_empty(), "updated_at should be set");
+    }
+
+    #[tokio::test]
+    async fn test_step_with_transitions() {
+        let client = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // Create workflow
+        client
+            .query(
+                r#"
+                CREATE workflow:transitions SET
+                    name = "Transition Workflow"
+            "#,
+            )
+            .await
+            .unwrap();
+
+        // Create two steps where one transitions to another
+        client
+            .query(
+                r#"
+                CREATE step:step1 SET
+                    name = "Step 1",
+                    workflow_id = workflow:transitions,
+                    order = 0;
+                CREATE step:step2 SET
+                    name = "Step 2",
+                    workflow_id = workflow:transitions,
+                    is_final = true,
+                    order = 1
+            "#,
+            )
+            .await
+            .unwrap();
+
+        // Update step1 to transition to step2
+        let result = client
+            .query(
+                r#"
+                UPDATE step:step1 SET
+                    transitions_to = [step:step2]
+            "#,
+            )
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "Setting transitions_to failed: {:?}",
+            result.err()
+        );
+
+        // Verify the transition
+        #[derive(Debug, serde::Deserialize)]
+        struct TransitionRow {
+            transitions_to: Vec<surrealdb::sql::Thing>,
+        }
+
+        let mut query_result = client
+            .query("SELECT transitions_to FROM step:step1")
+            .await
+            .unwrap();
+
+        let row: Option<TransitionRow> = query_result.take(0).unwrap();
+        let row = row.expect("Step should exist");
+        assert_eq!(row.transitions_to.len(), 1, "Should have one transition");
+        assert_eq!(
+            row.transitions_to[0].to_string(),
+            "step:step2",
+            "Should transition to step2"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_step_with_agent_config() {
+        let client = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // Create workflow
+        client
+            .query(
+                r#"
+                CREATE workflow:agent_config SET
+                    name = "Agent Config Workflow"
+            "#,
+            )
+            .await
+            .unwrap();
+
+        // Create step with complex agent config
+        let result = client
+            .query(
+                r#"
+                CREATE step:configured SET
+                    name = "Configured Step",
+                    workflow_id = workflow:agent_config,
+                    agent_config = {
+                        model: "opus",
+                        temperature: 0.5,
+                        max_tokens: 4096,
+                        system_prompt: "You are a helpful assistant",
+                        tools: ["read", "write", "bash"]
+                    }
+            "#,
+            )
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "Step with agent_config failed: {:?}",
+            result.err()
+        );
+
+        // Verify the agent config was stored
+        #[derive(Debug, serde::Deserialize)]
+        struct ConfigRow {
+            agent_config: serde_json::Value,
+        }
+
+        let mut query_result = client
+            .query("SELECT agent_config FROM step:configured")
+            .await
+            .unwrap();
+
+        let row: Option<ConfigRow> = query_result.take(0).unwrap();
+        let row = row.expect("Step should exist");
+        let config = row.agent_config.as_object().unwrap();
+
+        assert_eq!(config.get("model").unwrap().as_str().unwrap(), "opus");
+        assert_eq!(config.get("temperature").unwrap().as_f64().unwrap(), 0.5);
+        assert_eq!(config.get("max_tokens").unwrap().as_i64().unwrap(), 4096);
+    }
+
+    #[tokio::test]
+    async fn test_step_multiple_transitions() {
+        let client = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // Create workflow
+        client
+            .query(
+                r#"
+                CREATE workflow:multi_trans SET
+                    name = "Multi Transition Workflow"
+            "#,
+            )
+            .await
+            .unwrap();
+
+        // Create steps with branching transitions
+        client
+            .query(
+                r#"
+                CREATE step:start SET
+                    name = "Start",
+                    workflow_id = workflow:multi_trans,
+                    order = 0;
+                CREATE step:branch_a SET
+                    name = "Branch A",
+                    workflow_id = workflow:multi_trans,
+                    order = 1;
+                CREATE step:branch_b SET
+                    name = "Branch B",
+                    workflow_id = workflow:multi_trans,
+                    order = 1
+            "#,
+            )
+            .await
+            .unwrap();
+
+        // Set multiple transitions from start
+        let result = client
+            .query(
+                r#"
+                UPDATE step:start SET
+                    transitions_to = [step:branch_a, step:branch_b]
+            "#,
+            )
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "Multiple transitions failed: {:?}",
+            result.err()
+        );
+
+        // Verify multiple transitions
+        #[derive(Debug, serde::Deserialize)]
+        struct TransitionRow {
+            transitions_to: Vec<surrealdb::sql::Thing>,
+        }
+
+        let mut query_result = client
+            .query("SELECT transitions_to FROM step:start")
+            .await
+            .unwrap();
+
+        let row: Option<TransitionRow> = query_result.take(0).unwrap();
+        let row = row.expect("Step should exist");
+        assert_eq!(row.transitions_to.len(), 2, "Should have two transitions");
+    }
+
+    #[tokio::test]
+    async fn test_step_query_by_workflow() {
+        let client = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // Create workflow
+        client
+            .query(
+                r#"
+                CREATE workflow:query_wf SET
+                    name = "Query Workflow"
+            "#,
+            )
+            .await
+            .unwrap();
+
+        // Create multiple steps for the workflow
+        client
+            .query(
+                r#"
+                CREATE step:q1 SET name = "Step 1", workflow_id = workflow:query_wf, order = 0;
+                CREATE step:q2 SET name = "Step 2", workflow_id = workflow:query_wf, order = 1;
+                CREATE step:q3 SET name = "Step 3", workflow_id = workflow:query_wf, order = 2
+            "#,
+            )
+            .await
+            .unwrap();
+
+        // Query steps for the workflow
+        #[derive(Debug, serde::Deserialize)]
+        #[allow(dead_code)]
+        struct StepRow {
+            name: String,
+            order: i32,
+        }
+
+        let mut result = client
+            .query(
+                "SELECT name, order FROM step WHERE workflow_id = workflow:query_wf ORDER BY order",
+            )
+            .await
+            .unwrap();
+
+        let rows: Vec<StepRow> = result.take(0).unwrap();
+        assert_eq!(rows.len(), 3, "Should have 3 steps for the workflow");
+        assert_eq!(rows[0].name, "Step 1");
+        assert_eq!(rows[1].name, "Step 2");
+        assert_eq!(rows[2].name, "Step 3");
+    }
+
+    #[tokio::test]
+    async fn test_step_is_final_flag() {
+        let client = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // Create workflow
+        client
+            .query(
+                r#"
+                CREATE workflow:final_test SET
+                    name = "Final Test Workflow"
+            "#,
+            )
+            .await
+            .unwrap();
+
+        // Create steps with different is_final values
+        client
+            .query(
+                r#"
+                CREATE step:not_final SET
+                    name = "Not Final",
+                    workflow_id = workflow:final_test,
+                    is_final = false;
+                CREATE step:is_final SET
+                    name = "Is Final",
+                    workflow_id = workflow:final_test,
+                    is_final = true
+            "#,
+            )
+            .await
+            .unwrap();
+
+        // Query final steps
+        #[derive(Debug, serde::Deserialize)]
+        #[allow(dead_code)]
+        struct FinalRow {
+            name: String,
+            is_final: bool,
+        }
+
+        let mut result = client
+            .query("SELECT name, is_final FROM step WHERE workflow_id = workflow:final_test AND is_final = true")
+            .await
+            .unwrap();
+
+        let rows: Vec<FinalRow> = result.take(0).unwrap();
+        assert_eq!(rows.len(), 1, "Should have 1 final step");
+        assert_eq!(rows[0].name, "Is Final");
     }
 }
