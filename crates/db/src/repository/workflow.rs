@@ -99,6 +99,8 @@ pub struct WorkflowUpdate {
     pub on_done_workflow: Option<Option<String>>,
     /// Workflow to chain to when rejected (Some(Some(id)) to set, Some(None) to clear, None to leave unchanged)
     pub on_reject_workflow: Option<Option<String>>,
+    /// Initial step reference (Some(thing) to set, None to leave unchanged)
+    pub initial_step: Option<surrealdb::sql::Thing>,
 }
 
 impl WorkflowUpdate {
@@ -161,6 +163,12 @@ impl WorkflowUpdate {
         self
     }
 
+    /// Set the initial_step (first-class Step reference)
+    pub fn with_initial_step(mut self, step: surrealdb::sql::Thing) -> Self {
+        self.initial_step = Some(step);
+        self
+    }
+
     /// Check if any updates are specified
     pub fn has_updates(&self) -> bool {
         self.name.is_some()
@@ -169,6 +177,7 @@ impl WorkflowUpdate {
             || self.metadata.is_some()
             || self.on_done_workflow.is_some()
             || self.on_reject_workflow.is_some()
+            || self.initial_step.is_some()
     }
 }
 
@@ -408,6 +417,11 @@ impl<'a> WorkflowRepository<'a> {
                 }
                 None => field_updates.push("on_reject_workflow = NONE".to_string()),
             }
+        }
+
+        if let Some(initial_step) = &updates.initial_step {
+            debug!("Setting initial_step to: {:?}", initial_step);
+            field_updates.push(format!("initial_step = {}", initial_step));
         }
 
         if !field_updates.is_empty() {
@@ -1478,20 +1492,18 @@ mod tests {
     // ========================================
 
     #[tokio::test]
-    async fn test_create_empty_steps_fails() {
+    async fn test_create_empty_embedded_steps_allowed() {
+        // Empty embedded steps are allowed at the repository level since
+        // first-class Step entities are now used. The service layer validates
+        // that steps are provided during creation.
         let (db, temp_dir) = setup_test_db().await;
         let repo = WorkflowRepository::new(db.client());
 
         let workflow = Workflow::new("Empty Steps");
         let result = repo.create("test1", &workflow).await;
 
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            DbError::ValidationError { message } => {
-                assert_eq!(message, "workflow must have at least one step");
-            }
-            e => panic!("Expected ValidationError, got: {:?}", e),
-        }
+        assert!(result.is_ok());
+        assert!(repo.exists("test1").await.unwrap());
 
         cleanup(&temp_dir);
     }

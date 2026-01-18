@@ -7,8 +7,10 @@
 
 use std::path::PathBuf;
 use vertebrae_cli::commands::{
-    AddCommand, DeleteCommand, DependCommand, ExportCommand, ListCommand, RefCommand,
-    SectionCommand, TransitionToCommand,
+    AddCommand, BlockersCommand, CriterionRefCommand, DeleteCommand, DependCommand, ExportCommand,
+    ListCommand, PathCommand, ReadyCommand, RefCommand, SectionCommand, ShowCommand,
+    StepDoneCommand, TransitionToCommand, UndependCommand, UnrefCommand, UnsectionCommand,
+    UpdateCommand,
     transition_to::TargetStatus,
     workflow::{
         ParsedStep, WorkflowAddCommand, WorkflowAdvanceCommand, WorkflowAssignCommand,
@@ -16,12 +18,13 @@ use vertebrae_cli::commands::{
         WorkflowShowCommand, WorkflowUnassignCommand, WorkflowUpdateCommand,
     },
 };
-use vertebrae_core::DefaultTaskService;
-use vertebrae_db::{AgentConfig, Database, Level, SectionType};
+use vertebrae_core::{DefaultTaskService, DefaultWorkflowService};
+use vertebrae_db::{AgentConfig, CodeRef, Database, Level, Priority, Section, SectionType};
 
 /// Test context containing an isolated database, service, and temp directory
 pub struct TestContext {
     pub service: DefaultTaskService,
+    pub workflow_service: DefaultWorkflowService,
     pub temp_dir: PathBuf,
 }
 
@@ -43,9 +46,14 @@ impl TestContext {
 
         let db = Database::connect(&temp_dir).await.unwrap();
         db.init().await.unwrap();
-        let service = DefaultTaskService::new(db);
+        let service = DefaultTaskService::new(db.clone());
+        let workflow_service = DefaultWorkflowService::new(db);
 
-        Self { service, temp_dir }
+        Self {
+            service,
+            workflow_service,
+            temp_dir,
+        }
     }
 
     /// Create a new test context with a specific suffix for debugging.
@@ -63,9 +71,14 @@ impl TestContext {
 
         let db = Database::connect(&temp_dir).await.unwrap();
         db.init().await.unwrap();
-        let service = DefaultTaskService::new(db);
+        let service = DefaultTaskService::new(db.clone());
+        let workflow_service = DefaultWorkflowService::new(db);
 
-        Self { service, temp_dir }
+        Self {
+            service,
+            workflow_service,
+            temp_dir,
+        }
     }
 
     /// Get a reference to the database for direct queries in tests
@@ -217,7 +230,7 @@ pub fn reject_cmd(id: &str) -> TransitionToCommand {
         target: TargetStatus::Rejected,
         reason: None,
         force: false,
-        skip_validation: false,
+        skip_validation: true, // Skip validation by default for basic transition tests
     }
 }
 
@@ -430,6 +443,350 @@ pub async fn workflow_exists(db: &Database, id: &str) -> bool {
 }
 
 // =============================================================================
+// Additional Command Builders
+// =============================================================================
+
+/// Create a show command.
+pub fn show_cmd(id: &str) -> ShowCommand {
+    ShowCommand { id: id.to_string() }
+}
+
+/// Create a blockers command.
+pub fn blockers_cmd(id: &str) -> BlockersCommand {
+    BlockersCommand {
+        id: id.to_string(),
+        depth: None,
+        all: false,
+    }
+}
+
+/// Create a blockers command with options.
+pub fn blockers_cmd_full(id: &str, depth: Option<usize>, all: bool) -> BlockersCommand {
+    BlockersCommand {
+        id: id.to_string(),
+        depth,
+        all,
+    }
+}
+
+/// Create a path command.
+pub fn path_cmd(from_id: &str, to_id: &str) -> PathCommand {
+    PathCommand {
+        from_id: from_id.to_string(),
+        to_id: to_id.to_string(),
+    }
+}
+
+/// Create a ready command.
+pub fn ready_cmd() -> ReadyCommand {
+    ReadyCommand {}
+}
+
+/// Create an update command with title only.
+pub fn update_cmd(id: &str) -> UpdateCommand {
+    UpdateCommand {
+        id: id.to_string(),
+        title: None,
+        description: None,
+        priority: None,
+        add_tags: vec![],
+        remove_tags: vec![],
+        parent: None,
+        edit_section: None,
+        remove_section: None,
+    }
+}
+
+/// Create an update command with title change.
+pub fn update_cmd_with_title(id: &str, title: &str) -> UpdateCommand {
+    UpdateCommand {
+        id: id.to_string(),
+        title: Some(title.to_string()),
+        description: None,
+        priority: None,
+        add_tags: vec![],
+        remove_tags: vec![],
+        parent: None,
+        edit_section: None,
+        remove_section: None,
+    }
+}
+
+/// Create an update command with description change.
+pub fn update_cmd_with_description(id: &str, description: Option<&str>) -> UpdateCommand {
+    UpdateCommand {
+        id: id.to_string(),
+        title: None,
+        description: description.map(String::from),
+        priority: None,
+        add_tags: vec![],
+        remove_tags: vec![],
+        parent: None,
+        edit_section: None,
+        remove_section: None,
+    }
+}
+
+/// Create an update command with parent change.
+pub fn update_cmd_with_parent(id: &str, parent: Option<&str>) -> UpdateCommand {
+    UpdateCommand {
+        id: id.to_string(),
+        title: None,
+        description: None,
+        priority: None,
+        add_tags: vec![],
+        remove_tags: vec![],
+        parent: parent.map(String::from),
+        edit_section: None,
+        remove_section: None,
+    }
+}
+
+/// Create an update command with priority change.
+pub fn update_cmd_with_priority(id: &str, priority: Priority) -> UpdateCommand {
+    UpdateCommand {
+        id: id.to_string(),
+        title: None,
+        description: None,
+        priority: Some(priority),
+        add_tags: vec![],
+        remove_tags: vec![],
+        parent: None,
+        edit_section: None,
+        remove_section: None,
+    }
+}
+
+/// Create an update command with tag changes.
+pub fn update_cmd_with_tags(
+    id: &str,
+    add_tags: Vec<&str>,
+    remove_tags: Vec<&str>,
+) -> UpdateCommand {
+    UpdateCommand {
+        id: id.to_string(),
+        title: None,
+        description: None,
+        priority: None,
+        add_tags: add_tags.into_iter().map(String::from).collect(),
+        remove_tags: remove_tags.into_iter().map(String::from).collect(),
+        parent: None,
+        edit_section: None,
+        remove_section: None,
+    }
+}
+
+/// Create an undepend command.
+pub fn undepend_cmd(id: &str, blocker_id: &str) -> UndependCommand {
+    UndependCommand {
+        id: id.to_string(),
+        blocker_id: blocker_id.to_string(),
+    }
+}
+
+/// Create an unsection command to remove a specific section by index.
+pub fn unsection_cmd(id: &str, section_type: SectionType, index: u32) -> UnsectionCommand {
+    UnsectionCommand {
+        id: id.to_string(),
+        section_type: Some(section_type),
+        index: Some(index),
+        all: false,
+    }
+}
+
+/// Create an unsection command to remove all sections of a type.
+pub fn unsection_cmd_all_of_type(id: &str, section_type: SectionType) -> UnsectionCommand {
+    UnsectionCommand {
+        id: id.to_string(),
+        section_type: Some(section_type),
+        index: None,
+        all: true,
+    }
+}
+
+/// Create an unsection command to remove all sections.
+pub fn unsection_cmd_all(id: &str) -> UnsectionCommand {
+    UnsectionCommand {
+        id: id.to_string(),
+        section_type: None,
+        index: None,
+        all: true,
+    }
+}
+
+/// Create an unref command to remove references by file.
+pub fn unref_cmd(id: &str, file: &str) -> UnrefCommand {
+    UnrefCommand {
+        id: id.to_string(),
+        file: Some(file.to_string()),
+        all: false,
+    }
+}
+
+/// Create an unref command to remove all references.
+pub fn unref_cmd_all(id: &str) -> UnrefCommand {
+    UnrefCommand {
+        id: id.to_string(),
+        file: None,
+        all: true,
+    }
+}
+
+/// Create a step-done command.
+pub fn step_done_cmd(id: &str, index: usize) -> StepDoneCommand {
+    StepDoneCommand {
+        id: id.to_string(),
+        index,
+    }
+}
+
+/// Create a criterion-ref command.
+pub fn criterion_ref_cmd(id: &str, index: usize, file_spec: &str) -> CriterionRefCommand {
+    CriterionRefCommand {
+        id: id.to_string(),
+        index,
+        file_spec: file_spec.to_string(),
+        name: None,
+        description: None,
+    }
+}
+
+/// Create a criterion-ref command with name and description.
+pub fn criterion_ref_cmd_full(
+    id: &str,
+    index: usize,
+    file_spec: &str,
+    name: Option<&str>,
+    description: Option<&str>,
+) -> CriterionRefCommand {
+    CriterionRefCommand {
+        id: id.to_string(),
+        index,
+        file_spec: file_spec.to_string(),
+        name: name.map(String::from),
+        description: description.map(String::from),
+    }
+}
+
+/// Create a list command with status filter.
+pub fn list_cmd_with_status(statuses: Vec<&str>) -> ListCommand {
+    use vertebrae_db::Status;
+    let parsed_statuses: Vec<Status> = statuses
+        .into_iter()
+        .filter_map(|s| match s.to_lowercase().as_str() {
+            "backlog" => Some(Status::Backlog),
+            "todo" => Some(Status::Todo),
+            "in_progress" => Some(Status::InProgress),
+            "pending_review" => Some(Status::PendingReview),
+            "done" => Some(Status::Done),
+            "rejected" => Some(Status::Rejected),
+            _ => None,
+        })
+        .collect();
+    ListCommand {
+        levels: vec![],
+        statuses: parsed_statuses,
+        priorities: vec![],
+        tags: vec![],
+        root: false,
+        parent: None,
+        all: false,
+        search: None,
+        flat: false,
+    }
+}
+
+/// Create a list command with level filter.
+pub fn list_cmd_with_level(levels: Vec<Level>) -> ListCommand {
+    ListCommand {
+        levels,
+        statuses: vec![],
+        priorities: vec![],
+        tags: vec![],
+        root: false,
+        parent: None,
+        all: false,
+        search: None,
+        flat: false,
+    }
+}
+
+/// Create a list command with tag filter.
+pub fn list_cmd_with_tags(tags: Vec<&str>) -> ListCommand {
+    ListCommand {
+        levels: vec![],
+        statuses: vec![],
+        priorities: vec![],
+        tags: tags.into_iter().map(String::from).collect(),
+        root: false,
+        parent: None,
+        all: false,
+        search: None,
+        flat: false,
+    }
+}
+
+/// Create a list command with root filter.
+pub fn list_cmd_root() -> ListCommand {
+    ListCommand {
+        levels: vec![],
+        statuses: vec![],
+        priorities: vec![],
+        tags: vec![],
+        root: true,
+        parent: None,
+        all: false,
+        search: None,
+        flat: false,
+    }
+}
+
+/// Create a list command with parent filter.
+pub fn list_cmd_with_parent(parent: &str) -> ListCommand {
+    ListCommand {
+        levels: vec![],
+        statuses: vec![],
+        priorities: vec![],
+        tags: vec![],
+        root: false,
+        parent: Some(parent.to_string()),
+        all: false,
+        search: None,
+        flat: false,
+    }
+}
+
+/// Create a list command with flat output.
+pub fn list_cmd_flat() -> ListCommand {
+    ListCommand {
+        levels: vec![],
+        statuses: vec![],
+        priorities: vec![],
+        tags: vec![],
+        root: false,
+        parent: None,
+        all: false,
+        search: None,
+        flat: true,
+    }
+}
+
+/// Create a list command with --all flag.
+pub fn list_cmd_all() -> ListCommand {
+    ListCommand {
+        levels: vec![],
+        statuses: vec![],
+        priorities: vec![],
+        tags: vec![],
+        root: false,
+        parent: None,
+        all: true,
+        search: None,
+        flat: false,
+    }
+}
+
+// =============================================================================
 // Database Setup Helpers
 // =============================================================================
 
@@ -608,6 +965,137 @@ pub async fn get_all_task_ids(db: &Database) -> Vec<String> {
     let mut result = db.client().query(query).await.unwrap();
     let rows: Vec<IdRow> = result.take(0).unwrap();
     rows.into_iter().map(|r| r.id.id.to_raw()).collect()
+}
+
+/// Helper to get task sections.
+pub async fn get_task_sections(db: &Database, id: &str) -> Vec<Section> {
+    db.tasks()
+        .get(id)
+        .await
+        .unwrap()
+        .map(|t| t.sections)
+        .unwrap_or_default()
+}
+
+/// Helper to get task code refs.
+pub async fn get_task_refs(db: &Database, id: &str) -> Vec<CodeRef> {
+    db.tasks()
+        .get(id)
+        .await
+        .unwrap()
+        .map(|t| t.code_refs)
+        .unwrap_or_default()
+}
+
+/// Helper to get task title.
+pub async fn get_task_title(db: &Database, id: &str) -> Option<String> {
+    db.tasks().get(id).await.unwrap().map(|t| t.title)
+}
+
+/// Helper to get task description.
+pub async fn get_task_description(db: &Database, id: &str) -> Option<String> {
+    db.tasks()
+        .get(id)
+        .await
+        .unwrap()
+        .and_then(|t| t.description)
+}
+
+/// Helper to get task priority.
+pub async fn get_task_priority(db: &Database, id: &str) -> Option<Priority> {
+    db.tasks().get(id).await.unwrap().and_then(|t| t.priority)
+}
+
+/// Helper to get task tags.
+pub async fn get_task_tags(db: &Database, id: &str) -> Vec<String> {
+    db.tasks()
+        .get(id)
+        .await
+        .unwrap()
+        .map(|t| t.tags)
+        .unwrap_or_default()
+}
+
+/// Helper to check if a task exists.
+pub async fn task_exists(db: &Database, id: &str) -> bool {
+    db.tasks().get(id).await.unwrap().is_some()
+}
+
+/// Helper to get step sections only (sorted by order).
+pub async fn get_task_steps(db: &Database, id: &str) -> Vec<Section> {
+    let sections = get_task_sections(db, id).await;
+    let mut steps: Vec<Section> = sections
+        .into_iter()
+        .filter(|s| s.section_type == SectionType::Step)
+        .collect();
+    steps.sort_by_key(|s| s.order.unwrap_or(u32::MAX));
+    steps
+}
+
+/// Helper to get sections of a specific type.
+pub async fn get_task_sections_of_type(
+    db: &Database,
+    id: &str,
+    section_type: SectionType,
+) -> Vec<Section> {
+    let sections = get_task_sections(db, id).await;
+    let mut filtered: Vec<Section> = sections
+        .into_iter()
+        .filter(|s| s.section_type == section_type)
+        .collect();
+    filtered.sort_by_key(|s| s.order.unwrap_or(u32::MAX));
+    filtered
+}
+
+/// Helper to count direct children of a task.
+pub async fn count_children(db: &Database, parent_id: &str) -> usize {
+    use serde::Deserialize;
+
+    #[derive(Deserialize)]
+    struct CountRow {
+        count: usize,
+    }
+
+    let query = format!(
+        "SELECT count() as count FROM child_of WHERE out = task:{} GROUP ALL",
+        parent_id
+    );
+    let mut result = db.client().query(&query).await.unwrap();
+    let rows: Vec<CountRow> = result.take(0).unwrap();
+    rows.first().map(|r| r.count).unwrap_or(0)
+}
+
+/// Helper to count dependencies of a task.
+pub async fn count_dependencies(db: &Database, task_id: &str) -> usize {
+    use serde::Deserialize;
+
+    #[derive(Deserialize)]
+    struct CountRow {
+        count: usize,
+    }
+
+    let query = format!(
+        "SELECT count() as count FROM depends_on WHERE in = task:{} GROUP ALL",
+        task_id
+    );
+    let mut result = db.client().query(&query).await.unwrap();
+    let rows: Vec<CountRow> = result.take(0).unwrap();
+    rows.first().map(|r| r.count).unwrap_or(0)
+}
+
+/// Helper to get parent task ID.
+pub async fn get_parent_id(db: &Database, child_id: &str) -> Option<String> {
+    use serde::Deserialize;
+
+    #[derive(Deserialize)]
+    struct ParentRow {
+        out: surrealdb::sql::Thing,
+    }
+
+    let query = format!("SELECT out FROM child_of WHERE in = task:{}", child_id);
+    let mut result = db.client().query(&query).await.unwrap();
+    let rows: Vec<ParentRow> = result.take(0).unwrap();
+    rows.first().map(|r| r.out.id.to_raw())
 }
 
 #[cfg(test)]

@@ -1503,7 +1503,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(id.len(), 6);
+        assert_eq!(id.len(), 7); // 'x' prefix + 6 hex chars
 
         let task = service.get_task(&id).await.unwrap();
         assert_eq!(task.title, "My Task");

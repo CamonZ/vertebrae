@@ -33,8 +33,6 @@ pub enum WorkflowCommand {
     Retreat(WorkflowRetreatCommand),
     /// Reject a task in its workflow (triggers on_reject_workflow if configured)
     Reject(WorkflowRejectCommand),
-    /// Migrate existing tasks to use the default workflow
-    Migrate(WorkflowMigrateCommand),
 }
 
 impl WorkflowCommand {
@@ -64,7 +62,6 @@ impl WorkflowCommand {
             WorkflowCommand::Advance(cmd) => cmd.execute(&workflow_service).await,
             WorkflowCommand::Retreat(cmd) => cmd.execute(&workflow_service).await,
             WorkflowCommand::Reject(cmd) => cmd.execute(&workflow_service).await,
-            WorkflowCommand::Migrate(cmd) => cmd.execute(&workflow_service).await,
         }
     }
 }
@@ -401,11 +398,32 @@ impl WorkflowShowCommand {
             .map(|t| t.id.to_raw())
             .unwrap_or_else(|| self.id.clone());
 
+        // Get steps: prefer first-class Steps, fall back to embedded steps
+        #[allow(deprecated)]
+        let steps = if workflow.steps.is_empty() {
+            if let Some(ref workflow_thing) = workflow.id {
+                let first_class_steps = service
+                    .database()
+                    .steps()
+                    .list_by_workflow(workflow_thing)
+                    .await?;
+                // Convert first-class Steps to embedded WorkflowStep format
+                first_class_steps
+                    .into_iter()
+                    .map(|s| WorkflowStep::new(s.name, s.agent_config, s.order as u32))
+                    .collect()
+            } else {
+                workflow.steps
+            }
+        } else {
+            workflow.steps
+        };
+
         let detail = WorkflowDetail {
             id: workflow_id,
             name: workflow.name,
             description: workflow.description,
-            steps: workflow.steps,
+            steps,
             metadata: workflow.metadata,
             on_done_workflow: workflow.on_done_workflow,
             on_reject_workflow: workflow.on_reject_workflow,
@@ -758,73 +776,10 @@ impl WorkflowRejectCommand {
     }
 }
 
-/// Migrate existing tasks to use the default workflow
-#[derive(Debug, Args)]
-pub struct WorkflowMigrateCommand {
-    /// Run in dry-run mode (show what would be migrated without making changes)
-    #[arg(long)]
-    pub dry_run: bool,
-}
-
-impl WorkflowMigrateCommand {
-    /// Execute the migrate workflow command.
-    ///
-    /// Migrates all tasks that don't have a workflow assignment to the default
-    /// workflow, setting their current_step based on their current status.
-    ///
-    /// Tasks with `Rejected` status are skipped since that status is not part
-    /// of the default workflow.
-    ///
-    /// This migration is idempotent - running it multiple times is safe.
-    ///
-    /// # Arguments
-    ///
-    /// * `service` - Reference to the workflow service
-    ///
-    /// # Errors
-    ///
-    /// Returns `ServiceError::NotFound` if the default workflow doesn't exist.
-    /// Returns `ServiceError::Query` if service operations fail.
-    pub async fn execute(&self, service: &dyn WorkflowService) -> Result<String, ServiceError> {
-        let result = service.migrate_to_default_workflow(self.dry_run).await?;
-        let output = Self::format_result(&result);
-
-        if self.dry_run {
-            Ok(format!("[DRY RUN] {}", output))
-        } else {
-            Ok(output)
-        }
-    }
-
-    /// Format the migration result for display.
-    fn format_result(result: &vertebrae_core::MigrationResult) -> String {
-        let mut output = String::new();
-
-        if result.total() == 0 {
-            output.push_str("No tasks found without workflow assignment");
-        } else {
-            output.push_str(&format!(
-                "Migration complete: {} tasks migrated to default workflow",
-                result.migrated
-            ));
-
-            if result.has_skipped() {
-                output.push_str(&format!(
-                    "\n{} tasks skipped (Rejected status not in default workflow): {}",
-                    result.skipped,
-                    result.skipped_ids.join(", ")
-                ));
-            }
-        }
-
-        output
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vertebrae_core::{Database, MigrationResult, ServiceError};
+    use vertebrae_core::{Database, ServiceError};
 
     /// Helper to create an in-memory test database
     async fn setup_test_db() -> Database {
@@ -943,7 +898,7 @@ mod tests {
             "Result should start with 'Created workflow: '"
         );
         let id = extract_workflow_id(&result);
-        assert_eq!(id.len(), 6);
+        assert_eq!(id.len(), 7); // 'x' prefix + 6 hex chars
 
         // Verify workflow was persisted
         let workflow = db.workflows().get(&id).await.unwrap();
@@ -951,13 +906,14 @@ mod tests {
         let workflow = workflow.unwrap();
         assert_eq!(workflow.name, "My Workflow");
         assert!(workflow.description.is_none());
-        assert_eq!(workflow.steps.len(), 1);
-        assert_eq!(workflow.steps[0].name, "step1");
-        assert_eq!(
-            workflow.steps[0].agent_config.model,
-            Some("agent1".to_string())
-        );
-        assert_eq!(workflow.steps[0].order, 0);
+
+        // Verify first-class Steps were created (not embedded steps)
+        let workflow_thing = workflow.id.as_ref().unwrap();
+        let steps = db.steps().list_by_workflow(workflow_thing).await.unwrap();
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0].name, "step1");
+        assert_eq!(steps[0].agent_config.model, Some("agent1".to_string()));
+        assert_eq!(steps[0].order, 0);
     }
 
     #[tokio::test]
@@ -1021,15 +977,19 @@ mod tests {
         let id = extract_workflow_id(&result);
 
         let workflow = db.workflows().get(&id).await.unwrap().unwrap();
-        assert_eq!(workflow.steps.len(), 3);
+
+        // Verify first-class Steps were created (not embedded steps)
+        let workflow_thing = workflow.id.as_ref().unwrap();
+        let steps = db.steps().list_by_workflow(workflow_thing).await.unwrap();
+        assert_eq!(steps.len(), 3);
 
         // Verify steps are ordered correctly
-        assert_eq!(workflow.steps[0].name, "review");
-        assert_eq!(workflow.steps[0].order, 0);
-        assert_eq!(workflow.steps[1].name, "test");
-        assert_eq!(workflow.steps[1].order, 1);
-        assert_eq!(workflow.steps[2].name, "deploy");
-        assert_eq!(workflow.steps[2].order, 2);
+        assert_eq!(steps[0].name, "review");
+        assert_eq!(steps[0].order, 0);
+        assert_eq!(steps[1].name, "test");
+        assert_eq!(steps[1].order, 1);
+        assert_eq!(steps[2].name, "deploy");
+        assert_eq!(steps[2].order, 2);
     }
 
     #[tokio::test]
@@ -1133,8 +1093,9 @@ mod tests {
 
         let result = cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&result);
-        assert_eq!(id.len(), 6);
-        assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_eq!(id.len(), 7); // 'x' prefix + 6 hex chars
+        assert!(id.starts_with('x'));
+        assert!(id[1..].chars().all(|c| c.is_ascii_hexdigit()));
     }
 
     #[tokio::test]
@@ -2944,181 +2905,5 @@ mod tests {
             debug_str.contains("WorkflowRejectCommand") && debug_str.contains("task123"),
             "Debug output should contain WorkflowRejectCommand and task_id"
         );
-    }
-
-    // ========================================
-    // Migration command tests
-    // ========================================
-
-    #[tokio::test]
-    async fn test_migrate_no_tasks() {
-        let db = setup_test_db().await;
-
-        let cmd = WorkflowMigrateCommand { dry_run: false };
-        let result = cmd.execute(&create_service(&db)).await.unwrap();
-
-        assert!(
-            result.contains("No tasks found without workflow assignment"),
-            "Should report no tasks: {}",
-            result
-        );
-    }
-
-    #[tokio::test]
-    async fn test_migrate_tasks_success() {
-        let db = setup_test_db().await;
-
-        // Create tasks without workflow assignment
-        create_test_task(&db, "task1", "Task 1").await;
-        create_test_task(&db, "task2", "Task 2").await;
-
-        let cmd = WorkflowMigrateCommand { dry_run: false };
-        let result = cmd.execute(&create_service(&db)).await.unwrap();
-
-        assert!(
-            result.contains("Migration complete: 2 tasks migrated"),
-            "Should report 2 migrated: {}",
-            result
-        );
-
-        // Verify tasks are now assigned
-        let task1 = db.tasks().get("task1").await.unwrap().unwrap();
-        assert!(task1.workflow_id.is_some(), "Task 1 should have workflow");
-
-        let task2 = db.tasks().get("task2").await.unwrap().unwrap();
-        assert!(task2.workflow_id.is_some(), "Task 2 should have workflow");
-    }
-
-    #[tokio::test]
-    async fn test_migrate_dry_run() {
-        let db = setup_test_db().await;
-
-        // Create a task without workflow assignment
-        create_test_task(&db, "task1", "Task 1").await;
-
-        let cmd = WorkflowMigrateCommand { dry_run: true };
-        let result = cmd.execute(&create_service(&db)).await.unwrap();
-
-        assert!(
-            result.contains("[DRY RUN]"),
-            "Should indicate dry run: {}",
-            result
-        );
-        assert!(
-            result.contains("1 tasks migrated"),
-            "Should report 1 would be migrated: {}",
-            result
-        );
-
-        // Verify task was NOT actually migrated
-        let task1 = db.tasks().get("task1").await.unwrap().unwrap();
-        assert!(
-            task1.workflow_id.is_none(),
-            "Task should NOT have workflow after dry run"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_migrate_skips_rejected_tasks() {
-        use vertebrae_db::{Level, Status, Task};
-
-        let db = setup_test_db().await;
-
-        // Create a rejected task
-        let rejected_task = Task::new("Rejected Task", Level::Task).with_status(Status::Rejected);
-        db.tasks().create("rejected", &rejected_task).await.unwrap();
-
-        // Create a normal task
-        create_test_task(&db, "normal", "Normal Task").await;
-
-        let cmd = WorkflowMigrateCommand { dry_run: false };
-        let result = cmd.execute(&create_service(&db)).await.unwrap();
-
-        assert!(
-            result.contains("1 tasks migrated"),
-            "Should migrate 1 task: {}",
-            result
-        );
-        assert!(
-            result.contains("1 tasks skipped"),
-            "Should skip 1 task: {}",
-            result
-        );
-        assert!(
-            result.contains("rejected"),
-            "Should list rejected task ID: {}",
-            result
-        );
-    }
-
-    #[tokio::test]
-    async fn test_migrate_is_idempotent() {
-        let db = setup_test_db().await;
-
-        // Create a task
-        create_test_task(&db, "task1", "Task 1").await;
-
-        // First migration
-        let cmd = WorkflowMigrateCommand { dry_run: false };
-        let result1 = cmd.execute(&create_service(&db)).await.unwrap();
-        assert!(
-            result1.contains("1 tasks migrated"),
-            "First run should migrate 1: {}",
-            result1
-        );
-
-        // Second migration
-        let result2 = cmd.execute(&create_service(&db)).await.unwrap();
-        assert!(
-            result2.contains("No tasks found without workflow assignment"),
-            "Second run should find no tasks: {}",
-            result2
-        );
-    }
-
-    #[test]
-    fn test_workflow_migrate_command_debug() {
-        let cmd = WorkflowMigrateCommand { dry_run: true };
-        let debug_str = format!("{:?}", cmd);
-        assert!(
-            debug_str.contains("WorkflowMigrateCommand") && debug_str.contains("dry_run: true"),
-            "Debug output should contain WorkflowMigrateCommand and dry_run"
-        );
-    }
-
-    #[test]
-    fn test_format_result_no_tasks() {
-        let result = MigrationResult {
-            migrated: 0,
-            skipped: 0,
-            skipped_ids: vec![],
-        };
-        let output = WorkflowMigrateCommand::format_result(&result);
-        assert_eq!(output, "No tasks found without workflow assignment");
-    }
-
-    #[test]
-    fn test_format_result_with_migrations() {
-        let result = MigrationResult {
-            migrated: 5,
-            skipped: 0,
-            skipped_ids: vec![],
-        };
-        let output = WorkflowMigrateCommand::format_result(&result);
-        assert!(output.contains("5 tasks migrated"));
-        assert!(!output.contains("skipped"));
-    }
-
-    #[test]
-    fn test_format_result_with_skipped() {
-        let result = MigrationResult {
-            migrated: 3,
-            skipped: 2,
-            skipped_ids: vec!["id1".to_string(), "id2".to_string()],
-        };
-        let output = WorkflowMigrateCommand::format_result(&result);
-        assert!(output.contains("3 tasks migrated"));
-        assert!(output.contains("2 tasks skipped"));
-        assert!(output.contains("id1, id2"));
     }
 }

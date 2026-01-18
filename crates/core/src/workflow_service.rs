@@ -7,7 +7,7 @@
 use crate::error::{ServiceError, ServiceResult};
 use async_trait::async_trait;
 use std::sync::Arc;
-use vertebrae_db::{Database, Thing, Workflow, WorkflowStep};
+use vertebrae_db::{Database, Thing, Workflow};
 
 /// Event representing a workflow mutation for cache invalidation
 #[derive(Debug, Clone)]
@@ -459,6 +459,26 @@ impl DefaultWorkflowService {
         })
         .await
     }
+
+    /// Get ordered step names for a workflow.
+    ///
+    /// This handles both embedded steps (legacy) and first-class Step entities.
+    /// If `workflow.initial_step` is set, it fetches first-class Steps from the database.
+    /// Otherwise, it uses the embedded steps.
+    async fn get_workflow_steps(&self, workflow: &Workflow) -> ServiceResult<Vec<String>> {
+        // If workflow has first-class Steps, use them
+        if let Some(ref workflow_thing) = workflow.id {
+            let first_class_steps = self.db.steps().list_by_workflow(workflow_thing).await?;
+            if !first_class_steps.is_empty() {
+                // Return names in order
+                return Ok(first_class_steps.iter().map(|s| s.name.clone()).collect());
+            }
+        }
+
+        // Fall back to embedded steps (legacy workflows)
+        let ordered = workflow.ordered_steps();
+        Ok(ordered.iter().map(|s| s.name.clone()).collect())
+    }
 }
 
 #[async_trait]
@@ -510,18 +530,11 @@ impl WorkflowService for DefaultWorkflowService {
         // Generate unique ID
         let id = self.generate_unique_id(&options.name).await?;
 
-        // Build workflow
+        // Build workflow (without embedded steps - we'll use first-class Step entities)
         let mut workflow = Workflow::new(&options.name);
 
         if let Some(desc) = options.description {
             workflow = workflow.with_description(desc);
-        }
-
-        // Convert step inputs to WorkflowStep objects
-        for (order, step_input) in options.steps.iter().enumerate() {
-            let agent_config = vertebrae_db::AgentConfig::new().with_model(&step_input.model);
-            let step = WorkflowStep::new(&step_input.name, agent_config, order as u32);
-            workflow = workflow.with_step(step);
         }
 
         if let Some(on_done) = options.on_done_workflow {
@@ -532,8 +545,51 @@ impl WorkflowService for DefaultWorkflowService {
             workflow = workflow.with_on_reject_workflow(on_reject);
         }
 
-        // Create in database
+        // Create workflow in database first (needed for step references)
         self.db.workflows().create(&id, &workflow).await?;
+
+        // Create first-class Step entities
+        let workflow_thing = vertebrae_db::Thing::from(("workflow", id.as_str()));
+        let mut step_ids: Vec<vertebrae_db::Thing> = Vec::new();
+        let total_steps = options.steps.len();
+
+        for (order, step_input) in options.steps.iter().enumerate() {
+            let agent_config = vertebrae_db::AgentConfig::new().with_model(&step_input.model);
+            let is_final = order == total_steps - 1;
+
+            let step = vertebrae_db::Step::new(&step_input.name, workflow_thing.clone())
+                .with_agent_config(agent_config)
+                .with_order(order as i32)
+                .with_is_final(is_final);
+
+            // Generate step ID based on workflow and step name
+            let step_id = format!(
+                "{}_{}",
+                id,
+                step_input.name.to_lowercase().replace(' ', "_")
+            );
+            let created_step = self.db.steps().create_with_id(&step_id, &step).await?;
+
+            if let Some(thing) = created_step.id {
+                step_ids.push(thing);
+            }
+        }
+
+        // Set up linear transitions between steps
+        for i in 0..step_ids.len().saturating_sub(1) {
+            let current_id = step_ids[i].id.to_raw();
+            let next_step = step_ids[i + 1].clone();
+
+            let update = vertebrae_db::StepUpdate::new().with_transitions_to(vec![next_step]);
+            self.db.steps().update(&current_id, &update).await?;
+        }
+
+        // Set the workflow's initial_step to the first step
+        if let Some(first_step) = step_ids.first() {
+            let workflow_update =
+                vertebrae_db::WorkflowUpdate::new().with_initial_step(first_step.clone());
+            self.db.workflows().update(&id, &workflow_update).await?;
+        }
 
         // Fire mutation callback
         self.on_mutation(WorkflowMutationEvent::WorkflowCreated { id: id.clone() });
@@ -553,18 +609,34 @@ impl WorkflowService for DefaultWorkflowService {
     async fn list_workflows(&self) -> ServiceResult<Vec<WorkflowSummary>> {
         let workflows = self.db.workflows().list().await?;
 
-        Ok(workflows
-            .into_iter()
-            .map(|w| {
-                let id = w.id.map(|thing| thing.id.to_raw()).unwrap_or_default();
-                WorkflowSummary {
-                    id,
-                    name: w.name,
-                    description: w.description,
-                    step_count: w.steps.len(),
+        let mut summaries = Vec::with_capacity(workflows.len());
+        for w in workflows {
+            let id =
+                w.id.as_ref()
+                    .map(|thing| thing.id.to_raw())
+                    .unwrap_or_default();
+
+            // Get step count: prefer first-class Steps, fall back to embedded
+            let step_count = if let Some(ref workflow_thing) = w.id {
+                let first_class_steps = self.db.steps().list_by_workflow(workflow_thing).await?;
+                if !first_class_steps.is_empty() {
+                    first_class_steps.len()
+                } else {
+                    w.steps.len()
                 }
-            })
-            .collect())
+            } else {
+                w.steps.len()
+            };
+
+            summaries.push(WorkflowSummary {
+                id,
+                name: w.name,
+                description: w.description,
+                step_count,
+            });
+        }
+
+        Ok(summaries)
     }
 
     async fn update_workflow(&self, id: &str, options: UpdateWorkflowOptions) -> ServiceResult<()> {
@@ -689,12 +761,12 @@ impl WorkflowService for DefaultWorkflowService {
             .await?
             .ok_or_else(|| ServiceError::workflow_not_found(&workflow_id))?;
 
-        // Get the first step
-        let ordered_steps = workflow.ordered_steps();
-        if ordered_steps.is_empty() {
+        // Get the first step (supports both embedded and first-class steps)
+        let step_names = self.get_workflow_steps(&workflow).await?;
+        if step_names.is_empty() {
             return Err(ServiceError::validation_failed("Workflow has no steps"));
         }
-        let first_step_name = ordered_steps[0].name.clone();
+        let first_step_name = step_names[0].clone();
 
         // Assign workflow to task
         let workflow_thing = Thing::from(("workflow", workflow_id.as_str()));
@@ -767,8 +839,8 @@ impl WorkflowService for DefaultWorkflowService {
             .await?
             .ok_or_else(|| ServiceError::workflow_not_found(&workflow_id))?;
 
-        let ordered_steps = workflow.ordered_steps();
-        let total_steps = ordered_steps.len();
+        let step_names = self.get_workflow_steps(&workflow).await?;
+        let total_steps = step_names.len();
         let from_step = current_step as usize;
 
         // Check if we're at the last step
@@ -782,8 +854,8 @@ impl WorkflowService for DefaultWorkflowService {
                     .await?
                     .ok_or_else(|| ServiceError::workflow_not_found(new_workflow_id))?;
 
-                let new_ordered_steps = new_workflow.ordered_steps();
-                if new_ordered_steps.is_empty() {
+                let new_step_names = self.get_workflow_steps(&new_workflow).await?;
+                if new_step_names.is_empty() {
                     return Err(ServiceError::validation_failed(
                         "Target workflow has no steps",
                     ));
@@ -809,8 +881,8 @@ impl WorkflowService for DefaultWorkflowService {
                     workflow_id,
                     from_step,
                     to_step: 0,
-                    step_name: new_ordered_steps[0].name.clone(),
-                    total_steps: new_ordered_steps.len(),
+                    step_name: new_step_names[0].clone(),
+                    total_steps: new_step_names.len(),
                     execution_id: None,
                     chained_to_workflow: Some(new_workflow_id.clone()),
                 });
@@ -822,7 +894,7 @@ impl WorkflowService for DefaultWorkflowService {
         }
 
         let to_step = from_step + 1;
-        let step_name = ordered_steps[to_step].name.clone();
+        let step_name = step_names[to_step].clone();
 
         // Update task step
         self.db
@@ -883,8 +955,8 @@ impl WorkflowService for DefaultWorkflowService {
             .await?
             .ok_or_else(|| ServiceError::workflow_not_found(&workflow_id))?;
 
-        let ordered_steps = workflow.ordered_steps();
-        let total_steps = ordered_steps.len();
+        let step_names = self.get_workflow_steps(&workflow).await?;
+        let total_steps = step_names.len();
         let from_step = current_step as usize;
 
         // Check if we're at the first step
@@ -895,7 +967,7 @@ impl WorkflowService for DefaultWorkflowService {
         }
 
         let to_step = from_step - 1;
-        let step_name = ordered_steps[to_step].name.clone();
+        let step_name = step_names[to_step].clone();
 
         // Update task step
         self.db
@@ -959,14 +1031,14 @@ impl WorkflowService for DefaultWorkflowService {
                 .await?
                 .ok_or_else(|| ServiceError::workflow_not_found(&reject_workflow_id))?;
 
-            let ordered_steps = reject_workflow.ordered_steps();
-            if ordered_steps.is_empty() {
+            let step_names = self.get_workflow_steps(&reject_workflow).await?;
+            if step_names.is_empty() {
                 return Err(ServiceError::validation_failed(
                     "Reject workflow has no steps",
                 ));
             }
 
-            let first_step_name = ordered_steps[0].name.clone();
+            let first_step_name = step_names[0].clone();
 
             // Assign new workflow and reset to first step
             let reject_workflow_thing = Thing::from(("workflow", reject_workflow_id.as_str()));
@@ -1035,10 +1107,10 @@ impl WorkflowService for DefaultWorkflowService {
             }
         };
 
-        let ordered_steps = workflow.ordered_steps();
-        let total_steps = ordered_steps.len();
+        let step_names = self.get_workflow_steps(&workflow).await?;
+        let total_steps = step_names.len();
 
-        if ordered_steps.is_empty() {
+        if step_names.is_empty() {
             return Ok(WorkflowInfo {
                 id,
                 name: workflow.name,
@@ -1050,17 +1122,17 @@ impl WorkflowService for DefaultWorkflowService {
             });
         }
 
-        let step_idx = current_step.min(ordered_steps.len() - 1);
-        let current_step_name = ordered_steps[step_idx].name.clone();
+        let step_idx = current_step.min(step_names.len() - 1);
+        let current_step_name = step_names[step_idx].clone();
 
         let prev_step_name = if step_idx > 0 {
-            Some(ordered_steps[step_idx - 1].name.clone())
+            Some(step_names[step_idx - 1].clone())
         } else {
             None
         };
 
-        let next_step_name = if step_idx < ordered_steps.len() - 1 {
-            Some(ordered_steps[step_idx + 1].name.clone())
+        let next_step_name = if step_idx < step_names.len() - 1 {
+            Some(step_names[step_idx + 1].clone())
         } else {
             None
         };
@@ -1121,7 +1193,22 @@ mod tests {
 
         let workflow = service.get_workflow(&id).await.unwrap();
         assert_eq!(workflow.name, "Test Workflow");
-        assert_eq!(workflow.steps.len(), 2);
+
+        // Verify first-class Step entities were created (not embedded steps)
+        assert_eq!(workflow.steps.len(), 0, "embedded steps should be empty");
+        assert!(
+            workflow.initial_step.is_some(),
+            "initial_step should be set"
+        );
+
+        // Verify Step entities exist by querying the database
+        #[allow(deprecated)]
+        let db = service.database();
+        let workflow_thing = Thing::from(("workflow", id.as_str()));
+        let steps = db.steps().list_by_workflow(&workflow_thing).await.unwrap();
+        assert_eq!(steps.len(), 2);
+        assert_eq!(steps[0].name, "review");
+        assert_eq!(steps[1].name, "merge");
     }
 
     #[tokio::test]

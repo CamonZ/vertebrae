@@ -119,16 +119,28 @@ impl SectionCommand {
         // Fetch the task first to count existing sections of this type
         let task = service.get_task(&id).await?;
 
-        // Calculate the ordinal for multi-instance section types
-        let ordinal = if !is_single_instance_type(&self.section_type) {
+        // Handle single-instance vs multi-instance section types
+        let (ordinal, replaced) = if is_single_instance_type(&self.section_type) {
+            // For single-instance types, check if one already exists
+            let existing = task
+                .sections
+                .iter()
+                .any(|s| s.section_type == self.section_type);
+            if existing {
+                // Remove existing section first
+                service
+                    .remove_sections(&id, self.section_type.clone(), None)
+                    .await?;
+            }
+            (None, existing)
+        } else {
+            // For multi-instance types, calculate the next ordinal
             let count = task
                 .sections
                 .iter()
                 .filter(|s| s.section_type == self.section_type)
                 .count();
-            Some(count as u32)
-        } else {
-            None
+            (Some(count as u32), false)
         };
 
         // Create the section with the calculated order
@@ -147,7 +159,7 @@ impl SectionCommand {
         Ok(SectionResult {
             id,
             section_type: self.section_type.clone(),
-            replaced: false,
+            replaced,
             ordinal,
         })
     }

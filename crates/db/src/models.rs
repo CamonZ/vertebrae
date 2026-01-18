@@ -839,19 +839,16 @@ impl Workflow {
     /// Validate the workflow configuration.
     ///
     /// Checks that:
-    /// - The workflow has at least one step
-    /// - All step names are unique within the workflow
+    /// - All embedded step names are unique within the workflow
+    ///
+    /// Note: First-class Step entities are validated in the service layer.
     ///
     /// # Returns
     ///
     /// `Ok(())` if validation passes, or a descriptive error message.
     pub fn validate(&self) -> Result<(), String> {
-        // Check for at least one step
-        if self.steps.is_empty() {
-            return Err("workflow must have at least one step".to_string());
-        }
-
-        // Check for unique step names
+        // Check for unique step names in embedded steps (if any)
+        // Note: First-class Step entities are validated separately
         let mut seen_names = std::collections::HashSet::new();
         for step in &self.steps {
             if !seen_names.insert(&step.name) {
@@ -3209,12 +3206,13 @@ mod tests {
     }
 
     #[test]
-    fn test_workflow_validate_empty_steps_fails() {
+    fn test_workflow_validate_empty_steps_allowed() {
+        // Empty embedded steps are allowed at the model level since first-class Step entities
+        // are now used. The service layer validates that steps are provided during creation.
         let workflow = Workflow::new("Empty Steps");
 
         let result = workflow.validate();
-        assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), "workflow must have at least one step");
+        assert!(result.is_ok());
     }
 
     #[test]

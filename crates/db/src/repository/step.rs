@@ -356,11 +356,12 @@ impl<'a> StepRepository<'a> {
         }
 
         if let Some(transitions) = &updates.transitions_to {
-            let json =
-                serde_json::to_string(transitions).map_err(|e| DbError::ValidationError {
-                    message: format!("Failed to serialize transitions_to: {}", e),
-                })?;
-            set_clauses.push(format!("transitions_to = {}", json));
+            // Format as SurrealDB record references: [step:id1, step:id2, ...]
+            let refs: Vec<String> = transitions
+                .iter()
+                .map(|t| format!("{}:{}", t.tb, t.id.to_raw()))
+                .collect();
+            set_clauses.push(format!("transitions_to = [{}]", refs.join(", ")));
         }
 
         if let Some(order) = updates.order {

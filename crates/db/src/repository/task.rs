@@ -266,6 +266,13 @@ impl<'a> TaskRepository<'a> {
         };
 
         let title = task.title.clone();
+        let description = task.description.clone();
+
+        let description_clause = if description.is_some() {
+            ", description = $description"
+        } else {
+            ""
+        };
 
         let query = format!(
             r#"CREATE task:{} SET
@@ -273,15 +280,20 @@ impl<'a> TaskRepository<'a> {
                 level = "{}",
                 status = "{}",
                 priority = {},
-                tags = {}"#,
+                tags = {}{}"#,
             id,
             task.level.as_str(),
             task.status.as_str(),
             priority_str,
-            tags_str
+            tags_str,
+            description_clause
         );
 
-        self.client.query(&query).bind(("title", title)).await?;
+        let mut query_builder = self.client.query(&query).bind(("title", title));
+        if let Some(desc) = description {
+            query_builder = query_builder.bind(("description", desc));
+        }
+        query_builder.await?;
         Ok(())
     }
 
