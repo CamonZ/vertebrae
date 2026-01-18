@@ -729,9 +729,13 @@ pub struct Workflow {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
 
-    /// Ordered list of workflow steps
+    /// Ordered list of workflow steps (legacy embedded steps)
     #[serde(default)]
     pub steps: Vec<WorkflowStep>,
+
+    /// Reference to the initial step in the workflow (new first-class steps)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub initial_step: Option<Thing>,
 
     /// Additional metadata as key-value pairs
     #[serde(default)]
@@ -762,6 +766,7 @@ impl Workflow {
             name: name.into(),
             description: None,
             steps: Vec::new(),
+            initial_step: None,
             metadata: std::collections::HashMap::new(),
             on_done_workflow: None,
             on_reject_workflow: None,
@@ -803,6 +808,12 @@ impl Workflow {
     /// Set the workflow to chain to when the task is rejected
     pub fn with_on_reject_workflow(mut self, workflow_id: impl Into<String>) -> Self {
         self.on_reject_workflow = Some(workflow_id.into());
+        self
+    }
+
+    /// Set the initial step reference for this workflow
+    pub fn with_initial_step(mut self, step_id: Thing) -> Self {
+        self.initial_step = Some(step_id);
         self
     }
 
