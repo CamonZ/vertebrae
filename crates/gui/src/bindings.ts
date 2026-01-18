@@ -205,6 +205,32 @@ async getExecutionLogs(executionId: string) : Promise<Result<SessionLog[], Comma
 }
 },
 /**
+ * List all steps for a workflow
+ * 
+ * Returns all first-class Step entities associated with the given workflow ID.
+ */
+async listStepsForWorkflow(workflowId: string) : Promise<Result<Step[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_steps_for_workflow", { workflowId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Get a single step by ID
+ * 
+ * Returns the Step entity with the given ID.
+ */
+async getStep(stepId: string) : Promise<Result<Step | null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_step", { stepId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Start a workflow execution for a task
  */
 async runWorkflow(taskId: string) : Promise<Result<null, CommandError>> {
@@ -216,7 +242,7 @@ async runWorkflow(taskId: string) : Promise<Result<null, CommandError>> {
 }
 },
 /**
- * Create a new PTY session running Claude CLI
+ * Create a new PTY session with the user's default shell
  * 
  * Returns the session ID on success. The PTY will emit PtyOutputEvent for output
  * and PtyExitEvent when the session ends.
@@ -621,6 +647,46 @@ content: string;
  */
 created_at: string }
 /**
+ * First-class workflow step - mirrors db::Step
+ */
+export type Step = { 
+/**
+ * Step ID (string form)
+ */
+id: string | null; 
+/**
+ * Display name for this step
+ */
+name: string; 
+/**
+ * Reference to the workflow this step belongs to
+ */
+workflow_id: string; 
+/**
+ * Agent configuration for this step
+ */
+agent_config: AgentConfig; 
+/**
+ * Whether this is a final step (no outgoing transitions)
+ */
+is_final: boolean; 
+/**
+ * List of step IDs this step can transition to
+ */
+transitions_to: string[]; 
+/**
+ * Ordering index for sequential fallback (0-based)
+ */
+order: number; 
+/**
+ * Creation timestamp (ISO 8601 string)
+ */
+created_at: string | null; 
+/**
+ * Last update timestamp (ISO 8601 string)
+ */
+updated_at: string | null }
+/**
  * Step execution record - mirrors db::StepExecution
  */
 export type StepExecution = { 
@@ -866,9 +932,13 @@ name: string;
  */
 description: string | null; 
 /**
- * Ordered list of workflow steps
+ * Ordered list of workflow steps (legacy embedded steps)
  */
 steps: WorkflowStep[]; 
+/**
+ * Reference to the initial step in the workflow (new first-class steps)
+ */
+initial_step: string | null; 
 /**
  * Additional metadata as key-value pairs
  */
@@ -956,7 +1026,7 @@ export type WorkflowExecutionEventType =
  */
 { Failed: { error: string } }
 /**
- * Workflow step - mirrors db::WorkflowStep
+ * Workflow step - mirrors db::WorkflowStep (legacy embedded steps)
  */
 export type WorkflowStep = { 
 /**

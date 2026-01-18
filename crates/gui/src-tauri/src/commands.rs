@@ -5,7 +5,7 @@
 
 use crate::project_config::{ProjectConfig, SavedProject};
 use crate::types::{
-    SessionLog, StepExecution, TaskFilterOptions, TaskHierarchyNode, TaskSummary,
+    SessionLog, Step, StepExecution, TaskFilterOptions, TaskHierarchyNode, TaskSummary,
     TaskWithRelations, Workflow, WorkflowWithTasks,
 };
 use serde::{Deserialize, Serialize};
@@ -609,6 +609,74 @@ pub async fn get_execution_logs(
         }
         Err(e) => {
             log::error!("get_execution_logs error: {:?}", e);
+            Err(e.into())
+        }
+    }
+}
+
+// ============================================================================
+// Step Commands (First-Class Workflow Steps)
+// ============================================================================
+
+/// List all steps for a workflow
+///
+/// Returns all first-class Step entities associated with the given workflow ID.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_steps_for_workflow(
+    state: State<'_, AppState>,
+    workflow_id: String,
+) -> Result<Vec<Step>, CommandError> {
+    log::info!(
+        "list_steps_for_workflow called for workflow: {}",
+        workflow_id
+    );
+    let service_guard = state.service.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    #[allow(deprecated)]
+    let db = service.database();
+    let workflow_thing = surrealdb::sql::Thing::from(("workflow", workflow_id.as_str()));
+
+    match db.steps().list_by_workflow(&workflow_thing).await {
+        Ok(steps) => {
+            log::info!("list_steps_for_workflow returned {} steps", steps.len());
+            Ok(steps.into_iter().map(Into::into).collect())
+        }
+        Err(e) => {
+            log::error!("list_steps_for_workflow error: {:?}", e);
+            Err(e.into())
+        }
+    }
+}
+
+/// Get a single step by ID
+///
+/// Returns the Step entity with the given ID.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_step(
+    state: State<'_, AppState>,
+    step_id: String,
+) -> Result<Option<Step>, CommandError> {
+    log::info!("get_step called for step: {}", step_id);
+    let service_guard = state.service.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    #[allow(deprecated)]
+    let db = service.database();
+
+    match db.steps().get(&step_id).await {
+        Ok(step) => {
+            log::info!("get_step returned: {:?}", step.is_some());
+            Ok(step.map(Into::into))
+        }
+        Err(e) => {
+            log::error!("get_step error: {:?}", e);
             Err(e.into())
         }
     }

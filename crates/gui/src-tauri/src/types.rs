@@ -453,7 +453,7 @@ impl From<vertebrae_db::AgentConfig> for AgentConfig {
     }
 }
 
-/// Workflow step - mirrors db::WorkflowStep
+/// Workflow step - mirrors db::WorkflowStep (legacy embedded steps)
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct WorkflowStep {
     /// Display name for this step
@@ -474,6 +474,45 @@ impl From<vertebrae_db::WorkflowStep> for WorkflowStep {
     }
 }
 
+/// First-class workflow step - mirrors db::Step
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct Step {
+    /// Step ID (string form)
+    pub id: Option<String>,
+    /// Display name for this step
+    pub name: String,
+    /// Reference to the workflow this step belongs to
+    pub workflow_id: String,
+    /// Agent configuration for this step
+    pub agent_config: AgentConfig,
+    /// Whether this is a final step (no outgoing transitions)
+    pub is_final: bool,
+    /// List of step IDs this step can transition to
+    pub transitions_to: Vec<String>,
+    /// Ordering index for sequential fallback (0-based)
+    pub order: i32,
+    /// Creation timestamp (ISO 8601 string)
+    pub created_at: Option<String>,
+    /// Last update timestamp (ISO 8601 string)
+    pub updated_at: Option<String>,
+}
+
+impl From<vertebrae_db::Step> for Step {
+    fn from(step: vertebrae_db::Step) -> Self {
+        Step {
+            id: step.id.map(|t| t.id.to_raw()),
+            name: step.name,
+            workflow_id: step.workflow_id.id.to_raw(),
+            agent_config: step.agent_config.into(),
+            is_final: step.is_final,
+            transitions_to: step.transitions_to.iter().map(|t| t.id.to_raw()).collect(),
+            order: step.order,
+            created_at: step.created_at.map(|dt| dt.to_rfc3339()),
+            updated_at: step.updated_at.map(|dt| dt.to_rfc3339()),
+        }
+    }
+}
+
 /// Workflow - mirrors db::Workflow
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct Workflow {
@@ -483,8 +522,10 @@ pub struct Workflow {
     pub name: String,
     /// Optional description of the workflow
     pub description: Option<String>,
-    /// Ordered list of workflow steps
+    /// Ordered list of workflow steps (legacy embedded steps)
     pub steps: Vec<WorkflowStep>,
+    /// Reference to the initial step in the workflow (new first-class steps)
+    pub initial_step: Option<String>,
     /// Additional metadata as key-value pairs
     pub metadata: std::collections::HashMap<String, String>,
     /// Workflow to assign to task when completing the last step
@@ -504,6 +545,7 @@ impl From<vertebrae_db::Workflow> for Workflow {
             name: workflow.name,
             description: workflow.description,
             steps: workflow.steps.into_iter().map(Into::into).collect(),
+            initial_step: workflow.initial_step.map(|t| t.id.to_raw()),
             metadata: workflow.metadata,
             on_done_workflow: workflow.on_done_workflow,
             on_reject_workflow: workflow.on_reject_workflow,
