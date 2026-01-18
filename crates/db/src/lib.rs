@@ -152,6 +152,11 @@ impl Database {
         StepExecutionRepository::new(&self.client)
     }
 
+    /// Get a step repository for CRUD operations on first-class workflow steps.
+    pub fn steps(&self) -> StepRepository<'_> {
+        StepRepository::new(&self.client)
+    }
+
     /// Get a chat session repository for managing PTY chat sessions.
     pub fn chat_sessions(&self) -> ChatSessionRepository<'_> {
         ChatSessionRepository::new(&self.client)
