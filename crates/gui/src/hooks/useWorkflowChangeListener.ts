@@ -15,6 +15,16 @@ function getWorkflowChangeMessage(changeType: WorkflowChangeType, workflowId: st
       return `Workflow ${shortId} updated`;
     case "Deleted":
       return `Workflow ${shortId} deleted`;
+    case "TaskAssigned":
+      return `Task assigned to workflow ${shortId}`;
+    case "TaskUnassigned":
+      return `Task unassigned from workflow`;
+    case "StepAdvanced":
+      return `Task advanced in workflow ${shortId}`;
+    case "StepRetreated":
+      return `Task retreated in workflow ${shortId}`;
+    case "TaskRejected":
+      return `Task rejected from workflow ${shortId}`;
   }
 }
 

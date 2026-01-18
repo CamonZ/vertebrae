@@ -672,7 +672,27 @@ updated_at: string | null }
 /**
  * The type of change that occurred on a workflow.
  */
-export type WorkflowChangeType = "Created" | "Updated" | "Deleted"
+export type WorkflowChangeType = "Created" | "Updated" | "Deleted" | 
+/**
+ * A task was assigned to this workflow
+ */
+"TaskAssigned" | 
+/**
+ * A task was unassigned from a workflow
+ */
+"TaskUnassigned" | 
+/**
+ * A task advanced to the next step in the workflow
+ */
+"StepAdvanced" | 
+/**
+ * A task retreated to a previous step in the workflow
+ */
+"StepRetreated" | 
+/**
+ * A task was rejected from the workflow
+ */
+"TaskRejected"
 /**
  * Event payload for workflow changes.
  * Emitted when a workflow is created, updated, or deleted.

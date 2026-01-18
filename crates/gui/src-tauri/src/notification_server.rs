@@ -161,6 +161,11 @@ async fn handle_notify_change(
             "Created" => WorkflowChangeType::Created,
             "Updated" => WorkflowChangeType::Updated,
             "Deleted" => WorkflowChangeType::Deleted,
+            "TaskAssigned" => WorkflowChangeType::TaskAssigned,
+            "TaskUnassigned" => WorkflowChangeType::TaskUnassigned,
+            "StepAdvanced" => WorkflowChangeType::StepAdvanced,
+            "StepRetreated" => WorkflowChangeType::StepRetreated,
+            "TaskRejected" => WorkflowChangeType::TaskRejected,
             other => {
                 return Err(ErrorResponse {
                     error: format!("Unknown workflow change type: {}", other),
