@@ -17,10 +17,10 @@ pub use models::{
 };
 pub use repository::{
     BlockerNode, ChatSessionRepository, DEFAULT_WORKFLOW_ID, GraphQueries, MigrationResult,
-    Progress, RelationshipRepository, SectionRule, StepExecutionRepository, TaskFilter, TaskLister,
-    TaskRepository, TaskSummary, TaskUpdate, TaskWithRelationsData, TriageValidationConfig,
-    TriageValidationResult, TriageValidator, ValidationIssue, ValidationSeverity,
-    WorkflowRepository, WorkflowUpdate,
+    Progress, RelationshipRepository, SectionRule, StepExecutionRepository, StepRepository,
+    StepUpdate, TaskFilter, TaskLister, TaskRepository, TaskSummary, TaskUpdate,
+    TaskWithRelationsData, TriageValidationConfig, TriageValidationResult, TriageValidator,
+    ValidationIssue, ValidationSeverity, WorkflowRepository, WorkflowUpdate,
 };
 
 use std::path::{Path, PathBuf};
