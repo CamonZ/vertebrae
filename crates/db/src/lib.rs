@@ -12,12 +12,13 @@ pub use error::{DbError, DbResult, IncompleteChildInfo};
 #[allow(unused_imports)]
 pub use models::{
     AgentConfig, ChatMessage, ChatSession, CodeRef, ExecutionStatus, Level, PermissionMode,
-    Priority, Section, SectionType, SessionLog, Status, Step, StepExecution, Task, Workflow,
-    WorkflowStep,
+    Priority, Section, SectionType, SessionLog, Status, StatusDefinition, StatusProgression,
+    StatusSchema, Step, StepExecution, Task, Workflow, WorkflowStep,
 };
 pub use repository::{
-    BlockerNode, ChatSessionRepository, DEFAULT_WORKFLOW_ID, GraphQueries, MigrationResult,
-    Progress, RelationshipRepository, SectionRule, StepExecutionRepository, StepRepository,
+    BlockerNode, ChatSessionRepository, DEFAULT_STATUS_SCHEMA_ID, DEFAULT_WORKFLOW_ID,
+    GraphQueries, MigrationResult, Progress, RelationshipRepository, SectionRule,
+    StatusSchemaRepository, StatusSchemaUpdate, StepExecutionRepository, StepRepository,
     StepUpdate, TaskFilter, TaskLister, TaskRepository, TaskSummary, TaskUpdate,
     TaskWithRelationsData, TriageValidationConfig, TriageValidationResult, TriageValidator,
     ValidationIssue, ValidationSeverity, WorkflowRepository, WorkflowUpdate,
@@ -105,7 +106,8 @@ impl Database {
     /// Initialize the database schema.
     ///
     /// Sets up the namespace and database for Vertebrae operations,
-    /// then initializes the task table, graph relations, and default workflow.
+    /// then initializes the task table, graph relations, default workflow,
+    /// and default status schema.
     ///
     /// # Errors
     ///
@@ -123,6 +125,9 @@ impl Database {
 
         // Create the default workflow if it doesn't exist
         self.workflows().create_default_workflow().await?;
+
+        // Create the default status schema if it doesn't exist
+        self.status_schemas().create_default_schema().await?;
 
         Ok(())
     }
@@ -160,6 +165,11 @@ impl Database {
     /// Get a chat session repository for managing PTY chat sessions.
     pub fn chat_sessions(&self) -> ChatSessionRepository<'_> {
         ChatSessionRepository::new(&self.client)
+    }
+
+    /// Get a status schema repository for CRUD operations on status schemas.
+    pub fn status_schemas(&self) -> StatusSchemaRepository<'_> {
+        StatusSchemaRepository::new(&self.client)
     }
 
     /// Get a task lister for filtering and listing tasks.
@@ -499,6 +509,65 @@ mod tests {
         let result = Database::prepare_path(&temp_dir);
         assert!(result.is_ok());
         assert!(temp_dir.exists());
+
+        // Clean up
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_init_creates_default_status_schema() {
+        // Create a temporary directory for testing
+        let temp_dir =
+            env::temp_dir().join(format!("vtb-test-status-schema-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&temp_dir);
+
+        let db = Database::connect(&temp_dir).await.unwrap();
+        db.init().await.unwrap();
+
+        // Verify the default status schema was created
+        let schema = db
+            .status_schemas()
+            .get(DEFAULT_STATUS_SCHEMA_ID)
+            .await
+            .unwrap();
+        assert!(schema.is_some());
+
+        let schema = schema.unwrap();
+        assert_eq!(schema.name, "default");
+        assert!(schema.is_default);
+
+        // Verify it has the expected statuses (no 'todo')
+        let status_names: Vec<&str> = schema.statuses.iter().map(|s| s.name.as_str()).collect();
+        assert!(status_names.contains(&"backlog"));
+        assert!(status_names.contains(&"in_progress"));
+        assert!(status_names.contains(&"pending_review"));
+        assert!(status_names.contains(&"done"));
+        assert!(status_names.contains(&"rejected"));
+        assert!(!status_names.contains(&"todo"));
+
+        // Clean up
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_init_is_idempotent_for_status_schema() {
+        // Create a temporary directory for testing
+        let temp_dir = env::temp_dir().join(format!("vtb-test-idempotent-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&temp_dir);
+
+        let db = Database::connect(&temp_dir).await.unwrap();
+
+        // First init
+        db.init().await.unwrap();
+
+        // Second init should not fail
+        let result = db.init().await;
+        assert!(result.is_ok(), "Second init failed: {:?}", result.err());
+
+        // Should still have exactly one default schema
+        let schemas = db.status_schemas().list().await.unwrap();
+        let default_count = schemas.iter().filter(|s| s.is_default).count();
+        assert_eq!(default_count, 1);
 
         // Clean up
         let _ = std::fs::remove_dir_all(&temp_dir);

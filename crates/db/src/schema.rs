@@ -156,6 +156,29 @@ mod sql {
 
         DEFINE FIELD created_at ON chat_message TYPE datetime DEFAULT time::now();
     "#;
+
+    /// Define the status_schema table for configurable status definitions
+    ///
+    /// StatusSchema is the single source of truth for what statuses exist
+    /// and how tasks can transition between them. The default schema is
+    /// created on database initialization.
+    pub const DEFINE_STATUS_SCHEMA_TABLE: &str = r#"
+        DEFINE TABLE IF NOT EXISTS status_schema SCHEMAFULL;
+
+        DEFINE FIELD name ON status_schema TYPE string;
+
+        DEFINE FIELD description ON status_schema TYPE option<string>;
+
+        DEFINE FIELD is_default ON status_schema TYPE bool DEFAULT false;
+
+        DEFINE FIELD statuses ON status_schema FLEXIBLE TYPE array<object> DEFAULT [];
+
+        DEFINE FIELD progressions ON status_schema FLEXIBLE TYPE array<object> DEFAULT [];
+
+        DEFINE FIELD created_at ON status_schema TYPE datetime DEFAULT time::now();
+
+        DEFINE FIELD updated_at ON status_schema TYPE datetime DEFAULT time::now();
+    "#;
 }
 
 /// Backfill section order values for existing sections with order: None.
@@ -215,8 +238,8 @@ async fn backfill_section_orders(client: &Surreal<Db>) -> Result<(), DbError> {
 /// Initialize the database schema.
 ///
 /// Creates the task table, workflow table, step table, step_execution table, session_log table,
-/// chat_session table, chat_message table, child_of relation, and depends_on relation
-/// with all required fields and constraints.
+/// chat_session table, chat_message table, status_schema table, child_of relation,
+/// and depends_on relation with all required fields and constraints.
 ///
 /// This function is idempotent - it can be called multiple times safely
 /// as it uses `IF NOT EXISTS` clauses.
@@ -280,6 +303,12 @@ pub async fn init_schema(client: &Surreal<Db>) -> Result<(), DbError> {
     // Define the chat_message table for storing conversation history
     client
         .query(sql::DEFINE_CHAT_MESSAGE_TABLE)
+        .await
+        .map_err(|e| DbError::Schema(Box::new(e)))?;
+
+    // Define the status_schema table for configurable status definitions
+    client
+        .query(sql::DEFINE_STATUS_SCHEMA_TABLE)
         .await
         .map_err(|e| DbError::Schema(Box::new(e)))?;
 
@@ -2564,5 +2593,206 @@ mod tests {
         let rows: Vec<FinalRow> = result.take(0).unwrap();
         assert_eq!(rows.len(), 1, "Should have 1 final step");
         assert_eq!(rows[0].name, "Is Final");
+    }
+
+    // StatusSchema table tests
+    #[test]
+    fn test_status_schema_sql_constant_defined() {
+        assert!(!sql::DEFINE_STATUS_SCHEMA_TABLE.is_empty());
+    }
+
+    #[test]
+    fn test_status_schema_sql_contains_expected_definitions() {
+        assert!(sql::DEFINE_STATUS_SCHEMA_TABLE.contains("DEFINE TABLE"));
+        assert!(sql::DEFINE_STATUS_SCHEMA_TABLE.contains("status_schema"));
+        assert!(sql::DEFINE_STATUS_SCHEMA_TABLE.contains("SCHEMAFULL"));
+        assert!(sql::DEFINE_STATUS_SCHEMA_TABLE.contains("name"));
+        assert!(sql::DEFINE_STATUS_SCHEMA_TABLE.contains("description"));
+        assert!(sql::DEFINE_STATUS_SCHEMA_TABLE.contains("is_default"));
+        assert!(sql::DEFINE_STATUS_SCHEMA_TABLE.contains("statuses"));
+        assert!(sql::DEFINE_STATUS_SCHEMA_TABLE.contains("progressions"));
+        assert!(sql::DEFINE_STATUS_SCHEMA_TABLE.contains("created_at"));
+        assert!(sql::DEFINE_STATUS_SCHEMA_TABLE.contains("updated_at"));
+    }
+
+    #[tokio::test]
+    async fn test_status_schema_table_accepts_valid_data() {
+        let client = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // Insert a valid status schema
+        let result = client
+            .query(
+                r#"
+                CREATE status_schema SET
+                    name = "default",
+                    description = "Default status schema",
+                    is_default = true,
+                    statuses = [
+                        {
+                            name: "backlog",
+                            label: "Backlog",
+                            description: "Items waiting to be prioritized",
+                            color: "gray",
+                            is_terminal: false,
+                            unblocks_dependents: false,
+                            order: 0
+                        },
+                        {
+                            name: "done",
+                            label: "Done",
+                            description: "Completed",
+                            color: "green",
+                            is_terminal: true,
+                            unblocks_dependents: true,
+                            order: 1
+                        }
+                    ],
+                    progressions = [
+                        {
+                            from_status: "backlog",
+                            to_status: "done",
+                            label: "Complete",
+                            requires_validation: false
+                        }
+                    ]
+            "#,
+            )
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "Valid status schema insert failed: {:?}",
+            result.err()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_status_schema_table_accepts_minimal_data() {
+        let client = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // Insert with only required field (name)
+        let result = client
+            .query(
+                r#"
+                CREATE status_schema SET
+                    name = "minimal"
+            "#,
+            )
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "Minimal status schema insert failed: {:?}",
+            result.err()
+        );
+
+        // Verify defaults were applied
+        #[derive(Debug, serde::Deserialize)]
+        struct SchemaRow {
+            name: String,
+            is_default: bool,
+            statuses: Vec<serde_json::Value>,
+            progressions: Vec<serde_json::Value>,
+        }
+
+        let mut result = client
+            .query("SELECT name, is_default, statuses, progressions FROM status_schema WHERE name = 'minimal'")
+            .await
+            .unwrap();
+
+        let row: Option<SchemaRow> = result.take(0).unwrap();
+        let row = row.expect("Schema should exist");
+
+        assert_eq!(row.name, "minimal");
+        assert!(!row.is_default, "is_default should default to false");
+        assert!(row.statuses.is_empty(), "statuses should default to empty");
+        assert!(
+            row.progressions.is_empty(),
+            "progressions should default to empty"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_status_schema_timestamps_auto_populated() {
+        let client = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // Create schema without timestamps
+        client
+            .query(
+                r#"
+                CREATE status_schema:timestamps_test SET
+                    name = "timestamp_test"
+            "#,
+            )
+            .await
+            .unwrap();
+
+        // Verify timestamps were auto-populated
+        #[derive(Debug, serde::Deserialize)]
+        struct TimestampRow {
+            created_at: String,
+            updated_at: String,
+        }
+
+        let mut result = client
+            .query("SELECT created_at, updated_at FROM status_schema:timestamps_test")
+            .await
+            .unwrap();
+
+        let row: Option<TimestampRow> = result.take(0).unwrap();
+        let row = row.expect("Schema should exist");
+
+        assert!(
+            !row.created_at.is_empty(),
+            "created_at should be auto-populated"
+        );
+        assert!(
+            !row.updated_at.is_empty(),
+            "updated_at should be auto-populated"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_status_schema_can_have_multiple_schemas() {
+        let client = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // Create multiple schemas
+        client
+            .query(
+                r#"
+                CREATE status_schema:agile SET
+                    name = "agile",
+                    is_default = false;
+                CREATE status_schema:kanban SET
+                    name = "kanban",
+                    is_default = false;
+                CREATE status_schema:default SET
+                    name = "default",
+                    is_default = true
+            "#,
+            )
+            .await
+            .unwrap();
+
+        // Query all schemas
+        let mut result = client
+            .query("SELECT name FROM status_schema ORDER BY name")
+            .await
+            .unwrap();
+
+        #[derive(Debug, serde::Deserialize)]
+        struct NameRow {
+            name: String,
+        }
+
+        let rows: Vec<NameRow> = result.take(0).unwrap();
+        assert_eq!(rows.len(), 3, "Should have 3 schemas");
+        assert_eq!(rows[0].name, "agile");
+        assert_eq!(rows[1].name, "default");
+        assert_eq!(rows[2].name, "kanban");
     }
 }

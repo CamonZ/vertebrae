@@ -91,6 +91,14 @@ impl From<surrealdb::Error> for DbError {
     }
 }
 
+impl From<serde_json::Error> for DbError {
+    fn from(err: serde_json::Error) -> Self {
+        DbError::ValidationError {
+            message: format!("JSON serialization error: {}", err),
+        }
+    }
+}
+
 impl DbError {
     /// Get the full error message including nested SurrealDB error details.
     ///
