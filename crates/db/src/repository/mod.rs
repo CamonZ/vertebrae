@@ -24,4 +24,6 @@ pub use validation::{
     SectionRule, TriageValidationConfig, TriageValidationResult, TriageValidator, ValidationIssue,
     ValidationSeverity,
 };
-pub use workflow::{DEFAULT_WORKFLOW_ID, MigrationResult, WorkflowRepository, WorkflowUpdate};
+pub use workflow::{
+    DEFAULT_WORKFLOW_ID, MigrationResult, StepMigrationResult, WorkflowRepository, WorkflowUpdate,
+};
