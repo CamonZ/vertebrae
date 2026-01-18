@@ -46,6 +46,8 @@ mod sql {
         DEFINE FIELD workflow_id ON task TYPE option<record<workflow>>;
 
         DEFINE FIELD current_step ON task TYPE option<int>;
+
+        DEFINE FIELD current_step_id ON task TYPE option<record<step>>;
     "#;
 
     /// Define the child_of relation table for hierarchy edges
@@ -709,6 +711,7 @@ mod tests {
         assert!(sql::DEFINE_TASK_TABLE.contains("title"));
         assert!(sql::DEFINE_TASK_TABLE.contains("level"));
         assert!(sql::DEFINE_TASK_TABLE.contains("status"));
+        assert!(sql::DEFINE_TASK_TABLE.contains("current_step_id"));
 
         assert!(sql::DEFINE_CHILD_OF_RELATION.contains("RELATION"));
         assert!(sql::DEFINE_CHILD_OF_RELATION.contains("child_of"));
@@ -955,6 +958,169 @@ mod tests {
             .unwrap();
         let row: Option<DatetimeRow> = result.take(0).unwrap();
         assert!(row.is_some(), "started_at should be set after update");
+    }
+
+    #[tokio::test]
+    async fn test_task_with_current_step_id() {
+        let client = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // Create workflow and step first
+        client
+            .query(
+                r#"
+                CREATE workflow:step_ref_test SET
+                    name = "Step Reference Test";
+                CREATE step:test_step SET
+                    name = "Test Step",
+                    workflow_id = workflow:step_ref_test,
+                    order = 0
+            "#,
+            )
+            .await
+            .unwrap();
+
+        // Create task with current_step_id referencing a step
+        let result = client
+            .query(
+                r#"
+                CREATE task:with_step_id SET
+                    title = "Task with Step ID",
+                    level = "task",
+                    status = "in_progress",
+                    workflow_id = workflow:step_ref_test,
+                    current_step_id = step:test_step
+            "#,
+            )
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "Task with current_step_id should succeed: {:?}",
+            result.err()
+        );
+
+        // Verify current_step_id is set
+        #[derive(Debug, serde::Deserialize)]
+        struct StepIdRow {
+            current_step_id: Option<surrealdb::sql::Thing>,
+        }
+
+        let mut query_result = client
+            .query("SELECT current_step_id FROM task:with_step_id")
+            .await
+            .unwrap();
+
+        let row: Option<StepIdRow> = query_result.take(0).unwrap();
+        let row = row.expect("Task should exist");
+        assert!(
+            row.current_step_id.is_some(),
+            "current_step_id should be set"
+        );
+        assert_eq!(
+            row.current_step_id.unwrap().to_string(),
+            "step:test_step",
+            "current_step_id should reference the correct step"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_task_current_step_id_defaults_to_none() {
+        let client = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // Create task without current_step_id
+        client
+            .query(
+                r#"
+                CREATE task:no_step_id SET
+                    title = "Task without Step ID",
+                    level = "task",
+                    status = "todo"
+            "#,
+            )
+            .await
+            .unwrap();
+
+        // Verify current_step_id is None by default
+        #[derive(Debug, serde::Deserialize)]
+        struct StepIdRow {
+            current_step_id: Option<surrealdb::sql::Thing>,
+        }
+
+        let mut query_result = client
+            .query("SELECT current_step_id FROM task:no_step_id")
+            .await
+            .unwrap();
+
+        let row: Option<StepIdRow> = query_result.take(0).unwrap();
+        let row = row.expect("Task should exist");
+        assert!(
+            row.current_step_id.is_none(),
+            "current_step_id should be None by default"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_task_can_have_both_step_fields() {
+        let client = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // Create workflow and step
+        client
+            .query(
+                r#"
+                CREATE workflow:both_fields SET
+                    name = "Both Fields Test";
+                CREATE step:both_step SET
+                    name = "Both Step",
+                    workflow_id = workflow:both_fields,
+                    order = 0
+            "#,
+            )
+            .await
+            .unwrap();
+
+        // Create task with both current_step (legacy) and current_step_id (new)
+        let result = client
+            .query(
+                r#"
+                CREATE task:both_steps SET
+                    title = "Task with Both Step Fields",
+                    level = "task",
+                    status = "in_progress",
+                    workflow_id = workflow:both_fields,
+                    current_step = 0,
+                    current_step_id = step:both_step
+            "#,
+            )
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "Task with both step fields should succeed: {:?}",
+            result.err()
+        );
+
+        // Verify both fields are set
+        #[derive(Debug, serde::Deserialize)]
+        struct BothRow {
+            current_step: Option<i32>,
+            current_step_id: Option<surrealdb::sql::Thing>,
+        }
+
+        let mut query_result = client
+            .query("SELECT current_step, current_step_id FROM task:both_steps")
+            .await
+            .unwrap();
+
+        let row: Option<BothRow> = query_result.take(0).unwrap();
+        let row = row.expect("Task should exist");
+        assert_eq!(row.current_step, Some(0), "current_step should be 0");
+        assert!(
+            row.current_step_id.is_some(),
+            "current_step_id should be set"
+        );
     }
 
     // Workflow schema tests
