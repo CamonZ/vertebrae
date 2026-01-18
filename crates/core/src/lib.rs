@@ -43,6 +43,7 @@
 pub mod error;
 pub mod id_generator;
 pub mod service;
+pub mod step_service;
 pub mod workflow_service;
 
 // Re-export main types for convenience
@@ -52,6 +53,7 @@ pub use service::{
     TaskTreeNode, TaskWithRelations, TransitionResult, TreeFilterOptions, UnblockedTask,
     UpdateTaskOptions,
 };
+pub use step_service::{DefaultStepService, StepService};
 pub use workflow_service::{
     AssignResult, CreateWorkflowOptions, DefaultWorkflowService, MigrationResult, RejectResult,
     StepTransitionResult, UpdateWorkflowOptions, WorkflowInfo, WorkflowMutationCallback,
@@ -60,6 +62,6 @@ pub use workflow_service::{
 
 // Re-export commonly used types from vertebrae-db
 pub use vertebrae_db::{
-    BlockerNode, CodeRef, Database, Level, Priority, Section, SectionType, Status, Task,
-    TaskFilter, TaskSummary, TaskUpdate, Workflow, WorkflowStep,
+    BlockerNode, CodeRef, Database, Level, Priority, Section, SectionType, Status, Step,
+    StepUpdate, Task, TaskFilter, TaskSummary, TaskUpdate, Workflow, WorkflowStep,
 };
