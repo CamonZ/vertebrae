@@ -68,6 +68,8 @@ mod sql {
 
         DEFINE FIELD steps ON workflow FLEXIBLE TYPE array<object> DEFAULT [];
 
+        DEFINE FIELD initial_step ON workflow TYPE option<record<step>>;
+
         DEFINE FIELD metadata ON workflow FLEXIBLE TYPE object DEFAULT {};
 
         DEFINE FIELD on_done_workflow ON workflow TYPE option<string>;
@@ -969,6 +971,7 @@ mod tests {
         assert!(sql::DEFINE_WORKFLOW_TABLE.contains("name"));
         assert!(sql::DEFINE_WORKFLOW_TABLE.contains("description"));
         assert!(sql::DEFINE_WORKFLOW_TABLE.contains("steps"));
+        assert!(sql::DEFINE_WORKFLOW_TABLE.contains("initial_step"));
         assert!(sql::DEFINE_WORKFLOW_TABLE.contains("metadata"));
         assert!(sql::DEFINE_WORKFLOW_TABLE.contains("created_at"));
         assert!(sql::DEFINE_WORKFLOW_TABLE.contains("updated_at"));
@@ -1304,6 +1307,107 @@ mod tests {
         let row: Option<DescRow> = query_result.take(0).unwrap();
         let row = row.expect("Workflow should exist");
         assert!(row.description.is_none(), "description should be null");
+    }
+
+    #[tokio::test]
+    async fn test_workflow_with_initial_step() {
+        let client = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // Create workflow first
+        client
+            .query(
+                r#"
+                CREATE workflow:with_initial SET
+                    name = "Workflow with Initial Step"
+            "#,
+            )
+            .await
+            .unwrap();
+
+        // Create a step for the workflow
+        client
+            .query(
+                r#"
+                CREATE step:first_step SET
+                    name = "First Step",
+                    workflow_id = workflow:with_initial,
+                    order = 0
+            "#,
+            )
+            .await
+            .unwrap();
+
+        // Update workflow to set initial_step
+        let result = client
+            .query(
+                r#"
+                UPDATE workflow:with_initial SET
+                    initial_step = step:first_step
+            "#,
+            )
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "Setting initial_step should succeed: {:?}",
+            result.err()
+        );
+
+        // Verify initial_step is set
+        #[derive(Debug, serde::Deserialize)]
+        struct InitialStepRow {
+            initial_step: Option<surrealdb::sql::Thing>,
+        }
+
+        let mut query_result = client
+            .query("SELECT initial_step FROM workflow:with_initial")
+            .await
+            .unwrap();
+
+        let row: Option<InitialStepRow> = query_result.take(0).unwrap();
+        let row = row.expect("Workflow should exist");
+        assert!(row.initial_step.is_some(), "initial_step should be set");
+        assert_eq!(
+            row.initial_step.unwrap().to_string(),
+            "step:first_step",
+            "initial_step should reference the correct step"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_workflow_initial_step_defaults_to_none() {
+        let client = setup_test_db().await;
+        init_schema(&client).await.unwrap();
+
+        // Create workflow without initial_step
+        client
+            .query(
+                r#"
+                CREATE workflow:no_initial SET
+                    name = "Workflow without Initial Step"
+            "#,
+            )
+            .await
+            .unwrap();
+
+        // Verify initial_step is None by default
+        #[derive(Debug, serde::Deserialize)]
+        struct InitialStepRow {
+            initial_step: Option<surrealdb::sql::Thing>,
+        }
+
+        let mut query_result = client
+            .query("SELECT initial_step FROM workflow:no_initial")
+            .await
+            .unwrap();
+
+        let row: Option<InitialStepRow> = query_result.take(0).unwrap();
+        let row = row.expect("Workflow should exist");
+        assert!(
+            row.initial_step.is_none(),
+            "initial_step should be None by default"
+        );
     }
 
     // ========================================
