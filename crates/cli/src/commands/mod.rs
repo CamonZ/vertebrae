@@ -963,12 +963,12 @@ mod tests {
 
     #[test]
     fn test_command_transition_to_parses() {
-        let cli = TestCli::try_parse_from(["test", "transition-to", "abc123", "in_progress"]);
+        let cli = TestCli::try_parse_from(["test", "transition-to", "abc123", "default"]);
         assert!(cli.is_ok());
         match cli.unwrap().command {
             Command::TransitionTo(cmd) => {
                 assert_eq!(cmd.id, "abc123");
-                assert_eq!(cmd.target, transition_to::TargetStatus::InProgress);
+                assert_eq!(cmd.target, "default");
             }
             _ => panic!("Expected TransitionTo command"),
         }
@@ -987,9 +987,9 @@ mod tests {
     }
 
     #[test]
-    fn test_command_transition_to_all_targets() {
-        // Test all valid target values
-        let targets = ["in_progress", "pending_review", "done", "rejected"];
+    fn test_command_transition_to_workflow_targets() {
+        // Test valid workflow names as targets
+        let targets = ["default", "implementation", "review", "backlog:todo"];
         for target in targets {
             let cli = TestCli::try_parse_from(["test", "transition-to", "abc123", target]);
             assert!(cli.is_ok(), "Failed to parse target: {}", target);
@@ -997,46 +997,31 @@ mod tests {
     }
 
     #[test]
-    fn test_command_transition_to_invalid_target() {
-        let result = TestCli::try_parse_from(["test", "transition-to", "abc123", "invalid"]);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_command_transition_to_with_reason() {
-        let cli = TestCli::try_parse_from([
-            "test",
-            "transition-to",
-            "abc123",
-            "rejected",
-            "--reason",
-            "Out of scope",
-        ]);
+    fn test_command_transition_to_with_step() {
+        let cli = TestCli::try_parse_from(["test", "transition-to", "abc123", "review:approved"]);
         assert!(cli.is_ok());
         match cli.unwrap().command {
             Command::TransitionTo(cmd) => {
                 assert_eq!(cmd.id, "abc123");
-                assert_eq!(cmd.target, transition_to::TargetStatus::Rejected);
-                assert_eq!(cmd.reason, Some("Out of scope".to_string()));
+                assert_eq!(cmd.target, "review:approved");
             }
             _ => panic!("Expected TransitionTo command"),
         }
     }
 
     #[test]
-    fn test_command_transition_to_with_short_reason() {
+    fn test_command_transition_to_with_skip_validation() {
         let cli = TestCli::try_parse_from([
             "test",
             "transition-to",
             "abc123",
-            "rejected",
-            "-r",
-            "Reason",
+            "implementation",
+            "--skip-validation",
         ]);
         assert!(cli.is_ok());
         match cli.unwrap().command {
             Command::TransitionTo(cmd) => {
-                assert_eq!(cmd.reason, Some("Reason".to_string()));
+                assert!(cmd.skip_validation);
             }
             _ => panic!("Expected TransitionTo command"),
         }
@@ -1044,8 +1029,7 @@ mod tests {
 
     #[test]
     fn test_command_transition_to_debug() {
-        let cli =
-            TestCli::try_parse_from(["test", "transition-to", "test123", "in_progress"]).unwrap();
+        let cli = TestCli::try_parse_from(["test", "transition-to", "test123", "default"]).unwrap();
         let debug_str = format!("{:?}", cli.command);
         assert!(
             debug_str.contains("TransitionTo") && debug_str.contains("test123"),

@@ -11,7 +11,6 @@ use vertebrae_cli::commands::{
     ListCommand, PathCommand, ReadyCommand, RefCommand, SectionCommand, ShowCommand,
     StepDoneCommand, TransitionToCommand, UndependCommand, UnrefCommand, UnsectionCommand,
     UpdateCommand,
-    transition_to::TargetStatus,
     workflow::{
         ParsedStep, WorkflowAddCommand, WorkflowAdvanceCommand, WorkflowAssignCommand,
         WorkflowDeleteCommand, WorkflowListCommand, WorkflowRejectCommand, WorkflowRetreatCommand,
@@ -154,13 +153,12 @@ pub fn add_cmd_full(
     }
 }
 
-/// Create a transition-to command for triage (backlog -> todo).
+/// Create a transition-to command for triage (backlog -> in_progress).
 /// By default skips validation for test convenience. Use `triage_cmd_with_validation` for validation tests.
 pub fn triage_cmd(id: &str) -> TransitionToCommand {
     TransitionToCommand {
         id: id.to_string(),
-        target: TargetStatus::InProgress,
-        reason: None,
+        target: "default:in_progress".to_string(),
         force: false,
         skip_validation: true, // Skip validation by default for existing tests
     }
@@ -171,8 +169,7 @@ pub fn triage_cmd(id: &str) -> TransitionToCommand {
 pub fn triage_cmd_with_validation(id: &str) -> TransitionToCommand {
     TransitionToCommand {
         id: id.to_string(),
-        target: TargetStatus::InProgress,
-        reason: None,
+        target: "default:in_progress".to_string(),
         force: false,
         skip_validation: false,
     }
@@ -183,8 +180,7 @@ pub fn triage_cmd_with_validation(id: &str) -> TransitionToCommand {
 pub fn triage_cmd_force(id: &str) -> TransitionToCommand {
     TransitionToCommand {
         id: id.to_string(),
-        target: TargetStatus::InProgress,
-        reason: None,
+        target: "default:in_progress".to_string(),
         force: true,
         skip_validation: false,
     }
@@ -194,8 +190,7 @@ pub fn triage_cmd_force(id: &str) -> TransitionToCommand {
 pub fn start_cmd(id: &str) -> TransitionToCommand {
     TransitionToCommand {
         id: id.to_string(),
-        target: TargetStatus::InProgress,
-        reason: None,
+        target: "default:in_progress".to_string(),
         force: false,
         skip_validation: false,
     }
@@ -205,8 +200,7 @@ pub fn start_cmd(id: &str) -> TransitionToCommand {
 pub fn submit_cmd(id: &str) -> TransitionToCommand {
     TransitionToCommand {
         id: id.to_string(),
-        target: TargetStatus::PendingReview,
-        reason: None,
+        target: "default:pending_review".to_string(),
         force: false,
         skip_validation: false,
     }
@@ -216,31 +210,29 @@ pub fn submit_cmd(id: &str) -> TransitionToCommand {
 pub fn done_cmd(id: &str) -> TransitionToCommand {
     TransitionToCommand {
         id: id.to_string(),
-        target: TargetStatus::Done,
-        reason: None,
+        target: "default:done".to_string(),
         force: false,
         skip_validation: false,
     }
 }
 
-/// Create a transition-to command for reject (todo -> rejected).
+/// Create a transition-to command for reject.
 pub fn reject_cmd(id: &str) -> TransitionToCommand {
     TransitionToCommand {
         id: id.to_string(),
-        target: TargetStatus::Rejected,
-        reason: None,
+        target: "default:rejected".to_string(),
         force: false,
         skip_validation: true, // Skip validation by default for basic transition tests
     }
 }
 
-/// Create a transition-to command for reject with reason.
+/// Create a transition-to command for reject (alias without reason, reason no longer supported).
 #[allow(dead_code)]
-pub fn reject_cmd_with_reason(id: &str, reason: &str) -> TransitionToCommand {
+pub fn reject_cmd_with_reason(id: &str, _reason: &str) -> TransitionToCommand {
+    // Note: reason field is no longer supported in workflow-based transitions
     TransitionToCommand {
         id: id.to_string(),
-        target: TargetStatus::Rejected,
-        reason: Some(reason.to_string()),
+        target: "default:rejected".to_string(),
         force: false,
         skip_validation: false,
     }

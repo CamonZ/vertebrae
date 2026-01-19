@@ -1,74 +1,59 @@
-//! Transition-to command for all state transitions
+//! Transition-to command for workflow-based transitions
 //!
-//! Implements the `vtb transition-to` command to handle all task state transitions
-//! with proper validation. This consolidates the functionality of start, submit,
-//! done, triage, and reject commands into a single unified interface.
+//! Implements the `vtb transition-to` command to transition tasks between workflows
+//! and steps. Validates transitions against the workflow_transitions edge table.
 
-use clap::{Args, ValueEnum};
-use vertebrae_core::ServiceError;
-use vertebrae_db::TriageValidationResult;
+use clap::Args;
+use vertebrae_core::{ServiceError, TaskService};
 
-/// Target status for the transition-to command
-#[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
-pub enum TargetStatus {
-    /// Transition to in_progress status (from backlog or pending_review)
-    #[value(name = "in_progress")]
-    InProgress,
-    /// Transition to pending_review status (from in_progress)
-    #[value(name = "pending_review")]
-    PendingReview,
-    /// Transition to done status (from pending_review)
-    Done,
-    /// Transition to rejected status (from backlog or in_progress)
-    Rejected,
-}
-
-impl TargetStatus {
-    /// Get the string representation for the status
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            TargetStatus::InProgress => "in_progress",
-            TargetStatus::PendingReview => "pending_review",
-            TargetStatus::Done => "done",
-            TargetStatus::Rejected => "rejected",
-        }
-    }
-
-    /// Get the default workflow step index for this target status.
-    ///
-    /// Returns None for Rejected since it's not part of the standard workflow.
-    pub fn default_step_index(&self) -> Option<usize> {
-        match self {
-            TargetStatus::InProgress => Some(1),
-            TargetStatus::PendingReview => Some(2),
-            TargetStatus::Done => Some(3),
-            TargetStatus::Rejected => None,
-        }
-    }
-}
-
-/// Transition a task to a specific status
+/// Transition a task to a workflow/step
 #[derive(Debug, Args)]
 pub struct TransitionToCommand {
     /// Task ID to transition (case-insensitive)
     #[arg(required = true)]
     pub id: String,
 
-    /// Target status to transition to
-    #[arg(required = true, value_enum)]
-    pub target: TargetStatus,
-
-    /// Optional reason for rejection (only used with 'rejected' target)
-    #[arg(short, long)]
-    pub reason: Option<String>,
+    /// Target workflow or workflow:step (e.g., 'implementation' or 'review:approved')
+    #[arg(required = true)]
+    pub target: String,
 
     /// Override warnings (but not errors) when transitioning
     #[arg(short, long)]
     pub force: bool,
 
-    /// Bypass all validation when transitioning (escape hatch)
+    /// Bypass workflow transition validation (escape hatch)
     #[arg(long)]
     pub skip_validation: bool,
+}
+
+/// Parsed target representing either a workflow or workflow:step combination
+#[derive(Debug, Clone)]
+pub struct ParsedTarget {
+    /// The target workflow name or ID
+    pub workflow: String,
+    /// Optional target step name within the workflow
+    pub step: Option<String>,
+}
+
+impl ParsedTarget {
+    /// Parse a target string into workflow and optional step.
+    ///
+    /// Formats:
+    /// - "workflow" -> workflow only, use initial step
+    /// - "workflow:step" -> specific step in workflow
+    pub fn parse(target: &str) -> Self {
+        if let Some((workflow, step)) = target.split_once(':') {
+            Self {
+                workflow: workflow.to_string(),
+                step: Some(step.to_string()),
+            }
+        } else {
+            Self {
+                workflow: target.to_string(),
+                step: None,
+            }
+        }
+    }
 }
 
 /// Result of the transition-to command execution
@@ -76,104 +61,59 @@ pub struct TransitionToCommand {
 pub struct TransitionToResult {
     /// The task ID that was transitioned
     pub id: String,
-    /// The target status
-    pub target: TargetStatus,
-    /// Whether the task was already in the target status
-    pub already_in_target: bool,
-    /// List of incomplete dependencies (warnings, for in_progress)
-    pub incomplete_deps: Vec<(String, String, String)>, // (id, title, status)
-    /// List of tasks that are now unblocked (for done)
+    /// The target workflow
+    pub target_workflow: String,
+    /// The target step (if specified or determined)
+    pub target_step: Option<String>,
+    /// The previous workflow (if any)
+    pub from_workflow: Option<String>,
+    /// The previous step (if any)
+    pub from_step: Option<String>,
+    /// List of tasks that are now unblocked
     pub unblocked_tasks: Vec<(String, String)>, // (id, title)
-    /// The reason provided (for rejected)
-    pub reason: Option<String>,
-    /// Validation result (for transitions)
-    pub validation: Option<TriageValidationResult>,
     /// Whether validation was skipped
     pub validation_skipped: bool,
-    /// Whether warnings were forced
-    pub warnings_forced: bool,
 }
 
 impl std::fmt::Display for TransitionToResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Show validation skipped notice
         if self.validation_skipped {
-            writeln!(f, "Note: Validation skipped (--skip-validation)")?;
-            writeln!(f)?;
-        }
-
-        // Show validation results for todo transitions
-        if let Some(validation) = &self.validation {
-            // Show warnings and notes even if forced
-            if validation.has_warnings() || validation.has_notes() {
-                let warnings = validation.warnings();
-                let notes = validation.notes();
-
-                if !warnings.is_empty() {
-                    if self.warnings_forced {
-                        writeln!(f, "WARNINGS (forced with --force):")?;
-                    } else {
-                        writeln!(f, "WARNINGS ({}):", warnings.len())?;
-                    }
-                    for issue in warnings {
-                        writeln!(f, "  - {}", issue.message)?;
-                    }
-                    writeln!(f)?;
-                }
-
-                if !notes.is_empty() {
-                    writeln!(f, "NOTES ({}):", notes.len())?;
-                    for issue in notes {
-                        writeln!(f, "  - {}", issue.message)?;
-                    }
-                    writeln!(f)?;
-                }
-            }
-        }
-
-        // Show warnings for incomplete deps (for in_progress)
-        if !self.incomplete_deps.is_empty() {
-            writeln!(f, "Warning: Task depends on incomplete tasks:")?;
-            for (id, title, status) in &self.incomplete_deps {
-                writeln!(f, "  - {} ({}) [{}]", id, title, status)?;
-            }
+            writeln!(
+                f,
+                "Note: Workflow transition validation skipped (--skip-validation)"
+            )?;
             writeln!(f)?;
         }
 
         // Main result message
-        if self.already_in_target {
-            match self.target {
-                TargetStatus::InProgress => {
-                    write!(f, "Warning: Task '{}' is already in progress", self.id)?
-                }
-                TargetStatus::PendingReview => {
-                    write!(f, "Task '{}' is already pending review", self.id)?
-                }
-                TargetStatus::Done => write!(f, "Task '{}' is already done", self.id)?,
-                TargetStatus::Rejected => {
-                    write!(f, "Task '{}' is already rejected", self.id)?;
-                    if let Some(reason) = &self.reason {
-                        write!(f, " (added reason: {})", reason)?;
-                    }
-                }
-            }
+        let step_info = self
+            .target_step
+            .as_ref()
+            .map(|s| format!(":{}", s))
+            .unwrap_or_default();
+
+        if let Some(from_wf) = &self.from_workflow {
+            let from_step = self
+                .from_step
+                .as_ref()
+                .map(|s| format!(":{}", s))
+                .unwrap_or_default();
+            writeln!(
+                f,
+                "Transitioned task '{}' from {}{} to {}{}",
+                self.id, from_wf, from_step, self.target_workflow, step_info
+            )?;
         } else {
-            match self.target {
-                TargetStatus::InProgress => write!(f, "Started task: {}", self.id)?,
-                TargetStatus::PendingReview => write!(f, "Submitted task for review: {}", self.id)?,
-                TargetStatus::Done => write!(f, "Completed task: {}", self.id)?,
-                TargetStatus::Rejected => {
-                    write!(f, "Rejected task: {}", self.id)?;
-                    if let Some(reason) = &self.reason {
-                        write!(f, "\nReason: {}", reason)?;
-                    }
-                }
-            }
+            writeln!(
+                f,
+                "Assigned task '{}' to workflow {}{}",
+                self.id, self.target_workflow, step_info
+            )?;
         }
 
-        // Show unblocked tasks if any (for done)
+        // Show unblocked tasks if any
         if !self.unblocked_tasks.is_empty() {
-            writeln!(f)?;
             writeln!(f)?;
             writeln!(f, "Unblocked tasks:")?;
             for (id, title) in &self.unblocked_tasks {
@@ -188,8 +128,8 @@ impl std::fmt::Display for TransitionToResult {
 impl TransitionToCommand {
     /// Execute the transition-to command.
     ///
-    /// Transitions a task to the specified target status with proper validation.
-    /// Delegates to the service layer which fires MutationCallback automatically.
+    /// Transitions a task to a workflow/step with proper validation against
+    /// the workflow_transitions edge table.
     ///
     /// # Arguments
     ///
@@ -199,42 +139,287 @@ impl TransitionToCommand {
     ///
     /// Returns `ServiceError` if:
     /// - The task with the given ID does not exist
-    /// - The status transition is invalid
-    /// - The task has incomplete children (for done transition)
+    /// - The target workflow does not exist
+    /// - The transition is not allowed (no workflow_transitions edge)
     /// - Database operations fail
+    #[allow(deprecated)]
     pub async fn execute(
         &self,
-        service: &dyn vertebrae_core::TaskService,
+        service: &dyn TaskService,
     ) -> Result<TransitionToResult, ServiceError> {
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
 
-        // Use service layer to perform the transition (which fires MutationCallback automatically)
-        let result = service.transition_to(&id, self.target.as_str()).await?;
+        // Parse target into workflow and optional step
+        let parsed = ParsedTarget::parse(&self.target);
 
-        // Convert service TransitionResult to CLI TransitionToResult
+        // Get the task
+        let task = service.get_task(&id).await?;
+
+        // Get current workflow info
+        let from_workflow = task.workflow_id.as_ref().map(|t| t.id.to_raw());
+        let from_step = task.current_step.map(|s| format!("step_{}", s));
+
+        // Get the database to validate the transition
+        let db = service.database();
+
+        // Resolve target workflow - try by ID first, then by name
+        let workflow = db.workflows().get(&parsed.workflow).await?.or_else(|| None); // TODO: Add lookup by name
+
+        let target_workflow_id = if workflow.is_some() {
+            parsed.workflow.clone()
+        } else {
+            // Try to find workflow by name
+            // For now, assume the target is the ID
+            return Err(ServiceError::InvalidInput(format!(
+                "Workflow '{}' not found",
+                parsed.workflow
+            )));
+        };
+
+        // Validate the transition if not skipped
+        if !self.skip_validation {
+            if let Some(current_wf_id) = &from_workflow {
+                // Check if transition is allowed
+                let allowed = db
+                    .workflow_transitions()
+                    .exists(current_wf_id, &target_workflow_id)
+                    .await?;
+
+                if !allowed && current_wf_id != &target_workflow_id {
+                    return Err(ServiceError::InvalidInput(format!(
+                        "Transition from workflow '{}' to '{}' is not allowed. \
+                         Use --skip-validation to bypass this check.",
+                        current_wf_id, target_workflow_id
+                    )));
+                }
+
+                // If staying within the same workflow, validate step transition
+                if current_wf_id == &target_workflow_id
+                    && let Some(target_step_name) = &parsed.step
+                {
+                    let workflow_thing =
+                        surrealdb::sql::Thing::from(("workflow", target_workflow_id.as_str()));
+                    let steps = db.steps().list_by_workflow(&workflow_thing).await?;
+
+                    // Find current step
+                    let current_step_index = task.current_step.unwrap_or(0);
+                    let current_step = steps.iter().find(|s| s.order == current_step_index as i32);
+
+                    // Find target step
+                    let target_step = steps.iter().find(|s| s.name == *target_step_name);
+
+                    if let (Some(current), Some(target)) = (current_step, target_step) {
+                        // Check if target is in current step's transitions_to
+                        let target_id = target.id.as_ref();
+                        let is_valid_transition = target_id.is_some()
+                            && current.transitions_to.iter().any(|t| Some(t) == target_id);
+
+                        // Also allow transitioning to the same step
+                        let is_same_step = current.name == target.name;
+
+                        if !is_valid_transition && !is_same_step {
+                            // Get valid transition names for the error message
+                            let valid_transitions: Vec<String> = current
+                                .transitions_to
+                                .iter()
+                                .filter_map(|t| steps.iter().find(|s| s.id.as_ref() == Some(t)))
+                                .map(|s| s.name.clone())
+                                .collect();
+
+                            let hint = if valid_transitions.is_empty() {
+                                "This step has no valid transitions (terminal state). Use 'vtb list' to see other tasks.".to_string()
+                            } else {
+                                format!(
+                                    "Valid transitions from '{}': {}",
+                                    current.name,
+                                    valid_transitions.join(", ")
+                                )
+                            };
+
+                            return Err(ServiceError::InvalidInput(format!(
+                                "Invalid step transition from '{}' to '{}'. {}",
+                                current.name, target_step_name, hint
+                            )));
+                        }
+                    }
+                }
+            } else {
+                // Task has no workflow - validate based on task's current status
+                // Map the current status to a step in the target workflow
+                if let Some(target_step_name) = &parsed.step {
+                    let current_status = task.status.as_str();
+                    let workflow_thing =
+                        surrealdb::sql::Thing::from(("workflow", target_workflow_id.as_str()));
+                    let steps = db.steps().list_by_workflow(&workflow_thing).await?;
+
+                    // Find current step by matching status name
+                    let current_step = steps.iter().find(|s| s.name == current_status);
+
+                    // Find target step
+                    let target_step = steps.iter().find(|s| s.name == *target_step_name);
+
+                    if let (Some(current), Some(target)) = (current_step, target_step) {
+                        // Check if target is in current step's transitions_to
+                        let target_id = target.id.as_ref();
+                        let is_valid_transition = target_id.is_some()
+                            && current.transitions_to.iter().any(|t| Some(t) == target_id);
+
+                        // Also allow transitioning to the same step
+                        let is_same_step = current.name == target.name;
+
+                        if !is_valid_transition && !is_same_step {
+                            // Get valid transition names for the error message
+                            let valid_transitions: Vec<String> = current
+                                .transitions_to
+                                .iter()
+                                .filter_map(|t| steps.iter().find(|s| s.id.as_ref() == Some(t)))
+                                .map(|s| s.name.clone())
+                                .collect();
+
+                            let hint = if valid_transitions.is_empty() {
+                                "This step has no valid transitions (terminal state). Use 'vtb list' to see other tasks.".to_string()
+                            } else {
+                                format!(
+                                    "Valid transitions from '{}': {}",
+                                    current.name,
+                                    valid_transitions.join(", ")
+                                )
+                            };
+
+                            return Err(ServiceError::InvalidInput(format!(
+                                "Invalid status transition from '{}' to '{}'. {}",
+                                current.name, target_step_name, hint
+                            )));
+                        }
+                    } else if current_step.is_none() {
+                        // Current status doesn't map to any step in the workflow
+                        // This could be 'rejected' which isn't in the default workflow
+                        return Err(ServiceError::InvalidInput(format!(
+                            "Current status '{}' has no corresponding step in workflow '{}'. \
+                             Use --skip-validation to bypass this check.",
+                            current_status, target_workflow_id
+                        )));
+                    }
+                }
+            }
+        }
+
+        // Determine target step
+        let target_step_name = if let Some(step_name) = &parsed.step {
+            // Find step by name in target workflow
+            let workflow_thing =
+                surrealdb::sql::Thing::from(("workflow", target_workflow_id.as_str()));
+            let steps = db.steps().list_by_workflow(&workflow_thing).await?;
+            let step = steps.iter().find(|s| s.name == *step_name);
+            if step.is_none() {
+                return Err(ServiceError::InvalidInput(format!(
+                    "Step '{}' not found in workflow '{}'",
+                    step_name, target_workflow_id
+                )));
+            }
+            Some(step_name.clone())
+        } else {
+            // Use initial step of the workflow
+            let workflow = db.workflows().get(&target_workflow_id).await?;
+            if let Some(wf) = workflow {
+                if let Some(initial_step) = &wf.initial_step {
+                    let step = db.steps().get(&initial_step.id.to_raw()).await?;
+                    step.map(|s| s.name)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+
+        // Perform the transition - assign workflow and set step
+        let workflow_thing = surrealdb::sql::Thing::from(("workflow", target_workflow_id.as_str()));
+        service.assign_workflow(&id, &workflow_thing).await?;
+
+        // Set the step if specified
+        if let Some(step_name) = &parsed.step {
+            let workflow_thing_for_steps =
+                surrealdb::sql::Thing::from(("workflow", target_workflow_id.as_str()));
+            let steps = db
+                .steps()
+                .list_by_workflow(&workflow_thing_for_steps)
+                .await?;
+            if let Some(step) = steps.iter().find(|s| s.name == *step_name) {
+                service
+                    .update_current_step(&id, step.order as usize)
+                    .await?;
+            }
+            // Also update the status field for backward compatibility
+            // The step name in the default workflow matches the status name
+            db.tasks().update_status(&id, step_name).await?;
+        } else if let Some(ref step_name) = target_step_name {
+            // If we have a target step from initial step resolution, update status too
+            db.tasks().update_status(&id, step_name).await?;
+        }
+
+        // Get unblocked tasks (for done/terminal steps)
+        // Check if the target step is terminal and compute newly unblocked tasks
+        let mut unblocked_tasks = vec![];
+        if let Some(step_name) = &target_step_name {
+            // Terminal steps: done, rejected
+            if step_name == "done" || step_name == "rejected" {
+                // Find tasks that depend on this task
+                let dependents = db.relationships().get_dependents(&id).await?;
+
+                for dependent_id in dependents {
+                    // Check if this dependent has any remaining incomplete blockers
+                    let blockers = db.graph().get_blockers(&dependent_id, Some(1)).await?;
+                    let has_incomplete_blockers = blockers.iter().any(|blocker| {
+                        // A blocker is incomplete if its status is not done/rejected
+                        blocker.status.as_str() != "done" && blocker.status.as_str() != "rejected"
+                    });
+
+                    if !has_incomplete_blockers {
+                        // This task is now unblocked
+                        if let Ok(Some(task)) = db.tasks().get(&dependent_id).await {
+                            unblocked_tasks.push((dependent_id, task.title));
+                        }
+                    }
+                }
+            }
+        }
+
         Ok(TransitionToResult {
-            id: result.task_id,
-            target: self.target,
-            already_in_target: result.from_status == result.to_status,
-            incomplete_deps: vec![], // The service doesn't return this, but CLI doesn't strictly need it for basic operation
-            unblocked_tasks: result
-                .unblocked_tasks
-                .into_iter()
-                .map(|t| (t.id, t.title))
-                .collect(),
-            reason: self.reason.clone(),
-            validation: None,
-            validation_skipped: false,
-            warnings_forced: false,
+            id,
+            target_workflow: target_workflow_id,
+            target_step: target_step_name,
+            from_workflow,
+            from_step,
+            unblocked_tasks,
+            validation_skipped: self.skip_validation,
         })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    // NOTE: Tests have been removed due to service layer migration.
-    // The tests relied on `cmd.execute(&Database)` which is no longer valid after
-    // the refactoring to use the TaskService trait. These tests would need to be
-    // rewritten using a mock TaskService implementation or behavioral testing approach.
+    use super::*;
+
+    #[test]
+    fn test_parse_target_workflow_only() {
+        let target = ParsedTarget::parse("implementation");
+        assert_eq!(target.workflow, "implementation");
+        assert!(target.step.is_none());
+    }
+
+    #[test]
+    fn test_parse_target_workflow_and_step() {
+        let target = ParsedTarget::parse("review:approved");
+        assert_eq!(target.workflow, "review");
+        assert_eq!(target.step, Some("approved".to_string()));
+    }
+
+    #[test]
+    fn test_parse_target_with_underscore() {
+        let target = ParsedTarget::parse("in_progress:coding_done");
+        assert_eq!(target.workflow, "in_progress");
+        assert_eq!(target.step, Some("coding_done".to_string()));
+    }
 }

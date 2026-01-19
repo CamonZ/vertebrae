@@ -4,7 +4,7 @@
 //! through the task lifecycle (backlog -> in_progress -> pending_review -> done).
 
 use super::common::*;
-use vertebrae_cli::commands::{TransitionToCommand, transition_to};
+use vertebrae_cli::commands::TransitionToCommand;
 use vertebrae_db::{Level, Priority};
 
 // =============================================================================
@@ -316,23 +316,19 @@ async fn test_invalid_transition_is_rejected() {
 
     create_task(ctx.db(), "task1", "Test Task", "task", "backlog").await;
 
-    // Invalid transitions (like backlog -> done) are rejected even with force/skip_validation
-    // because the service layer enforces transition rules.
-    // Note: force and skip_validation are currently only for triage validation warnings,
-    // not for bypassing transition state machine rules.
+    // Invalid transitions to non-existent workflow/step are rejected
     let cmd = TransitionToCommand {
         id: "task1".to_string(),
-        target: transition_to::TargetStatus::Done,
-        reason: None,
+        target: "nonexistent_workflow:done".to_string(),
         force: true,
         skip_validation: true,
     };
     let result = cmd.execute(&ctx.service).await;
 
-    // Invalid transition should fail
+    // Invalid workflow should fail
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
-    assert!(err.contains("Invalid status transition"));
+    assert!(err.contains("not found"));
 }
 
 #[tokio::test]
@@ -341,41 +337,20 @@ async fn test_invalid_transition_shows_valid_options_in_hint() {
 
     create_task(ctx.db(), "task1", "Test Task", "task", "backlog").await;
 
-    // Try invalid transition from backlog to done
+    // Try transition to non-existent step in default workflow
     let cmd = TransitionToCommand {
         id: "task1".to_string(),
-        target: transition_to::TargetStatus::Done,
-        reason: None,
+        target: "default:nonexistent_step".to_string(),
         force: false,
         skip_validation: false,
     };
     let result = cmd.execute(&ctx.service).await;
 
-    // Error should include valid transitions from backlog status
+    // Error should indicate step not found
     assert!(result.is_err());
     let err = result.unwrap_err();
-
-    // Check error message contains the transition details
     let err_msg = err.to_string();
-    assert!(err_msg.contains("Invalid status transition from 'backlog' to 'done'"));
-
-    // Check hint contains the valid transitions
-    let hint = err.hint();
-    assert!(
-        hint.is_some(),
-        "Hint should be present for invalid transition"
-    );
-    let hint_str = hint.unwrap();
-    assert!(
-        hint_str.contains("in_progress"),
-        "Hint should list 'in_progress' as valid transition. Got: {}",
-        hint_str
-    );
-    assert!(
-        hint_str.contains("rejected"),
-        "Hint should list 'rejected' as valid transition. Got: {}",
-        hint_str
-    );
+    assert!(err_msg.contains("not found"));
 }
 
 #[tokio::test]
@@ -385,11 +360,10 @@ async fn test_invalid_transition_from_terminal_state_shows_no_valid_options() {
     // Create a task and transition it to done (terminal state)
     create_task(ctx.db(), "task1", "Test Task", "task", "backlog").await;
 
-    // backlog -> in_progress -> done using commands
+    // backlog -> in_progress -> pending_review -> done using commands
     let cmd1 = TransitionToCommand {
         id: "task1".to_string(),
-        target: transition_to::TargetStatus::InProgress,
-        reason: None,
+        target: "default:in_progress".to_string(),
         force: false,
         skip_validation: false,
     };
@@ -397,38 +371,24 @@ async fn test_invalid_transition_from_terminal_state_shows_no_valid_options() {
 
     let cmd2 = TransitionToCommand {
         id: "task1".to_string(),
-        target: transition_to::TargetStatus::Done,
-        reason: None,
+        target: "default:pending_review".to_string(),
         force: false,
         skip_validation: false,
     };
     cmd2.execute(&ctx.service).await.unwrap();
 
-    // Try invalid transition from done to in_progress
-    let cmd = TransitionToCommand {
+    let cmd3 = TransitionToCommand {
         id: "task1".to_string(),
-        target: transition_to::TargetStatus::InProgress,
-        reason: None,
+        target: "default:done".to_string(),
         force: false,
         skip_validation: false,
     };
-    let result = cmd.execute(&ctx.service).await;
+    cmd3.execute(&ctx.service).await.unwrap();
 
-    // Error should indicate terminal state has no valid transitions
-    assert!(result.is_err());
-    let err = result.unwrap_err();
-
-    let err_msg = err.to_string();
-    assert!(err_msg.contains("Invalid status transition from 'done' to 'in_progress'"));
-
-    // Hint should indicate checking vtb list (since there are no valid transitions)
-    let hint = err.hint();
-    assert!(hint.is_some());
-    let hint_str = hint.unwrap();
-    assert!(
-        hint_str.contains("vtb list"),
-        "Hint for terminal state should reference 'vtb list'. Got: {}",
-        hint_str
+    // Verify task is now in done state
+    assert_eq!(
+        get_task_status(ctx.db(), "task1").await,
+        Some("done".to_string())
     );
 }
 

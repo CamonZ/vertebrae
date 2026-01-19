@@ -422,11 +422,19 @@ impl<'a> WorkflowRepository<'a> {
         let step_repo = StepRepository::new(self.client);
         let workflow_thing = surrealdb::sql::Thing::from(("workflow", DEFAULT_WORKFLOW_ID));
 
-        let step_names = ["backlog", "in_progress", "pending_review", "done"];
+        // Main flow steps + rejected as terminal
+        let step_names = [
+            "backlog",
+            "in_progress",
+            "pending_review",
+            "done",
+            "rejected",
+        ];
         let mut created_step_ids: Vec<surrealdb::sql::Thing> = Vec::new();
 
         for (order, step_name) in step_names.iter().enumerate() {
-            let is_final = order == step_names.len() - 1;
+            // Both "done" and "rejected" are terminal states
+            let is_final = *step_name == "done" || *step_name == "rejected";
             let step = Step::new(*step_name, workflow_thing.clone())
                 .with_agent_config(AgentConfig::new().with_model("task-agent"))
                 .with_order(order as i32)
@@ -439,12 +447,18 @@ impl<'a> WorkflowRepository<'a> {
             }
         }
 
-        // Set up linear transitions between steps
-        for i in 0..created_step_ids.len().saturating_sub(1) {
+        // Set up transitions:
+        // - Linear flow: backlog -> in_progress -> pending_review -> done
+        // - Any non-terminal step can transition to rejected
+        let rejected_step = created_step_ids[4].clone(); // "rejected" is at index 4
+
+        for i in 0..3 {
+            // backlog, in_progress, pending_review can transition to next step AND to rejected
             let current_id = created_step_ids[i].id.to_raw();
             let next_step = created_step_ids[i + 1].clone();
 
-            let update = StepUpdate::new().with_transitions_to(vec![next_step]);
+            let update =
+                StepUpdate::new().with_transitions_to(vec![next_step, rejected_step.clone()]);
             step_repo.update(&current_id, &update).await?;
         }
 
