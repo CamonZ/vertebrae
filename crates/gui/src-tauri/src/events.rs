@@ -59,7 +59,16 @@ pub struct WorkflowExecutionEvent {
 pub enum WorkflowExecutionEventType {
     /// Workflow execution started
     Started,
-    /// A step execution started
+    /// Orchestrator phase started
+    OrchestratorStarted {
+        execution_id: String,
+        step_name: String,
+    },
+    /// Orchestrator phase completed, prompt ready
+    OrchestratorCompleted { execution_id: String },
+    /// Orchestrator phase failed
+    OrchestratorFailed { execution_id: String, error: String },
+    /// A step execution started (execution phase)
     StepStarted {
         execution_id: String,
         step_name: String,

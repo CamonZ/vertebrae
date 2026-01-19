@@ -998,7 +998,19 @@ export type WorkflowExecutionEventType =
  */
 "Started" | 
 /**
- * A step execution started
+ * Orchestrator phase started
+ */
+{ OrchestratorStarted: { execution_id: string; step_name: string } } | 
+/**
+ * Orchestrator phase completed, prompt ready
+ */
+{ OrchestratorCompleted: { execution_id: string } } | 
+/**
+ * Orchestrator phase failed
+ */
+{ OrchestratorFailed: { execution_id: string; error: string } } | 
+/**
+ * A step execution started (execution phase)
  */
 { StepStarted: { execution_id: string; step_name: string } } | 
 /**
