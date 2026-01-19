@@ -95,6 +95,8 @@ pub struct WorkflowUpdate {
     pub metadata: Option<std::collections::HashMap<String, String>>,
     /// Initial step reference (Some(thing) to set, None to leave unchanged)
     pub initial_step: Option<surrealdb::sql::Thing>,
+    /// Auto advance setting (Some(bool) to set, None to leave unchanged)
+    pub auto_advance: Option<bool>,
 }
 
 impl WorkflowUpdate {
@@ -133,12 +135,19 @@ impl WorkflowUpdate {
         self
     }
 
+    /// Set the auto_advance setting
+    pub fn with_auto_advance(mut self, auto_advance: bool) -> Self {
+        self.auto_advance = Some(auto_advance);
+        self
+    }
+
     /// Check if any updates are specified
     pub fn has_updates(&self) -> bool {
         self.name.is_some()
             || self.description.is_some()
             || self.metadata.is_some()
             || self.initial_step.is_some()
+            || self.auto_advance.is_some()
     }
 }
 
@@ -314,6 +323,10 @@ impl<'a> WorkflowRepository<'a> {
         if let Some(initial_step) = &updates.initial_step {
             debug!("Setting initial_step to: {:?}", initial_step);
             field_updates.push(format!("initial_step = {}", initial_step));
+        }
+
+        if let Some(auto_advance) = updates.auto_advance {
+            field_updates.push(format!("auto_advance = {}", auto_advance));
         }
 
         if !field_updates.is_empty() {

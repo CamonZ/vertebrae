@@ -594,6 +594,10 @@ pub struct Workflow {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub validation_gate_id: Option<Thing>,
 
+    /// Whether to automatically advance to the next step on successful completion
+    #[serde(default)]
+    pub auto_advance: bool,
+
     /// Creation timestamp
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_at: Option<DateTime<Utc>>,
@@ -613,9 +617,16 @@ impl Workflow {
             initial_step: None,
             metadata: std::collections::HashMap::new(),
             validation_gate_id: None,
+            auto_advance: false,
             created_at: None,
             updated_at: None,
         }
+    }
+
+    /// Set auto_advance for this workflow
+    pub fn with_auto_advance(mut self, auto_advance: bool) -> Self {
+        self.auto_advance = auto_advance;
+        self
     }
 
     /// Set the description of this workflow
@@ -650,6 +661,7 @@ impl PartialEq for Workflow {
             && self.initial_step == other.initial_step
             && self.metadata == other.metadata
             && self.validation_gate_id == other.validation_gate_id
+            && self.auto_advance == other.auto_advance
     }
 }
 
@@ -3341,6 +3353,15 @@ mod tests {
             .with_metadata("owner", "team-a");
         assert_eq!(workflow.metadata.get("version"), Some(&"1.0".to_string()));
         assert_eq!(workflow.metadata.get("owner"), Some(&"team-a".to_string()));
+    }
+
+    #[test]
+    fn test_workflow_with_auto_advance() {
+        let workflow = Workflow::new("Auto Advance Test").with_auto_advance(true);
+        assert!(workflow.auto_advance);
+
+        let workflow_default = Workflow::new("Default Auto Advance");
+        assert!(!workflow_default.auto_advance);
     }
 
     #[test]

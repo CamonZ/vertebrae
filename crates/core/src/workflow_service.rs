@@ -59,6 +59,8 @@ pub struct CreateWorkflowOptions {
     pub description: Option<String>,
     /// Workflow steps
     pub steps: Vec<WorkflowStepInput>,
+    /// Whether to automatically advance to the next step on successful completion
+    pub auto_advance: bool,
 }
 
 impl CreateWorkflowOptions {
@@ -68,12 +70,19 @@ impl CreateWorkflowOptions {
             name: name.into(),
             description: None,
             steps,
+            auto_advance: false,
         }
     }
 
     /// Set the description
     pub fn with_description(mut self, description: impl Into<String>) -> Self {
         self.description = Some(description.into());
+        self
+    }
+
+    /// Set the auto_advance setting
+    pub fn with_auto_advance(mut self, auto_advance: bool) -> Self {
+        self.auto_advance = auto_advance;
         self
     }
 }
@@ -104,6 +113,8 @@ pub struct UpdateWorkflowOptions {
     pub name: Option<String>,
     /// New description (Some(Some(x)) to set, Some(None) to clear, None leaves unchanged)
     pub description: Option<Option<String>>,
+    /// Auto advance setting (Some(bool) to set, None leaves unchanged)
+    pub auto_advance: Option<bool>,
 }
 
 impl UpdateWorkflowOptions {
@@ -130,9 +141,15 @@ impl UpdateWorkflowOptions {
         self
     }
 
+    /// Set the auto_advance setting
+    pub fn with_auto_advance(mut self, auto_advance: bool) -> Self {
+        self.auto_advance = Some(auto_advance);
+        self
+    }
+
     /// Check if any updates are specified
     pub fn has_updates(&self) -> bool {
-        self.name.is_some() || self.description.is_some()
+        self.name.is_some() || self.description.is_some() || self.auto_advance.is_some()
     }
 }
 
@@ -459,7 +476,7 @@ impl WorkflowService for DefaultWorkflowService {
         let id = self.generate_unique_id(&options.name).await?;
 
         // Build workflow (without embedded steps - we'll use first-class Step entities)
-        let mut workflow = Workflow::new(&options.name);
+        let mut workflow = Workflow::new(&options.name).with_auto_advance(options.auto_advance);
 
         if let Some(desc) = options.description {
             workflow = workflow.with_description(desc);
@@ -591,6 +608,10 @@ impl WorkflowService for DefaultWorkflowService {
                 update = update.clear_description();
             }
             None => {}
+        }
+
+        if let Some(auto_advance) = options.auto_advance {
+            update = update.with_auto_advance(auto_advance);
         }
 
         self.db.workflows().update(&id, &update).await?;

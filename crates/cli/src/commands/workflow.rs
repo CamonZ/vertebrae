@@ -80,6 +80,10 @@ pub struct WorkflowAddCommand {
     /// Workflow steps in 'name:model' format (can be specified multiple times)
     #[arg(short, long = "step", value_parser = parse_step)]
     pub steps: Vec<ParsedStep>,
+
+    /// Automatically advance to the next step on successful completion
+    #[arg(long)]
+    pub auto_advance: bool,
 }
 
 /// A parsed workflow step from the command line
@@ -150,7 +154,8 @@ impl WorkflowAddCommand {
             .collect();
 
         // Build the create options
-        let mut options = CreateWorkflowOptions::new(&self.name, steps);
+        let mut options =
+            CreateWorkflowOptions::new(&self.name, steps).with_auto_advance(self.auto_advance);
 
         if let Some(description) = &self.description {
             options = options.with_description(description);
@@ -255,6 +260,8 @@ pub struct WorkflowDetail {
     pub name: String,
     /// Optional description
     pub description: Option<String>,
+    /// Whether to automatically advance to the next step on successful completion
+    pub auto_advance: bool,
     /// Ordered list of workflow steps
     pub steps: Vec<StepDisplayInfo>,
     /// Additional metadata as key-value pairs
@@ -279,6 +286,14 @@ impl std::fmt::Display for WorkflowDetail {
             writeln!(f, "{}", description)?;
             writeln!(f)?;
         }
+
+        // Auto advance setting
+        writeln!(
+            f,
+            "Auto Advance: {}",
+            if self.auto_advance { "Yes" } else { "No" }
+        )?;
+        writeln!(f)?;
 
         // Steps section
         writeln!(f, "Steps ({} total)", self.steps.len())?;
@@ -400,6 +415,7 @@ impl WorkflowShowCommand {
             id: workflow_id,
             name: workflow.name,
             description: workflow.description,
+            auto_advance: workflow.auto_advance,
             steps,
             metadata: workflow.metadata,
             created_at: workflow.created_at.map(|dt| dt.to_rfc3339()),
@@ -427,6 +443,14 @@ pub struct WorkflowUpdateCommand {
     /// Clear the workflow description
     #[arg(long, conflicts_with = "description")]
     pub clear_description: bool,
+
+    /// Enable automatic advancement to the next step on successful completion
+    #[arg(long, conflicts_with = "no_auto_advance")]
+    pub auto_advance: bool,
+
+    /// Disable automatic advancement to the next step
+    #[arg(long, conflicts_with = "auto_advance")]
+    pub no_auto_advance: bool,
 }
 
 impl WorkflowUpdateCommand {
@@ -456,10 +480,16 @@ impl WorkflowUpdateCommand {
             options = options.clear_description();
         }
 
+        if self.auto_advance {
+            options = options.with_auto_advance(true);
+        } else if self.no_auto_advance {
+            options = options.with_auto_advance(false);
+        }
+
         // Check if any updates were provided
         if !options.has_updates() {
             return Err(ServiceError::validation_failed(
-                "no updates specified (use --name, --description, or --clear-description options)",
+                "no updates specified (use --name, --description, --clear-description, --auto-advance, or --no-auto-advance options)",
             ));
         }
 
@@ -814,6 +844,7 @@ mod tests {
                 name: "step1".to_string(),
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
+            auto_advance: false,
         };
 
         let result = cmd
@@ -854,6 +885,7 @@ mod tests {
                 name: "step1".to_string(),
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
+            auto_advance: false,
         };
 
         let result = cmd
@@ -891,6 +923,7 @@ mod tests {
                     agent_config: AgentConfig::new().with_model("deployer"),
                 },
             ],
+            auto_advance: false,
         };
 
         let result = cmd
@@ -926,6 +959,7 @@ mod tests {
                 name: "step1".to_string(),
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
+            auto_advance: false,
         };
 
         let result = cmd.execute(&create_service(&db)).await;
@@ -953,6 +987,7 @@ mod tests {
                 name: "step1".to_string(),
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
+            auto_advance: false,
         };
 
         let result = cmd.execute(&create_service(&db)).await;
@@ -977,6 +1012,7 @@ mod tests {
             name: "No Steps Workflow".to_string(),
             description: None,
             steps: vec![],
+            auto_advance: false,
         };
 
         let result = cmd.execute(&create_service(&db)).await;
@@ -1004,6 +1040,7 @@ mod tests {
                 name: "step1".to_string(),
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
+            auto_advance: false,
         };
 
         let result = cmd.execute(&create_service(&db)).await.unwrap();
@@ -1027,6 +1064,7 @@ mod tests {
                     name: "step1".to_string(),
                     agent_config: AgentConfig::new().with_model("agent1"),
                 }],
+                auto_advance: false,
             };
 
             let result = cmd.execute(&create_service(&db)).await.unwrap();
@@ -1056,6 +1094,7 @@ mod tests {
                 name: "step1".to_string(),
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
+            auto_advance: false,
         };
 
         let result = cmd.execute(&service).await.unwrap();
@@ -1101,6 +1140,7 @@ mod tests {
                 name: "step1".to_string(),
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
+            auto_advance: false,
         };
         let result1 = add_cmd1.execute(&create_service(&db)).await.unwrap();
         let id1 = extract_workflow_id(&result1);
@@ -1123,6 +1163,7 @@ mod tests {
                     agent_config: AgentConfig::new().with_model("deployer"),
                 },
             ],
+            auto_advance: false,
         };
         let result2 = add_cmd2.execute(&create_service(&db)).await.unwrap();
         let id2 = extract_workflow_id(&result2);
@@ -1163,6 +1204,7 @@ mod tests {
                 name: "step1".to_string(),
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
+            auto_advance: false,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
@@ -1206,6 +1248,7 @@ mod tests {
                     agent_config: AgentConfig::new().with_model("deployer"),
                 },
             ],
+            auto_advance: false,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
@@ -1276,6 +1319,7 @@ mod tests {
                 name: "step1".to_string(),
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
+            auto_advance: false,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
@@ -1307,6 +1351,7 @@ mod tests {
                 name: "step1".to_string(),
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
+            auto_advance: false,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
@@ -1361,6 +1406,7 @@ mod tests {
             id: "abc123".to_string(),
             name: "Full Workflow".to_string(),
             description: Some("A complete workflow".to_string()),
+            auto_advance: false,
             steps: vec![
                 StepDisplayInfo {
                     name: "step1".to_string(),
@@ -1383,6 +1429,7 @@ mod tests {
         assert!(output.contains("Workflow: abc123 - Full Workflow"));
         assert!(output.contains("Description"));
         assert!(output.contains("A complete workflow"));
+        assert!(output.contains("Auto Advance: No"));
         assert!(output.contains("Steps (2 total)"));
         assert!(output.contains("1. step1 (model: agent1)"));
         assert!(output.contains("2. step2 (model: agent2)"));
@@ -1398,6 +1445,7 @@ mod tests {
             id: "abc123".to_string(),
             name: "Metadata Workflow".to_string(),
             description: None,
+            auto_advance: false,
             steps: vec![StepDisplayInfo {
                 name: "step1".to_string(),
                 model: Some("agent1".to_string()),
@@ -1495,6 +1543,7 @@ mod tests {
             id: "abc123".to_string(),
             name: "Test Workflow".to_string(),
             description: None,
+            auto_advance: false,
             steps: vec![],
             metadata: std::collections::HashMap::new(),
             created_at: None,
@@ -1526,6 +1575,7 @@ mod tests {
                 name: "step1".to_string(),
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
+            auto_advance: false,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
@@ -1536,6 +1586,8 @@ mod tests {
             name: Some("New Name".to_string()),
             description: None,
             clear_description: false,
+            auto_advance: false,
+            no_auto_advance: false,
         };
         let result = update_cmd.execute(&create_service(&db)).await.unwrap();
         assert_eq!(result, format!("Updated workflow: {}", id));
@@ -1557,6 +1609,7 @@ mod tests {
                 name: "step1".to_string(),
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
+            auto_advance: false,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
@@ -1567,6 +1620,8 @@ mod tests {
             name: None,
             description: Some("New description".to_string()),
             clear_description: false,
+            auto_advance: false,
+            no_auto_advance: false,
         };
         let result = update_cmd.execute(&create_service(&db)).await.unwrap();
         assert_eq!(result, format!("Updated workflow: {}", id));
@@ -1588,6 +1643,7 @@ mod tests {
                 name: "step1".to_string(),
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
+            auto_advance: false,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
@@ -1598,6 +1654,8 @@ mod tests {
             name: None,
             description: None,
             clear_description: true,
+            auto_advance: false,
+            no_auto_advance: false,
         };
         let result = update_cmd.execute(&create_service(&db)).await.unwrap();
         assert_eq!(result, format!("Updated workflow: {}", id));
@@ -1616,6 +1674,8 @@ mod tests {
             name: Some("New Name".to_string()),
             description: None,
             clear_description: false,
+            auto_advance: false,
+            no_auto_advance: false,
         };
 
         let result = update_cmd.execute(&create_service(&db)).await;
@@ -1640,6 +1700,7 @@ mod tests {
                 name: "step1".to_string(),
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
+            auto_advance: false,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
@@ -1650,6 +1711,8 @@ mod tests {
             name: None,
             description: None,
             clear_description: false,
+            auto_advance: false,
+            no_auto_advance: false,
         };
 
         let result = update_cmd.execute(&create_service(&db)).await;
@@ -1678,6 +1741,7 @@ mod tests {
                 name: "step1".to_string(),
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
+            auto_advance: false,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
@@ -1688,6 +1752,8 @@ mod tests {
             name: Some("   ".to_string()),
             description: None,
             clear_description: false,
+            auto_advance: false,
+            no_auto_advance: false,
         };
 
         let result = update_cmd.execute(&create_service(&db)).await;
@@ -1716,6 +1782,7 @@ mod tests {
                 name: "step1".to_string(),
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
+            auto_advance: false,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
@@ -1726,6 +1793,8 @@ mod tests {
             name: Some("Updated Name".to_string()),
             description: None,
             clear_description: false,
+            auto_advance: false,
+            no_auto_advance: false,
         };
 
         let result = update_cmd.execute(&create_service(&db)).await;
@@ -1743,6 +1812,8 @@ mod tests {
             name: Some("New Name".to_string()),
             description: None,
             clear_description: false,
+            auto_advance: false,
+            no_auto_advance: false,
         };
         let debug_str = format!("{:?}", cmd);
         assert!(
@@ -1769,6 +1840,7 @@ mod tests {
                 name: "step1".to_string(),
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
+            auto_advance: false,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
@@ -1815,6 +1887,7 @@ mod tests {
                 name: "step1".to_string(),
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
+            auto_advance: false,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
@@ -1872,6 +1945,7 @@ mod tests {
                     agent_config: AgentConfig::new().with_model("tester"),
                 },
             ],
+            auto_advance: false,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let workflow_id = extract_workflow_id(&add_result);
@@ -1916,6 +1990,7 @@ mod tests {
                 name: "step1".to_string(),
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
+            auto_advance: false,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let workflow_id = extract_workflow_id(&add_result);
@@ -1971,6 +2046,7 @@ mod tests {
                 name: "step1".to_string(),
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
+            auto_advance: false,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let workflow_id = extract_workflow_id(&add_result);
@@ -2018,6 +2094,7 @@ mod tests {
                 name: "step1".to_string(),
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
+            auto_advance: false,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let workflow_id = extract_workflow_id(&add_result);
@@ -2124,6 +2201,7 @@ mod tests {
                     agent_config: AgentConfig::new().with_model("agent3"),
                 },
             ],
+            auto_advance: false,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let workflow_id = extract_workflow_id(&add_result);
@@ -2171,6 +2249,7 @@ mod tests {
                     agent_config: AgentConfig::new().with_model("agent2"),
                 },
             ],
+            auto_advance: false,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let workflow_id = extract_workflow_id(&add_result);
@@ -2285,6 +2364,7 @@ mod tests {
                     agent_config: AgentConfig::new().with_model("agent3"),
                 },
             ],
+            auto_advance: false,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let workflow_id = extract_workflow_id(&add_result);
@@ -2339,6 +2419,7 @@ mod tests {
                     agent_config: AgentConfig::new().with_model("agent2"),
                 },
             ],
+            auto_advance: false,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let workflow_id = extract_workflow_id(&add_result);
@@ -2441,6 +2522,7 @@ mod tests {
                 name: "test".to_string(),
                 agent_config: AgentConfig::new().with_model("test-agent"),
             }],
+            auto_advance: false,
         };
         let result = workflow.execute(&create_service(&db)).await.unwrap();
         let workflow_id = extract_workflow_id(&result);
