@@ -145,6 +145,12 @@ mod sql {
 
         DEFINE FIELD workflow_id ON step TYPE record<workflow>;
 
+        DEFINE FIELD goal ON step TYPE option<string>;
+
+        DEFINE FIELD agents ON step TYPE array<string> DEFAULT [];
+
+        DEFINE FIELD skills ON step TYPE array<string> DEFAULT [];
+
         DEFINE FIELD agent_config ON step FLEXIBLE TYPE object DEFAULT {};
 
         DEFINE FIELD is_final ON step TYPE bool DEFAULT false;

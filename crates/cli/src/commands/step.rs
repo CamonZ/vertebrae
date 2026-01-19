@@ -60,7 +60,19 @@ pub struct StepAddCommand {
     #[arg(long)]
     pub id: Option<String>,
 
-    /// Model to use for this step's agent
+    /// Goal describing what this step should accomplish
+    #[arg(long, short)]
+    pub goal: Option<String>,
+
+    /// Paths to .claude/agents/ files (can be specified multiple times)
+    #[arg(long, short = 'a')]
+    pub agent: Vec<String>,
+
+    /// Skill names available for this step (can be specified multiple times)
+    #[arg(long, short = 's')]
+    pub skill: Vec<String>,
+
+    /// Model to use for this step's agent (legacy, use --agent instead)
     #[arg(long, short)]
     pub model: Option<String>,
 
@@ -96,7 +108,7 @@ impl StepAddCommand {
         // Build the workflow Thing reference
         let workflow_id = Thing::from(("workflow", self.workflow.to_lowercase().as_str()));
 
-        // Build agent config
+        // Build agent config (legacy support)
         let mut agent_config = AgentConfig::new();
         if let Some(model) = &self.model {
             agent_config = agent_config.with_model(model);
@@ -114,6 +126,21 @@ impl StepAddCommand {
             .with_agent_config(agent_config)
             .with_order(self.order)
             .with_is_final(self.r#final);
+
+        // Set goal if provided
+        if let Some(goal) = &self.goal {
+            step = step.with_goal(goal);
+        }
+
+        // Set agents if provided
+        if !self.agent.is_empty() {
+            step = step.with_agents(self.agent.clone());
+        }
+
+        // Set skills if provided
+        if !self.skill.is_empty() {
+            step = step.with_skills(self.skill.clone());
+        }
 
         // Add transitions one at a time
         for transition in transitions_to {
@@ -228,6 +255,20 @@ impl StepShowCommand {
                 let workflow_id = s.workflow_id.id.to_string();
                 let model = s.agent_config.model.as_deref().unwrap_or("default");
 
+                let goal = s.goal.as_deref().unwrap_or("(none)");
+
+                let agents = if s.agents.is_empty() {
+                    "(none)".to_string()
+                } else {
+                    s.agents.join(", ")
+                };
+
+                let skills = if s.skills.is_empty() {
+                    "(none)".to_string()
+                } else {
+                    s.skills.join(", ")
+                };
+
                 let transitions = if s.transitions_to.is_empty() {
                     "(none)".to_string()
                 } else {
@@ -244,6 +285,9 @@ impl StepShowCommand {
 
 Workflow:      {}
 Order:         {}
+Goal:          {}
+Agents:        {}
+Skills:        {}
 Model:         {}
 Is Final:      {}
 Transitions:   {}
@@ -253,6 +297,9 @@ Updated:       {}"#,
                     s.name,
                     workflow_id,
                     s.order,
+                    goal,
+                    agents,
+                    skills,
                     model,
                     if s.is_final { "Yes" } else { "No" },
                     transitions,
@@ -285,7 +332,27 @@ pub struct StepUpdateCommand {
     #[arg(long)]
     pub name: Option<String>,
 
-    /// New model for the step's agent
+    /// New goal for the step
+    #[arg(long, short)]
+    pub goal: Option<String>,
+
+    /// New agents list (replaces existing)
+    #[arg(long, short = 'a')]
+    pub agent: Vec<String>,
+
+    /// Clear all agents
+    #[arg(long)]
+    pub clear_agents: bool,
+
+    /// New skills list (replaces existing)
+    #[arg(long, short = 's')]
+    pub skill: Vec<String>,
+
+    /// Clear all skills
+    #[arg(long)]
+    pub clear_skills: bool,
+
+    /// New model for the step's agent (legacy)
     #[arg(long, short)]
     pub model: Option<String>,
 
@@ -333,6 +400,22 @@ impl StepUpdateCommand {
 
         if let Some(name) = &self.name {
             updates = updates.with_name(name);
+        }
+
+        if let Some(goal) = &self.goal {
+            updates = updates.with_goal(goal);
+        }
+
+        if self.clear_agents {
+            updates = updates.with_agents(vec![]);
+        } else if !self.agent.is_empty() {
+            updates = updates.with_agents(self.agent.clone());
+        }
+
+        if self.clear_skills {
+            updates = updates.with_skills(vec![]);
+        } else if !self.skill.is_empty() {
+            updates = updates.with_skills(self.skill.clone());
         }
 
         if let Some(order) = self.order {
@@ -473,6 +556,40 @@ mod tests {
     }
 
     #[test]
+    fn test_step_add_with_orchestration_fields() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "add",
+            "Code Review",
+            "--workflow",
+            "default",
+            "--goal",
+            "Review code for best practices",
+            "--agent",
+            ".claude/agents/reviewer.md",
+            "--agent",
+            ".claude/agents/linter.md",
+            "--skill",
+            "code-review",
+            "--skill",
+            "lint",
+        ]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            StepCommand::Add(cmd) => {
+                assert_eq!(cmd.name, "Code Review");
+                assert_eq!(cmd.goal, Some("Review code for best practices".to_string()));
+                assert_eq!(
+                    cmd.agent,
+                    vec![".claude/agents/reviewer.md", ".claude/agents/linter.md"]
+                );
+                assert_eq!(cmd.skill, vec!["code-review", "lint"]);
+            }
+            _ => panic!("Expected Add command"),
+        }
+    }
+
+    #[test]
     fn test_step_add_requires_name() {
         let result = TestCli::try_parse_from(["test", "add", "--workflow", "default"]);
         assert!(result.is_err());
@@ -574,6 +691,49 @@ mod tests {
         match cli.unwrap().command {
             StepCommand::Update(cmd) => {
                 assert!(cmd.clear_transitions);
+            }
+            _ => panic!("Expected Update command"),
+        }
+    }
+
+    #[test]
+    fn test_step_update_with_orchestration_fields() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "update",
+            "review-step",
+            "--goal",
+            "Updated goal",
+            "--agent",
+            ".claude/agents/new-agent.md",
+            "--skill",
+            "new-skill",
+        ]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            StepCommand::Update(cmd) => {
+                assert_eq!(cmd.goal, Some("Updated goal".to_string()));
+                assert_eq!(cmd.agent, vec![".claude/agents/new-agent.md"]);
+                assert_eq!(cmd.skill, vec!["new-skill"]);
+            }
+            _ => panic!("Expected Update command"),
+        }
+    }
+
+    #[test]
+    fn test_step_update_clear_agents_and_skills() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "update",
+            "review-step",
+            "--clear-agents",
+            "--clear-skills",
+        ]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            StepCommand::Update(cmd) => {
+                assert!(cmd.clear_agents);
+                assert!(cmd.clear_skills);
             }
             _ => panic!("Expected Update command"),
         }

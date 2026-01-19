@@ -24,6 +24,12 @@ pub struct StepRepository<'a> {
 pub struct StepUpdate {
     /// New name (if Some)
     pub name: Option<String>,
+    /// New goal (if Some)
+    pub goal: Option<String>,
+    /// New agents list (if Some, replaces entire list)
+    pub agents: Option<Vec<String>>,
+    /// New skills list (if Some, replaces entire list)
+    pub skills: Option<Vec<String>>,
     /// New agent config (if Some)
     pub agent_config: Option<serde_json::Value>,
     /// New is_final value (if Some)
@@ -43,6 +49,24 @@ impl StepUpdate {
     /// Set a new name
     pub fn with_name(mut self, name: impl Into<String>) -> Self {
         self.name = Some(name.into());
+        self
+    }
+
+    /// Set a new goal
+    pub fn with_goal(mut self, goal: impl Into<String>) -> Self {
+        self.goal = Some(goal.into());
+        self
+    }
+
+    /// Set agents list
+    pub fn with_agents(mut self, agents: Vec<String>) -> Self {
+        self.agents = Some(agents);
+        self
+    }
+
+    /// Set skills list
+    pub fn with_skills(mut self, skills: Vec<String>) -> Self {
+        self.skills = Some(skills);
         self
     }
 
@@ -73,6 +97,9 @@ impl StepUpdate {
     /// Check if any updates are specified
     pub fn has_updates(&self) -> bool {
         self.name.is_some()
+            || self.goal.is_some()
+            || self.agents.is_some()
+            || self.skills.is_some()
             || self.agent_config.is_some()
             || self.is_final.is_some()
             || self.transitions_to.is_some()
@@ -123,21 +150,35 @@ impl<'a> StepRepository<'a> {
                 message: format!("Failed to serialize transitions_to: {}", e),
             })?;
 
+        let agents_json =
+            serde_json::to_string(&step.agents).map_err(|e| DbError::ValidationError {
+                message: format!("Failed to serialize agents: {}", e),
+            })?;
+
+        let skills_json =
+            serde_json::to_string(&step.skills).map_err(|e| DbError::ValidationError {
+                message: format!("Failed to serialize skills: {}", e),
+            })?;
+
         let query = format!(
             r#"CREATE step SET
                 name = $name,
                 workflow_id = {},
+                goal = $goal,
+                agents = {},
+                skills = {},
                 agent_config = {},
                 is_final = $is_final,
                 transitions_to = {},
                 order = $order"#,
-            step.workflow_id, agent_config_json, transitions_json
+            step.workflow_id, agents_json, skills_json, agent_config_json, transitions_json
         );
 
         let mut result = self
             .client
             .query(&query)
             .bind(("name", step.name.clone()))
+            .bind(("goal", step.goal.clone()))
             .bind(("is_final", step.is_final))
             .bind(("order", step.order))
             .await
@@ -176,21 +217,35 @@ impl<'a> StepRepository<'a> {
                 message: format!("Failed to serialize transitions_to: {}", e),
             })?;
 
+        let agents_json =
+            serde_json::to_string(&step.agents).map_err(|e| DbError::ValidationError {
+                message: format!("Failed to serialize agents: {}", e),
+            })?;
+
+        let skills_json =
+            serde_json::to_string(&step.skills).map_err(|e| DbError::ValidationError {
+                message: format!("Failed to serialize skills: {}", e),
+            })?;
+
         let query = format!(
             r#"CREATE step:{} SET
                 name = $name,
                 workflow_id = {},
+                goal = $goal,
+                agents = {},
+                skills = {},
                 agent_config = {},
                 is_final = $is_final,
                 transitions_to = {},
                 order = $order"#,
-            id, step.workflow_id, agent_config_json, transitions_json
+            id, step.workflow_id, agents_json, skills_json, agent_config_json, transitions_json
         );
 
         let mut result = self
             .client
             .query(&query)
             .bind(("name", step.name.clone()))
+            .bind(("goal", step.goal.clone()))
             .bind(("is_final", step.is_final))
             .bind(("order", step.order))
             .await
@@ -341,6 +396,24 @@ impl<'a> StepRepository<'a> {
 
         if let Some(name) = &updates.name {
             set_clauses.push(format!("name = \"{}\"", name.replace('\"', "\\\"")));
+        }
+
+        if let Some(goal) = &updates.goal {
+            set_clauses.push(format!("goal = \"{}\"", goal.replace('\"', "\\\"")));
+        }
+
+        if let Some(agents) = &updates.agents {
+            let json = serde_json::to_string(agents).map_err(|e| DbError::ValidationError {
+                message: format!("Failed to serialize agents: {}", e),
+            })?;
+            set_clauses.push(format!("agents = {}", json));
+        }
+
+        if let Some(skills) = &updates.skills {
+            let json = serde_json::to_string(skills).map_err(|e| DbError::ValidationError {
+                message: format!("Failed to serialize skills: {}", e),
+            })?;
+            set_clauses.push(format!("skills = {}", json));
         }
 
         if let Some(agent_config) = &updates.agent_config {
@@ -731,5 +804,80 @@ mod tests {
             created.agent_config.system_prompt,
             agent_config.system_prompt
         );
+    }
+
+    #[tokio::test]
+    async fn test_step_with_orchestration_fields() {
+        let client = setup_test_db().await;
+        let repo = StepRepository::new(&client);
+
+        let workflow_id = Thing::from(("workflow", "test"));
+        let step = Step::new("Code Review", workflow_id)
+            .with_goal("Review code for best practices and security issues")
+            .with_agents(vec![
+                ".claude/agents/reviewer.md".to_string(),
+                ".claude/agents/security.md".to_string(),
+            ])
+            .with_skills(vec![
+                "code-review".to_string(),
+                "security-audit".to_string(),
+            ])
+            .with_order(0);
+
+        let created = repo
+            .create_with_id("orchestration_test", &step)
+            .await
+            .unwrap();
+        assert_eq!(
+            created.goal,
+            Some("Review code for best practices and security issues".to_string())
+        );
+        assert_eq!(
+            created.agents,
+            vec![".claude/agents/reviewer.md", ".claude/agents/security.md"]
+        );
+        assert_eq!(created.skills, vec!["code-review", "security-audit"]);
+    }
+
+    #[tokio::test]
+    async fn test_update_step_orchestration_fields() {
+        let client = setup_test_db().await;
+        let repo = StepRepository::new(&client);
+
+        let workflow_id = Thing::from(("workflow", "test"));
+        let step = Step::new("Original", workflow_id).with_order(0);
+        repo.create_with_id("update_orch_test", &step)
+            .await
+            .unwrap();
+
+        let updates = StepUpdate::new()
+            .with_goal("Updated goal")
+            .with_agents(vec![".claude/agents/new.md".to_string()])
+            .with_skills(vec!["new-skill".to_string()]);
+
+        repo.update("update_orch_test", &updates).await.unwrap();
+
+        let updated = repo.get("update_orch_test").await.unwrap().unwrap();
+        assert_eq!(updated.goal, Some("Updated goal".to_string()));
+        assert_eq!(updated.agents, vec![".claude/agents/new.md"]);
+        assert_eq!(updated.skills, vec!["new-skill"]);
+    }
+
+    #[tokio::test]
+    async fn test_step_builder_methods() {
+        let workflow_id = Thing::from(("workflow", "test"));
+        let step = Step::new("Test", workflow_id)
+            .with_goal("Test goal")
+            .with_agent(".claude/agents/test.md")
+            .with_agent(".claude/agents/test2.md")
+            .with_skill("skill1")
+            .with_skill("skill2");
+
+        assert_eq!(step.goal, Some("Test goal".to_string()));
+        assert_eq!(
+            step.agents,
+            vec![".claude/agents/test.md", ".claude/agents/test2.md"]
+        );
+        assert_eq!(step.skills, vec!["skill1", "skill2"]);
     }
 }

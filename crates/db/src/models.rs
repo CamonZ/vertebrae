@@ -491,7 +491,19 @@ pub struct Step {
     /// Reference to the workflow this step belongs to
     pub workflow_id: Thing,
 
-    /// Agent configuration for this step
+    /// What this step should accomplish
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub goal: Option<String>,
+
+    /// Paths to .claude/agents/ files for this step
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub agents: Vec<String>,
+
+    /// Skill names available for this step
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skills: Vec<String>,
+
+    /// Agent configuration for this step (legacy, kept for backwards compatibility)
     #[serde(default)]
     pub agent_config: AgentConfig,
 
@@ -523,6 +535,9 @@ impl Step {
             id: None,
             name: name.into(),
             workflow_id,
+            goal: None,
+            agents: Vec::new(),
+            skills: Vec::new(),
             agent_config: AgentConfig::default(),
             is_final: false,
             transitions_to: Vec::new(),
@@ -530,6 +545,36 @@ impl Step {
             created_at: None,
             updated_at: None,
         }
+    }
+
+    /// Set the goal for this step
+    pub fn with_goal(mut self, goal: impl Into<String>) -> Self {
+        self.goal = Some(goal.into());
+        self
+    }
+
+    /// Set the agents for this step
+    pub fn with_agents(mut self, agents: Vec<String>) -> Self {
+        self.agents = agents;
+        self
+    }
+
+    /// Add an agent to this step
+    pub fn with_agent(mut self, agent: impl Into<String>) -> Self {
+        self.agents.push(agent.into());
+        self
+    }
+
+    /// Set the skills for this step
+    pub fn with_skills(mut self, skills: Vec<String>) -> Self {
+        self.skills = skills;
+        self
+    }
+
+    /// Add a skill to this step
+    pub fn with_skill(mut self, skill: impl Into<String>) -> Self {
+        self.skills.push(skill.into());
+        self
     }
 
     /// Set the agent configuration for this step
