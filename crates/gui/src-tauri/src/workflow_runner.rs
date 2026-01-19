@@ -65,7 +65,7 @@ pub async fn execute_workflow(
         .workflow_id
         .ok_or_else(|| "Task has no workflow".to_string())?;
 
-    let workflow = db
+    let _workflow = db
         .workflows()
         .get(&workflow_id.id.to_raw())
         .await
@@ -73,6 +73,13 @@ pub async fn execute_workflow(
         .ok_or_else(|| "Workflow not found".to_string())?;
 
     let workflow_id_str = workflow_id.id.to_raw();
+
+    // Fetch first-class Step entities for this workflow
+    let steps = db
+        .steps()
+        .list_by_workflow(&workflow_id)
+        .await
+        .map_err(|e| format!("Failed to get steps: {}", e))?;
 
     // 2. Emit started event
     let _ = app_handle.emit(
@@ -87,7 +94,7 @@ pub async fn execute_workflow(
     log::info!(
         "[WorkflowRunner] Workflow started for task: {}, steps: {}",
         task_id,
-        workflow.steps.len()
+        steps.len()
     );
 
     // 3. Get task goal for prompt
@@ -99,11 +106,11 @@ pub async fn execute_workflow(
         .unwrap_or_else(|| task.title.clone());
 
     // 4. Execute each step sequentially
-    for (step_index, step) in workflow.steps.iter().enumerate() {
+    for (step_index, step) in steps.iter().enumerate() {
         log::info!(
             "[WorkflowRunner] Executing step {} of {}: {}",
             step_index + 1,
-            workflow.steps.len(),
+            steps.len(),
             step.name
         );
 
@@ -158,7 +165,7 @@ pub async fn execute_workflow(
 /// Creates an execution record, spawns Claude CLI, streams output to SessionLog,
 /// and emits events for progress updates.
 async fn execute_step(
-    step: vertebrae_db::WorkflowStep,
+    step: vertebrae_db::Step,
     task_goal: &str,
     task_id: &str,
     workflow_id: &str,

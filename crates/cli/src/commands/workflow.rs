@@ -8,7 +8,7 @@ use vertebrae_core::{
     CreateWorkflowOptions, DefaultWorkflowService, ServiceError, TaskService,
     UpdateWorkflowOptions, WorkflowService, WorkflowStepInput,
 };
-use vertebrae_db::{AgentConfig, WorkflowStep};
+use vertebrae_db::AgentConfig;
 
 /// Workflow management commands
 #[derive(Debug, Subcommand)]
@@ -251,6 +251,17 @@ impl WorkflowListCommand {
     }
 }
 
+/// Display information for a workflow step
+#[derive(Debug, Clone)]
+pub struct StepDisplayInfo {
+    /// Step name
+    pub name: String,
+    /// Agent model
+    pub model: Option<String>,
+    /// Step order (0-based)
+    pub order: i32,
+}
+
 /// Detailed view of a workflow with all steps
 #[derive(Debug)]
 pub struct WorkflowDetail {
@@ -261,7 +272,7 @@ pub struct WorkflowDetail {
     /// Optional description
     pub description: Option<String>,
     /// Ordered list of workflow steps
-    pub steps: Vec<WorkflowStep>,
+    pub steps: Vec<StepDisplayInfo>,
     /// Additional metadata as key-value pairs
     pub metadata: std::collections::HashMap<String, String>,
     /// Workflow to chain to when done
@@ -301,7 +312,7 @@ impl std::fmt::Display for WorkflowDetail {
             sorted_steps.sort_by_key(|s| s.order);
 
             for step in &sorted_steps {
-                let model_display = step.agent_config.model.as_deref().unwrap_or("default");
+                let model_display = step.model.as_deref().unwrap_or("default");
                 writeln!(
                     f,
                     "{}. {} (model: {})",
@@ -398,25 +409,24 @@ impl WorkflowShowCommand {
             .map(|t| t.id.to_raw())
             .unwrap_or_else(|| self.id.clone());
 
-        // Get steps: prefer first-class Steps, fall back to embedded steps
-        #[allow(deprecated)]
-        let steps = if workflow.steps.is_empty() {
-            if let Some(ref workflow_thing) = workflow.id {
-                let first_class_steps = service
-                    .database()
-                    .steps()
-                    .list_by_workflow(workflow_thing)
-                    .await?;
-                // Convert first-class Steps to embedded WorkflowStep format
-                first_class_steps
-                    .into_iter()
-                    .map(|s| WorkflowStep::new(s.name, s.agent_config, s.order as u32))
-                    .collect()
-            } else {
-                workflow.steps
-            }
+        // Get steps from first-class Step entities
+        let steps = if let Some(ref workflow_thing) = workflow.id {
+            let first_class_steps = service
+                .database()
+                .steps()
+                .list_by_workflow(workflow_thing)
+                .await?;
+            // Convert to display format
+            first_class_steps
+                .into_iter()
+                .map(|s| StepDisplayInfo {
+                    name: s.name,
+                    model: s.agent_config.model,
+                    order: s.order,
+                })
+                .collect()
         } else {
-            workflow.steps
+            Vec::new()
         };
 
         let detail = WorkflowDetail {
@@ -1463,8 +1473,16 @@ mod tests {
             name: "Full Workflow".to_string(),
             description: Some("A complete workflow".to_string()),
             steps: vec![
-                WorkflowStep::new("step1", AgentConfig::new().with_model("agent1"), 0),
-                WorkflowStep::new("step2", AgentConfig::new().with_model("agent2"), 1),
+                StepDisplayInfo {
+                    name: "step1".to_string(),
+                    model: Some("agent1".to_string()),
+                    order: 0,
+                },
+                StepDisplayInfo {
+                    name: "step2".to_string(),
+                    model: Some("agent2".to_string()),
+                    order: 1,
+                },
             ],
             metadata: std::collections::HashMap::new(),
             on_done_workflow: None,
@@ -1493,11 +1511,11 @@ mod tests {
             id: "abc123".to_string(),
             name: "Metadata Workflow".to_string(),
             description: None,
-            steps: vec![WorkflowStep::new(
-                "step1",
-                AgentConfig::new().with_model("agent1"),
-                0,
-            )],
+            steps: vec![StepDisplayInfo {
+                name: "step1".to_string(),
+                model: Some("agent1".to_string()),
+                order: 0,
+            }],
             metadata,
             on_done_workflow: None,
             on_reject_workflow: None,

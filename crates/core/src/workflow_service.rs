@@ -462,22 +462,14 @@ impl DefaultWorkflowService {
 
     /// Get ordered step names for a workflow.
     ///
-    /// This handles both embedded steps (legacy) and first-class Step entities.
-    /// If `workflow.initial_step` is set, it fetches first-class Steps from the database.
-    /// Otherwise, it uses the embedded steps.
+    /// Fetches first-class Step entities from the database.
     async fn get_workflow_steps(&self, workflow: &Workflow) -> ServiceResult<Vec<String>> {
-        // If workflow has first-class Steps, use them
         if let Some(ref workflow_thing) = workflow.id {
-            let first_class_steps = self.db.steps().list_by_workflow(workflow_thing).await?;
-            if !first_class_steps.is_empty() {
-                // Return names in order
-                return Ok(first_class_steps.iter().map(|s| s.name.clone()).collect());
-            }
+            let steps = self.db.steps().list_by_workflow(workflow_thing).await?;
+            return Ok(steps.iter().map(|s| s.name.clone()).collect());
         }
 
-        // Fall back to embedded steps (legacy workflows)
-        let ordered = workflow.ordered_steps();
-        Ok(ordered.iter().map(|s| s.name.clone()).collect())
+        Ok(Vec::new())
     }
 }
 
@@ -616,16 +608,12 @@ impl WorkflowService for DefaultWorkflowService {
                     .map(|thing| thing.id.to_raw())
                     .unwrap_or_default();
 
-            // Get step count: prefer first-class Steps, fall back to embedded
+            // Get step count from first-class Step entities
             let step_count = if let Some(ref workflow_thing) = w.id {
-                let first_class_steps = self.db.steps().list_by_workflow(workflow_thing).await?;
-                if !first_class_steps.is_empty() {
-                    first_class_steps.len()
-                } else {
-                    w.steps.len()
-                }
+                let steps = self.db.steps().list_by_workflow(workflow_thing).await?;
+                steps.len()
             } else {
-                w.steps.len()
+                0
             };
 
             summaries.push(WorkflowSummary {
@@ -761,7 +749,7 @@ impl WorkflowService for DefaultWorkflowService {
             .await?
             .ok_or_else(|| ServiceError::workflow_not_found(&workflow_id))?;
 
-        // Get the first step (supports both embedded and first-class steps)
+        // Get the first step
         let step_names = self.get_workflow_steps(&workflow).await?;
         if step_names.is_empty() {
             return Err(ServiceError::validation_failed("Workflow has no steps"));
@@ -1194,8 +1182,7 @@ mod tests {
         let workflow = service.get_workflow(&id).await.unwrap();
         assert_eq!(workflow.name, "Test Workflow");
 
-        // Verify first-class Step entities were created (not embedded steps)
-        assert_eq!(workflow.steps.len(), 0, "embedded steps should be empty");
+        // Verify initial_step is set
         assert!(
             workflow.initial_step.is_some(),
             "initial_step should be set"

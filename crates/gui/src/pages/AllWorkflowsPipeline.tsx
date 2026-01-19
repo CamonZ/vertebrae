@@ -16,8 +16,7 @@ import {
   commands,
   type TaskLevel,
   type TaskWithRelations,
-  type Workflow,
-  type WorkflowStep,
+  type Step,
 } from "../bindings";
 import { useWorkflows } from "../hooks/useWorkflows";
 import { useWorkflowChangeListener } from "../hooks/useWorkflowChangeListener";
@@ -44,8 +43,8 @@ type TaskZoneNodeData = {
   >;
   onTaskClick?: (taskId: string) => void;
   selectedTaskId?: string | null;
-  onZoneClick?: (step: WorkflowStep) => void;
-  step?: WorkflowStep;
+  onZoneClick?: (step: Step) => void;
+  step?: Step;
   isZoneActive?: boolean;
   [key: string]: unknown;
 };
@@ -244,7 +243,7 @@ function calculateWorkflowZoneHeight(): number {
  */
 function groupTasksByStep(
   tasks: TaskWithRelations[],
-  steps: Workflow["steps"]
+  steps: Step[]
 ): Map<string, TaskWithRelations[]> {
   const sortedSteps = [...steps].sort((a, b) => a.order - b.order);
   const groups = new Map<string, TaskWithRelations[]>();
@@ -296,16 +295,21 @@ export function AllWorkflowsPipeline() {
     Map<string, TaskWithRelations[]>
   >(new Map());
 
+  // State for fetched steps per workflow
+  const [workflowStepsMap, setWorkflowStepsMap] = useState<
+    Map<string, Step[]>
+  >(new Map());
+
   // State for selected task (for detail panel)
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
 
   // State for selected step (for step config panel)
-  const [selectedStep, setSelectedStep] = useState<WorkflowStep | null>(null);
+  const [selectedStep, setSelectedStep] = useState<Step | null>(null);
 
   // State for selected zone (workflow ID + step for filtered tasks panel)
   const [selectedZone, setSelectedZone] = useState<{
     workflowId: string;
-    step: WorkflowStep;
+    step: Step;
   } | null>(null);
 
   // Task selection handlers
@@ -324,7 +328,7 @@ export function AllWorkflowsPipeline() {
   }, []);
 
   // Step selection handlers
-  const handleStepClick = useCallback((step: WorkflowStep) => {
+  const handleStepClick = useCallback((step: Step) => {
     setSelectedStep(step);
     setSelectedTaskId(null); // Clear task selection when step is selected
   }, []);
@@ -335,7 +339,7 @@ export function AllWorkflowsPipeline() {
 
   // Zone selection handlers (for filtered tasks panel)
   const handleZoneClick = useCallback(
-    (workflowId: string, step: WorkflowStep) => {
+    (workflowId: string, step: Step) => {
       setSelectedZone({ workflowId, step });
       setSelectedTaskId(null); // Clear task selection
       setSelectedStep(null); // Clear step config selection
@@ -347,47 +351,77 @@ export function AllWorkflowsPipeline() {
     setSelectedZone(null);
   }, []);
 
-  // Fetch task details for all workflows
+  // Fetch task details and steps for all workflows
   useEffect(() => {
-    const fetchAllWorkflowTasks = async () => {
+    const fetchAllWorkflowData = async () => {
       if (workflows.length === 0) {
         setWorkflowTasksMap(new Map());
+        setWorkflowStepsMap(new Map());
         return;
       }
 
       const tasksMap = new Map<string, TaskWithRelations[]>();
+      const stepsMap = new Map<string, Step[]>();
 
       try {
         for (const workflow of workflows) {
+          // Skip workflows without an ID
+          const workflowId = workflow.id;
+          if (!workflowId) continue;
+
+          // Fetch tasks for this workflow
           try {
-            const result = await commands.getWorkflowWithTaskDetails(
-              workflow.id
+            const tasksResult = await commands.getWorkflowWithTaskDetails(
+              workflowId
             );
-            if (result.status === "ok") {
-              tasksMap.set(workflow.id, result.data.tasks);
+            if (tasksResult.status === "ok") {
+              tasksMap.set(workflowId, tasksResult.data.tasks);
             } else {
               console.warn(
-                `Failed to load tasks for workflow ${workflow.id}:`,
-                result.error.message
+                `Failed to load tasks for workflow ${workflowId}:`,
+                tasksResult.error.message
               );
-              tasksMap.set(workflow.id, []);
+              tasksMap.set(workflowId, []);
             }
           } catch (err) {
             console.warn(
-              `Failed to load tasks for workflow ${workflow.id}:`,
+              `Failed to load tasks for workflow ${workflowId}:`,
               String(err)
             );
-            tasksMap.set(workflow.id, []);
+            tasksMap.set(workflowId, []);
+          }
+
+          // Fetch steps for this workflow
+          try {
+            const stepsResult = await commands.listStepsForWorkflow(
+              workflowId
+            );
+            if (stepsResult.status === "ok") {
+              stepsMap.set(workflowId, stepsResult.data);
+            } else {
+              console.warn(
+                `Failed to load steps for workflow ${workflowId}:`,
+                stepsResult.error.message
+              );
+              stepsMap.set(workflowId, []);
+            }
+          } catch (err) {
+            console.warn(
+              `Failed to load steps for workflow ${workflowId}:`,
+              String(err)
+            );
+            stepsMap.set(workflowId, []);
           }
         }
       } catch (err) {
-        addToast(`Failed to load workflow tasks: ${String(err)}`, "error");
+        addToast(`Failed to load workflow data: ${String(err)}`, "error");
       }
 
       setWorkflowTasksMap(tasksMap);
+      setWorkflowStepsMap(stepsMap);
     };
 
-    fetchAllWorkflowTasks();
+    fetchAllWorkflowData();
   }, [workflows, addToast]);
 
   // Subscribe to workflow change events for automatic list refresh
@@ -408,16 +442,21 @@ export function AllWorkflowsPipeline() {
     let currentY = 0;
 
     workflows.forEach((workflow) => {
-      const sortedSteps = [...workflow.steps].sort((a, b) => a.order - b.order);
-      const workflowTasks = workflowTasksMap.get(workflow.id) || [];
-      const tasksByStep = groupTasksByStep(workflowTasks, workflow.steps);
+      // Skip workflows without an ID
+      const workflowId = workflow.id;
+      if (!workflowId) return;
+
+      const workflowSteps = workflowStepsMap.get(workflowId) || [];
+      const sortedSteps = [...workflowSteps].sort((a, b) => a.order - b.order);
+      const workflowTasks = workflowTasksMap.get(workflowId) || [];
+      const tasksByStep = groupTasksByStep(workflowTasks, workflowSteps);
 
       const zoneWidth = calculateWorkflowZoneWidth(sortedSteps.length);
       const zoneHeight = calculateWorkflowZoneHeight();
 
       // Add workflow zone node
       nodes.push({
-        id: `workflow-zone-${workflow.id}`,
+        id: `workflow-zone-${workflowId}`,
         type: "workflowZoneNode",
         position: { x: 0, y: currentY },
         data: {
@@ -436,7 +475,7 @@ export function AllWorkflowsPipeline() {
           selectedStep?.name === step.name &&
           selectedStep?.order === step.order;
         nodes.push({
-          id: `step-${workflow.id}-${step.order}`,
+          id: `step-${workflowId}-${step.order}`,
           type: "stepNode",
           position: {
             x: WORKFLOW_ZONE_PADDING + index * NODE_SPACING_X,
@@ -455,10 +494,10 @@ export function AllWorkflowsPipeline() {
         // Add task zone node below each step
         const stepTasks = tasksByStep.get(step.name.toLowerCase()) || [];
         const isZoneActive =
-          selectedZone?.workflowId === workflow.id &&
+          selectedZone?.workflowId === workflowId &&
           selectedZone?.step.order === step.order;
         nodes.push({
-          id: `task-zone-${workflow.id}-${step.order}`,
+          id: `task-zone-${workflowId}-${step.order}`,
           type: "taskZoneNode",
           position: {
             x: WORKFLOW_ZONE_PADDING + index * NODE_SPACING_X - 9, // Center offset
@@ -470,7 +509,7 @@ export function AllWorkflowsPipeline() {
             onTaskClick: handleTaskClick,
             selectedTaskId,
             step,
-            onZoneClick: () => handleZoneClick(workflow.id, step),
+            onZoneClick: () => handleZoneClick(workflowId, step),
             isZoneActive,
           } as TaskZoneNodeData,
           style: {
@@ -492,6 +531,7 @@ export function AllWorkflowsPipeline() {
   }, [
     workflows,
     workflowTasksMap,
+    workflowStepsMap,
     handleTaskClick,
     selectedTaskId,
     handleStepClick,
@@ -656,22 +696,33 @@ export function AllWorkflowsPipeline() {
         (() => {
           const allWorkflowTasks =
             workflowTasksMap.get(selectedZone.workflowId) || [];
-          // Get workflow object to access steps
-          const workflow = workflows.find(
-            (w) => w.id === selectedZone.workflowId
-          );
-          if (!workflow) return null;
+          // Get steps for this workflow
+          const workflowSteps =
+            workflowStepsMap.get(selectedZone.workflowId) || [];
+          if (workflowSteps.length === 0) return null;
 
           // Group tasks by step
           const tasksByStep = groupTasksByStep(
             allWorkflowTasks,
-            workflow.steps
+            workflowSteps
           );
           // Get tasks for selected step
           const stepTasks =
             tasksByStep.get(selectedZone.step.name.toLowerCase()) || [];
           // Convert TaskWithRelations to TaskSummary for the panel
-          const taskSummaries = stepTasks.map((tr) => tr.task);
+          // Filter out any tasks without IDs and map to TaskSummary format
+          const taskSummaries = stepTasks
+            .filter((tr) => tr.task.id !== null)
+            .map((tr) => ({
+              id: tr.task.id as string,
+              title: tr.task.title,
+              level: tr.task.level,
+              status: tr.task.status,
+              priority: tr.task.priority,
+              tags: tr.task.tags,
+              needs_human_review: tr.task.needs_human_review,
+              created_at: tr.task.created_at ?? new Date().toISOString(),
+            }));
 
           return (
             <FilteredTasksPanel

@@ -462,28 +462,7 @@ impl From<vertebrae_db::AgentConfig> for AgentConfig {
     }
 }
 
-/// Workflow step - mirrors db::WorkflowStep (legacy embedded steps)
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
-pub struct WorkflowStep {
-    /// Display name for this step
-    pub name: String,
-    /// The agent configuration to use for this step
-    pub agent_config: AgentConfig,
-    /// Ordering index for sequential execution (0-based)
-    pub order: u32,
-}
-
-impl From<vertebrae_db::WorkflowStep> for WorkflowStep {
-    fn from(step: vertebrae_db::WorkflowStep) -> Self {
-        WorkflowStep {
-            name: step.name,
-            agent_config: step.agent_config.into(),
-            order: step.order,
-        }
-    }
-}
-
-/// First-class workflow step - mirrors db::Step
+/// Workflow step entity - mirrors db::Step
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct Step {
     /// Step ID (string form)
@@ -531,9 +510,7 @@ pub struct Workflow {
     pub name: String,
     /// Optional description of the workflow
     pub description: Option<String>,
-    /// Ordered list of workflow steps (legacy embedded steps)
-    pub steps: Vec<WorkflowStep>,
-    /// Reference to the initial step in the workflow (new first-class steps)
+    /// Reference to the initial step in the workflow
     pub initial_step: Option<String>,
     /// Additional metadata as key-value pairs
     pub metadata: std::collections::HashMap<String, String>,
@@ -553,7 +530,6 @@ impl From<vertebrae_db::Workflow> for Workflow {
             id: workflow.id.map(|t| t.id.to_raw()),
             name: workflow.name,
             description: workflow.description,
-            steps: workflow.steps.into_iter().map(Into::into).collect(),
             initial_step: workflow.initial_step.map(|t| t.id.to_raw()),
             metadata: workflow.metadata,
             on_done_workflow: workflow.on_done_workflow,

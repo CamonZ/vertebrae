@@ -2,13 +2,19 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { StepDetailPanel } from "./StepDetailPanel";
-import type { WorkflowStep } from "../../bindings";
+import type { Step } from "../../bindings";
 
-// Helper to create a workflow step with defaults
-function createWorkflowStep(overrides?: Partial<WorkflowStep>): WorkflowStep {
+// Helper to create a step with defaults
+function createStep(overrides?: Partial<Step>): Step {
   return {
+    id: null,
     name: "Test Step",
+    workflow_id: "workflow-1",
     order: 0,
+    is_final: false,
+    transitions_to: [],
+    created_at: null,
+    updated_at: null,
     agent_config: {
       model: null,
       fallback_model: null,
@@ -38,21 +44,21 @@ describe("StepDetailPanel", () => {
     });
 
     it("renders panel header with 'Step Configuration' title", () => {
-      const step = createWorkflowStep();
+      const step = createStep();
       render(<StepDetailPanel step={step} />);
 
       expect(screen.getByText("Step Configuration")).toBeInTheDocument();
     });
 
     it("renders step name in panel title", () => {
-      const step = createWorkflowStep({ name: "Development" });
+      const step = createStep({ name: "Development" });
       render(<StepDetailPanel step={step} />);
 
       expect(screen.getByRole("heading", { name: "Development" })).toBeInTheDocument();
     });
 
     it("renders step order badge (1-indexed)", () => {
-      const step = createWorkflowStep({ order: 2 });
+      const step = createStep({ order: 2 });
       render(<StepDetailPanel step={step} />);
 
       // Order 2 displays as "3" (1-indexed)
@@ -60,7 +66,7 @@ describe("StepDetailPanel", () => {
     });
 
     it("renders step position text", () => {
-      const step = createWorkflowStep({ order: 1 });
+      const step = createStep({ order: 1 });
       render(<StepDetailPanel step={step} />);
 
       expect(screen.getByText("Step 2 in workflow")).toBeInTheDocument();
@@ -69,9 +75,9 @@ describe("StepDetailPanel", () => {
 
   describe("model configuration", () => {
     it("shows 'Default' when no model is configured", () => {
-      const step = createWorkflowStep({
+      const step = createStep({
         agent_config: {
-          ...createWorkflowStep().agent_config,
+          ...createStep().agent_config,
           model: null,
         },
       });
@@ -85,9 +91,9 @@ describe("StepDetailPanel", () => {
     });
 
     it("displays configured model name", () => {
-      const step = createWorkflowStep({
+      const step = createStep({
         agent_config: {
-          ...createWorkflowStep().agent_config,
+          ...createStep().agent_config,
           model: "claude-3-opus",
         },
       });
@@ -97,9 +103,9 @@ describe("StepDetailPanel", () => {
     });
 
     it("displays fallback model when configured", () => {
-      const step = createWorkflowStep({
+      const step = createStep({
         agent_config: {
-          ...createWorkflowStep().agent_config,
+          ...createStep().agent_config,
           model: "claude-3-opus",
           fallback_model: "claude-3-sonnet",
         },
@@ -112,9 +118,9 @@ describe("StepDetailPanel", () => {
 
   describe("system prompt", () => {
     it("displays system prompt override when configured", () => {
-      const step = createWorkflowStep({
+      const step = createStep({
         agent_config: {
-          ...createWorkflowStep().agent_config,
+          ...createStep().agent_config,
           system_prompt: "You are a helpful assistant",
         },
       });
@@ -125,9 +131,9 @@ describe("StepDetailPanel", () => {
     });
 
     it("displays append system prompt when configured", () => {
-      const step = createWorkflowStep({
+      const step = createStep({
         agent_config: {
-          ...createWorkflowStep().agent_config,
+          ...createStep().agent_config,
           append_system_prompt: "Additional instructions here",
         },
       });
@@ -138,7 +144,7 @@ describe("StepDetailPanel", () => {
     });
 
     it("does not show system prompt section when none configured", () => {
-      const step = createWorkflowStep();
+      const step = createStep();
       render(<StepDetailPanel step={step} />);
 
       expect(screen.queryByText("System Prompt")).not.toBeInTheDocument();
@@ -147,9 +153,9 @@ describe("StepDetailPanel", () => {
 
   describe("tools configuration", () => {
     it("displays built-in tools count in header", () => {
-      const step = createWorkflowStep({
+      const step = createStep({
         agent_config: {
-          ...createWorkflowStep().agent_config,
+          ...createStep().agent_config,
           tools: ["read", "write", "execute"],
           allowed_tools: ["bash"],
         },
@@ -161,9 +167,9 @@ describe("StepDetailPanel", () => {
     });
 
     it("displays built-in tools as tags", () => {
-      const step = createWorkflowStep({
+      const step = createStep({
         agent_config: {
-          ...createWorkflowStep().agent_config,
+          ...createStep().agent_config,
           tools: ["read", "write"],
         },
       });
@@ -174,9 +180,9 @@ describe("StepDetailPanel", () => {
     });
 
     it("displays allowed tools", () => {
-      const step = createWorkflowStep({
+      const step = createStep({
         agent_config: {
-          ...createWorkflowStep().agent_config,
+          ...createStep().agent_config,
           allowed_tools: ["bash", "python"],
         },
       });
@@ -187,9 +193,9 @@ describe("StepDetailPanel", () => {
     });
 
     it("displays disallowed tools with error styling", () => {
-      const step = createWorkflowStep({
+      const step = createStep({
         agent_config: {
-          ...createWorkflowStep().agent_config,
+          ...createStep().agent_config,
           disallowed_tools: ["dangerous_tool"],
         },
       });
@@ -199,7 +205,7 @@ describe("StepDetailPanel", () => {
     });
 
     it("shows 'Using default tools' when no tools configured", () => {
-      const step = createWorkflowStep();
+      const step = createStep();
       render(<StepDetailPanel step={step} />);
 
       expect(screen.getByText("Using default tools")).toBeInTheDocument();
@@ -208,7 +214,7 @@ describe("StepDetailPanel", () => {
 
   describe("permissions", () => {
     it("shows 'Default' when no permission mode configured", () => {
-      const step = createWorkflowStep();
+      const step = createStep();
       render(<StepDetailPanel step={step} />);
 
       // Find the permission mode "Default" text (there's also model Default)
@@ -217,9 +223,9 @@ describe("StepDetailPanel", () => {
     });
 
     it("displays configured permission mode", () => {
-      const step = createWorkflowStep({
+      const step = createStep({
         agent_config: {
-          ...createWorkflowStep().agent_config,
+          ...createStep().agent_config,
           permission_mode: "plan",
         },
       });
@@ -229,9 +235,9 @@ describe("StepDetailPanel", () => {
     });
 
     it("displays budget when configured", () => {
-      const step = createWorkflowStep({
+      const step = createStep({
         agent_config: {
-          ...createWorkflowStep().agent_config,
+          ...createStep().agent_config,
           max_budget_usd: 10.5,
         },
       });
@@ -243,9 +249,9 @@ describe("StepDetailPanel", () => {
 
   describe("MCP configuration", () => {
     it("displays MCP servers when configured", () => {
-      const step = createWorkflowStep({
+      const step = createStep({
         agent_config: {
-          ...createWorkflowStep().agent_config,
+          ...createStep().agent_config,
           mcp_config: ["server1", "server2"],
         },
       });
@@ -257,7 +263,7 @@ describe("StepDetailPanel", () => {
     });
 
     it("does not show MCP section when no servers configured", () => {
-      const step = createWorkflowStep();
+      const step = createStep();
       render(<StepDetailPanel step={step} />);
 
       expect(screen.queryByText("MCP Servers")).not.toBeInTheDocument();
@@ -266,9 +272,9 @@ describe("StepDetailPanel", () => {
 
   describe("plugin directories", () => {
     it("displays plugin directories when configured", () => {
-      const step = createWorkflowStep({
+      const step = createStep({
         agent_config: {
-          ...createWorkflowStep().agent_config,
+          ...createStep().agent_config,
           plugin_dirs: ["/path/to/plugins", "/another/path"],
         },
       });
@@ -282,9 +288,9 @@ describe("StepDetailPanel", () => {
 
   describe("custom agents", () => {
     it("displays custom agents when configured", () => {
-      const step = createWorkflowStep({
+      const step = createStep({
         agent_config: {
-          ...createWorkflowStep().agent_config,
+          ...createStep().agent_config,
           agents: "custom agent config here",
         },
       });
@@ -297,9 +303,9 @@ describe("StepDetailPanel", () => {
 
   describe("JSON schema", () => {
     it("displays output schema when configured", () => {
-      const step = createWorkflowStep({
+      const step = createStep({
         agent_config: {
-          ...createWorkflowStep().agent_config,
+          ...createStep().agent_config,
           json_schema: '{"type": "object"}',
         },
       });
@@ -312,7 +318,7 @@ describe("StepDetailPanel", () => {
 
   describe("close button", () => {
     it("renders close button when onClose is provided", () => {
-      const step = createWorkflowStep();
+      const step = createStep();
       const onClose = vi.fn();
       render(<StepDetailPanel step={step} onClose={onClose} />);
 
@@ -321,7 +327,7 @@ describe("StepDetailPanel", () => {
 
     it("calls onClose when close button is clicked", async () => {
       const user = userEvent.setup();
-      const step = createWorkflowStep();
+      const step = createStep();
       const onClose = vi.fn();
       render(<StepDetailPanel step={step} onClose={onClose} />);
 
@@ -331,7 +337,7 @@ describe("StepDetailPanel", () => {
     });
 
     it("does not render close button when onClose is not provided", () => {
-      const step = createWorkflowStep();
+      const step = createStep();
       render(<StepDetailPanel step={step} />);
 
       expect(screen.queryByLabelText("Close panel")).not.toBeInTheDocument();

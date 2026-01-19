@@ -12,6 +12,7 @@ vi.mock("./bindings", () => ({
     listTasks: vi.fn(),
     getTaskHierarchy: vi.fn(),
     getTask: vi.fn(),
+    listStepsForWorkflow: vi.fn(),
   },
   events: {
     workflowChangedEvent: {
@@ -79,6 +80,60 @@ describe("Router Acceptance Tests", () => {
     (commands.getTaskHierarchy as ReturnType<typeof vi.fn>).mockResolvedValue({
       status: "ok",
       data: [],
+    });
+
+    (commands.listStepsForWorkflow as ReturnType<typeof vi.fn>).mockResolvedValue({
+      status: "ok",
+      data: [
+        {
+          id: "step-backlog",
+          workflow_id: "workflow-1",
+          name: "backlog",
+          order: 0,
+          agent_config: {
+            model: "claude-3-sonnet",
+            system_prompt: "",
+            append_system_prompt: "",
+            tools: [],
+            allowed_tools: [],
+            permission_mode: null,
+          },
+          created_at: null,
+          updated_at: null,
+        },
+        {
+          id: "step-in_progress",
+          workflow_id: "workflow-1",
+          name: "in_progress",
+          order: 1,
+          agent_config: {
+            model: "claude-3-sonnet",
+            system_prompt: "",
+            append_system_prompt: "",
+            tools: [],
+            allowed_tools: [],
+            permission_mode: null,
+          },
+          created_at: null,
+          updated_at: null,
+        },
+        {
+          id: "step-done",
+          workflow_id: "workflow-1",
+          name: "done",
+          order: 2,
+          agent_config: {
+            model: "claude-3-sonnet",
+            system_prompt: "",
+            append_system_prompt: "",
+            tools: [],
+            allowed_tools: [],
+            permission_mode: null,
+          },
+          created_at: null,
+          updated_at: null,
+        },
+      ],
     });
   });
 

@@ -3,6 +3,7 @@ import { screen } from "@testing-library/react";
 import {
   render,
   createMockWorkflow,
+  createMockSteps,
   createMockTaskWithRelations,
 } from "../../test/test-utils";
 import { WorkflowPipeline } from "./WorkflowPipeline";
@@ -10,8 +11,8 @@ import { WorkflowPipeline } from "./WorkflowPipeline";
 describe("WorkflowPipeline", () => {
   describe("rendering", () => {
     it("renders empty state when no steps are defined", () => {
-      const workflow = createMockWorkflow({ steps: [] });
-      render(<WorkflowPipeline workflow={workflow} />);
+      const workflow = createMockWorkflow();
+      render(<WorkflowPipeline workflow={workflow} steps={[]} />);
 
       expect(screen.getByText("No steps defined")).toBeInTheDocument();
       expect(
@@ -21,7 +22,8 @@ describe("WorkflowPipeline", () => {
 
     it("renders step nodes for each workflow step", () => {
       const workflow = createMockWorkflow();
-      render(<WorkflowPipeline workflow={workflow} />);
+      const steps = createMockSteps();
+      render(<WorkflowPipeline workflow={workflow} steps={steps} />);
 
       // Check that step names are rendered (both in step nodes and zone labels)
       expect(screen.getAllByText(/backlog/i).length).toBeGreaterThan(0);
@@ -31,6 +33,7 @@ describe("WorkflowPipeline", () => {
 
     it("renders tasks in their corresponding zones", () => {
       const workflow = createMockWorkflow();
+      const steps = createMockSteps();
       const tasks = [
         createMockTaskWithRelations({
           task: { id: "task-1", title: "Task in Backlog", status: "backlog" },
@@ -41,7 +44,7 @@ describe("WorkflowPipeline", () => {
       ];
 
       render(
-        <WorkflowPipeline workflow={workflow} tasksWithRelations={tasks} />
+        <WorkflowPipeline workflow={workflow} steps={steps} tasksWithRelations={tasks} />
       );
 
       // Tasks are rendered inside zones (React Flow may render nodes multiple times)
@@ -54,6 +57,7 @@ describe("WorkflowPipeline", () => {
 
     it("shows task count in zone labels", () => {
       const workflow = createMockWorkflow();
+      const steps = createMockSteps();
       const tasks = [
         createMockTaskWithRelations({
           task: { id: "task-1", title: "Task 1", status: "backlog" },
@@ -64,7 +68,7 @@ describe("WorkflowPipeline", () => {
       ];
 
       render(
-        <WorkflowPipeline workflow={workflow} tasksWithRelations={tasks} />
+        <WorkflowPipeline workflow={workflow} steps={steps} tasksWithRelations={tasks} />
       );
 
       // Zone should show count
@@ -75,6 +79,7 @@ describe("WorkflowPipeline", () => {
   describe("task grouping", () => {
     it("groups done/rejected tasks into done zone", () => {
       const workflow = createMockWorkflow();
+      const steps = createMockSteps();
       const tasks = [
         createMockTaskWithRelations({
           task: { id: "task-1", title: "Done Task", status: "done" },
@@ -85,7 +90,7 @@ describe("WorkflowPipeline", () => {
       ];
 
       render(
-        <WorkflowPipeline workflow={workflow} tasksWithRelations={tasks} />
+        <WorkflowPipeline workflow={workflow} steps={steps} tasksWithRelations={tasks} />
       );
 
       // Both should appear in done zone - check the zone label shows count
@@ -94,6 +99,7 @@ describe("WorkflowPipeline", () => {
 
     it("places tasks without current_step_id in first step", () => {
       const workflow = createMockWorkflow();
+      const steps = createMockSteps();
       const tasks = [
         createMockTaskWithRelations({
           task: { id: "task-1", title: "New Task", status: "todo" },
@@ -101,7 +107,7 @@ describe("WorkflowPipeline", () => {
       ];
 
       render(
-        <WorkflowPipeline workflow={workflow} tasksWithRelations={tasks} />
+        <WorkflowPipeline workflow={workflow} steps={steps} tasksWithRelations={tasks} />
       );
 
       // Task without current_step_id should be in backlog (first step)
@@ -110,6 +116,7 @@ describe("WorkflowPipeline", () => {
 
     it("places tasks based on current_step_id when stepIdToName is provided", () => {
       const workflow = createMockWorkflow();
+      const steps = createMockSteps();
       const tasks = [
         createMockTaskWithRelations({
           task: {
@@ -129,6 +136,7 @@ describe("WorkflowPipeline", () => {
       render(
         <WorkflowPipeline
           workflow={workflow}
+          steps={steps}
           tasksWithRelations={tasks}
           stepIdToName={stepIdToName}
         />
@@ -140,6 +148,7 @@ describe("WorkflowPipeline", () => {
 
     it("uses execution state for positioning during workflow execution", () => {
       const workflow = createMockWorkflow();
+      const steps = createMockSteps();
       const tasks = [
         createMockTaskWithRelations({
           task: { id: "task-1", title: "Executing Task", status: "todo" },
@@ -153,6 +162,7 @@ describe("WorkflowPipeline", () => {
       render(
         <WorkflowPipeline
           workflow={workflow}
+          steps={steps}
           tasksWithRelations={tasks}
           executionState={executionState}
         />
@@ -164,6 +174,7 @@ describe("WorkflowPipeline", () => {
 
     it("prioritizes current_step_id over execution state for positioning", () => {
       const workflow = createMockWorkflow();
+      const steps = createMockSteps();
       const tasks = [
         createMockTaskWithRelations({
           task: {
@@ -188,6 +199,7 @@ describe("WorkflowPipeline", () => {
       render(
         <WorkflowPipeline
           workflow={workflow}
+          steps={steps}
           tasksWithRelations={tasks}
           stepIdToName={stepIdToName}
           executionState={executionState}
@@ -202,21 +214,24 @@ describe("WorkflowPipeline", () => {
   describe("step node rendering", () => {
     it("marks first step as Entry", () => {
       const workflow = createMockWorkflow();
-      render(<WorkflowPipeline workflow={workflow} />);
+      const steps = createMockSteps();
+      render(<WorkflowPipeline workflow={workflow} steps={steps} />);
 
       expect(screen.getByText("Entry")).toBeInTheDocument();
     });
 
     it("marks last step as Exit", () => {
       const workflow = createMockWorkflow();
-      render(<WorkflowPipeline workflow={workflow} />);
+      const steps = createMockSteps();
+      render(<WorkflowPipeline workflow={workflow} steps={steps} />);
 
       expect(screen.getByText("Exit")).toBeInTheDocument();
     });
 
     it("marks middle steps as Process", () => {
       const workflow = createMockWorkflow();
-      render(<WorkflowPipeline workflow={workflow} />);
+      const steps = createMockSteps();
+      render(<WorkflowPipeline workflow={workflow} steps={steps} />);
 
       expect(screen.getByText("Process")).toBeInTheDocument();
     });
@@ -225,6 +240,7 @@ describe("WorkflowPipeline", () => {
   describe("status visual styling", () => {
     it("shows backlog status icon for backlog tasks", () => {
       const workflow = createMockWorkflow();
+      const steps = createMockSteps();
       const tasks = [
         createMockTaskWithRelations({
           task: { id: "task-1", title: "Backlog Task", status: "backlog" },
@@ -232,7 +248,7 @@ describe("WorkflowPipeline", () => {
       ];
 
       render(
-        <WorkflowPipeline workflow={workflow} tasksWithRelations={tasks} />
+        <WorkflowPipeline workflow={workflow} steps={steps} tasksWithRelations={tasks} />
       );
 
       // The backlog icon is ○
@@ -241,6 +257,7 @@ describe("WorkflowPipeline", () => {
 
     it("shows todo status icon for todo tasks", () => {
       const workflow = createMockWorkflow();
+      const steps = createMockSteps();
       const tasks = [
         createMockTaskWithRelations({
           task: { id: "task-1", title: "Todo Task", status: "todo" },
@@ -248,7 +265,7 @@ describe("WorkflowPipeline", () => {
       ];
 
       render(
-        <WorkflowPipeline workflow={workflow} tasksWithRelations={tasks} />
+        <WorkflowPipeline workflow={workflow} steps={steps} tasksWithRelations={tasks} />
       );
 
       // The todo icon is ◉
@@ -257,6 +274,7 @@ describe("WorkflowPipeline", () => {
 
     it("shows in_progress status icon for in_progress tasks", () => {
       const workflow = createMockWorkflow();
+      const steps = createMockSteps();
       const tasks = [
         createMockTaskWithRelations({
           task: { id: "task-1", title: "Running Task", status: "in_progress" },
@@ -264,7 +282,7 @@ describe("WorkflowPipeline", () => {
       ];
 
       render(
-        <WorkflowPipeline workflow={workflow} tasksWithRelations={tasks} />
+        <WorkflowPipeline workflow={workflow} steps={steps} tasksWithRelations={tasks} />
       );
 
       // The in_progress icon is ⟳ (spinning)
@@ -273,6 +291,7 @@ describe("WorkflowPipeline", () => {
 
     it("shows pending_review status icon for pending_review tasks", () => {
       const workflow = createMockWorkflow();
+      const steps = createMockSteps();
       const tasks = [
         createMockTaskWithRelations({
           task: { id: "task-1", title: "Review Task", status: "pending_review" },
@@ -280,7 +299,7 @@ describe("WorkflowPipeline", () => {
       ];
 
       render(
-        <WorkflowPipeline workflow={workflow} tasksWithRelations={tasks} />
+        <WorkflowPipeline workflow={workflow} steps={steps} tasksWithRelations={tasks} />
       );
 
       // The pending_review icon is ◈
@@ -289,6 +308,7 @@ describe("WorkflowPipeline", () => {
 
     it("shows done status icon for done tasks", () => {
       const workflow = createMockWorkflow();
+      const steps = createMockSteps();
       const tasks = [
         createMockTaskWithRelations({
           task: { id: "task-1", title: "Completed Task", status: "done" },
@@ -296,7 +316,7 @@ describe("WorkflowPipeline", () => {
       ];
 
       render(
-        <WorkflowPipeline workflow={workflow} tasksWithRelations={tasks} />
+        <WorkflowPipeline workflow={workflow} steps={steps} tasksWithRelations={tasks} />
       );
 
       // The done icon is ✓
@@ -305,6 +325,7 @@ describe("WorkflowPipeline", () => {
 
     it("shows rejected status icon for rejected tasks", () => {
       const workflow = createMockWorkflow();
+      const steps = createMockSteps();
       const tasks = [
         createMockTaskWithRelations({
           task: { id: "task-1", title: "Rejected Task", status: "rejected" },
@@ -312,7 +333,7 @@ describe("WorkflowPipeline", () => {
       ];
 
       render(
-        <WorkflowPipeline workflow={workflow} tasksWithRelations={tasks} />
+        <WorkflowPipeline workflow={workflow} steps={steps} tasksWithRelations={tasks} />
       );
 
       // The rejected icon is ✕
@@ -321,6 +342,7 @@ describe("WorkflowPipeline", () => {
 
     it("displays status visually independent of position", () => {
       const workflow = createMockWorkflow();
+      const steps = createMockSteps();
       // Task has in_progress status but is positioned in backlog step
       const tasks = [
         createMockTaskWithRelations({
@@ -329,7 +351,7 @@ describe("WorkflowPipeline", () => {
       ];
 
       render(
-        <WorkflowPipeline workflow={workflow} tasksWithRelations={tasks} />
+        <WorkflowPipeline workflow={workflow} steps={steps} tasksWithRelations={tasks} />
       );
 
       // Task should be in backlog zone (first step, no current_step_id)
@@ -343,9 +365,10 @@ describe("WorkflowPipeline", () => {
     it("passes onPlayClick to step nodes", () => {
       const onPlayClick = vi.fn();
       const workflow = createMockWorkflow();
+      const steps = createMockSteps();
 
       render(
-        <WorkflowPipeline workflow={workflow} onPlayClick={onPlayClick} />
+        <WorkflowPipeline workflow={workflow} steps={steps} onPlayClick={onPlayClick} />
       );
 
       // Component should render without error when callback is provided
@@ -356,8 +379,9 @@ describe("WorkflowPipeline", () => {
   describe("empty zones", () => {
     it("shows 'No tasks' message for empty zones", () => {
       const workflow = createMockWorkflow();
+      const steps = createMockSteps();
 
-      render(<WorkflowPipeline workflow={workflow} tasksWithRelations={[]} />);
+      render(<WorkflowPipeline workflow={workflow} steps={steps} tasksWithRelations={[]} />);
 
       // All zones should show "No tasks"
       const noTasksElements = screen.getAllByText("No tasks");

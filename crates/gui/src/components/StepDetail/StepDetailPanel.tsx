@@ -1,7 +1,7 @@
-import type { WorkflowStep } from "../../bindings";
+import type { Step } from "../../bindings";
 
 interface StepDetailPanelProps {
-  step: WorkflowStep | null;
+  step: Step | null;
   onClose?: () => void;
 }
 
@@ -239,7 +239,7 @@ export function StepDetailPanel({ step, onClose }: StepDetailPanelProps) {
                       ? "bg-bg-tertiary text-text-secondary"
                       : agent_config.permission_mode === "plan"
                         ? "bg-info/10 text-info"
-                        : agent_config.permission_mode === "bypasspermissions"
+                        : agent_config.permission_mode === "bypass_permissions"
                           ? "bg-warning/10 text-warning"
                           : "bg-bg-tertiary text-text-secondary"
                   }`}

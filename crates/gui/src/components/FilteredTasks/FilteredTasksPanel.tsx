@@ -1,13 +1,12 @@
 import { useState, useCallback, useMemo } from "react";
-import type { TaskFilterOptions, TaskSummary, TaskHierarchyNode } from "../../bindings";
+import type { TaskFilterOptions, TaskSummary, TaskHierarchyNode, Step } from "../../bindings";
 import type { ViewMode } from "../TaskList";
-import { TaskList, TaskFilters, TaskTreeView } from "../TaskList";
+import { TaskList, TaskTreeView } from "../TaskList";
 import { useTaskHierarchy } from "../../hooks/useTaskHierarchy";
 import { useExpandedNodes } from "../../hooks/useExpandedNodes";
-import type { WorkflowStep } from "../../bindings";
 
 interface FilteredTasksPanelProps {
-  step: WorkflowStep | null;
+  step: Step | null;
   tasks: TaskSummary[];
   workflowId: string;
   onClose?: () => void;
@@ -55,10 +54,6 @@ export function FilteredTasksPanel({
     isLoading: isHierarchyLoading,
     error: hierarchyError,
   } = useTaskHierarchy(null, memoizedFilters) || {};
-
-  const handleFiltersChange = useCallback((newFilters: TaskFilterOptions) => {
-    setSearch(newFilters.search ?? null);
-  }, []);
 
   const handleViewModeChange = useCallback((mode: ViewMode) => {
     setViewMode(mode);

@@ -14,7 +14,7 @@ pub use models::{
     AgentConfig, ChatMessage, ChatSession, CodeRef, ExecutionStatus, Level, PermissionMode,
     Priority, Section, SectionType, SessionLog, Status, StatusDefinition, StatusProgression,
     StatusSchema, Step, StepExecution, Task, ValidationGate, ValidationGateType,
-    ValidationMechanism, ValidationResult, Workflow, WorkflowStep,
+    ValidationMechanism, ValidationResult, Workflow,
 };
 pub use repository::{
     BlockerNode, ChatSessionRepository, DEFAULT_STATUS_SCHEMA_ID, DEFAULT_WORKFLOW_ID,

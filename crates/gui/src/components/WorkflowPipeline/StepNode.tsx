@@ -1,18 +1,18 @@
 import { memo } from 'react';
 import { Handle, Position, type NodeProps, type Node } from '@xyflow/react';
-import type { WorkflowStep } from '../../bindings';
+import type { Step } from '../../bindings';
 import { NODE_SIZING, NODE_SHADOW_STYLE, HANDLE_SIZING } from './nodeConstants';
 
 /**
  * Data passed to StepNode
  */
 export type StepNodeData = {
-  step: WorkflowStep;
+  step: Step;
   isFirst: boolean;
   isLast: boolean;
   onPlayClick?: (taskId: string) => void;
   isExecuting?: boolean;
-  onStepClick?: (step: WorkflowStep) => void;
+  onStepClick?: (step: Step) => void;
   isSelected?: boolean;
 };
 

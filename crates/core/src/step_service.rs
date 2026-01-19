@@ -130,7 +130,6 @@ impl StepService for DefaultStepService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vertebrae_db::{AgentConfig, WorkflowStep};
 
     async fn setup_test_service() -> DefaultStepService {
         let db = Database::connect_mem().await.unwrap();
@@ -138,13 +137,9 @@ mod tests {
         DefaultStepService::new(db)
     }
 
-    /// Create a workflow with at least one embedded step to pass validation
+    /// Create a workflow (without embedded steps - using first-class Step entities)
     fn test_workflow(name: &str) -> vertebrae_db::Workflow {
-        vertebrae_db::Workflow::new(name).with_step(WorkflowStep::new(
-            "placeholder",
-            AgentConfig::default(),
-            0,
-        ))
+        vertebrae_db::Workflow::new(name)
     }
 
     #[tokio::test]

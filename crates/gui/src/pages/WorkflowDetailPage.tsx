@@ -372,8 +372,8 @@ export function WorkflowDetailPage() {
                 />
               </svg>
               <span className="font-mono text-xs">
-                {workflowData.steps.length} step
-                {workflowData.steps.length !== 1 ? "s" : ""}
+                {steps.length} step
+                {steps.length !== 1 ? "s" : ""}
               </span>
             </div>
 
@@ -473,6 +473,7 @@ export function WorkflowDetailPage() {
         </div>
         <WorkflowPipeline
           workflow={workflowData}
+          steps={steps}
           executionState={executionState}
           tasksWithRelations={tasksWithRelations}
           stepIdToName={stepIdToName}

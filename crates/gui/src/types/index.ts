@@ -31,7 +31,7 @@ export type {
 
   // Workflow types
   Workflow,
-  WorkflowStep,
+  Step,
   WorkflowWithTasks,
   AgentConfig,
   PermissionMode,

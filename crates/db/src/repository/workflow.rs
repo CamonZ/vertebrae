@@ -4,8 +4,8 @@
 //! encapsulating SurrealDB queries and providing a clean API.
 
 use crate::error::{DbError, DbResult};
-use crate::models::{AgentConfig, Step, Workflow, WorkflowStep};
-use crate::repository::StepRepository;
+use crate::models::{AgentConfig, Step, Workflow};
+use crate::repository::{StepRepository, StepUpdate};
 
 /// The ID of the default workflow that matches the standard status flow.
 ///
@@ -91,8 +91,6 @@ pub struct WorkflowUpdate {
     pub name: Option<String>,
     /// New description (if Some, None clears it, absent leaves unchanged)
     pub description: Option<Option<String>>,
-    /// Steps to set (replaces entire steps array)
-    pub steps: Option<Vec<WorkflowStep>>,
     /// Metadata to set (replaces entire metadata object)
     pub metadata: Option<std::collections::HashMap<String, String>>,
     /// Workflow to chain to when done (Some(Some(id)) to set, Some(None) to clear, None to leave unchanged)
@@ -124,12 +122,6 @@ impl WorkflowUpdate {
     /// Clear the description
     pub fn clear_description(mut self) -> Self {
         self.description = Some(None);
-        self
-    }
-
-    /// Set steps
-    pub fn with_steps(mut self, steps: Vec<WorkflowStep>) -> Self {
-        self.steps = Some(steps);
         self
     }
 
@@ -173,7 +165,6 @@ impl WorkflowUpdate {
     pub fn has_updates(&self) -> bool {
         self.name.is_some()
             || self.description.is_some()
-            || self.steps.is_some()
             || self.metadata.is_some()
             || self.on_done_workflow.is_some()
             || self.on_reject_workflow.is_some()
@@ -229,21 +220,10 @@ impl<'a> WorkflowRepository<'a> {
         debug!("Creating workflow: {} with name: {}", id, workflow.name);
         trace!("Workflow data: {:?}", workflow);
 
-        // Validate workflow configuration
-        workflow
-            .validate()
-            .map_err(|msg| DbError::ValidationError { message: msg })?;
-
         let description_str = match &workflow.description {
             Some(d) => format!("\"{}\"", d.replace('\"', "\\\"")),
             None => "NONE".to_string(),
         };
-
-        let steps_json =
-            serde_json::to_string(&workflow.steps).map_err(|e| DbError::InvalidPath {
-                path: std::path::PathBuf::from(id),
-                reason: format!("Failed to serialize steps: {}", e),
-            })?;
 
         let metadata_json =
             serde_json::to_string(&workflow.metadata).map_err(|e| DbError::InvalidPath {
@@ -267,11 +247,10 @@ impl<'a> WorkflowRepository<'a> {
             r#"CREATE workflow:{} SET
                 name = $name,
                 description = {},
-                steps = {},
                 metadata = {},
                 on_done_workflow = {},
                 on_reject_workflow = {}"#,
-            id, description_str, steps_json, metadata_json, on_done_str, on_reject_str
+            id, description_str, metadata_json, on_done_str, on_reject_str
         );
 
         self.client.query(&query).bind(("name", name)).await?;
@@ -363,31 +342,6 @@ impl<'a> WorkflowRepository<'a> {
                 }
                 None => field_updates.push("description = NONE".to_string()),
             }
-        }
-
-        if let Some(steps) = &updates.steps {
-            // Validate steps before updating
-            if steps.is_empty() {
-                return Err(DbError::ValidationError {
-                    message: "workflow must have at least one step".to_string(),
-                });
-            }
-
-            // Check for unique step names
-            let mut seen_names = std::collections::HashSet::new();
-            for step in steps {
-                if !seen_names.insert(&step.name) {
-                    return Err(DbError::ValidationError {
-                        message: format!("duplicate step name '{}' in workflow", step.name),
-                    });
-                }
-            }
-
-            let steps_json = serde_json::to_string(steps).map_err(|e| DbError::InvalidPath {
-                path: std::path::PathBuf::from(id),
-                reason: format!("Failed to serialize steps: {}", e),
-            })?;
-            field_updates.push(format!("steps = {}", steps_json));
         }
 
         if let Some(metadata) = &updates.metadata {
@@ -487,40 +441,50 @@ impl<'a> WorkflowRepository<'a> {
 
         debug!("Creating default workflow");
 
-        let default_workflow = Workflow::new("Default Workflow")
-            .with_description(
-                "Standard task workflow matching the status flow: \
+        let default_workflow = Workflow::new("Default Workflow").with_description(
+            "Standard task workflow matching the status flow: \
                 backlog -> todo -> in_progress -> pending_review -> done",
-            )
-            .with_step(WorkflowStep::new(
-                "backlog",
-                AgentConfig::new().with_model("task-agent"),
-                0,
-            ))
-            .with_step(WorkflowStep::new(
-                "todo",
-                AgentConfig::new().with_model("task-agent"),
-                1,
-            ))
-            .with_step(WorkflowStep::new(
-                "in_progress",
-                AgentConfig::new().with_model("task-agent"),
-                2,
-            ))
-            .with_step(WorkflowStep::new(
-                "pending_review",
-                AgentConfig::new().with_model("task-agent"),
-                3,
-            ))
-            .with_step(WorkflowStep::new(
-                "done",
-                AgentConfig::new().with_model("task-agent"),
-                4,
-            ));
+        );
 
         self.create(DEFAULT_WORKFLOW_ID, &default_workflow).await?;
 
-        debug!("Default workflow created successfully");
+        // Create first-class Step entities for the default workflow
+        let step_repo = StepRepository::new(self.client);
+        let workflow_thing = surrealdb::sql::Thing::from(("workflow", DEFAULT_WORKFLOW_ID));
+
+        let step_names = ["backlog", "todo", "in_progress", "pending_review", "done"];
+        let mut created_step_ids: Vec<surrealdb::sql::Thing> = Vec::new();
+
+        for (order, step_name) in step_names.iter().enumerate() {
+            let is_final = order == step_names.len() - 1;
+            let step = Step::new(*step_name, workflow_thing.clone())
+                .with_agent_config(AgentConfig::new().with_model("task-agent"))
+                .with_order(order as i32)
+                .with_is_final(is_final);
+
+            let step_id = format!("{}_{}", DEFAULT_WORKFLOW_ID, step_name);
+            let created_step = step_repo.create_with_id(&step_id, &step).await?;
+            if let Some(thing) = created_step.id {
+                created_step_ids.push(thing);
+            }
+        }
+
+        // Set up linear transitions between steps
+        for i in 0..created_step_ids.len().saturating_sub(1) {
+            let current_id = created_step_ids[i].id.to_raw();
+            let next_step = created_step_ids[i + 1].clone();
+
+            let update = StepUpdate::new().with_transitions_to(vec![next_step]);
+            step_repo.update(&current_id, &update).await?;
+        }
+
+        // Set the workflow's initial_step to the first step
+        if let Some(first_step) = created_step_ids.first() {
+            let workflow_update = WorkflowUpdate::new().with_initial_step(first_step.clone());
+            self.update(DEFAULT_WORKFLOW_ID, &workflow_update).await?;
+        }
+
+        debug!("Default workflow created successfully with first-class Steps");
         Ok(true)
     }
 
@@ -707,307 +671,59 @@ impl<'a> WorkflowRepository<'a> {
     pub async fn export_all(&self) -> DbResult<Vec<(String, Workflow)>> {
         debug!("Exporting all workflows");
 
-        #[derive(Debug, Deserialize)]
-        struct WorkflowWithId {
-            id: surrealdb::sql::Thing,
-            #[serde(flatten)]
-            workflow: Workflow,
-        }
-
         let mut result = self.client.query("SELECT * FROM workflow").await?;
-        let workflows: Vec<WorkflowWithId> = result.take(0)?;
+        let workflows: Vec<Workflow> = result.take(0)?;
 
         debug!("Exported {} workflows", workflows.len());
         Ok(workflows
             .into_iter()
-            .map(|w| (w.id.id.to_raw(), w.workflow))
+            .filter_map(|w| w.id.as_ref().map(|id| (id.id.to_raw(), w.clone())))
             .collect())
     }
 
-    /// Migrate embedded workflow steps to first-class Step entities.
+    /// Legacy migration function for embedded workflow steps.
     ///
-    /// This migration reads all workflows with embedded steps (the legacy `steps` field)
-    /// and creates corresponding `Step` records in the step table. It also:
-    /// - Sets up transitions between sequential steps
-    /// - Marks the last step as final
-    /// - Sets the workflow's `initial_step` to the first step created
-    /// - Updates tasks that reference these workflows to use `current_step_id`
-    ///
-    /// This migration is idempotent - workflows that already have an `initial_step` set
-    /// are skipped, as they've already been migrated.
+    /// This function is deprecated as embedded steps are no longer supported.
+    /// All workflows now use first-class Step entities exclusively.
     ///
     /// # Returns
     ///
-    /// A `StepMigrationResult` containing counts of workflows processed and steps created.
-    ///
-    /// # Errors
-    ///
-    /// Returns `DbError::Query` if database operations fail.
+    /// An empty `StepMigrationResult` since there are no embedded steps to migrate.
+    #[deprecated(
+        since = "0.2.0",
+        note = "embedded steps are no longer supported; use first-class Step entities"
+    )]
     pub async fn migrate_embedded_steps_to_first_class(&self) -> DbResult<StepMigrationResult> {
-        debug!("Starting migration of embedded steps to first-class Step entities");
-
-        let step_repo = StepRepository::new(self.client);
-
-        // Get workflow IDs with minimal fields needed for migration check
-        #[derive(Debug, Deserialize)]
-        struct WorkflowMigrationInfo {
-            id: surrealdb::sql::Thing,
-            steps: Vec<WorkflowStep>,
-            initial_step: Option<surrealdb::sql::Thing>,
-        }
-
-        let mut result = self
-            .client
-            .query("SELECT id, steps, initial_step FROM workflow")
-            .await?;
-        let workflows: Vec<WorkflowMigrationInfo> = result.take(0)?;
-
-        debug!("Found {} workflows to check for migration", workflows.len());
-
-        let mut workflows_processed = 0;
-        let mut steps_created = 0;
-        let mut workflows_skipped = 0;
-        let mut tasks_updated = 0;
-
-        for wf in workflows {
-            let workflow_id_str = wf.id.id.to_raw();
-
-            // Skip if workflow already has initial_step set (already migrated)
-            if wf.initial_step.is_some() {
-                debug!(
-                    "Skipping workflow {} - already has initial_step set",
-                    workflow_id_str
-                );
-                workflows_skipped += 1;
-                continue;
-            }
-
-            // Skip if workflow has no embedded steps
-            if wf.steps.is_empty() {
-                debug!(
-                    "Skipping workflow {} - no embedded steps to migrate",
-                    workflow_id_str
-                );
-                workflows_skipped += 1;
-                continue;
-            }
-
-            debug!(
-                "Migrating workflow {} with {} embedded steps",
-                workflow_id_str,
-                wf.steps.len()
-            );
-
-            // Create Step entities for each embedded step
-            let mut created_step_ids: Vec<surrealdb::sql::Thing> = Vec::new();
-
-            for (idx, embedded_step) in wf.steps.iter().enumerate() {
-                let is_last = idx == wf.steps.len() - 1;
-
-                // Create a unique step ID based on workflow ID and step name
-                let step_id = format!(
-                    "{}_{}",
-                    workflow_id_str,
-                    embedded_step.name.to_lowercase().replace(' ', "_")
-                );
-
-                let step = Step::new(embedded_step.name.clone(), wf.id.clone())
-                    .with_agent_config(embedded_step.agent_config.clone())
-                    .with_order(embedded_step.order as i32)
-                    .with_is_final(is_last);
-
-                match step_repo.create_with_id(&step_id, &step).await {
-                    Ok(created_step) => {
-                        if let Some(step_thing) = created_step.id {
-                            created_step_ids.push(step_thing);
-                            steps_created += 1;
-                            trace!("Created step {} for workflow {}", step_id, workflow_id_str);
-                        }
-                    }
-                    Err(e) => {
-                        debug!(
-                            "Failed to create step {} for workflow {}: {}",
-                            step_id, workflow_id_str, e
-                        );
-                        // Continue with other steps even if one fails
-                    }
-                }
-            }
-
-            // Set up transitions between sequential steps
-            if created_step_ids.len() > 1 {
-                for i in 0..created_step_ids.len() - 1 {
-                    let current_step_id = &created_step_ids[i];
-                    let next_step_id = &created_step_ids[i + 1];
-
-                    // Update current step to transition to next step
-                    let update_query = format!(
-                        "UPDATE {} SET transitions_to = [{}]",
-                        current_step_id, next_step_id
-                    );
-                    if let Err(e) = self.client.query(&update_query).await {
-                        debug!(
-                            "Failed to set transition from {} to {}: {}",
-                            current_step_id, next_step_id, e
-                        );
-                    }
-                }
-            }
-
-            // Set the workflow's initial_step to the first created step
-            if let Some(first_step_id) = created_step_ids.first() {
-                let update_query = format!(
-                    "UPDATE workflow:{} SET initial_step = {}, updated_at = time::now()",
-                    workflow_id_str, first_step_id
-                );
-                if let Err(e) = self.client.query(&update_query).await {
-                    debug!(
-                        "Failed to set initial_step for workflow {}: {}",
-                        workflow_id_str, e
-                    );
-                } else {
-                    debug!(
-                        "Set initial_step to {} for workflow {}",
-                        first_step_id, workflow_id_str
-                    );
-                }
-            }
-
-            // Update tasks that reference this workflow to use current_step_id
-            // Find tasks with this workflow_id and current_step set but no current_step_id
-            #[derive(Debug, Deserialize)]
-            struct TaskWithStep {
-                id: surrealdb::sql::Thing,
-                current_step: Option<usize>,
-            }
-
-            let tasks_query = format!(
-                "SELECT id, current_step FROM task WHERE workflow_id = workflow:{} AND current_step IS NOT NONE AND current_step_id IS NONE",
-                workflow_id_str
-            );
-            let mut task_result = self.client.query(&tasks_query).await?;
-            let tasks: Vec<TaskWithStep> = task_result.take(0)?;
-
-            for task in tasks {
-                let task_id = task.id.id.to_raw();
-
-                // Map current_step index to the corresponding step ID
-                if let Some(step_idx) = task.current_step
-                    && let Some(step_id) = created_step_ids.get(step_idx)
-                {
-                    let task_update = format!(
-                        "UPDATE task:{} SET current_step_id = {}, updated_at = time::now()",
-                        task_id, step_id
-                    );
-                    if let Err(e) = self.client.query(&task_update).await {
-                        debug!(
-                            "Failed to update task {} with current_step_id: {}",
-                            task_id, e
-                        );
-                    } else {
-                        tasks_updated += 1;
-                        trace!(
-                            "Updated task {} with current_step_id = {}",
-                            task_id, step_id
-                        );
-                    }
-                }
-            }
-
-            workflows_processed += 1;
-        }
-
-        debug!(
-            "Step migration complete: {} workflows processed, {} steps created, {} tasks updated, {} workflows skipped",
-            workflows_processed, steps_created, tasks_updated, workflows_skipped
-        );
+        debug!("Embedded step migration is deprecated - no embedded steps exist");
 
         Ok(StepMigrationResult {
-            workflows_processed,
-            steps_created,
-            workflows_skipped,
-            tasks_updated,
+            workflows_processed: 0,
+            steps_created: 0,
+            workflows_skipped: 0,
+            tasks_updated: 0,
         })
     }
 
-    /// Perform a dry-run check for step migration without making changes.
+    /// Legacy dry-run check for step migration.
     ///
-    /// This method analyzes all workflows and determines how many would be
-    /// migrated and how many steps would be created, without actually
-    /// performing the migration.
+    /// This function is deprecated as embedded steps are no longer supported.
+    /// All workflows now use first-class Step entities exclusively.
     ///
     /// # Returns
     ///
-    /// A `StepMigrationResult` containing estimated counts.
+    /// An empty `StepMigrationResult` since there are no embedded steps to migrate.
+    #[deprecated(
+        since = "0.2.0",
+        note = "embedded steps are no longer supported; use first-class Step entities"
+    )]
     pub async fn dry_run_step_migration(&self) -> DbResult<StepMigrationResult> {
-        debug!("Starting dry-run check for step migration");
-
-        // Get workflow IDs with minimal fields needed for migration check
-        #[derive(Debug, Deserialize)]
-        struct WorkflowMigrationInfo {
-            id: surrealdb::sql::Thing,
-            steps: Vec<WorkflowStep>,
-            initial_step: Option<surrealdb::sql::Thing>,
-        }
-
-        let mut result = self
-            .client
-            .query("SELECT id, steps, initial_step FROM workflow")
-            .await?;
-        let workflows: Vec<WorkflowMigrationInfo> = result.take(0)?;
-
-        let mut workflows_processed = 0;
-        let mut steps_created = 0;
-        let mut workflows_skipped = 0;
-        let mut tasks_updated = 0;
-
-        for wf in workflows {
-            let workflow_id_str = wf.id.id.to_raw();
-
-            // Skip if workflow already has initial_step set
-            if wf.initial_step.is_some() {
-                workflows_skipped += 1;
-                continue;
-            }
-
-            // Skip if workflow has no embedded steps
-            if wf.steps.is_empty() {
-                workflows_skipped += 1;
-                continue;
-            }
-
-            // Count steps that would be created
-            steps_created += wf.steps.len();
-            workflows_processed += 1;
-
-            // Count tasks that would be updated
-            let tasks_query = format!(
-                "SELECT count() FROM task WHERE workflow_id = workflow:{} AND current_step IS NOT NONE AND current_step_id IS NONE GROUP ALL",
-                workflow_id_str
-            );
-
-            #[derive(Debug, Deserialize)]
-            struct CountResult {
-                count: usize,
-            }
-
-            let mut task_result = self.client.query(&tasks_query).await?;
-            let count_results: Vec<CountResult> = task_result.take(0)?;
-            if let Some(count_result) = count_results.first() {
-                tasks_updated += count_result.count;
-            }
-        }
-
-        debug!(
-            "Dry-run complete: {} workflows would be processed, {} steps would be created, {} tasks would be updated, {} workflows skipped",
-            workflows_processed, steps_created, tasks_updated, workflows_skipped
-        );
+        debug!("Embedded step migration dry-run is deprecated - no embedded steps exist");
 
         Ok(StepMigrationResult {
-            workflows_processed,
-            steps_created,
-            workflows_skipped,
-            tasks_updated,
+            workflows_processed: 0,
+            steps_created: 0,
+            workflows_skipped: 0,
+            tasks_updated: 0,
         })
     }
 }
@@ -1052,13 +768,9 @@ mod tests {
         cleanup(&temp_dir);
     }
 
-    /// Helper to create a valid workflow with at least one step
+    /// Helper to create a valid workflow
     fn valid_workflow(name: &str) -> Workflow {
-        Workflow::new(name).with_step(WorkflowStep::new(
-            "default_step",
-            AgentConfig::new().with_model("default_agent"),
-            0,
-        ))
+        Workflow::new(name)
     }
 
     #[tokio::test]
@@ -1107,16 +819,6 @@ mod tests {
 
         let workflow = Workflow::new("Full Workflow")
             .with_description("A complete workflow")
-            .with_step(WorkflowStep::new(
-                "Step 1",
-                AgentConfig::new().with_model("agent1"),
-                0,
-            ))
-            .with_step(WorkflowStep::new(
-                "Step 2",
-                AgentConfig::new().with_model("agent2"),
-                1,
-            ))
             .with_metadata("version", "1.0")
             .with_metadata("team", "platform");
 
@@ -1128,9 +830,6 @@ mod tests {
             retrieved.description,
             Some("A complete workflow".to_string())
         );
-        assert_eq!(retrieved.steps.len(), 2);
-        assert_eq!(retrieved.steps[0].name, "Step 1");
-        assert_eq!(retrieved.steps[1].name, "Step 2");
         assert_eq!(retrieved.metadata.get("version"), Some(&"1.0".to_string()));
         assert_eq!(
             retrieved.metadata.get("team"),
@@ -1257,33 +956,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_update_steps() {
-        let (db, temp_dir) = setup_test_db().await;
-        let repo = WorkflowRepository::new(db.client());
-
-        let workflow = Workflow::new("Steps Test").with_step(WorkflowStep::new(
-            "Original Step",
-            AgentConfig::new().with_model("agent1"),
-            0,
-        ));
-        repo.create("upd4", &workflow).await.unwrap();
-
-        let new_steps = vec![
-            WorkflowStep::new("New Step 1", AgentConfig::new().with_model("new_agent1"), 0),
-            WorkflowStep::new("New Step 2", AgentConfig::new().with_model("new_agent2"), 1),
-        ];
-        let updates = WorkflowUpdate::new().with_steps(new_steps);
-        repo.update("upd4", &updates).await.unwrap();
-
-        let retrieved = repo.get("upd4").await.unwrap().unwrap();
-        assert_eq!(retrieved.steps.len(), 2);
-        assert_eq!(retrieved.steps[0].name, "New Step 1");
-        assert_eq!(retrieved.steps[1].name, "New Step 2");
-
-        cleanup(&temp_dir);
-    }
-
-    #[tokio::test]
     async fn test_update_metadata() {
         let (db, temp_dir) = setup_test_db().await;
         let repo = WorkflowRepository::new(db.client());
@@ -1401,13 +1073,7 @@ mod tests {
         let repo = WorkflowRepository::new(db.client());
 
         // Create
-        let workflow = Workflow::new("CRUD Test")
-            .with_description("Initial description")
-            .with_step(WorkflowStep::new(
-                "Step 1",
-                AgentConfig::new().with_model("agent1"),
-                0,
-            ));
+        let workflow = Workflow::new("CRUD Test").with_description("Initial description");
         repo.create("crud1", &workflow).await.unwrap();
 
         // Read
@@ -1417,22 +1083,16 @@ mod tests {
             retrieved.description,
             Some("Initial description".to_string())
         );
-        assert_eq!(retrieved.steps.len(), 1);
 
         // Update
         let updates = WorkflowUpdate::new()
             .with_name("Updated CRUD Test")
-            .with_description("Updated description")
-            .with_steps(vec![
-                WorkflowStep::new("Updated Step 1", AgentConfig::new().with_model("agent1"), 0),
-                WorkflowStep::new("New Step 2", AgentConfig::new().with_model("agent2"), 1),
-            ]);
+            .with_description("Updated description");
         repo.update("crud1", &updates).await.unwrap();
 
         let updated = repo.get("crud1").await.unwrap().unwrap();
         assert_eq!(updated.name, "Updated CRUD Test");
         assert_eq!(updated.description, Some("Updated description".to_string()));
-        assert_eq!(updated.steps.len(), 2);
 
         // List - should include crud1 + default workflow
         let list = repo.list().await.unwrap();
@@ -1459,11 +1119,6 @@ mod tests {
         let update = WorkflowUpdate::new()
             .with_name("New Name")
             .with_description("New Description")
-            .with_steps(vec![WorkflowStep::new(
-                "Step",
-                AgentConfig::new().with_model("agent"),
-                0,
-            )])
             .with_metadata(metadata);
 
         assert_eq!(update.name, Some("New Name".to_string()));
@@ -1471,7 +1126,6 @@ mod tests {
             update.description,
             Some(Some("New Description".to_string()))
         );
-        assert!(update.steps.is_some());
         assert!(update.metadata.is_some());
         assert!(update.has_updates());
     }
@@ -1482,112 +1136,24 @@ mod tests {
 
         assert!(update.name.is_none());
         assert!(update.description.is_none());
-        assert!(update.steps.is_none());
         assert!(update.metadata.is_none());
         assert!(!update.has_updates());
     }
 
     // ========================================
-    // Validation tests
+    // Workflow creation tests
     // ========================================
 
     #[tokio::test]
-    async fn test_create_empty_embedded_steps_allowed() {
-        // Empty embedded steps are allowed at the repository level since
-        // first-class Step entities are now used. The service layer validates
-        // that steps are provided during creation.
+    async fn test_create_workflow_allowed() {
         let (db, temp_dir) = setup_test_db().await;
         let repo = WorkflowRepository::new(db.client());
 
-        let workflow = Workflow::new("Empty Steps");
+        let workflow = Workflow::new("Test Workflow");
         let result = repo.create("test1", &workflow).await;
 
         assert!(result.is_ok());
         assert!(repo.exists("test1").await.unwrap());
-
-        cleanup(&temp_dir);
-    }
-
-    #[tokio::test]
-    async fn test_create_duplicate_step_names_fails() {
-        let (db, temp_dir) = setup_test_db().await;
-        let repo = WorkflowRepository::new(db.client());
-
-        let workflow = Workflow::new("Duplicate Steps")
-            .with_step(WorkflowStep::new(
-                "review",
-                AgentConfig::new().with_model("agent1"),
-                0,
-            ))
-            .with_step(WorkflowStep::new(
-                "test",
-                AgentConfig::new().with_model("agent2"),
-                1,
-            ))
-            .with_step(WorkflowStep::new(
-                "review",
-                AgentConfig::new().with_model("agent3"),
-                2,
-            ));
-
-        let result = repo.create("test1", &workflow).await;
-
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            DbError::ValidationError { message } => {
-                assert_eq!(message, "duplicate step name 'review' in workflow");
-            }
-            e => panic!("Expected ValidationError, got: {:?}", e),
-        }
-
-        cleanup(&temp_dir);
-    }
-
-    #[tokio::test]
-    async fn test_update_to_empty_steps_fails() {
-        let (db, temp_dir) = setup_test_db().await;
-        let repo = WorkflowRepository::new(db.client());
-
-        let workflow = valid_workflow("Test Workflow");
-        repo.create("test1", &workflow).await.unwrap();
-
-        let updates = WorkflowUpdate::new().with_steps(vec![]);
-        let result = repo.update("test1", &updates).await;
-
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            DbError::ValidationError { message } => {
-                assert_eq!(message, "workflow must have at least one step");
-            }
-            e => panic!("Expected ValidationError, got: {:?}", e),
-        }
-
-        cleanup(&temp_dir);
-    }
-
-    #[tokio::test]
-    async fn test_update_to_duplicate_step_names_fails() {
-        let (db, temp_dir) = setup_test_db().await;
-        let repo = WorkflowRepository::new(db.client());
-
-        let workflow = valid_workflow("Test Workflow");
-        repo.create("test1", &workflow).await.unwrap();
-
-        let new_steps = vec![
-            WorkflowStep::new("build", AgentConfig::new().with_model("agent1"), 0),
-            WorkflowStep::new("deploy", AgentConfig::new().with_model("agent2"), 1),
-            WorkflowStep::new("build", AgentConfig::new().with_model("agent3"), 2), // duplicate
-        ];
-        let updates = WorkflowUpdate::new().with_steps(new_steps);
-        let result = repo.update("test1", &updates).await;
-
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            DbError::ValidationError { message } => {
-                assert_eq!(message, "duplicate step name 'build' in workflow");
-            }
-            e => panic!("Expected ValidationError, got: {:?}", e),
-        }
 
         cleanup(&temp_dir);
     }
@@ -1610,19 +1176,8 @@ mod tests {
         let workflow = repo.get(DEFAULT_WORKFLOW_ID).await.unwrap().unwrap();
         assert_eq!(workflow.name, "Default Workflow");
         assert!(workflow.description.is_some());
-        assert_eq!(workflow.steps.len(), 5);
-
-        // Verify step order matches standard status flow
-        assert_eq!(workflow.steps[0].name, "backlog");
-        assert_eq!(workflow.steps[0].order, 0);
-        assert_eq!(workflow.steps[1].name, "todo");
-        assert_eq!(workflow.steps[1].order, 1);
-        assert_eq!(workflow.steps[2].name, "in_progress");
-        assert_eq!(workflow.steps[2].order, 2);
-        assert_eq!(workflow.steps[3].name, "pending_review");
-        assert_eq!(workflow.steps[3].order, 3);
-        assert_eq!(workflow.steps[4].name, "done");
-        assert_eq!(workflow.steps[4].order, 4);
+        // Workflow should have initial_step set to the first step
+        assert!(workflow.initial_step.is_some());
 
         cleanup(&temp_dir);
     }
@@ -1640,7 +1195,6 @@ mod tests {
         // Workflow should still exist and be unchanged
         let workflow = repo.get(DEFAULT_WORKFLOW_ID).await.unwrap().unwrap();
         assert_eq!(workflow.name, "Default Workflow");
-        assert_eq!(workflow.steps.len(), 5);
 
         // Verify there's only one default workflow
         let all_workflows = repo.list().await.unwrap();
@@ -1988,327 +1542,42 @@ mod tests {
         assert_eq!(empty_result.total_workflows(), 0);
     }
 
+    // Note: Step migration tests removed since embedded steps are no longer supported.
+    // The migrate_embedded_steps_to_first_class function is deprecated and returns empty results.
+    // All workflows now use first-class Step entities exclusively.
     #[tokio::test]
-    async fn test_migrate_embedded_steps_creates_steps() {
-        use crate::repository::StepRepository;
-
+    #[allow(deprecated)]
+    async fn test_migrate_embedded_steps_returns_empty() {
         let (db, temp_dir) = setup_test_db().await;
         let workflow_repo = WorkflowRepository::new(db.client());
-        let step_repo = StepRepository::new(db.client());
 
-        // Create a workflow with embedded steps
-        let workflow = Workflow::new("Test Workflow")
-            .with_step(WorkflowStep::new(
-                "Review",
-                AgentConfig::new().with_model("review-agent"),
-                0,
-            ))
-            .with_step(WorkflowStep::new(
-                "Build",
-                AgentConfig::new().with_model("build-agent"),
-                1,
-            ))
-            .with_step(WorkflowStep::new(
-                "Deploy",
-                AgentConfig::new().with_model("deploy-agent"),
-                2,
-            ));
-
-        workflow_repo.create("test_wf", &workflow).await.unwrap();
-
-        // Run migration
+        // Migration is deprecated and returns empty results
         let result = workflow_repo
             .migrate_embedded_steps_to_first_class()
             .await
             .unwrap();
 
-        // We have default workflow (5 steps) + test_wf (3 steps)
-        assert_eq!(result.workflows_processed, 2);
-        assert_eq!(result.steps_created, 8);
-        assert!(result.has_migrations());
-
-        // Verify steps were created for test_wf
-        let workflow_thing = surrealdb::sql::Thing::from(("workflow", "test_wf"));
-        let steps = step_repo.list_by_workflow(&workflow_thing).await.unwrap();
-        assert_eq!(steps.len(), 3);
-        assert_eq!(steps[0].name, "Review");
-        assert_eq!(steps[1].name, "Build");
-        assert_eq!(steps[2].name, "Deploy");
-
-        cleanup(&temp_dir);
-    }
-
-    #[tokio::test]
-    async fn test_migrate_embedded_steps_sets_initial_step() {
-        let (db, temp_dir) = setup_test_db().await;
-        let workflow_repo = WorkflowRepository::new(db.client());
-
-        // Create a workflow with embedded steps
-        let workflow = Workflow::new("Initial Step Test").with_step(WorkflowStep::new(
-            "Start",
-            AgentConfig::new().with_model("start-agent"),
-            0,
-        ));
-
-        workflow_repo.create("init_test", &workflow).await.unwrap();
-
-        // Run migration
-        workflow_repo
-            .migrate_embedded_steps_to_first_class()
-            .await
-            .unwrap();
-
-        // Verify initial_step was set
-        let migrated = workflow_repo.get("init_test").await.unwrap().unwrap();
-        assert!(
-            migrated.initial_step.is_some(),
-            "initial_step should be set after migration"
-        );
-
-        cleanup(&temp_dir);
-    }
-
-    #[tokio::test]
-    async fn test_migrate_embedded_steps_sets_transitions() {
-        use crate::repository::StepRepository;
-
-        let (db, temp_dir) = setup_test_db().await;
-        let workflow_repo = WorkflowRepository::new(db.client());
-        let step_repo = StepRepository::new(db.client());
-
-        // Create a workflow with multiple steps
-        let workflow = Workflow::new("Transition Test")
-            .with_step(WorkflowStep::new(
-                "Step1",
-                AgentConfig::new().with_model("agent1"),
-                0,
-            ))
-            .with_step(WorkflowStep::new(
-                "Step2",
-                AgentConfig::new().with_model("agent2"),
-                1,
-            ))
-            .with_step(WorkflowStep::new(
-                "Step3",
-                AgentConfig::new().with_model("agent3"),
-                2,
-            ));
-
-        workflow_repo.create("trans_test", &workflow).await.unwrap();
-
-        // Run migration
-        workflow_repo
-            .migrate_embedded_steps_to_first_class()
-            .await
-            .unwrap();
-
-        // Get the steps and verify transitions
-        let workflow_thing = surrealdb::sql::Thing::from(("workflow", "trans_test"));
-        let steps = step_repo.list_by_workflow(&workflow_thing).await.unwrap();
-
-        // First step should have transition to second
-        assert!(
-            !steps[0].transitions_to.is_empty(),
-            "First step should have transitions"
-        );
-        assert!(
-            !steps[1].transitions_to.is_empty(),
-            "Second step should have transitions"
-        );
-        // Last step should be final
-        assert!(steps[2].is_final, "Last step should be marked as final");
-        assert!(
-            steps[2].transitions_to.is_empty(),
-            "Final step should have no transitions"
-        );
-
-        cleanup(&temp_dir);
-    }
-
-    #[tokio::test]
-    async fn test_migrate_embedded_steps_is_idempotent() {
-        let (db, temp_dir) = setup_test_db().await;
-        let workflow_repo = WorkflowRepository::new(db.client());
-
-        // Create a workflow with embedded steps
-        let workflow = Workflow::new("Idempotent Test").with_step(WorkflowStep::new(
-            "Only",
-            AgentConfig::new().with_model("agent"),
-            0,
-        ));
-
-        workflow_repo.create("idemp_test", &workflow).await.unwrap();
-
-        // Run migration first time
-        let result1 = workflow_repo
-            .migrate_embedded_steps_to_first_class()
-            .await
-            .unwrap();
-        // default workflow (5 steps) + idemp_test (1 step)
-        assert_eq!(result1.steps_created, 6);
-
-        // Run migration second time - should skip already migrated workflows
-        let result2 = workflow_repo
-            .migrate_embedded_steps_to_first_class()
-            .await
-            .unwrap();
-        assert_eq!(
-            result2.steps_created, 0,
-            "Second migration should not create steps"
-        );
-        assert_eq!(result2.workflows_skipped, 2);
-
-        cleanup(&temp_dir);
-    }
-
-    #[tokio::test]
-    async fn test_migrate_embedded_steps_updates_tasks() {
-        use crate::models::{Level, Status, Task};
-        use crate::repository::TaskRepository;
-
-        let (db, temp_dir) = setup_test_db().await;
-        let workflow_repo = WorkflowRepository::new(db.client());
-        let task_repo = TaskRepository::new(db.client());
-
-        // Create a workflow with embedded steps
-        let workflow = Workflow::new("Task Update Test")
-            .with_step(WorkflowStep::new(
-                "backlog",
-                AgentConfig::new().with_model("agent1"),
-                0,
-            ))
-            .with_step(WorkflowStep::new(
-                "in_progress",
-                AgentConfig::new().with_model("agent2"),
-                1,
-            ));
-
-        workflow_repo.create("task_upd", &workflow).await.unwrap();
-
-        // Create a task and assign it to the workflow at step 1
-        // TaskRepository.create() doesn't save workflow_id, so we use assign_workflow()
-        let task = Task::new("Task to Update", Level::Task).with_status(Status::InProgress);
-        task_repo.create("task1", &task).await.unwrap();
-
-        // Assign the task to the workflow
-        let workflow_thing = surrealdb::sql::Thing::from(("workflow", "task_upd"));
-        task_repo
-            .assign_workflow("task1", &workflow_thing)
-            .await
-            .unwrap();
-        // Set current_step to 1 (assign_workflow defaults to 0)
-        task_repo.update_current_step("task1", 1).await.unwrap();
-
-        // Run migration
-        let result = workflow_repo
-            .migrate_embedded_steps_to_first_class()
-            .await
-            .unwrap();
-        assert_eq!(result.tasks_updated, 1);
-
-        // Verify task has current_step_id set
-        let updated_task = task_repo.get("task1").await.unwrap().unwrap();
-        assert!(
-            updated_task.current_step_id.is_some(),
-            "Task should have current_step_id set after migration"
-        );
-
-        cleanup(&temp_dir);
-    }
-
-    #[tokio::test]
-    async fn test_dry_run_step_migration() {
-        let (db, temp_dir) = setup_test_db().await;
-        let workflow_repo = WorkflowRepository::new(db.client());
-
-        // Create a workflow with embedded steps
-        let workflow = Workflow::new("Dry Run Test")
-            .with_step(WorkflowStep::new(
-                "Step1",
-                AgentConfig::new().with_model("agent1"),
-                0,
-            ))
-            .with_step(WorkflowStep::new(
-                "Step2",
-                AgentConfig::new().with_model("agent2"),
-                1,
-            ));
-
-        workflow_repo.create("dry_run", &workflow).await.unwrap();
-
-        // Run dry-run
-        let result = workflow_repo.dry_run_step_migration().await.unwrap();
-
-        // Should report default workflow (5 steps) + dry_run (2 steps)
-        assert_eq!(result.workflows_processed, 2);
-        assert_eq!(result.steps_created, 7);
-
-        // Verify no steps were actually created for the dry_run workflow
-        let workflow_thing = surrealdb::sql::Thing::from(("workflow", "dry_run"));
-        let step_repo = StepRepository::new(db.client());
-        let steps = step_repo.list_by_workflow(&workflow_thing).await.unwrap();
-        assert!(
-            steps.is_empty(),
-            "Dry-run should not create any steps in the database"
-        );
-
-        cleanup(&temp_dir);
-    }
-
-    #[tokio::test]
-    async fn test_migrate_skips_workflows_with_initial_step_already_set() {
-        use crate::repository::StepRepository;
-        use surrealdb::sql::Thing;
-
-        let (db, temp_dir) = setup_test_db().await;
-        let workflow_repo = WorkflowRepository::new(db.client());
-        let step_repo = StepRepository::new(db.client());
-
-        // First migrate all existing workflows (default workflow)
-        let first_result = workflow_repo
-            .migrate_embedded_steps_to_first_class()
-            .await
-            .unwrap();
-        assert_eq!(
-            first_result.workflows_processed, 1,
-            "Default workflow should be migrated"
-        );
-
-        // Create a workflow with embedded steps (required by validation)
-        let workflow = Workflow::new("New Style Workflow").with_step(WorkflowStep::new(
-            "placeholder",
-            AgentConfig::new().with_model("agent"),
-            0,
-        ));
-        workflow_repo.create("new_style", &workflow).await.unwrap();
-
-        // Create a first-class step and set initial_step directly
-        // (simulating a workflow created with the new first-class steps)
-        let workflow_thing = Thing::from(("workflow", "new_style"));
-        let step = Step::new("Real Step", workflow_thing);
-        let created_step = step_repo.create_with_id("new_step", &step).await.unwrap();
-
-        // Set initial_step on the workflow (making it look already migrated)
-        db.client()
-            .query(format!(
-                "UPDATE workflow:new_style SET initial_step = {}",
-                created_step.id.unwrap()
-            ))
-            .await
-            .unwrap();
-
-        // Run migration again
-        let result = workflow_repo
-            .migrate_embedded_steps_to_first_class()
-            .await
-            .unwrap();
-
-        // Should skip all workflows:
-        // - 1 default workflow (already migrated - has initial_step)
-        // - 1 new_style workflow (has initial_step set)
         assert_eq!(result.workflows_processed, 0);
         assert_eq!(result.steps_created, 0);
-        assert_eq!(result.workflows_skipped, 2);
+        assert_eq!(result.workflows_skipped, 0);
+        assert_eq!(result.tasks_updated, 0);
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    #[allow(deprecated)]
+    async fn test_dry_run_step_migration_returns_empty() {
+        let (db, temp_dir) = setup_test_db().await;
+        let workflow_repo = WorkflowRepository::new(db.client());
+
+        // Dry run is deprecated and returns empty results
+        let result = workflow_repo.dry_run_step_migration().await.unwrap();
+
+        assert_eq!(result.workflows_processed, 0);
+        assert_eq!(result.steps_created, 0);
+        assert_eq!(result.workflows_skipped, 0);
+        assert_eq!(result.tasks_updated, 0);
 
         cleanup(&temp_dir);
     }

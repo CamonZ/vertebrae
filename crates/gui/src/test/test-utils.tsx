@@ -95,6 +95,62 @@ export function createMockWorkflow(overrides?: Partial<{
 }
 
 /**
+ * Create mock Step entities for testing (first-class steps)
+ */
+export function createMockSteps(workflowId = "test-workflow-1") {
+  return [
+    {
+      id: "step-backlog",
+      workflow_id: workflowId,
+      name: "backlog",
+      order: 0,
+      agent_config: {
+        model: "claude-3-sonnet",
+        system_prompt: "",
+        append_system_prompt: "",
+        tools: [],
+        allowed_tools: [],
+        permission_mode: null,
+      },
+      created_at: null,
+      updated_at: null,
+    },
+    {
+      id: "step-in_progress",
+      workflow_id: workflowId,
+      name: "in_progress",
+      order: 1,
+      agent_config: {
+        model: "claude-3-sonnet",
+        system_prompt: "",
+        append_system_prompt: "",
+        tools: [],
+        allowed_tools: [],
+        permission_mode: null,
+      },
+      created_at: null,
+      updated_at: null,
+    },
+    {
+      id: "step-done",
+      workflow_id: workflowId,
+      name: "done",
+      order: 2,
+      agent_config: {
+        model: "claude-3-sonnet",
+        system_prompt: "",
+        append_system_prompt: "",
+        tools: [],
+        allowed_tools: [],
+        permission_mode: null,
+      },
+      created_at: null,
+      updated_at: null,
+    },
+  ];
+}
+
+/**
  * Create mock task data for testing
  */
 export function createMockTask(overrides?: Partial<{

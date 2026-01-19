@@ -13,7 +13,7 @@ import {
 import "@xyflow/react/dist/style.css";
 
 import { StepNode, type StepNodeData } from "./StepNode";
-import type { Workflow, TaskWithRelations } from "../../bindings";
+import type { Workflow, TaskWithRelations, Step } from "../../bindings";
 
 /**
  * Zone node data type
@@ -147,6 +147,8 @@ function ZoneNode({ data }: NodeProps<Node<ZoneNodeData>>) {
  */
 interface WorkflowPipelineProps {
   workflow: Workflow;
+  /** First-class Step entities for this workflow */
+  steps: Step[];
   executionState?: Map<
     string,
     { currentStep: string | number; status: string; error?: string }
@@ -183,7 +185,8 @@ const NODE_Y_POSITION = 80;
  * Executing tasks animate between their current step position.
  */
 export function WorkflowPipeline({
-  workflow,
+  workflow: _workflow,
+  steps,
   executionState,
   tasksWithRelations = [],
   stepIdToName,
@@ -192,8 +195,8 @@ export function WorkflowPipeline({
 }: WorkflowPipelineProps) {
   // Sort steps by order to ensure correct layout
   const sortedSteps = useMemo(
-    () => [...workflow.steps].sort((a, b) => a.order - b.order),
-    [workflow.steps]
+    () => [...steps].sort((a, b) => a.order - b.order),
+    [steps]
   );
 
   // Zone positioning constants

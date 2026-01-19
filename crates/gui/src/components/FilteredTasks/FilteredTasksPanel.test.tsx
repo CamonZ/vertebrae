@@ -2,13 +2,19 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FilteredTasksPanel } from "./FilteredTasksPanel";
-import type { TaskSummary, WorkflowStep } from "../../bindings";
+import type { TaskSummary, Step } from "../../bindings";
 
-// Helper to create a workflow step
-function createWorkflowStep(overrides?: Partial<WorkflowStep>): WorkflowStep {
+// Helper to create a step
+function createStep(overrides?: Partial<Step>): Step {
   return {
+    id: null,
     name: "Test Step",
+    workflow_id: "workflow-1",
     order: 0,
+    is_final: false,
+    transitions_to: [],
+    created_at: null,
+    updated_at: null,
     agent_config: {
       model: null,
       fallback_model: null,
@@ -35,20 +41,12 @@ function createTaskSummary(
   return {
     id: "task-123",
     title: "Test Task",
-    description: "Test description",
     status: "todo",
     level: "task",
     priority: null,
     created_at: "2024-01-01T00:00:00Z",
-    updated_at: "2024-01-01T00:00:00Z",
-    started_at: null,
-    completed_at: null,
     needs_human_review: false,
     tags: [],
-    sections: [],
-    code_refs: [],
-    workflow_id: null,
-    current_step: null,
     ...overrides,
   };
 }
@@ -63,14 +61,14 @@ describe("FilteredTasksPanel", () => {
     });
 
     it("renders step name in panel", () => {
-      const step = createWorkflowStep({ name: "Development" });
+      const step = createStep({ name: "Development" });
       render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />);
 
       expect(screen.getByText("Development")).toBeInTheDocument();
     });
 
     it("renders step order badge (1-indexed)", () => {
-      const step = createWorkflowStep({ order: 2 });
+      const step = createStep({ order: 2 });
       render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />);
 
       // Order 2 displays as "3" (1-indexed)
@@ -78,7 +76,7 @@ describe("FilteredTasksPanel", () => {
     });
 
     it("renders task count", () => {
-      const step = createWorkflowStep();
+      const step = createStep();
       const tasks = [
         createTaskSummary({ id: "task-1" }),
         createTaskSummary({ id: "task-2" }),
@@ -89,7 +87,7 @@ describe("FilteredTasksPanel", () => {
     });
 
     it("displays active task count", () => {
-      const step = createWorkflowStep();
+      const step = createStep();
       const tasks = [
         createTaskSummary({ id: "task-1", status: "in_progress" }),
         createTaskSummary({ id: "task-2", status: "todo" }),
@@ -102,7 +100,7 @@ describe("FilteredTasksPanel", () => {
 
   describe("search functionality", () => {
     it("renders search input", () => {
-      const step = createWorkflowStep();
+      const step = createStep();
       render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />);
 
       expect(screen.getByPlaceholderText("Search...")).toBeInTheDocument();
@@ -111,7 +109,7 @@ describe("FilteredTasksPanel", () => {
 
   describe("view mode toggle", () => {
     it("renders tree and list view toggle buttons", () => {
-      const step = createWorkflowStep();
+      const step = createStep();
       render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />);
 
       expect(screen.getByLabelText("Tree view")).toBeInTheDocument();
@@ -119,7 +117,7 @@ describe("FilteredTasksPanel", () => {
     });
 
     it("defaults to tree view", () => {
-      const step = createWorkflowStep();
+      const step = createStep();
       render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />);
 
       const treeButton = screen.getByLabelText("Tree view");
@@ -128,7 +126,7 @@ describe("FilteredTasksPanel", () => {
 
     it("switches to list view when button clicked", async () => {
       const user = userEvent.setup();
-      const step = createWorkflowStep();
+      const step = createStep();
       render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />);
 
       const listButton = screen.getByLabelText("List view");
@@ -141,7 +139,7 @@ describe("FilteredTasksPanel", () => {
 
   describe("close button", () => {
     it("renders close button when onClose is provided", () => {
-      const step = createWorkflowStep();
+      const step = createStep();
       const onClose = vi.fn();
       render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" onClose={onClose} />);
 
@@ -150,7 +148,7 @@ describe("FilteredTasksPanel", () => {
 
     it("calls onClose when close button is clicked", async () => {
       const user = userEvent.setup();
-      const step = createWorkflowStep();
+      const step = createStep();
       const onClose = vi.fn();
       render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" onClose={onClose} />);
 
@@ -160,7 +158,7 @@ describe("FilteredTasksPanel", () => {
     });
 
     it("does not render close button when onClose is not provided", () => {
-      const step = createWorkflowStep();
+      const step = createStep();
       render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />);
 
       expect(screen.queryByLabelText("Close panel")).not.toBeInTheDocument();
@@ -170,7 +168,7 @@ describe("FilteredTasksPanel", () => {
   describe("task selection", () => {
     it("calls onTaskSelect when task is clicked in list view", async () => {
       const user = userEvent.setup();
-      const step = createWorkflowStep();
+      const step = createStep();
       const tasks = [
         createTaskSummary({ id: "task-1", title: "Test Task" }),
       ];
