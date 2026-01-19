@@ -264,19 +264,12 @@ mod tests {
         priority: Option<&str>,
         tags: &[&str],
     ) {
-        use vertebrae_db::{Level, Status, Task};
+        use vertebrae_db::{Level, Task};
 
         let level_enum = match level {
             "epic" => Level::Epic,
             "ticket" => Level::Ticket,
             _ => Level::Task,
-        };
-
-        let status_enum = match status {
-            "done" => Status::Done,
-            "in_progress" => Status::InProgress,
-            "todo" => Status::Todo,
-            _ => Status::Backlog,
         };
 
         let priority_enum = priority.and_then(|p| match p {
@@ -291,7 +284,7 @@ mod tests {
             title: title.to_string(),
             description: None,
             level: level_enum,
-            status: status_enum,
+            status: status.to_string(),
             priority: priority_enum,
             tags: tags.iter().map(|t| t.to_string()).collect(),
             sections: vec![],
@@ -1105,7 +1098,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_preserves_other_fields() {
-        use vertebrae_db::{CodeRef, Level, Section, SectionType, Status, Task};
+        use vertebrae_db::{CodeRef, Level, Section, SectionType, Task};
 
         let service = setup_test_db().await;
 
@@ -1114,7 +1107,7 @@ mod tests {
             title: "Original".to_string(),
             description: None,
             level: Level::Ticket,
-            status: Status::InProgress,
+            status: "in_progress".to_string(),
             priority: Some(vertebrae_db::Priority::High),
             tags: vec!["backend".to_string(), "api".to_string()],
             sections: vec![Section {
@@ -1178,7 +1171,7 @@ mod tests {
 
         assert_eq!(task.title, "Updated title");
         assert_eq!(task.level, Level::Ticket);
-        assert_eq!(task.status, Status::InProgress);
+        assert_eq!(task.status, "in_progress");
         assert_eq!(task.priority, Some(vertebrae_db::Priority::High));
         // Verify tags and other fields are preserved
         assert_eq!(task.tags, vec!["backend", "api"]);
@@ -1299,7 +1292,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_clear_description() {
-        use vertebrae_db::{Level, Status, Task};
+        use vertebrae_db::{Level, Task};
 
         let service = setup_test_db().await;
 
@@ -1308,7 +1301,7 @@ mod tests {
             title: "Test task".to_string(),
             description: Some("Original description".to_string()),
             level: Level::Task,
-            status: Status::Todo,
+            status: "todo".to_string(),
             priority: None,
             tags: vec![],
             sections: vec![],

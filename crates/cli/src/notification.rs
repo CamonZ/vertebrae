@@ -288,8 +288,6 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_callback_handles_all_event_variants() {
-        use vertebrae_db::Status;
-
         // This test verifies that the callback handles all MutationEvent variants
         // without panicking. We can't easily test the HTTP call itself without
         // a mock server, but we can verify the callback processes each variant.
@@ -308,8 +306,8 @@ mod tests {
             },
             MutationEvent::TaskStatusChanged {
                 id: "abc123".to_string(),
-                old_status: Status::Backlog,
-                new_status: Status::Todo,
+                old_status: "backlog".to_string(),
+                new_status: "todo".to_string(),
             },
         ];
 

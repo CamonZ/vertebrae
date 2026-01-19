@@ -144,7 +144,7 @@ impl std::fmt::Display for PathResult {
 mod tests {
     use super::*;
     use vertebrae_core::DefaultTaskService;
-    use vertebrae_db::{Database, Status};
+    use vertebrae_db::Database;
 
     /// Helper to create an in-memory test service
     async fn setup_test_service() -> DefaultTaskService {
@@ -156,8 +156,7 @@ mod tests {
     /// Helper to create a task in the database
     async fn create_task(service: &DefaultTaskService, id: &str, title: &str) {
         let db = service.database();
-        let task =
-            vertebrae_db::Task::new(title, vertebrae_db::Level::Task).with_status(Status::Todo);
+        let task = vertebrae_db::Task::new(title, vertebrae_db::Level::Task).with_status("todo");
         db.tasks().create(id, &task).await.unwrap();
     }
 

@@ -4,7 +4,7 @@
 
 use clap::Args;
 use vertebrae_core::{ServiceError, TaskService};
-use vertebrae_db::{Level, Priority, Status, TaskFilter};
+use vertebrae_db::{Level, Priority, TaskFilter};
 
 /// A summary of a task for display in the list
 #[derive(Debug, Clone)]
@@ -33,8 +33,8 @@ pub struct ListCommand {
     pub levels: Vec<Level>,
 
     /// Filter by status (can be specified multiple times)
-    #[arg(short, long = "status", value_parser = parse_status)]
-    pub statuses: Vec<Status>,
+    #[arg(short, long = "status")]
+    pub statuses: Vec<String>,
 
     /// Filter by priority (can be specified multiple times)
     #[arg(short, long = "priority", value_parser = parse_priority)]
@@ -76,16 +76,6 @@ fn parse_level(s: &str) -> Result<Level, String> {
             s
         )),
     }
-}
-
-/// Parse a status string into a Status enum
-fn parse_status(s: &str) -> Result<Status, String> {
-    Status::parse(&s.to_lowercase()).ok_or_else(|| {
-        format!(
-            "invalid status '{}'. Valid values: backlog, todo, in_progress, pending_review, done, rejected",
-            s
-        )
-    })
 }
 
 /// Parse a priority string into a Priority enum
@@ -229,7 +219,7 @@ mod tests {
         priority: Option<&str>,
         tags: &[&str],
     ) {
-        use vertebrae_db::{Level, Priority, Status, Task};
+        use vertebrae_db::{Level, Priority, Task};
 
         let level_enum = match level {
             "epic" => Level::Epic,
@@ -237,8 +227,6 @@ mod tests {
             "task" => Level::Task,
             _ => Level::Task,
         };
-
-        let status_enum = Status::parse(status).unwrap_or(Status::Todo);
 
         let priority_enum = priority.and_then(|p| match p {
             "low" => Some(Priority::Low),
@@ -250,7 +238,7 @@ mod tests {
 
         let tags_vec: Vec<String> = tags.iter().map(|t| t.to_string()).collect();
 
-        let mut task = Task::new(title, level_enum).with_status(status_enum);
+        let mut task = Task::new(title, level_enum).with_status(status);
 
         if let Some(p) = priority_enum {
             task = task.with_priority(p);
@@ -287,37 +275,6 @@ mod tests {
         let result = parse_level("invalid");
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("invalid level"));
-    }
-
-    #[test]
-    fn test_parse_status_valid() {
-        assert_eq!(parse_status("backlog").unwrap(), Status::Backlog);
-        assert_eq!(parse_status("todo").unwrap(), Status::Todo);
-        assert_eq!(parse_status("in_progress").unwrap(), Status::InProgress);
-        assert_eq!(
-            parse_status("pending_review").unwrap(),
-            Status::PendingReview
-        );
-        assert_eq!(parse_status("done").unwrap(), Status::Done);
-        assert_eq!(parse_status("rejected").unwrap(), Status::Rejected);
-    }
-
-    #[test]
-    fn test_parse_status_case_insensitive() {
-        assert_eq!(parse_status("TODO").unwrap(), Status::Todo);
-        assert_eq!(parse_status("In_Progress").unwrap(), Status::InProgress);
-        assert_eq!(parse_status("DONE").unwrap(), Status::Done);
-        assert_eq!(
-            parse_status("PENDING_REVIEW").unwrap(),
-            Status::PendingReview
-        );
-    }
-
-    #[test]
-    fn test_parse_status_invalid() {
-        let result = parse_status("unknown");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("invalid status"));
     }
 
     #[test]
@@ -496,7 +453,7 @@ mod tests {
 
         let cmd = ListCommand {
             levels: vec![],
-            statuses: vec![Status::Backlog],
+            statuses: vec!["backlog".to_string()],
             priorities: vec![],
             tags: vec![],
             root: false,
@@ -816,7 +773,7 @@ mod tests {
     fn test_build_filter_with_all_options() {
         let cmd = ListCommand {
             levels: vec![Level::Epic, Level::Ticket],
-            statuses: vec![Status::Todo, Status::InProgress],
+            statuses: vec!["todo".to_string(), "in_progress".to_string()],
             priorities: vec![Priority::High],
             tags: vec!["backend".to_string(), "api".to_string()],
             root: true,
@@ -893,7 +850,7 @@ mod tests {
             id: "abc123".to_string(),
             title: "Test Task".to_string(),
             level: Level::Ticket,
-            status: Status::InProgress,
+            status: "in_progress".to_string(),
             priority: Some(Priority::Medium),
             tags: vec!["test".to_string()],
             needs_human_review: Some(true),
@@ -963,7 +920,7 @@ mod tests {
     fn test_list_command_debug() {
         let cmd = ListCommand {
             levels: vec![Level::Epic],
-            statuses: vec![Status::Todo],
+            statuses: vec!["todo".to_string()],
             priorities: vec![Priority::High],
             tags: vec!["backend".to_string()],
             root: true,
@@ -977,7 +934,7 @@ mod tests {
         assert!(
             debug_str.contains("ListCommand")
                 && debug_str.contains("Epic")
-                && debug_str.contains("Todo")
+                && debug_str.contains("todo")
                 && debug_str.contains("High")
                 && debug_str.contains("backend")
                 && debug_str.contains("root: true")
@@ -1005,7 +962,7 @@ mod tests {
         level: &str,
         status: &str,
     ) {
-        use vertebrae_db::{Level, Status, Task, TaskUpdate};
+        use vertebrae_db::{Level, Task, TaskUpdate};
 
         let level_enum = match level {
             "epic" => Level::Epic,
@@ -1014,11 +971,9 @@ mod tests {
             _ => Level::Task,
         };
 
-        let status_enum = Status::parse(status).unwrap_or(Status::Todo);
-
         let task = Task::new(title, level_enum)
             .with_description(description)
-            .with_status(status_enum);
+            .with_status(status);
 
         db.tasks().create(id, &task).await.unwrap();
 
@@ -1218,7 +1173,7 @@ mod tests {
         // Search for "auth" but only in_progress status
         let cmd = ListCommand {
             levels: vec![],
-            statuses: vec![Status::InProgress],
+            statuses: vec!["in_progress".to_string()],
             priorities: vec![],
             tags: vec![],
             root: false,

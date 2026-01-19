@@ -5,7 +5,7 @@
 //! and descendant collection.
 
 use crate::error::DbResult;
-use crate::models::{Level, Priority, Status};
+use crate::models::{Level, Priority};
 use crate::repository::TaskSummary;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -773,7 +773,7 @@ impl<'a> GraphQueries<'a> {
                 id: row.id.id.to_raw(),
                 title: row.title,
                 level: Self::parse_level(&row.level),
-                status: Self::parse_status(&row.status),
+                status: Self::normalize_status(&row.status),
                 priority: row.priority.as_deref().map(Self::parse_priority),
                 tags: row.tags,
                 needs_human_review: row.needs_human_review,
@@ -791,9 +791,9 @@ impl<'a> GraphQueries<'a> {
         }
     }
 
-    /// Parse a status string into a Status enum
-    fn parse_status(s: &str) -> Status {
-        Status::parse(s).unwrap_or(Status::Todo)
+    /// Convert a status string to lowercase for consistency
+    fn normalize_status(s: &str) -> String {
+        s.to_lowercase()
     }
 
     /// Parse a priority string into a Priority enum
@@ -1001,7 +1001,7 @@ impl<'a> GraphQueries<'a> {
 mod tests {
     use super::*;
     use crate::Database;
-    use crate::models::{Level, Priority, Status};
+    use crate::models::{Level, Priority};
     use std::env;
 
     /// Helper to create a test database
@@ -1687,7 +1687,7 @@ mod tests {
         assert_eq!(blocker.id, "blocker1");
         assert_eq!(blocker.title, "Blocker Task");
         assert_eq!(blocker.level, Level::Ticket);
-        assert_eq!(blocker.status, Status::InProgress);
+        assert_eq!(blocker.status, "in_progress");
         assert_eq!(blocker.priority, Some(Priority::High));
         assert_eq!(blocker.tags, vec!["backend", "urgent"]);
         assert_eq!(blocker.needs_human_review, Some(true));
@@ -1717,7 +1717,7 @@ mod tests {
         assert_eq!(blockers.len(), 1);
         assert_eq!(blockers[0].id, "blocker2");
         assert_eq!(blockers[0].title, "Active Blocker");
-        assert_eq!(blockers[0].status, Status::InProgress);
+        assert_eq!(blockers[0].status, "in_progress");
 
         cleanup(&temp_dir);
     }

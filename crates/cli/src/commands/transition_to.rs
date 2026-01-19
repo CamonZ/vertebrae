@@ -6,7 +6,7 @@
 
 use clap::{Args, ValueEnum};
 use vertebrae_core::ServiceError;
-use vertebrae_db::{Status, TriageValidationResult};
+use vertebrae_db::TriageValidationResult;
 
 /// Target status for the transition-to command
 #[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
@@ -26,18 +26,7 @@ pub enum TargetStatus {
 }
 
 impl TargetStatus {
-    /// Convert to the database Status enum
-    pub fn to_status(&self) -> Status {
-        match self {
-            TargetStatus::Todo => Status::Todo,
-            TargetStatus::InProgress => Status::InProgress,
-            TargetStatus::PendingReview => Status::PendingReview,
-            TargetStatus::Done => Status::Done,
-            TargetStatus::Rejected => Status::Rejected,
-        }
-    }
-
-    /// Get the string representation
+    /// Get the string representation for the status
     pub fn as_str(&self) -> &'static str {
         match self {
             TargetStatus::Todo => "todo",
@@ -227,7 +216,7 @@ impl TransitionToCommand {
         let id = self.id.to_lowercase();
 
         // Use service layer to perform the transition (which fires MutationCallback automatically)
-        let result = service.transition_to(&id, self.target.to_status()).await?;
+        let result = service.transition_to(&id, self.target.as_str()).await?;
 
         // Convert service TransitionResult to CLI TransitionToResult
         Ok(TransitionToResult {

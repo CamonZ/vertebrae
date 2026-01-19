@@ -298,7 +298,7 @@ fn convert_tree_node(node: &vertebrae_core::TaskTreeNode) -> TaskHierarchyNode {
             id: node.id.clone(),
             title: node.title.clone(),
             level: node.level.clone().into(),
-            status: node.status.clone().into(),
+            status: node.status.clone(),
             priority: node.priority.clone().map(Into::into),
             tags: node.tags.clone(),
             needs_human_review: node.needs_human_review,

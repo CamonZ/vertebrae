@@ -5,7 +5,6 @@
 
 use clap::Args;
 use vertebrae_core::{ServiceError, TaskService};
-use vertebrae_db::Status;
 
 /// Show all tasks blocking a given task
 #[derive(Debug, Args)]
@@ -151,7 +150,7 @@ impl BlockersCommand {
             // Get the blocker task summary
             if let Ok(task) = service.get_task(&blocker_id).await {
                 // By default, filter out completed blockers (status = done)
-                if !self.all && task.status == Status::Done {
+                if !self.all && task.status == "done" {
                     continue;
                 }
 
@@ -286,16 +285,8 @@ mod tests {
             _ => Level::Task,
         };
 
-        let status_enum = match status {
-            "todo" => vertebrae_db::Status::Todo,
-            "in_progress" => vertebrae_db::Status::InProgress,
-            "pending_review" => vertebrae_db::Status::PendingReview,
-            "done" => vertebrae_db::Status::Done,
-            _ => vertebrae_db::Status::Backlog,
-        };
-
         let db = service.database();
-        let task = Task::new(title, level_enum).with_status(status_enum);
+        let task = Task::new(title, level_enum).with_status(status);
         db.tasks().create(id, &task).await.unwrap();
     }
 

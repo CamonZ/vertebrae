@@ -163,9 +163,9 @@ mod tests {
 
     #[test]
     fn test_export_record_task_serialization() {
-        use vertebrae_db::{Level, Status};
+        use vertebrae_db::Level;
 
-        let task = Task::new("Test task", Level::Task).with_status(Status::Todo);
+        let task = Task::new("Test task", Level::Task).with_status("todo");
 
         let record = ExportRecord::Task {
             id: "abc123".to_string(),

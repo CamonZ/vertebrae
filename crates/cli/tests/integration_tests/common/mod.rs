@@ -664,19 +664,7 @@ pub fn criterion_ref_cmd_full(
 
 /// Create a list command with status filter.
 pub fn list_cmd_with_status(statuses: Vec<&str>) -> ListCommand {
-    use vertebrae_db::Status;
-    let parsed_statuses: Vec<Status> = statuses
-        .into_iter()
-        .filter_map(|s| match s.to_lowercase().as_str() {
-            "backlog" => Some(Status::Backlog),
-            "todo" => Some(Status::Todo),
-            "in_progress" => Some(Status::InProgress),
-            "pending_review" => Some(Status::PendingReview),
-            "done" => Some(Status::Done),
-            "rejected" => Some(Status::Rejected),
-            _ => None,
-        })
-        .collect();
+    let parsed_statuses: Vec<String> = statuses.into_iter().map(|s| s.to_lowercase()).collect();
     ListCommand {
         levels: vec![],
         statuses: parsed_statuses,

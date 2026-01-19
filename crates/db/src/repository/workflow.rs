@@ -442,15 +442,25 @@ impl<'a> WorkflowRepository<'a> {
     ///
     /// Returns `DbError::Query` if database operations fail.
     pub async fn dry_run_migration(&self) -> DbResult<MigrationResult> {
-        use crate::models::Status;
-
         debug!("Starting dry-run migration check");
+
+        // Helper to map status string to default workflow step
+        fn status_to_step(status: &str) -> Option<usize> {
+            match status {
+                "backlog" => Some(0),
+                "todo" => Some(1),
+                "in_progress" => Some(2),
+                "pending_review" => Some(3),
+                "done" => Some(4),
+                _ => None, // rejected and unknown statuses not in default workflow
+            }
+        }
 
         // Find all tasks without workflow_id
         #[derive(Debug, Deserialize)]
         struct TaskWithStatus {
             id: surrealdb::sql::Thing,
-            status: Status,
+            status: String,
         }
 
         let query = "SELECT id, status FROM task WHERE workflow_id IS NONE";
@@ -474,13 +484,13 @@ impl<'a> WorkflowRepository<'a> {
             let task_id = task.id.id.to_raw();
 
             // Get the step index for this status
-            if task.status.default_workflow_step().is_some() {
+            if status_to_step(&task.status).is_some() {
                 trace!("Task {} would be migrated", task_id);
                 would_migrate += 1;
             } else {
-                // Status not in default workflow (e.g., Rejected)
+                // Status not in default workflow (e.g., rejected)
                 debug!(
-                    "Task {} would be skipped (status {:?} not in default workflow)",
+                    "Task {} would be skipped (status '{}' not in default workflow)",
                     task_id, task.status
                 );
                 skipped_ids.push(task_id);
@@ -520,9 +530,19 @@ impl<'a> WorkflowRepository<'a> {
     /// Returns `DbError::NotFound` if the default workflow doesn't exist.
     /// Returns `DbError::Query` if database operations fail.
     pub async fn migrate_to_default_workflow(&self) -> DbResult<MigrationResult> {
-        use crate::models::Status;
-
         debug!("Starting migration to default workflow");
+
+        // Helper to map status string to default workflow step
+        fn status_to_step(status: &str) -> Option<usize> {
+            match status {
+                "backlog" => Some(0),
+                "todo" => Some(1),
+                "in_progress" => Some(2),
+                "pending_review" => Some(3),
+                "done" => Some(4),
+                _ => None, // rejected and unknown statuses not in default workflow
+            }
+        }
 
         // Ensure default workflow exists
         if !self.exists(DEFAULT_WORKFLOW_ID).await? {
@@ -538,7 +558,7 @@ impl<'a> WorkflowRepository<'a> {
         #[derive(Debug, Deserialize)]
         struct TaskWithStatus {
             id: surrealdb::sql::Thing,
-            status: Status,
+            status: String,
         }
 
         let query = "SELECT id, status FROM task WHERE workflow_id IS NONE";
@@ -559,7 +579,7 @@ impl<'a> WorkflowRepository<'a> {
             let task_id = task.id.id.to_raw();
 
             // Get the step index for this status
-            match task.status.default_workflow_step() {
+            match status_to_step(&task.status) {
                 Some(step) => {
                     // Update the task with workflow_id and current_step
                     let update_query = format!(
@@ -576,9 +596,9 @@ impl<'a> WorkflowRepository<'a> {
                     migrated += 1;
                 }
                 None => {
-                    // Status not in default workflow (e.g., Rejected)
+                    // Status not in default workflow (e.g., rejected)
                     debug!(
-                        "Skipping task {} with status {:?} (not in default workflow)",
+                        "Skipping task {} with status '{}' (not in default workflow)",
                         task_id, task.status
                     );
                     skipped_ids.push(task_id);
@@ -1196,7 +1216,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_migrate_tasks_with_various_statuses() {
-        use crate::models::{Level, Status, Task};
+        use crate::models::{Level, Task};
         use crate::repository::TaskRepository;
 
         let (db, temp_dir) = setup_test_db().await;
@@ -1204,12 +1224,11 @@ mod tests {
         let task_repo = TaskRepository::new(db.client());
 
         // Create tasks with different statuses
-        let task1 = Task::new("Backlog Task", Level::Task).with_status(Status::Backlog);
-        let task2 = Task::new("Todo Task", Level::Task).with_status(Status::Todo);
-        let task3 = Task::new("In Progress Task", Level::Task).with_status(Status::InProgress);
-        let task4 =
-            Task::new("Pending Review Task", Level::Task).with_status(Status::PendingReview);
-        let task5 = Task::new("Done Task", Level::Task).with_status(Status::Done);
+        let task1 = Task::new("Backlog Task", Level::Task).with_status("backlog");
+        let task2 = Task::new("Todo Task", Level::Task).with_status("todo");
+        let task3 = Task::new("In Progress Task", Level::Task).with_status("in_progress");
+        let task4 = Task::new("Pending Review Task", Level::Task).with_status("pending_review");
+        let task5 = Task::new("Done Task", Level::Task).with_status("done");
 
         task_repo.create("t1", &task1).await.unwrap();
         task_repo.create("t2", &task2).await.unwrap();
@@ -1250,7 +1269,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_migrate_skips_rejected_tasks() {
-        use crate::models::{Level, Status, Task};
+        use crate::models::{Level, Task};
         use crate::repository::TaskRepository;
 
         let (db, temp_dir) = setup_test_db().await;
@@ -1258,8 +1277,8 @@ mod tests {
         let task_repo = TaskRepository::new(db.client());
 
         // Create a rejected task and a normal task
-        let rejected_task = Task::new("Rejected Task", Level::Task).with_status(Status::Rejected);
-        let normal_task = Task::new("Normal Task", Level::Task).with_status(Status::Todo);
+        let rejected_task = Task::new("Rejected Task", Level::Task).with_status("rejected");
+        let normal_task = Task::new("Normal Task", Level::Task).with_status("todo");
 
         task_repo.create("rejected", &rejected_task).await.unwrap();
         task_repo.create("normal", &normal_task).await.unwrap();
@@ -1287,7 +1306,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_migrate_is_idempotent() {
-        use crate::models::{Level, Status, Task};
+        use crate::models::{Level, Task};
         use crate::repository::TaskRepository;
 
         let (db, temp_dir) = setup_test_db().await;
@@ -1295,7 +1314,7 @@ mod tests {
         let task_repo = TaskRepository::new(db.client());
 
         // Create a task
-        let task = Task::new("Test Task", Level::Task).with_status(Status::Todo);
+        let task = Task::new("Test Task", Level::Task).with_status("todo");
         task_repo.create("test", &task).await.unwrap();
 
         // Run migration first time
@@ -1317,7 +1336,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_migrate_skips_already_assigned_tasks() {
-        use crate::models::{Level, Status, Task};
+        use crate::models::{Level, Task};
         use crate::repository::TaskRepository;
 
         let (db, temp_dir) = setup_test_db().await;
@@ -1325,7 +1344,7 @@ mod tests {
         let task_repo = TaskRepository::new(db.client());
 
         // Create a task and assign it to the workflow manually
-        let task = Task::new("Pre-assigned Task", Level::Task).with_status(Status::Todo);
+        let task = Task::new("Pre-assigned Task", Level::Task).with_status("todo");
         task_repo.create("assigned", &task).await.unwrap();
 
         let workflow_thing = surrealdb::sql::Thing::from(("workflow", DEFAULT_WORKFLOW_ID));
@@ -1335,7 +1354,7 @@ mod tests {
             .unwrap();
 
         // Create another task without workflow
-        let task2 = Task::new("Unassigned Task", Level::Task).with_status(Status::InProgress);
+        let task2 = Task::new("Unassigned Task", Level::Task).with_status("in_progress");
         task_repo.create("unassigned", &task2).await.unwrap();
 
         // Run migration - should only migrate the unassigned task
@@ -1362,7 +1381,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_dry_run_migration_mixed_tasks() {
-        use crate::models::{Level, Status, Task};
+        use crate::models::{Level, Task};
         use crate::repository::TaskRepository;
 
         let (db, temp_dir) = setup_test_db().await;
@@ -1370,9 +1389,9 @@ mod tests {
         let task_repo = TaskRepository::new(db.client());
 
         // Create tasks with different statuses
-        let task1 = Task::new("Backlog Task", Level::Task).with_status(Status::Backlog);
-        let task2 = Task::new("Rejected Task", Level::Task).with_status(Status::Rejected);
-        let task3 = Task::new("Todo Task", Level::Task).with_status(Status::Todo);
+        let task1 = Task::new("Backlog Task", Level::Task).with_status("backlog");
+        let task2 = Task::new("Rejected Task", Level::Task).with_status("rejected");
+        let task3 = Task::new("Todo Task", Level::Task).with_status("todo");
 
         task_repo.create("t1", &task1).await.unwrap();
         task_repo.create("t2", &task2).await.unwrap();
@@ -1397,7 +1416,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_dry_run_migration_does_not_modify_tasks() {
-        use crate::models::{Level, Status, Task};
+        use crate::models::{Level, Task};
         use crate::repository::TaskRepository;
 
         let (db, temp_dir) = setup_test_db().await;
@@ -1405,7 +1424,7 @@ mod tests {
         let task_repo = TaskRepository::new(db.client());
 
         // Create a task
-        let task = Task::new("Test Task", Level::Task).with_status(Status::InProgress);
+        let task = Task::new("Test Task", Level::Task).with_status("in_progress");
         task_repo.create("test", &task).await.unwrap();
 
         // Get original task state

@@ -39,143 +39,6 @@ impl std::fmt::Display for Level {
     }
 }
 
-/// Task status
-///
-/// Represents the current state of a task in its lifecycle.
-/// Tasks follow a strict workflow with these allowed transitions:
-/// - backlog -> todo
-/// - todo -> in_progress, rejected
-/// - in_progress -> pending_review
-/// - pending_review -> in_progress, done
-/// - rejected, done -> no transitions (final states)
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Status {
-    Backlog,
-    Todo,
-    InProgress,
-    PendingReview,
-    Done,
-    Rejected,
-}
-
-impl Status {
-    /// Returns the string representation used in the database
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Status::Backlog => "backlog",
-            Status::Todo => "todo",
-            Status::InProgress => "in_progress",
-            Status::PendingReview => "pending_review",
-            Status::Done => "done",
-            Status::Rejected => "rejected",
-        }
-    }
-
-    /// Returns the step index in the default workflow for this status.
-    ///
-    /// The default workflow has steps: backlog(0), todo(1), in_progress(2),
-    /// pending_review(3), done(4). The Rejected status is not part of the
-    /// default workflow, so it returns `None`.
-    ///
-    /// # Returns
-    ///
-    /// `Some(index)` for statuses in the default workflow, `None` for Rejected.
-    pub fn default_workflow_step(&self) -> Option<usize> {
-        match self {
-            Status::Backlog => Some(0),
-            Status::Todo => Some(1),
-            Status::InProgress => Some(2),
-            Status::PendingReview => Some(3),
-            Status::Done => Some(4),
-            Status::Rejected => None,
-        }
-    }
-
-    /// Returns the list of valid target states this status can transition to.
-    ///
-    /// The workflow transitions are:
-    /// - backlog -> todo
-    /// - todo -> in_progress, rejected
-    /// - in_progress -> pending_review
-    /// - pending_review -> in_progress, done
-    /// - rejected, done -> no transitions (final states)
-    pub fn valid_transitions(&self) -> &'static [Status] {
-        match self {
-            Status::Backlog => &[Status::Todo],
-            Status::Todo => &[Status::InProgress, Status::Rejected],
-            Status::InProgress => &[Status::PendingReview],
-            Status::PendingReview => &[Status::InProgress, Status::Done],
-            Status::Done => &[],
-            Status::Rejected => &[],
-        }
-    }
-
-    /// Check if transitioning from this status to the target status is valid.
-    ///
-    /// Returns `true` if the transition is allowed, `false` otherwise.
-    pub fn can_transition_to(&self, target: &Status) -> bool {
-        self.valid_transitions().contains(target)
-    }
-
-    /// Attempt to validate a transition from this status to the target status.
-    ///
-    /// Returns `Ok(())` if the transition is valid, or an error message describing
-    /// why the transition is invalid.
-    pub fn validate_transition(&self, target: &Status) -> Result<(), String> {
-        if self == target {
-            return Ok(()); // No-op transition to same status is always valid
-        }
-
-        if self.can_transition_to(target) {
-            Ok(())
-        } else {
-            let valid_targets = self.valid_transitions();
-            if valid_targets.is_empty() {
-                Err(format!(
-                    "Cannot transition from '{}': this is a final state with no allowed transitions",
-                    self.as_str()
-                ))
-            } else {
-                let valid_list: Vec<&str> = valid_targets.iter().map(|s| s.as_str()).collect();
-                Err(format!(
-                    "Invalid status transition from '{}' to '{}'. Valid transitions from '{}' are: {}",
-                    self.as_str(),
-                    target.as_str(),
-                    self.as_str(),
-                    valid_list.join(", ")
-                ))
-            }
-        }
-    }
-
-    /// Returns true if this status is a final state (no further transitions allowed)
-    pub fn is_final(&self) -> bool {
-        matches!(self, Status::Done | Status::Rejected)
-    }
-
-    /// Parse a status string into a Status enum.
-    ///
-    /// Returns `None` if the string doesn't match any known status.
-    pub fn parse(s: &str) -> Option<Self> {
-        match s {
-            "backlog" => Some(Status::Backlog),
-            "todo" => Some(Status::Todo),
-            "in_progress" => Some(Status::InProgress),
-            "pending_review" => Some(Status::PendingReview),
-            "done" => Some(Status::Done),
-            "rejected" => Some(Status::Rejected),
-            _ => None,
-        }
-    }
-}
-
-impl std::fmt::Display for Status {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.as_str())
-    }
-}
-
 /// Task priority level
 ///
 /// Optional priority for tasks, from low to critical.
@@ -438,8 +301,8 @@ pub struct Task {
     /// Hierarchy level (epic, ticket, task)
     pub level: Level,
 
-    /// Current status
-    pub status: Status,
+    /// Current status (references StatusDefinition.name from StatusSchema)
+    pub status: String,
 
     /// Optional priority
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -506,7 +369,7 @@ impl Task {
             title: title.into(),
             description: None,
             level,
-            status: Status::Todo,
+            status: "backlog".to_string(),
             priority: None,
             tags: Vec::new(),
             created_at: None,
@@ -531,8 +394,8 @@ impl Task {
     }
 
     /// Set the status of this task
-    pub fn with_status(mut self, status: Status) -> Self {
-        self.status = status;
+    pub fn with_status(mut self, status: impl Into<String>) -> Self {
+        self.status = status.into();
         self
     }
 
@@ -1866,13 +1729,11 @@ impl StatusSchema {
     ///
     /// The default schema includes:
     /// - backlog: Initial status for new items
+    /// - todo: Triaged and ready to be worked on
     /// - in_progress: Work is actively being done
     /// - pending_review: Work completed, awaiting review
     /// - done: Work completed and approved (terminal, unblocks dependents)
     /// - rejected: Work rejected or cancelled (terminal)
-    ///
-    /// Note: "todo" is intentionally excluded - being in a workflow's first step
-    /// indicates readiness to work.
     pub fn default_schema() -> Self {
         Self::new("default")
             .with_description("Default status schema with standard workflow stages")
@@ -1883,37 +1744,44 @@ impl StatusSchema {
                     .with_description("Items waiting to be prioritized")
                     .with_color("#95a5a6")
                     .with_order(0),
+                StatusDefinition::new("todo")
+                    .with_label("Todo")
+                    .with_description("Triaged and ready to be worked on")
+                    .with_color("#9b59b6")
+                    .with_order(1),
                 StatusDefinition::new("in_progress")
                     .with_label("In Progress")
                     .with_description("Work is actively being done")
                     .with_color("#3498db")
-                    .with_order(1),
+                    .with_order(2),
                 StatusDefinition::new("pending_review")
                     .with_label("Pending Review")
                     .with_description("Work completed, awaiting review")
                     .with_color("#f39c12")
-                    .with_order(2),
+                    .with_order(3),
                 StatusDefinition::new("done")
                     .with_label("Done")
                     .with_description("Work completed and approved")
                     .with_color("#27ae60")
                     .with_is_terminal(true)
                     .with_unblocks_dependents(true)
-                    .with_order(3),
+                    .with_order(4),
                 StatusDefinition::new("rejected")
                     .with_label("Rejected")
                     .with_description("Work rejected or cancelled")
                     .with_color("#e74c3c")
                     .with_is_terminal(true)
-                    .with_order(4),
+                    .with_order(5),
             ])
             .with_progressions(vec![
+                StatusProgression::new("backlog", "todo").with_label("Triage"),
                 StatusProgression::new("backlog", "in_progress").with_label("Start"),
+                StatusProgression::new("backlog", "rejected").with_label("Reject"),
+                StatusProgression::new("todo", "in_progress").with_label("Start"),
+                StatusProgression::new("todo", "rejected").with_label("Reject"),
                 StatusProgression::new("in_progress", "pending_review").with_label("Submit"),
                 StatusProgression::new("pending_review", "in_progress").with_label("Revise"),
                 StatusProgression::new("pending_review", "done").with_label("Approve"),
-                StatusProgression::new("backlog", "rejected").with_label("Reject"),
-                StatusProgression::new("in_progress", "rejected").with_label("Cancel"),
             ])
     }
 }
@@ -2396,253 +2264,6 @@ mod tests {
         let level = Level::Epic;
         let cloned = level.clone();
         assert_eq!(level, cloned);
-    }
-
-    // Status enum tests
-    #[test]
-    fn test_status_as_str() {
-        assert_eq!(Status::Backlog.as_str(), "backlog");
-        assert_eq!(Status::Todo.as_str(), "todo");
-        assert_eq!(Status::InProgress.as_str(), "in_progress");
-        assert_eq!(Status::PendingReview.as_str(), "pending_review");
-        assert_eq!(Status::Done.as_str(), "done");
-        assert_eq!(Status::Rejected.as_str(), "rejected");
-    }
-
-    #[test]
-    fn test_status_display() {
-        assert_eq!(format!("{}", Status::Backlog), "backlog");
-        assert_eq!(format!("{}", Status::Todo), "todo");
-        assert_eq!(format!("{}", Status::InProgress), "in_progress");
-        assert_eq!(format!("{}", Status::PendingReview), "pending_review");
-        assert_eq!(format!("{}", Status::Done), "done");
-        assert_eq!(format!("{}", Status::Rejected), "rejected");
-    }
-
-    #[test]
-    fn test_status_serialize() {
-        assert_eq!(
-            serde_json::to_string(&Status::Backlog).unwrap(),
-            "\"backlog\""
-        );
-        assert_eq!(serde_json::to_string(&Status::Todo).unwrap(), "\"todo\"");
-        assert_eq!(
-            serde_json::to_string(&Status::InProgress).unwrap(),
-            "\"in_progress\""
-        );
-        assert_eq!(
-            serde_json::to_string(&Status::PendingReview).unwrap(),
-            "\"pending_review\""
-        );
-        assert_eq!(serde_json::to_string(&Status::Done).unwrap(), "\"done\"");
-        assert_eq!(
-            serde_json::to_string(&Status::Rejected).unwrap(),
-            "\"rejected\""
-        );
-    }
-
-    #[test]
-    fn test_status_deserialize() {
-        assert_eq!(
-            serde_json::from_str::<Status>("\"backlog\"").unwrap(),
-            Status::Backlog
-        );
-        assert_eq!(
-            serde_json::from_str::<Status>("\"todo\"").unwrap(),
-            Status::Todo
-        );
-        assert_eq!(
-            serde_json::from_str::<Status>("\"in_progress\"").unwrap(),
-            Status::InProgress
-        );
-        assert_eq!(
-            serde_json::from_str::<Status>("\"pending_review\"").unwrap(),
-            Status::PendingReview
-        );
-        assert_eq!(
-            serde_json::from_str::<Status>("\"done\"").unwrap(),
-            Status::Done
-        );
-        assert_eq!(
-            serde_json::from_str::<Status>("\"rejected\"").unwrap(),
-            Status::Rejected
-        );
-    }
-
-    #[test]
-    fn test_status_clone_and_eq() {
-        let status = Status::InProgress;
-        let cloned = status.clone();
-        assert_eq!(status, cloned);
-    }
-
-    // Status transition tests
-    #[test]
-    fn test_status_valid_transitions() {
-        // backlog -> todo
-        assert_eq!(Status::Backlog.valid_transitions(), &[Status::Todo]);
-
-        // todo -> in_progress, rejected
-        assert_eq!(
-            Status::Todo.valid_transitions(),
-            &[Status::InProgress, Status::Rejected]
-        );
-
-        // in_progress -> pending_review
-        assert_eq!(
-            Status::InProgress.valid_transitions(),
-            &[Status::PendingReview]
-        );
-
-        // pending_review -> in_progress, done
-        assert_eq!(
-            Status::PendingReview.valid_transitions(),
-            &[Status::InProgress, Status::Done]
-        );
-
-        // done -> no transitions (final state)
-        assert!(Status::Done.valid_transitions().is_empty());
-
-        // rejected -> no transitions (final state)
-        assert!(Status::Rejected.valid_transitions().is_empty());
-    }
-
-    #[test]
-    fn test_status_can_transition_to_valid() {
-        assert!(Status::Backlog.can_transition_to(&Status::Todo));
-        assert!(Status::Todo.can_transition_to(&Status::InProgress));
-        assert!(Status::Todo.can_transition_to(&Status::Rejected));
-        assert!(Status::InProgress.can_transition_to(&Status::PendingReview));
-        assert!(Status::PendingReview.can_transition_to(&Status::InProgress));
-        assert!(Status::PendingReview.can_transition_to(&Status::Done));
-    }
-
-    #[test]
-    fn test_status_can_transition_to_invalid() {
-        // Backlog cannot go directly to in_progress
-        assert!(!Status::Backlog.can_transition_to(&Status::InProgress));
-        assert!(!Status::Backlog.can_transition_to(&Status::Done));
-
-        // Todo cannot go directly to done
-        assert!(!Status::Todo.can_transition_to(&Status::Done));
-        assert!(!Status::Todo.can_transition_to(&Status::PendingReview));
-
-        // InProgress cannot go directly to done
-        assert!(!Status::InProgress.can_transition_to(&Status::Done));
-        assert!(!Status::InProgress.can_transition_to(&Status::Todo));
-
-        // Done cannot transition anywhere
-        assert!(!Status::Done.can_transition_to(&Status::Todo));
-        assert!(!Status::Done.can_transition_to(&Status::InProgress));
-
-        // Rejected cannot transition anywhere
-        assert!(!Status::Rejected.can_transition_to(&Status::Todo));
-        assert!(!Status::Rejected.can_transition_to(&Status::InProgress));
-    }
-
-    #[test]
-    fn test_status_validate_transition_valid() {
-        assert!(Status::Backlog.validate_transition(&Status::Todo).is_ok());
-        assert!(
-            Status::Todo
-                .validate_transition(&Status::InProgress)
-                .is_ok()
-        );
-        assert!(Status::Todo.validate_transition(&Status::Rejected).is_ok());
-        assert!(
-            Status::InProgress
-                .validate_transition(&Status::PendingReview)
-                .is_ok()
-        );
-        assert!(
-            Status::PendingReview
-                .validate_transition(&Status::InProgress)
-                .is_ok()
-        );
-        assert!(
-            Status::PendingReview
-                .validate_transition(&Status::Done)
-                .is_ok()
-        );
-    }
-
-    #[test]
-    fn test_status_validate_transition_same_status() {
-        // Transitioning to the same status should be valid (no-op)
-        assert!(
-            Status::Backlog
-                .validate_transition(&Status::Backlog)
-                .is_ok()
-        );
-        assert!(Status::Todo.validate_transition(&Status::Todo).is_ok());
-        assert!(
-            Status::InProgress
-                .validate_transition(&Status::InProgress)
-                .is_ok()
-        );
-        assert!(
-            Status::PendingReview
-                .validate_transition(&Status::PendingReview)
-                .is_ok()
-        );
-        assert!(Status::Done.validate_transition(&Status::Done).is_ok());
-        assert!(
-            Status::Rejected
-                .validate_transition(&Status::Rejected)
-                .is_ok()
-        );
-    }
-
-    #[test]
-    fn test_status_validate_transition_invalid() {
-        // Invalid transition with available targets
-        let result = Status::Todo.validate_transition(&Status::Done);
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(err.contains("Invalid status transition"));
-        assert!(err.contains("todo"));
-        assert!(err.contains("done"));
-        assert!(err.contains("in_progress"));
-        assert!(err.contains("rejected"));
-
-        // Final state with no targets
-        let result = Status::Done.validate_transition(&Status::Todo);
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(err.contains("final state"));
-        assert!(err.contains("no allowed transitions"));
-    }
-
-    #[test]
-    fn test_status_is_final() {
-        assert!(!Status::Backlog.is_final());
-        assert!(!Status::Todo.is_final());
-        assert!(!Status::InProgress.is_final());
-        assert!(!Status::PendingReview.is_final());
-        assert!(Status::Done.is_final());
-        assert!(Status::Rejected.is_final());
-    }
-
-    #[test]
-    fn test_status_from_str() {
-        assert_eq!(Status::parse("backlog"), Some(Status::Backlog));
-        assert_eq!(Status::parse("todo"), Some(Status::Todo));
-        assert_eq!(Status::parse("in_progress"), Some(Status::InProgress));
-        assert_eq!(Status::parse("pending_review"), Some(Status::PendingReview));
-        assert_eq!(Status::parse("done"), Some(Status::Done));
-        assert_eq!(Status::parse("rejected"), Some(Status::Rejected));
-        assert_eq!(Status::parse("unknown"), None);
-        assert_eq!(Status::parse(""), None);
-    }
-
-    #[test]
-    fn test_status_default_workflow_step() {
-        assert_eq!(Status::Backlog.default_workflow_step(), Some(0));
-        assert_eq!(Status::Todo.default_workflow_step(), Some(1));
-        assert_eq!(Status::InProgress.default_workflow_step(), Some(2));
-        assert_eq!(Status::PendingReview.default_workflow_step(), Some(3));
-        assert_eq!(Status::Done.default_workflow_step(), Some(4));
-        assert_eq!(Status::Rejected.default_workflow_step(), None);
     }
 
     // Priority enum tests
@@ -3137,7 +2758,7 @@ mod tests {
         assert!(task.id.is_none());
         assert_eq!(task.title, "Implement feature");
         assert_eq!(task.level, Level::Task);
-        assert_eq!(task.status, Status::Todo);
+        assert_eq!(task.status, "backlog");
         assert!(task.priority.is_none());
         assert!(task.tags.is_empty());
         assert!(task.created_at.is_none());
@@ -3152,8 +2773,8 @@ mod tests {
 
     #[test]
     fn test_task_with_status() {
-        let task = Task::new("Test", Level::Task).with_status(Status::InProgress);
-        assert_eq!(task.status, Status::InProgress);
+        let task = Task::new("Test", Level::Task).with_status("in_progress");
+        assert_eq!(task.status, "in_progress");
     }
 
     #[test]
@@ -3192,7 +2813,7 @@ mod tests {
     #[test]
     fn test_task_builder_chain() {
         let task = Task::new("Complex Task", Level::Epic)
-            .with_status(Status::InProgress)
+            .with_status("in_progress")
             .with_priority(Priority::Critical)
             .with_tags(["urgent", "backend"])
             .with_section(Section::new(SectionType::Goal, "Complete the epic"))
@@ -3200,7 +2821,7 @@ mod tests {
 
         assert_eq!(task.title, "Complex Task");
         assert_eq!(task.level, Level::Epic);
-        assert_eq!(task.status, Status::InProgress);
+        assert_eq!(task.status, "in_progress");
         assert_eq!(task.priority, Some(Priority::Critical));
         assert_eq!(task.tags, vec!["urgent", "backend"]);
         assert_eq!(task.sections.len(), 1);
@@ -3210,7 +2831,7 @@ mod tests {
     #[test]
     fn test_task_serialize() {
         let task = Task::new("Test Task", Level::Ticket)
-            .with_status(Status::Done)
+            .with_status("done")
             .with_priority(Priority::Medium)
             .with_tag("test");
 
@@ -3228,7 +2849,7 @@ mod tests {
         let value = serde_json::to_value(&task).unwrap();
         assert_eq!(value["title"], "Minimal");
         assert_eq!(value["level"], "task");
-        assert_eq!(value["status"], "todo");
+        assert_eq!(value["status"], "backlog"); // Default status is backlog
         assert!(value.get("priority").is_none());
         assert!(value.get("id").is_none());
     }
@@ -3248,7 +2869,7 @@ mod tests {
         let task: Task = serde_json::from_str(json).unwrap();
         assert_eq!(task.title, "Deserialized Task");
         assert_eq!(task.level, Level::Epic);
-        assert_eq!(task.status, Status::Backlog);
+        assert_eq!(task.status, "backlog");
         assert_eq!(task.priority, Some(Priority::Low));
         assert_eq!(task.tags, vec!["a", "b"]);
     }
@@ -3264,7 +2885,7 @@ mod tests {
         let task: Task = serde_json::from_str(json).unwrap();
         assert_eq!(task.title, "Minimal");
         assert_eq!(task.level, Level::Task);
-        assert_eq!(task.status, Status::Todo);
+        assert_eq!(task.status, "todo");
         assert!(task.priority.is_none());
         assert!(task.tags.is_empty());
         assert!(task.sections.is_empty());
@@ -3538,7 +3159,7 @@ mod tests {
         // Create a task with workflow, serialize it, then deserialize it
         let workflow_id = Thing::from(("workflow", "wf456"));
         let original = Task::new("Workflow Task", Level::Task)
-            .with_status(Status::InProgress)
+            .with_status("in_progress")
             .with_workflow(workflow_id.clone(), 2);
 
         let json = serde_json::to_string(&original).unwrap();
@@ -4974,14 +4595,14 @@ mod tests {
         assert!(schema.is_default);
         assert!(schema.description.is_some());
 
-        // Check statuses (no todo!)
+        // Check statuses (includes todo for backward compatibility)
         let names = schema.status_names();
         assert!(names.contains(&"backlog"));
+        assert!(names.contains(&"todo"));
         assert!(names.contains(&"in_progress"));
         assert!(names.contains(&"pending_review"));
         assert!(names.contains(&"done"));
         assert!(names.contains(&"rejected"));
-        assert!(!names.contains(&"todo")); // Important: no todo status
 
         // Check terminal statuses
         assert!(schema.get_status("done").unwrap().is_terminal);
@@ -4993,7 +4614,10 @@ mod tests {
         assert!(!schema.get_status("rejected").unwrap().unblocks_dependents);
 
         // Check progressions
+        assert!(schema.can_transition("backlog", "todo"));
         assert!(schema.can_transition("backlog", "in_progress"));
+        assert!(schema.can_transition("todo", "in_progress"));
+        assert!(schema.can_transition("todo", "rejected"));
         assert!(schema.can_transition("in_progress", "pending_review"));
         assert!(schema.can_transition("pending_review", "done"));
         assert!(schema.can_transition("pending_review", "in_progress"));

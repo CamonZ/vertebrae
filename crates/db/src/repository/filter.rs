@@ -4,7 +4,7 @@
 //! tasks with complex filter combinations.
 
 use crate::error::DbResult;
-use crate::models::{Level, Priority, Status};
+use crate::models::{Level, Priority};
 use serde::Deserialize;
 use surrealdb::Surreal;
 use surrealdb::engine::local::Db;
@@ -18,8 +18,8 @@ pub struct TaskSummary {
     pub title: String,
     /// Hierarchy level
     pub level: Level,
-    /// Current status
-    pub status: Status,
+    /// Current status (references StatusDefinition.name from StatusSchema)
+    pub status: String,
     /// Optional priority
     pub priority: Option<Priority>,
     /// Tags for categorization
@@ -39,8 +39,8 @@ pub struct TaskWithRelationsData {
     pub title: String,
     /// Hierarchy level
     pub level: Level,
-    /// Current status
-    pub status: Status,
+    /// Current status (references StatusDefinition.name from StatusSchema)
+    pub status: String,
     /// Optional priority
     pub priority: Option<Priority>,
     /// Tags for categorization
@@ -92,7 +92,7 @@ impl TaskRow {
             id: self.id.id.to_raw(),
             title: self.title,
             level: parse_level(&self.level),
-            status: parse_status(&self.status),
+            status: normalize_status(&self.status),
             priority: self.priority.as_deref().map(parse_priority),
             tags: self.tags,
             needs_human_review: self.needs_human_review,
@@ -143,9 +143,9 @@ fn parse_level(s: &str) -> Level {
     }
 }
 
-/// Parse a status string into a Status enum
-fn parse_status(s: &str) -> Status {
-    Status::parse(s).unwrap_or(Status::Todo)
+/// Convert a status string to lowercase for consistency
+fn normalize_status(s: &str) -> String {
+    s.to_lowercase()
 }
 
 /// Parse a priority string into a Priority enum
@@ -171,8 +171,8 @@ fn parse_priority(s: &str) -> Priority {
 pub struct TaskFilter {
     /// Filter by levels (OR semantics)
     pub levels: Vec<Level>,
-    /// Filter by statuses (OR semantics)
-    pub statuses: Vec<Status>,
+    /// Filter by statuses (OR semantics) - status names from StatusSchema
+    pub statuses: Vec<String>,
     /// Filter by priorities (OR semantics)
     pub priorities: Vec<Priority>,
     /// Filter by tags (OR semantics - task must have at least one matching tag)
@@ -208,14 +208,14 @@ impl TaskFilter {
     }
 
     /// Add a status to filter by
-    pub fn with_status(mut self, status: Status) -> Self {
-        self.statuses.push(status);
+    pub fn with_status(mut self, status: impl Into<String>) -> Self {
+        self.statuses.push(status.into());
         self
     }
 
     /// Add multiple statuses to filter by
-    pub fn with_statuses(mut self, statuses: impl IntoIterator<Item = Status>) -> Self {
-        self.statuses.extend(statuses);
+    pub fn with_statuses(mut self, statuses: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.statuses.extend(statuses.into_iter().map(|s| s.into()));
         self
     }
 
@@ -381,7 +381,7 @@ impl<'a> TaskLister<'a> {
                 id: row.id.id.to_raw(),
                 title: row.title,
                 level: parse_level(&row.level),
-                status: parse_status(&row.status),
+                status: normalize_status(&row.status),
                 priority: row.priority.as_deref().map(parse_priority),
                 tags: row.tags,
                 needs_human_review: row.needs_human_review,
@@ -501,7 +501,7 @@ impl<'a> TaskLister<'a> {
             let status_conditions: Vec<String> = filter
                 .statuses
                 .iter()
-                .map(|s| format!("status = \"{}\"", s.as_str()))
+                .map(|s| format!("status = \"{}\"", s))
                 .collect();
             conditions.push(format!("({})", status_conditions.join(" OR ")));
         }
@@ -593,11 +593,11 @@ impl<'a> TaskLister<'a> {
     ///
     /// ```ignore
     /// let lister = TaskLister::new(db.client());
-    /// let todo_ready = lister.list_ready(Status::Todo).await?;
-    /// let backlog_ready = lister.list_ready(Status::Backlog).await?;
+    /// let todo_ready = lister.list_ready("todo").await?;
+    /// let backlog_ready = lister.list_ready("backlog").await?;
     /// ```
-    pub async fn list_ready(&self, status: Status) -> DbResult<Vec<TaskSummary>> {
-        let status_str = status.as_str();
+    pub async fn list_ready(&self, status: impl AsRef<str>) -> DbResult<Vec<TaskSummary>> {
+        let status_str = status.as_ref();
 
         // OPTIMIZED: Batch fetch all data in 3 queries instead of N*M queries
         //
@@ -773,7 +773,7 @@ impl<'a> TaskLister<'a> {
                 id: task.id.id.to_raw(),
                 title: task.title,
                 level: parse_level(&task.level),
-                status: parse_status(&task.status),
+                status: normalize_status(&task.status),
                 priority: task.priority.map(|p| parse_priority(&p)),
                 tags: task.tags,
                 needs_human_review: task.needs_human_review,
@@ -802,8 +802,7 @@ impl<'a> TaskLister<'a> {
             .into_iter()
             .filter(|task| {
                 // Filter by done status unless include_done or statuses specified
-                if !filter.include_done && filter.statuses.is_empty() && task.status == Status::Done
-                {
+                if !filter.include_done && filter.statuses.is_empty() && task.status == "done" {
                     return false;
                 }
 
@@ -971,14 +970,14 @@ mod tests {
 
     #[test]
     fn test_task_filter_with_status() {
-        let filter = TaskFilter::new().with_status(Status::Todo);
-        assert_eq!(filter.statuses, vec![Status::Todo]);
+        let filter = TaskFilter::new().with_status("todo");
+        assert_eq!(filter.statuses, vec!["todo"]);
     }
 
     #[test]
     fn test_task_filter_with_statuses() {
-        let filter = TaskFilter::new().with_statuses([Status::Todo, Status::InProgress]);
-        assert_eq!(filter.statuses, vec![Status::Todo, Status::InProgress]);
+        let filter = TaskFilter::new().with_statuses(["todo", "in_progress"]);
+        assert_eq!(filter.statuses, vec!["todo", "in_progress"]);
     }
 
     #[test]
@@ -1027,13 +1026,13 @@ mod tests {
     fn test_task_filter_builder_chain() {
         let filter = TaskFilter::new()
             .with_level(Level::Epic)
-            .with_status(Status::InProgress)
+            .with_status("in_progress")
             .with_priority(Priority::High)
             .with_tag("urgent")
             .include_done();
 
         assert_eq!(filter.levels, vec![Level::Epic]);
-        assert_eq!(filter.statuses, vec![Status::InProgress]);
+        assert_eq!(filter.statuses, vec!["in_progress"]);
         assert_eq!(filter.priorities, vec![Priority::High]);
         assert_eq!(filter.tags, vec!["urgent"]);
         assert!(filter.include_done);
@@ -1068,13 +1067,13 @@ mod tests {
     fn test_task_filter_debug() {
         let filter = TaskFilter::new()
             .with_level(Level::Epic)
-            .with_status(Status::Todo)
+            .with_status("todo")
             .root_only();
 
         let debug_str = format!("{:?}", filter);
         assert!(debug_str.contains("TaskFilter"));
         assert!(debug_str.contains("Epic"));
-        assert!(debug_str.contains("Todo"));
+        assert!(debug_str.contains("todo"));
         assert!(debug_str.contains("root_only: true"));
     }
 
@@ -1088,7 +1087,7 @@ mod tests {
             id: "123".to_string(),
             title: "Test".to_string(),
             level: Level::Task,
-            status: Status::Todo,
+            status: "todo".to_string(),
             priority: Some(Priority::High),
             tags: vec!["backend".to_string()],
             needs_human_review: Some(true),
@@ -1105,7 +1104,7 @@ mod tests {
             id: "abc123".to_string(),
             title: "Test Task".to_string(),
             level: Level::Ticket,
-            status: Status::InProgress,
+            status: "in_progress".to_string(),
             priority: Some(Priority::High),
             tags: vec!["backend".to_string()],
             needs_human_review: None,
@@ -1125,7 +1124,7 @@ mod tests {
             id: "123".to_string(),
             title: "Test".to_string(),
             level: Level::Task,
-            status: Status::Todo,
+            status: "todo".to_string(),
             priority: None,
             tags: vec![],
             needs_human_review: None,
@@ -1136,7 +1135,7 @@ mod tests {
             id: "123".to_string(),
             title: "Test".to_string(),
             level: Level::Task,
-            status: Status::Todo,
+            status: "todo".to_string(),
             priority: None,
             tags: vec![],
             needs_human_review: None,
@@ -1159,14 +1158,12 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_status() {
-        assert_eq!(parse_status("backlog"), Status::Backlog);
-        assert_eq!(parse_status("todo"), Status::Todo);
-        assert_eq!(parse_status("in_progress"), Status::InProgress);
-        assert_eq!(parse_status("pending_review"), Status::PendingReview);
-        assert_eq!(parse_status("done"), Status::Done);
-        assert_eq!(parse_status("rejected"), Status::Rejected);
-        assert_eq!(parse_status("unknown"), Status::Todo); // default
+    fn test_normalize_status() {
+        assert_eq!(normalize_status("backlog"), "backlog");
+        assert_eq!(normalize_status("BACKLOG"), "backlog");
+        assert_eq!(normalize_status("in_progress"), "in_progress");
+        assert_eq!(normalize_status("IN_PROGRESS"), "in_progress");
+        assert_eq!(normalize_status("Unknown"), "unknown");
     }
 
     #[test]
@@ -1195,7 +1192,7 @@ mod tests {
         let result = lister.list(&filter).await.unwrap();
 
         assert_eq!(result.len(), 2);
-        assert!(result.iter().all(|t| t.status != Status::Done));
+        assert!(result.iter().all(|t| t.status != "done"));
 
         let ids: HashSet<_> = result.iter().map(|t| t.id.as_str()).collect();
         assert!(ids.contains("task1"));
@@ -1274,11 +1271,11 @@ mod tests {
         create_task(&db, "task3", "Task 3", "task", "in_progress", None, &[]).await;
 
         let lister = TaskLister::new(db.client());
-        let filter = TaskFilter::new().with_status(Status::Backlog);
+        let filter = TaskFilter::new().with_status("backlog");
         let result = lister.list(&filter).await.unwrap();
 
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].status, Status::Backlog);
+        assert_eq!(result[0].status, "backlog");
 
         cleanup(&temp_dir);
     }
@@ -1507,9 +1504,7 @@ mod tests {
         assert_eq!(result.len(), 3);
 
         // With status filter, only done
-        let filter = TaskFilter::new()
-            .children_of("parent1")
-            .with_status(Status::Done);
+        let filter = TaskFilter::new().children_of("parent1").with_status("done");
         let result = lister.list(&filter).await.unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].id, "child2");
@@ -2142,7 +2137,7 @@ mod tests {
         .await;
 
         let lister = TaskLister::new(db.client());
-        let filter = TaskFilter::new().with_status(Status::Todo);
+        let filter = TaskFilter::new().with_status("todo");
         let result = lister.list(&filter).await.unwrap();
 
         // Assert exact order: newest todo first

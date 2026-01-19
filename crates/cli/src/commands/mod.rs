@@ -604,11 +604,8 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[test]
-    fn test_command_list_invalid_status() {
-        let result = TestCli::try_parse_from(["test", "list", "--status", "unknown"]);
-        assert!(result.is_err());
-    }
+    // Note: test_command_list_invalid_status removed - status is now a dynamic String,
+    // validation happens at runtime in the service layer when transitioning tasks
 
     #[test]
     fn test_command_list_invalid_priority() {

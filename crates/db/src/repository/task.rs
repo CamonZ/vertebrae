@@ -4,7 +4,7 @@
 //! encapsulating SurrealDB queries and providing a clean API.
 
 use crate::error::{DbError, DbResult};
-use crate::models::{CodeRef, Priority, Section, SectionType, Status, Task};
+use crate::models::{CodeRef, Priority, Section, SectionType, Task};
 use serde::Deserialize;
 use serde_json;
 use surrealdb::Surreal;
@@ -46,8 +46,8 @@ pub struct TaskUpdate {
     pub set_started_at: bool,
     /// Whether to conditionally set started_at only if currently NULL (null-coalescing)
     pub set_started_at_if_null: bool,
-    /// New status (if Some)
-    pub status: Option<Status>,
+    /// New status (if Some) - references StatusDefinition.name from StatusSchema
+    pub status: Option<String>,
     /// Workflow ID to assign (if Some)
     pub workflow_id: Option<Option<surrealdb::sql::Thing>>,
     /// Current step in the workflow (if Some)
@@ -146,8 +146,8 @@ impl TaskUpdate {
     }
 
     /// Set the task status
-    pub fn with_status(mut self, status: Status) -> Self {
-        self.status = Some(status);
+    pub fn with_status(mut self, status: impl Into<String>) -> Self {
+        self.status = Some(status.into());
         self
     }
 
@@ -338,7 +338,7 @@ impl<'a> TaskRepository<'a> {
     /// # Errors
     ///
     /// Returns `DbError::Query` if the database operation fails.
-    pub async fn update_status(&self, id: &str, status: Status) -> DbResult<()> {
+    pub async fn update_status(&self, id: &str, status: impl AsRef<str>) -> DbResult<()> {
         self.update_status_unchecked(id, status).await
     }
 
@@ -355,11 +355,11 @@ impl<'a> TaskRepository<'a> {
     /// # Errors
     ///
     /// Returns `DbError::Query` if the database operation fails.
-    pub async fn update_status_unchecked(&self, id: &str, status: Status) -> DbResult<()> {
+    pub async fn update_status_unchecked(&self, id: &str, status: impl AsRef<str>) -> DbResult<()> {
         let query = format!(
             "UPDATE task:{} SET status = '{}', updated_at = time::now()",
             id,
-            status.as_str()
+            status.as_ref()
         );
         self.client.query(&query).await?;
         Ok(())
@@ -516,7 +516,7 @@ impl<'a> TaskRepository<'a> {
         }
 
         if let Some(status) = &updates.status {
-            field_updates.push(format!("status = '{}'", status.as_str()));
+            field_updates.push(format!("status = '{}'", status));
         }
 
         if updates.clear_sections {
@@ -1052,7 +1052,7 @@ mod tests {
         let repo = TaskRepository::new(db.client());
 
         let task = Task::new("Full Task", Level::Epic)
-            .with_status(Status::InProgress)
+            .with_status("in_progress")
             .with_priority(Priority::High)
             .with_tags(["backend", "urgent"]);
 
@@ -1090,7 +1090,7 @@ mod tests {
         let repo = TaskRepository::new(db.client());
 
         let task = Task::new("Get Test", Level::Ticket)
-            .with_status(Status::Todo)
+            .with_status("todo")
             .with_priority(Priority::Medium);
 
         repo.create("get1", &task).await.unwrap();
@@ -1101,7 +1101,7 @@ mod tests {
         let retrieved = retrieved.unwrap();
         assert_eq!(retrieved.title, "Get Test");
         assert_eq!(retrieved.level, Level::Ticket);
-        assert_eq!(retrieved.status, Status::Todo);
+        assert_eq!(retrieved.status, "todo");
         assert_eq!(retrieved.priority, Some(Priority::Medium));
 
         cleanup(&temp_dir);
@@ -1127,13 +1127,11 @@ mod tests {
         repo.create("status1", &task).await.unwrap();
 
         // Update status
-        repo.update_status("status1", Status::InProgress)
-            .await
-            .unwrap();
+        repo.update_status("status1", "in_progress").await.unwrap();
 
         // Verify
         let retrieved = repo.get("status1").await.unwrap().unwrap();
-        assert_eq!(retrieved.status, Status::InProgress);
+        assert_eq!(retrieved.status, "in_progress");
 
         cleanup(&temp_dir);
     }

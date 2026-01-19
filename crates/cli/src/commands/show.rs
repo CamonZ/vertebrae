@@ -762,7 +762,7 @@ fn format_code_ref_location(code_ref: &CodeRef) -> String {
 mod tests {
     use super::*;
     use vertebrae_core::DefaultTaskService;
-    use vertebrae_db::{Level, Priority, Status, Task};
+    use vertebrae_db::{Level, Priority, Task};
 
     /// Helper to create an in-memory test service
     async fn setup_test_service() -> DefaultTaskService {
@@ -788,15 +788,6 @@ mod tests {
             _ => Level::Task,
         };
 
-        let status_enum = match status {
-            "backlog" => Status::Backlog,
-            "in_progress" => Status::InProgress,
-            "pending_review" => Status::PendingReview,
-            "done" => Status::Done,
-            "rejected" => Status::Rejected,
-            _ => Status::Todo,
-        };
-
         let priority_enum = priority.and_then(|p| match p {
             "critical" => Some(Priority::Critical),
             "high" => Some(Priority::High),
@@ -806,7 +797,7 @@ mod tests {
         });
 
         let mut task = Task::new(title, level_enum);
-        task.status = status_enum;
+        task.status = status.to_string();
         task.priority = priority_enum;
         task.tags = tags.iter().map(|s| s.to_string()).collect();
 

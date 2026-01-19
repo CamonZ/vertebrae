@@ -46,6 +46,10 @@ pub enum ServiceError {
     #[error("Dependency would create a cycle")]
     CyclicDependency,
 
+    /// Invalid input error
+    #[error("Invalid input: {0}")]
+    InvalidInput(String),
+
     /// Database error from the underlying storage layer
     #[error(transparent)]
     Database(#[from] DbError),
@@ -123,6 +127,7 @@ impl ServiceError {
             }
             ServiceError::Database(db_err) => db_err.hint(),
             ServiceError::ValidationFailed { .. } => None,
+            ServiceError::InvalidInput(_) => None,
         }
     }
 }

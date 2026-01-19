@@ -248,7 +248,8 @@ async fn test_transition_in_progress_to_rejected_not_allowed() {
     // This transition is invalid per the state machine
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
-    assert!(err.contains("Invalid status transition"));
+    // Error message format: "Invalid transition from 'in_progress' to 'rejected'. Valid transitions: ..."
+    assert!(err.contains("Invalid transition"));
 }
 
 #[tokio::test]
@@ -332,8 +333,8 @@ async fn test_invalid_transition_is_rejected() {
     // Invalid transition should fail
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
-    // Error message format: "Invalid status transition from 'backlog' to 'done'"
-    assert!(err.contains("Invalid status transition"));
+    // Error message format: "Invalid transition from 'backlog' to 'done'. Valid transitions: todo"
+    assert!(err.contains("Invalid transition"));
 }
 
 // =============================================================================

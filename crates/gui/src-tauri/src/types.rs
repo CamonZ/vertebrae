@@ -24,43 +24,8 @@ impl From<vertebrae_db::Level> for TaskLevel {
     }
 }
 
-/// Task status - mirrors db::Status
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
-#[serde(rename_all = "snake_case")]
-pub enum TaskStatus {
-    Backlog,
-    Todo,
-    InProgress,
-    PendingReview,
-    Done,
-    Rejected,
-}
-
-impl From<vertebrae_db::Status> for TaskStatus {
-    fn from(status: vertebrae_db::Status) -> Self {
-        match status {
-            vertebrae_db::Status::Backlog => TaskStatus::Backlog,
-            vertebrae_db::Status::Todo => TaskStatus::Todo,
-            vertebrae_db::Status::InProgress => TaskStatus::InProgress,
-            vertebrae_db::Status::PendingReview => TaskStatus::PendingReview,
-            vertebrae_db::Status::Done => TaskStatus::Done,
-            vertebrae_db::Status::Rejected => TaskStatus::Rejected,
-        }
-    }
-}
-
-impl From<TaskStatus> for vertebrae_db::Status {
-    fn from(status: TaskStatus) -> Self {
-        match status {
-            TaskStatus::Backlog => vertebrae_db::Status::Backlog,
-            TaskStatus::Todo => vertebrae_db::Status::Todo,
-            TaskStatus::InProgress => vertebrae_db::Status::InProgress,
-            TaskStatus::PendingReview => vertebrae_db::Status::PendingReview,
-            TaskStatus::Done => vertebrae_db::Status::Done,
-            TaskStatus::Rejected => vertebrae_db::Status::Rejected,
-        }
-    }
-}
+// Note: Task.status is now a String that references StatusDefinition.name from StatusSchema.
+// The frontend uses strings directly for status values.
 
 /// Task priority - mirrors db::Priority
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
@@ -193,8 +158,8 @@ pub struct TaskSummary {
     pub title: String,
     /// Hierarchy level
     pub level: TaskLevel,
-    /// Current status
-    pub status: TaskStatus,
+    /// Current status (references StatusDefinition.name from StatusSchema)
+    pub status: String,
     /// Optional priority
     pub priority: Option<TaskPriority>,
     /// Tags for categorization
@@ -211,7 +176,7 @@ impl From<vertebrae_db::TaskSummary> for TaskSummary {
             id: summary.id,
             title: summary.title,
             level: summary.level.into(),
-            status: summary.status.into(),
+            status: summary.status,
             priority: summary.priority.map(Into::into),
             tags: summary.tags,
             needs_human_review: summary.needs_human_review,
@@ -231,8 +196,8 @@ pub struct Task {
     pub description: Option<String>,
     /// Hierarchy level
     pub level: TaskLevel,
-    /// Current status
-    pub status: TaskStatus,
+    /// Current status (references StatusDefinition.name from StatusSchema)
+    pub status: String,
     /// Optional priority
     pub priority: Option<TaskPriority>,
     /// Tags for categorization
@@ -270,7 +235,7 @@ impl From<vertebrae_db::Task> for Task {
             title: task.title,
             description: task.description,
             level: task.level.into(),
-            status: task.status.into(),
+            status: task.status,
             priority: task.priority.map(Into::into),
             tags: task.tags,
             created_at: task.created_at.map(|dt| dt.to_rfc3339()),
@@ -316,8 +281,8 @@ pub struct TaskHierarchyNode {
 /// Filter options for listing tasks
 #[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
 pub struct TaskFilterOptions {
-    /// Filter by statuses (OR semantics)
-    pub statuses: Option<Vec<TaskStatus>>,
+    /// Filter by statuses (OR semantics) - status names from StatusSchema
+    pub statuses: Option<Vec<String>>,
     /// Filter by levels (OR semantics)
     pub levels: Option<Vec<TaskLevel>>,
     /// Filter by tags (OR semantics)
@@ -340,7 +305,7 @@ impl From<TaskFilterOptions> for vertebrae_db::TaskFilter {
 
         if let Some(statuses) = opts.statuses {
             for status in statuses {
-                filter = filter.with_status(status.into());
+                filter = filter.with_status(status);
             }
         }
 

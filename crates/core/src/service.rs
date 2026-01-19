@@ -10,12 +10,12 @@ use chrono::{DateTime, Utc};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use vertebrae_db::{
-    BlockerNode, CodeRef, Database, Level, Priority, Section, Status, Task, TaskFilter,
-    TaskSummary, TaskUpdate, Thing,
+    BlockerNode, CodeRef, Database, Level, Priority, Section, Task, TaskFilter, TaskSummary,
+    TaskUpdate, Thing,
 };
 
 // Re-export commonly used types
-pub use vertebrae_db::{Level as TaskLevel, Priority as TaskPriority, Status as TaskStatus};
+pub use vertebrae_db::{Level as TaskLevel, Priority as TaskPriority};
 
 /// Event representing a task mutation for cache invalidation
 #[derive(Debug, Clone)]
@@ -29,8 +29,8 @@ pub enum MutationEvent {
     /// Task status changed (for explicit status-only updates)
     TaskStatusChanged {
         id: String,
-        old_status: Status,
-        new_status: Status,
+        old_status: String,
+        new_status: String,
     },
 }
 
@@ -47,8 +47,8 @@ pub struct CreateTaskOptions {
     pub description: Option<String>,
     /// Task level (defaults to Task)
     pub level: Option<Level>,
-    /// Task status (defaults to Backlog)
-    pub status: Option<Status>,
+    /// Task status (defaults to "backlog") - references StatusDefinition.name from StatusSchema
+    pub status: Option<String>,
     /// Task priority
     pub priority: Option<Priority>,
     /// Tags for categorization
@@ -83,8 +83,8 @@ impl CreateTaskOptions {
     }
 
     /// Set the status
-    pub fn with_status(mut self, status: Status) -> Self {
-        self.status = Some(status);
+    pub fn with_status(mut self, status: impl Into<String>) -> Self {
+        self.status = Some(status.into());
         self
     }
 
@@ -246,9 +246,9 @@ pub struct TransitionResult {
     /// The task ID that was transitioned
     pub task_id: String,
     /// The previous status
-    pub from_status: Status,
+    pub from_status: String,
     /// The new status
-    pub to_status: Status,
+    pub to_status: String,
     /// Tasks that are now unblocked (for statuses with unblocks_dependents=true)
     pub unblocked_tasks: Vec<UnblockedTask>,
     /// Workflow that was automatically assigned (if any)
@@ -276,8 +276,8 @@ pub struct TaskTreeNode {
     pub title: String,
     /// Hierarchy level (epic, ticket, task)
     pub level: Level,
-    /// Current status
-    pub status: Status,
+    /// Current status (references StatusDefinition.name from StatusSchema)
+    pub status: String,
     /// Optional priority
     pub priority: Option<Priority>,
     /// Tags for categorization
@@ -414,7 +414,7 @@ pub trait TaskService: Send + Sync {
     async fn list_tasks(&self, filter: &TaskFilter) -> ServiceResult<Vec<TaskSummary>>;
 
     /// Get tasks ready for work at a given status
-    async fn list_ready(&self, status: Status) -> ServiceResult<Vec<TaskSummary>>;
+    async fn list_ready(&self, status: &str) -> ServiceResult<Vec<TaskSummary>>;
 
     /// Get tasks as a hierarchical tree structure
     ///
@@ -441,7 +441,7 @@ pub trait TaskService: Send + Sync {
     /// Transition a task to a new status
     ///
     /// Validates the transition and performs any associated actions.
-    async fn transition_to(&self, id: &str, target: Status) -> ServiceResult<TransitionResult>;
+    async fn transition_to(&self, id: &str, target: &str) -> ServiceResult<TransitionResult>;
 
     // =========================================================================
     // Relationships
@@ -662,7 +662,7 @@ impl DefaultTaskService {
     /// Check if a task matches the given filter criteria
     fn task_matches_filter(&self, task: &TaskSummary, filter: &TaskFilter) -> bool {
         // Default: exclude done status unless include_done is set or statuses are specified
-        if !filter.include_done && filter.statuses.is_empty() && task.status == Status::Done {
+        if !filter.include_done && filter.statuses.is_empty() && task.status == "done" {
             return false;
         }
 
@@ -731,7 +731,7 @@ impl TaskService for DefaultTaskService {
 
         // Build task
         let level = options.level.unwrap_or(Level::Task);
-        let status = options.status.unwrap_or(Status::Backlog);
+        let status = options.status.unwrap_or_else(|| "backlog".to_string());
 
         let mut task = Task::new(options.title, level).with_status(status);
 
@@ -885,7 +885,7 @@ impl TaskService for DefaultTaskService {
         Ok(self.db.list_tasks().list(filter).await?)
     }
 
-    async fn list_ready(&self, status: Status) -> ServiceResult<Vec<TaskSummary>> {
+    async fn list_ready(&self, status: &str) -> ServiceResult<Vec<TaskSummary>> {
         Ok(self.db.list_ready_items(status).await?)
     }
 
@@ -930,7 +930,7 @@ impl TaskService for DefaultTaskService {
         for (dependent_id, blocker_id) in depends_on_relations {
             // Only count as blocker if the blocker is not done
             if let Some(blocker_task) = task_map.get(&blocker_id)
-                && blocker_task.status != Status::Done
+                && blocker_task.status != "done"
             {
                 blocker_map
                     .entry(dependent_id)
@@ -1052,72 +1052,93 @@ impl TaskService for DefaultTaskService {
         Ok(tree)
     }
 
-    async fn transition_to(&self, id: &str, target: Status) -> ServiceResult<TransitionResult> {
+    async fn transition_to(&self, id: &str, target: &str) -> ServiceResult<TransitionResult> {
         let id = id.to_lowercase();
+        let target = target.to_lowercase();
 
         // Get current task
         let task = self.get_task(&id).await?;
         let from_status = task.status.clone();
 
-        // Validate transition
-        let valid_targets = from_status.valid_transitions();
-        if !valid_targets.contains(&target) {
-            return Err(ServiceError::invalid_transition(
-                from_status.as_str(),
-                target.as_str(),
-            ));
+        // Fetch the default status schema for validation
+        let status_schema = self.db.status_schemas().get_default().await?;
+        let schema = status_schema.as_ref().ok_or_else(|| {
+            ServiceError::InvalidInput("No default status schema found".to_string())
+        })?;
+
+        // Validate target status exists in schema
+        let target_definition = schema.get_status(&target).ok_or_else(|| {
+            ServiceError::InvalidInput(format!(
+                "Unknown status '{}'. Valid statuses: {}",
+                target,
+                schema
+                    .statuses
+                    .iter()
+                    .map(|s| s.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ))
+        })?;
+
+        // Validate transition using StatusSchema.can_transition
+        if !schema.can_transition(&from_status, &target) {
+            // Build error message with valid transitions
+            let valid_transitions: Vec<&str> = schema
+                .progressions
+                .iter()
+                .filter(|p| p.from_status == from_status)
+                .map(|p| p.to_status.as_str())
+                .collect();
+            let valid_str = if valid_transitions.is_empty() {
+                "none (terminal state)".to_string()
+            } else {
+                valid_transitions.join(", ")
+            };
+            return Err(ServiceError::InvalidInput(format!(
+                "Invalid transition from '{}' to '{}'. Valid transitions: {}",
+                from_status, target, valid_str
+            )));
         }
 
         // Build update
         let mut update = TaskUpdate::new().with_status(target.clone());
 
-        // Set timestamps based on transition
-        if target == Status::InProgress {
+        // Set timestamps based on transition (using status name conventions)
+        if target == "in_progress" {
             update = update.set_started_at_if_null();
-        } else if target == Status::Done {
-            // Set completed_at handled in repository
         }
+        // completed_at is handled in repository for terminal statuses
 
         // Apply update
         self.db.tasks().update(&id, &update).await?;
 
-        // Fetch the default status schema to get StatusDefinition for target status
-        let status_schema = self.db.status_schemas().get_default().await?;
-        let status_definition = status_schema
-            .as_ref()
-            .and_then(|schema| schema.get_status(target.as_str()));
-
         // Auto-assign workflow if the target status has a workflow_id configured
-        let assigned_workflow = if let Some(status_def) = status_definition {
-            if let Some(workflow_thing) = &status_def.workflow_id {
-                let workflow_id = workflow_thing.id.to_raw();
+        let assigned_workflow = if let Some(workflow_thing) = &target_definition.workflow_id {
+            let workflow_id = workflow_thing.id.to_raw();
 
-                // Check if workflow exists before assigning
-                if self.db.workflows().exists(&workflow_id).await? {
-                    // Assign the workflow (this also sets current_step to 0)
-                    self.db.tasks().assign_workflow(&id, workflow_thing).await?;
-                    self.db.tasks().update_current_step(&id, 0).await?;
+            // Check if workflow exists before assigning
+            if self.db.workflows().exists(&workflow_id).await? {
+                // Assign the workflow (this also sets current_step to 0)
+                self.db.tasks().assign_workflow(&id, workflow_thing).await?;
+                self.db.tasks().update_current_step(&id, 0).await?;
 
-                    // Get the first step name
-                    let workflow = self.db.workflows().get(&workflow_id).await?;
-                    let first_step_name = if let Some(wf) = &workflow {
-                        if let Some(ref wf_thing) = wf.id {
-                            let steps = self.db.steps().list_by_workflow(wf_thing).await?;
-                            steps.first().map(|s| s.name.clone()).unwrap_or_default()
-                        } else {
-                            String::new()
-                        }
+                // Get the first step name
+                let workflow = self.db.workflows().get(&workflow_id).await?;
+                let first_step_name = if let Some(wf) = &workflow {
+                    if let Some(ref wf_thing) = wf.id {
+                        let steps = self.db.steps().list_by_workflow(wf_thing).await?;
+                        steps.first().map(|s| s.name.clone()).unwrap_or_default()
                     } else {
                         String::new()
-                    };
-
-                    Some(AssignedWorkflow {
-                        workflow_id,
-                        first_step_name,
-                    })
+                    }
                 } else {
-                    None
-                }
+                    String::new()
+                };
+
+                Some(AssignedWorkflow {
+                    workflow_id,
+                    first_step_name,
+                })
             } else {
                 None
             }
@@ -1126,9 +1147,7 @@ impl TaskService for DefaultTaskService {
         };
 
         // Get unblocked tasks if the target status has unblocks_dependents=true
-        let should_unblock = status_definition
-            .map(|def| def.unblocks_dependents)
-            .unwrap_or(target == Status::Done); // Fallback to Done check for backwards compatibility
+        let should_unblock = target_definition.unblocks_dependents;
 
         let unblocked_tasks = if should_unblock {
             self.db
@@ -1568,7 +1587,7 @@ mod tests {
         let task = service.get_task(&id).await.unwrap();
         assert_eq!(task.title, "My Task");
         assert_eq!(task.level, Level::Task);
-        assert_eq!(task.status, Status::Backlog);
+        assert_eq!(task.status, "backlog");
     }
 
     #[tokio::test]
@@ -1694,20 +1713,17 @@ mod tests {
         let service = setup_test_service().await;
 
         let id = service
-            .create_task(CreateTaskOptions::new("Task").with_status(Status::Todo))
+            .create_task(CreateTaskOptions::new("Task").with_status("todo"))
             .await
             .unwrap();
 
-        let result = service
-            .transition_to(&id, Status::InProgress)
-            .await
-            .unwrap();
+        let result = service.transition_to(&id, "in_progress").await.unwrap();
 
-        assert_eq!(result.from_status, Status::Todo);
-        assert_eq!(result.to_status, Status::InProgress);
+        assert_eq!(result.from_status, "todo");
+        assert_eq!(result.to_status, "in_progress");
 
         let task = service.get_task(&id).await.unwrap();
-        assert_eq!(task.status, Status::InProgress);
+        assert_eq!(task.status, "in_progress");
     }
 
     #[tokio::test]
@@ -1720,12 +1736,9 @@ mod tests {
             .unwrap();
 
         // Task is in Backlog, cannot go directly to Done
-        let result = service.transition_to(&id, Status::Done).await;
+        let result = service.transition_to(&id, "done").await;
 
-        assert!(matches!(
-            result,
-            Err(ServiceError::InvalidTransition { .. })
-        ));
+        assert!(result.is_err());
     }
 
     #[tokio::test]
@@ -1934,7 +1947,7 @@ mod tests {
 
         // Create blocker task and mark it done
         let blocker_id = service
-            .create_task(CreateTaskOptions::new("Blocker").with_status(Status::Todo))
+            .create_task(CreateTaskOptions::new("Blocker").with_status("todo"))
             .await
             .unwrap();
 
@@ -1946,17 +1959,14 @@ mod tests {
 
         // Mark blocker as done (must go through full workflow)
         service
-            .transition_to(&blocker_id, Status::InProgress)
+            .transition_to(&blocker_id, "in_progress")
             .await
             .unwrap();
         service
-            .transition_to(&blocker_id, Status::PendingReview)
+            .transition_to(&blocker_id, "pending_review")
             .await
             .unwrap();
-        service
-            .transition_to(&blocker_id, Status::Done)
-            .await
-            .unwrap();
+        service.transition_to(&blocker_id, "done").await.unwrap();
 
         let options = TreeFilterOptions::new(TaskFilter::new().include_done());
         let tree = service.get_task_tree(&options).await.unwrap();
@@ -1975,20 +1985,20 @@ mod tests {
 
         // Create a done task
         let done_id = service
-            .create_task(CreateTaskOptions::new("Done Task").with_status(Status::Todo))
+            .create_task(CreateTaskOptions::new("Done Task").with_status("todo"))
             .await
             .unwrap();
 
         // Mark task as done (must go through full workflow)
         service
-            .transition_to(&done_id, Status::InProgress)
+            .transition_to(&done_id, "in_progress")
             .await
             .unwrap();
         service
-            .transition_to(&done_id, Status::PendingReview)
+            .transition_to(&done_id, "pending_review")
             .await
             .unwrap();
-        service.transition_to(&done_id, Status::Done).await.unwrap();
+        service.transition_to(&done_id, "done").await.unwrap();
 
         // Create an active task
         let _active_id = service
@@ -2087,12 +2097,12 @@ mod tests {
             .unwrap();
 
         let todo_id = service
-            .create_task(CreateTaskOptions::new("Todo Task").with_status(Status::Todo))
+            .create_task(CreateTaskOptions::new("Todo Task").with_status("todo"))
             .await
             .unwrap();
 
         // Filter for todo status only
-        let filter = TaskFilter::new().with_status(Status::Todo);
+        let filter = TaskFilter::new().with_status("todo");
         let options = TreeFilterOptions::new(filter).with_preserve_ancestors(false);
         let tree = service.get_task_tree(&options).await.unwrap();
 
@@ -2624,15 +2634,12 @@ mod tests {
         let service = setup_test_service().await;
 
         let id = service
-            .create_task(CreateTaskOptions::new("Task").with_status(Status::Todo))
+            .create_task(CreateTaskOptions::new("Task").with_status("todo"))
             .await
             .unwrap();
 
         // Transition to in_progress (default schema has no workflow for this status)
-        let result = service
-            .transition_to(&id, Status::InProgress)
-            .await
-            .unwrap();
+        let result = service.transition_to(&id, "in_progress").await.unwrap();
 
         // Should not have assigned any workflow
         assert!(
@@ -2647,28 +2654,25 @@ mod tests {
 
         // Create task A (dependency)
         let task_a = service
-            .create_task(CreateTaskOptions::new("Task A").with_status(Status::Todo))
+            .create_task(CreateTaskOptions::new("Task A").with_status("todo"))
             .await
             .unwrap();
 
         // Create task B that depends on A
         let task_b = service
-            .create_task(CreateTaskOptions::new("Task B").with_status(Status::Todo))
+            .create_task(CreateTaskOptions::new("Task B").with_status("todo"))
             .await
             .unwrap();
 
         service.add_dependency(&task_b, &task_a).await.unwrap();
 
         // Move A to in_progress, then pending_review, then done
+        service.transition_to(&task_a, "in_progress").await.unwrap();
         service
-            .transition_to(&task_a, Status::InProgress)
+            .transition_to(&task_a, "pending_review")
             .await
             .unwrap();
-        service
-            .transition_to(&task_a, Status::PendingReview)
-            .await
-            .unwrap();
-        let result = service.transition_to(&task_a, Status::Done).await.unwrap();
+        let result = service.transition_to(&task_a, "done").await.unwrap();
 
         // Should unblock task_b (done has unblocks_dependents=true in default schema)
         assert_eq!(result.unblocked_tasks.len(), 1);
@@ -2681,23 +2685,20 @@ mod tests {
 
         // Create task A (dependency)
         let task_a = service
-            .create_task(CreateTaskOptions::new("Task A").with_status(Status::Todo))
+            .create_task(CreateTaskOptions::new("Task A").with_status("todo"))
             .await
             .unwrap();
 
         // Create task B that depends on A
         let task_b = service
-            .create_task(CreateTaskOptions::new("Task B").with_status(Status::Todo))
+            .create_task(CreateTaskOptions::new("Task B").with_status("todo"))
             .await
             .unwrap();
 
         service.add_dependency(&task_b, &task_a).await.unwrap();
 
         // Reject task A (rejected has unblocks_dependents=false in default schema)
-        let result = service
-            .transition_to(&task_a, Status::Rejected)
-            .await
-            .unwrap();
+        let result = service.transition_to(&task_a, "rejected").await.unwrap();
 
         // Should NOT unblock task_b (rejected does not unblock dependents)
         assert!(
@@ -2737,14 +2738,11 @@ mod tests {
 
         // Now create a task and transition to in_progress
         let id = service
-            .create_task(CreateTaskOptions::new("Task with workflow").with_status(Status::Todo))
+            .create_task(CreateTaskOptions::new("Task with workflow").with_status("todo"))
             .await
             .unwrap();
 
-        let result = service
-            .transition_to(&id, Status::InProgress)
-            .await
-            .unwrap();
+        let result = service.transition_to(&id, "in_progress").await.unwrap();
 
         // Should have assigned the workflow
         assert!(

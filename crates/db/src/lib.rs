@@ -12,9 +12,9 @@ pub use error::{DbError, DbResult, IncompleteChildInfo};
 #[allow(unused_imports)]
 pub use models::{
     AgentConfig, ChatMessage, ChatSession, CodeRef, ExecutionStatus, Level, PermissionMode,
-    Priority, Section, SectionType, SessionLog, Status, StatusDefinition, StatusProgression,
-    StatusSchema, Step, StepExecution, Task, ValidationGate, ValidationGateType,
-    ValidationMechanism, ValidationResult, Workflow,
+    Priority, Section, SectionType, SessionLog, StatusDefinition, StatusProgression, StatusSchema,
+    Step, StepExecution, Task, ValidationGate, ValidationGateType, ValidationMechanism,
+    ValidationResult, Workflow,
 };
 pub use repository::{
     BlockerNode, ChatSessionRepository, DEFAULT_STATUS_SCHEMA_ID, DEFAULT_WORKFLOW_ID,
@@ -201,7 +201,7 @@ impl Database {
     /// # Returns
     ///
     /// A vector of task summaries representing entry points for work/triage.
-    pub async fn list_ready_items(&self, status: Status) -> DbResult<Vec<TaskSummary>> {
+    pub async fn list_ready_items(&self, status: impl AsRef<str>) -> DbResult<Vec<TaskSummary>> {
         self.list_tasks().list_ready(status).await
     }
 
@@ -543,14 +543,14 @@ mod tests {
         assert_eq!(schema.name, "default");
         assert!(schema.is_default);
 
-        // Verify it has the expected statuses (no 'todo')
+        // Verify it has the expected statuses (includes 'todo' for backward compatibility)
         let status_names: Vec<&str> = schema.statuses.iter().map(|s| s.name.as_str()).collect();
         assert!(status_names.contains(&"backlog"));
+        assert!(status_names.contains(&"todo"));
         assert!(status_names.contains(&"in_progress"));
         assert!(status_names.contains(&"pending_review"));
         assert!(status_names.contains(&"done"));
         assert!(status_names.contains(&"rejected"));
-        assert!(!status_names.contains(&"todo"));
 
         // Clean up
         let _ = std::fs::remove_dir_all(&temp_dir);

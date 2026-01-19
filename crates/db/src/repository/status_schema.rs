@@ -655,14 +655,14 @@ mod tests {
         assert_eq!(schema.name, "default");
         assert!(schema.is_default);
         assert!(!schema.statuses.is_empty());
-        // Should have backlog, in_progress, pending_review, done, rejected (no todo)
+        // Should have backlog, todo, in_progress, pending_review, done, rejected
         let names: Vec<&str> = schema.statuses.iter().map(|s| s.name.as_str()).collect();
         assert!(names.contains(&"backlog"));
+        assert!(names.contains(&"todo"));
         assert!(names.contains(&"in_progress"));
         assert!(names.contains(&"pending_review"));
         assert!(names.contains(&"done"));
         assert!(names.contains(&"rejected"));
-        assert!(!names.contains(&"todo"));
     }
 
     #[tokio::test]
@@ -683,7 +683,8 @@ mod tests {
 
         // Invalid status
         assert!(!repo.is_valid_status("invalid").await.unwrap());
-        assert!(!repo.is_valid_status("todo").await.unwrap()); // todo is not in default schema
+        // todo is included for backward compatibility
+        assert!(repo.is_valid_status("todo").await.unwrap());
     }
 
     #[tokio::test]

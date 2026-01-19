@@ -5,7 +5,7 @@
 
 use clap::Args;
 use vertebrae_core::{ServiceError, TaskService};
-use vertebrae_db::{Status, TaskSummary};
+use vertebrae_db::TaskSummary;
 
 #[cfg(test)]
 use {vertebrae_core::DefaultTaskService, vertebrae_db::Level};
@@ -75,10 +75,10 @@ impl ReadyCommand {
         let db = service.database();
 
         // Get ready items for todo status
-        let todo_ready = db.list_ready_items(Status::Todo).await?;
+        let todo_ready = db.list_ready_items("todo").await?;
 
         // Get ready items for backlog status
-        let backlog_ready = db.list_ready_items(Status::Backlog).await?;
+        let backlog_ready = db.list_ready_items("backlog").await?;
 
         Ok(ReadyResult {
             todo_ready,
@@ -114,22 +114,12 @@ mod tests {
             "task" => Level::Task,
             _ => Level::Task,
         };
-        let status = match status {
-            "todo" => Status::Todo,
-            "in_progress" => Status::InProgress,
-            "pending_review" => Status::PendingReview,
-            "done" => Status::Done,
-            "backlog" => Status::Backlog,
-            "rejected" => Status::Rejected,
-            _ => Status::Backlog,
-        };
-
         let task = Task {
             id: None,
             title: title.to_string(),
             description: None,
             level,
-            status,
+            status: status.to_string(),
             priority: None,
             tags: vec![],
             sections: vec![],
@@ -194,7 +184,7 @@ mod tests {
                 id: "abc123".to_string(),
                 title: "Test Task".to_string(),
                 level: Level::Task,
-                status: Status::Todo,
+                status: "todo".to_string(),
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -218,7 +208,7 @@ mod tests {
                 id: "def456".to_string(),
                 title: "Backlog Task".to_string(),
                 level: Level::Epic,
-                status: Status::Backlog,
+                status: "backlog".to_string(),
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -241,7 +231,7 @@ mod tests {
                 id: "abc123".to_string(),
                 title: "Todo Task".to_string(),
                 level: Level::Task,
-                status: Status::Todo,
+                status: "todo".to_string(),
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -251,7 +241,7 @@ mod tests {
                 id: "def456".to_string(),
                 title: "Backlog Task".to_string(),
                 level: Level::Epic,
-                status: Status::Backlog,
+                status: "backlog".to_string(),
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
