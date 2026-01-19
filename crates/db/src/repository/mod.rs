@@ -14,6 +14,7 @@ mod task;
 mod validation;
 mod validation_gate;
 mod workflow;
+mod workflow_transition;
 
 pub use chat::ChatSessionRepository;
 pub use execution::StepExecutionRepository;
@@ -31,3 +32,4 @@ pub use validation_gate::{ValidationGateRepository, ValidationGateUpdate};
 pub use workflow::{
     DEFAULT_WORKFLOW_ID, MigrationResult, StepMigrationResult, WorkflowRepository, WorkflowUpdate,
 };
+pub use workflow_transition::WorkflowTransitionRepository;

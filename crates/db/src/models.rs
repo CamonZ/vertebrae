@@ -2424,6 +2424,68 @@ impl PartialEq for ValidationGate {
 
 impl Eq for ValidationGate {}
 
+/// Workflow transition edge defining valid transitions between workflows.
+///
+/// This edge table stores the allowed transitions between workflows, enabling
+/// tasks to move from one workflow to another (e.g., from "implementation" workflow
+/// to "review" workflow). The `target_step` optionally specifies which step in the
+/// target workflow to start at.
+///
+/// The edge direction is: from_workflow -> workflow_transitions -> to_workflow
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkflowTransition {
+    /// Unique identifier (SurrealDB record ID)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<Thing>,
+
+    /// The workflow this transition starts from
+    pub from_workflow: Thing,
+
+    /// The workflow this transition goes to
+    pub to_workflow: Thing,
+
+    /// Human-readable label for this transition (e.g., "Submit for Review")
+    pub label: String,
+
+    /// Optional reference to a specific step in the target workflow to start at.
+    /// If None, the transition starts at the target workflow's initial step.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_step: Option<Thing>,
+
+    /// Creation timestamp
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<DateTime<Utc>>,
+}
+
+impl WorkflowTransition {
+    /// Create a new workflow transition.
+    ///
+    /// # Arguments
+    ///
+    /// * `from_workflow` - The workflow this transition starts from
+    /// * `to_workflow` - The workflow this transition goes to
+    /// * `label` - Human-readable label for this transition
+    pub fn new(from_workflow: Thing, to_workflow: Thing, label: impl Into<String>) -> Self {
+        Self {
+            id: None,
+            from_workflow,
+            to_workflow,
+            label: label.into(),
+            target_step: None,
+            created_at: None,
+        }
+    }
+
+    /// Set the target step for this transition.
+    ///
+    /// When specified, tasks using this transition will start at this step
+    /// in the target workflow instead of the workflow's initial step.
+    pub fn with_target_step(mut self, step: Thing) -> Self {
+        self.target_step = Some(step);
+        self
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

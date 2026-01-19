@@ -14,7 +14,7 @@ pub use models::{
     AgentConfig, ChatMessage, ChatSession, CodeRef, ExecutionStatus, Level, PermissionMode,
     Priority, Section, SectionType, SessionLog, StatusDefinition, StatusProgression, StatusSchema,
     Step, StepExecution, Task, ValidationGate, ValidationGateType, ValidationMechanism,
-    ValidationResult, Workflow,
+    ValidationResult, Workflow, WorkflowTransition,
 };
 pub use repository::{
     BlockerNode, ChatSessionRepository, DEFAULT_STATUS_SCHEMA_ID, DEFAULT_WORKFLOW_ID,
@@ -23,7 +23,7 @@ pub use repository::{
     StepUpdate, TaskFilter, TaskLister, TaskRepository, TaskSummary, TaskUpdate,
     TaskWithRelationsData, TriageValidationConfig, TriageValidationResult, TriageValidator,
     ValidationGateRepository, ValidationGateUpdate, ValidationIssue, ValidationSeverity,
-    WorkflowRepository, WorkflowUpdate,
+    WorkflowRepository, WorkflowTransitionRepository, WorkflowUpdate,
 };
 
 use std::path::{Path, PathBuf};
@@ -177,6 +177,11 @@ impl Database {
     /// Get a validation gate repository for CRUD operations on validation gates.
     pub fn validation_gates(&self) -> ValidationGateRepository<'_> {
         ValidationGateRepository::new(&self.client)
+    }
+
+    /// Get a workflow transition repository for managing workflow-to-workflow transitions.
+    pub fn workflow_transitions(&self) -> WorkflowTransitionRepository<'_> {
+        WorkflowTransitionRepository::new(&self.client)
     }
 
     /// Get a task lister for filtering and listing tasks.
