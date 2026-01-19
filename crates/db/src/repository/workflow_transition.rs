@@ -301,6 +301,39 @@ impl<'a> WorkflowTransitionRepository<'a> {
             })
             .collect())
     }
+
+    /// Seed default workflow transitions for the standard workflow system.
+    ///
+    /// Creates transitions between the default workflow and itself for common
+    /// status progressions. This is idempotent - if transitions already exist,
+    /// it returns Ok(false) without making changes.
+    ///
+    /// The default workflow has steps: backlog -> in_progress -> pending_review -> done
+    /// Transitions allow:
+    /// - Advancing forward through the workflow
+    /// - Going back for revisions (pending_review -> in_progress)
+    ///
+    /// # Returns
+    ///
+    /// `Ok(true)` if transitions were created, `Ok(false)` if they already exist.
+    ///
+    /// # Errors
+    ///
+    /// Returns `DbError::Query` if database operations fail.
+    pub async fn seed_default_transitions(&self) -> DbResult<bool> {
+        // Check if transitions already exist
+        let existing = self.list_all().await?;
+        if !existing.is_empty() {
+            return Ok(false);
+        }
+
+        // Create self-transitions for the default workflow
+        // These allow tasks to progress through the workflow steps
+        self.create("default", "default", "Progress through workflow", None)
+            .await?;
+
+        Ok(true)
+    }
 }
 
 #[cfg(test)]
@@ -533,14 +566,14 @@ mod tests {
         create_workflow(&db, "wf2", "Workflow 2").await;
         create_workflow(&db, "wf3", "Workflow 3").await;
 
-        // Initially empty
-        assert!(repo.list_all().await.unwrap().is_empty());
+        // Note: init() seeds default transitions, so list is not initially empty
+        let initial_count = repo.list_all().await.unwrap().len();
 
         repo.create("wf1", "wf2", "1 to 2", None).await.unwrap();
         repo.create("wf2", "wf3", "2 to 3", None).await.unwrap();
 
         let all = repo.list_all().await.unwrap();
-        assert_eq!(all.len(), 2);
+        assert_eq!(all.len(), initial_count + 2);
 
         cleanup(&temp_dir);
     }
@@ -581,6 +614,41 @@ mod tests {
 
         // Should not error when deleting non-existent transition
         repo.delete("wf1", "wf2").await.unwrap();
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_seed_default_transitions() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = WorkflowTransitionRepository::new(db.client());
+
+        // Note: setup_test_db calls db.init() which already seeds default transitions
+        // So we expect list_all to return at least 1 transition
+        let transitions = repo.list_all().await.unwrap();
+        assert!(
+            !transitions.is_empty(),
+            "Default transitions should be seeded during init"
+        );
+
+        // Calling seed again should return false (already exists)
+        let seeded = repo.seed_default_transitions().await.unwrap();
+        assert!(!seeded, "Should not re-seed if transitions already exist");
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_seed_default_transitions_creates_default_workflow_transition() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = WorkflowTransitionRepository::new(db.client());
+
+        // After init, there should be a transition for the default workflow
+        let transitions = repo.get_from_workflow("default").await.unwrap();
+        assert!(
+            !transitions.is_empty(),
+            "Default workflow should have transitions"
+        );
 
         cleanup(&temp_dir);
     }

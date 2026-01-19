@@ -128,6 +128,11 @@ impl Database {
         // Create the default workflow if it doesn't exist
         self.workflows().create_default_workflow().await?;
 
+        // Seed default workflow transitions
+        self.workflow_transitions()
+            .seed_default_transitions()
+            .await?;
+
         // Create the default status schema if it doesn't exist
         self.status_schemas().create_default_schema().await?;
 
