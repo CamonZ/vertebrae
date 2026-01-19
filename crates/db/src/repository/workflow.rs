@@ -97,6 +97,8 @@ pub struct WorkflowUpdate {
     pub initial_step: Option<surrealdb::sql::Thing>,
     /// Auto advance setting (Some(bool) to set, None to leave unchanged)
     pub auto_advance: Option<bool>,
+    /// Display order for sorting workflows (Some(i32) to set, None to leave unchanged)
+    pub order: Option<i32>,
 }
 
 impl WorkflowUpdate {
@@ -141,6 +143,12 @@ impl WorkflowUpdate {
         self
     }
 
+    /// Set the display order
+    pub fn with_order(mut self, order: i32) -> Self {
+        self.order = Some(order);
+        self
+    }
+
     /// Check if any updates are specified
     pub fn has_updates(&self) -> bool {
         self.name.is_some()
@@ -148,6 +156,7 @@ impl WorkflowUpdate {
             || self.metadata.is_some()
             || self.initial_step.is_some()
             || self.auto_advance.is_some()
+            || self.order.is_some()
     }
 }
 
@@ -211,16 +220,22 @@ impl<'a> WorkflowRepository<'a> {
             })?;
 
         let name = workflow.name.clone();
+        let order = workflow.order;
 
         let query = format!(
             r#"CREATE workflow:{} SET
                 name = $name,
                 description = {},
-                metadata = {}"#,
+                metadata = {},
+                order = $order"#,
             id, description_str, metadata_json
         );
 
-        self.client.query(&query).bind(("name", name)).await?;
+        self.client
+            .query(&query)
+            .bind(("name", name))
+            .bind(("order", order))
+            .await?;
         Ok(())
     }
 
@@ -258,7 +273,7 @@ impl<'a> WorkflowRepository<'a> {
         debug!("Listing all workflows");
         let mut result = self
             .client
-            .query("SELECT * FROM workflow ORDER BY created_at DESC")
+            .query("SELECT * FROM workflow ORDER BY order ASC, created_at DESC")
             .await
             .map_err(|e| DbError::Query(Box::new(e)))?;
         let workflows: Vec<Workflow> = result.take(0)?;
@@ -327,6 +342,10 @@ impl<'a> WorkflowRepository<'a> {
 
         if let Some(auto_advance) = updates.auto_advance {
             field_updates.push(format!("auto_advance = {}", auto_advance));
+        }
+
+        if let Some(order) = updates.order {
+            field_updates.push(format!("order = {}", order));
         }
 
         if !field_updates.is_empty() {
@@ -869,6 +888,70 @@ mod tests {
         let workflows = repo.list().await.unwrap();
         // 3 created + 1 default workflow
         assert_eq!(workflows.len(), 4);
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_list_sorted_by_order() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = WorkflowRepository::new(db.client());
+
+        // Create workflows with different order values
+        let workflow_c = Workflow::new("Workflow C").with_order(3);
+        let workflow_a = Workflow::new("Workflow A").with_order(1);
+        let workflow_b = Workflow::new("Workflow B").with_order(2);
+
+        // Create in random order
+        repo.create("wfc", &workflow_c).await.unwrap();
+        repo.create("wfa", &workflow_a).await.unwrap();
+        repo.create("wfb", &workflow_b).await.unwrap();
+
+        let workflows = repo.list().await.unwrap();
+
+        // Default workflow has order 0, so it should be first
+        // Then A (order 1), B (order 2), C (order 3)
+        assert_eq!(workflows.len(), 4);
+        assert_eq!(workflows[0].name, "Default Workflow");
+        assert_eq!(workflows[0].order, 0);
+        assert_eq!(workflows[1].name, "Workflow A");
+        assert_eq!(workflows[1].order, 1);
+        assert_eq!(workflows[2].name, "Workflow B");
+        assert_eq!(workflows[2].order, 2);
+        assert_eq!(workflows[3].name, "Workflow C");
+        assert_eq!(workflows[3].order, 3);
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_create_with_order() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = WorkflowRepository::new(db.client());
+
+        let workflow = Workflow::new("Ordered Workflow").with_order(5);
+        repo.create("ord1", &workflow).await.unwrap();
+
+        let retrieved = repo.get("ord1").await.unwrap().unwrap();
+        assert_eq!(retrieved.name, "Ordered Workflow");
+        assert_eq!(retrieved.order, 5);
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_update_order() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = WorkflowRepository::new(db.client());
+
+        let workflow = Workflow::new("Order Update").with_order(1);
+        repo.create("ordupd", &workflow).await.unwrap();
+
+        let updates = WorkflowUpdate::new().with_order(10);
+        repo.update("ordupd", &updates).await.unwrap();
+
+        let retrieved = repo.get("ordupd").await.unwrap().unwrap();
+        assert_eq!(retrieved.order, 10);
 
         cleanup(&temp_dir);
     }

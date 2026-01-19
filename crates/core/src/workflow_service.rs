@@ -61,6 +61,8 @@ pub struct CreateWorkflowOptions {
     pub steps: Vec<WorkflowStepInput>,
     /// Whether to automatically advance to the next step on successful completion
     pub auto_advance: bool,
+    /// Display order for sorting workflows (lower values appear first)
+    pub order: i32,
 }
 
 impl CreateWorkflowOptions {
@@ -71,6 +73,7 @@ impl CreateWorkflowOptions {
             description: None,
             steps,
             auto_advance: false,
+            order: 0,
         }
     }
 
@@ -83,6 +86,12 @@ impl CreateWorkflowOptions {
     /// Set the auto_advance setting
     pub fn with_auto_advance(mut self, auto_advance: bool) -> Self {
         self.auto_advance = auto_advance;
+        self
+    }
+
+    /// Set the display order
+    pub fn with_order(mut self, order: i32) -> Self {
+        self.order = order;
         self
     }
 }
@@ -115,6 +124,8 @@ pub struct UpdateWorkflowOptions {
     pub description: Option<Option<String>>,
     /// Auto advance setting (Some(bool) to set, None leaves unchanged)
     pub auto_advance: Option<bool>,
+    /// Display order for sorting workflows (Some(i32) to set, None leaves unchanged)
+    pub order: Option<i32>,
 }
 
 impl UpdateWorkflowOptions {
@@ -147,9 +158,18 @@ impl UpdateWorkflowOptions {
         self
     }
 
+    /// Set the display order
+    pub fn with_order(mut self, order: i32) -> Self {
+        self.order = Some(order);
+        self
+    }
+
     /// Check if any updates are specified
     pub fn has_updates(&self) -> bool {
-        self.name.is_some() || self.description.is_some() || self.auto_advance.is_some()
+        self.name.is_some()
+            || self.description.is_some()
+            || self.auto_advance.is_some()
+            || self.order.is_some()
     }
 }
 
@@ -476,7 +496,9 @@ impl WorkflowService for DefaultWorkflowService {
         let id = self.generate_unique_id(&options.name).await?;
 
         // Build workflow (without embedded steps - we'll use first-class Step entities)
-        let mut workflow = Workflow::new(&options.name).with_auto_advance(options.auto_advance);
+        let mut workflow = Workflow::new(&options.name)
+            .with_auto_advance(options.auto_advance)
+            .with_order(options.order);
 
         if let Some(desc) = options.description {
             workflow = workflow.with_description(desc);
@@ -612,6 +634,10 @@ impl WorkflowService for DefaultWorkflowService {
 
         if let Some(auto_advance) = options.auto_advance {
             update = update.with_auto_advance(auto_advance);
+        }
+
+        if let Some(order) = options.order {
+            update = update.with_order(order);
         }
 
         self.db.workflows().update(&id, &update).await?;

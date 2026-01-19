@@ -80,6 +80,8 @@ mod sql {
 
         DEFINE FIELD auto_advance ON workflow TYPE bool DEFAULT false;
 
+        DEFINE FIELD order ON workflow TYPE int DEFAULT 0;
+
         DEFINE FIELD created_at ON workflow TYPE datetime DEFAULT time::now();
 
         DEFINE FIELD updated_at ON workflow TYPE datetime DEFAULT time::now();
@@ -1255,6 +1257,7 @@ mod tests {
         assert!(sql::DEFINE_WORKFLOW_TABLE.contains("initial_step"));
         assert!(sql::DEFINE_WORKFLOW_TABLE.contains("metadata"));
         assert!(sql::DEFINE_WORKFLOW_TABLE.contains("auto_advance"));
+        assert!(sql::DEFINE_WORKFLOW_TABLE.contains("order"));
         assert!(sql::DEFINE_WORKFLOW_TABLE.contains("created_at"));
         assert!(sql::DEFINE_WORKFLOW_TABLE.contains("updated_at"));
     }

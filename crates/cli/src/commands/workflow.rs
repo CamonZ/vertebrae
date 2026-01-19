@@ -84,6 +84,10 @@ pub struct WorkflowAddCommand {
     /// Automatically advance to the next step on successful completion
     #[arg(long)]
     pub auto_advance: bool,
+
+    /// Display order for sorting workflows (lower values appear first)
+    #[arg(short, long, default_value = "0")]
+    pub order: i32,
 }
 
 /// A parsed workflow step from the command line
@@ -154,8 +158,9 @@ impl WorkflowAddCommand {
             .collect();
 
         // Build the create options
-        let mut options =
-            CreateWorkflowOptions::new(&self.name, steps).with_auto_advance(self.auto_advance);
+        let mut options = CreateWorkflowOptions::new(&self.name, steps)
+            .with_auto_advance(self.auto_advance)
+            .with_order(self.order);
 
         if let Some(description) = &self.description {
             options = options.with_description(description);
@@ -845,6 +850,7 @@ mod tests {
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
             auto_advance: false,
+            order: 0,
         };
 
         let result = cmd
@@ -886,6 +892,7 @@ mod tests {
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
             auto_advance: false,
+            order: 0,
         };
 
         let result = cmd
@@ -924,6 +931,7 @@ mod tests {
                 },
             ],
             auto_advance: false,
+            order: 0,
         };
 
         let result = cmd
@@ -960,6 +968,7 @@ mod tests {
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
             auto_advance: false,
+            order: 0,
         };
 
         let result = cmd.execute(&create_service(&db)).await;
@@ -988,6 +997,7 @@ mod tests {
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
             auto_advance: false,
+            order: 0,
         };
 
         let result = cmd.execute(&create_service(&db)).await;
@@ -1013,6 +1023,7 @@ mod tests {
             description: None,
             steps: vec![],
             auto_advance: false,
+            order: 0,
         };
 
         let result = cmd.execute(&create_service(&db)).await;
@@ -1041,6 +1052,7 @@ mod tests {
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
             auto_advance: false,
+            order: 0,
         };
 
         let result = cmd.execute(&create_service(&db)).await.unwrap();
@@ -1065,6 +1077,7 @@ mod tests {
                     agent_config: AgentConfig::new().with_model("agent1"),
                 }],
                 auto_advance: false,
+                order: 0,
             };
 
             let result = cmd.execute(&create_service(&db)).await.unwrap();
@@ -1095,6 +1108,7 @@ mod tests {
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
             auto_advance: false,
+            order: 0,
         };
 
         let result = cmd.execute(&service).await.unwrap();
@@ -1141,6 +1155,7 @@ mod tests {
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
             auto_advance: false,
+            order: 0,
         };
         let result1 = add_cmd1.execute(&create_service(&db)).await.unwrap();
         let id1 = extract_workflow_id(&result1);
@@ -1164,6 +1179,7 @@ mod tests {
                 },
             ],
             auto_advance: false,
+            order: 0,
         };
         let result2 = add_cmd2.execute(&create_service(&db)).await.unwrap();
         let id2 = extract_workflow_id(&result2);
@@ -1205,6 +1221,7 @@ mod tests {
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
             auto_advance: false,
+            order: 0,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
@@ -1249,6 +1266,7 @@ mod tests {
                 },
             ],
             auto_advance: false,
+            order: 0,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
@@ -1320,6 +1338,7 @@ mod tests {
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
             auto_advance: false,
+            order: 0,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
@@ -1352,6 +1371,7 @@ mod tests {
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
             auto_advance: false,
+            order: 0,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
@@ -1576,6 +1596,7 @@ mod tests {
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
             auto_advance: false,
+            order: 0,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
@@ -1610,6 +1631,7 @@ mod tests {
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
             auto_advance: false,
+            order: 0,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
@@ -1644,6 +1666,7 @@ mod tests {
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
             auto_advance: false,
+            order: 0,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
@@ -1701,6 +1724,7 @@ mod tests {
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
             auto_advance: false,
+            order: 0,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
@@ -1742,6 +1766,7 @@ mod tests {
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
             auto_advance: false,
+            order: 0,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
@@ -1783,6 +1808,7 @@ mod tests {
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
             auto_advance: false,
+            order: 0,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
@@ -1841,6 +1867,7 @@ mod tests {
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
             auto_advance: false,
+            order: 0,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
@@ -1888,6 +1915,7 @@ mod tests {
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
             auto_advance: false,
+            order: 0,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
@@ -1946,6 +1974,7 @@ mod tests {
                 },
             ],
             auto_advance: false,
+            order: 0,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let workflow_id = extract_workflow_id(&add_result);
@@ -1991,6 +2020,7 @@ mod tests {
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
             auto_advance: false,
+            order: 0,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let workflow_id = extract_workflow_id(&add_result);
@@ -2047,6 +2077,7 @@ mod tests {
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
             auto_advance: false,
+            order: 0,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let workflow_id = extract_workflow_id(&add_result);
@@ -2095,6 +2126,7 @@ mod tests {
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
             auto_advance: false,
+            order: 0,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let workflow_id = extract_workflow_id(&add_result);
@@ -2202,6 +2234,7 @@ mod tests {
                 },
             ],
             auto_advance: false,
+            order: 0,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let workflow_id = extract_workflow_id(&add_result);
@@ -2250,6 +2283,7 @@ mod tests {
                 },
             ],
             auto_advance: false,
+            order: 0,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let workflow_id = extract_workflow_id(&add_result);
@@ -2365,6 +2399,7 @@ mod tests {
                 },
             ],
             auto_advance: false,
+            order: 0,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let workflow_id = extract_workflow_id(&add_result);
@@ -2420,6 +2455,7 @@ mod tests {
                 },
             ],
             auto_advance: false,
+            order: 0,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let workflow_id = extract_workflow_id(&add_result);
@@ -2523,6 +2559,7 @@ mod tests {
                 agent_config: AgentConfig::new().with_model("test-agent"),
             }],
             auto_advance: false,
+            order: 0,
         };
         let result = workflow.execute(&create_service(&db)).await.unwrap();
         let workflow_id = extract_workflow_id(&result);

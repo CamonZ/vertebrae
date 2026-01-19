@@ -41,6 +41,7 @@ async fn test_workflow_add_with_multiple_steps() {
             },
         ],
         auto_advance: false,
+        order: 0,
     };
     let result = cmd.execute(&ctx.workflow_service).await;
 
@@ -226,6 +227,7 @@ async fn test_workflow_advance() {
             },
         ],
         auto_advance: false,
+        order: 0,
     };
     let add_result = cmd.execute(&ctx.workflow_service).await.unwrap();
     let workflow_id = extract_workflow_id(&add_result);
@@ -266,6 +268,7 @@ async fn test_workflow_retreat() {
             },
         ],
         auto_advance: false,
+        order: 0,
     };
     let add_result = cmd.execute(&ctx.workflow_service).await.unwrap();
     let workflow_id = extract_workflow_id(&add_result);

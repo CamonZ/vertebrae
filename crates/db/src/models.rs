@@ -643,6 +643,10 @@ pub struct Workflow {
     #[serde(default)]
     pub auto_advance: bool,
 
+    /// Display order for sorting workflows (lower values appear first)
+    #[serde(default)]
+    pub order: i32,
+
     /// Creation timestamp
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_at: Option<DateTime<Utc>>,
@@ -663,6 +667,7 @@ impl Workflow {
             metadata: std::collections::HashMap::new(),
             validation_gate_id: None,
             auto_advance: false,
+            order: 0,
             created_at: None,
             updated_at: None,
         }
@@ -671,6 +676,12 @@ impl Workflow {
     /// Set auto_advance for this workflow
     pub fn with_auto_advance(mut self, auto_advance: bool) -> Self {
         self.auto_advance = auto_advance;
+        self
+    }
+
+    /// Set the display order for this workflow
+    pub fn with_order(mut self, order: i32) -> Self {
+        self.order = order;
         self
     }
 

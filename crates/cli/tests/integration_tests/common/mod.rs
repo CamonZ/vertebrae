@@ -346,6 +346,7 @@ pub fn workflow_add_cmd(name: &str, step_name: &str, model: &str) -> WorkflowAdd
             agent_config: AgentConfig::new().with_model(model),
         }],
         auto_advance: false,
+        order: 0,
     }
 }
 
