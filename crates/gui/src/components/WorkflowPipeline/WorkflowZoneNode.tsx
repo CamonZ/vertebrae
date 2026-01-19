@@ -8,6 +8,7 @@ import type { Workflow } from "../../bindings";
 export type WorkflowZoneNodeData = {
   workflow: Workflow;
   taskCount: number;
+  stepCount: number;
   width: number;
   height: number;
 };
@@ -22,7 +23,7 @@ export type WorkflowZoneNodeType = Node<WorkflowZoneNodeData, "workflowZoneNode"
 function WorkflowZoneNodeComponent({
   data,
 }: NodeProps<WorkflowZoneNodeType>) {
-  const { workflow, taskCount, width, height } = data;
+  const { workflow, taskCount, stepCount, width, height } = data;
 
   return (
     <div
@@ -54,7 +55,7 @@ function WorkflowZoneNodeComponent({
                 d="M4 6h16M4 12h16M4 18h7"
               />
             </svg>
-            {workflow.steps.length} step{workflow.steps.length !== 1 ? "s" : ""}
+            {stepCount} step{stepCount !== 1 ? "s" : ""}
           </span>
           <span className="flex items-center gap-1">
             <svg

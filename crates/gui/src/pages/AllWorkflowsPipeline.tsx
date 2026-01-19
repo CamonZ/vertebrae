@@ -462,6 +462,7 @@ export function AllWorkflowsPipeline() {
         data: {
           workflow,
           taskCount: workflowTasks.length,
+          stepCount: sortedSteps.length,
           width: zoneWidth,
           height: zoneHeight,
         } as WorkflowZoneNodeData,
