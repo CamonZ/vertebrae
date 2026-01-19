@@ -42,12 +42,18 @@
 
 pub mod error;
 pub mod id_generator;
+pub mod orchestrator;
 pub mod service;
 pub mod step_service;
 pub mod workflow_service;
 
 // Re-export main types for convenience
 pub use error::{ServiceError, ServiceResult};
+pub use orchestrator::{
+    ORCHESTRATOR_AGENT_PATH, ORCHESTRATOR_ALLOWED_TOOLS, ORCHESTRATOR_DISALLOWED_TOOLS,
+    ORCHESTRATOR_MODEL, ORCHESTRATOR_SYSTEM_PROMPT, OrchestratorContext, OrchestratorOutput,
+    TransitionHint, orchestrator_agent_config, orchestrator_output_schema,
+};
 pub use service::{
     CreateTaskOptions, DefaultTaskService, MutationCallback, MutationEvent, TaskService,
     TaskTreeNode, TaskWithRelations, TransitionResult, TreeFilterOptions, UnblockedTask,
