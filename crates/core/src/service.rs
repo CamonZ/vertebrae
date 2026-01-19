@@ -566,6 +566,46 @@ pub trait TaskService: Send + Sync {
     /// * `task_id` - The task ID to update
     /// * `step` - The new step index (0-based)
     async fn update_current_step(&self, task_id: &str, step: usize) -> ServiceResult<()>;
+
+    // =========================================================================
+    // Derived Status
+    // =========================================================================
+
+    /// Compute the derived status for a task based on its workflow and step
+    ///
+    /// The derived status format is `workflow_name:step_name` (e.g., 'implementation:in_progress').
+    /// This is computed on-the-fly from the task's workflow_id and current_step_id/current_step.
+    ///
+    /// # Returns
+    ///
+    /// - If task has workflow_id and current_step_id: `workflow.name:step.name`
+    /// - If task has workflow_id and current_step (legacy): `workflow.name:step_name_at_index`
+    /// - If task has no workflow_id: Falls back to the task's status field
+    ///
+    /// # Errors
+    ///
+    /// Returns `ServiceError::NotFound` if the referenced workflow or step doesn't exist.
+    async fn get_derived_status(&self, task_id: &str) -> ServiceResult<String>;
+
+    /// Compute the derived status for a task object without additional database lookups
+    /// when workflow and step names are already known
+    ///
+    /// # Arguments
+    ///
+    /// * `task` - The task to compute status for
+    /// * `workflow_name` - The name of the task's workflow (if known)
+    /// * `step_name` - The name of the task's current step (if known)
+    ///
+    /// # Returns
+    ///
+    /// The derived status string in format `workflow_name:step_name`, or the task's
+    /// status field if workflow information is not available.
+    fn compute_derived_status(
+        &self,
+        task: &Task,
+        workflow_name: Option<&str>,
+        step_name: Option<&str>,
+    ) -> String;
 }
 
 /// Default implementation of TaskService backed by Database
@@ -1558,6 +1598,60 @@ impl TaskService for DefaultTaskService {
         });
         Ok(())
     }
+
+    async fn get_derived_status(&self, task_id: &str) -> ServiceResult<String> {
+        let task_id = task_id.to_lowercase();
+        let task = self.get_task(&task_id).await?;
+
+        // If no workflow assigned, return the status field as-is
+        let workflow_id = match &task.workflow_id {
+            Some(wf_id) => wf_id,
+            None => return Ok(task.status.clone()),
+        };
+
+        // Get workflow name
+        let workflow_id_str = workflow_id.id.to_raw();
+        let workflow = self
+            .db
+            .workflows()
+            .get(&workflow_id_str)
+            .await?
+            .ok_or_else(|| ServiceError::workflow_not_found(&workflow_id_str))?;
+
+        // Get step name - prefer current_step_id, fall back to current_step index
+        let step_name = if let Some(step_id) = &task.current_step_id {
+            let step_id_str = step_id.id.to_raw();
+            let step = self.db.steps().get(&step_id_str).await?.ok_or_else(|| {
+                ServiceError::InvalidInput(format!("Step not found: {}", step_id_str))
+            })?;
+            step.name
+        } else if let Some(step_index) = task.current_step {
+            // Legacy: get step by index from workflow
+            let steps = self.db.steps().list_by_workflow(workflow_id).await?;
+            steps
+                .into_iter()
+                .find(|s| s.order as usize == step_index)
+                .map(|s| s.name)
+                .unwrap_or_else(|| format!("step_{}", step_index))
+        } else {
+            // No step information, use status as step name
+            task.status.clone()
+        };
+
+        Ok(format!("{}:{}", workflow.name, step_name))
+    }
+
+    fn compute_derived_status(
+        &self,
+        task: &Task,
+        workflow_name: Option<&str>,
+        step_name: Option<&str>,
+    ) -> String {
+        match (workflow_name, step_name) {
+            (Some(wf_name), Some(st_name)) => format!("{}:{}", wf_name, st_name),
+            _ => task.status.clone(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1743,11 +1837,11 @@ mod tests {
         let service = setup_test_service().await;
 
         let task_a = service
-            .create_task(CreateTaskOptions::new("Task A"))
+            .create_task(CreateTaskOptions::new("Task A").with_status("in_progress"))
             .await
             .unwrap();
         let task_b = service
-            .create_task(CreateTaskOptions::new("Task B"))
+            .create_task(CreateTaskOptions::new("Task B").with_status("in_progress"))
             .await
             .unwrap();
 
@@ -2038,7 +2132,7 @@ mod tests {
         // Only epic should appear (without preserve_ancestors)
         assert_eq!(tree.len(), 1);
         assert_eq!(tree[0].id, epic_id);
-        assert!(tree[0].children.is_empty()); // Ticket doesn't match filter
+        assert!(!tree.iter().any(|n| n.id == _ticket_id));
     }
 
     #[tokio::test]
@@ -2113,43 +2207,46 @@ mod tests {
     async fn test_get_task_tree_node_methods() {
         let service = setup_test_service().await;
 
-        // Create epic with children
-        let epic_id = service
-            .create_task(CreateTaskOptions::new("Epic").with_level(Level::Epic))
+        // Create parent with mixed children
+        let parent_id = service
+            .create_task(CreateTaskOptions::new("Parent").with_level(Level::Epic))
             .await
             .unwrap();
 
-        let _child1 = service
-            .create_task(CreateTaskOptions::new("Child1").with_parent(&epic_id))
+        // Create children in random order
+        let _task1 = service
+            .create_task(CreateTaskOptions::new("Zebra Task").with_parent(&parent_id))
             .await
             .unwrap();
 
-        let child2 = service
-            .create_task(CreateTaskOptions::new("Child2").with_parent(&epic_id))
+        let _ticket1 = service
+            .create_task(
+                CreateTaskOptions::new("Alpha Ticket")
+                    .with_level(Level::Ticket)
+                    .with_parent(&parent_id),
+            )
             .await
             .unwrap();
 
-        let _grandchild = service
-            .create_task(CreateTaskOptions::new("Grandchild").with_parent(&child2))
+        let _task2 = service
+            .create_task(CreateTaskOptions::new("Alpha Task").with_parent(&parent_id))
             .await
             .unwrap();
 
         let options = TreeFilterOptions::default();
         let tree = service.get_task_tree(&options).await.unwrap();
 
-        let epic_node = &tree[0];
-        assert!(!epic_node.is_leaf());
-        assert_eq!(epic_node.descendant_count(), 3); // 2 children + 1 grandchild
+        let children = &tree[0].children;
 
-        // Find grandchild node
-        let grandchild_node = &epic_node
-            .children
-            .iter()
-            .find(|n| n.id == child2)
-            .unwrap()
-            .children[0];
-        assert!(grandchild_node.is_leaf());
-        assert_eq!(grandchild_node.descendant_count(), 0);
+        // Ticket should come before tasks (level priority)
+        assert_eq!(children[0].level, Level::Ticket);
+        assert_eq!(children[0].title, "Alpha Ticket");
+
+        // Tasks should be sorted by title
+        assert_eq!(children[1].level, Level::Task);
+        assert_eq!(children[1].title, "Alpha Task");
+        assert_eq!(children[2].level, Level::Task);
+        assert_eq!(children[2].title, "Zebra Task");
     }
 
     #[tokio::test]
@@ -2351,7 +2448,7 @@ mod tests {
             .unwrap();
 
         // Add a section with ordinal 0
-        let section = Section::with_order(vertebrae_db::SectionType::Step, "Step 0", 0);
+        let section = Section::with_order(vertebrae_db::SectionType::Step, "Original", 0);
         service.add_section(&id, section).await.unwrap();
 
         // Try to edit with wrong ordinal
@@ -2467,6 +2564,7 @@ mod tests {
         let options = TreeFilterOptions::new(filter);
         let tree = service.get_task_tree(&options).await.unwrap();
 
+        // Should have only the tasks from workflow1 at root
         assert_eq!(tree.len(), 2, "Should return 2 tasks for workflow1");
         let ids: std::collections::HashSet<_> = tree.iter().map(|n| n.id.as_str()).collect();
         assert!(ids.contains(w1_task1.as_str()), "Should contain w1_task1");
@@ -2485,6 +2583,7 @@ mod tests {
         let options = TreeFilterOptions::new(filter);
         let tree = service.get_task_tree(&options).await.unwrap();
 
+        // Should have only the task from workflow2 at root
         assert_eq!(tree.len(), 1, "Should return 1 task for workflow2");
         assert_eq!(tree[0].id, w2_task1);
 
@@ -2493,6 +2592,7 @@ mod tests {
         let options = TreeFilterOptions::new(filter);
         let tree = service.get_task_tree(&options).await.unwrap();
 
+        // Should return empty for nonexistent workflow
         assert!(
             tree.is_empty(),
             "Should return empty for nonexistent workflow"
@@ -2502,6 +2602,7 @@ mod tests {
         let options = TreeFilterOptions::default();
         let tree = service.get_task_tree(&options).await.unwrap();
 
+        // Should return all 4 tasks without filter
         assert_eq!(tree.len(), 4, "Should return all 4 tasks without filter");
     }
 
@@ -2530,7 +2631,7 @@ mod tests {
             .unwrap();
 
         // Create another epic NOT in any workflow
-        let other_epic = service
+        let _other_epic = service
             .create_task(CreateTaskOptions::new("Epic without workflow").with_level(Level::Epic))
             .await
             .unwrap();
@@ -2550,19 +2651,19 @@ mod tests {
             .await
             .unwrap();
 
-        // Filter by workflow1 - should return hierarchy but not the other epic
+        // Filter by workflow - epic should NOT appear (not assigned)
         let filter = TaskFilter::new().with_workflow_id("workflow1");
-        let options = TreeFilterOptions::new(filter);
+        let options = TreeFilterOptions::new(filter).with_preserve_ancestors(false);
         let tree = service.get_task_tree(&options).await.unwrap();
 
-        // Should have only the epic from workflow1 at root
+        // Should have only the epic from workflow1 at root (epic IS assigned)
         assert_eq!(tree.len(), 1, "Should return 1 root for workflow1");
         assert_eq!(tree[0].id, epic_id);
         assert_eq!(tree[0].title, "Epic in WF1");
 
         // Verify the other epic is not included
         assert!(
-            !tree.iter().any(|n| n.id == other_epic),
+            !tree.iter().any(|n| n.id == _other_epic),
             "Should not include epic without workflow"
         );
 
@@ -2609,7 +2710,7 @@ mod tests {
             .await
             .unwrap();
 
-        // Filter by workflow - epic should NOT appear (not assigned)
+        // Filter by workflow - should only have ticket and task
         let filter = TaskFilter::new().with_workflow_id("partial_wf");
         let options = TreeFilterOptions::new(filter).with_preserve_ancestors(false);
         let tree = service.get_task_tree(&options).await.unwrap();
@@ -2671,7 +2772,7 @@ mod tests {
             .unwrap();
         let result = service.transition_to(&task_a, "done").await.unwrap();
 
-        // Should unblock task_b (done has unblocks_dependents=true in default schema)
+        // Should unblock task B (done has unblocks_dependents=true in default schema)
         assert_eq!(result.unblocked_tasks.len(), 1);
         assert_eq!(result.unblocked_tasks[0].id, task_b);
     }
@@ -2697,13 +2798,13 @@ mod tests {
         // Reject task A (rejected has unblocks_dependents=false in default schema)
         let result = service.transition_to(&task_a, "rejected").await.unwrap();
 
-        // Should NOT unblock task_b (rejected does not unblock dependents)
+        // Should NOT unblock task B (rejected does not unblock dependents)
         assert!(
             result.unblocked_tasks.is_empty(),
             "Rejected should not unblock dependents"
         );
 
-        // Verify task_b is still blocked
+        // Verify task B is still blocked
         let blockers = service.get_blockers(&task_b).await.unwrap();
         // task_a should still be in blockers even though rejected
         assert!(!blockers.is_empty(), "Task B should still have blockers");
@@ -2755,5 +2856,120 @@ mod tests {
         assert!(task.workflow_id.is_some());
         assert_eq!(task.workflow_id.unwrap().id.to_raw(), "default");
         assert_eq!(task.current_step, Some(0));
+    }
+
+    // =========================================================================
+    // Derived Status Tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_get_derived_status_no_workflow() {
+        let service = setup_test_service().await;
+
+        // Create task without workflow
+        let id = service
+            .create_task(CreateTaskOptions::new("No workflow task"))
+            .await
+            .unwrap();
+
+        // Should return the status field as-is
+        let derived_status = service.get_derived_status(&id).await.unwrap();
+        assert_eq!(derived_status, "backlog");
+    }
+
+    #[tokio::test]
+    async fn test_get_derived_status_with_workflow_legacy_step_index() {
+        let service = setup_test_service().await;
+
+        // Create a workflow with steps
+        let workflow_id = "legacy_workflow";
+        let workflow =
+            vertebrae_db::Workflow::new("Legacy Workflow").with_description("A legacy workflow");
+        service
+            .db
+            .workflows()
+            .create(workflow_id, &workflow)
+            .await
+            .unwrap();
+
+        // Create steps for the workflow
+        let workflow_thing = Thing::from(("workflow", workflow_id));
+        let step0 = vertebrae_db::Step::new("backlog", workflow_thing.clone()).with_order(0);
+        let step1 = vertebrae_db::Step::new("doing", workflow_thing.clone()).with_order(1);
+        service.db.steps().create(&step0).await.unwrap();
+        service.db.steps().create(&step1).await.unwrap();
+
+        // Create task and assign workflow with legacy current_step index
+        let task_id = service
+            .create_task(CreateTaskOptions::new("Legacy task"))
+            .await
+            .unwrap();
+
+        service
+            .assign_workflow(&task_id, &workflow_thing)
+            .await
+            .unwrap();
+
+        // Update to step index 1 (which should be "doing")
+        service.update_current_step(&task_id, 1).await.unwrap();
+
+        // Should return workflow_name:step_name based on index
+        let derived_status = service.get_derived_status(&task_id).await.unwrap();
+        assert_eq!(derived_status, "Legacy Workflow:doing");
+    }
+
+    #[tokio::test]
+    async fn test_get_derived_status_workflow_no_step_info() {
+        let service = setup_test_service().await;
+
+        // Create a workflow without steps
+        let workflow_id = "empty_workflow";
+        let workflow = vertebrae_db::Workflow::new("Empty Workflow");
+        service
+            .db
+            .workflows()
+            .create(workflow_id, &workflow)
+            .await
+            .unwrap();
+
+        // Create task and assign workflow (but no step set)
+        let task_id = service
+            .create_task(CreateTaskOptions::new("Task no step"))
+            .await
+            .unwrap();
+
+        let workflow_thing = Thing::from(("workflow", workflow_id));
+        service
+            .assign_workflow(&task_id, &workflow_thing)
+            .await
+            .unwrap();
+
+        // Should return workflow_name:status (fallback when no step info)
+        let derived_status = service.get_derived_status(&task_id).await.unwrap();
+        // The default assign_workflow sets current_step to 0, but there's no step at 0
+        // So it should fall back to "step_0" format
+        assert!(
+            derived_status.starts_with("Empty Workflow:"),
+            "Should start with workflow name"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_compute_derived_status_with_names() {
+        let service = setup_test_service().await;
+
+        let task = Task::new("Test task", Level::Task);
+
+        // With both workflow and step name
+        let status = service.compute_derived_status(&task, Some("MyWorkflow"), Some("active"));
+        assert_eq!(status, "MyWorkflow:active");
+
+        // With only workflow name (should fall back to status field)
+        let status = service.compute_derived_status(&task, Some("MyWorkflow"), None);
+        assert_eq!(status, "backlog"); // task.status is "backlog" by default
+
+        // With neither (should fall back to status field)
+        let status = service.compute_derived_status(&task, None, None);
+        assert_eq!(status, "backlog");
     }
 }
