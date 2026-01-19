@@ -14,7 +14,7 @@ use vertebrae_db::SectionType;
 async fn test_section_add_goal() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Test Task", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
 
     let cmd = section_cmd("task1", SectionType::Goal, "Complete the implementation");
     let result = cmd.execute(&ctx.service).await;
@@ -30,7 +30,7 @@ async fn test_section_add_goal() {
 async fn test_section_add_context() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Test Task", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
 
     let cmd = section_cmd("task1", SectionType::Context, "Background information");
     let result = cmd.execute(&ctx.service).await;
@@ -46,7 +46,7 @@ async fn test_section_add_context() {
 async fn test_section_add_current_behavior() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Test Task", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
 
     let cmd = section_cmd("task1", SectionType::CurrentBehavior, "Currently does X");
     let result = cmd.execute(&ctx.service).await;
@@ -61,7 +61,7 @@ async fn test_section_add_current_behavior() {
 async fn test_section_add_desired_behavior() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Test Task", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
 
     let cmd = section_cmd("task1", SectionType::DesiredBehavior, "Should do Y");
     let result = cmd.execute(&ctx.service).await;
@@ -76,7 +76,7 @@ async fn test_section_add_desired_behavior() {
 async fn test_single_instance_section_replaces_existing() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Test Task", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
 
     // Add first goal
     section_cmd("task1", SectionType::Goal, "First goal")
@@ -103,7 +103,7 @@ async fn test_single_instance_section_replaces_existing() {
 async fn test_section_add_multiple_steps() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Test Task", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
 
     section_cmd("task1", SectionType::Step, "First step")
         .execute(&ctx.service)
@@ -129,7 +129,7 @@ async fn test_section_add_multiple_steps() {
 async fn test_section_add_multiple_testing_criteria() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Test Task", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
 
     section_cmd("task1", SectionType::TestingCriterion, "Should pass test 1")
         .execute(&ctx.service)
@@ -149,7 +149,7 @@ async fn test_section_add_multiple_testing_criteria() {
 async fn test_section_add_constraints() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Test Task", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
 
     section_cmd(
         "task1",
@@ -176,7 +176,7 @@ async fn test_section_add_constraints() {
 async fn test_section_add_anti_patterns() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Test Task", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
 
     section_cmd("task1", SectionType::AntiPattern, "Don't use global state")
         .execute(&ctx.service)
@@ -192,7 +192,7 @@ async fn test_section_add_anti_patterns() {
 async fn test_section_add_failure_tests() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Test Task", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
 
     section_cmd(
         "task1",
@@ -216,7 +216,7 @@ async fn test_section_add_failure_tests() {
 async fn test_unsection_remove_single_instance() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Test Task", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
     section_cmd("task1", SectionType::Goal, "The goal")
         .execute(&ctx.service)
         .await
@@ -234,7 +234,7 @@ async fn test_unsection_remove_single_instance() {
 async fn test_unsection_remove_by_index() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Test Task", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
     section_cmd("task1", SectionType::Step, "Step 1")
         .execute(&ctx.service)
         .await
@@ -263,7 +263,7 @@ async fn test_unsection_remove_by_index() {
 async fn test_unsection_remove_all_of_type() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Test Task", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
     section_cmd("task1", SectionType::Step, "Step 1")
         .execute(&ctx.service)
         .await
@@ -293,7 +293,7 @@ async fn test_unsection_remove_all_of_type() {
 async fn test_unsection_remove_all_sections() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Test Task", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
     section_cmd("task1", SectionType::Goal, "Goal")
         .execute(&ctx.service)
         .await
@@ -323,7 +323,7 @@ async fn test_unsection_remove_all_sections() {
 async fn test_step_done_marks_step_complete() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Test Task", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
     section_cmd("task1", SectionType::Step, "First step")
         .execute(&ctx.service)
         .await
@@ -347,7 +347,7 @@ async fn test_step_done_marks_step_complete() {
 async fn test_step_done_second_step() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Test Task", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
     section_cmd("task1", SectionType::Step, "First step")
         .execute(&ctx.service)
         .await
@@ -371,7 +371,7 @@ async fn test_step_done_second_step() {
 async fn test_step_done_invalid_index() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Test Task", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
     section_cmd("task1", SectionType::Step, "Only step")
         .execute(&ctx.service)
         .await
@@ -388,7 +388,7 @@ async fn test_step_done_invalid_index() {
 async fn test_step_done_zero_index_rejected() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Test Task", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
     section_cmd("task1", SectionType::Step, "Step")
         .execute(&ctx.service)
         .await
@@ -409,7 +409,7 @@ async fn test_step_done_zero_index_rejected() {
 async fn test_ref_add_simple() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Test Task", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
 
     let cmd = ref_cmd("task1", "src/main.rs");
     let result = cmd.execute(&ctx.service).await;
@@ -424,7 +424,7 @@ async fn test_ref_add_simple() {
 async fn test_ref_add_with_line_number() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Test Task", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
 
     let cmd = ref_cmd("task1", "src/lib.rs:L42");
     let result = cmd.execute(&ctx.service).await;
@@ -440,7 +440,7 @@ async fn test_ref_add_with_line_number() {
 async fn test_ref_add_with_line_range() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Test Task", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
 
     let cmd = ref_cmd("task1", "src/lib.rs:L10-20");
     let result = cmd.execute(&ctx.service).await;
@@ -457,7 +457,7 @@ async fn test_ref_add_with_line_range() {
 async fn test_ref_add_with_name_and_description() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Test Task", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
 
     let cmd = ref_cmd_full(
         "task1",
@@ -478,7 +478,7 @@ async fn test_ref_add_with_name_and_description() {
 async fn test_ref_add_multiple() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Test Task", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
 
     ref_cmd("task1", "src/main.rs")
         .execute(&ctx.service)
@@ -505,7 +505,7 @@ async fn test_ref_add_multiple() {
 async fn test_unref_by_file() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Test Task", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
     ref_cmd("task1", "src/main.rs")
         .execute(&ctx.service)
         .await
@@ -528,7 +528,7 @@ async fn test_unref_by_file() {
 async fn test_unref_all() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Test Task", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
     ref_cmd("task1", "src/main.rs")
         .execute(&ctx.service)
         .await
@@ -554,7 +554,7 @@ async fn test_unref_all() {
 async fn test_criterion_ref_adds_ref_to_criterion() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Test Task", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
     section_cmd("task1", SectionType::TestingCriterion, "Should pass test")
         .execute(&ctx.service)
         .await
@@ -578,7 +578,7 @@ async fn test_criterion_ref_adds_ref_to_criterion() {
 async fn test_criterion_ref_with_name() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Test Task", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
     section_cmd(
         "task1",
         SectionType::TestingCriterion,
@@ -604,7 +604,7 @@ async fn test_criterion_ref_with_name() {
 async fn test_criterion_ref_invalid_index() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Test Task", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
     section_cmd("task1", SectionType::TestingCriterion, "Only criterion")
         .execute(&ctx.service)
         .await
@@ -625,7 +625,7 @@ async fn test_criterion_ref_invalid_index() {
 async fn test_section_case_insensitive_id() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Test Task", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
 
     let cmd = section_cmd("TASK1", SectionType::Goal, "Goal with uppercase ID");
     let result = cmd.execute(&ctx.service).await;
@@ -639,7 +639,7 @@ async fn test_section_case_insensitive_id() {
 async fn test_ref_case_insensitive_id() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Test Task", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
 
     let cmd = ref_cmd("TASK1", "src/file.rs");
     let result = cmd.execute(&ctx.service).await;

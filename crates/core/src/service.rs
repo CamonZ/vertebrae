@@ -1082,22 +1082,19 @@ impl TaskService for DefaultTaskService {
 
         // Validate transition using StatusSchema.can_transition
         if !schema.can_transition(&from_status, &target) {
-            // Build error message with valid transitions
-            let valid_transitions: Vec<&str> = schema
+            // Build list of valid transitions from current status
+            let valid_transitions: Vec<String> = schema
                 .progressions
                 .iter()
                 .filter(|p| p.from_status == from_status)
-                .map(|p| p.to_status.as_str())
+                .map(|p| p.to_status.clone())
                 .collect();
-            let valid_str = if valid_transitions.is_empty() {
-                "none (terminal state)".to_string()
-            } else {
-                valid_transitions.join(", ")
-            };
-            return Err(ServiceError::InvalidInput(format!(
-                "Invalid transition from '{}' to '{}'. Valid transitions: {}",
-                from_status, target, valid_str
-            )));
+
+            return Err(ServiceError::invalid_transition_with_valid(
+                &from_status,
+                &target,
+                valid_transitions,
+            ));
         }
 
         // Build update
@@ -1713,13 +1710,13 @@ mod tests {
         let service = setup_test_service().await;
 
         let id = service
-            .create_task(CreateTaskOptions::new("Task").with_status("todo"))
+            .create_task(CreateTaskOptions::new("Task").with_status("in_progress"))
             .await
             .unwrap();
 
         let result = service.transition_to(&id, "in_progress").await.unwrap();
 
-        assert_eq!(result.from_status, "todo");
+        assert_eq!(result.from_status, "in_progress");
         assert_eq!(result.to_status, "in_progress");
 
         let task = service.get_task(&id).await.unwrap();
@@ -1947,7 +1944,7 @@ mod tests {
 
         // Create blocker task and mark it done
         let blocker_id = service
-            .create_task(CreateTaskOptions::new("Blocker").with_status("todo"))
+            .create_task(CreateTaskOptions::new("Blocker").with_status("in_progress"))
             .await
             .unwrap();
 
@@ -1985,7 +1982,7 @@ mod tests {
 
         // Create a done task
         let done_id = service
-            .create_task(CreateTaskOptions::new("Done Task").with_status("todo"))
+            .create_task(CreateTaskOptions::new("Done Task").with_status("in_progress"))
             .await
             .unwrap();
 
@@ -2097,12 +2094,12 @@ mod tests {
             .unwrap();
 
         let todo_id = service
-            .create_task(CreateTaskOptions::new("Todo Task").with_status("todo"))
+            .create_task(CreateTaskOptions::new("Todo Task").with_status("in_progress"))
             .await
             .unwrap();
 
         // Filter for todo status only
-        let filter = TaskFilter::new().with_status("todo");
+        let filter = TaskFilter::new().with_status("in_progress");
         let options = TreeFilterOptions::new(filter).with_preserve_ancestors(false);
         let tree = service.get_task_tree(&options).await.unwrap();
 
@@ -2634,7 +2631,7 @@ mod tests {
         let service = setup_test_service().await;
 
         let id = service
-            .create_task(CreateTaskOptions::new("Task").with_status("todo"))
+            .create_task(CreateTaskOptions::new("Task").with_status("in_progress"))
             .await
             .unwrap();
 
@@ -2654,13 +2651,13 @@ mod tests {
 
         // Create task A (dependency)
         let task_a = service
-            .create_task(CreateTaskOptions::new("Task A").with_status("todo"))
+            .create_task(CreateTaskOptions::new("Task A").with_status("in_progress"))
             .await
             .unwrap();
 
         // Create task B that depends on A
         let task_b = service
-            .create_task(CreateTaskOptions::new("Task B").with_status("todo"))
+            .create_task(CreateTaskOptions::new("Task B").with_status("in_progress"))
             .await
             .unwrap();
 
@@ -2685,13 +2682,13 @@ mod tests {
 
         // Create task A (dependency)
         let task_a = service
-            .create_task(CreateTaskOptions::new("Task A").with_status("todo"))
+            .create_task(CreateTaskOptions::new("Task A").with_status("in_progress"))
             .await
             .unwrap();
 
         // Create task B that depends on A
         let task_b = service
-            .create_task(CreateTaskOptions::new("Task B").with_status("todo"))
+            .create_task(CreateTaskOptions::new("Task B").with_status("in_progress"))
             .await
             .unwrap();
 
@@ -2738,7 +2735,7 @@ mod tests {
 
         // Now create a task and transition to in_progress
         let id = service
-            .create_task(CreateTaskOptions::new("Task with workflow").with_status("todo"))
+            .create_task(CreateTaskOptions::new("Task with workflow").with_status("in_progress"))
             .await
             .unwrap();
 

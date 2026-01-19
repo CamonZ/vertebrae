@@ -11,9 +11,7 @@ use vertebrae_db::TriageValidationResult;
 /// Target status for the transition-to command
 #[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
 pub enum TargetStatus {
-    /// Transition to todo status (from backlog)
-    Todo,
-    /// Transition to in_progress status (from todo or pending_review)
+    /// Transition to in_progress status (from backlog or pending_review)
     #[value(name = "in_progress")]
     InProgress,
     /// Transition to pending_review status (from in_progress)
@@ -21,7 +19,7 @@ pub enum TargetStatus {
     PendingReview,
     /// Transition to done status (from pending_review)
     Done,
-    /// Transition to rejected status (from todo)
+    /// Transition to rejected status (from backlog or in_progress)
     Rejected,
 }
 
@@ -29,7 +27,6 @@ impl TargetStatus {
     /// Get the string representation for the status
     pub fn as_str(&self) -> &'static str {
         match self {
-            TargetStatus::Todo => "todo",
             TargetStatus::InProgress => "in_progress",
             TargetStatus::PendingReview => "pending_review",
             TargetStatus::Done => "done",
@@ -42,10 +39,9 @@ impl TargetStatus {
     /// Returns None for Rejected since it's not part of the standard workflow.
     pub fn default_step_index(&self) -> Option<usize> {
         match self {
-            TargetStatus::Todo => Some(1),
-            TargetStatus::InProgress => Some(2),
-            TargetStatus::PendingReview => Some(3),
-            TargetStatus::Done => Some(4),
+            TargetStatus::InProgress => Some(1),
+            TargetStatus::PendingReview => Some(2),
+            TargetStatus::Done => Some(3),
             TargetStatus::Rejected => None,
         }
     }
@@ -66,11 +62,11 @@ pub struct TransitionToCommand {
     #[arg(short, long)]
     pub reason: Option<String>,
 
-    /// Override warnings (but not errors) when transitioning to todo
+    /// Override warnings (but not errors) when transitioning
     #[arg(short, long)]
     pub force: bool,
 
-    /// Bypass all validation when transitioning to todo (escape hatch)
+    /// Bypass all validation when transitioning (escape hatch)
     #[arg(long)]
     pub skip_validation: bool,
 }
@@ -90,7 +86,7 @@ pub struct TransitionToResult {
     pub unblocked_tasks: Vec<(String, String)>, // (id, title)
     /// The reason provided (for rejected)
     pub reason: Option<String>,
-    /// Validation result (for todo transition)
+    /// Validation result (for transitions)
     pub validation: Option<TriageValidationResult>,
     /// Whether validation was skipped
     pub validation_skipped: bool,
@@ -147,7 +143,6 @@ impl std::fmt::Display for TransitionToResult {
         // Main result message
         if self.already_in_target {
             match self.target {
-                TargetStatus::Todo => write!(f, "Task '{}' is already in todo", self.id)?,
                 TargetStatus::InProgress => {
                     write!(f, "Warning: Task '{}' is already in progress", self.id)?
                 }
@@ -164,7 +159,6 @@ impl std::fmt::Display for TransitionToResult {
             }
         } else {
             match self.target {
-                TargetStatus::Todo => write!(f, "Triaged task: {}", self.id)?,
                 TargetStatus::InProgress => write!(f, "Started task: {}", self.id)?,
                 TargetStatus::PendingReview => write!(f, "Submitted task for review: {}", self.id)?,
                 TargetStatus::Done => write!(f, "Completed task: {}", self.id)?,

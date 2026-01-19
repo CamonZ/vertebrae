@@ -14,8 +14,8 @@ use vertebrae_db::Level;
 async fn test_depend_creates_dependency() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Task 1", "task", "todo").await;
-    create_task(ctx.db(), "blocker", "Blocker", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Task 1", "task", "in_progress").await;
+    create_task(ctx.db(), "blocker", "Blocker", "task", "in_progress").await;
 
     let cmd = depend_cmd("task1", "blocker");
     let result = cmd.execute(&ctx.service).await;
@@ -28,9 +28,9 @@ async fn test_depend_creates_dependency() {
 async fn test_depend_multiple_blockers() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Task 1", "task", "todo").await;
-    create_task(ctx.db(), "blocker1", "Blocker 1", "task", "todo").await;
-    create_task(ctx.db(), "blocker2", "Blocker 2", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Task 1", "task", "in_progress").await;
+    create_task(ctx.db(), "blocker1", "Blocker 1", "task", "in_progress").await;
+    create_task(ctx.db(), "blocker2", "Blocker 2", "task", "in_progress").await;
 
     depend_cmd("task1", "blocker1")
         .execute(&ctx.service)
@@ -50,8 +50,8 @@ async fn test_depend_multiple_blockers() {
 async fn test_undepend_removes_dependency() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Task 1", "task", "todo").await;
-    create_task(ctx.db(), "blocker", "Blocker", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Task 1", "task", "in_progress").await;
+    create_task(ctx.db(), "blocker", "Blocker", "task", "in_progress").await;
     create_depends_on(ctx.db(), "task1", "blocker").await;
 
     assert!(dependency_exists(ctx.db(), "task1", "blocker").await);
@@ -67,8 +67,8 @@ async fn test_undepend_removes_dependency() {
 async fn test_undepend_nonexistent_dependency() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Task 1", "task", "todo").await;
-    create_task(ctx.db(), "task2", "Task 2", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Task 1", "task", "in_progress").await;
+    create_task(ctx.db(), "task2", "Task 2", "task", "in_progress").await;
 
     // No dependency exists between them
     let cmd = undepend_cmd("task1", "task2");
@@ -87,7 +87,7 @@ async fn test_undepend_nonexistent_dependency() {
 async fn test_depend_rejects_self_dependency() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Task 1", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Task 1", "task", "in_progress").await;
 
     let cmd = depend_cmd("task1", "task1");
     let result = cmd.execute(&ctx.service).await;
@@ -101,8 +101,8 @@ async fn test_depend_rejects_self_dependency() {
 async fn test_depend_rejects_direct_cycle() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Task 1", "task", "todo").await;
-    create_task(ctx.db(), "task2", "Task 2", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Task 1", "task", "in_progress").await;
+    create_task(ctx.db(), "task2", "Task 2", "task", "in_progress").await;
 
     // Create task1 -> task2
     depend_cmd("task1", "task2")
@@ -123,9 +123,9 @@ async fn test_depend_rejects_direct_cycle() {
 async fn test_depend_rejects_transitive_cycle() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Task 1", "task", "todo").await;
-    create_task(ctx.db(), "task2", "Task 2", "task", "todo").await;
-    create_task(ctx.db(), "task3", "Task 3", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Task 1", "task", "in_progress").await;
+    create_task(ctx.db(), "task2", "Task 2", "task", "in_progress").await;
+    create_task(ctx.db(), "task3", "Task 3", "task", "in_progress").await;
 
     // Create chain: task1 -> task2 -> task3
     depend_cmd("task1", "task2")
@@ -154,10 +154,10 @@ async fn test_depend_allows_diamond_dependency() {
     // task2   task3
     //    \     /
     //     task4
-    create_task(ctx.db(), "task1", "Task 1", "task", "todo").await;
-    create_task(ctx.db(), "task2", "Task 2", "task", "todo").await;
-    create_task(ctx.db(), "task3", "Task 3", "task", "todo").await;
-    create_task(ctx.db(), "task4", "Task 4", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Task 1", "task", "in_progress").await;
+    create_task(ctx.db(), "task2", "Task 2", "task", "in_progress").await;
+    create_task(ctx.db(), "task3", "Task 3", "task", "in_progress").await;
+    create_task(ctx.db(), "task4", "Task 4", "task", "in_progress").await;
 
     depend_cmd("task1", "task2")
         .execute(&ctx.service)
@@ -186,7 +186,7 @@ async fn test_depend_allows_diamond_dependency() {
 async fn test_add_with_parent_creates_relationship() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "parent", "Parent Epic", "epic", "todo").await;
+    create_task(ctx.db(), "parent", "Parent Epic", "epic", "in_progress").await;
 
     let cmd = add_cmd_with_parent("Child Task", "parent");
     let result = cmd.execute(&ctx.service).await;
@@ -200,9 +200,9 @@ async fn test_add_with_parent_creates_relationship() {
 async fn test_reparent_via_update() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "parent1", "Parent 1", "epic", "todo").await;
-    create_task(ctx.db(), "parent2", "Parent 2", "epic", "todo").await;
-    create_task(ctx.db(), "child", "Child", "ticket", "todo").await;
+    create_task(ctx.db(), "parent1", "Parent 1", "epic", "in_progress").await;
+    create_task(ctx.db(), "parent2", "Parent 2", "epic", "in_progress").await;
+    create_task(ctx.db(), "child", "Child", "ticket", "in_progress").await;
     create_child_of(ctx.db(), "child", "parent1").await;
 
     assert!(child_of_exists(ctx.db(), "child", "parent1").await);
@@ -220,8 +220,8 @@ async fn test_reparent_via_update() {
 async fn test_remove_parent_via_update() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "parent", "Parent", "epic", "todo").await;
-    create_task(ctx.db(), "child", "Child", "ticket", "todo").await;
+    create_task(ctx.db(), "parent", "Parent", "epic", "in_progress").await;
+    create_task(ctx.db(), "child", "Child", "ticket", "in_progress").await;
     create_child_of(ctx.db(), "child", "parent").await;
 
     assert!(child_of_exists(ctx.db(), "child", "parent").await);
@@ -238,7 +238,7 @@ async fn test_remove_parent_via_update() {
 async fn test_self_parent_rejected() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Task 1", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Task 1", "task", "in_progress").await;
 
     let cmd = update_cmd_with_parent("task1", Some("task1"));
     let result = cmd.execute(&ctx.service).await;
@@ -257,8 +257,8 @@ async fn test_self_parent_rejected() {
 async fn test_add_with_multiple_depends_on() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "blocker1", "Blocker 1", "task", "todo").await;
-    create_task(ctx.db(), "blocker2", "Blocker 2", "task", "todo").await;
+    create_task(ctx.db(), "blocker1", "Blocker 1", "task", "in_progress").await;
+    create_task(ctx.db(), "blocker2", "Blocker 2", "task", "in_progress").await;
 
     let mut cmd = add_cmd("Dependent Task");
     cmd.depends_on = vec!["blocker1".to_string(), "blocker2".to_string()];
@@ -275,7 +275,7 @@ async fn test_add_with_multiple_depends_on() {
 async fn test_add_with_parent_and_depends_on() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "parent", "Parent Epic", "epic", "todo").await;
+    create_task(ctx.db(), "parent", "Parent Epic", "epic", "in_progress").await;
     create_task(ctx.db(), "blocker", "Blocker", "task", "done").await;
 
     let mut cmd = add_cmd_with_parent("Child with Dep", "parent");
@@ -297,8 +297,8 @@ async fn test_add_with_parent_and_depends_on() {
 async fn test_depend_case_insensitive() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Task 1", "task", "todo").await;
-    create_task(ctx.db(), "blocker", "Blocker", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Task 1", "task", "in_progress").await;
+    create_task(ctx.db(), "blocker", "Blocker", "task", "in_progress").await;
 
     // Use uppercase IDs
     let cmd = depend_cmd("TASK1", "BLOCKER");
@@ -313,8 +313,8 @@ async fn test_depend_case_insensitive() {
 async fn test_undepend_case_insensitive() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Task 1", "task", "todo").await;
-    create_task(ctx.db(), "blocker", "Blocker", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Task 1", "task", "in_progress").await;
+    create_task(ctx.db(), "blocker", "Blocker", "task", "in_progress").await;
     create_depends_on(ctx.db(), "task1", "blocker").await;
 
     let cmd = undepend_cmd("TASK1", "BLOCKER");

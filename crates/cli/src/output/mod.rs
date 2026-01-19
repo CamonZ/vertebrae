@@ -405,7 +405,7 @@ mod tests {
             id: "abc123".to_string(),
             title: "Test Task".to_string(),
             level: "task".to_string(),
-            status: "todo".to_string(),
+            status: "in_progress".to_string(),
             priority: Some("high".to_string()),
             tags: vec!["backend".to_string()],
             needs_human_review: None,
@@ -431,7 +431,7 @@ mod tests {
         let data_parts: Vec<&str> = lines[2].split_whitespace().collect();
         assert_eq!(data_parts[0], "abc123", "ID column");
         assert_eq!(data_parts[1], "task", "Level column");
-        assert_eq!(data_parts[2], "todo", "Status column");
+        assert_eq!(data_parts[2], "in_progress", "Status column");
         assert_eq!(data_parts[3], "high", "Priority column");
         assert_eq!(data_parts[4], "Test", "Title column (first word)");
         assert_eq!(data_parts[5], "Task", "Title column (second word)");
@@ -454,7 +454,7 @@ mod tests {
                 id: "d4e5f6".to_string(),
                 title: "Simple Task".to_string(),
                 level: "task".to_string(),
-                status: "todo".to_string(),
+                status: "in_progress".to_string(),
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -489,7 +489,7 @@ mod tests {
             id: "abc123".to_string(),
             title: "No Priority".to_string(),
             level: "task".to_string(),
-            status: "todo".to_string(),
+            status: "in_progress".to_string(),
             priority: None,
             tags: vec![],
             needs_human_review: None,
@@ -509,7 +509,7 @@ mod tests {
             id: "abc123".to_string(),
             title: "No Tags".to_string(),
             level: "task".to_string(),
-            status: "todo".to_string(),
+            status: "in_progress".to_string(),
             priority: Some("low".to_string()),
             tags: vec![],
             needs_human_review: None,
@@ -576,7 +576,7 @@ mod tests {
             id: "abc123".to_string(),
             title: "This is a very long task title that should be truncated".to_string(),
             level: "task".to_string(),
-            status: "todo".to_string(),
+            status: "in_progress".to_string(),
             priority: None,
             tags: vec![],
             needs_human_review: None,
@@ -617,7 +617,7 @@ mod tests {
             id: "abc123".to_string(),
             title: "Task".to_string(),
             level: "task".to_string(),
-            status: "todo".to_string(),
+            status: "in_progress".to_string(),
             priority: None,
             tags: tags_input.clone(),
             needs_human_review: None,
@@ -643,7 +643,7 @@ mod tests {
                 id: "a".to_string(),
                 title: "Short".to_string(),
                 level: "epic".to_string(),
-                status: "todo".to_string(),
+                status: "in_progress".to_string(),
                 priority: Some("high".to_string()),
                 tags: vec!["x".to_string()],
                 needs_human_review: None,
@@ -691,7 +691,7 @@ mod tests {
 
     #[test]
     fn test_format_all_statuses() {
-        let statuses = ["todo", "in_progress", "done", "blocked"];
+        let statuses = ["backlog", "in_progress", "done", "rejected"];
 
         for status in statuses {
             let tasks = vec![TaskSummary {
@@ -718,7 +718,7 @@ mod tests {
                 id: "abc".to_string(),
                 title: "Test".to_string(),
                 level: level.to_string(),
-                status: "todo".to_string(),
+                status: "in_progress".to_string(),
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -738,7 +738,7 @@ mod tests {
                 id: "abc".to_string(),
                 title: "Test".to_string(),
                 level: "task".to_string(),
-                status: "todo".to_string(),
+                status: "in_progress".to_string(),
                 priority: Some(priority.to_string()),
                 tags: vec![],
                 needs_human_review: None,
@@ -763,7 +763,7 @@ mod tests {
             id: "abc123".to_string(),
             title: "Needs Review".to_string(),
             level: "task".to_string(),
-            status: "todo".to_string(),
+            status: "in_progress".to_string(),
             priority: None,
             tags: vec![],
             needs_human_review: Some(true),
@@ -784,7 +784,7 @@ mod tests {
             id: "abc123".to_string(),
             title: "No Review".to_string(),
             level: "task".to_string(),
-            status: "todo".to_string(),
+            status: "in_progress".to_string(),
             priority: None,
             tags: vec![],
             needs_human_review: Some(false),
@@ -824,7 +824,7 @@ mod tests {
             id: "abc123".to_string(),
             title: "Epic Task".to_string(),
             level: "epic".to_string(),
-            status: "todo".to_string(),
+            status: "in_progress".to_string(),
             priority: None,
             tags: vec![],
             needs_human_review: None,
@@ -837,7 +837,7 @@ mod tests {
         assert_eq!(lines.len(), 1);
         assert!(lines[0].contains("abc123"));
         assert!(lines[0].contains("epic"));
-        assert!(lines[0].contains("todo"));
+        assert!(lines[0].contains("in_progress"));
         assert!(lines[0].contains("Epic Task"));
     }
 
@@ -848,7 +848,7 @@ mod tests {
                 id: "epic1".to_string(),
                 title: "Epic Task".to_string(),
                 level: "epic".to_string(),
-                status: "todo".to_string(),
+                status: "in_progress".to_string(),
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -888,7 +888,7 @@ mod tests {
                 id: "epic1".to_string(),
                 title: "Epic".to_string(),
                 level: "epic".to_string(),
-                status: "todo".to_string(),
+                status: "in_progress".to_string(),
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -897,7 +897,7 @@ mod tests {
                 id: "ticket1".to_string(),
                 title: "Ticket 1".to_string(),
                 level: "ticket".to_string(),
-                status: "todo".to_string(),
+                status: "in_progress".to_string(),
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -906,7 +906,7 @@ mod tests {
                 id: "ticket2".to_string(),
                 title: "Ticket 2".to_string(),
                 level: "ticket".to_string(),
-                status: "todo".to_string(),
+                status: "in_progress".to_string(),
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -936,7 +936,7 @@ mod tests {
                 id: "epic1".to_string(),
                 title: "Epic".to_string(),
                 level: "epic".to_string(),
-                status: "todo".to_string(),
+                status: "in_progress".to_string(),
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -945,7 +945,7 @@ mod tests {
                 id: "ticket1".to_string(),
                 title: "Ticket".to_string(),
                 level: "ticket".to_string(),
-                status: "todo".to_string(),
+                status: "in_progress".to_string(),
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -954,7 +954,7 @@ mod tests {
                 id: "task1".to_string(),
                 title: "Task".to_string(),
                 level: "task".to_string(),
-                status: "todo".to_string(),
+                status: "in_progress".to_string(),
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -982,7 +982,7 @@ mod tests {
                 id: "task1".to_string(),
                 title: "Orphan Task".to_string(),
                 level: "task".to_string(),
-                status: "todo".to_string(),
+                status: "in_progress".to_string(),
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -991,7 +991,7 @@ mod tests {
                 id: "epic1".to_string(),
                 title: "Epic".to_string(),
                 level: "epic".to_string(),
-                status: "todo".to_string(),
+                status: "in_progress".to_string(),
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -1017,7 +1017,7 @@ mod tests {
             id: "ticket1".to_string(),
             title: "Orphan Ticket".to_string(),
             level: "ticket".to_string(),
-            status: "todo".to_string(),
+            status: "in_progress".to_string(),
             priority: None,
             tags: vec![],
             needs_human_review: None,
@@ -1069,7 +1069,7 @@ mod tests {
                 id: "test".to_string(),
                 title: "Test".to_string(),
                 level: "task".to_string(),
-                status: "todo".to_string(),
+                status: "in_progress".to_string(),
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -1089,7 +1089,7 @@ mod tests {
                 id: "test".to_string(),
                 title: "Test".to_string(),
                 level: "task".to_string(),
-                status: "todo".to_string(),
+                status: "in_progress".to_string(),
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,

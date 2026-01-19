@@ -390,7 +390,7 @@ mod tests {
             r#"CREATE task:{} SET
                 title = "{}",
                 level = "task",
-                status = "todo",
+                status = "in_progress",
                 tags = [],
                 sections = [],
                 refs = []"#,

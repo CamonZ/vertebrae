@@ -1066,7 +1066,7 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
-        create_task(&db, "task1", "Independent Task", "task", "todo").await;
+        create_task(&db, "task1", "Independent Task", "task", "in_progress").await;
 
         let blockers = graph.get_blockers("task1", None).await.unwrap();
         assert!(blockers.is_empty());
@@ -1079,7 +1079,7 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
-        create_task(&db, "blocker1", "Blocker Task", "task", "todo").await;
+        create_task(&db, "blocker1", "Blocker Task", "task", "in_progress").await;
         create_task(&db, "task1", "Blocked Task", "task", "backlog").await;
         create_depends_on(&db, "task1", "blocker1").await;
 
@@ -1088,7 +1088,7 @@ mod tests {
         assert_eq!(blockers[0].id, "blocker1");
         assert_eq!(blockers[0].title, "Blocker Task");
         assert_eq!(blockers[0].level, "task");
-        assert_eq!(blockers[0].status, "todo");
+        assert_eq!(blockers[0].status, "in_progress");
         assert!(blockers[0].children.is_empty());
 
         cleanup(&temp_dir);
@@ -1100,8 +1100,15 @@ mod tests {
         let graph = GraphQueries::new(db.client());
 
         // Create chain: task1 -> blocker1 -> blocker2
-        create_task(&db, "blocker2", "Root Blocker", "task", "todo").await;
-        create_task(&db, "blocker1", "Intermediate Blocker", "task", "todo").await;
+        create_task(&db, "blocker2", "Root Blocker", "task", "in_progress").await;
+        create_task(
+            &db,
+            "blocker1",
+            "Intermediate Blocker",
+            "task",
+            "in_progress",
+        )
+        .await;
         create_task(&db, "task1", "Final Task", "task", "backlog").await;
 
         create_depends_on(&db, "task1", "blocker1").await;
@@ -1122,9 +1129,9 @@ mod tests {
         let graph = GraphQueries::new(db.client());
 
         // Create chain: task1 -> blocker1 -> blocker2 -> blocker3
-        create_task(&db, "blocker3", "Deep Blocker", "task", "todo").await;
-        create_task(&db, "blocker2", "Mid Blocker", "task", "todo").await;
-        create_task(&db, "blocker1", "Direct Blocker", "task", "todo").await;
+        create_task(&db, "blocker3", "Deep Blocker", "task", "in_progress").await;
+        create_task(&db, "blocker2", "Mid Blocker", "task", "in_progress").await;
+        create_task(&db, "blocker1", "Direct Blocker", "task", "in_progress").await;
         create_task(&db, "task1", "Main Task", "task", "backlog").await;
 
         create_depends_on(&db, "task1", "blocker1").await;
@@ -1151,7 +1158,7 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
-        create_task(&db, "blocker1", "Blocker", "task", "todo").await;
+        create_task(&db, "blocker1", "Blocker", "task", "in_progress").await;
         create_task(&db, "task1", "Main Task", "task", "backlog").await;
         create_depends_on(&db, "task1", "blocker1").await;
 
@@ -1167,7 +1174,7 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
-        create_task(&db, "blocker1", "Blocker 1", "task", "todo").await;
+        create_task(&db, "blocker1", "Blocker 1", "task", "in_progress").await;
         create_task(&db, "blocker2", "Blocker 2", "task", "in_progress").await;
         create_task(&db, "task1", "Blocked Task", "task", "backlog").await;
 
@@ -1193,7 +1200,7 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
-        create_task(&db, "taska", "Task A", "task", "todo").await;
+        create_task(&db, "taska", "Task A", "task", "in_progress").await;
 
         let path = graph.find_path("taska", "taska").await.unwrap();
         assert!(path.is_some());
@@ -1207,8 +1214,8 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
-        create_task(&db, "taska", "Task A", "task", "todo").await;
-        create_task(&db, "taskb", "Task B", "task", "todo").await;
+        create_task(&db, "taska", "Task A", "task", "in_progress").await;
+        create_task(&db, "taskb", "Task B", "task", "in_progress").await;
         create_depends_on(&db, "taska", "taskb").await;
 
         let path = graph.find_path("taska", "taskb").await.unwrap();
@@ -1224,9 +1231,9 @@ mod tests {
         let graph = GraphQueries::new(db.client());
 
         // Create chain: A -> B -> C
-        create_task(&db, "taska", "Task A", "task", "todo").await;
-        create_task(&db, "taskb", "Task B", "task", "todo").await;
-        create_task(&db, "taskc", "Task C", "task", "todo").await;
+        create_task(&db, "taska", "Task A", "task", "in_progress").await;
+        create_task(&db, "taskb", "Task B", "task", "in_progress").await;
+        create_task(&db, "taskc", "Task C", "task", "in_progress").await;
         create_depends_on(&db, "taska", "taskb").await;
         create_depends_on(&db, "taskb", "taskc").await;
 
@@ -1242,8 +1249,8 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
-        create_task(&db, "taska", "Task A", "task", "todo").await;
-        create_task(&db, "taskb", "Task B", "task", "todo").await;
+        create_task(&db, "taska", "Task A", "task", "in_progress").await;
+        create_task(&db, "taskb", "Task B", "task", "in_progress").await;
         // No dependency between them
 
         let path = graph.find_path("taska", "taskb").await.unwrap();
@@ -1257,8 +1264,8 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
-        create_task(&db, "taska", "Task A", "task", "todo").await;
-        create_task(&db, "taskb", "Task B", "task", "todo").await;
+        create_task(&db, "taska", "Task A", "task", "in_progress").await;
+        create_task(&db, "taskb", "Task B", "task", "in_progress").await;
         create_depends_on(&db, "taska", "taskb").await;
 
         // Path in reverse direction should not exist
@@ -1277,8 +1284,8 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
-        create_task(&db, "taska", "Task A", "task", "todo").await;
-        create_task(&db, "taskb", "Task B", "task", "todo").await;
+        create_task(&db, "taska", "Task A", "task", "in_progress").await;
+        create_task(&db, "taskb", "Task B", "task", "in_progress").await;
 
         let would_cycle = graph.would_create_cycle("taska", "taskb").await.unwrap();
         assert!(!would_cycle);
@@ -1291,8 +1298,8 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
-        create_task(&db, "taska", "Task A", "task", "todo").await;
-        create_task(&db, "taskb", "Task B", "task", "todo").await;
+        create_task(&db, "taska", "Task A", "task", "in_progress").await;
+        create_task(&db, "taskb", "Task B", "task", "in_progress").await;
         create_depends_on(&db, "taska", "taskb").await;
 
         // Creating B -> A would create a cycle (A -> B -> A)
@@ -1307,9 +1314,9 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
-        create_task(&db, "taska", "Task A", "task", "todo").await;
-        create_task(&db, "taskb", "Task B", "task", "todo").await;
-        create_task(&db, "taskc", "Task C", "task", "todo").await;
+        create_task(&db, "taska", "Task A", "task", "in_progress").await;
+        create_task(&db, "taskb", "Task B", "task", "in_progress").await;
+        create_task(&db, "taskc", "Task C", "task", "in_progress").await;
 
         // A depends on B, B depends on C
         create_depends_on(&db, "taska", "taskb").await;
@@ -1327,8 +1334,8 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
-        create_task(&db, "taska", "Task A", "task", "todo").await;
-        create_task(&db, "taskb", "Task B", "task", "todo").await;
+        create_task(&db, "taska", "Task A", "task", "in_progress").await;
+        create_task(&db, "taskb", "Task B", "task", "in_progress").await;
         create_depends_on(&db, "taska", "taskb").await;
 
         let cycle_path = graph.get_cycle_path("taskb", "taska").await.unwrap();
@@ -1345,8 +1352,8 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
-        create_task(&db, "taska", "Task A", "task", "todo").await;
-        create_task(&db, "taskb", "Task B", "task", "todo").await;
+        create_task(&db, "taska", "Task A", "task", "in_progress").await;
+        create_task(&db, "taskb", "Task B", "task", "in_progress").await;
         // No dependencies
 
         let cycle_path = graph.get_cycle_path("taska", "taskb").await.unwrap();
@@ -1360,9 +1367,9 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
-        create_task(&db, "taska", "Task A", "task", "todo").await;
-        create_task(&db, "taskb", "Task B", "task", "todo").await;
-        create_task(&db, "taskc", "Task C", "task", "todo").await;
+        create_task(&db, "taska", "Task A", "task", "in_progress").await;
+        create_task(&db, "taskb", "Task B", "task", "in_progress").await;
+        create_task(&db, "taskc", "Task C", "task", "in_progress").await;
 
         // A depends on B, B depends on C
         create_depends_on(&db, "taska", "taskb").await;
@@ -1397,8 +1404,8 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
-        create_task(&db, "taska", "Task A", "task", "todo").await;
-        create_task(&db, "taskb", "Task B", "task", "todo").await;
+        create_task(&db, "taska", "Task A", "task", "in_progress").await;
+        create_task(&db, "taskb", "Task B", "task", "in_progress").await;
         create_depends_on(&db, "taska", "taskb").await;
 
         // No cycle in this graph
@@ -1413,7 +1420,7 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
-        create_task(&db, "taska", "Task A", "task", "todo").await;
+        create_task(&db, "taska", "Task A", "task", "in_progress").await;
 
         // No dependencies at all
         let cycle = graph.detect_cycle("taska").await.unwrap();
@@ -1431,7 +1438,7 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
-        create_task(&db, "parent", "Parent Task", "epic", "todo").await;
+        create_task(&db, "parent", "Parent Task", "epic", "in_progress").await;
 
         let descendants = graph.get_all_descendants("parent").await.unwrap();
         assert!(descendants.is_empty());
@@ -1444,9 +1451,9 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
-        create_task(&db, "parent", "Parent", "epic", "todo").await;
-        create_task(&db, "child1", "Child 1", "ticket", "todo").await;
-        create_task(&db, "child2", "Child 2", "ticket", "todo").await;
+        create_task(&db, "parent", "Parent", "epic", "in_progress").await;
+        create_task(&db, "child1", "Child 1", "ticket", "in_progress").await;
+        create_task(&db, "child2", "Child 2", "ticket", "in_progress").await;
 
         create_child_of(&db, "child1", "parent").await;
         create_child_of(&db, "child2", "parent").await;
@@ -1465,9 +1472,9 @@ mod tests {
         let graph = GraphQueries::new(db.client());
 
         // Create: parent -> child -> grandchild
-        create_task(&db, "parent", "Parent", "epic", "todo").await;
-        create_task(&db, "child", "Child", "ticket", "todo").await;
-        create_task(&db, "grandchild", "Grandchild", "task", "todo").await;
+        create_task(&db, "parent", "Parent", "epic", "in_progress").await;
+        create_task(&db, "child", "Child", "ticket", "in_progress").await;
+        create_task(&db, "grandchild", "Grandchild", "task", "in_progress").await;
 
         create_child_of(&db, "child", "parent").await;
         create_child_of(&db, "grandchild", "child").await;
@@ -1489,7 +1496,7 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
-        create_task(&db, "root", "Root Task", "epic", "todo").await;
+        create_task(&db, "root", "Root Task", "epic", "in_progress").await;
 
         let ancestors = graph.get_ancestor_chain("root").await.unwrap();
         assert!(ancestors.is_empty());
@@ -1502,8 +1509,8 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
-        create_task(&db, "parent", "Parent", "epic", "todo").await;
-        create_task(&db, "child", "Child", "ticket", "todo").await;
+        create_task(&db, "parent", "Parent", "epic", "in_progress").await;
+        create_task(&db, "child", "Child", "ticket", "in_progress").await;
         create_child_of(&db, "child", "parent").await;
 
         let ancestors = graph.get_ancestor_chain("child").await.unwrap();
@@ -1517,9 +1524,9 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
-        create_task(&db, "grandparent", "Grandparent", "epic", "todo").await;
-        create_task(&db, "parent", "Parent", "ticket", "todo").await;
-        create_task(&db, "child", "Child", "task", "todo").await;
+        create_task(&db, "grandparent", "Grandparent", "epic", "in_progress").await;
+        create_task(&db, "parent", "Parent", "ticket", "in_progress").await;
+        create_task(&db, "child", "Child", "task", "in_progress").await;
 
         create_child_of(&db, "parent", "grandparent").await;
         create_child_of(&db, "child", "parent").await;
@@ -1539,7 +1546,7 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
-        create_task(&db, "parent", "Parent", "epic", "todo").await;
+        create_task(&db, "parent", "Parent", "epic", "in_progress").await;
 
         let has_incomplete = graph.has_incomplete_children("parent").await.unwrap();
         assert!(!has_incomplete);
@@ -1572,7 +1579,7 @@ mod tests {
 
         create_task(&db, "parent", "Parent", "epic", "in_progress").await;
         create_task(&db, "child1", "Child 1", "ticket", "done").await;
-        create_task(&db, "child2", "Child 2", "ticket", "todo").await;
+        create_task(&db, "child2", "Child 2", "ticket", "in_progress").await;
 
         create_child_of(&db, "child1", "parent").await;
         create_child_of(&db, "child2", "parent").await;
@@ -1592,7 +1599,7 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
-        create_task(&db, "task1", "Task 1", "task", "todo").await;
+        create_task(&db, "task1", "Task 1", "task", "in_progress").await;
 
         let blockers = graph.get_incomplete_blockers("task1").await.unwrap();
         assert!(blockers.is_empty());
@@ -1607,7 +1614,7 @@ mod tests {
 
         create_task(&db, "blocker1", "Blocker 1", "task", "done").await;
         create_task(&db, "blocker2", "Blocker 2", "task", "done").await;
-        create_task(&db, "task1", "Task 1", "task", "todo").await;
+        create_task(&db, "task1", "Task 1", "task", "in_progress").await;
 
         create_depends_on(&db, "task1", "blocker1").await;
         create_depends_on(&db, "task1", "blocker2").await;
@@ -1646,7 +1653,7 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
-        create_task(&db, "task1", "Task 1", "task", "todo").await;
+        create_task(&db, "task1", "Task 1", "task", "in_progress").await;
 
         let blockers = graph
             .get_incomplete_blockers_with_details("task1")
@@ -1731,7 +1738,7 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
-        create_task(&db, "task1", "Task 1", "task", "todo").await;
+        create_task(&db, "task1", "Task 1", "task", "in_progress").await;
 
         let incomplete = graph.get_incomplete_descendants("task1").await.unwrap();
         assert!(incomplete.is_empty());
@@ -1764,7 +1771,7 @@ mod tests {
 
         create_task(&db, "parent", "Parent", "ticket", "in_progress").await;
         create_task(&db, "child1", "Child 1", "task", "done").await;
-        create_task(&db, "child2", "Child 2", "task", "todo").await;
+        create_task(&db, "child2", "Child 2", "task", "in_progress").await;
         create_task(&db, "child3", "Child 3", "task", "backlog").await;
 
         create_child_of(&db, "child1", "parent").await;
@@ -1791,7 +1798,7 @@ mod tests {
         create_task(&db, "epic", "Epic", "epic", "in_progress").await;
         create_task(&db, "ticket", "Ticket", "ticket", "in_progress").await;
         create_task(&db, "task1", "Task 1", "task", "done").await;
-        create_task(&db, "task2", "Task 2", "task", "todo").await;
+        create_task(&db, "task2", "Task 2", "task", "in_progress").await;
 
         create_child_of(&db, "ticket", "epic").await;
         create_child_of(&db, "task1", "ticket").await;
@@ -1850,7 +1857,7 @@ mod tests {
         create_task(&db, "ticket1", "Ticket 1", "ticket", "done").await;
         create_task(&db, "ticket2", "Ticket 2", "ticket", "in_progress").await;
         create_task(&db, "task1", "Task 1", "task", "done").await;
-        create_task(&db, "task2", "Task 2", "task", "todo").await;
+        create_task(&db, "task2", "Task 2", "task", "in_progress").await;
 
         create_child_of(&db, "ticket1", "epic").await;
         create_child_of(&db, "ticket2", "epic").await;
@@ -1880,7 +1887,7 @@ mod tests {
             id: "test".to_string(),
             title: "Test".to_string(),
             level: "task".to_string(),
-            status: "todo".to_string(),
+            status: "in_progress".to_string(),
             children: vec![],
         };
 
@@ -1888,7 +1895,7 @@ mod tests {
         assert_eq!(cloned.id, "test");
         assert_eq!(cloned.title, "Test");
         assert_eq!(cloned.level, "task");
-        assert_eq!(cloned.status, "todo");
+        assert_eq!(cloned.status, "in_progress");
     }
 
     #[tokio::test]
@@ -1897,7 +1904,7 @@ mod tests {
             id: "test".to_string(),
             title: "Test".to_string(),
             level: "task".to_string(),
-            status: "todo".to_string(),
+            status: "in_progress".to_string(),
             children: vec![],
         };
 
@@ -1912,10 +1919,10 @@ mod tests {
         let graph = GraphQueries::new(db.client());
 
         // Diamond: A -> (B, C) -> D
-        create_task(&db, "taska", "Task A", "task", "todo").await;
-        create_task(&db, "taskb", "Task B", "task", "todo").await;
-        create_task(&db, "taskc", "Task C", "task", "todo").await;
-        create_task(&db, "taskd", "Task D", "task", "todo").await;
+        create_task(&db, "taska", "Task A", "task", "in_progress").await;
+        create_task(&db, "taskb", "Task B", "task", "in_progress").await;
+        create_task(&db, "taskc", "Task C", "task", "in_progress").await;
+        create_task(&db, "taskd", "Task D", "task", "in_progress").await;
 
         create_depends_on(&db, "taska", "taskb").await;
         create_depends_on(&db, "taska", "taskc").await;
@@ -2014,7 +2021,7 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
-        create_task(&db, "task1", "Task 1", "task", "todo").await;
+        create_task(&db, "task1", "Task 1", "task", "in_progress").await;
 
         let progress = graph.get_progress("task1").await.unwrap();
         assert_eq!(progress.done_count, 0);
@@ -2049,7 +2056,7 @@ mod tests {
         create_task(&db, "epic1", "Epic 1", "epic", "in_progress").await;
         create_task(&db, "ticket1", "Ticket 1", "ticket", "done").await;
         create_task(&db, "ticket2", "Ticket 2", "ticket", "done").await;
-        create_task(&db, "ticket3", "Ticket 3", "ticket", "todo").await;
+        create_task(&db, "ticket3", "Ticket 3", "ticket", "in_progress").await;
 
         create_child_of(&db, "ticket1", "epic1").await;
         create_child_of(&db, "ticket2", "epic1").await;
@@ -2098,7 +2105,7 @@ mod tests {
         create_task(&db, "epic1", "Epic 1", "epic", "in_progress").await;
         create_task(&db, "ticket1", "Ticket 1", "ticket", "done").await;
         create_task(&db, "task1", "Task 1", "task", "done").await;
-        create_task(&db, "task2", "Task 2", "task", "todo").await;
+        create_task(&db, "task2", "Task 2", "task", "in_progress").await;
 
         create_child_of(&db, "ticket1", "epic1").await;
         create_child_of(&db, "task1", "ticket1").await;
@@ -2118,8 +2125,8 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
-        create_task(&db, "epic1", "Epic 1", "epic", "todo").await;
-        create_task(&db, "ticket1", "Ticket 1", "ticket", "todo").await;
+        create_task(&db, "epic1", "Epic 1", "epic", "in_progress").await;
+        create_task(&db, "ticket1", "Ticket 1", "ticket", "in_progress").await;
         create_task(&db, "ticket2", "Ticket 2", "ticket", "backlog").await;
 
         create_child_of(&db, "ticket1", "epic1").await;

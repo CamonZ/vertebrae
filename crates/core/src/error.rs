@@ -24,7 +24,12 @@ pub enum ServiceError {
 
     /// Invalid task state transition
     #[error("Invalid status transition from '{from}' to '{to}'")]
-    InvalidTransition { from: String, to: String },
+    InvalidTransition {
+        from: String,
+        to: String,
+        /// Valid transitions from the current status
+        valid_transitions: Vec<String>,
+    },
 
     /// Task is blocked by incomplete dependencies
     #[error("Task '{task_id}' is blocked by incomplete dependencies")]
@@ -70,11 +75,25 @@ impl ServiceError {
         }
     }
 
-    /// Create an invalid transition error
+    /// Create an invalid transition error with valid transitions
+    pub fn invalid_transition_with_valid(
+        from: impl Into<String>,
+        to: impl Into<String>,
+        valid_transitions: Vec<String>,
+    ) -> Self {
+        ServiceError::InvalidTransition {
+            from: from.into(),
+            to: to.into(),
+            valid_transitions,
+        }
+    }
+
+    /// Create an invalid transition error (without valid transitions)
     pub fn invalid_transition(from: impl Into<String>, to: impl Into<String>) -> Self {
         ServiceError::InvalidTransition {
             from: from.into(),
             to: to.into(),
+            valid_transitions: Vec::new(),
         }
     }
 
@@ -102,30 +121,37 @@ impl ServiceError {
     /// Get a user-friendly hint for how to resolve this error.
     ///
     /// Returns `None` if no specific guidance is available.
-    pub fn hint(&self) -> Option<&'static str> {
+    pub fn hint(&self) -> Option<String> {
         match self {
             ServiceError::TaskNotFound { .. } => {
-                Some("Hint: Check the task ID with 'vtb list' or use a prefix of the full ID")
+                Some("Hint: Check the task ID with 'vtb list' or use a prefix of the full ID".to_string())
             }
             ServiceError::WorkflowNotFound { .. } => {
-                Some("Hint: List available workflows with 'vtb workflow list'")
+                Some("Hint: List available workflows with 'vtb workflow list'".to_string())
             }
-            ServiceError::InvalidTransition { .. } => Some(
-                "Hint: Valid transitions are: backlog→todo, todo→in_progress/rejected, in_progress→pending_review/done/rejected",
-            ),
+            ServiceError::InvalidTransition { valid_transitions, .. } => {
+                if valid_transitions.is_empty() {
+                    Some("Hint: Check 'vtb list' for current status".to_string())
+                } else {
+                    Some(format!(
+                        "Hint: Valid transitions from current status: {}",
+                        valid_transitions.join(", ")
+                    ))
+                }
+            }
             ServiceError::TaskBlocked { .. } => Some(
-                "Hint: Complete or remove blocking dependencies first. Use 'vtb blockers <id>' to see what's blocking",
+                "Hint: Complete or remove blocking dependencies first. Use 'vtb blockers <id>' to see what's blocking".to_string(),
             ),
             ServiceError::ParentNotFound { .. } => {
-                Some("Hint: Check the parent task ID with 'vtb list'")
+                Some("Hint: Check the parent task ID with 'vtb list'".to_string())
             }
             ServiceError::DependencyNotFound { .. } => {
-                Some("Hint: Check the dependency task ID with 'vtb list'")
+                Some("Hint: Check the dependency task ID with 'vtb list'".to_string())
             }
             ServiceError::CyclicDependency => {
-                Some("Hint: A task cannot depend on itself or create a circular dependency chain")
+                Some("Hint: A task cannot depend on itself or create a circular dependency chain".to_string())
             }
-            ServiceError::Database(db_err) => db_err.hint(),
+            ServiceError::Database(db_err) => db_err.hint().map(String::from),
             ServiceError::ValidationFailed { .. } => None,
             ServiceError::InvalidInput(_) => None,
         }
@@ -222,10 +248,27 @@ mod tests {
 
     #[test]
     fn test_hint_invalid_transition() {
-        let err = ServiceError::invalid_transition("backlog", "done");
+        // Test with valid transitions provided
+        let err = ServiceError::invalid_transition_with_valid(
+            "backlog",
+            "done",
+            vec!["in_progress".to_string(), "rejected".to_string()],
+        );
         let hint = err.hint();
         assert!(hint.is_some());
-        assert!(hint.unwrap().contains("Valid transitions"));
+        assert!(
+            hint.unwrap()
+                .contains("Valid transitions from current status: in_progress, rejected")
+        );
+    }
+
+    #[test]
+    fn test_hint_invalid_transition_terminal_state() {
+        // Test with empty valid transitions (terminal state)
+        let err = ServiceError::invalid_transition("done", "backlog");
+        let hint = err.hint();
+        assert!(hint.is_some());
+        assert!(hint.unwrap().contains("Check 'vtb list'"));
     }
 
     #[test]

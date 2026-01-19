@@ -17,36 +17,19 @@ pub struct ReadyCommand {}
 /// Result of the ready command execution
 #[derive(Debug)]
 pub struct ReadyResult {
-    /// Tasks that are ready to work on (todo status, unblocked, work not started)
-    pub todo_ready: Vec<TaskSummary>,
-    /// Tasks that are ready to triage (backlog status, unblocked, work not started)
+    /// Tasks that are ready to start (backlog status, unblocked, work not started on children)
     pub backlog_ready: Vec<TaskSummary>,
 }
 
 impl std::fmt::Display for ReadyResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let has_todo = !self.todo_ready.is_empty();
-        let has_backlog = !self.backlog_ready.is_empty();
-
-        if !has_todo && !has_backlog {
+        if self.backlog_ready.is_empty() {
             return write!(f, "No actionable items found.");
         }
 
-        if has_todo {
-            writeln!(f, "Ready to work (todo):")?;
-            for task in &self.todo_ready {
-                writeln!(f, "  {}  {}  {}", task.id, task.level, task.title)?;
-            }
-        }
-
-        if has_backlog {
-            if has_todo {
-                writeln!(f)?; // Add blank line between sections
-            }
-            writeln!(f, "Ready to triage (backlog):")?;
-            for task in &self.backlog_ready {
-                writeln!(f, "  {}  {}  {}", task.id, task.level, task.title)?;
-            }
+        writeln!(f, "Ready to start (backlog):")?;
+        for task in &self.backlog_ready {
+            writeln!(f, "  {}  {}  {}", task.id, task.level, task.title)?;
         }
 
         Ok(())
@@ -57,8 +40,7 @@ impl ReadyCommand {
     /// Execute the ready command.
     ///
     /// Finds and returns actionable entry points:
-    /// - Todo items: ready to work on (unblocked, no work started)
-    /// - Backlog items: ready to triage (unblocked, no work started)
+    /// - Backlog items: ready to start work (unblocked, no work started on children)
     ///
     /// For items with hierarchies, only shows the highest-level entry point.
     /// An item is excluded if any of its children have work started
@@ -74,16 +56,10 @@ impl ReadyCommand {
     pub async fn execute(&self, service: &dyn TaskService) -> Result<ReadyResult, ServiceError> {
         let db = service.database();
 
-        // Get ready items for todo status
-        let todo_ready = db.list_ready_items("todo").await?;
-
-        // Get ready items for backlog status
+        // Get ready items for backlog status (ready to start work)
         let backlog_ready = db.list_ready_items("backlog").await?;
 
-        Ok(ReadyResult {
-            todo_ready,
-            backlog_ready,
-        })
+        Ok(ReadyResult { backlog_ready })
     }
 }
 
@@ -171,39 +147,14 @@ mod tests {
     #[test]
     fn test_ready_result_display_empty() {
         let result = ReadyResult {
-            todo_ready: vec![],
             backlog_ready: vec![],
         };
         assert_eq!(result.to_string(), "No actionable items found.");
     }
 
     #[test]
-    fn test_ready_result_display_todo_only() {
-        let result = ReadyResult {
-            todo_ready: vec![TaskSummary {
-                id: "abc123".to_string(),
-                title: "Test Task".to_string(),
-                level: Level::Task,
-                status: "todo".to_string(),
-                priority: None,
-                tags: vec![],
-                needs_human_review: None,
-                created_at: chrono::Utc::now(),
-            }],
-            backlog_ready: vec![],
-        };
-
-        let output = result.to_string();
-        assert!(output.contains("Ready to work (todo):"));
-        assert!(output.contains("abc123"));
-        assert!(output.contains("Test Task"));
-        assert!(!output.contains("Ready to triage"));
-    }
-
-    #[test]
     fn test_ready_result_display_backlog_only() {
         let result = ReadyResult {
-            todo_ready: vec![],
             backlog_ready: vec![TaskSummary {
                 id: "def456".to_string(),
                 title: "Backlog Task".to_string(),
@@ -217,7 +168,7 @@ mod tests {
         };
 
         let output = result.to_string();
-        assert!(output.contains("Ready to triage (backlog):"));
+        assert!(output.contains("Ready to start (backlog):"));
         assert!(output.contains("def456"));
         assert!(output.contains("Backlog Task"));
         assert!(!output.contains("Ready to work"));
@@ -227,21 +178,11 @@ mod tests {
     fn test_ready_result_display_both_sections() {
         let now = chrono::Utc::now();
         let result = ReadyResult {
-            todo_ready: vec![TaskSummary {
+            backlog_ready: vec![TaskSummary {
                 id: "abc123".to_string(),
                 title: "Todo Task".to_string(),
                 level: Level::Task,
-                status: "todo".to_string(),
-                priority: None,
-                tags: vec![],
-                needs_human_review: None,
-                created_at: now,
-            }],
-            backlog_ready: vec![TaskSummary {
-                id: "def456".to_string(),
-                title: "Backlog Task".to_string(),
-                level: Level::Epic,
-                status: "backlog".to_string(),
+                status: "in_progress".to_string(),
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -250,10 +191,9 @@ mod tests {
         };
 
         let output = result.to_string();
-        assert!(output.contains("Ready to work (todo):"));
-        assert!(output.contains("Ready to triage (backlog):"));
+        assert!(output.contains("Ready to start (backlog):"));
         assert!(output.contains("abc123"));
-        assert!(output.contains("def456"));
+        assert!(output.contains("Todo Task"));
     }
 
     #[tokio::test]
@@ -263,21 +203,6 @@ mod tests {
         let cmd = ReadyCommand {};
         let result = cmd.execute(&service).await.unwrap();
 
-        assert!(result.todo_ready.is_empty());
-        assert!(result.backlog_ready.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_ready_single_todo_task() {
-        let service = setup_test_service().await;
-
-        create_task(&service, "task1", "Ready Task", "task", "todo").await;
-
-        let cmd = ReadyCommand {};
-        let result = cmd.execute(&service).await.unwrap();
-
-        assert_eq!(result.todo_ready.len(), 1);
-        assert_eq!(result.todo_ready[0].id, "task1");
         assert!(result.backlog_ready.is_empty());
     }
 
@@ -290,8 +215,7 @@ mod tests {
         let cmd = ReadyCommand {};
         let result = cmd.execute(&service).await.unwrap();
 
-        assert!(result.todo_ready.is_empty());
-        assert_eq!(result.backlog_ready.len(), 1);
+        assert!(result.backlog_ready.len() == 1);
         assert_eq!(result.backlog_ready[0].id, "task1");
     }
 
@@ -304,7 +228,6 @@ mod tests {
         let cmd = ReadyCommand {};
         let result = cmd.execute(&service).await.unwrap();
 
-        assert!(result.todo_ready.is_empty());
         assert!(result.backlog_ready.is_empty());
     }
 
@@ -317,7 +240,6 @@ mod tests {
         let cmd = ReadyCommand {};
         let result = cmd.execute(&service).await.unwrap();
 
-        assert!(result.todo_ready.is_empty());
         assert!(result.backlog_ready.is_empty());
     }
 
@@ -325,25 +247,25 @@ mod tests {
     async fn test_ready_shows_parent_not_child_when_no_work_started() {
         let service = setup_test_service().await;
 
-        // Create epic with todo child - should show epic only
-        create_task(&service, "epic1", "Epic", "epic", "todo").await;
-        create_task(&service, "ticket1", "Ticket", "ticket", "todo").await;
+        // Create epic with backlog child - should show epic only
+        create_task(&service, "epic1", "Epic", "epic", "backlog").await;
+        create_task(&service, "ticket1", "Ticket", "ticket", "backlog").await;
         create_child_of(&service, "ticket1", "epic1").await;
 
         let cmd = ReadyCommand {};
         let result = cmd.execute(&service).await.unwrap();
 
         // Should show only epic1, not ticket1
-        assert_eq!(result.todo_ready.len(), 1);
-        assert_eq!(result.todo_ready[0].id, "epic1");
+        assert_eq!(result.backlog_ready.len(), 1);
+        assert_eq!(result.backlog_ready[0].id, "epic1");
     }
 
     #[tokio::test]
     async fn test_ready_excludes_parent_when_child_work_started() {
         let service = setup_test_service().await;
 
-        // Create epic with in_progress child - epic should not show
-        create_task(&service, "epic1", "Epic", "epic", "todo").await;
+        // Create epic in backlog with in_progress child - epic should not show
+        create_task(&service, "epic1", "Epic", "epic", "backlog").await;
         create_task(&service, "ticket1", "Ticket", "ticket", "in_progress").await;
         create_child_of(&service, "ticket1", "epic1").await;
 
@@ -351,60 +273,60 @@ mod tests {
         let result = cmd.execute(&service).await.unwrap();
 
         // Epic should be excluded because work has started on a child
-        assert!(result.todo_ready.is_empty());
+        assert!(result.backlog_ready.is_empty());
     }
 
     #[tokio::test]
     async fn test_ready_excludes_blocked_tasks() {
         let service = setup_test_service().await;
 
-        // Create blocker and blocked task
-        create_task(&service, "blocker", "Blocker", "task", "todo").await;
-        create_task(&service, "blocked", "Blocked", "task", "todo").await;
+        // Create blocker (backlog) and blocked task (backlog)
+        create_task(&service, "blocker", "Blocker", "task", "backlog").await;
+        create_task(&service, "blocked", "Blocked", "task", "backlog").await;
         create_depends_on(&service, "blocked", "blocker").await;
 
         let cmd = ReadyCommand {};
         let result = cmd.execute(&service).await.unwrap();
 
         // Should show only blocker (blocked is blocked by an incomplete task)
-        assert_eq!(result.todo_ready.len(), 1);
-        assert_eq!(result.todo_ready[0].id, "blocker");
+        assert_eq!(result.backlog_ready.len(), 1);
+        assert_eq!(result.backlog_ready[0].id, "blocker");
     }
 
     #[tokio::test]
     async fn test_ready_includes_unblocked_tasks() {
         let service = setup_test_service().await;
 
-        // Create blocker (done) and blocked task
+        // Create blocker (done) and blocked task (backlog)
         create_task(&service, "blocker", "Blocker", "task", "done").await;
-        create_task(&service, "blocked", "Blocked", "task", "todo").await;
+        create_task(&service, "blocked", "Blocked", "task", "backlog").await;
         create_depends_on(&service, "blocked", "blocker").await;
 
         let cmd = ReadyCommand {};
         let result = cmd.execute(&service).await.unwrap();
 
         // Should show blocked task (blocker is done)
-        assert_eq!(result.todo_ready.len(), 1);
-        assert_eq!(result.todo_ready[0].id, "blocked");
+        assert_eq!(result.backlog_ready.len(), 1);
+        assert_eq!(result.backlog_ready[0].id, "blocked");
     }
 
     #[tokio::test]
     async fn test_ready_prioritizes_epic_over_ticket_over_task() {
         let service = setup_test_service().await;
 
-        // Create independent tasks at all levels
-        create_task(&service, "task1", "Task", "task", "todo").await;
-        create_task(&service, "ticket1", "Ticket", "ticket", "todo").await;
-        create_task(&service, "epic1", "Epic", "epic", "todo").await;
+        // Create independent tasks at all levels - all backlog
+        create_task(&service, "task1", "Task", "task", "backlog").await;
+        create_task(&service, "ticket1", "Ticket", "ticket", "backlog").await;
+        create_task(&service, "epic1", "Epic", "epic", "backlog").await;
 
         let cmd = ReadyCommand {};
         let result = cmd.execute(&service).await.unwrap();
 
         // Should show all three since they're independent
-        assert_eq!(result.todo_ready.len(), 3);
+        assert_eq!(result.backlog_ready.len(), 3);
 
         // Verify all are present
-        let ids: Vec<&str> = result.todo_ready.iter().map(|t| t.id.as_str()).collect();
+        let ids: Vec<&str> = result.backlog_ready.iter().map(|t| t.id.as_str()).collect();
         assert!(ids.contains(&"epic1"));
         assert!(ids.contains(&"ticket1"));
         assert!(ids.contains(&"task1"));
@@ -414,10 +336,10 @@ mod tests {
     async fn test_ready_deep_hierarchy() {
         let service = setup_test_service().await;
 
-        // Create epic -> ticket -> task hierarchy, all todo
-        create_task(&service, "epic1", "Epic", "epic", "todo").await;
-        create_task(&service, "ticket1", "Ticket", "ticket", "todo").await;
-        create_task(&service, "task1", "Task", "task", "todo").await;
+        // Create epic -> ticket -> task hierarchy, all backlog
+        create_task(&service, "epic1", "Epic", "epic", "backlog").await;
+        create_task(&service, "ticket1", "Ticket", "ticket", "backlog").await;
+        create_task(&service, "task1", "Task", "task", "backlog").await;
         create_child_of(&service, "ticket1", "epic1").await;
         create_child_of(&service, "task1", "ticket1").await;
 
@@ -425,8 +347,8 @@ mod tests {
         let result = cmd.execute(&service).await.unwrap();
 
         // Should show only epic1 (highest level entry point)
-        assert_eq!(result.todo_ready.len(), 1);
-        assert_eq!(result.todo_ready[0].id, "epic1");
+        assert_eq!(result.backlog_ready.len(), 1);
+        assert_eq!(result.backlog_ready[0].id, "epic1");
     }
 
     #[tokio::test]
@@ -435,8 +357,8 @@ mod tests {
 
         // Create epic -> ticket -> task hierarchy
         // task is in_progress, so epic should be excluded
-        create_task(&service, "epic1", "Epic", "epic", "todo").await;
-        create_task(&service, "ticket1", "Ticket", "ticket", "todo").await;
+        create_task(&service, "epic1", "Epic", "epic", "backlog").await;
+        create_task(&service, "ticket1", "Ticket", "ticket", "backlog").await;
         create_task(&service, "task1", "Task", "task", "in_progress").await;
         create_child_of(&service, "ticket1", "epic1").await;
         create_child_of(&service, "task1", "ticket1").await;
@@ -445,7 +367,7 @@ mod tests {
         let result = cmd.execute(&service).await.unwrap();
 
         // Should show nothing (work started deep in hierarchy)
-        assert!(result.todo_ready.is_empty());
+        assert!(result.backlog_ready.is_empty());
     }
 
     #[tokio::test]
@@ -453,12 +375,12 @@ mod tests {
         let service = setup_test_service().await;
 
         // Create epic with two tickets:
-        // - ticket1: in_progress
-        // - ticket2: todo
+        // - ticket1: in_progress (work started)
+        // - ticket2: backlog (ready to start)
         // ticket2 should show (it's an entry point, not under the in_progress one)
-        create_task(&service, "epic1", "Epic", "epic", "todo").await;
+        create_task(&service, "epic1", "Epic", "epic", "backlog").await;
         create_task(&service, "ticket1", "Ticket 1", "ticket", "in_progress").await;
-        create_task(&service, "ticket2", "Ticket 2", "ticket", "todo").await;
+        create_task(&service, "ticket2", "Ticket 2", "ticket", "backlog").await;
         create_child_of(&service, "ticket1", "epic1").await;
         create_child_of(&service, "ticket2", "epic1").await;
 
@@ -467,7 +389,7 @@ mod tests {
 
         // Epic has work started (ticket1 is in_progress), so it shouldn't show
         // But ticket2 should show (it's the entry point for its subtree)
-        assert_eq!(result.todo_ready.len(), 1);
-        assert_eq!(result.todo_ready[0].id, "ticket2");
+        assert_eq!(result.backlog_ready.len(), 1);
+        assert_eq!(result.backlog_ready[0].id, "ticket2");
     }
 }

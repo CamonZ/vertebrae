@@ -340,7 +340,7 @@ mod tests {
         let execution = StepExecution::new(
             Thing::from(("task", "get_test")),
             Thing::from(("workflow", "get_test")),
-            "todo",
+            "in_progress",
         );
 
         let id = repo.create_execution(&execution).await.unwrap();
@@ -348,7 +348,7 @@ mod tests {
 
         assert!(retrieved.is_some());
         let retrieved = retrieved.unwrap();
-        assert_eq!(retrieved.step_name, "todo");
+        assert_eq!(retrieved.step_name, "in_progress");
         assert_eq!(retrieved.status, ExecutionStatus::InProgress);
     }
 
@@ -370,7 +370,10 @@ mod tests {
 
         // Create executions with different timestamps
         let base_time = Utc::now();
-        for (i, step) in ["backlog", "todo", "in_progress"].iter().enumerate() {
+        for (i, step) in ["backlog", "in_progress", "pending_review"]
+            .iter()
+            .enumerate()
+        {
             let execution = StepExecution::new(
                 Thing::from(("task", "list_test")),
                 Thing::from(("workflow", "list_test")),
@@ -385,8 +388,8 @@ mod tests {
 
         // Verify chronological order
         assert_eq!(executions[0].step_name, "backlog");
-        assert_eq!(executions[1].step_name, "todo");
-        assert_eq!(executions[2].step_name, "in_progress");
+        assert_eq!(executions[1].step_name, "in_progress");
+        assert_eq!(executions[2].step_name, "pending_review");
     }
 
     #[tokio::test]

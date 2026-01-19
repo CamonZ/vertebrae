@@ -1,0 +1,5 @@
+#V2
+SELECT id, title, status FROM task LIMIT 5
+SELECT progressions FROM status_schema:default
+SELECT statuses FROM status_schema:default
+UPDATE status_schema:default SET progressions = [  { from_status: 'backlog', to_status: 'in_progress', label: 'Start', requires_validation: false },  { from_status: 'backlog', to_status: 'rejected', label: 'Reject', requires_validation: false },  { from_status: 'in_progress', to_status: 'pending_review', label: 'Submit', requires_validation: false },  { from_status: 'in_progress', to_status: 'done', label: 'Complete', requires_validation: false },  { from_status: 'in_progress', to_status: 'rejected', label: 'Reject', requires_validation: false },  { from_status: 'pending_review', to_status: 'in_progress', label: 'Revise', requires_validation: false },  { from_status: 'pending_review', to_status: 'done', label: 'Approve', requires_validation: false }]

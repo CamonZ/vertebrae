@@ -207,7 +207,7 @@ mod tests {
 
     #[test]
     fn test_import_record_task_deserialization() {
-        let json = r#"{"type":"task","id":"abc123","title":"Test task","level":"task","status":"todo","tags":[],"sections":[],"refs":[]}"#;
+        let json = r#"{"type":"task","id":"abc123","title":"Test task","level":"task","status":"in_progress","tags":[],"sections":[],"refs":[]}"#;
         let record: ImportRecord = serde_json::from_str(json).unwrap();
 
         match record {

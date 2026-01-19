@@ -1090,7 +1090,7 @@ mod tests {
         let repo = TaskRepository::new(db.client());
 
         let task = Task::new("Get Test", Level::Ticket)
-            .with_status("todo")
+            .with_status("in_progress")
             .with_priority(Priority::Medium);
 
         repo.create("get1", &task).await.unwrap();
@@ -1101,7 +1101,7 @@ mod tests {
         let retrieved = retrieved.unwrap();
         assert_eq!(retrieved.title, "Get Test");
         assert_eq!(retrieved.level, Level::Ticket);
-        assert_eq!(retrieved.status, "todo");
+        assert_eq!(retrieved.status, "in_progress");
         assert_eq!(retrieved.priority, Some(Priority::Medium));
 
         cleanup(&temp_dir);
@@ -1490,7 +1490,7 @@ mod tests {
             title = "Clear Description Test",
             description = "Initial description",
             level = "task",
-            status = "todo",
+            status = "in_progress",
             tags = [],
             sections = [],
             refs = []"#;
@@ -1559,7 +1559,7 @@ mod tests {
         let query = r#"CREATE task:ref2 SET
             title = "Multiple Refs Test",
             level = "task",
-            status = "todo",
+            status = "in_progress",
             tags = [],
             sections = [],
             refs = [{ path: "src/lib.rs" }]"#;
@@ -1650,7 +1650,7 @@ mod tests {
         let query = r#"CREATE task:ref5 SET
             title = "Null Refs Test",
             level = "task",
-            status = "todo",
+            status = "in_progress",
             tags = [],
             sections = [],
             refs = NONE"#;
@@ -1681,7 +1681,7 @@ mod tests {
         let query = r#"CREATE task:secref1 SET
             title = "Section Ref Test",
             level = "task",
-            status = "todo",
+            status = "in_progress",
             tags = [],
             sections = [{ type: "testing_criterion", content: "Verify something", refs: [] }],
             refs = []"#;
@@ -1711,7 +1711,7 @@ mod tests {
         let query = r#"CREATE task:secref2 SET
             title = "Section Ref Test",
             level = "task",
-            status = "todo",
+            status = "in_progress",
             tags = [],
             sections = [{ type: "testing_criterion", content: "Verify something", refs: [{ path: "src/existing.rs" }] }],
             refs = []"#;
@@ -1741,7 +1741,7 @@ mod tests {
         let query = r#"CREATE task:secref3 SET
             title = "Section Ref Test",
             level = "task",
-            status = "todo",
+            status = "in_progress",
             tags = [],
             sections = [{ type: "step", content: "Do something", refs: [] }],
             refs = []"#;
@@ -1792,7 +1792,7 @@ mod tests {
         let query = r#"CREATE task:secref4 SET
             title = "Section Ref Test",
             level = "task",
-            status = "todo",
+            status = "in_progress",
             tags = [],
             sections = [{ type: "testing_criterion", content: "Test criterion" }],
             refs = []"#;
@@ -1825,7 +1825,7 @@ mod tests {
         let query = r#"CREATE task:remsec1 SET
             title = "Remove Section Test",
             level = "task",
-            status = "todo",
+            status = "in_progress",
             tags = [],
             sections = [{ type: "step", content: "Only step", order: 1 }],
             refs = []"#;
@@ -1852,7 +1852,7 @@ mod tests {
         let query = r#"CREATE task:remsec2 SET
             title = "Remove Section Test",
             level = "task",
-            status = "todo",
+            status = "in_progress",
             tags = [],
             sections = [
                 { type: "step", content: "Step 1", order: 1 },
@@ -1887,7 +1887,7 @@ mod tests {
         let query = r#"CREATE task:remsec3 SET
             title = "Remove Section Test",
             level = "task",
-            status = "todo",
+            status = "in_progress",
             tags = [],
             sections = [
                 { type: "goal", content: "The goal", order: 1 },
@@ -1946,7 +1946,7 @@ mod tests {
         let query = r#"CREATE task:remsec4 SET
             title = "Remove Section Test",
             level = "task",
-            status = "todo",
+            status = "in_progress",
             tags = [],
             sections = [{ type: "goal", content: "The goal", order: 1 }],
             refs = []"#;
@@ -1976,7 +1976,7 @@ mod tests {
         let query = r#"CREATE task:remsec5 SET
             title = "Remove Section Test",
             level = "task",
-            status = "todo",
+            status = "in_progress",
             tags = [],
             sections = [{ type: "step", content: "Step 1", order: 1 }],
             refs = []"#;

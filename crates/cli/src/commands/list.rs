@@ -304,7 +304,7 @@ mod tests {
         let db = setup_test_db().await;
 
         // Create some tasks
-        create_task(&db, "task1", "Task 1", "task", "todo", None, &[]).await;
+        create_task(&db, "task1", "Task 1", "task", "in_progress", None, &[]).await;
         create_task(&db, "task2", "Task 2", "task", "in_progress", None, &[]).await;
         create_task(&db, "task3", "Task 3", "task", "done", None, &[]).await;
 
@@ -341,7 +341,7 @@ mod tests {
         let db = setup_test_db().await;
 
         // Create some tasks
-        create_task(&db, "task1", "Task 1", "task", "todo", None, &[]).await;
+        create_task(&db, "task1", "Task 1", "task", "in_progress", None, &[]).await;
         create_task(&db, "task2", "Task 2", "task", "done", None, &[]).await;
 
         let cmd = ListCommand {
@@ -377,9 +377,18 @@ mod tests {
     async fn test_list_filter_by_level() {
         let db = setup_test_db().await;
 
-        create_task(&db, "epic1", "Epic 1", "epic", "todo", None, &[]).await;
-        create_task(&db, "ticket1", "Ticket 1", "ticket", "todo", None, &[]).await;
-        create_task(&db, "task1", "Task 1", "task", "todo", None, &[]).await;
+        create_task(&db, "epic1", "Epic 1", "epic", "in_progress", None, &[]).await;
+        create_task(
+            &db,
+            "ticket1",
+            "Ticket 1",
+            "ticket",
+            "in_progress",
+            None,
+            &[],
+        )
+        .await;
+        create_task(&db, "task1", "Task 1", "task", "in_progress", None, &[]).await;
 
         let cmd = ListCommand {
             levels: vec![Level::Epic],
@@ -405,9 +414,18 @@ mod tests {
     async fn test_list_filter_by_multiple_levels() {
         let db = setup_test_db().await;
 
-        create_task(&db, "epic1", "Epic 1", "epic", "todo", None, &[]).await;
-        create_task(&db, "ticket1", "Ticket 1", "ticket", "todo", None, &[]).await;
-        create_task(&db, "task1", "Task 1", "task", "todo", None, &[]).await;
+        create_task(&db, "epic1", "Epic 1", "epic", "in_progress", None, &[]).await;
+        create_task(
+            &db,
+            "ticket1",
+            "Ticket 1",
+            "ticket",
+            "in_progress",
+            None,
+            &[],
+        )
+        .await;
+        create_task(&db, "task1", "Task 1", "task", "in_progress", None, &[]).await;
 
         let cmd = ListCommand {
             levels: vec![Level::Epic, Level::Ticket],
@@ -447,7 +465,7 @@ mod tests {
     async fn test_list_filter_by_status() {
         let db = setup_test_db().await;
 
-        create_task(&db, "task1", "Task 1", "task", "todo", None, &[]).await;
+        create_task(&db, "task1", "Task 1", "task", "in_progress", None, &[]).await;
         create_task(&db, "task2", "Task 2", "task", "backlog", None, &[]).await;
         create_task(&db, "task3", "Task 3", "task", "in_progress", None, &[]).await;
 
@@ -475,9 +493,27 @@ mod tests {
     async fn test_list_filter_by_priority() {
         let db = setup_test_db().await;
 
-        create_task(&db, "task1", "Task 1", "task", "todo", Some("high"), &[]).await;
-        create_task(&db, "task2", "Task 2", "task", "todo", Some("low"), &[]).await;
-        create_task(&db, "task3", "Task 3", "task", "todo", None, &[]).await;
+        create_task(
+            &db,
+            "task1",
+            "Task 1",
+            "task",
+            "in_progress",
+            Some("high"),
+            &[],
+        )
+        .await;
+        create_task(
+            &db,
+            "task2",
+            "Task 2",
+            "task",
+            "in_progress",
+            Some("low"),
+            &[],
+        )
+        .await;
+        create_task(&db, "task3", "Task 3", "task", "in_progress", None, &[]).await;
 
         let cmd = ListCommand {
             levels: vec![],
@@ -503,14 +539,32 @@ mod tests {
     async fn test_list_filter_by_tag() {
         let db = setup_test_db().await;
 
-        create_task(&db, "task1", "Task 1", "task", "todo", None, &["backend"]).await;
-        create_task(&db, "task2", "Task 2", "task", "todo", None, &["frontend"]).await;
+        create_task(
+            &db,
+            "task1",
+            "Task 1",
+            "task",
+            "in_progress",
+            None,
+            &["backend"],
+        )
+        .await;
+        create_task(
+            &db,
+            "task2",
+            "Task 2",
+            "task",
+            "in_progress",
+            None,
+            &["frontend"],
+        )
+        .await;
         create_task(
             &db,
             "task3",
             "Task 3",
             "task",
-            "todo",
+            "in_progress",
             None,
             &["backend", "api"],
         )
@@ -561,9 +615,36 @@ mod tests {
         let db = setup_test_db().await;
 
         // Create parent and child tasks
-        create_task(&db, "parent1", "Parent Epic", "epic", "todo", None, &[]).await;
-        create_task(&db, "child1", "Child Ticket", "ticket", "todo", None, &[]).await;
-        create_task(&db, "orphan1", "Orphan Task", "task", "todo", None, &[]).await;
+        create_task(
+            &db,
+            "parent1",
+            "Parent Epic",
+            "epic",
+            "in_progress",
+            None,
+            &[],
+        )
+        .await;
+        create_task(
+            &db,
+            "child1",
+            "Child Ticket",
+            "ticket",
+            "in_progress",
+            None,
+            &[],
+        )
+        .await;
+        create_task(
+            &db,
+            "orphan1",
+            "Orphan Task",
+            "task",
+            "in_progress",
+            None,
+            &[],
+        )
+        .await;
 
         // Create parent-child relationship
         create_child_of(&db, "child1", "parent1").await;
@@ -596,10 +677,28 @@ mod tests {
         let db = setup_test_db().await;
 
         // Create parent and child tasks
-        create_task(&db, "parent1", "Parent Epic", "epic", "todo", None, &[]).await;
-        create_task(&db, "child1", "Child 1", "ticket", "todo", None, &[]).await;
-        create_task(&db, "child2", "Child 2", "ticket", "todo", None, &[]).await;
-        create_task(&db, "other1", "Other Task", "task", "todo", None, &[]).await;
+        create_task(
+            &db,
+            "parent1",
+            "Parent Epic",
+            "epic",
+            "in_progress",
+            None,
+            &[],
+        )
+        .await;
+        create_task(&db, "child1", "Child 1", "ticket", "in_progress", None, &[]).await;
+        create_task(&db, "child2", "Child 2", "ticket", "in_progress", None, &[]).await;
+        create_task(
+            &db,
+            "other1",
+            "Other Task",
+            "task",
+            "in_progress",
+            None,
+            &[],
+        )
+        .await;
 
         // Create parent-child relationships
         create_child_of(&db, "child1", "parent1").await;
@@ -631,7 +730,7 @@ mod tests {
     async fn test_list_children_nonexistent_parent() {
         let db = setup_test_db().await;
 
-        create_task(&db, "task1", "Task 1", "task", "todo", None, &[]).await;
+        create_task(&db, "task1", "Task 1", "task", "in_progress", None, &[]).await;
 
         let cmd = ListCommand {
             levels: vec![],
@@ -685,7 +784,7 @@ mod tests {
             "task1",
             "Task 1",
             "epic",
-            "todo",
+            "in_progress",
             Some("high"),
             &["backend"],
         )
@@ -695,7 +794,7 @@ mod tests {
             "task2",
             "Task 2",
             "epic",
-            "todo",
+            "in_progress",
             Some("low"),
             &["backend"],
         )
@@ -705,7 +804,7 @@ mod tests {
             "task3",
             "Task 3",
             "ticket",
-            "todo",
+            "in_progress",
             Some("high"),
             &["backend"],
         )
@@ -746,8 +845,8 @@ mod tests {
     async fn test_list_root_with_level_filter() {
         let db = setup_test_db().await;
 
-        create_task(&db, "epic1", "Epic", "epic", "todo", None, &[]).await;
-        create_task(&db, "ticket1", "Ticket", "ticket", "todo", None, &[]).await;
+        create_task(&db, "epic1", "Epic", "epic", "in_progress", None, &[]).await;
+        create_task(&db, "ticket1", "Ticket", "ticket", "in_progress", None, &[]).await;
 
         let cmd = ListCommand {
             levels: vec![Level::Epic],
@@ -773,7 +872,7 @@ mod tests {
     fn test_build_filter_with_all_options() {
         let cmd = ListCommand {
             levels: vec![Level::Epic, Level::Ticket],
-            statuses: vec!["todo".to_string(), "in_progress".to_string()],
+            statuses: vec!["in_progress".to_string(), "in_progress".to_string()],
             priorities: vec![Priority::High],
             tags: vec!["backend".to_string(), "api".to_string()],
             root: true,
@@ -874,7 +973,7 @@ mod tests {
             id: "123".to_string(),
             title: "Test".to_string(),
             level: "task".to_string(),
-            status: "todo".to_string(),
+            status: "in_progress".to_string(),
             priority: Some("high".to_string()),
             tags: vec!["backend".to_string(), "urgent".to_string()],
             needs_human_review: Some(true),
@@ -920,7 +1019,7 @@ mod tests {
     fn test_list_command_debug() {
         let cmd = ListCommand {
             levels: vec![Level::Epic],
-            statuses: vec!["todo".to_string()],
+            statuses: vec!["in_progress".to_string()],
             priorities: vec![Priority::High],
             tags: vec!["backend".to_string()],
             root: true,
@@ -934,7 +1033,7 @@ mod tests {
         assert!(
             debug_str.contains("ListCommand")
                 && debug_str.contains("Epic")
-                && debug_str.contains("todo")
+                && debug_str.contains("in_progress")
                 && debug_str.contains("High")
                 && debug_str.contains("backend")
                 && debug_str.contains("root: true")
@@ -991,7 +1090,7 @@ mod tests {
             "task1",
             "Authentication feature",
             "task",
-            "todo",
+            "in_progress",
             None,
             &[],
         )
@@ -1001,12 +1100,21 @@ mod tests {
             "task2",
             "Database migration",
             "task",
-            "todo",
+            "in_progress",
             None,
             &[],
         )
         .await;
-        create_task(&db, "task3", "API endpoint", "task", "todo", None, &[]).await;
+        create_task(
+            &db,
+            "task3",
+            "API endpoint",
+            "task",
+            "in_progress",
+            None,
+            &[],
+        )
+        .await;
 
         let cmd = ListCommand {
             levels: vec![],
@@ -1039,7 +1147,7 @@ mod tests {
             "Feature A",
             "Implement user authentication system",
             "task",
-            "todo",
+            "in_progress",
         )
         .await;
         create_task_with_description(
@@ -1048,7 +1156,7 @@ mod tests {
             "Feature B",
             "Add database caching",
             "task",
-            "todo",
+            "in_progress",
         )
         .await;
 
@@ -1081,12 +1189,12 @@ mod tests {
             "task1",
             "AUTHENTICATION Feature",
             "task",
-            "todo",
+            "in_progress",
             None,
             &[],
         )
         .await;
-        create_task(&db, "task2", "Other task", "task", "todo", None, &[]).await;
+        create_task(&db, "task2", "Other task", "task", "in_progress", None, &[]).await;
 
         // Search with lowercase should find uppercase title
         let cmd = ListCommand {
@@ -1131,8 +1239,8 @@ mod tests {
     async fn test_search_with_no_matches_returns_empty() {
         let db = setup_test_db().await;
 
-        create_task(&db, "task1", "Task A", "task", "todo", None, &[]).await;
-        create_task(&db, "task2", "Task B", "task", "todo", None, &[]).await;
+        create_task(&db, "task1", "Task A", "task", "in_progress", None, &[]).await;
+        create_task(&db, "task2", "Task B", "task", "in_progress", None, &[]).await;
 
         let cmd = ListCommand {
             levels: vec![],
@@ -1157,7 +1265,16 @@ mod tests {
     async fn test_search_combined_with_status_filter() {
         let db = setup_test_db().await;
 
-        create_task(&db, "task1", "Auth task todo", "task", "todo", None, &[]).await;
+        create_task(
+            &db,
+            "task1",
+            "Auth task backlog",
+            "task",
+            "backlog",
+            None,
+            &[],
+        )
+        .await;
         create_task(
             &db,
             "task2",
@@ -1168,7 +1285,7 @@ mod tests {
             &[],
         )
         .await;
-        create_task(&db, "task3", "Other task", "task", "todo", None, &[]).await;
+        create_task(&db, "task3", "Other task", "task", "in_progress", None, &[]).await;
 
         // Search for "auth" but only in_progress status
         let cmd = ListCommand {
@@ -1195,9 +1312,9 @@ mod tests {
     async fn test_search_combined_with_level_filter() {
         let db = setup_test_db().await;
 
-        create_task(&db, "epic1", "Auth epic", "epic", "todo", None, &[]).await;
-        create_task(&db, "task1", "Auth task", "task", "todo", None, &[]).await;
-        create_task(&db, "task2", "Other task", "task", "todo", None, &[]).await;
+        create_task(&db, "epic1", "Auth epic", "epic", "in_progress", None, &[]).await;
+        create_task(&db, "task1", "Auth task", "task", "in_progress", None, &[]).await;
+        create_task(&db, "task2", "Other task", "task", "in_progress", None, &[]).await;
 
         // Search for "auth" but only epic level
         let cmd = ListCommand {
@@ -1224,7 +1341,7 @@ mod tests {
     async fn test_search_empty_string_returns_error() {
         let db = setup_test_db().await;
 
-        create_task(&db, "task1", "Task 1", "task", "todo", None, &[]).await;
+        create_task(&db, "task1", "Task 1", "task", "in_progress", None, &[]).await;
 
         let cmd = ListCommand {
             levels: vec![],
@@ -1255,7 +1372,7 @@ mod tests {
     async fn test_search_whitespace_only_returns_error() {
         let db = setup_test_db().await;
 
-        create_task(&db, "task1", "Task 1", "task", "todo", None, &[]).await;
+        create_task(&db, "task1", "Task 1", "task", "in_progress", None, &[]).await;
 
         let cmd = ListCommand {
             levels: vec![],
@@ -1286,9 +1403,36 @@ mod tests {
     async fn test_search_with_root_flag() {
         let db = setup_test_db().await;
 
-        create_task(&db, "parent1", "Auth Parent", "epic", "todo", None, &[]).await;
-        create_task(&db, "child1", "Auth Child", "task", "todo", None, &[]).await;
-        create_task(&db, "other1", "Other Parent", "epic", "todo", None, &[]).await;
+        create_task(
+            &db,
+            "parent1",
+            "Auth Parent",
+            "epic",
+            "in_progress",
+            None,
+            &[],
+        )
+        .await;
+        create_task(
+            &db,
+            "child1",
+            "Auth Child",
+            "task",
+            "in_progress",
+            None,
+            &[],
+        )
+        .await;
+        create_task(
+            &db,
+            "other1",
+            "Other Parent",
+            "epic",
+            "in_progress",
+            None,
+            &[],
+        )
+        .await;
         create_child_of(&db, "child1", "parent1").await;
 
         // Search for "auth" with root flag - should only return root task
@@ -1316,9 +1460,27 @@ mod tests {
     async fn test_search_with_children_flag() {
         let db = setup_test_db().await;
 
-        create_task(&db, "parent1", "Parent", "epic", "todo", None, &[]).await;
-        create_task(&db, "child1", "Auth Child", "task", "todo", None, &[]).await;
-        create_task(&db, "child2", "Other Child", "task", "todo", None, &[]).await;
+        create_task(&db, "parent1", "Parent", "epic", "in_progress", None, &[]).await;
+        create_task(
+            &db,
+            "child1",
+            "Auth Child",
+            "task",
+            "in_progress",
+            None,
+            &[],
+        )
+        .await;
+        create_task(
+            &db,
+            "child2",
+            "Other Child",
+            "task",
+            "in_progress",
+            None,
+            &[],
+        )
+        .await;
         create_child_of(&db, "child1", "parent1").await;
         create_child_of(&db, "child2", "parent1").await;
 
@@ -1347,7 +1509,7 @@ mod tests {
     async fn test_search_with_special_characters() {
         let db = setup_test_db().await;
 
-        create_task(&db, "task1", "Test task", "task", "todo", None, &[]).await;
+        create_task(&db, "task1", "Test task", "task", "in_progress", None, &[]).await;
 
         // Search with quotes - should not cause SQL injection
         let cmd = ListCommand {
@@ -1375,10 +1537,26 @@ mod tests {
         let db = setup_test_db().await;
 
         // Create task without description
-        create_task(&db, "task1", "Auth Feature", "task", "todo", None, &[]).await;
+        create_task(
+            &db,
+            "task1",
+            "Auth Feature",
+            "task",
+            "in_progress",
+            None,
+            &[],
+        )
+        .await;
         // Create task with description
-        create_task_with_description(&db, "task2", "Other", "auth in description", "task", "todo")
-            .await;
+        create_task_with_description(
+            &db,
+            "task2",
+            "Other",
+            "auth in description",
+            "task",
+            "in_progress",
+        )
+        .await;
 
         let cmd = ListCommand {
             levels: vec![],
@@ -1408,19 +1586,46 @@ mod tests {
     async fn test_tag_or_semantics_preserved() {
         let db = setup_test_db().await;
 
-        create_task(&db, "task1", "Task 1", "task", "todo", None, &["backend"]).await;
-        create_task(&db, "task2", "Task 2", "task", "todo", None, &["frontend"]).await;
+        create_task(
+            &db,
+            "task1",
+            "Task 1",
+            "task",
+            "in_progress",
+            None,
+            &["backend"],
+        )
+        .await;
+        create_task(
+            &db,
+            "task2",
+            "Task 2",
+            "task",
+            "in_progress",
+            None,
+            &["frontend"],
+        )
+        .await;
         create_task(
             &db,
             "task3",
             "Task 3",
             "task",
-            "todo",
+            "in_progress",
             None,
             &["backend", "api"],
         )
         .await;
-        create_task(&db, "task4", "Task 4", "task", "todo", None, &["other"]).await;
+        create_task(
+            &db,
+            "task4",
+            "Task 4",
+            "task",
+            "in_progress",
+            None,
+            &["other"],
+        )
+        .await;
 
         // Filter by multiple tags (OR semantics)
         let cmd = ListCommand {

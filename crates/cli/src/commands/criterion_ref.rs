@@ -206,7 +206,7 @@ mod tests {
             r#"CREATE task:{} SET
                 title = "Test Task",
                 level = "task",
-                status = "todo",
+                status = "in_progress",
                 sections = [{}]"#,
             id,
             sections.join(", ")
@@ -222,7 +222,7 @@ mod tests {
             r#"CREATE task:{} SET
                 title = "Test Task",
                 level = "task",
-                status = "todo",
+                status = "in_progress",
                 sections = [
                     {{ type: "step", content: "First step", order: 1 }},
                     {{ type: "testing_criterion", content: "First criterion", order: 1, refs: [] }},

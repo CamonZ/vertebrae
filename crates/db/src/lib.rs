@@ -543,14 +543,15 @@ mod tests {
         assert_eq!(schema.name, "default");
         assert!(schema.is_default);
 
-        // Verify it has the expected statuses (includes 'todo' for backward compatibility)
+        // Verify it has the expected statuses (todo is no longer included)
         let status_names: Vec<&str> = schema.statuses.iter().map(|s| s.name.as_str()).collect();
         assert!(status_names.contains(&"backlog"));
-        assert!(status_names.contains(&"todo"));
         assert!(status_names.contains(&"in_progress"));
         assert!(status_names.contains(&"pending_review"));
         assert!(status_names.contains(&"done"));
         assert!(status_names.contains(&"rejected"));
+        // todo is no longer a valid status
+        assert!(!status_names.contains(&"todo"));
 
         // Clean up
         let _ = std::fs::remove_dir_all(&temp_dir);

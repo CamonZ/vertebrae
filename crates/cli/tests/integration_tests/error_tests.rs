@@ -35,7 +35,7 @@ async fn test_transition_nonexistent_task() {
 async fn test_depend_on_nonexistent_blocker() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Task 1", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Task 1", "task", "in_progress").await;
 
     let cmd = depend_cmd("task1", "nonexistent");
     let result = cmd.execute(&ctx.service).await;
@@ -47,7 +47,7 @@ async fn test_depend_on_nonexistent_blocker() {
 async fn test_depend_nonexistent_task() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "blocker", "Blocker", "task", "todo").await;
+    create_task(ctx.db(), "blocker", "Blocker", "task", "in_progress").await;
 
     let cmd = depend_cmd("nonexistent", "blocker");
     let result = cmd.execute(&ctx.service).await;
@@ -125,7 +125,7 @@ async fn test_transition_rejected_to_done_without_force() {
 async fn test_self_dependency_rejected() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Task 1", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Task 1", "task", "in_progress").await;
 
     let cmd = depend_cmd("task1", "task1");
     let result = cmd.execute(&ctx.service).await;
@@ -139,7 +139,7 @@ async fn test_self_dependency_rejected() {
 async fn test_self_parent_rejected() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Task 1", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Task 1", "task", "in_progress").await;
 
     let cmd = update_cmd_with_parent("task1", Some("task1"));
     let result = cmd.execute(&ctx.service).await;
@@ -158,8 +158,8 @@ async fn test_self_parent_rejected() {
 async fn test_dependency_cycle_rejected() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Task 1", "task", "todo").await;
-    create_task(ctx.db(), "task2", "Task 2", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Task 1", "task", "in_progress").await;
+    create_task(ctx.db(), "task2", "Task 2", "task", "in_progress").await;
 
     // Create task1 -> task2
     depend_cmd("task1", "task2")
@@ -180,9 +180,9 @@ async fn test_dependency_cycle_rejected() {
 async fn test_transitive_cycle_rejected() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Task 1", "task", "todo").await;
-    create_task(ctx.db(), "task2", "Task 2", "task", "todo").await;
-    create_task(ctx.db(), "task3", "Task 3", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Task 1", "task", "in_progress").await;
+    create_task(ctx.db(), "task2", "Task 2", "task", "in_progress").await;
+    create_task(ctx.db(), "task3", "Task 3", "task", "in_progress").await;
 
     // Create chain: task1 -> task2 -> task3
     depend_cmd("task1", "task2")
@@ -219,7 +219,7 @@ async fn test_update_nonexistent_task() {
 async fn test_update_parent_to_nonexistent() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Task 1", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Task 1", "task", "in_progress").await;
 
     let cmd = update_cmd_with_parent("task1", Some("nonexistent"));
     let result = cmd.execute(&ctx.service).await;
@@ -263,7 +263,7 @@ async fn test_blockers_nonexistent_task() {
 async fn test_path_from_nonexistent() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Task 1", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Task 1", "task", "in_progress").await;
 
     let cmd = path_cmd("nonexistent", "task1");
     let result = cmd.execute(&ctx.service).await;
@@ -275,7 +275,7 @@ async fn test_path_from_nonexistent() {
 async fn test_path_to_nonexistent() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Task 1", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Task 1", "task", "in_progress").await;
 
     let cmd = path_cmd("task1", "nonexistent");
     let result = cmd.execute(&ctx.service).await;

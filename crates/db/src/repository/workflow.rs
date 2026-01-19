@@ -360,7 +360,7 @@ impl<'a> WorkflowRepository<'a> {
     /// Create the default workflow if it doesn't already exist.
     ///
     /// The default workflow matches the standard task status flow:
-    /// backlog -> todo -> in_progress -> pending_review -> done
+    /// backlog -> in_progress -> pending_review -> done
     ///
     /// This workflow is used for backwards compatibility and is automatically
     /// assigned to tasks that don't have an explicit workflow.
@@ -381,7 +381,7 @@ impl<'a> WorkflowRepository<'a> {
 
         let default_workflow = Workflow::new("Default Workflow").with_description(
             "Standard task workflow matching the status flow: \
-                backlog -> todo -> in_progress -> pending_review -> done",
+                backlog -> in_progress -> pending_review -> done",
         );
 
         self.create(DEFAULT_WORKFLOW_ID, &default_workflow).await?;
@@ -390,7 +390,7 @@ impl<'a> WorkflowRepository<'a> {
         let step_repo = StepRepository::new(self.client);
         let workflow_thing = surrealdb::sql::Thing::from(("workflow", DEFAULT_WORKFLOW_ID));
 
-        let step_names = ["backlog", "todo", "in_progress", "pending_review", "done"];
+        let step_names = ["backlog", "in_progress", "pending_review", "done"];
         let mut created_step_ids: Vec<surrealdb::sql::Thing> = Vec::new();
 
         for (order, step_name) in step_names.iter().enumerate() {
@@ -448,10 +448,9 @@ impl<'a> WorkflowRepository<'a> {
         fn status_to_step(status: &str) -> Option<usize> {
             match status {
                 "backlog" => Some(0),
-                "todo" => Some(1),
-                "in_progress" => Some(2),
-                "pending_review" => Some(3),
-                "done" => Some(4),
+                "in_progress" => Some(1),
+                "pending_review" => Some(2),
+                "done" => Some(3),
                 _ => None, // rejected and unknown statuses not in default workflow
             }
         }
@@ -536,10 +535,9 @@ impl<'a> WorkflowRepository<'a> {
         fn status_to_step(status: &str) -> Option<usize> {
             match status {
                 "backlog" => Some(0),
-                "todo" => Some(1),
-                "in_progress" => Some(2),
-                "pending_review" => Some(3),
-                "done" => Some(4),
+                "in_progress" => Some(1),
+                "pending_review" => Some(2),
+                "done" => Some(3),
                 _ => None, // rejected and unknown statuses not in default workflow
             }
         }
@@ -1223,46 +1221,41 @@ mod tests {
         let workflow_repo = WorkflowRepository::new(db.client());
         let task_repo = TaskRepository::new(db.client());
 
-        // Create tasks with different statuses
+        // Create tasks with different statuses (no todo status anymore)
         let task1 = Task::new("Backlog Task", Level::Task).with_status("backlog");
-        let task2 = Task::new("Todo Task", Level::Task).with_status("todo");
-        let task3 = Task::new("In Progress Task", Level::Task).with_status("in_progress");
-        let task4 = Task::new("Pending Review Task", Level::Task).with_status("pending_review");
-        let task5 = Task::new("Done Task", Level::Task).with_status("done");
+        let task2 = Task::new("In Progress Task", Level::Task).with_status("in_progress");
+        let task3 = Task::new("Pending Review Task", Level::Task).with_status("pending_review");
+        let task4 = Task::new("Done Task", Level::Task).with_status("done");
 
         task_repo.create("t1", &task1).await.unwrap();
         task_repo.create("t2", &task2).await.unwrap();
         task_repo.create("t3", &task3).await.unwrap();
         task_repo.create("t4", &task4).await.unwrap();
-        task_repo.create("t5", &task5).await.unwrap();
 
         // Run migration
         let result = workflow_repo.migrate_to_default_workflow().await.unwrap();
-        assert_eq!(result.migrated, 5);
+        assert_eq!(result.migrated, 4);
         assert_eq!(result.skipped, 0);
         assert!(result.has_migrations());
         assert!(!result.has_skipped());
 
         // Verify each task has correct workflow_id and current_step
+        // New step mapping: backlog=0, in_progress=1, pending_review=2, done=3
         let t1 = task_repo.get("t1").await.unwrap().unwrap();
         assert!(t1.workflow_id.is_some());
         assert_eq!(t1.current_step, Some(0)); // backlog
 
         let t2 = task_repo.get("t2").await.unwrap().unwrap();
         assert!(t2.workflow_id.is_some());
-        assert_eq!(t2.current_step, Some(1)); // todo
+        assert_eq!(t2.current_step, Some(1)); // in_progress
 
         let t3 = task_repo.get("t3").await.unwrap().unwrap();
         assert!(t3.workflow_id.is_some());
-        assert_eq!(t3.current_step, Some(2)); // in_progress
+        assert_eq!(t3.current_step, Some(2)); // pending_review
 
         let t4 = task_repo.get("t4").await.unwrap().unwrap();
         assert!(t4.workflow_id.is_some());
-        assert_eq!(t4.current_step, Some(3)); // pending_review
-
-        let t5 = task_repo.get("t5").await.unwrap().unwrap();
-        assert!(t5.workflow_id.is_some());
-        assert_eq!(t5.current_step, Some(4)); // done
+        assert_eq!(t4.current_step, Some(3)); // done
 
         cleanup(&temp_dir);
     }
@@ -1278,7 +1271,7 @@ mod tests {
 
         // Create a rejected task and a normal task
         let rejected_task = Task::new("Rejected Task", Level::Task).with_status("rejected");
-        let normal_task = Task::new("Normal Task", Level::Task).with_status("todo");
+        let normal_task = Task::new("Normal Task", Level::Task).with_status("in_progress");
 
         task_repo.create("rejected", &rejected_task).await.unwrap();
         task_repo.create("normal", &normal_task).await.unwrap();
@@ -1314,7 +1307,7 @@ mod tests {
         let task_repo = TaskRepository::new(db.client());
 
         // Create a task
-        let task = Task::new("Test Task", Level::Task).with_status("todo");
+        let task = Task::new("Test Task", Level::Task).with_status("in_progress");
         task_repo.create("test", &task).await.unwrap();
 
         // Run migration first time
@@ -1344,7 +1337,7 @@ mod tests {
         let task_repo = TaskRepository::new(db.client());
 
         // Create a task and assign it to the workflow manually
-        let task = Task::new("Pre-assigned Task", Level::Task).with_status("todo");
+        let task = Task::new("Pre-assigned Task", Level::Task).with_status("in_progress");
         task_repo.create("assigned", &task).await.unwrap();
 
         let workflow_thing = surrealdb::sql::Thing::from(("workflow", DEFAULT_WORKFLOW_ID));
@@ -1391,7 +1384,7 @@ mod tests {
         // Create tasks with different statuses
         let task1 = Task::new("Backlog Task", Level::Task).with_status("backlog");
         let task2 = Task::new("Rejected Task", Level::Task).with_status("rejected");
-        let task3 = Task::new("Todo Task", Level::Task).with_status("todo");
+        let task3 = Task::new("Todo Task", Level::Task).with_status("in_progress");
 
         task_repo.create("t1", &task1).await.unwrap();
         task_repo.create("t2", &task2).await.unwrap();

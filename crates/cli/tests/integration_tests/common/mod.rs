@@ -159,7 +159,7 @@ pub fn add_cmd_full(
 pub fn triage_cmd(id: &str) -> TransitionToCommand {
     TransitionToCommand {
         id: id.to_string(),
-        target: TargetStatus::Todo,
+        target: TargetStatus::InProgress,
         reason: None,
         force: false,
         skip_validation: true, // Skip validation by default for existing tests
@@ -171,7 +171,7 @@ pub fn triage_cmd(id: &str) -> TransitionToCommand {
 pub fn triage_cmd_with_validation(id: &str) -> TransitionToCommand {
     TransitionToCommand {
         id: id.to_string(),
-        target: TargetStatus::Todo,
+        target: TargetStatus::InProgress,
         reason: None,
         force: false,
         skip_validation: false,
@@ -183,7 +183,7 @@ pub fn triage_cmd_with_validation(id: &str) -> TransitionToCommand {
 pub fn triage_cmd_force(id: &str) -> TransitionToCommand {
     TransitionToCommand {
         id: id.to_string(),
-        target: TargetStatus::Todo,
+        target: TargetStatus::InProgress,
         reason: None,
         force: true,
         skip_validation: false,
@@ -1100,7 +1100,7 @@ mod tests {
         assert_eq!(count_tasks(ctx2.db()).await, 0);
 
         // Add task to ctx1
-        create_task(ctx1.db(), "task1", "Test Task", "task", "todo").await;
+        create_task(ctx1.db(), "task1", "Test Task", "task", "in_progress").await;
 
         // Verify ctx1 has task but ctx2 does not
         assert_eq!(count_tasks(ctx1.db()).await, 1);
@@ -1117,8 +1117,8 @@ mod tests {
     async fn test_relationship_helpers() {
         let ctx = TestContext::new().await;
 
-        create_task(ctx.db(), "parent", "Parent", "epic", "todo").await;
-        create_task(ctx.db(), "child", "Child", "ticket", "todo").await;
+        create_task(ctx.db(), "parent", "Parent", "epic", "in_progress").await;
+        create_task(ctx.db(), "child", "Child", "ticket", "in_progress").await;
         create_task(ctx.db(), "blocker", "Blocker", "task", "done").await;
 
         create_child_of(ctx.db(), "child", "parent").await;
@@ -1134,9 +1134,9 @@ mod tests {
 
         assert_eq!(count_tasks(ctx.db()).await, 0);
 
-        create_task(ctx.db(), "task1", "Task 1", "task", "todo").await;
-        create_task(ctx.db(), "task2", "Task 2", "task", "todo").await;
-        create_task(ctx.db(), "task3", "Task 3", "task", "todo").await;
+        create_task(ctx.db(), "task1", "Task 1", "task", "in_progress").await;
+        create_task(ctx.db(), "task2", "Task 2", "task", "in_progress").await;
+        create_task(ctx.db(), "task3", "Task 3", "task", "in_progress").await;
 
         assert_eq!(count_tasks(ctx.db()).await, 3);
 

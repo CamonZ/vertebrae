@@ -163,7 +163,7 @@ async fn test_workflow_assign() {
     let ctx = TestContext::new().await;
 
     // Create task and workflow
-    create_task(ctx.db(), "task1", "Test Task", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
     let add_result = workflow_add_cmd("review", "Review Step", "gpt-4")
         .execute(&ctx.workflow_service)
         .await
@@ -181,7 +181,7 @@ async fn test_workflow_unassign() {
     let ctx = TestContext::new().await;
 
     // Create and assign workflow
-    create_task(ctx.db(), "task1", "Test Task", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
     let add_result = workflow_add_cmd("review", "Review Step", "gpt-4")
         .execute(&ctx.workflow_service)
         .await
@@ -229,7 +229,7 @@ async fn test_workflow_advance() {
     let workflow_id = extract_workflow_id(&add_result);
 
     // Create task and assign workflow
-    create_task(ctx.db(), "task1", "Test Task", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
     workflow_assign_cmd("task1", &workflow_id)
         .execute(&ctx.workflow_service)
         .await
@@ -268,7 +268,7 @@ async fn test_workflow_retreat() {
     let workflow_id = extract_workflow_id(&add_result);
 
     // Create task and assign workflow
-    create_task(ctx.db(), "task1", "Test Task", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
     workflow_assign_cmd("task1", &workflow_id)
         .execute(&ctx.workflow_service)
         .await
@@ -298,7 +298,7 @@ async fn test_workflow_reject() {
         .unwrap();
     let workflow_id = extract_workflow_id(&add_result);
 
-    create_task(ctx.db(), "task1", "Test Task", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
     workflow_assign_cmd("task1", &workflow_id)
         .execute(&ctx.workflow_service)
         .await
@@ -318,7 +318,7 @@ async fn test_workflow_reject() {
 async fn test_workflow_assign_nonexistent_workflow() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Test Task", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
 
     let cmd = workflow_assign_cmd("task1", "nonexistent-workflow");
     let result = cmd.execute(&ctx.workflow_service).await;
@@ -346,7 +346,7 @@ async fn test_workflow_assign_nonexistent_task() {
 async fn test_workflow_advance_no_workflow_assigned() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Test Task", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
 
     let cmd = workflow_advance_cmd("task1");
     let result = cmd.execute(&ctx.workflow_service).await;

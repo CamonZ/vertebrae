@@ -549,7 +549,7 @@ mod tests {
             "abc123",
             "Original title",
             "task",
-            "todo",
+            "in_progress",
             Some("low"),
             &["backend"],
         )
@@ -590,7 +590,7 @@ mod tests {
             "abc123",
             "Test task",
             "task",
-            "todo",
+            "in_progress",
             Some("low"),
             &["api"],
         )
@@ -631,7 +631,7 @@ mod tests {
             "abc123",
             "Test task",
             "task",
-            "todo",
+            "in_progress",
             None,
             &["initial"],
         )
@@ -666,7 +666,7 @@ mod tests {
             "abc123",
             "Test task",
             "task",
-            "todo",
+            "in_progress",
             None,
             &["initial", "toremove"],
         )
@@ -701,7 +701,7 @@ mod tests {
             "abc123",
             "Test task",
             "task",
-            "todo",
+            "in_progress",
             None,
             &["existing"],
         )
@@ -737,7 +737,7 @@ mod tests {
             "parent1",
             "Parent task",
             "epic",
-            "todo",
+            "in_progress",
             None,
             &[],
         )
@@ -747,7 +747,7 @@ mod tests {
             "child1",
             "Child task",
             "task",
-            "todo",
+            "in_progress",
             None,
             &[],
         )
@@ -781,7 +781,7 @@ mod tests {
             "parent1",
             "Parent 1",
             "epic",
-            "todo",
+            "in_progress",
             None,
             &[],
         )
@@ -791,7 +791,7 @@ mod tests {
             "parent2",
             "Parent 2",
             "epic",
-            "todo",
+            "in_progress",
             None,
             &[],
         )
@@ -801,7 +801,7 @@ mod tests {
             "child1",
             "Child task",
             "task",
-            "todo",
+            "in_progress",
             None,
             &[],
         )
@@ -836,7 +836,7 @@ mod tests {
             "parent1",
             "Parent task",
             "epic",
-            "todo",
+            "in_progress",
             None,
             &[],
         )
@@ -846,7 +846,7 @@ mod tests {
             "child1",
             "Child task",
             "task",
-            "todo",
+            "in_progress",
             None,
             &[],
         )
@@ -886,7 +886,7 @@ mod tests {
             "abc123",
             "Test task",
             "task",
-            "todo",
+            "in_progress",
             None,
             &[],
         )
@@ -927,7 +927,7 @@ mod tests {
             "abc123",
             "Test task",
             "task",
-            "todo",
+            "in_progress",
             None,
             &[],
         )
@@ -968,7 +968,7 @@ mod tests {
             "abc123",
             "Test task",
             "task",
-            "todo",
+            "in_progress",
             None,
             &[],
         )
@@ -1002,7 +1002,7 @@ mod tests {
             "abc123",
             "Test task",
             "task",
-            "todo",
+            "in_progress",
             None,
             &[],
         )
@@ -1036,7 +1036,7 @@ mod tests {
             "abc123",
             "Test task",
             "task",
-            "todo",
+            "in_progress",
             None,
             &[],
         )
@@ -1068,7 +1068,7 @@ mod tests {
             "abc123",
             "Original",
             "task",
-            "todo",
+            "in_progress",
             Some("low"),
             &["old"],
         )
@@ -1212,7 +1212,7 @@ mod tests {
             "parent1",
             "Parent task",
             "epic",
-            "todo",
+            "in_progress",
             None,
             &[],
         )
@@ -1222,7 +1222,7 @@ mod tests {
             "child1",
             "Child task",
             "task",
-            "todo",
+            "in_progress",
             None,
             &[],
         )
@@ -1258,7 +1258,7 @@ mod tests {
             "abc123",
             "Test task",
             "task",
-            "todo",
+            "in_progress",
             None,
             &[],
         )
@@ -1301,7 +1301,7 @@ mod tests {
             title: "Test task".to_string(),
             description: Some("Original description".to_string()),
             level: Level::Task,
-            status: "todo".to_string(),
+            status: "in_progress".to_string(),
             priority: None,
             tags: vec![],
             sections: vec![],
@@ -1400,7 +1400,7 @@ mod tests {
             "abc123",
             "Test task",
             "task",
-            "todo",
+            "in_progress",
             None,
             &[],
         )
@@ -1453,7 +1453,7 @@ mod tests {
             "abc123",
             "Test task",
             "task",
-            "todo",
+            "in_progress",
             None,
             &[],
         )
@@ -1501,7 +1501,7 @@ mod tests {
             "abc123",
             "Test task",
             "task",
-            "todo",
+            "in_progress",
             None,
             &[],
         )
@@ -1618,7 +1618,7 @@ mod tests {
             "abc123",
             "Original title",
             "task",
-            "todo",
+            "in_progress",
             None,
             &[],
         )
@@ -1670,7 +1670,7 @@ mod tests {
             "abc123",
             "Original",
             "task",
-            "todo",
+            "in_progress",
             Some("low"),
             &["old"],
         )
@@ -1724,7 +1724,7 @@ mod tests {
             "parent1",
             "Parent",
             "epic",
-            "todo",
+            "in_progress",
             None,
             &[],
         )
@@ -1734,7 +1734,7 @@ mod tests {
             "child1",
             "Child",
             "task",
-            "todo",
+            "in_progress",
             None,
             &[],
         )
@@ -1771,7 +1771,7 @@ mod tests {
             "abc123",
             "Test task",
             "task",
-            "todo",
+            "in_progress",
             None,
             &[],
         )
@@ -1815,7 +1815,7 @@ mod tests {
             "abc123",
             "Test task",
             "task",
-            "todo",
+            "in_progress",
             None,
             &[],
         )
@@ -1856,7 +1856,7 @@ mod tests {
             "abc123",
             "Test task",
             "task",
-            "todo",
+            "in_progress",
             None,
             &["tag1", "tag2", "tag3"],
         )
@@ -1891,7 +1891,7 @@ mod tests {
             "abc123",
             "Test task",
             "task",
-            "todo",
+            "in_progress",
             None,
             &[],
         )
@@ -1936,7 +1936,7 @@ mod tests {
             "abc123",
             "Test task",
             "task",
-            "todo",
+            "in_progress",
             None,
             &[],
         )
@@ -1978,7 +1978,7 @@ mod tests {
             "abc123",
             "Test task",
             "task",
-            "todo",
+            "in_progress",
             None,
             &[],
         )
@@ -2020,7 +2020,7 @@ mod tests {
             "abc123",
             "Test task",
             "task",
-            "todo",
+            "in_progress",
             None,
             &["existing"],
         )
@@ -2057,7 +2057,7 @@ mod tests {
             "abc123",
             "Test task",
             "task",
-            "todo",
+            "in_progress",
             None,
             &[],
         )
@@ -2095,7 +2095,7 @@ mod tests {
             "abc123",
             "Original",
             "task",
-            "todo",
+            "in_progress",
             None,
             &[],
         )

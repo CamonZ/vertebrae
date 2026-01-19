@@ -22,7 +22,7 @@ mod sql {
             ASSERT $value IN ["epic", "ticket", "task"];
 
         DEFINE FIELD status ON task TYPE string
-            ASSERT $value IN ["backlog", "todo", "in_progress", "pending_review", "done", "rejected"];
+            ASSERT $value IN ["backlog", "in_progress", "pending_review", "done", "rejected"];
 
         DEFINE FIELD priority ON task TYPE option<string>
             ASSERT $value IN [NONE, "low", "medium", "high", "critical"];
@@ -418,7 +418,7 @@ mod tests {
                 CREATE task SET
                     title = "Test Task",
                     level = "task",
-                    status = "todo",
+                    status = "in_progress",
                     priority = "high",
                     tags = ["test", "example"]
             "#,
@@ -468,7 +468,7 @@ mod tests {
                 CREATE task SET
                     title = "Invalid Task",
                     level = "invalid_level",
-                    status = "todo"
+                    status = "in_progress"
             "#,
             )
             .await
@@ -513,7 +513,7 @@ mod tests {
                 CREATE task SET
                     title = "Invalid Task",
                     level = "task",
-                    status = "todo",
+                    status = "in_progress",
                     priority = "super_urgent"
             "#,
             )
@@ -536,7 +536,7 @@ mod tests {
                 CREATE task SET
                     title = "No Priority Task",
                     level = "task",
-                    status = "todo",
+                    status = "in_progress",
                     priority = NONE
             "#,
             )
@@ -561,7 +561,7 @@ mod tests {
                 CREATE task:child SET
                     title = "Child Ticket",
                     level = "ticket",
-                    status = "todo";
+                    status = "in_progress";
             "#,
             )
             .await
@@ -633,7 +633,7 @@ mod tests {
                 CREATE task SET
                     title = "Task with Sections",
                     level = "ticket",
-                    status = "todo",
+                    status = "in_progress",
                     sections = [
                         { type: "goal", content: "Implement feature X" },
                         { type: "context", content: "Background information" },
@@ -662,7 +662,7 @@ mod tests {
                 CREATE task SET
                     title = "Task with Refs",
                     level = "task",
-                    status = "todo",
+                    status = "in_progress",
                     refs = [
                         { path: "src/main.rs", line_start: 1, line_end: 50 },
                         { path: "README.md" }
@@ -686,7 +686,7 @@ mod tests {
                 CREATE task:defaults SET
                     title = "Default Test",
                     level = "task",
-                    status = "todo"
+                    status = "in_progress"
             "#,
             )
             .await
@@ -727,7 +727,7 @@ mod tests {
 
         for level in ["epic", "ticket", "task"] {
             let query = format!(
-                r#"CREATE task SET title = "Test {}", level = "{}", status = "todo""#,
+                r#"CREATE task SET title = "Test {}", level = "{}", status = "in_progress""#,
                 level, level
             );
             let result = client.query(&query).await;
@@ -742,7 +742,7 @@ mod tests {
 
         for (i, status) in [
             "backlog",
-            "todo",
+            "in_progress",
             "in_progress",
             "pending_review",
             "done",
@@ -767,7 +767,7 @@ mod tests {
 
         for (i, priority) in ["low", "medium", "high", "critical"].iter().enumerate() {
             let query = format!(
-                r#"CREATE task SET title = "Test {}", level = "task", status = "todo", priority = "{}""#,
+                r#"CREATE task SET title = "Test {}", level = "task", status = "in_progress", priority = "{}""#,
                 i, priority
             );
             let result = client.query(&query).await;
@@ -828,7 +828,7 @@ mod tests {
                 CREATE task:no_timestamps SET
                     title = "Task without timestamps",
                     level = "task",
-                    status = "todo"
+                    status = "in_progress"
             "#,
             )
             .await;
@@ -1002,7 +1002,7 @@ mod tests {
                 CREATE task:update_test SET
                     title = "Update test",
                     level = "task",
-                    status = "todo"
+                    status = "in_progress"
             "#,
             )
             .await
@@ -1116,7 +1116,7 @@ mod tests {
                 CREATE task:no_step_id SET
                     title = "Task without Step ID",
                     level = "task",
-                    status = "todo"
+                    status = "in_progress"
             "#,
             )
             .await
@@ -1773,7 +1773,7 @@ mod tests {
                 CREATE task:invalid_status SET
                     title = "Invalid Status Test",
                     level = "task",
-                    status = "todo";
+                    status = "in_progress";
                 CREATE workflow:invalid_wf SET
                     name = "Invalid Status Workflow"
             "#,

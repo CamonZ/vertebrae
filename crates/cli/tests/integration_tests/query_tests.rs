@@ -25,9 +25,9 @@ async fn test_list_empty_database() {
 async fn test_list_all_tasks() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Task 1", "task", "todo").await;
-    create_task(ctx.db(), "task2", "Task 2", "task", "todo").await;
-    create_task(ctx.db(), "task3", "Task 3", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Task 1", "task", "in_progress").await;
+    create_task(ctx.db(), "task2", "Task 2", "task", "in_progress").await;
+    create_task(ctx.db(), "task3", "Task 3", "task", "in_progress").await;
 
     let cmd = list_cmd();
     let result = cmd.execute(&ctx.service).await;
@@ -41,11 +41,11 @@ async fn test_list_all_tasks() {
 async fn test_list_with_status_filter() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Task 1", "task", "todo").await;
-    create_task(ctx.db(), "task2", "Task 2", "task", "in_progress").await;
+    create_task(ctx.db(), "task1", "Task 1", "task", "in_progress").await;
+    create_task(ctx.db(), "task2", "Task 2", "task", "backlog").await;
     create_task(ctx.db(), "task3", "Task 3", "task", "done").await;
 
-    let cmd = list_cmd_with_status(vec!["todo"]);
+    let cmd = list_cmd_with_status(vec!["in_progress"]);
     let result = cmd.execute(&ctx.service).await;
 
     assert!(result.is_ok());
@@ -58,11 +58,11 @@ async fn test_list_with_status_filter() {
 async fn test_list_with_multiple_statuses() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Task 1", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Task 1", "task", "in_progress").await;
     create_task(ctx.db(), "task2", "Task 2", "task", "in_progress").await;
     create_task(ctx.db(), "task3", "Task 3", "task", "done").await;
 
-    let cmd = list_cmd_with_status(vec!["todo", "in_progress"]);
+    let cmd = list_cmd_with_status(vec!["in_progress", "pending_review"]);
     let result = cmd.execute(&ctx.service).await;
 
     assert!(result.is_ok());
@@ -74,9 +74,9 @@ async fn test_list_with_multiple_statuses() {
 async fn test_list_with_level_filter() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "epic1", "Epic 1", "epic", "todo").await;
-    create_task(ctx.db(), "ticket1", "Ticket 1", "ticket", "todo").await;
-    create_task(ctx.db(), "task1", "Task 1", "task", "todo").await;
+    create_task(ctx.db(), "epic1", "Epic 1", "epic", "in_progress").await;
+    create_task(ctx.db(), "ticket1", "Ticket 1", "ticket", "in_progress").await;
+    create_task(ctx.db(), "task1", "Task 1", "task", "in_progress").await;
 
     let cmd = list_cmd_with_level(vec![Level::Epic]);
     let result = cmd.execute(&ctx.service).await;
@@ -91,14 +91,30 @@ async fn test_list_with_level_filter() {
 async fn test_list_with_tag_filter() {
     let ctx = TestContext::new().await;
 
-    create_task_with_tags(ctx.db(), "task1", "Task 1", "task", "todo", &["frontend"]).await;
-    create_task_with_tags(ctx.db(), "task2", "Task 2", "task", "todo", &["backend"]).await;
+    create_task_with_tags(
+        ctx.db(),
+        "task1",
+        "Task 1",
+        "task",
+        "in_progress",
+        &["frontend"],
+    )
+    .await;
+    create_task_with_tags(
+        ctx.db(),
+        "task2",
+        "Task 2",
+        "task",
+        "in_progress",
+        &["backend"],
+    )
+    .await;
     create_task_with_tags(
         ctx.db(),
         "task3",
         "Task 3",
         "task",
-        "todo",
+        "in_progress",
         &["frontend", "urgent"],
     )
     .await;
@@ -116,14 +132,14 @@ async fn test_list_root_only() {
     let ctx = TestContext::new().await;
 
     // Create hierarchy: epic -> ticket -> task
-    create_task(ctx.db(), "epic", "Epic", "epic", "todo").await;
-    create_task(ctx.db(), "ticket", "Ticket", "ticket", "todo").await;
-    create_task(ctx.db(), "task1", "Task", "task", "todo").await;
+    create_task(ctx.db(), "epic", "Epic", "epic", "in_progress").await;
+    create_task(ctx.db(), "ticket", "Ticket", "ticket", "in_progress").await;
+    create_task(ctx.db(), "task1", "Task", "task", "in_progress").await;
     create_child_of(ctx.db(), "ticket", "epic").await;
     create_child_of(ctx.db(), "task1", "ticket").await;
 
     // Also a standalone task
-    create_task(ctx.db(), "task2", "Standalone Task", "task", "todo").await;
+    create_task(ctx.db(), "task2", "Standalone Task", "task", "in_progress").await;
 
     let cmd = list_cmd_root();
     let result = cmd.execute(&ctx.service).await;
@@ -138,10 +154,10 @@ async fn test_list_root_only() {
 async fn test_list_with_parent_filter() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "parent", "Parent", "epic", "todo").await;
-    create_task(ctx.db(), "child1", "Child 1", "ticket", "todo").await;
-    create_task(ctx.db(), "child2", "Child 2", "ticket", "todo").await;
-    create_task(ctx.db(), "other", "Other", "task", "todo").await;
+    create_task(ctx.db(), "parent", "Parent", "epic", "in_progress").await;
+    create_task(ctx.db(), "child1", "Child 1", "ticket", "in_progress").await;
+    create_task(ctx.db(), "child2", "Child 2", "ticket", "in_progress").await;
+    create_task(ctx.db(), "other", "Other", "task", "in_progress").await;
     create_child_of(ctx.db(), "child1", "parent").await;
     create_child_of(ctx.db(), "child2", "parent").await;
 
@@ -162,11 +178,18 @@ async fn test_list_with_search() {
         "auth1",
         "Implement authentication",
         "task",
-        "todo",
+        "in_progress",
     )
     .await;
-    create_task(ctx.db(), "auth2", "Fix auth bug", "task", "todo").await;
-    create_task(ctx.db(), "other", "Database migration", "task", "todo").await;
+    create_task(ctx.db(), "auth2", "Fix auth bug", "task", "in_progress").await;
+    create_task(
+        ctx.db(),
+        "other",
+        "Database migration",
+        "task",
+        "in_progress",
+    )
+    .await;
 
     let cmd = list_cmd_with_search("auth");
     let result = cmd.execute(&ctx.service).await;
@@ -181,8 +204,8 @@ async fn test_list_flat_output() {
     let ctx = TestContext::new().await;
 
     // Create hierarchy
-    create_task(ctx.db(), "epic", "Epic", "epic", "todo").await;
-    create_task(ctx.db(), "ticket", "Ticket", "ticket", "todo").await;
+    create_task(ctx.db(), "epic", "Epic", "epic", "in_progress").await;
+    create_task(ctx.db(), "ticket", "Ticket", "ticket", "in_progress").await;
     create_child_of(ctx.db(), "ticket", "epic").await;
 
     let cmd = list_cmd_flat();
@@ -198,7 +221,7 @@ async fn test_list_flat_output() {
 async fn test_list_all_flag_includes_done() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Task 1", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Task 1", "task", "in_progress").await;
     create_task(ctx.db(), "task2", "Task 2", "task", "done").await;
     create_task(ctx.db(), "task3", "Task 3", "task", "rejected").await;
 
@@ -226,7 +249,7 @@ async fn test_show_task_details() {
         "task1",
         "Test Task",
         "task",
-        "todo",
+        "in_progress",
         "This is a description",
     )
     .await;
@@ -248,7 +271,7 @@ async fn test_show_task_details() {
 async fn test_show_task_with_sections() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Test Task", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
     section_cmd("task1", vertebrae_db::SectionType::Goal, "The goal")
         .execute(&ctx.service)
         .await
@@ -270,9 +293,9 @@ async fn test_show_task_with_sections() {
 async fn test_show_task_with_relationships() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "parent", "Parent", "epic", "todo").await;
-    create_task(ctx.db(), "child", "Child", "ticket", "todo").await;
-    create_task(ctx.db(), "blocker", "Blocker", "task", "todo").await;
+    create_task(ctx.db(), "parent", "Parent", "epic", "in_progress").await;
+    create_task(ctx.db(), "child", "Child", "ticket", "in_progress").await;
+    create_task(ctx.db(), "blocker", "Blocker", "task", "in_progress").await;
     create_child_of(ctx.db(), "child", "parent").await;
     create_depends_on(ctx.db(), "child", "blocker").await;
 
@@ -290,7 +313,7 @@ async fn test_show_task_with_relationships() {
 async fn test_show_case_insensitive() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Test Task", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
 
     let cmd = show_cmd("TASK1");
     let result = cmd.execute(&ctx.service).await;
@@ -307,7 +330,7 @@ async fn test_show_case_insensitive() {
 async fn test_blockers_no_dependencies() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Task 1", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Task 1", "task", "in_progress").await;
 
     let cmd = blockers_cmd("task1");
     let result = cmd.execute(&ctx.service).await;
@@ -321,9 +344,9 @@ async fn test_blockers_no_dependencies() {
 async fn test_blockers_direct_blockers() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Task 1", "task", "todo").await;
-    create_task(ctx.db(), "blocker1", "Blocker 1", "task", "todo").await;
-    create_task(ctx.db(), "blocker2", "Blocker 2", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Task 1", "task", "in_progress").await;
+    create_task(ctx.db(), "blocker1", "Blocker 1", "task", "in_progress").await;
+    create_task(ctx.db(), "blocker2", "Blocker 2", "task", "in_progress").await;
     create_depends_on(ctx.db(), "task1", "blocker1").await;
     create_depends_on(ctx.db(), "task1", "blocker2").await;
 
@@ -340,9 +363,9 @@ async fn test_blockers_transitive() {
     let ctx = TestContext::new().await;
 
     // Chain: task1 -> blocker1 -> blocker2
-    create_task(ctx.db(), "task1", "Task 1", "task", "todo").await;
-    create_task(ctx.db(), "blocker1", "Blocker 1", "task", "todo").await;
-    create_task(ctx.db(), "blocker2", "Blocker 2", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Task 1", "task", "in_progress").await;
+    create_task(ctx.db(), "blocker1", "Blocker 1", "task", "in_progress").await;
+    create_task(ctx.db(), "blocker2", "Blocker 2", "task", "in_progress").await;
     create_depends_on(ctx.db(), "task1", "blocker1").await;
     create_depends_on(ctx.db(), "blocker1", "blocker2").await;
 
@@ -359,9 +382,9 @@ async fn test_blockers_transitive() {
 async fn test_blockers_excludes_done_by_default() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Task 1", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Task 1", "task", "in_progress").await;
     create_task(ctx.db(), "blocker1", "Blocker 1", "task", "done").await;
-    create_task(ctx.db(), "blocker2", "Blocker 2", "task", "todo").await;
+    create_task(ctx.db(), "blocker2", "Blocker 2", "task", "in_progress").await;
     create_depends_on(ctx.db(), "task1", "blocker1").await;
     create_depends_on(ctx.db(), "task1", "blocker2").await;
 
@@ -378,9 +401,9 @@ async fn test_blockers_excludes_done_by_default() {
 async fn test_blockers_with_all_flag() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Task 1", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Task 1", "task", "in_progress").await;
     create_task(ctx.db(), "blocker1", "Blocker 1", "task", "done").await;
-    create_task(ctx.db(), "blocker2", "Blocker 2", "task", "todo").await;
+    create_task(ctx.db(), "blocker2", "Blocker 2", "task", "in_progress").await;
     create_depends_on(ctx.db(), "task1", "blocker1").await;
     create_depends_on(ctx.db(), "task1", "blocker2").await;
 
@@ -398,10 +421,10 @@ async fn test_blockers_with_depth_limit() {
     let ctx = TestContext::new().await;
 
     // Chain: task1 -> b1 -> b2 -> b3
-    create_task(ctx.db(), "task1", "Task 1", "task", "todo").await;
-    create_task(ctx.db(), "b1", "Blocker 1", "task", "todo").await;
-    create_task(ctx.db(), "b2", "Blocker 2", "task", "todo").await;
-    create_task(ctx.db(), "b3", "Blocker 3", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Task 1", "task", "in_progress").await;
+    create_task(ctx.db(), "b1", "Blocker 1", "task", "in_progress").await;
+    create_task(ctx.db(), "b2", "Blocker 2", "task", "in_progress").await;
+    create_task(ctx.db(), "b3", "Blocker 3", "task", "in_progress").await;
     create_depends_on(ctx.db(), "task1", "b1").await;
     create_depends_on(ctx.db(), "b1", "b2").await;
     create_depends_on(ctx.db(), "b2", "b3").await;
@@ -420,10 +443,10 @@ async fn test_blockers_with_depth_limit() {
 // =============================================================================
 
 #[tokio::test]
-async fn test_ready_shows_todo_tasks() {
+async fn test_ready_shows_backlog_tasks() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Task 1", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Task 1", "task", "in_progress").await;
     create_task(ctx.db(), "task2", "Task 2", "task", "backlog").await;
 
     let cmd = ready_cmd();
@@ -431,16 +454,17 @@ async fn test_ready_shows_todo_tasks() {
 
     assert!(result.is_ok());
     let ready_result = result.unwrap();
-    assert_eq!(ready_result.todo_ready.len(), 1);
+    // Only task2 is in backlog (ready to start)
     assert_eq!(ready_result.backlog_ready.len(), 1);
+    assert_eq!(ready_result.backlog_ready[0].id, "task2");
 }
 
 #[tokio::test]
 async fn test_ready_excludes_blocked_tasks() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Task 1", "task", "todo").await;
-    create_task(ctx.db(), "blocker", "Blocker", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Task 1", "task", "backlog").await;
+    create_task(ctx.db(), "blocker", "Blocker", "task", "backlog").await;
     create_depends_on(ctx.db(), "task1", "blocker").await;
 
     let cmd = ready_cmd();
@@ -449,15 +473,15 @@ async fn test_ready_excludes_blocked_tasks() {
     assert!(result.is_ok());
     let ready_result = result.unwrap();
     // task1 is blocked, blocker is ready
-    assert_eq!(ready_result.todo_ready.len(), 1);
-    assert_eq!(ready_result.todo_ready[0].id, "blocker");
+    assert_eq!(ready_result.backlog_ready.len(), 1);
+    assert_eq!(ready_result.backlog_ready[0].id, "blocker");
 }
 
 #[tokio::test]
 async fn test_ready_excludes_tasks_with_in_progress_children() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "parent", "Parent", "epic", "todo").await;
+    create_task(ctx.db(), "parent", "Parent", "epic", "backlog").await;
     create_task(ctx.db(), "child", "Child", "task", "in_progress").await;
     create_child_of(ctx.db(), "child", "parent").await;
 
@@ -467,7 +491,7 @@ async fn test_ready_excludes_tasks_with_in_progress_children() {
     assert!(result.is_ok());
     let ready_result = result.unwrap();
     // Parent has work started (child is in_progress)
-    assert!(ready_result.todo_ready.is_empty());
+    assert!(ready_result.backlog_ready.is_empty());
 }
 
 // =============================================================================
@@ -478,8 +502,8 @@ async fn test_ready_excludes_tasks_with_in_progress_children() {
 async fn test_path_direct_dependency() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Task 1", "task", "todo").await;
-    create_task(ctx.db(), "task2", "Task 2", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Task 1", "task", "in_progress").await;
+    create_task(ctx.db(), "task2", "Task 2", "task", "in_progress").await;
     create_depends_on(ctx.db(), "task1", "task2").await;
 
     let cmd = path_cmd("task1", "task2");
@@ -497,9 +521,9 @@ async fn test_path_transitive() {
     let ctx = TestContext::new().await;
 
     // Chain: task1 -> task2 -> task3
-    create_task(ctx.db(), "task1", "Task 1", "task", "todo").await;
-    create_task(ctx.db(), "task2", "Task 2", "task", "todo").await;
-    create_task(ctx.db(), "task3", "Task 3", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Task 1", "task", "in_progress").await;
+    create_task(ctx.db(), "task2", "Task 2", "task", "in_progress").await;
+    create_task(ctx.db(), "task3", "Task 3", "task", "in_progress").await;
     create_depends_on(ctx.db(), "task1", "task2").await;
     create_depends_on(ctx.db(), "task2", "task3").await;
 
@@ -517,8 +541,8 @@ async fn test_path_transitive() {
 async fn test_path_no_connection() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Task 1", "task", "todo").await;
-    create_task(ctx.db(), "task2", "Task 2", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Task 1", "task", "in_progress").await;
+    create_task(ctx.db(), "task2", "Task 2", "task", "in_progress").await;
     // No dependency between them
 
     let cmd = path_cmd("task1", "task2");
@@ -533,7 +557,7 @@ async fn test_path_no_connection() {
 async fn test_path_same_task() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Task 1", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Task 1", "task", "in_progress").await;
 
     let cmd = path_cmd("task1", "task1");
     let result = cmd.execute(&ctx.service).await;
@@ -549,8 +573,8 @@ async fn test_path_same_task() {
 async fn test_path_case_insensitive() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Task 1", "task", "todo").await;
-    create_task(ctx.db(), "task2", "Task 2", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Task 1", "task", "in_progress").await;
+    create_task(ctx.db(), "task2", "Task 2", "task", "in_progress").await;
     create_depends_on(ctx.db(), "task1", "task2").await;
 
     let cmd = path_cmd("TASK1", "TASK2");

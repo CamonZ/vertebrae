@@ -1,7 +1,7 @@
 //! Lifecycle tests for task creation and status transitions
 //!
 //! Tests the add command with various options and status transitions
-//! through the task lifecycle (backlog -> todo -> in_progress -> pending_review -> done).
+//! through the task lifecycle (backlog -> in_progress -> pending_review -> done).
 
 use super::common::*;
 use vertebrae_cli::commands::{TransitionToCommand, transition_to};
@@ -87,7 +87,7 @@ async fn test_add_task_with_parent() {
     let ctx = TestContext::new().await;
 
     // Create parent epic first
-    create_task(ctx.db(), "parent", "Parent Epic", "epic", "todo").await;
+    create_task(ctx.db(), "parent", "Parent Epic", "epic", "in_progress").await;
 
     let cmd = add_cmd_with_parent("Child Task", "parent");
     let result = cmd.execute(&ctx.service).await;
@@ -104,7 +104,7 @@ async fn test_add_task_with_depends_on() {
     let ctx = TestContext::new().await;
 
     // Create blocker first
-    create_task(ctx.db(), "blocker", "Blocker Task", "task", "todo").await;
+    create_task(ctx.db(), "blocker", "Blocker Task", "task", "in_progress").await;
 
     let mut cmd = add_cmd("Dependent Task");
     cmd.depends_on = vec!["blocker".to_string()];
@@ -165,7 +165,7 @@ async fn test_transition_backlog_to_todo() {
     assert!(result.is_ok());
     assert_eq!(
         get_task_status(ctx.db(), "task1").await,
-        Some("todo".to_string())
+        Some("in_progress".to_string())
     );
 }
 
@@ -173,7 +173,7 @@ async fn test_transition_backlog_to_todo() {
 async fn test_transition_todo_to_in_progress() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Test Task", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
 
     let cmd = start_cmd("task1");
     let result = cmd.execute(&ctx.service).await;
@@ -221,7 +221,7 @@ async fn test_transition_pending_review_to_done() {
 async fn test_transition_todo_to_rejected() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Test Task", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
 
     let cmd = reject_cmd("task1");
     let result = cmd.execute(&ctx.service).await;
@@ -234,29 +234,28 @@ async fn test_transition_todo_to_rejected() {
 }
 
 #[tokio::test]
-async fn test_transition_in_progress_to_rejected_not_allowed() {
+async fn test_transition_in_progress_to_rejected_is_allowed() {
     let ctx = TestContext::new().await;
 
     create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
 
-    // Direct transition from in_progress to rejected is NOT allowed
-    // Valid transitions from in_progress: pending_review only
-    // Note: The skip_validation flag in CLI is not wired to bypass service-level transition rules
+    // Direct transition from in_progress to rejected IS allowed in the new schema
     let cmd = reject_cmd("task1");
     let result = cmd.execute(&ctx.service).await;
 
-    // This transition is invalid per the state machine
-    assert!(result.is_err());
-    let err = result.unwrap_err().to_string();
-    // Error message format: "Invalid transition from 'in_progress' to 'rejected'. Valid transitions: ..."
-    assert!(err.contains("Invalid transition"));
+    // This transition is valid
+    assert!(result.is_ok());
+    assert_eq!(
+        get_task_status(ctx.db(), "task1").await,
+        Some("rejected".to_string())
+    );
 }
 
 #[tokio::test]
 async fn test_transition_with_reason() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Test Task", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
 
     let cmd = reject_cmd_with_reason("task1", "Duplicate task");
     let result = cmd.execute(&ctx.service).await;
@@ -278,7 +277,7 @@ async fn test_completing_task_unblocks_dependents() {
 
     // Create blocker and dependent
     create_task(ctx.db(), "blocker", "Blocker", "task", "in_progress").await;
-    create_task(ctx.db(), "dependent", "Dependent", "task", "todo").await;
+    create_task(ctx.db(), "dependent", "Dependent", "task", "in_progress").await;
     create_depends_on(ctx.db(), "dependent", "blocker").await;
 
     // Complete the blocker: in_progress -> pending_review -> done
@@ -301,7 +300,7 @@ async fn test_force_transition_skips_validation() {
     let ctx = TestContext::new().await;
 
     // Create a task with an incomplete blocker
-    create_task(ctx.db(), "blocker", "Blocker", "task", "todo").await;
+    create_task(ctx.db(), "blocker", "Blocker", "task", "in_progress").await;
     create_task(ctx.db(), "task1", "Test Task", "task", "backlog").await;
     create_depends_on(ctx.db(), "task1", "blocker").await;
 
@@ -333,8 +332,104 @@ async fn test_invalid_transition_is_rejected() {
     // Invalid transition should fail
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
-    // Error message format: "Invalid transition from 'backlog' to 'done'. Valid transitions: todo"
-    assert!(err.contains("Invalid transition"));
+    assert!(err.contains("Invalid status transition"));
+}
+
+#[tokio::test]
+async fn test_invalid_transition_shows_valid_options_in_hint() {
+    let ctx = TestContext::new().await;
+
+    create_task(ctx.db(), "task1", "Test Task", "task", "backlog").await;
+
+    // Try invalid transition from backlog to done
+    let cmd = TransitionToCommand {
+        id: "task1".to_string(),
+        target: transition_to::TargetStatus::Done,
+        reason: None,
+        force: false,
+        skip_validation: false,
+    };
+    let result = cmd.execute(&ctx.service).await;
+
+    // Error should include valid transitions from backlog status
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+
+    // Check error message contains the transition details
+    let err_msg = err.to_string();
+    assert!(err_msg.contains("Invalid status transition from 'backlog' to 'done'"));
+
+    // Check hint contains the valid transitions
+    let hint = err.hint();
+    assert!(
+        hint.is_some(),
+        "Hint should be present for invalid transition"
+    );
+    let hint_str = hint.unwrap();
+    assert!(
+        hint_str.contains("in_progress"),
+        "Hint should list 'in_progress' as valid transition. Got: {}",
+        hint_str
+    );
+    assert!(
+        hint_str.contains("rejected"),
+        "Hint should list 'rejected' as valid transition. Got: {}",
+        hint_str
+    );
+}
+
+#[tokio::test]
+async fn test_invalid_transition_from_terminal_state_shows_no_valid_options() {
+    let ctx = TestContext::new().await;
+
+    // Create a task and transition it to done (terminal state)
+    create_task(ctx.db(), "task1", "Test Task", "task", "backlog").await;
+
+    // backlog -> in_progress -> done using commands
+    let cmd1 = TransitionToCommand {
+        id: "task1".to_string(),
+        target: transition_to::TargetStatus::InProgress,
+        reason: None,
+        force: false,
+        skip_validation: false,
+    };
+    cmd1.execute(&ctx.service).await.unwrap();
+
+    let cmd2 = TransitionToCommand {
+        id: "task1".to_string(),
+        target: transition_to::TargetStatus::Done,
+        reason: None,
+        force: false,
+        skip_validation: false,
+    };
+    cmd2.execute(&ctx.service).await.unwrap();
+
+    // Try invalid transition from done to in_progress
+    let cmd = TransitionToCommand {
+        id: "task1".to_string(),
+        target: transition_to::TargetStatus::InProgress,
+        reason: None,
+        force: false,
+        skip_validation: false,
+    };
+    let result = cmd.execute(&ctx.service).await;
+
+    // Error should indicate terminal state has no valid transitions
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+
+    let err_msg = err.to_string();
+    assert!(err_msg.contains("Invalid status transition from 'done' to 'in_progress'"));
+
+    // Hint should indicate checking vtb list (since there are no valid transitions)
+    let hint = err.hint();
+    assert!(hint.is_some());
+    let hint_str = hint.unwrap();
+    assert!(
+        hint_str.contains("vtb list"),
+        "Hint for terminal state should reference 'vtb list'. Got: {}",
+        hint_str
+    );
 }
 
 // =============================================================================
@@ -345,7 +440,7 @@ async fn test_invalid_transition_is_rejected() {
 async fn test_delete_task() {
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Test Task", "task", "todo").await;
+    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
     assert!(task_exists(ctx.db(), "task1").await);
 
     let cmd = delete_cmd("task1", false);
@@ -360,9 +455,9 @@ async fn test_delete_task_cascade() {
     let ctx = TestContext::new().await;
 
     // Create parent with children
-    create_task(ctx.db(), "parent", "Parent", "epic", "todo").await;
-    create_task(ctx.db(), "child1", "Child 1", "ticket", "todo").await;
-    create_task(ctx.db(), "child2", "Child 2", "ticket", "todo").await;
+    create_task(ctx.db(), "parent", "Parent", "epic", "in_progress").await;
+    create_task(ctx.db(), "child1", "Child 1", "ticket", "in_progress").await;
+    create_task(ctx.db(), "child2", "Child 2", "ticket", "in_progress").await;
     create_child_of(ctx.db(), "child1", "parent").await;
     create_child_of(ctx.db(), "child2", "parent").await;
 
@@ -380,8 +475,8 @@ async fn test_delete_task_without_cascade_orphans_children() {
     let ctx = TestContext::new().await;
 
     // Create parent with child
-    create_task(ctx.db(), "parent", "Parent", "epic", "todo").await;
-    create_task(ctx.db(), "child", "Child", "ticket", "todo").await;
+    create_task(ctx.db(), "parent", "Parent", "epic", "in_progress").await;
+    create_task(ctx.db(), "child", "Child", "ticket", "in_progress").await;
     create_child_of(ctx.db(), "child", "parent").await;
 
     let cmd = delete_cmd("parent", false);

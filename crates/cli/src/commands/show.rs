@@ -831,7 +831,7 @@ mod tests {
             "abc123",
             "Test Task",
             "task",
-            "todo",
+            "in_progress",
             Some("high"),
             &[],
         )
@@ -849,7 +849,7 @@ mod tests {
         assert_eq!(detail.id, "abc123");
         assert_eq!(detail.title, "Test Task");
         assert_eq!(detail.level, "task");
-        assert_eq!(detail.status, "todo");
+        assert_eq!(detail.status, "in_progress");
         assert_eq!(detail.priority, Some("high".to_string()));
         assert!(detail.tags.is_empty(), "Tags should be empty");
 
@@ -888,7 +888,16 @@ mod tests {
     async fn test_show_case_insensitive() {
         let service = setup_test_service().await;
 
-        create_task(&service, "abc123", "Test Task", "task", "todo", None, &[]).await;
+        create_task(
+            &service,
+            "abc123",
+            "Test Task",
+            "task",
+            "in_progress",
+            None,
+            &[],
+        )
+        .await;
 
         let cmd = ShowCommand {
             id: "ABC123".to_string(),
@@ -912,7 +921,16 @@ mod tests {
             &["backend", "core"],
         )
         .await;
-        create_task(&service, "child1", "Child Task", "task", "todo", None, &[]).await;
+        create_task(
+            &service,
+            "child1",
+            "Child Task",
+            "task",
+            "in_progress",
+            None,
+            &[],
+        )
+        .await;
         create_child_of(&service, "child1", "parent1").await;
 
         let cmd = ShowCommand {
@@ -942,7 +960,7 @@ mod tests {
             "parent1",
             "Parent Epic",
             "epic",
-            "todo",
+            "in_progress",
             None,
             &[],
         )
@@ -1075,7 +1093,7 @@ mod tests {
             "blocker",
             "Blocker Task",
             "task",
-            "todo",
+            "in_progress",
             None,
             &[],
         )
@@ -1117,7 +1135,7 @@ mod tests {
             "withdata",
             "Task with Data",
             "ticket",
-            "todo",
+            "in_progress",
             None,
             &[],
         )
@@ -1248,7 +1266,7 @@ mod tests {
             "tagged",
             "Tagged Task",
             "task",
-            "todo",
+            "in_progress",
             None,
             &["backend", "api"],
         )
@@ -1324,7 +1342,7 @@ mod tests {
             title: "Test Task".to_string(),
             description: Some("A detailed description".to_string()),
             level: "task".to_string(),
-            status: "todo".to_string(),
+            status: "in_progress".to_string(),
             priority: Some("high".to_string()),
             tags: vec!["backend".to_string()],
             created_at: Some("2024-01-15T10:30:00Z".to_string()),
@@ -1343,7 +1361,7 @@ mod tests {
                 id: "parent".to_string(),
                 title: "Parent".to_string(),
                 level: "epic".to_string(),
-                status: "todo".to_string(),
+                status: "in_progress".to_string(),
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -1357,7 +1375,7 @@ mod tests {
 
         assert!(output.contains("Task: abc123 - Test Task"));
         assert!(output.contains("Level:    task"));
-        assert!(output.contains("Status:   todo"));
+        assert!(output.contains("Status:   in_progress"));
         assert!(output.contains("Priority: high"));
         assert!(output.contains("Tags:     backend"));
         assert!(output.contains("Description"));
@@ -1378,7 +1396,7 @@ mod tests {
             title: "Minimal Task".to_string(),
             description: None,
             level: "task".to_string(),
-            status: "todo".to_string(),
+            status: "in_progress".to_string(),
             priority: None,
             tags: vec![],
             created_at: None,
@@ -1420,7 +1438,7 @@ mod tests {
             title: "Review Task".to_string(),
             description: None,
             level: "task".to_string(),
-            status: "todo".to_string(),
+            status: "in_progress".to_string(),
             priority: None,
             tags: vec![],
             created_at: None,
@@ -1450,7 +1468,7 @@ mod tests {
             title: "Task with Steps".to_string(),
             description: None,
             level: "task".to_string(),
-            status: "todo".to_string(),
+            status: "in_progress".to_string(),
             priority: None,
             tags: vec![],
             created_at: None,
@@ -1514,7 +1532,7 @@ mod tests {
                 id: "parent1".to_string(),
                 title: "Parent Task".to_string(),
                 level: "epic".to_string(),
-                status: "todo".to_string(),
+                status: "in_progress".to_string(),
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -1646,7 +1664,7 @@ mod tests {
             title: "Task Needing Revision".to_string(),
             description: None,
             level: "task".to_string(),
-            status: "todo".to_string(),
+            status: "in_progress".to_string(),
             priority: None,
             tags: vec![],
             created_at: None,

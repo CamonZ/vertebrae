@@ -307,7 +307,7 @@ mod tests {
             MutationEvent::TaskStatusChanged {
                 id: "abc123".to_string(),
                 old_status: "backlog".to_string(),
-                new_status: "todo".to_string(),
+                new_status: "in_progress".to_string(),
             },
         ];
 

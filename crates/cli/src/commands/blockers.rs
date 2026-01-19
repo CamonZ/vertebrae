@@ -299,7 +299,7 @@ mod tests {
     async fn test_blockers_no_blockers() {
         let service = setup_test_service().await;
 
-        create_task(&service, "task1", "Independent Task", "task", "todo").await;
+        create_task(&service, "task1", "Independent Task", "task", "in_progress").await;
 
         let cmd = BlockersCommand {
             id: "task1".to_string(),
@@ -322,7 +322,7 @@ mod tests {
     async fn test_blockers_single_blocker() {
         let service = setup_test_service().await;
 
-        create_task(&service, "blocker1", "Blocker Task", "task", "todo").await;
+        create_task(&service, "blocker1", "Blocker Task", "task", "in_progress").await;
         create_task(&service, "task1", "Dependent Task", "task", "backlog").await;
         create_depends_on(&service, "task1", "blocker1").await;
 
@@ -346,8 +346,15 @@ mod tests {
         let service = setup_test_service().await;
 
         // Create chain: task1 -> blocker1 -> blocker2
-        create_task(&service, "blocker2", "Root Blocker", "task", "todo").await;
-        create_task(&service, "blocker1", "Intermediate Blocker", "task", "todo").await;
+        create_task(&service, "blocker2", "Root Blocker", "task", "in_progress").await;
+        create_task(
+            &service,
+            "blocker1",
+            "Intermediate Blocker",
+            "task",
+            "in_progress",
+        )
+        .await;
         create_task(&service, "task1", "Final Task", "task", "backlog").await;
 
         create_depends_on(&service, "task1", "blocker1").await;
@@ -374,7 +381,7 @@ mod tests {
     async fn test_blockers_multiple_direct() {
         let service = setup_test_service().await;
 
-        create_task(&service, "blocker1", "Blocker 1", "task", "todo").await;
+        create_task(&service, "blocker1", "Blocker 1", "task", "in_progress").await;
         create_task(&service, "blocker2", "Blocker 2", "task", "in_progress").await;
         create_task(&service, "task1", "Dependent Task", "task", "backlog").await;
 
@@ -410,9 +417,16 @@ mod tests {
         let service = setup_test_service().await;
 
         // Create chain: task1 -> blocker1 -> blocker2 -> blocker3
-        create_task(&service, "blocker3", "Deep Blocker", "task", "todo").await;
-        create_task(&service, "blocker2", "Mid Blocker", "task", "todo").await;
-        create_task(&service, "blocker1", "Direct Blocker", "task", "todo").await;
+        create_task(&service, "blocker3", "Deep Blocker", "task", "in_progress").await;
+        create_task(&service, "blocker2", "Mid Blocker", "task", "in_progress").await;
+        create_task(
+            &service,
+            "blocker1",
+            "Direct Blocker",
+            "task",
+            "in_progress",
+        )
+        .await;
         create_task(&service, "task1", "Main Task", "task", "backlog").await;
 
         create_depends_on(&service, "task1", "blocker1").await;
@@ -456,7 +470,7 @@ mod tests {
     async fn test_blockers_depth_zero() {
         let service = setup_test_service().await;
 
-        create_task(&service, "blocker1", "Blocker", "task", "todo").await;
+        create_task(&service, "blocker1", "Blocker", "task", "in_progress").await;
         create_task(&service, "task1", "Main Task", "task", "backlog").await;
         create_depends_on(&service, "task1", "blocker1").await;
 
@@ -503,7 +517,7 @@ mod tests {
     async fn test_blockers_case_insensitive() {
         let service = setup_test_service().await;
 
-        create_task(&service, "task1", "Test Task", "task", "todo").await;
+        create_task(&service, "task1", "Test Task", "task", "in_progress").await;
 
         let cmd = BlockersCommand {
             id: "TASK1".to_string(),
@@ -520,9 +534,9 @@ mod tests {
         let service = setup_test_service().await;
 
         // Diamond: task1 -> (blocker1, blocker2) -> shared_blocker
-        create_task(&service, "shared", "Shared Blocker", "task", "todo").await;
-        create_task(&service, "blocker1", "Blocker 1", "task", "todo").await;
-        create_task(&service, "blocker2", "Blocker 2", "task", "todo").await;
+        create_task(&service, "shared", "Shared Blocker", "task", "in_progress").await;
+        create_task(&service, "blocker1", "Blocker 1", "task", "in_progress").await;
+        create_task(&service, "blocker2", "Blocker 2", "task", "in_progress").await;
         create_task(&service, "task1", "Main Task", "task", "backlog").await;
 
         create_depends_on(&service, "task1", "blocker1").await;
@@ -560,7 +574,14 @@ mod tests {
         let service = setup_test_service().await;
 
         create_task(&service, "done_blocker", "Done Blocker", "ticket", "done").await;
-        create_task(&service, "todo_blocker", "Todo Blocker", "task", "todo").await;
+        create_task(
+            &service,
+            "todo_blocker",
+            "Todo Blocker",
+            "task",
+            "in_progress",
+        )
+        .await;
         create_task(&service, "task1", "Main Task", "task", "backlog").await;
 
         create_depends_on(&service, "task1", "done_blocker").await;
@@ -585,13 +606,14 @@ mod tests {
         assert_eq!(todo_blocker.id, "todo_blocker");
         assert_eq!(todo_blocker.title, "Todo Blocker");
         assert_eq!(todo_blocker.level, "task");
-        assert_eq!(todo_blocker.status, "todo");
+        assert_eq!(todo_blocker.status, "in_progress");
         assert!(todo_blocker.children.is_empty());
 
         // Output should only contain the todo blocker, not the done one
         let output = format!("{}", blockers_result);
         assert!(
-            output.contains("todo") && !output.lines().any(|line| line.contains("done_blocker")),
+            output.contains("in_progress")
+                && !output.lines().any(|line| line.contains("done_blocker")),
             "Output should only contain incomplete blockers"
         );
     }
@@ -601,7 +623,14 @@ mod tests {
         let service = setup_test_service().await;
 
         create_task(&service, "done_blocker", "Done Blocker", "ticket", "done").await;
-        create_task(&service, "todo_blocker", "Todo Blocker", "task", "todo").await;
+        create_task(
+            &service,
+            "todo_blocker",
+            "Todo Blocker",
+            "task",
+            "in_progress",
+        )
+        .await;
         create_task(&service, "task1", "Main Task", "task", "backlog").await;
 
         create_depends_on(&service, "task1", "done_blocker").await;
@@ -640,13 +669,13 @@ mod tests {
             .expect("Should find todo_blocker");
         assert_eq!(todo_blocker.title, "Todo Blocker");
         assert_eq!(todo_blocker.level, "task");
-        assert_eq!(todo_blocker.status, "todo");
+        assert_eq!(todo_blocker.status, "in_progress");
         assert!(todo_blocker.children.is_empty());
 
         // Check output contains both status values
         let output = format!("{}", blockers_result);
         let has_done = output.lines().any(|line| line.contains("done"));
-        let has_todo = output.lines().any(|line| line.contains("todo"));
+        let has_todo = output.lines().any(|line| line.contains("in_progress"));
         assert!(
             has_done && has_todo,
             "Output should contain both 'done' and 'todo' status values"
@@ -659,9 +688,16 @@ mod tests {
 
         // Create chain: task1 -> blocker1 (todo) -> blocker2 (done) -> blocker3 (todo)
         // By default, blocker2 and its children should be filtered out
-        create_task(&service, "blocker3", "Deep Blocker", "task", "todo").await;
+        create_task(&service, "blocker3", "Deep Blocker", "task", "in_progress").await;
         create_task(&service, "blocker2", "Done Blocker", "task", "done").await;
-        create_task(&service, "blocker1", "Direct Blocker", "task", "todo").await;
+        create_task(
+            &service,
+            "blocker1",
+            "Direct Blocker",
+            "task",
+            "in_progress",
+        )
+        .await;
         create_task(&service, "task1", "Main Task", "task", "backlog").await;
 
         create_depends_on(&service, "task1", "blocker1").await;
@@ -759,12 +795,12 @@ mod tests {
                 id: "a".to_string(),
                 title: "A".to_string(),
                 level: "task".to_string(),
-                status: "todo".to_string(),
+                status: "in_progress".to_string(),
                 children: vec![BlockerNode {
                     id: "b".to_string(),
                     title: "B".to_string(),
                     level: "task".to_string(),
-                    status: "todo".to_string(),
+                    status: "in_progress".to_string(),
                     children: vec![],
                 }],
             },
@@ -772,7 +808,7 @@ mod tests {
                 id: "c".to_string(),
                 title: "C".to_string(),
                 level: "task".to_string(),
-                status: "todo".to_string(),
+                status: "in_progress".to_string(),
                 children: vec![],
             },
         ];
@@ -802,7 +838,7 @@ mod tests {
                 id: "blocker1".to_string(),
                 title: "Blocker Task".to_string(),
                 level: "ticket".to_string(),
-                status: "todo".to_string(),
+                status: "in_progress".to_string(),
                 children: vec![],
             }],
             total_count: 1,
@@ -831,14 +867,14 @@ mod tests {
                     id: "blocker1".to_string(),
                     title: "Blocker 1".to_string(),
                     level: "task".to_string(),
-                    status: "todo".to_string(),
+                    status: "in_progress".to_string(),
                     children: vec![],
                 },
                 BlockerNode {
                     id: "blocker2".to_string(),
                     title: "Blocker 2".to_string(),
                     level: "task".to_string(),
-                    status: "todo".to_string(),
+                    status: "in_progress".to_string(),
                     children: vec![],
                 },
             ],
@@ -872,7 +908,7 @@ mod tests {
             id: "test".to_string(),
             title: "Test".to_string(),
             level: "task".to_string(),
-            status: "todo".to_string(),
+            status: "in_progress".to_string(),
             children: vec![],
         };
         let debug_str = format!("{:?}", node);

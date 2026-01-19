@@ -156,7 +156,8 @@ mod tests {
     /// Helper to create a task in the database
     async fn create_task(service: &DefaultTaskService, id: &str, title: &str) {
         let db = service.database();
-        let task = vertebrae_db::Task::new(title, vertebrae_db::Level::Task).with_status("todo");
+        let task =
+            vertebrae_db::Task::new(title, vertebrae_db::Level::Task).with_status("in_progress");
         db.tasks().create(id, &task).await.unwrap();
     }
 

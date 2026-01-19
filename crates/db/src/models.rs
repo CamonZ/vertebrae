@@ -1744,42 +1744,36 @@ impl StatusSchema {
                     .with_description("Items waiting to be prioritized")
                     .with_color("#95a5a6")
                     .with_order(0),
-                StatusDefinition::new("todo")
-                    .with_label("Todo")
-                    .with_description("Triaged and ready to be worked on")
-                    .with_color("#9b59b6")
-                    .with_order(1),
                 StatusDefinition::new("in_progress")
                     .with_label("In Progress")
                     .with_description("Work is actively being done")
                     .with_color("#3498db")
-                    .with_order(2),
+                    .with_order(1),
                 StatusDefinition::new("pending_review")
                     .with_label("Pending Review")
                     .with_description("Work completed, awaiting review")
                     .with_color("#f39c12")
-                    .with_order(3),
+                    .with_order(2),
                 StatusDefinition::new("done")
                     .with_label("Done")
                     .with_description("Work completed and approved")
                     .with_color("#27ae60")
                     .with_is_terminal(true)
                     .with_unblocks_dependents(true)
-                    .with_order(4),
+                    .with_order(3),
                 StatusDefinition::new("rejected")
                     .with_label("Rejected")
                     .with_description("Work rejected or cancelled")
                     .with_color("#e74c3c")
                     .with_is_terminal(true)
-                    .with_order(5),
+                    .with_order(4),
             ])
             .with_progressions(vec![
-                StatusProgression::new("backlog", "todo").with_label("Triage"),
                 StatusProgression::new("backlog", "in_progress").with_label("Start"),
                 StatusProgression::new("backlog", "rejected").with_label("Reject"),
-                StatusProgression::new("todo", "in_progress").with_label("Start"),
-                StatusProgression::new("todo", "rejected").with_label("Reject"),
                 StatusProgression::new("in_progress", "pending_review").with_label("Submit"),
+                StatusProgression::new("in_progress", "done").with_label("Complete"),
+                StatusProgression::new("in_progress", "rejected").with_label("Reject"),
                 StatusProgression::new("pending_review", "in_progress").with_label("Revise"),
                 StatusProgression::new("pending_review", "done").with_label("Approve"),
             ])
@@ -2879,13 +2873,13 @@ mod tests {
         let json = r#"{
             "title": "Minimal",
             "level": "task",
-            "status": "todo"
+            "status": "in_progress"
         }"#;
 
         let task: Task = serde_json::from_str(json).unwrap();
         assert_eq!(task.title, "Minimal");
         assert_eq!(task.level, Level::Task);
-        assert_eq!(task.status, "todo");
+        assert_eq!(task.status, "in_progress");
         assert!(task.priority.is_none());
         assert!(task.tags.is_empty());
         assert!(task.sections.is_empty());
@@ -3061,7 +3055,7 @@ mod tests {
         let json = r#"{
             "title": "No Timestamps",
             "level": "task",
-            "status": "todo"
+            "status": "in_progress"
         }"#;
 
         let task: Task = serde_json::from_str(json).unwrap();
@@ -3174,7 +3168,7 @@ mod tests {
         let json = r#"{
             "title": "No Workflow Task",
             "level": "task",
-            "status": "todo"
+            "status": "in_progress"
         }"#;
 
         let task: Task = serde_json::from_str(json).unwrap();
@@ -4595,14 +4589,15 @@ mod tests {
         assert!(schema.is_default);
         assert!(schema.description.is_some());
 
-        // Check statuses (includes todo for backward compatibility)
+        // Check statuses
         let names = schema.status_names();
         assert!(names.contains(&"backlog"));
-        assert!(names.contains(&"todo"));
         assert!(names.contains(&"in_progress"));
         assert!(names.contains(&"pending_review"));
         assert!(names.contains(&"done"));
         assert!(names.contains(&"rejected"));
+        // todo is no longer a valid status
+        assert!(!names.contains(&"todo"));
 
         // Check terminal statuses
         assert!(schema.get_status("done").unwrap().is_terminal);
@@ -4614,13 +4609,14 @@ mod tests {
         assert!(!schema.get_status("rejected").unwrap().unblocks_dependents);
 
         // Check progressions
-        assert!(schema.can_transition("backlog", "todo"));
         assert!(schema.can_transition("backlog", "in_progress"));
-        assert!(schema.can_transition("todo", "in_progress"));
-        assert!(schema.can_transition("todo", "rejected"));
+        assert!(schema.can_transition("backlog", "rejected"));
         assert!(schema.can_transition("in_progress", "pending_review"));
         assert!(schema.can_transition("pending_review", "done"));
         assert!(schema.can_transition("pending_review", "in_progress"));
+        // todo transitions no longer exist
+        assert!(!schema.can_transition("backlog", "todo"));
+        assert!(!schema.can_transition("todo", "in_progress"));
 
         // Schema should validate
         assert!(schema.validate().is_ok());

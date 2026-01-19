@@ -135,7 +135,7 @@ impl DbError {
                 }
             }
             DbError::InvalidStatusTransition { .. } => Some(
-                "Hint: Valid transitions are: backlog→todo, todo→in_progress/rejected, in_progress→pending_review/done/rejected",
+                "Hint: Check 'vtb list' for current status. Valid transitions depend on the task's workflow",
             ),
             DbError::IncompleteChildren { .. } => {
                 Some("Hint: Complete or cancel all child tasks before completing the parent")
@@ -222,7 +222,7 @@ mod tests {
             children: vec![IncompleteChildInfo {
                 id: "task1".to_string(),
                 title: "Incomplete Task".to_string(),
-                status: "todo".to_string(),
+                status: "in_progress".to_string(),
                 level: "task".to_string(),
             }],
         };
@@ -240,7 +240,7 @@ mod tests {
                 IncompleteChildInfo {
                     id: "task1".to_string(),
                     title: "Incomplete Task".to_string(),
-                    status: "todo".to_string(),
+                    status: "in_progress".to_string(),
                     level: "task".to_string(),
                 },
                 IncompleteChildInfo {
@@ -266,7 +266,7 @@ mod tests {
         let info = IncompleteChildInfo {
             id: "test1".to_string(),
             title: "Test Task".to_string(),
-            status: "todo".to_string(),
+            status: "in_progress".to_string(),
             level: "task".to_string(),
         };
         let cloned = info.clone();
@@ -281,7 +281,7 @@ mod tests {
         let info = IncompleteChildInfo {
             id: "test1".to_string(),
             title: "Test Task".to_string(),
-            status: "todo".to_string(),
+            status: "in_progress".to_string(),
             level: "task".to_string(),
         };
         let debug_str = format!("{:?}", info);
@@ -289,7 +289,7 @@ mod tests {
             debug_str.contains("IncompleteChildInfo")
                 && debug_str.contains("test1")
                 && debug_str.contains("Test Task")
-                && debug_str.contains("todo")
+                && debug_str.contains("in_progress")
                 && debug_str.contains("task"),
             "Debug output should contain all field values"
         );
@@ -299,7 +299,7 @@ mod tests {
     fn test_invalid_status_transition_error_display() {
         let err = DbError::InvalidStatusTransition {
             task_id: "task123".to_string(),
-            from_status: "todo".to_string(),
+            from_status: "in_progress".to_string(),
             to_status: "done".to_string(),
             message: "Invalid status transition from 'todo' to 'done'. Valid transitions from 'todo' are: in_progress, rejected".to_string(),
         };
@@ -314,7 +314,7 @@ mod tests {
         let err = DbError::InvalidStatusTransition {
             task_id: "task123".to_string(),
             from_status: "done".to_string(),
-            to_status: "todo".to_string(),
+            to_status: "in_progress".to_string(),
             message: "Cannot transition from 'done': this is a final state".to_string(),
         };
         let debug_str = format!("{:?}", err);
@@ -322,7 +322,7 @@ mod tests {
             debug_str.contains("InvalidStatusTransition")
                 && debug_str.contains("task123")
                 && debug_str.contains("done")
-                && debug_str.contains("todo"),
+                && debug_str.contains("in_progress"),
             "Debug output should contain InvalidStatusTransition and relevant fields"
         );
     }

@@ -739,9 +739,9 @@ description: string | null;
  */
 level: TaskLevel; 
 /**
- * Current status
+ * Current status (references StatusDefinition.name from StatusSchema)
  */
-status: TaskStatus; 
+status: string; 
 /**
  * Optional priority
  */
@@ -812,9 +812,9 @@ export type TaskChangedEvent = { task_id: string; change_type: TaskChangeType }
  */
 export type TaskFilterOptions = { 
 /**
- * Filter by statuses (OR semantics)
+ * Filter by statuses (OR semantics) - status names from StatusSchema
  */
-statuses: TaskStatus[] | null; 
+statuses: string[] | null; 
 /**
  * Filter by levels (OR semantics)
  */
@@ -864,10 +864,6 @@ export type TaskLevel = "epic" | "ticket" | "task"
  */
 export type TaskPriority = "low" | "medium" | "high" | "critical"
 /**
- * Task status - mirrors db::Status
- */
-export type TaskStatus = "backlog" | "todo" | "in_progress" | "pending_review" | "done" | "rejected"
-/**
  * Summary of a task for list views - mirrors db::TaskSummary
  */
 export type TaskSummary = { 
@@ -884,9 +880,9 @@ title: string;
  */
 level: TaskLevel; 
 /**
- * Current status
+ * Current status (references StatusDefinition.name from StatusSchema)
  */
-status: TaskStatus; 
+status: string; 
 /**
  * Optional priority
  */

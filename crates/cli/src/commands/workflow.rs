@@ -1083,8 +1083,8 @@ mod tests {
             result
         );
         assert!(
-            result.contains("5 steps"),
-            "Expected 5 steps in default workflow: {}",
+            result.contains("4 steps"),
+            "Expected 4 steps in default workflow: {}",
             result
         );
     }
