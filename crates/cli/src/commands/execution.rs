@@ -1,20 +1,24 @@
-//! Execution commands for viewing workflow execution history
+//! Execution commands for managing workflow execution history
 //!
-//! Implements the `vtb execution` subcommand group for viewing step executions
-//! and their associated session logs.
+//! Implements the `vtb execution` subcommand group for creating, viewing,
+//! and updating step executions and their associated session logs.
 
 use clap::{Args, Subcommand};
 use surrealdb::sql::Thing;
 use vertebrae_core::{ServiceError, TaskService};
-use vertebrae_db::{ExecutionStatus, SessionLog};
+use vertebrae_db::{ExecutionStatus, SessionLog, StepExecution};
 
 /// Execution management commands
 #[derive(Debug, Subcommand)]
 pub enum ExecutionCommand {
+    /// Create a new execution for a task
+    Create(ExecutionCreateCommand),
     /// List all executions for a task
     List(ExecutionListCommand),
     /// Show details of a specific execution
     Show(ExecutionShowCommand),
+    /// Update an existing execution
+    Update(ExecutionUpdateCommand),
     /// Add a log entry to an execution
     Log(ExecutionLogCommand),
 }
@@ -31,10 +35,156 @@ impl ExecutionCommand {
     /// Returns `ServiceError` if the command execution fails.
     pub async fn execute(&self, service: &dyn TaskService) -> Result<String, ServiceError> {
         match self {
+            ExecutionCommand::Create(cmd) => cmd.execute(service).await,
             ExecutionCommand::List(cmd) => cmd.execute(service).await,
             ExecutionCommand::Show(cmd) => cmd.execute(service).await,
+            ExecutionCommand::Update(cmd) => cmd.execute(service).await,
             ExecutionCommand::Log(cmd) => cmd.execute(service).await,
         }
+    }
+}
+
+/// Create a new step execution for a task
+#[derive(Debug, Args)]
+pub struct ExecutionCreateCommand {
+    /// Task ID (short or full) to create execution for
+    #[arg(required = true)]
+    pub task_id: String,
+
+    /// JSON context data about the task (must be valid JSON)
+    #[arg(long)]
+    pub context: Option<String>,
+
+    /// JSON prompt for the execution (must be valid JSON)
+    #[arg(long)]
+    pub prompt: Option<String>,
+}
+
+impl ExecutionCreateCommand {
+    /// Execute the create execution command.
+    ///
+    /// Creates a new StepExecution for the task's current workflow and step.
+    /// The task must have a workflow assigned.
+    ///
+    /// # Arguments
+    ///
+    /// * `service` - Reference to the task service
+    ///
+    /// # Errors
+    ///
+    /// Returns `ServiceError` if:
+    /// - The task is not found
+    /// - The task has no workflow assigned
+    /// - The context or prompt is not valid JSON
+    /// - Database operations fail
+    pub async fn execute(&self, service: &dyn TaskService) -> Result<String, ServiceError> {
+        // Normalize task ID to lowercase for case-insensitive lookup
+        let task_id = self.task_id.to_lowercase();
+
+        // Get the task to verify it exists and has a workflow
+        let task = service.get_task(&task_id).await?;
+
+        // Verify task has a workflow assigned
+        let workflow_id = task.workflow_id.as_ref().ok_or_else(|| {
+            ServiceError::validation_failed(format!(
+                "task '{}' has no workflow assigned",
+                &task_id[..6.min(task_id.len())]
+            ))
+        })?;
+
+        // Get the current step name from the task's status (which represents current workflow step)
+        let step_name = &task.status;
+
+        // Validate context JSON if provided
+        if let Some(ref context) = self.context {
+            serde_json::from_str::<serde_json::Value>(context).map_err(|e| {
+                ServiceError::validation_failed(format!("invalid context JSON: {}", e))
+            })?;
+        }
+
+        // Validate prompt JSON if provided
+        if let Some(ref prompt) = self.prompt {
+            serde_json::from_str::<serde_json::Value>(prompt).map_err(|e| {
+                ServiceError::validation_failed(format!("invalid prompt JSON: {}", e))
+            })?;
+        }
+
+        // Create the step execution
+        let task_thing = Thing::from(("task", task_id.as_str()));
+        let mut execution = StepExecution::new(task_thing, workflow_id.clone(), step_name);
+
+        if let Some(ref context) = self.context {
+            execution = execution.with_context(context);
+        }
+
+        if let Some(ref prompt) = self.prompt {
+            execution = execution.with_prompt(prompt);
+        }
+
+        // Save to database
+        let db = service.database();
+        let exec_id = db.executions().create_execution(&execution).await?;
+
+        Ok(exec_id)
+    }
+}
+
+/// Update an existing execution
+#[derive(Debug, Args)]
+pub struct ExecutionUpdateCommand {
+    /// Execution ID to update
+    #[arg(required = true)]
+    pub execution_id: String,
+
+    /// Output text from the execution
+    #[arg(long)]
+    pub output: Option<String>,
+
+    /// Transition result (e.g., "advance", "reject", "retry")
+    #[arg(long)]
+    pub transition_result: Option<String>,
+}
+
+impl ExecutionUpdateCommand {
+    /// Execute the update execution command.
+    ///
+    /// Updates an existing execution's output and/or transition result.
+    ///
+    /// # Arguments
+    ///
+    /// * `service` - Reference to the task service
+    ///
+    /// # Errors
+    ///
+    /// Returns `ServiceError` if:
+    /// - The execution is not found
+    /// - Database operations fail
+    pub async fn execute(&self, service: &dyn TaskService) -> Result<String, ServiceError> {
+        let db = service.database();
+
+        // Verify the execution exists
+        let _execution = db
+            .executions()
+            .get_execution(&self.execution_id)
+            .await?
+            .ok_or_else(|| {
+                ServiceError::validation_failed(format!(
+                    "execution '{}' not found",
+                    self.execution_id
+                ))
+            })?;
+
+        // Update the execution
+        db.executions()
+            .update_execution(
+                &self.execution_id,
+                self.output.clone(),
+                self.transition_result.clone(),
+            )
+            .await?;
+
+        let short_id = &self.execution_id[..6.min(self.execution_id.len())];
+        Ok(format!("Updated execution {}", short_id))
     }
 }
 
@@ -211,6 +361,45 @@ impl ExecutionShowCommand {
         output.push_str(&format!("Started:    {}\n", started));
         output.push_str(&format!("Completed:  {}\n", completed));
         output.push_str(&format!("Duration:   {}\n", duration));
+        if let Some(ref result) = execution.transition_result {
+            output.push_str(&format!("Transition: {}\n", result));
+        }
+
+        // Display context if present
+        if let Some(ref context) = execution.context {
+            output.push('\n');
+            output.push_str("Context\n");
+            output.push_str(&"-".repeat(40));
+            output.push('\n');
+            output.push_str(context);
+            if !context.ends_with('\n') {
+                output.push('\n');
+            }
+        }
+
+        // Display prompt if present
+        if let Some(ref prompt) = execution.prompt {
+            output.push('\n');
+            output.push_str("Prompt\n");
+            output.push_str(&"-".repeat(40));
+            output.push('\n');
+            output.push_str(prompt);
+            if !prompt.ends_with('\n') {
+                output.push('\n');
+            }
+        }
+
+        // Display output if present
+        if let Some(ref exec_output) = execution.output {
+            output.push('\n');
+            output.push_str("Output\n");
+            output.push_str(&"-".repeat(40));
+            output.push('\n');
+            output.push_str(exec_output);
+            if !exec_output.ends_with('\n') {
+                output.push('\n');
+            }
+        }
 
         // Get session logs for this execution
         let logs = db.executions().list_logs_for_execution(&exec_id).await?;
@@ -407,6 +596,184 @@ mod tests {
         assert!(
             debug_str.contains("Log") && debug_str.contains("exec123"),
             "Debug output should contain Log variant and execution_id field value"
+        );
+    }
+
+    #[test]
+    fn test_execution_create_parses() {
+        let cli = TestCli::try_parse_from(["test", "create", "task123"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            ExecutionCommand::Create(cmd) => {
+                assert_eq!(cmd.task_id, "task123");
+                assert!(cmd.context.is_none());
+                assert!(cmd.prompt.is_none());
+            }
+            _ => panic!("Expected Create command"),
+        }
+    }
+
+    #[test]
+    fn test_execution_create_with_context() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "create",
+            "task123",
+            "--context",
+            r#"{"task": "test"}"#,
+        ]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            ExecutionCommand::Create(cmd) => {
+                assert_eq!(cmd.task_id, "task123");
+                assert_eq!(cmd.context, Some(r#"{"task": "test"}"#.to_string()));
+            }
+            _ => panic!("Expected Create command"),
+        }
+    }
+
+    #[test]
+    fn test_execution_create_with_prompt() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "create",
+            "task123",
+            "--prompt",
+            r#"{"instruction": "do something"}"#,
+        ]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            ExecutionCommand::Create(cmd) => {
+                assert_eq!(cmd.task_id, "task123");
+                assert_eq!(
+                    cmd.prompt,
+                    Some(r#"{"instruction": "do something"}"#.to_string())
+                );
+            }
+            _ => panic!("Expected Create command"),
+        }
+    }
+
+    #[test]
+    fn test_execution_create_with_both_flags() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "create",
+            "task123",
+            "--context",
+            r#"{"task": "test"}"#,
+            "--prompt",
+            r#"{"instruction": "do something"}"#,
+        ]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            ExecutionCommand::Create(cmd) => {
+                assert_eq!(cmd.task_id, "task123");
+                assert!(cmd.context.is_some());
+                assert!(cmd.prompt.is_some());
+            }
+            _ => panic!("Expected Create command"),
+        }
+    }
+
+    #[test]
+    fn test_execution_create_requires_task_id() {
+        let result = TestCli::try_parse_from(["test", "create"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_execution_create_debug() {
+        let cli = TestCli::try_parse_from(["test", "create", "task123"]).unwrap();
+        let debug_str = format!("{:?}", cli.command);
+        assert!(
+            debug_str.contains("Create") && debug_str.contains("task123"),
+            "Debug output should contain Create variant and task_id field value"
+        );
+    }
+
+    #[test]
+    fn test_execution_update_parses() {
+        let cli = TestCli::try_parse_from(["test", "update", "exec123"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            ExecutionCommand::Update(cmd) => {
+                assert_eq!(cmd.execution_id, "exec123");
+                assert!(cmd.output.is_none());
+                assert!(cmd.transition_result.is_none());
+            }
+            _ => panic!("Expected Update command"),
+        }
+    }
+
+    #[test]
+    fn test_execution_update_with_output() {
+        let cli =
+            TestCli::try_parse_from(["test", "update", "exec123", "--output", "Task completed"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            ExecutionCommand::Update(cmd) => {
+                assert_eq!(cmd.execution_id, "exec123");
+                assert_eq!(cmd.output, Some("Task completed".to_string()));
+            }
+            _ => panic!("Expected Update command"),
+        }
+    }
+
+    #[test]
+    fn test_execution_update_with_transition_result() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "update",
+            "exec123",
+            "--transition-result",
+            "advance",
+        ]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            ExecutionCommand::Update(cmd) => {
+                assert_eq!(cmd.execution_id, "exec123");
+                assert_eq!(cmd.transition_result, Some("advance".to_string()));
+            }
+            _ => panic!("Expected Update command"),
+        }
+    }
+
+    #[test]
+    fn test_execution_update_with_all_flags() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "update",
+            "exec123",
+            "--output",
+            "Task completed",
+            "--transition-result",
+            "advance",
+        ]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            ExecutionCommand::Update(cmd) => {
+                assert_eq!(cmd.execution_id, "exec123");
+                assert_eq!(cmd.output, Some("Task completed".to_string()));
+                assert_eq!(cmd.transition_result, Some("advance".to_string()));
+            }
+            _ => panic!("Expected Update command"),
+        }
+    }
+
+    #[test]
+    fn test_execution_update_requires_execution_id() {
+        let result = TestCli::try_parse_from(["test", "update"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_execution_update_debug() {
+        let cli = TestCli::try_parse_from(["test", "update", "exec123"]).unwrap();
+        let debug_str = format!("{:?}", cli.command);
+        assert!(
+            debug_str.contains("Update") && debug_str.contains("exec123"),
+            "Debug output should contain Update variant and execution_id field value"
         );
     }
 }

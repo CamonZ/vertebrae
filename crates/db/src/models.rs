@@ -836,6 +836,10 @@ pub struct StepExecution {
     pub status: ExecutionStatus,
 
     // --- Turn data fields (populated after execution) ---
+    /// JSON context data about the task provided by the orchestrator
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
+
     /// JSON prompt sent to the orchestrator for this execution
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prompt: Option<String>,
@@ -843,6 +847,10 @@ pub struct StepExecution {
     /// Final text result from the execution
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output: Option<String>,
+
+    /// Result of transition decision (e.g., "advance", "reject", "retry")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transition_result: Option<String>,
 
     /// Model that executed this step (e.g., "claude-sonnet-4-20250514")
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -878,8 +886,10 @@ impl StepExecution {
             started_at: Utc::now(),
             completed_at: None,
             status: ExecutionStatus::InProgress,
+            context: None,
             prompt: None,
             output: None,
+            transition_result: None,
             model_used: None,
             session_id: None,
             token_usage: None,
@@ -894,6 +904,12 @@ impl StepExecution {
         self
     }
 
+    /// Set the context JSON for this execution
+    pub fn with_context(mut self, context: impl Into<String>) -> Self {
+        self.context = Some(context.into());
+        self
+    }
+
     /// Set the prompt used for this execution
     pub fn with_prompt(mut self, prompt: impl Into<String>) -> Self {
         self.prompt = Some(prompt.into());
@@ -903,6 +919,12 @@ impl StepExecution {
     /// Set the output from this execution
     pub fn with_output(mut self, output: impl Into<String>) -> Self {
         self.output = Some(output.into());
+        self
+    }
+
+    /// Set the transition result for this execution
+    pub fn with_transition_result(mut self, result: impl Into<String>) -> Self {
+        self.transition_result = Some(result.into());
         self
     }
 

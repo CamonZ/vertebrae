@@ -103,9 +103,13 @@ mod sql {
             ASSERT $value IN ["in_progress", "completed", "failed"];
 
         -- Turn data fields (populated after execution)
+        DEFINE FIELD context ON step_execution TYPE option<string>;
+
         DEFINE FIELD prompt ON step_execution TYPE option<string>;
 
         DEFINE FIELD output ON step_execution TYPE option<string>;
+
+        DEFINE FIELD transition_result ON step_execution TYPE option<string>;
 
         DEFINE FIELD model_used ON step_execution TYPE option<string>;
 

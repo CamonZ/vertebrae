@@ -98,8 +98,10 @@ impl<'a> StepExecutionRepository<'a> {
                 started_at = d"{}",
                 completed_at = {},
                 status = $status,
+                context = $context,
                 prompt = $prompt,
                 output = $output,
+                transition_result = $transition_result,
                 model_used = $model_used,
                 session_id = $session_id,
                 token_usage = {},
@@ -119,8 +121,10 @@ impl<'a> StepExecutionRepository<'a> {
             .query(&query)
             .bind(("step_name", step_name))
             .bind(("status", status))
+            .bind(("context", execution.context.clone()))
             .bind(("prompt", execution.prompt.clone()))
             .bind(("output", execution.output.clone()))
+            .bind(("transition_result", execution.transition_result.clone()))
             .bind(("model_used", execution.model_used.clone()))
             .bind(("session_id", execution.session_id.clone()))
             .await
@@ -297,6 +301,62 @@ impl<'a> StepExecutionRepository<'a> {
             .await
             .map_err(|e| DbError::Query(Box::new(e)))?;
 
+        Ok(())
+    }
+
+    /// Update an execution's output and/or transition result.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The execution ID to update
+    /// * `output` - Optional output text to set
+    /// * `transition_result` - Optional transition result to set
+    ///
+    /// # Errors
+    ///
+    /// Returns `DbError::Query` if the database operation fails.
+    pub async fn update_execution(
+        &self,
+        id: &str,
+        output: Option<String>,
+        transition_result: Option<String>,
+    ) -> DbResult<()> {
+        debug!(
+            "Updating execution {} with output={:?}, transition_result={:?}",
+            id,
+            output.as_ref().map(|s| s.len()),
+            transition_result.as_ref()
+        );
+
+        let mut field_updates = Vec::new();
+
+        if output.is_some() {
+            field_updates.push("output = $output".to_string());
+        }
+
+        if transition_result.is_some() {
+            field_updates.push("transition_result = $transition_result".to_string());
+        }
+
+        if field_updates.is_empty() {
+            debug!("No updates to apply for execution {}", id);
+            return Ok(());
+        }
+
+        let query = format!(
+            "UPDATE step_execution:{} SET {}",
+            id,
+            field_updates.join(", ")
+        );
+
+        self.client
+            .query(&query)
+            .bind(("output", output))
+            .bind(("transition_result", transition_result))
+            .await
+            .map_err(|e| DbError::Query(Box::new(e)))?;
+
+        debug!("Updated execution {}", id);
         Ok(())
     }
 
@@ -674,5 +734,136 @@ mod tests {
         assert_eq!(usage.output_tokens, 250);
         assert!(usage.cache_read_input_tokens.is_none());
         assert!(usage.cache_creation_input_tokens.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_create_execution_with_context_and_transition() {
+        let client = setup_test_db().await;
+        create_prerequisites(&client, "ctx_trans_test").await;
+
+        let repo = StepExecutionRepository::new(&client);
+        let execution = StepExecution::new(
+            Thing::from(("task", "ctx_trans_test")),
+            Thing::from(("workflow", "ctx_trans_test")),
+            "execute",
+        )
+        .with_context(r#"{"task_id": "test", "description": "Test task"}"#)
+        .with_prompt(r#"{"instruction": "implement feature"}"#)
+        .with_transition_result("advance");
+
+        let id = repo.create_execution(&execution).await.unwrap();
+        let retrieved = repo.get_execution(&id).await.unwrap().unwrap();
+
+        assert_eq!(
+            retrieved.context,
+            Some(r#"{"task_id": "test", "description": "Test task"}"#.to_string())
+        );
+        assert_eq!(
+            retrieved.prompt,
+            Some(r#"{"instruction": "implement feature"}"#.to_string())
+        );
+        assert_eq!(retrieved.transition_result, Some("advance".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_update_execution_output() {
+        let client = setup_test_db().await;
+        create_prerequisites(&client, "update_output_test").await;
+
+        let repo = StepExecutionRepository::new(&client);
+        let execution = StepExecution::new(
+            Thing::from(("task", "update_output_test")),
+            Thing::from(("workflow", "update_output_test")),
+            "step",
+        );
+
+        let id = repo.create_execution(&execution).await.unwrap();
+
+        // Update with output only
+        repo.update_execution(&id, Some("Task completed successfully".to_string()), None)
+            .await
+            .unwrap();
+
+        let retrieved = repo.get_execution(&id).await.unwrap().unwrap();
+        assert_eq!(
+            retrieved.output,
+            Some("Task completed successfully".to_string())
+        );
+        assert!(retrieved.transition_result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_update_execution_transition_result() {
+        let client = setup_test_db().await;
+        create_prerequisites(&client, "update_trans_test").await;
+
+        let repo = StepExecutionRepository::new(&client);
+        let execution = StepExecution::new(
+            Thing::from(("task", "update_trans_test")),
+            Thing::from(("workflow", "update_trans_test")),
+            "step",
+        );
+
+        let id = repo.create_execution(&execution).await.unwrap();
+
+        // Update with transition result only
+        repo.update_execution(&id, None, Some("advance".to_string()))
+            .await
+            .unwrap();
+
+        let retrieved = repo.get_execution(&id).await.unwrap().unwrap();
+        assert!(retrieved.output.is_none());
+        assert_eq!(retrieved.transition_result, Some("advance".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_update_execution_both_fields() {
+        let client = setup_test_db().await;
+        create_prerequisites(&client, "update_both_test").await;
+
+        let repo = StepExecutionRepository::new(&client);
+        let execution = StepExecution::new(
+            Thing::from(("task", "update_both_test")),
+            Thing::from(("workflow", "update_both_test")),
+            "step",
+        );
+
+        let id = repo.create_execution(&execution).await.unwrap();
+
+        // Update with both fields
+        repo.update_execution(
+            &id,
+            Some("Feature implemented".to_string()),
+            Some("reject".to_string()),
+        )
+        .await
+        .unwrap();
+
+        let retrieved = repo.get_execution(&id).await.unwrap().unwrap();
+        assert_eq!(retrieved.output, Some("Feature implemented".to_string()));
+        assert_eq!(retrieved.transition_result, Some("reject".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_update_execution_no_changes() {
+        let client = setup_test_db().await;
+        create_prerequisites(&client, "update_none_test").await;
+
+        let repo = StepExecutionRepository::new(&client);
+        let execution = StepExecution::new(
+            Thing::from(("task", "update_none_test")),
+            Thing::from(("workflow", "update_none_test")),
+            "step",
+        )
+        .with_output("original output");
+
+        let id = repo.create_execution(&execution).await.unwrap();
+
+        // Update with no changes
+        repo.update_execution(&id, None, None).await.unwrap();
+
+        // Verify original data is unchanged
+        let retrieved = repo.get_execution(&id).await.unwrap().unwrap();
+        assert_eq!(retrieved.output, Some("original output".to_string()));
     }
 }
