@@ -249,8 +249,19 @@ pub struct TransitionResult {
     pub from_status: Status,
     /// The new status
     pub to_status: Status,
-    /// Tasks that are now unblocked (for done transitions)
+    /// Tasks that are now unblocked (for statuses with unblocks_dependents=true)
     pub unblocked_tasks: Vec<UnblockedTask>,
+    /// Workflow that was automatically assigned (if any)
+    pub assigned_workflow: Option<AssignedWorkflow>,
+}
+
+/// Information about an automatically assigned workflow
+#[derive(Debug, Clone)]
+pub struct AssignedWorkflow {
+    /// The workflow ID
+    pub workflow_id: String,
+    /// The name of the first step
+    pub first_step_name: String,
 }
 
 /// A node in the hierarchical task tree
@@ -1070,8 +1081,56 @@ impl TaskService for DefaultTaskService {
         // Apply update
         self.db.tasks().update(&id, &update).await?;
 
-        // Get unblocked tasks if transitioning to done
-        let unblocked_tasks = if target == Status::Done {
+        // Fetch the default status schema to get StatusDefinition for target status
+        let status_schema = self.db.status_schemas().get_default().await?;
+        let status_definition = status_schema
+            .as_ref()
+            .and_then(|schema| schema.get_status(target.as_str()));
+
+        // Auto-assign workflow if the target status has a workflow_id configured
+        let assigned_workflow = if let Some(status_def) = status_definition {
+            if let Some(workflow_thing) = &status_def.workflow_id {
+                let workflow_id = workflow_thing.id.to_raw();
+
+                // Check if workflow exists before assigning
+                if self.db.workflows().exists(&workflow_id).await? {
+                    // Assign the workflow (this also sets current_step to 0)
+                    self.db.tasks().assign_workflow(&id, workflow_thing).await?;
+                    self.db.tasks().update_current_step(&id, 0).await?;
+
+                    // Get the first step name
+                    let workflow = self.db.workflows().get(&workflow_id).await?;
+                    let first_step_name = if let Some(wf) = &workflow {
+                        if let Some(ref wf_thing) = wf.id {
+                            let steps = self.db.steps().list_by_workflow(wf_thing).await?;
+                            steps.first().map(|s| s.name.clone()).unwrap_or_default()
+                        } else {
+                            String::new()
+                        }
+                    } else {
+                        String::new()
+                    };
+
+                    Some(AssignedWorkflow {
+                        workflow_id,
+                        first_step_name,
+                    })
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Get unblocked tasks if the target status has unblocks_dependents=true
+        let should_unblock = status_definition
+            .map(|def| def.unblocks_dependents)
+            .unwrap_or(target == Status::Done); // Fallback to Done check for backwards compatibility
+
+        let unblocked_tasks = if should_unblock {
             self.db
                 .graph()
                 .get_unblocked_tasks(&id)
@@ -1095,6 +1154,7 @@ impl TaskService for DefaultTaskService {
             from_status,
             to_status: target,
             unblocked_tasks,
+            assigned_workflow,
         })
     }
 
@@ -2553,5 +2613,152 @@ mod tests {
         assert_eq!(tree[0].id, ticket_id);
         assert_eq!(tree[0].children.len(), 1);
         assert_eq!(tree[0].children[0].id, task_id);
+    }
+
+    // =========================================================================
+    // Status-driven workflow assignment tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_transition_to_returns_no_workflow_when_status_has_none() {
+        let service = setup_test_service().await;
+
+        let id = service
+            .create_task(CreateTaskOptions::new("Task").with_status(Status::Todo))
+            .await
+            .unwrap();
+
+        // Transition to in_progress (default schema has no workflow for this status)
+        let result = service
+            .transition_to(&id, Status::InProgress)
+            .await
+            .unwrap();
+
+        // Should not have assigned any workflow
+        assert!(
+            result.assigned_workflow.is_none(),
+            "Should not assign workflow when status has no workflow_id"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_transition_unblocks_with_unblocks_dependents_status() {
+        let service = setup_test_service().await;
+
+        // Create task A (dependency)
+        let task_a = service
+            .create_task(CreateTaskOptions::new("Task A").with_status(Status::Todo))
+            .await
+            .unwrap();
+
+        // Create task B that depends on A
+        let task_b = service
+            .create_task(CreateTaskOptions::new("Task B").with_status(Status::Todo))
+            .await
+            .unwrap();
+
+        service.add_dependency(&task_b, &task_a).await.unwrap();
+
+        // Move A to in_progress, then pending_review, then done
+        service
+            .transition_to(&task_a, Status::InProgress)
+            .await
+            .unwrap();
+        service
+            .transition_to(&task_a, Status::PendingReview)
+            .await
+            .unwrap();
+        let result = service.transition_to(&task_a, Status::Done).await.unwrap();
+
+        // Should unblock task_b (done has unblocks_dependents=true in default schema)
+        assert_eq!(result.unblocked_tasks.len(), 1);
+        assert_eq!(result.unblocked_tasks[0].id, task_b);
+    }
+
+    #[tokio::test]
+    async fn test_transition_no_unblock_with_rejected_status() {
+        let service = setup_test_service().await;
+
+        // Create task A (dependency)
+        let task_a = service
+            .create_task(CreateTaskOptions::new("Task A").with_status(Status::Todo))
+            .await
+            .unwrap();
+
+        // Create task B that depends on A
+        let task_b = service
+            .create_task(CreateTaskOptions::new("Task B").with_status(Status::Todo))
+            .await
+            .unwrap();
+
+        service.add_dependency(&task_b, &task_a).await.unwrap();
+
+        // Reject task A (rejected has unblocks_dependents=false in default schema)
+        let result = service
+            .transition_to(&task_a, Status::Rejected)
+            .await
+            .unwrap();
+
+        // Should NOT unblock task_b (rejected does not unblock dependents)
+        assert!(
+            result.unblocked_tasks.is_empty(),
+            "Rejected should not unblock dependents"
+        );
+
+        // Verify task_b is still blocked
+        let blockers = service.get_blockers(&task_b).await.unwrap();
+        // task_a should still be in blockers even though rejected
+        assert!(!blockers.is_empty(), "Task B should still have blockers");
+    }
+
+    #[tokio::test]
+    async fn test_transition_with_custom_schema_workflow() {
+        let service = setup_test_service().await;
+
+        // First create a workflow to reference
+        let workflow_thing = Thing::from(("workflow", "default"));
+
+        // Update the default schema to add workflow_id to in_progress status
+        let schema_repo = service.database().status_schemas();
+        let schema = schema_repo.get("default").await.unwrap().unwrap();
+
+        // Create updated statuses with workflow_id on in_progress
+        let mut updated_statuses: Vec<vertebrae_db::StatusDefinition> =
+            schema.statuses.iter().cloned().collect();
+        if let Some(in_progress_status) = updated_statuses
+            .iter_mut()
+            .find(|s| s.name == "in_progress")
+        {
+            in_progress_status.workflow_id = Some(workflow_thing.clone());
+        }
+
+        let update = vertebrae_db::StatusSchemaUpdate::new().with_statuses(updated_statuses);
+        schema_repo.update("default", update).await.unwrap();
+
+        // Now create a task and transition to in_progress
+        let id = service
+            .create_task(CreateTaskOptions::new("Task with workflow").with_status(Status::Todo))
+            .await
+            .unwrap();
+
+        let result = service
+            .transition_to(&id, Status::InProgress)
+            .await
+            .unwrap();
+
+        // Should have assigned the workflow
+        assert!(
+            result.assigned_workflow.is_some(),
+            "Should assign workflow when status has workflow_id"
+        );
+        let assigned = result.assigned_workflow.unwrap();
+        assert_eq!(assigned.workflow_id, "default");
+        assert!(!assigned.first_step_name.is_empty());
+
+        // Verify task now has the workflow assigned
+        let task = service.get_task(&id).await.unwrap();
+        assert!(task.workflow_id.is_some());
+        assert_eq!(task.workflow_id.unwrap().id.to_raw(), "default");
+        assert_eq!(task.current_step, Some(0));
     }
 }
