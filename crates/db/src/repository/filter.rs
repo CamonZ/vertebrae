@@ -63,6 +63,10 @@ pub struct TaskWithRelationsData {
     pub depends_on_ids: Vec<String>,
     /// Task IDs that depend on this task
     pub dependent_ids: Vec<String>,
+    /// Workflow ID (if any)
+    pub workflow_id: Option<String>,
+    /// Current step ID in workflow (if any) - preferred for positioning
+    pub current_step_id: Option<String>,
 }
 
 /// Internal row type for deserializing from SurrealDB
@@ -124,6 +128,10 @@ struct TaskWithRelationsRow {
     depends_on_ids: Vec<surrealdb::sql::Thing>,
     #[serde(default)]
     dependent_ids: Vec<surrealdb::sql::Thing>,
+    #[serde(default)]
+    workflow_id: Option<surrealdb::sql::Thing>,
+    #[serde(default)]
+    current_step_id: Option<surrealdb::sql::Thing>,
 }
 
 /// Parse a level string into a Level enum
@@ -340,7 +348,7 @@ impl<'a> TaskLister<'a> {
         let query = if conditions.is_empty() {
             r#"SELECT
                 id, title, level, status, priority, tags, needs_human_review,
-                created_at, description, sections, refs,
+                created_at, description, sections, refs, workflow_id, current_step_id,
                 (->child_of->task)[0].id AS parent_id,
                 <-child_of<-task.id AS children_ids,
                 ->depends_on->task.id AS depends_on_ids,
@@ -352,7 +360,7 @@ impl<'a> TaskLister<'a> {
             format!(
                 r#"SELECT
                     id, title, level, status, priority, tags, needs_human_review,
-                    created_at, description, sections, refs,
+                    created_at, description, sections, refs, workflow_id, current_step_id,
                     (->child_of->task)[0].id AS parent_id,
                     <-child_of<-task.id AS children_ids,
                     ->depends_on->task.id AS depends_on_ids,
@@ -397,6 +405,8 @@ impl<'a> TaskLister<'a> {
                     .into_iter()
                     .map(|t| t.id.to_raw())
                     .collect(),
+                workflow_id: row.workflow_id.map(|t| t.id.to_raw()),
+                current_step_id: row.current_step_id.map(|t| t.id.to_raw()),
             })
             .collect())
     }

@@ -92,7 +92,7 @@ describe("WorkflowPipeline", () => {
       expect(screen.getByText(/done \(2\)/i)).toBeInTheDocument();
     });
 
-    it("places tasks without execution state in first step", () => {
+    it("places tasks without current_step_id in first step", () => {
       const workflow = createMockWorkflow();
       const tasks = [
         createMockTaskWithRelations({
@@ -104,15 +104,45 @@ describe("WorkflowPipeline", () => {
         <WorkflowPipeline workflow={workflow} tasksWithRelations={tasks} />
       );
 
-      // Task without execution state should be in backlog (first step)
+      // Task without current_step_id should be in backlog (first step)
       expect(screen.getByText(/backlog \(1\)/i)).toBeInTheDocument();
     });
 
-    it("places tasks based on execution state currentStep", () => {
+    it("places tasks based on current_step_id when stepIdToName is provided", () => {
       const workflow = createMockWorkflow();
       const tasks = [
         createMockTaskWithRelations({
-          task: { id: "task-1", title: "In Progress Task", status: "todo" },
+          task: {
+            id: "task-1",
+            title: "Task with Step ID",
+            status: "todo",
+            current_step_id: "step-in-progress-123",
+          },
+        }),
+      ];
+
+      // Map step ID to step name
+      const stepIdToName = new Map([
+        ["step-in-progress-123", "in_progress"],
+      ]);
+
+      render(
+        <WorkflowPipeline
+          workflow={workflow}
+          tasksWithRelations={tasks}
+          stepIdToName={stepIdToName}
+        />
+      );
+
+      // Task should be in in_progress zone based on current_step_id
+      expect(screen.getByText(/in_progress \(1\)/i)).toBeInTheDocument();
+    });
+
+    it("uses execution state for positioning during workflow execution", () => {
+      const workflow = createMockWorkflow();
+      const tasks = [
+        createMockTaskWithRelations({
+          task: { id: "task-1", title: "Executing Task", status: "todo" },
         }),
       ];
 
@@ -128,8 +158,44 @@ describe("WorkflowPipeline", () => {
         />
       );
 
-      // Task should be in in_progress zone
+      // Task should be in in_progress zone based on execution state
       expect(screen.getByText(/in_progress \(1\)/i)).toBeInTheDocument();
+    });
+
+    it("prioritizes current_step_id over execution state for positioning", () => {
+      const workflow = createMockWorkflow();
+      const tasks = [
+        createMockTaskWithRelations({
+          task: {
+            id: "task-1",
+            title: "Task with Both",
+            status: "todo",
+            current_step_id: "step-done-456",
+          },
+        }),
+      ];
+
+      // Step ID maps to "done" step
+      const stepIdToName = new Map([
+        ["step-done-456", "done"],
+      ]);
+
+      // Execution state says "backlog" but current_step_id says "done"
+      const executionState = new Map([
+        ["task-1", { currentStep: "backlog", status: "in_progress" }],
+      ]);
+
+      render(
+        <WorkflowPipeline
+          workflow={workflow}
+          tasksWithRelations={tasks}
+          stepIdToName={stepIdToName}
+          executionState={executionState}
+        />
+      );
+
+      // Task should be in done zone (current_step_id takes priority)
+      expect(screen.getByText(/done \(1\)/i)).toBeInTheDocument();
     });
   });
 
@@ -156,12 +222,12 @@ describe("WorkflowPipeline", () => {
     });
   });
 
-  describe("execution state", () => {
-    it("shows waiting status icon for tasks without execution state", () => {
+  describe("status visual styling", () => {
+    it("shows backlog status icon for backlog tasks", () => {
       const workflow = createMockWorkflow();
       const tasks = [
         createMockTaskWithRelations({
-          task: { id: "task-1", title: "Waiting Task", status: "backlog" },
+          task: { id: "task-1", title: "Backlog Task", status: "backlog" },
         }),
       ];
 
@@ -169,35 +235,59 @@ describe("WorkflowPipeline", () => {
         <WorkflowPipeline workflow={workflow} tasksWithRelations={tasks} />
       );
 
-      // The waiting icon is ○
+      // The backlog icon is ○
       expect(screen.getByText("○")).toBeInTheDocument();
     });
 
-    it("shows in_progress status icon for executing tasks", () => {
+    it("shows todo status icon for todo tasks", () => {
       const workflow = createMockWorkflow();
       const tasks = [
         createMockTaskWithRelations({
-          task: { id: "task-1", title: "Running Task", status: "backlog" },
+          task: { id: "task-1", title: "Todo Task", status: "todo" },
         }),
       ];
 
-      const executionState = new Map([
-        ["task-1", { currentStep: "backlog", status: "in_progress" }],
-      ]);
-
       render(
-        <WorkflowPipeline
-          workflow={workflow}
-          tasksWithRelations={tasks}
-          executionState={executionState}
-        />
+        <WorkflowPipeline workflow={workflow} tasksWithRelations={tasks} />
       );
 
-      // The in_progress icon is ⟳ - tasks are rendered in zones now
+      // The todo icon is ◉
+      expect(screen.getByText("◉")).toBeInTheDocument();
+    });
+
+    it("shows in_progress status icon for in_progress tasks", () => {
+      const workflow = createMockWorkflow();
+      const tasks = [
+        createMockTaskWithRelations({
+          task: { id: "task-1", title: "Running Task", status: "in_progress" },
+        }),
+      ];
+
+      render(
+        <WorkflowPipeline workflow={workflow} tasksWithRelations={tasks} />
+      );
+
+      // The in_progress icon is ⟳ (spinning)
       expect(screen.getAllByText("⟳").length).toBeGreaterThan(0);
     });
 
-    it("shows completed status icon for done tasks", () => {
+    it("shows pending_review status icon for pending_review tasks", () => {
+      const workflow = createMockWorkflow();
+      const tasks = [
+        createMockTaskWithRelations({
+          task: { id: "task-1", title: "Review Task", status: "pending_review" },
+        }),
+      ];
+
+      render(
+        <WorkflowPipeline workflow={workflow} tasksWithRelations={tasks} />
+      );
+
+      // The pending_review icon is ◈
+      expect(screen.getByText("◈")).toBeInTheDocument();
+    });
+
+    it("shows done status icon for done tasks", () => {
       const workflow = createMockWorkflow();
       const tasks = [
         createMockTaskWithRelations({
@@ -211,6 +301,41 @@ describe("WorkflowPipeline", () => {
 
       // The done icon is ✓
       expect(screen.getByText("✓")).toBeInTheDocument();
+    });
+
+    it("shows rejected status icon for rejected tasks", () => {
+      const workflow = createMockWorkflow();
+      const tasks = [
+        createMockTaskWithRelations({
+          task: { id: "task-1", title: "Rejected Task", status: "rejected" },
+        }),
+      ];
+
+      render(
+        <WorkflowPipeline workflow={workflow} tasksWithRelations={tasks} />
+      );
+
+      // The rejected icon is ✕
+      expect(screen.getByText("✕")).toBeInTheDocument();
+    });
+
+    it("displays status visually independent of position", () => {
+      const workflow = createMockWorkflow();
+      // Task has in_progress status but is positioned in backlog step
+      const tasks = [
+        createMockTaskWithRelations({
+          task: { id: "task-1", title: "Mixed State Task", status: "in_progress" },
+        }),
+      ];
+
+      render(
+        <WorkflowPipeline workflow={workflow} tasksWithRelations={tasks} />
+      );
+
+      // Task should be in backlog zone (first step, no current_step_id)
+      expect(screen.getByText(/backlog \(1\)/i)).toBeInTheDocument();
+      // But should show in_progress icon (spinning ⟳)
+      expect(screen.getAllByText("⟳").length).toBeGreaterThan(0);
     });
   });
 

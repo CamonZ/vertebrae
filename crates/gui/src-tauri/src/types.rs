@@ -257,8 +257,10 @@ pub struct Task {
     pub rejection_reason: Option<String>,
     /// Workflow ID (string form)
     pub workflow_id: Option<String>,
-    /// Current step in workflow (0-indexed)
+    /// Current step in workflow (0-indexed) - legacy, prefer current_step_id
     pub current_step: Option<u32>,
+    /// Current step ID (string form) - preferred for positioning
+    pub current_step_id: Option<String>,
 }
 
 impl From<vertebrae_db::Task> for Task {
@@ -282,6 +284,7 @@ impl From<vertebrae_db::Task> for Task {
             rejection_reason: task.rejection_reason,
             workflow_id: task.workflow_id.map(|t| t.id.to_raw()),
             current_step: task.current_step.map(|s| s as u32),
+            current_step_id: task.current_step_id.map(|t| t.id.to_raw()),
         }
     }
 }

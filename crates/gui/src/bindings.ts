@@ -791,9 +791,13 @@ rejection_reason: string | null;
  */
 workflow_id: string | null; 
 /**
- * Current step in workflow (0-indexed)
+ * Current step in workflow (0-indexed) - legacy, prefer current_step_id
  */
-current_step: number | null }
+current_step: number | null; 
+/**
+ * Current step ID (string form) - preferred for positioning
+ */
+current_step_id: string | null }
 /**
  * The type of change that occurred on a task.
  */

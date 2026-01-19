@@ -26,38 +26,76 @@ type ZoneNodeData = {
 };
 
 /**
- * Custom zone node component - scrollable container for tasks
+ * Get border/background color based on task status.
+ * Status is a macro concept - it shows the overall state of the task.
+ */
+function getTaskStatusColor(status: string) {
+  switch (status) {
+    case "in_progress":
+      return "border-accent bg-accent/10";
+    case "pending_review":
+      return "border-warning bg-warning/10";
+    case "done":
+      return "border-success/50 bg-success/5";
+    case "rejected":
+      return "border-error bg-error/10";
+    case "todo":
+      return "border-info/50 bg-info/5";
+    case "backlog":
+    default:
+      return "border-border bg-bg-tertiary";
+  }
+}
+
+/**
+ * Get icon based on task status.
+ */
+function getTaskStatusIcon(status: string) {
+  switch (status) {
+    case "in_progress":
+      return "⟳";
+    case "pending_review":
+      return "◈";
+    case "done":
+      return "✓";
+    case "rejected":
+      return "✕";
+    case "todo":
+      return "◉";
+    case "backlog":
+    default:
+      return "○";
+  }
+}
+
+/**
+ * Get icon color based on task status.
+ */
+function getTaskStatusIconColor(status: string) {
+  switch (status) {
+    case "in_progress":
+      return "animate-spin text-accent";
+    case "pending_review":
+      return "text-warning";
+    case "done":
+      return "text-success";
+    case "rejected":
+      return "text-error";
+    case "todo":
+      return "text-info";
+    case "backlog":
+    default:
+      return "text-text-muted";
+  }
+}
+
+/**
+ * Custom zone node component - scrollable container for tasks.
+ * Tasks are positioned here based on current_step_id (micro concept).
+ * Task status is shown via border colors and icons (macro concept).
  */
 function ZoneNode({ data }: NodeProps<Node<ZoneNodeData>>) {
-  const { label, tasks = [], executionState } = data;
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "in_progress":
-        return "border-accent bg-accent/10";
-      case "completed":
-      case "done":
-        return "border-success/50 bg-success/5";
-      case "failed":
-        return "border-error bg-error/10";
-      default:
-        return "border-border bg-bg-tertiary";
-    }
-  };
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case "in_progress":
-        return "⟳";
-      case "completed":
-      case "done":
-        return "✓";
-      case "failed":
-        return "✕";
-      default:
-        return "○";
-    }
-  };
+  const { label, tasks = [] } = data;
 
   return (
     <div className="flex flex-col w-[280px] h-[280px]">
@@ -66,26 +104,26 @@ function ZoneNode({ data }: NodeProps<Node<ZoneNodeData>>) {
       </div>
       <div className="flex-1 overflow-y-auto overflow-x-hidden space-y-1.5 pr-1 scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
         {tasks.map((tr) => {
-          const execState = executionState?.get(tr.task.id!);
-          const status = tr.task.status === "done" || tr.task.status === "rejected"
-            ? "done"
-            : (execState?.status || "waiting");
+          // Use task status for visual styling (border color indicates macro state)
+          // Position is determined by current_step_id in the parent component
+          const taskStatus = tr.task.status;
 
           return (
             <div
               key={tr.task.id}
-              className={`rounded-lg border p-2 transition-all duration-200 ${getStatusColor(status)} hover:border-primary/50`}
+              className={`rounded-lg border p-2 transition-all duration-200 ${getTaskStatusColor(taskStatus)} hover:border-primary/50`}
             >
               <div className="flex items-start gap-2">
-                <span className={`flex-shrink-0 text-xs font-bold ${
-                  status === "in_progress" ? "animate-spin text-accent" :
-                  status === "done" ? "text-success" :
-                  status === "failed" ? "text-error" : "text-text-muted"
-                }`}>
-                  {getStatusIcon(status)}
+                <span
+                  className={`flex-shrink-0 text-xs font-bold ${getTaskStatusIconColor(taskStatus)}`}
+                >
+                  {getTaskStatusIcon(taskStatus)}
                 </span>
                 <div className="flex-1 min-w-0">
-                  <p className="truncate text-xs font-medium text-text-primary" title={tr.task.title}>
+                  <p
+                    className="truncate text-xs font-medium text-text-primary"
+                    title={tr.task.title}
+                  >
                     {tr.task.title}
                   </p>
                   <code className="block truncate font-mono text-[10px] text-text-muted">
@@ -114,6 +152,8 @@ interface WorkflowPipelineProps {
     { currentStep: string | number; status: string; error?: string }
   >;
   tasksWithRelations?: TaskWithRelations[];
+  /** Map from step ID to step name for resolving current_step_id */
+  stepIdToName?: Map<string, string>;
   onPlayClick?: (taskId: string) => void;
   isExecuting?: boolean;
 }
@@ -146,6 +186,7 @@ export function WorkflowPipeline({
   workflow,
   executionState,
   tasksWithRelations = [],
+  stepIdToName,
   onPlayClick,
   isExecuting,
 }: WorkflowPipelineProps) {
@@ -159,6 +200,8 @@ export function WorkflowPipeline({
   const STEP_ZONE_Y = 220; // Below step nodes (80 + 130 + 10 padding)
 
   // Group tasks by their current step
+  // Priority: current_step_id > executionState > first step (for active tasks)
+  // Done/rejected tasks always go to the "done" zone
   const tasksByStep = useMemo(() => {
     const groups: Map<string, TaskWithRelations[]> = new Map();
 
@@ -168,7 +211,8 @@ export function WorkflowPipeline({
     });
 
     tasksWithRelations.forEach((tr) => {
-      // Done/rejected tasks go to the "done" step zone
+      // Done/rejected tasks go to the "done" step zone (visual indicator)
+      // Note: The status border will still show the task as done/rejected
       if (tr.task.status === "done" || tr.task.status === "rejected") {
         if (groups.has("done")) {
           groups.get("done")!.push(tr);
@@ -176,9 +220,17 @@ export function WorkflowPipeline({
         }
       }
 
-      const execState = executionState?.get(tr.task.id!);
+      // 1. Use current_step_id if available (primary positioning source)
+      if (tr.task.current_step_id && stepIdToName) {
+        const stepName = stepIdToName.get(tr.task.current_step_id);
+        if (stepName && groups.has(stepName.toLowerCase())) {
+          groups.get(stepName.toLowerCase())!.push(tr);
+          return;
+        }
+      }
 
-      // Check execution state for current step
+      // 2. Use execution state for real-time animation during workflow execution
+      const execState = executionState?.get(tr.task.id!);
       if (execState) {
         let stepName: string | undefined;
         if (typeof execState.currentStep === "number") {
@@ -193,7 +245,7 @@ export function WorkflowPipeline({
         }
       }
 
-      // Default to first step if no execution state
+      // 3. Default to first step if no position info available
       const firstStep = sortedSteps[0]?.name?.toLowerCase();
       if (firstStep && groups.has(firstStep)) {
         groups.get(firstStep)!.push(tr);
@@ -201,7 +253,7 @@ export function WorkflowPipeline({
     });
 
     return groups;
-  }, [tasksWithRelations, executionState, sortedSteps]);
+  }, [tasksWithRelations, executionState, sortedSteps, stepIdToName]);
 
   // Convert workflow steps to React Flow nodes (positioned horizontally)
   const stepNodes: Node<StepNodeData>[] = useMemo(

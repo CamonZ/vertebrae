@@ -104,6 +104,9 @@ export function createMockTask(overrides?: Partial<{
   status: string;
   level: string;
   parent_id: string | null;
+  workflow_id: string | null;
+  current_step: number | null;
+  current_step_id: string | null;
 }>) {
   return {
     id: `task-${Math.random().toString(36).slice(2, 10)}`,
@@ -113,6 +116,8 @@ export function createMockTask(overrides?: Partial<{
     level: "task",
     parent_id: null,
     workflow_id: null,
+    current_step: null,
+    current_step_id: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     ...overrides,

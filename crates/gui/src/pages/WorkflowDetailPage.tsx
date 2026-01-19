@@ -1,6 +1,6 @@
 import { useParams, Link } from "react-router-dom";
 import { useState, useCallback, useMemo, useEffect } from "react";
-import { commands, type TaskWithRelations } from "../bindings";
+import { commands, type TaskWithRelations, type Step } from "../bindings";
 import { useWorkflow } from "../hooks/useWorkflow";
 import { useWorkflowChangeListener } from "../hooks/useWorkflowChangeListener";
 import { useTaskChangeListener } from "../hooks/useTaskChangeListener";
@@ -36,6 +36,20 @@ export function WorkflowDetailPage() {
     TaskWithRelations[]
   >([]);
 
+  // State for first-class steps (used to resolve current_step_id to step name)
+  const [steps, setSteps] = useState<Step[]>([]);
+
+  // Map from step ID to step name for quick lookup
+  const stepIdToName = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const step of steps) {
+      if (step.id) {
+        map.set(step.id, step.name);
+      }
+    }
+    return map;
+  }, [steps]);
+
   // Fetch workflow with all task details in a single call
   useEffect(() => {
     const fetchWorkflowWithTaskDetails = async () => {
@@ -60,6 +74,32 @@ export function WorkflowDetailPage() {
 
     fetchWorkflowWithTaskDetails();
   }, [id, addToast]);
+
+  // Fetch first-class steps for the workflow
+  useEffect(() => {
+    const fetchSteps = async () => {
+      if (!id) {
+        setSteps([]);
+        return;
+      }
+
+      try {
+        const result = await commands.listStepsForWorkflow(id);
+        if (result.status === "ok") {
+          setSteps(result.data);
+        } else {
+          // Steps may not exist for all workflows, so just log
+          console.debug(`No first-class steps for workflow: ${result.error.message}`);
+          setSteps([]);
+        }
+      } catch (err) {
+        console.debug(`Failed to fetch steps: ${String(err)}`);
+        setSteps([]);
+      }
+    };
+
+    fetchSteps();
+  }, [id]);
 
   // Execution state: Map of taskId -> { currentStep, status, error }
   // Initialize with all tasks in "waiting" status
@@ -435,6 +475,7 @@ export function WorkflowDetailPage() {
           workflow={workflowData}
           executionState={executionState}
           tasksWithRelations={tasksWithRelations}
+          stepIdToName={stepIdToName}
           isExecuting={isExecuting}
         />
       </div>

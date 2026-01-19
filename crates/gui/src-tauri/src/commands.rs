@@ -513,9 +513,13 @@ pub async fn get_workflow_with_task_details(
             needs_human_review: data.needs_human_review,
             revision_feedback: None,
             rejection_reason: None,
-            workflow_id: None,
+            workflow_id: data
+                .workflow_id
+                .map(|id| surrealdb::sql::Thing::from(("workflow".to_string(), id))),
             current_step: None,
-            current_step_id: None,
+            current_step_id: data
+                .current_step_id
+                .map(|id| surrealdb::sql::Thing::from(("step".to_string(), id))),
         };
 
         tasks.push(TaskWithRelations {
