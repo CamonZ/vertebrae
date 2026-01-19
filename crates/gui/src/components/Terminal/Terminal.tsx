@@ -145,7 +145,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       theme = "dark",
       autoFocus = true,
       fontSize = 14,
-      fontFamily = '"Geist Mono", "SF Mono", Monaco, monospace',
+      // Prioritize Nerd Fonts for powerline glyph support, then fall back to standard monospace
+      fontFamily = '"Hasklug Nerd Font Mono", "MesloLGS NF", "JetBrainsMono Nerd Font", "FiraCode Nerd Font", "Hack Nerd Font", "Geist Mono", "SF Mono", Monaco, "Cascadia Code", "Fira Code", Consolas, monospace',
       className = "",
     },
     ref
@@ -154,6 +155,12 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
     const terminalRef = useRef<XTerm | null>(null);
     const fitAddonRef = useRef<FitAddon | null>(null);
     const resizeObserverRef = useRef<ResizeObserver | null>(null);
+
+    // Store callbacks in refs to avoid re-creating terminal when callbacks change
+    const onDataRef = useRef(onData);
+    const onResizeRef = useRef(onResize);
+    onDataRef.current = onData;
+    onResizeRef.current = onResize;
 
     // Expose imperative methods
     useImperativeHandle(ref, () => ({
@@ -215,19 +222,17 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           term.focus();
         }
         // Notify initial dimensions
-        if (onResize) {
-          onResize({ cols: term.cols, rows: term.rows });
-        }
+        onResizeRef.current?.({ cols: term.cols, rows: term.rows });
       });
 
-      // Handle user input
+      // Handle user input - use ref to always get current callback
       const dataDisposable = term.onData((data) => {
-        onData?.(data);
+        onDataRef.current?.(data);
       });
 
-      // Handle resize events from terminal
+      // Handle resize events from terminal - use ref to always get current callback
       const resizeDisposable = term.onResize((size) => {
-        onResize?.({ cols: size.cols, rows: size.rows });
+        onResizeRef.current?.({ cols: size.cols, rows: size.rows });
       });
 
       // Set up container resize observer
@@ -249,7 +254,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         fitAddonRef.current = null;
         resizeObserverRef.current = null;
       };
-    }, [theme, fontSize, fontFamily, autoFocus, onData, onResize]);
+    }, [theme, fontSize, fontFamily, autoFocus]); // Removed onData, onResize - using refs instead
 
     return (
       <div
