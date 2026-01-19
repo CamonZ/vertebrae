@@ -514,10 +514,6 @@ pub struct Workflow {
     pub initial_step: Option<String>,
     /// Additional metadata as key-value pairs
     pub metadata: std::collections::HashMap<String, String>,
-    /// Workflow to assign to task when completing the last step
-    pub on_done_workflow: Option<String>,
-    /// Workflow to assign to task when rejected
-    pub on_reject_workflow: Option<String>,
     /// Creation timestamp (ISO 8601 string)
     pub created_at: Option<String>,
     /// Last update timestamp (ISO 8601 string)
@@ -532,8 +528,6 @@ impl From<vertebrae_db::Workflow> for Workflow {
             description: workflow.description,
             initial_step: workflow.initial_step.map(|t| t.id.to_raw()),
             metadata: workflow.metadata,
-            on_done_workflow: workflow.on_done_workflow,
-            on_reject_workflow: workflow.on_reject_workflow,
             created_at: workflow.created_at.map(|dt| dt.to_rfc3339()),
             updated_at: workflow.updated_at.map(|dt| dt.to_rfc3339()),
         }

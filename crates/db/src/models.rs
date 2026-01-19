@@ -727,14 +727,6 @@ pub struct Workflow {
     #[serde(default)]
     pub metadata: std::collections::HashMap<String, String>,
 
-    /// Workflow to assign to task when completing the last step (pipeline chaining)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub on_done_workflow: Option<String>,
-
-    /// Workflow to assign to task when rejected (pipeline chaining)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub on_reject_workflow: Option<String>,
-
     /// Optional validation gate for workflow completion
     #[serde(skip_serializing_if = "Option::is_none")]
     pub validation_gate_id: Option<Thing>,
@@ -757,8 +749,6 @@ impl Workflow {
             description: None,
             initial_step: None,
             metadata: std::collections::HashMap::new(),
-            on_done_workflow: None,
-            on_reject_workflow: None,
             validation_gate_id: None,
             created_at: None,
             updated_at: None,
@@ -774,18 +764,6 @@ impl Workflow {
     /// Add a metadata key-value pair
     pub fn with_metadata(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.metadata.insert(key.into(), value.into());
-        self
-    }
-
-    /// Set the workflow to chain to when the last step completes
-    pub fn with_on_done_workflow(mut self, workflow_id: impl Into<String>) -> Self {
-        self.on_done_workflow = Some(workflow_id.into());
-        self
-    }
-
-    /// Set the workflow to chain to when the task is rejected
-    pub fn with_on_reject_workflow(mut self, workflow_id: impl Into<String>) -> Self {
-        self.on_reject_workflow = Some(workflow_id.into());
         self
     }
 
@@ -808,8 +786,6 @@ impl PartialEq for Workflow {
             && self.description == other.description
             && self.initial_step == other.initial_step
             && self.metadata == other.metadata
-            && self.on_done_workflow == other.on_done_workflow
-            && self.on_reject_workflow == other.on_reject_workflow
             && self.validation_gate_id == other.validation_gate_id
     }
 }

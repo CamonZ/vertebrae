@@ -50,8 +50,6 @@ export function createMockWorkflow(overrides?: Partial<{
     name: "Test Workflow",
     description: "A test workflow",
     is_default: false,
-    on_done_workflow: null,
-    on_reject_workflow: null,
     steps: [
       {
         name: "backlog",

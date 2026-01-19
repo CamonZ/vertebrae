@@ -405,52 +405,6 @@ export function WorkflowDetailPage() {
             {workflowData.description}
           </p>
         )}
-
-        {/* Chain indicators */}
-        {(workflowData.on_done_workflow || workflowData.on_reject_workflow) && (
-          <div className="mt-4 flex gap-4">
-            {workflowData.on_done_workflow && (
-              <div className="flex items-center gap-2 rounded-lg border border-success/30 bg-success/10 px-3 py-1.5 text-xs font-medium text-success">
-                <svg
-                  className="h-4 w-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={1.5}
-                    d="M13 7l5 5m0 0l-5 5m5-5H6"
-                  />
-                </svg>
-                <span>
-                  On done: {truncateId(workflowData.on_done_workflow)}
-                </span>
-              </div>
-            )}
-            {workflowData.on_reject_workflow && (
-              <div className="flex items-center gap-2 rounded-lg border border-error/30 bg-error/10 px-3 py-1.5 text-xs font-medium text-error">
-                <svg
-                  className="h-4 w-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={1.5}
-                    d="M6 18L18 6M6 6l12 12"
-                  />
-                </svg>
-                <span>
-                  On reject: {truncateId(workflowData.on_reject_workflow)}
-                </span>
-              </div>
-            )}
-          </div>
-        )}
       </div>
 
       {/* Pipeline View with Execution */}

@@ -647,7 +647,7 @@ content: string;
  */
 created_at: string }
 /**
- * First-class workflow step - mirrors db::Step
+ * Workflow step entity - mirrors db::Step
  */
 export type Step = { 
 /**
@@ -944,25 +944,13 @@ name: string;
  */
 description: string | null; 
 /**
- * Ordered list of workflow steps (legacy embedded steps)
- */
-steps: WorkflowStep[]; 
-/**
- * Reference to the initial step in the workflow (new first-class steps)
+ * Reference to the initial step in the workflow
  */
 initial_step: string | null; 
 /**
  * Additional metadata as key-value pairs
  */
 metadata: Partial<{ [key in string]: string }>; 
-/**
- * Workflow to assign to task when completing the last step
- */
-on_done_workflow: string | null; 
-/**
- * Workflow to assign to task when rejected
- */
-on_reject_workflow: string | null; 
 /**
  * Creation timestamp (ISO 8601 string)
  */
@@ -1037,22 +1025,6 @@ export type WorkflowExecutionEventType =
  * Workflow failed
  */
 { Failed: { error: string } }
-/**
- * Workflow step - mirrors db::WorkflowStep (legacy embedded steps)
- */
-export type WorkflowStep = { 
-/**
- * Display name for this step
- */
-name: string; 
-/**
- * The agent configuration to use for this step
- */
-agent_config: AgentConfig; 
-/**
- * Ordering index for sequential execution (0-based)
- */
-order: number }
 /**
  * Workflow with its associated tasks including full details and relations
  */

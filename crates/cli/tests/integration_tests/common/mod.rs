@@ -345,8 +345,6 @@ pub fn workflow_add_cmd(name: &str, step_name: &str, model: &str) -> WorkflowAdd
             name: step_name.to_string(),
             agent_config: AgentConfig::new().with_model(model),
         }],
-        on_done: None,
-        on_reject: None,
     }
 }
 
@@ -374,10 +372,6 @@ pub fn workflow_update_cmd(
         name: name.map(String::from),
         description: description.map(String::from),
         clear_description: false,
-        on_done: None,
-        clear_on_done: false,
-        on_reject: None,
-        clear_on_reject: false,
     }
 }
 

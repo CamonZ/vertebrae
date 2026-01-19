@@ -31,7 +31,7 @@ pub enum WorkflowCommand {
     Advance(WorkflowAdvanceCommand),
     /// Retreat a task to the previous workflow step
     Retreat(WorkflowRetreatCommand),
-    /// Reject a task in its workflow (triggers on_reject_workflow if configured)
+    /// Reject a task in its workflow (unassigns workflow from task)
     Reject(WorkflowRejectCommand),
 }
 
@@ -80,14 +80,6 @@ pub struct WorkflowAddCommand {
     /// Workflow steps in 'name:model' format (can be specified multiple times)
     #[arg(short, long = "step", value_parser = parse_step)]
     pub steps: Vec<ParsedStep>,
-
-    /// Workflow ID to chain to when the last step completes
-    #[arg(long)]
-    pub on_done: Option<String>,
-
-    /// Workflow ID to chain to when the task is rejected
-    #[arg(long)]
-    pub on_reject: Option<String>,
 }
 
 /// A parsed workflow step from the command line
@@ -162,14 +154,6 @@ impl WorkflowAddCommand {
 
         if let Some(description) = &self.description {
             options = options.with_description(description);
-        }
-
-        if let Some(on_done) = &self.on_done {
-            options = options.with_on_done_workflow(on_done);
-        }
-
-        if let Some(on_reject) = &self.on_reject {
-            options = options.with_on_reject_workflow(on_reject);
         }
 
         // Create the workflow
@@ -275,10 +259,6 @@ pub struct WorkflowDetail {
     pub steps: Vec<StepDisplayInfo>,
     /// Additional metadata as key-value pairs
     pub metadata: std::collections::HashMap<String, String>,
-    /// Workflow to chain to when done
-    pub on_done_workflow: Option<String>,
-    /// Workflow to chain to when rejected
-    pub on_reject_workflow: Option<String>,
     /// Creation timestamp
     pub created_at: Option<String>,
     /// Last update timestamp
@@ -323,19 +303,6 @@ impl std::fmt::Display for WorkflowDetail {
             }
         }
         writeln!(f)?;
-
-        // Pipeline Chaining section (if any)
-        if self.on_done_workflow.is_some() || self.on_reject_workflow.is_some() {
-            writeln!(f, "Pipeline Chaining")?;
-            writeln!(f, "{}", "-".repeat(40))?;
-            if let Some(ref on_done) = self.on_done_workflow {
-                writeln!(f, "  On Done:   -> {}", on_done)?;
-            }
-            if let Some(ref on_reject) = self.on_reject_workflow {
-                writeln!(f, "  On Reject: -> {}", on_reject)?;
-            }
-            writeln!(f)?;
-        }
 
         // Metadata section (if any)
         if !self.metadata.is_empty() {
@@ -435,8 +402,6 @@ impl WorkflowShowCommand {
             description: workflow.description,
             steps,
             metadata: workflow.metadata,
-            on_done_workflow: workflow.on_done_workflow,
-            on_reject_workflow: workflow.on_reject_workflow,
             created_at: workflow.created_at.map(|dt| dt.to_rfc3339()),
             updated_at: workflow.updated_at.map(|dt| dt.to_rfc3339()),
         };
@@ -462,22 +427,6 @@ pub struct WorkflowUpdateCommand {
     /// Clear the workflow description
     #[arg(long, conflicts_with = "description")]
     pub clear_description: bool,
-
-    /// Workflow ID to chain to when the last step completes
-    #[arg(long)]
-    pub on_done: Option<String>,
-
-    /// Clear the on-done workflow
-    #[arg(long, conflicts_with = "on_done")]
-    pub clear_on_done: bool,
-
-    /// Workflow ID to chain to when the task is rejected
-    #[arg(long)]
-    pub on_reject: Option<String>,
-
-    /// Clear the on-reject workflow
-    #[arg(long, conflicts_with = "on_reject")]
-    pub clear_on_reject: bool,
 }
 
 impl WorkflowUpdateCommand {
@@ -507,22 +456,10 @@ impl WorkflowUpdateCommand {
             options = options.clear_description();
         }
 
-        if let Some(on_done) = &self.on_done {
-            options = options.with_on_done_workflow(on_done);
-        } else if self.clear_on_done {
-            options = options.clear_on_done_workflow();
-        }
-
-        if let Some(on_reject) = &self.on_reject {
-            options = options.with_on_reject_workflow(on_reject);
-        } else if self.clear_on_reject {
-            options = options.clear_on_reject_workflow();
-        }
-
         // Check if any updates were provided
         if !options.has_updates() {
             return Err(ServiceError::validation_failed(
-                "no updates specified (use --name, --description, --on-done, --on-reject, or --clear-* options)",
+                "no updates specified (use --name, --description, or --clear-description options)",
             ));
         }
 
@@ -736,7 +673,7 @@ impl WorkflowRetreatCommand {
     }
 }
 
-/// Reject a task in its workflow, triggering on_reject_workflow chaining if configured
+/// Reject a task in its workflow, unassigning the workflow from the task
 #[derive(Debug, Args)]
 pub struct WorkflowRejectCommand {
     /// Task ID to reject (case-insensitive)
@@ -747,9 +684,7 @@ pub struct WorkflowRejectCommand {
 impl WorkflowRejectCommand {
     /// Execute the reject workflow command.
     ///
-    /// Rejects the task in its current workflow. If the workflow has an on_reject_workflow
-    /// configured, the task will be assigned to that workflow. Otherwise, the task's
-    /// workflow assignment is cleared.
+    /// Rejects the task in its current workflow and unassigns the workflow from the task.
     ///
     /// # Arguments
     ///
@@ -763,26 +698,10 @@ impl WorkflowRejectCommand {
         // Reject the task in its workflow
         let result = service.reject_task(&self.task_id).await?;
 
-        // Build output message based on whether workflow chaining occurred
-        let message = if let Some(chained_to) = &result.chained_to_workflow {
-            let first_step = result.first_step_name.as_deref().unwrap_or("Step 1");
-            let exec_id = result.execution_id.as_deref().unwrap_or("unknown");
-            format!(
-                "Rejected task {} from workflow {} and chained to workflow {} at step 1: {} (execution: {})",
-                result.task_id,
-                result.from_workflow_id,
-                chained_to,
-                first_step,
-                &exec_id[..6.min(exec_id.len())]
-            )
-        } else {
-            format!(
-                "Rejected task {} from workflow {} (no on_reject_workflow configured, workflow unassigned)",
-                result.task_id, result.from_workflow_id
-            )
-        };
-
-        Ok(message)
+        Ok(format!(
+            "Rejected task {} from workflow {} (workflow unassigned)",
+            result.task_id, result.from_workflow_id
+        ))
     }
 }
 
@@ -895,8 +814,6 @@ mod tests {
                 name: "step1".to_string(),
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
-            on_done: None,
-            on_reject: None,
         };
 
         let result = cmd
@@ -937,8 +854,6 @@ mod tests {
                 name: "step1".to_string(),
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
-            on_done: None,
-            on_reject: None,
         };
 
         let result = cmd
@@ -976,8 +891,6 @@ mod tests {
                     agent_config: AgentConfig::new().with_model("deployer"),
                 },
             ],
-            on_done: None,
-            on_reject: None,
         };
 
         let result = cmd
@@ -1013,8 +926,6 @@ mod tests {
                 name: "step1".to_string(),
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
-            on_done: None,
-            on_reject: None,
         };
 
         let result = cmd.execute(&create_service(&db)).await;
@@ -1042,8 +953,6 @@ mod tests {
                 name: "step1".to_string(),
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
-            on_done: None,
-            on_reject: None,
         };
 
         let result = cmd.execute(&create_service(&db)).await;
@@ -1068,8 +977,6 @@ mod tests {
             name: "No Steps Workflow".to_string(),
             description: None,
             steps: vec![],
-            on_done: None,
-            on_reject: None,
         };
 
         let result = cmd.execute(&create_service(&db)).await;
@@ -1097,8 +1004,6 @@ mod tests {
                 name: "step1".to_string(),
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
-            on_done: None,
-            on_reject: None,
         };
 
         let result = cmd.execute(&create_service(&db)).await.unwrap();
@@ -1122,8 +1027,6 @@ mod tests {
                     name: "step1".to_string(),
                     agent_config: AgentConfig::new().with_model("agent1"),
                 }],
-                on_done: None,
-                on_reject: None,
             };
 
             let result = cmd.execute(&create_service(&db)).await.unwrap();
@@ -1153,8 +1056,6 @@ mod tests {
                 name: "step1".to_string(),
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
-            on_done: None,
-            on_reject: None,
         };
 
         let result = cmd.execute(&service).await.unwrap();
@@ -1200,8 +1101,6 @@ mod tests {
                 name: "step1".to_string(),
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
-            on_done: None,
-            on_reject: None,
         };
         let result1 = add_cmd1.execute(&create_service(&db)).await.unwrap();
         let id1 = extract_workflow_id(&result1);
@@ -1224,8 +1123,6 @@ mod tests {
                     agent_config: AgentConfig::new().with_model("deployer"),
                 },
             ],
-            on_done: None,
-            on_reject: None,
         };
         let result2 = add_cmd2.execute(&create_service(&db)).await.unwrap();
         let id2 = extract_workflow_id(&result2);
@@ -1266,8 +1163,6 @@ mod tests {
                 name: "step1".to_string(),
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
-            on_done: None,
-            on_reject: None,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
@@ -1311,8 +1206,6 @@ mod tests {
                     agent_config: AgentConfig::new().with_model("deployer"),
                 },
             ],
-            on_done: None,
-            on_reject: None,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
@@ -1383,8 +1276,6 @@ mod tests {
                 name: "step1".to_string(),
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
-            on_done: None,
-            on_reject: None,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
@@ -1416,8 +1307,6 @@ mod tests {
                 name: "step1".to_string(),
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
-            on_done: None,
-            on_reject: None,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
@@ -1485,8 +1374,6 @@ mod tests {
                 },
             ],
             metadata: std::collections::HashMap::new(),
-            on_done_workflow: None,
-            on_reject_workflow: None,
             created_at: None,
             updated_at: None,
         };
@@ -1517,8 +1404,6 @@ mod tests {
                 order: 0,
             }],
             metadata,
-            on_done_workflow: None,
-            on_reject_workflow: None,
             created_at: None,
             updated_at: None,
         };
@@ -1612,8 +1497,6 @@ mod tests {
             description: None,
             steps: vec![],
             metadata: std::collections::HashMap::new(),
-            on_done_workflow: None,
-            on_reject_workflow: None,
             created_at: None,
             updated_at: None,
         };
@@ -1643,8 +1526,6 @@ mod tests {
                 name: "step1".to_string(),
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
-            on_done: None,
-            on_reject: None,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
@@ -1655,10 +1536,6 @@ mod tests {
             name: Some("New Name".to_string()),
             description: None,
             clear_description: false,
-            on_done: None,
-            clear_on_done: false,
-            on_reject: None,
-            clear_on_reject: false,
         };
         let result = update_cmd.execute(&create_service(&db)).await.unwrap();
         assert_eq!(result, format!("Updated workflow: {}", id));
@@ -1680,8 +1557,6 @@ mod tests {
                 name: "step1".to_string(),
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
-            on_done: None,
-            on_reject: None,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
@@ -1692,10 +1567,6 @@ mod tests {
             name: None,
             description: Some("New description".to_string()),
             clear_description: false,
-            on_done: None,
-            clear_on_done: false,
-            on_reject: None,
-            clear_on_reject: false,
         };
         let result = update_cmd.execute(&create_service(&db)).await.unwrap();
         assert_eq!(result, format!("Updated workflow: {}", id));
@@ -1717,8 +1588,6 @@ mod tests {
                 name: "step1".to_string(),
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
-            on_done: None,
-            on_reject: None,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
@@ -1729,10 +1598,6 @@ mod tests {
             name: None,
             description: None,
             clear_description: true,
-            on_done: None,
-            clear_on_done: false,
-            on_reject: None,
-            clear_on_reject: false,
         };
         let result = update_cmd.execute(&create_service(&db)).await.unwrap();
         assert_eq!(result, format!("Updated workflow: {}", id));
@@ -1751,10 +1616,6 @@ mod tests {
             name: Some("New Name".to_string()),
             description: None,
             clear_description: false,
-            on_done: None,
-            clear_on_done: false,
-            on_reject: None,
-            clear_on_reject: false,
         };
 
         let result = update_cmd.execute(&create_service(&db)).await;
@@ -1779,8 +1640,6 @@ mod tests {
                 name: "step1".to_string(),
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
-            on_done: None,
-            on_reject: None,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
@@ -1791,10 +1650,6 @@ mod tests {
             name: None,
             description: None,
             clear_description: false,
-            on_done: None,
-            clear_on_done: false,
-            on_reject: None,
-            clear_on_reject: false,
         };
 
         let result = update_cmd.execute(&create_service(&db)).await;
@@ -1823,8 +1678,6 @@ mod tests {
                 name: "step1".to_string(),
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
-            on_done: None,
-            on_reject: None,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
@@ -1835,10 +1688,6 @@ mod tests {
             name: Some("   ".to_string()),
             description: None,
             clear_description: false,
-            on_done: None,
-            clear_on_done: false,
-            on_reject: None,
-            clear_on_reject: false,
         };
 
         let result = update_cmd.execute(&create_service(&db)).await;
@@ -1867,8 +1716,6 @@ mod tests {
                 name: "step1".to_string(),
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
-            on_done: None,
-            on_reject: None,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
@@ -1879,10 +1726,6 @@ mod tests {
             name: Some("Updated Name".to_string()),
             description: None,
             clear_description: false,
-            on_done: None,
-            clear_on_done: false,
-            on_reject: None,
-            clear_on_reject: false,
         };
 
         let result = update_cmd.execute(&create_service(&db)).await;
@@ -1900,10 +1743,6 @@ mod tests {
             name: Some("New Name".to_string()),
             description: None,
             clear_description: false,
-            on_done: None,
-            clear_on_done: false,
-            on_reject: None,
-            clear_on_reject: false,
         };
         let debug_str = format!("{:?}", cmd);
         assert!(
@@ -1930,8 +1769,6 @@ mod tests {
                 name: "step1".to_string(),
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
-            on_done: None,
-            on_reject: None,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
@@ -1978,8 +1815,6 @@ mod tests {
                 name: "step1".to_string(),
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
-            on_done: None,
-            on_reject: None,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let id = extract_workflow_id(&add_result);
@@ -2037,8 +1872,6 @@ mod tests {
                     agent_config: AgentConfig::new().with_model("tester"),
                 },
             ],
-            on_done: None,
-            on_reject: None,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let workflow_id = extract_workflow_id(&add_result);
@@ -2083,8 +1916,6 @@ mod tests {
                 name: "step1".to_string(),
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
-            on_done: None,
-            on_reject: None,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let workflow_id = extract_workflow_id(&add_result);
@@ -2140,8 +1971,6 @@ mod tests {
                 name: "step1".to_string(),
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
-            on_done: None,
-            on_reject: None,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let workflow_id = extract_workflow_id(&add_result);
@@ -2189,8 +2018,6 @@ mod tests {
                 name: "step1".to_string(),
                 agent_config: AgentConfig::new().with_model("agent1"),
             }],
-            on_done: None,
-            on_reject: None,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let workflow_id = extract_workflow_id(&add_result);
@@ -2297,8 +2124,6 @@ mod tests {
                     agent_config: AgentConfig::new().with_model("agent3"),
                 },
             ],
-            on_done: None,
-            on_reject: None,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let workflow_id = extract_workflow_id(&add_result);
@@ -2346,8 +2171,6 @@ mod tests {
                     agent_config: AgentConfig::new().with_model("agent2"),
                 },
             ],
-            on_done: None,
-            on_reject: None,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let workflow_id = extract_workflow_id(&add_result);
@@ -2462,8 +2285,6 @@ mod tests {
                     agent_config: AgentConfig::new().with_model("agent3"),
                 },
             ],
-            on_done: None,
-            on_reject: None,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let workflow_id = extract_workflow_id(&add_result);
@@ -2518,8 +2339,6 @@ mod tests {
                     agent_config: AgentConfig::new().with_model("agent2"),
                 },
             ],
-            on_done: None,
-            on_reject: None,
         };
         let add_result = add_cmd.execute(&create_service(&db)).await.unwrap();
         let workflow_id = extract_workflow_id(&add_result);
@@ -2607,162 +2426,14 @@ mod tests {
     }
 
     // ========================================
-    // Pipeline Chaining tests
+    // Reject workflow tests
     // ========================================
 
     #[tokio::test]
-    async fn test_advance_workflow_chains_on_done() {
+    async fn test_reject_unassigns_workflow() {
         let db = setup_test_db().await;
 
-        // Create a second workflow to chain to
-        let second_workflow = WorkflowAddCommand {
-            name: "Review Workflow".to_string(),
-            description: None,
-            steps: vec![ParsedStep {
-                name: "review".to_string(),
-                agent_config: AgentConfig::new().with_model("reviewer"),
-            }],
-            on_done: None,
-            on_reject: None,
-        };
-        let second_result = second_workflow.execute(&create_service(&db)).await.unwrap();
-        let second_workflow_id = extract_workflow_id(&second_result);
-
-        // Create a first workflow with on_done chaining to second
-        let first_workflow = WorkflowAddCommand {
-            name: "Process Workflow".to_string(),
-            description: None,
-            steps: vec![ParsedStep {
-                name: "process".to_string(),
-                agent_config: AgentConfig::new().with_model("processor"),
-            }],
-            on_done: Some(second_workflow_id.clone()),
-            on_reject: None,
-        };
-        let first_result = first_workflow.execute(&create_service(&db)).await.unwrap();
-        let first_workflow_id = extract_workflow_id(&first_result);
-
-        // Create a task and assign it to the first workflow
-        create_test_task(&db, "abc123", "Test Task").await;
-        let assign_cmd = WorkflowAssignCommand {
-            task_id: "abc123".to_string(),
-            workflow_id: first_workflow_id.clone(),
-        };
-        assign_cmd.execute(&create_service(&db)).await.unwrap();
-
-        // Advance - should chain to the second workflow
-        let advance_cmd = WorkflowAdvanceCommand {
-            task_id: "abc123".to_string(),
-        };
-        let result = advance_cmd.execute(&create_service(&db)).await.unwrap();
-
-        // Verify the chaining message
-        assert!(
-            result.contains("Completed workflow") && result.contains("chained"),
-            "Result should mention completed and chained: {}",
-            result
-        );
-        assert!(
-            result.contains(&second_workflow_id),
-            "Result should mention the new workflow ID: {}",
-            result
-        );
-
-        // Verify task is now assigned to the second workflow at step 0
-        let task = db.tasks().get("abc123").await.unwrap().unwrap();
-        let task_workflow_id = task.workflow_id.as_ref().unwrap().id.to_raw();
-        // SurrealDB treats numeric-looking IDs as numbers, stripping leading zeros
-        // so we compare by checking if one contains the other (after trimming zeros)
-        assert!(
-            second_workflow_id.contains(&task_workflow_id)
-                || task_workflow_id.contains(&second_workflow_id),
-            "Workflow IDs should match: {} vs {}",
-            task_workflow_id,
-            second_workflow_id
-        );
-        assert_eq!(task.current_step, Some(0));
-    }
-
-    #[tokio::test]
-    async fn test_reject_workflow_chains_on_reject() {
-        let db = setup_test_db().await;
-
-        // Create a recovery workflow
-        let recovery_workflow = WorkflowAddCommand {
-            name: "Recovery Workflow".to_string(),
-            description: None,
-            steps: vec![ParsedStep {
-                name: "recovery".to_string(),
-                agent_config: AgentConfig::new().with_model("recovery-agent"),
-            }],
-            on_done: None,
-            on_reject: None,
-        };
-        let recovery_result = recovery_workflow
-            .execute(&create_service(&db))
-            .await
-            .unwrap();
-        let recovery_workflow_id = extract_workflow_id(&recovery_result);
-
-        // Create a main workflow with on_reject chaining
-        let main_workflow = WorkflowAddCommand {
-            name: "Main Workflow".to_string(),
-            description: None,
-            steps: vec![ParsedStep {
-                name: "main".to_string(),
-                agent_config: AgentConfig::new().with_model("main-agent"),
-            }],
-            on_done: None,
-            on_reject: Some(recovery_workflow_id.clone()),
-        };
-        let main_result = main_workflow.execute(&create_service(&db)).await.unwrap();
-        let main_workflow_id = extract_workflow_id(&main_result);
-
-        // Create a task and assign it
-        create_test_task(&db, "abc123", "Test Task").await;
-        let assign_cmd = WorkflowAssignCommand {
-            task_id: "abc123".to_string(),
-            workflow_id: main_workflow_id.clone(),
-        };
-        assign_cmd.execute(&create_service(&db)).await.unwrap();
-
-        // Reject - should chain to recovery workflow
-        let reject_cmd = WorkflowRejectCommand {
-            task_id: "abc123".to_string(),
-        };
-        let result = reject_cmd.execute(&create_service(&db)).await.unwrap();
-
-        // Verify the chaining message
-        assert!(
-            result.contains("Rejected") && result.contains("chained"),
-            "Result should mention rejected and chained: {}",
-            result
-        );
-        assert!(
-            result.contains(&recovery_workflow_id),
-            "Result should mention the recovery workflow ID: {}",
-            result
-        );
-
-        // Verify task is now assigned to the recovery workflow at step 0
-        let task = db.tasks().get("abc123").await.unwrap().unwrap();
-        let task_workflow_id = task.workflow_id.as_ref().unwrap().id.to_raw();
-        // SurrealDB treats numeric-looking IDs as numbers, stripping leading zeros
-        assert!(
-            recovery_workflow_id.contains(&task_workflow_id)
-                || task_workflow_id.contains(&recovery_workflow_id),
-            "Workflow IDs should match: {} vs {}",
-            task_workflow_id,
-            recovery_workflow_id
-        );
-        assert_eq!(task.current_step, Some(0));
-    }
-
-    #[tokio::test]
-    async fn test_reject_without_on_reject_unassigns_workflow() {
-        let db = setup_test_db().await;
-
-        // Create a workflow without on_reject
+        // Create a workflow
         let workflow = WorkflowAddCommand {
             name: "Test Workflow".to_string(),
             description: None,
@@ -2770,8 +2441,6 @@ mod tests {
                 name: "test".to_string(),
                 agent_config: AgentConfig::new().with_model("test-agent"),
             }],
-            on_done: None,
-            on_reject: None,
         };
         let result = workflow.execute(&create_service(&db)).await.unwrap();
         let workflow_id = extract_workflow_id(&result);
@@ -2844,73 +2513,6 @@ mod tests {
             }
             e => panic!("Expected TaskNotFound error, got {:?}", e),
         }
-    }
-
-    #[tokio::test]
-    async fn test_workflow_show_displays_chaining_info() {
-        let db = setup_test_db().await;
-
-        // Create two workflows
-        let done_workflow = WorkflowAddCommand {
-            name: "Done Workflow".to_string(),
-            description: None,
-            steps: vec![ParsedStep {
-                name: "done".to_string(),
-                agent_config: AgentConfig::new().with_model("done-agent"),
-            }],
-            on_done: None,
-            on_reject: None,
-        };
-        let done_result = done_workflow.execute(&create_service(&db)).await.unwrap();
-        let done_id = extract_workflow_id(&done_result);
-
-        let reject_workflow = WorkflowAddCommand {
-            name: "Reject Workflow".to_string(),
-            description: None,
-            steps: vec![ParsedStep {
-                name: "reject".to_string(),
-                agent_config: AgentConfig::new().with_model("reject-agent"),
-            }],
-            on_done: None,
-            on_reject: None,
-        };
-        let reject_result = reject_workflow.execute(&create_service(&db)).await.unwrap();
-        let reject_id = extract_workflow_id(&reject_result);
-
-        // Create a main workflow with both chaining options
-        let main_workflow = WorkflowAddCommand {
-            name: "Main Workflow".to_string(),
-            description: None,
-            steps: vec![ParsedStep {
-                name: "main".to_string(),
-                agent_config: AgentConfig::new().with_model("main-agent"),
-            }],
-            on_done: Some(done_id.clone()),
-            on_reject: Some(reject_id.clone()),
-        };
-        let main_result = main_workflow.execute(&create_service(&db)).await.unwrap();
-        let main_id = extract_workflow_id(&main_result);
-
-        // Show the workflow
-        let show_cmd = WorkflowShowCommand { id: main_id };
-        let result = show_cmd.execute(&create_service(&db)).await.unwrap();
-
-        // Verify chaining info is displayed
-        assert!(
-            result.contains("Pipeline Chaining"),
-            "Should have Pipeline Chaining section: {}",
-            result
-        );
-        assert!(
-            result.contains("On Done:") && result.contains(&done_id),
-            "Should show on_done workflow: {}",
-            result
-        );
-        assert!(
-            result.contains("On Reject:") && result.contains(&reject_id),
-            "Should show on_reject workflow: {}",
-            result
-        );
     }
 
     #[test]

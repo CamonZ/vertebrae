@@ -40,8 +40,6 @@ async fn test_workflow_add_with_multiple_steps() {
                 agent_config: AgentConfig::new().with_model("claude-3"),
             },
         ],
-        on_done: None,
-        on_reject: None,
     };
     let result = cmd.execute(&ctx.workflow_service).await;
 
@@ -226,8 +224,6 @@ async fn test_workflow_advance() {
                 agent_config: AgentConfig::new().with_model("gpt-4"),
             },
         ],
-        on_done: None,
-        on_reject: None,
     };
     let add_result = cmd.execute(&ctx.workflow_service).await.unwrap();
     let workflow_id = extract_workflow_id(&add_result);
@@ -267,8 +263,6 @@ async fn test_workflow_retreat() {
                 agent_config: AgentConfig::new().with_model("gpt-4"),
             },
         ],
-        on_done: None,
-        on_reject: None,
     };
     let add_result = cmd.execute(&ctx.workflow_service).await.unwrap();
     let workflow_id = extract_workflow_id(&add_result);

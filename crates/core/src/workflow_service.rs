@@ -59,10 +59,6 @@ pub struct CreateWorkflowOptions {
     pub description: Option<String>,
     /// Workflow steps
     pub steps: Vec<WorkflowStepInput>,
-    /// Workflow to chain to when task completes all steps
-    pub on_done_workflow: Option<String>,
-    /// Workflow to chain to when task is rejected
-    pub on_reject_workflow: Option<String>,
 }
 
 impl CreateWorkflowOptions {
@@ -72,26 +68,12 @@ impl CreateWorkflowOptions {
             name: name.into(),
             description: None,
             steps,
-            on_done_workflow: None,
-            on_reject_workflow: None,
         }
     }
 
     /// Set the description
     pub fn with_description(mut self, description: impl Into<String>) -> Self {
         self.description = Some(description.into());
-        self
-    }
-
-    /// Set the on_done_workflow
-    pub fn with_on_done_workflow(mut self, workflow_id: impl Into<String>) -> Self {
-        self.on_done_workflow = Some(workflow_id.into());
-        self
-    }
-
-    /// Set the on_reject_workflow
-    pub fn with_on_reject_workflow(mut self, workflow_id: impl Into<String>) -> Self {
-        self.on_reject_workflow = Some(workflow_id.into());
         self
     }
 }
@@ -122,10 +104,6 @@ pub struct UpdateWorkflowOptions {
     pub name: Option<String>,
     /// New description (Some(Some(x)) to set, Some(None) to clear, None leaves unchanged)
     pub description: Option<Option<String>>,
-    /// Workflow to chain to when done (Some(Some(x)) to set, Some(None) to clear, None leaves unchanged)
-    pub on_done_workflow: Option<Option<String>>,
-    /// Workflow to chain to when rejected (Some(Some(x)) to set, Some(None) to clear, None leaves unchanged)
-    pub on_reject_workflow: Option<Option<String>>,
 }
 
 impl UpdateWorkflowOptions {
@@ -152,36 +130,9 @@ impl UpdateWorkflowOptions {
         self
     }
 
-    /// Set the on_done_workflow
-    pub fn with_on_done_workflow(mut self, workflow_id: impl Into<String>) -> Self {
-        self.on_done_workflow = Some(Some(workflow_id.into()));
-        self
-    }
-
-    /// Clear the on_done_workflow
-    pub fn clear_on_done_workflow(mut self) -> Self {
-        self.on_done_workflow = Some(None);
-        self
-    }
-
-    /// Set the on_reject_workflow
-    pub fn with_on_reject_workflow(mut self, workflow_id: impl Into<String>) -> Self {
-        self.on_reject_workflow = Some(Some(workflow_id.into()));
-        self
-    }
-
-    /// Clear the on_reject_workflow
-    pub fn clear_on_reject_workflow(mut self) -> Self {
-        self.on_reject_workflow = Some(None);
-        self
-    }
-
     /// Check if any updates are specified
     pub fn has_updates(&self) -> bool {
-        self.name.is_some()
-            || self.description.is_some()
-            || self.on_done_workflow.is_some()
-            || self.on_reject_workflow.is_some()
+        self.name.is_some() || self.description.is_some()
     }
 }
 
@@ -375,8 +326,7 @@ pub trait WorkflowService: Send + Sync {
 
     /// Advance a task to the next step in its workflow
     ///
-    /// If the task is on the last step and there is an on_done_workflow,
-    /// automatically chains to the new workflow.
+    /// Returns an error if the task is already on the last step.
     async fn advance_step(&self, task_id: &str) -> ServiceResult<StepTransitionResult>;
 
     /// Move a task back to the previous step in its workflow
@@ -386,7 +336,7 @@ pub trait WorkflowService: Send + Sync {
 
     /// Reject a task in its current workflow
     ///
-    /// If there is an on_reject_workflow, automatically chains to it.
+    /// Unassigns the workflow from the task.
     async fn reject_task(&self, task_id: &str) -> ServiceResult<RejectResult>;
 
     // =========================================================================
@@ -505,20 +455,6 @@ impl WorkflowService for DefaultWorkflowService {
             }
         }
 
-        // Validate on_done_workflow exists if specified
-        if let Some(on_done_id) = &options.on_done_workflow
-            && !self.db.workflows().exists(on_done_id).await?
-        {
-            return Err(ServiceError::workflow_not_found(on_done_id));
-        }
-
-        // Validate on_reject_workflow exists if specified
-        if let Some(on_reject_id) = &options.on_reject_workflow
-            && !self.db.workflows().exists(on_reject_id).await?
-        {
-            return Err(ServiceError::workflow_not_found(on_reject_id));
-        }
-
         // Generate unique ID
         let id = self.generate_unique_id(&options.name).await?;
 
@@ -527,14 +463,6 @@ impl WorkflowService for DefaultWorkflowService {
 
         if let Some(desc) = options.description {
             workflow = workflow.with_description(desc);
-        }
-
-        if let Some(on_done) = options.on_done_workflow {
-            workflow = workflow.with_on_done_workflow(on_done);
-        }
-
-        if let Some(on_reject) = options.on_reject_workflow {
-            workflow = workflow.with_on_reject_workflow(on_reject);
         }
 
         // Create workflow in database first (needed for step references)
@@ -639,20 +567,6 @@ impl WorkflowService for DefaultWorkflowService {
             return Ok(());
         }
 
-        // Validate on_done_workflow exists if being set
-        if let Some(Some(on_done_id)) = &options.on_done_workflow
-            && !self.db.workflows().exists(on_done_id).await?
-        {
-            return Err(ServiceError::workflow_not_found(on_done_id));
-        }
-
-        // Validate on_reject_workflow exists if being set
-        if let Some(Some(on_reject_id)) = &options.on_reject_workflow
-            && !self.db.workflows().exists(on_reject_id).await?
-        {
-            return Err(ServiceError::workflow_not_found(on_reject_id));
-        }
-
         // Validate name if provided
         if let Some(name) = &options.name
             && name.trim().is_empty()
@@ -675,26 +589,6 @@ impl WorkflowService for DefaultWorkflowService {
             }
             Some(None) => {
                 update = update.clear_description();
-            }
-            None => {}
-        }
-
-        match &options.on_done_workflow {
-            Some(Some(workflow_id)) => {
-                update = update.with_on_done_workflow(workflow_id);
-            }
-            Some(None) => {
-                update = update.clear_on_done_workflow();
-            }
-            None => {}
-        }
-
-        match &options.on_reject_workflow {
-            Some(Some(workflow_id)) => {
-                update = update.with_on_reject_workflow(workflow_id);
-            }
-            Some(None) => {
-                update = update.clear_on_reject_workflow();
             }
             None => {}
         }
@@ -833,49 +727,6 @@ impl WorkflowService for DefaultWorkflowService {
 
         // Check if we're at the last step
         if from_step >= total_steps - 1 {
-            // If there's an on_done_workflow, chain to it
-            if let Some(ref new_workflow_id) = workflow.on_done_workflow {
-                let new_workflow = self
-                    .db
-                    .workflows()
-                    .get(new_workflow_id)
-                    .await?
-                    .ok_or_else(|| ServiceError::workflow_not_found(new_workflow_id))?;
-
-                let new_step_names = self.get_workflow_steps(&new_workflow).await?;
-                if new_step_names.is_empty() {
-                    return Err(ServiceError::validation_failed(
-                        "Target workflow has no steps",
-                    ));
-                }
-
-                let new_workflow_thing = Thing::from(("workflow", new_workflow_id.as_str()));
-                self.db
-                    .tasks()
-                    .assign_workflow(&task_id, &new_workflow_thing)
-                    .await?;
-                self.db.tasks().update_current_step(&task_id, 0).await?;
-
-                // Fire mutation callback
-                self.on_mutation(WorkflowMutationEvent::TaskStepAdvanced {
-                    task_id: task_id.clone(),
-                    workflow_id: workflow_id.clone(),
-                    from_step,
-                    to_step: 0,
-                });
-
-                return Ok(StepTransitionResult {
-                    task_id,
-                    workflow_id,
-                    from_step,
-                    to_step: 0,
-                    step_name: new_step_names[0].clone(),
-                    total_steps: new_step_names.len(),
-                    execution_id: None,
-                    chained_to_workflow: Some(new_workflow_id.clone()),
-                });
-            }
-
             return Err(ServiceError::validation_failed(
                 "Task is already at the last step of the workflow",
             ));
@@ -889,9 +740,6 @@ impl WorkflowService for DefaultWorkflowService {
             .tasks()
             .update_current_step(&task_id, to_step)
             .await?;
-
-        // No longer need to check for on_done_workflow here since we handle it above
-        let chained_to_workflow = None;
 
         // Fire mutation callback
         self.on_mutation(WorkflowMutationEvent::TaskStepAdvanced {
@@ -909,7 +757,7 @@ impl WorkflowService for DefaultWorkflowService {
             step_name,
             total_steps,
             execution_id: None,
-            chained_to_workflow,
+            chained_to_workflow: None,
         })
     }
 
@@ -1001,74 +849,28 @@ impl WorkflowService for DefaultWorkflowService {
 
         let from_workflow_id = workflow_thing.id.to_raw();
 
-        // Get current workflow
-        let workflow = self
-            .db
-            .workflows()
-            .get(&from_workflow_id)
-            .await?
-            .ok_or_else(|| ServiceError::workflow_not_found(&from_workflow_id))?;
-
-        // Check if there's an on_reject_workflow
-        if let Some(reject_workflow_id) = workflow.on_reject_workflow {
-            // Get the reject workflow
-            let reject_workflow = self
-                .db
-                .workflows()
-                .get(&reject_workflow_id)
-                .await?
-                .ok_or_else(|| ServiceError::workflow_not_found(&reject_workflow_id))?;
-
-            let step_names = self.get_workflow_steps(&reject_workflow).await?;
-            if step_names.is_empty() {
-                return Err(ServiceError::validation_failed(
-                    "Reject workflow has no steps",
-                ));
-            }
-
-            let first_step_name = step_names[0].clone();
-
-            // Assign new workflow and reset to first step
-            let reject_workflow_thing = Thing::from(("workflow", reject_workflow_id.as_str()));
-            self.db
-                .tasks()
-                .assign_workflow(&task_id, &reject_workflow_thing)
-                .await?;
-            self.db.tasks().update_current_step(&task_id, 0).await?;
-
-            // Fire mutation callback
-            self.on_mutation(WorkflowMutationEvent::TaskRejected {
-                task_id: task_id.clone(),
-                from_workflow_id: from_workflow_id.clone(),
-                to_workflow_id: Some(reject_workflow_id.clone()),
-            });
-
-            Ok(RejectResult {
-                task_id,
-                from_workflow_id,
-                chained_to_workflow: Some(reject_workflow_id),
-                first_step_name: Some(first_step_name),
-                execution_id: None,
-            })
-        } else {
-            // No reject workflow, just unassign
-            self.db.tasks().unassign_workflow(&task_id).await?;
-
-            // Fire mutation callback
-            self.on_mutation(WorkflowMutationEvent::TaskRejected {
-                task_id: task_id.clone(),
-                from_workflow_id: from_workflow_id.clone(),
-                to_workflow_id: None,
-            });
-
-            Ok(RejectResult {
-                task_id,
-                from_workflow_id,
-                chained_to_workflow: None,
-                first_step_name: None,
-                execution_id: None,
-            })
+        // Verify workflow exists
+        if !self.db.workflows().exists(&from_workflow_id).await? {
+            return Err(ServiceError::workflow_not_found(&from_workflow_id));
         }
+
+        // Unassign workflow from task
+        self.db.tasks().unassign_workflow(&task_id).await?;
+
+        // Fire mutation callback
+        self.on_mutation(WorkflowMutationEvent::TaskRejected {
+            task_id: task_id.clone(),
+            from_workflow_id: from_workflow_id.clone(),
+            to_workflow_id: None,
+        });
+
+        Ok(RejectResult {
+            task_id,
+            from_workflow_id,
+            chained_to_workflow: None,
+            first_step_name: None,
+            execution_id: None,
+        })
     }
 
     async fn get_workflow_info(
