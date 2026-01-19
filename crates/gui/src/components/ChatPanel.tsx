@@ -8,15 +8,15 @@ import { usePtySession } from "../hooks/usePtySession";
 import { commands } from "../bindings";
 import { useUIStore } from "../stores";
 
-// Default width in pixels (approximately 1/4 of a 1920px screen)
-const DEFAULT_WIDTH = 480;
-// Min/max as fractions of window width
-const MIN_WIDTH_FRACTION = 0.25;
-const MAX_WIDTH_FRACTION = 0.33;
+// Default height in pixels (approximately 1/3 of a typical screen)
+const DEFAULT_HEIGHT = 320;
+// Min/max as fractions of window height
+const MIN_HEIGHT_FRACTION = 0.15;
+const MAX_HEIGHT_FRACTION = 0.6;
 
 /**
  * ChatPanel provides a resizable terminal interface.
- * Renders as a left-side panel with drag-to-resize capability.
+ * Renders as a bottom panel that slides up with drag-to-resize capability.
  * Users can run any commands including Claude Code.
  */
 export function ChatPanel() {
@@ -28,8 +28,8 @@ export function ChatPanel() {
 
   // Panel state from store
   const chatPanelOpen = useUIStore((s) => s.chatPanelOpen);
-  const chatPanelWidth = useUIStore((s) => s.chatPanelWidth);
-  const setChatPanelWidth = useUIStore((s) => s.setChatPanelWidth);
+  const chatPanelHeight = useUIStore((s) => s.chatPanelHeight);
+  const setChatPanelHeight = useUIStore((s) => s.setChatPanelHeight);
   const toggleChatPanel = useUIStore((s) => s.toggleChatPanel);
 
   // Resize state
@@ -178,19 +178,22 @@ export function ChatPanel() {
     setIsResizing(true);
   }, []);
 
-  // Handle resize movement
+  // Handle resize movement (vertical)
   useEffect(() => {
     if (!isResizing) return;
 
     const handleMouseMove = (e: MouseEvent) => {
-      const windowWidth = window.innerWidth;
-      const minWidth = windowWidth * MIN_WIDTH_FRACTION;
-      const maxWidth = windowWidth * MAX_WIDTH_FRACTION;
+      const windowHeight = window.innerHeight;
+      const minHeight = windowHeight * MIN_HEIGHT_FRACTION;
+      const maxHeight = windowHeight * MAX_HEIGHT_FRACTION;
 
-      // Calculate new width based on mouse position (accounting for sidebar)
-      // Sidebar is 64px when collapsed
-      const newWidth = Math.min(Math.max(e.clientX - 64, minWidth), maxWidth);
-      setChatPanelWidth(newWidth);
+      // Calculate new height based on mouse position from bottom
+      // Account for header (56px approximately)
+      const newHeight = Math.min(
+        Math.max(windowHeight - e.clientY, minHeight),
+        maxHeight
+      );
+      setChatPanelHeight(newHeight);
     };
 
     const handleMouseUp = () => {
@@ -204,26 +207,26 @@ export function ChatPanel() {
       document.removeEventListener("mousemove", handleMouseMove);
       document.removeEventListener("mouseup", handleMouseUp);
     };
-  }, [isResizing, setChatPanelWidth]);
+  }, [isResizing, setChatPanelHeight]);
 
-  // Clamp width on window resize
+  // Clamp height on window resize
   useEffect(() => {
     const handleResize = () => {
-      const windowWidth = window.innerWidth;
-      const minWidth = windowWidth * MIN_WIDTH_FRACTION;
-      const maxWidth = windowWidth * MAX_WIDTH_FRACTION;
-      const clampedWidth = Math.min(
-        Math.max(chatPanelWidth, minWidth),
-        maxWidth
+      const windowHeight = window.innerHeight;
+      const minHeight = windowHeight * MIN_HEIGHT_FRACTION;
+      const maxHeight = windowHeight * MAX_HEIGHT_FRACTION;
+      const clampedHeight = Math.min(
+        Math.max(chatPanelHeight, minHeight),
+        maxHeight
       );
-      if (clampedWidth !== chatPanelWidth) {
-        setChatPanelWidth(clampedWidth);
+      if (clampedHeight !== chatPanelHeight) {
+        setChatPanelHeight(clampedHeight);
       }
     };
 
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
-  }, [chatPanelWidth, setChatPanelWidth]);
+  }, [chatPanelHeight, setChatPanelHeight]);
 
   if (!chatPanelOpen) {
     return null;
@@ -232,18 +235,24 @@ export function ChatPanel() {
   return (
     <div
       ref={panelRef}
-      className="relative flex flex-col border-r border-border bg-bg-primary"
-      style={{ width: chatPanelWidth || DEFAULT_WIDTH }}
+      className="relative flex flex-col border-t border-border bg-bg-primary"
+      style={{ height: chatPanelHeight || DEFAULT_HEIGHT }}
     >
+      {/* Resize handle at top */}
+      <div
+        className={`absolute left-0 top-0 z-10 h-1 w-full cursor-ns-resize transition-colors hover:bg-primary/50 ${
+          isResizing ? "bg-primary" : "bg-transparent"
+        }`}
+        onMouseDown={handleMouseDown}
+      />
+
       {/* Header with session controls */}
       <div className="relative flex items-center justify-between border-b border-border bg-bg-primary px-4 py-2">
         {/* Neural grid background */}
         <div className="neural-grid pointer-events-none absolute inset-0 opacity-20" />
 
         <div className="relative flex items-center gap-3">
-          <h2 className="text-sm font-semibold text-text-primary">
-            Terminal
-          </h2>
+          <h2 className="text-sm font-semibold text-text-primary">Terminal</h2>
 
           {/* Session status indicator */}
           {state === "starting" && (
@@ -332,6 +341,7 @@ export function ChatPanel() {
             className="rounded p-1.5 text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary"
             title="Close panel"
           >
+            {/* Down chevron icon for collapsing bottom panel */}
             <svg
               className="h-4 w-4"
               fill="none"
@@ -342,7 +352,7 @@ export function ChatPanel() {
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 strokeWidth={2}
-                d="M11 19l-7-7 7-7m8 14l-7-7 7-7"
+                d="M19 9l-7 7-7-7"
               />
             </svg>
           </button>
@@ -393,14 +403,6 @@ export function ChatPanel() {
           </p>
         )}
       </div>
-
-      {/* Resize handle */}
-      <div
-        className={`absolute right-0 top-0 h-full w-1 cursor-ew-resize transition-colors hover:bg-primary/50 ${
-          isResizing ? "bg-primary" : "bg-transparent"
-        }`}
-        onMouseDown={handleMouseDown}
-      />
     </div>
   );
 }

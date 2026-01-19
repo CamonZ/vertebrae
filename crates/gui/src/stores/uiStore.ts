@@ -3,16 +3,16 @@ import { persist } from "zustand/middleware";
 
 type Theme = "light" | "dark" | "system";
 
-// Default chat panel width in pixels (approximately 1/4 of a 1920px screen)
-const DEFAULT_CHAT_PANEL_WIDTH = 480;
+// Default chat panel height in pixels (approximately 1/3 of a typical screen)
+const DEFAULT_CHAT_PANEL_HEIGHT = 320;
 
 interface UIState {
   /** Current theme preference */
   theme: Theme;
   /** Whether the chat panel is open */
   chatPanelOpen: boolean;
-  /** Width of the chat panel in pixels */
-  chatPanelWidth: number;
+  /** Height of the chat panel in pixels */
+  chatPanelHeight: number;
 }
 
 interface UIActions {
@@ -22,8 +22,8 @@ interface UIActions {
   toggleChatPanel: () => void;
   /** Set the chat panel open state explicitly */
   setChatPanelOpen: (open: boolean) => void;
-  /** Set the chat panel width */
-  setChatPanelWidth: (width: number) => void;
+  /** Set the chat panel height */
+  setChatPanelHeight: (height: number) => void;
 }
 
 export type UIStore = UIState & UIActions;
@@ -34,7 +34,7 @@ export const useUIStore = create<UIStore>()(
       // Initial state
       theme: "system",
       chatPanelOpen: false,
-      chatPanelWidth: DEFAULT_CHAT_PANEL_WIDTH,
+      chatPanelHeight: DEFAULT_CHAT_PANEL_HEIGHT,
 
       // Actions
       setTheme: (theme) => set({ theme }),
@@ -44,14 +44,14 @@ export const useUIStore = create<UIStore>()(
 
       setChatPanelOpen: (open) => set({ chatPanelOpen: open }),
 
-      setChatPanelWidth: (width) => set({ chatPanelWidth: width }),
+      setChatPanelHeight: (height) => set({ chatPanelHeight: height }),
     }),
     {
       name: "vertebrae-ui-storage",
       // Only persist UI preferences, not transient state
       partialize: (state) => ({
         theme: state.theme,
-        chatPanelWidth: state.chatPanelWidth,
+        chatPanelHeight: state.chatPanelHeight,
       }),
     }
   )

@@ -19,10 +19,10 @@ export function AppShell({
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-bg-secondary">
       <Sidebar />
-      <ChatPanel />
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <Header title={title} subtitle={subtitle} />
         <ContentArea>{children}</ContentArea>
+        <ChatPanel />
       </div>
       <ToastContainer />
     </div>

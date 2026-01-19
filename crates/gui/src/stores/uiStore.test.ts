@@ -7,7 +7,7 @@ describe("uiStore", () => {
     useUIStore.setState({
       theme: "system",
       chatPanelOpen: false,
-      chatPanelWidth: 480,
+      chatPanelHeight: 320,
     });
   });
 
@@ -22,9 +22,9 @@ describe("uiStore", () => {
       expect(state.chatPanelOpen).toBe(false);
     });
 
-    it("has default chat panel width", () => {
+    it("has default chat panel height", () => {
       const state = useUIStore.getState();
-      expect(state.chatPanelWidth).toBe(480);
+      expect(state.chatPanelHeight).toBe(320);
     });
   });
 
@@ -93,17 +93,17 @@ describe("uiStore", () => {
     });
   });
 
-  describe("setChatPanelWidth", () => {
-    it("sets chat panel width", () => {
-      useUIStore.getState().setChatPanelWidth(600);
+  describe("setChatPanelHeight", () => {
+    it("sets chat panel height", () => {
+      useUIStore.getState().setChatPanelHeight(400);
 
-      expect(useUIStore.getState().chatPanelWidth).toBe(600);
+      expect(useUIStore.getState().chatPanelHeight).toBe(400);
     });
 
-    it("allows setting width to minimum", () => {
-      useUIStore.getState().setChatPanelWidth(300);
+    it("allows setting height to minimum", () => {
+      useUIStore.getState().setChatPanelHeight(150);
 
-      expect(useUIStore.getState().chatPanelWidth).toBe(300);
+      expect(useUIStore.getState().chatPanelHeight).toBe(150);
     });
   });
 });
