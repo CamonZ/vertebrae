@@ -703,6 +703,52 @@ impl std::fmt::Display for ExecutionStatus {
     }
 }
 
+/// Token usage statistics from Claude execution
+///
+/// Tracks input, output, and cache token usage for billing and optimization.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TokenUsage {
+    /// Number of input tokens processed
+    pub input_tokens: u64,
+    /// Number of output tokens generated
+    pub output_tokens: u64,
+    /// Number of tokens read from cache
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_read_input_tokens: Option<u64>,
+    /// Number of tokens written to cache
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_creation_input_tokens: Option<u64>,
+}
+
+impl TokenUsage {
+    /// Create a new TokenUsage with required fields
+    pub fn new(input_tokens: u64, output_tokens: u64) -> Self {
+        Self {
+            input_tokens,
+            output_tokens,
+            cache_read_input_tokens: None,
+            cache_creation_input_tokens: None,
+        }
+    }
+
+    /// Set cache read tokens
+    pub fn with_cache_read(mut self, tokens: u64) -> Self {
+        self.cache_read_input_tokens = Some(tokens);
+        self
+    }
+
+    /// Set cache creation tokens
+    pub fn with_cache_creation(mut self, tokens: u64) -> Self {
+        self.cache_creation_input_tokens = Some(tokens);
+        self
+    }
+
+    /// Calculate total tokens (input + output)
+    pub fn total(&self) -> u64 {
+        self.input_tokens + self.output_tokens
+    }
+}
+
 /// A record of a workflow step execution
 ///
 /// StepExecution tracks each time a task enters a workflow step,
@@ -731,6 +777,35 @@ pub struct StepExecution {
 
     /// Current status of this step execution
     pub status: ExecutionStatus,
+
+    // --- Turn data fields (populated after execution) ---
+    /// JSON prompt sent to the orchestrator for this execution
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
+
+    /// Final text result from the execution
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output: Option<String>,
+
+    /// Model that executed this step (e.g., "claude-sonnet-4-20250514")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_used: Option<String>,
+
+    /// Claude session ID for debugging
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+
+    /// Token usage statistics
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token_usage: Option<TokenUsage>,
+
+    /// Execution cost in USD
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost_usd: Option<f64>,
+
+    /// Execution duration in milliseconds
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
 }
 
 impl StepExecution {
@@ -746,12 +821,61 @@ impl StepExecution {
             started_at: Utc::now(),
             completed_at: None,
             status: ExecutionStatus::InProgress,
+            prompt: None,
+            output: None,
+            model_used: None,
+            session_id: None,
+            token_usage: None,
+            cost_usd: None,
+            duration_ms: None,
         }
     }
 
     /// Create a new step execution with a specific start time
     pub fn with_started_at(mut self, started_at: DateTime<Utc>) -> Self {
         self.started_at = started_at;
+        self
+    }
+
+    /// Set the prompt used for this execution
+    pub fn with_prompt(mut self, prompt: impl Into<String>) -> Self {
+        self.prompt = Some(prompt.into());
+        self
+    }
+
+    /// Set the output from this execution
+    pub fn with_output(mut self, output: impl Into<String>) -> Self {
+        self.output = Some(output.into());
+        self
+    }
+
+    /// Set the model used for this execution
+    pub fn with_model_used(mut self, model: impl Into<String>) -> Self {
+        self.model_used = Some(model.into());
+        self
+    }
+
+    /// Set the session ID for this execution
+    pub fn with_session_id(mut self, session_id: impl Into<String>) -> Self {
+        self.session_id = Some(session_id.into());
+        self
+    }
+
+    /// Set the token usage for this execution
+    pub fn with_token_usage(mut self, usage: TokenUsage) -> Self {
+        self.token_usage = Some(usage);
+        self
+    }
+
+    /// Set the cost in USD for this execution
+    pub fn with_cost_usd(mut self, cost: f64) -> Self {
+        self.cost_usd = Some(cost);
+        self
+    }
+
+    /// Set the duration in milliseconds for this execution
+    pub fn with_duration_ms(mut self, duration: u64) -> Self {
+        self.duration_ms = Some(duration);
         self
     }
 

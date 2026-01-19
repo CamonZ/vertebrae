@@ -187,6 +187,13 @@ async fn execute_step(
         started_at: Utc::now(),
         completed_at: None,
         status: ExecutionStatus::InProgress,
+        prompt: None,
+        output: None,
+        model_used: None,
+        session_id: None,
+        token_usage: None,
+        cost_usd: None,
+        duration_ms: None,
     };
 
     let exec_id = db

@@ -61,6 +61,35 @@ impl<'a> StepExecutionRepository<'a> {
         let step_name = execution.step_name.clone();
         let status = execution.status.as_str().to_string();
 
+        // Build token_usage object if present
+        let token_usage_str = match &execution.token_usage {
+            Some(usage) => {
+                let cache_read = match usage.cache_read_input_tokens {
+                    Some(v) => v.to_string(),
+                    None => "NONE".to_string(),
+                };
+                let cache_creation = match usage.cache_creation_input_tokens {
+                    Some(v) => v.to_string(),
+                    None => "NONE".to_string(),
+                };
+                format!(
+                    "{{ input_tokens: {}, output_tokens: {}, cache_read_input_tokens: {}, cache_creation_input_tokens: {} }}",
+                    usage.input_tokens, usage.output_tokens, cache_read, cache_creation
+                )
+            }
+            None => "NONE".to_string(),
+        };
+
+        let cost_usd_str = match execution.cost_usd {
+            Some(v) => v.to_string(),
+            None => "NONE".to_string(),
+        };
+
+        let duration_ms_str = match execution.duration_ms {
+            Some(v) => v.to_string(),
+            None => "NONE".to_string(),
+        };
+
         let query = format!(
             r#"CREATE step_execution SET
                 task_id = {},
@@ -68,8 +97,21 @@ impl<'a> StepExecutionRepository<'a> {
                 step_name = $step_name,
                 started_at = d"{}",
                 completed_at = {},
-                status = $status"#,
-            execution.task_id, execution.workflow_id, started_at, completed_at_str
+                status = $status,
+                prompt = $prompt,
+                output = $output,
+                model_used = $model_used,
+                session_id = $session_id,
+                token_usage = {},
+                cost_usd = {},
+                duration_ms = {}"#,
+            execution.task_id,
+            execution.workflow_id,
+            started_at,
+            completed_at_str,
+            token_usage_str,
+            cost_usd_str,
+            duration_ms_str
         );
 
         let mut result = self
@@ -77,6 +119,10 @@ impl<'a> StepExecutionRepository<'a> {
             .query(&query)
             .bind(("step_name", step_name))
             .bind(("status", status))
+            .bind(("prompt", execution.prompt.clone()))
+            .bind(("output", execution.output.clone()))
+            .bind(("model_used", execution.model_used.clone()))
+            .bind(("session_id", execution.session_id.clone()))
             .await
             .map_err(|e| DbError::Query(Box::new(e)))?;
 
@@ -524,5 +570,109 @@ mod tests {
             .await
             .unwrap();
         assert!(latest.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_create_execution_with_turn_data() {
+        use crate::models::TokenUsage;
+
+        let client = setup_test_db().await;
+        create_prerequisites(&client, "turn_data_test").await;
+
+        let repo = StepExecutionRepository::new(&client);
+        let token_usage = TokenUsage::new(1000, 500)
+            .with_cache_read(200)
+            .with_cache_creation(100);
+
+        let execution = StepExecution::new(
+            Thing::from(("task", "turn_data_test")),
+            Thing::from(("workflow", "turn_data_test")),
+            "execute",
+        )
+        .with_prompt(r#"{"task": "implement feature"}"#)
+        .with_output("Feature implemented successfully")
+        .with_model_used("claude-sonnet-4-20250514")
+        .with_session_id("session_abc123")
+        .with_token_usage(token_usage)
+        .with_cost_usd(0.0125)
+        .with_duration_ms(45000);
+
+        let id = repo.create_execution(&execution).await.unwrap();
+        let retrieved = repo.get_execution(&id).await.unwrap().unwrap();
+
+        assert_eq!(
+            retrieved.prompt,
+            Some(r#"{"task": "implement feature"}"#.to_string())
+        );
+        assert_eq!(
+            retrieved.output,
+            Some("Feature implemented successfully".to_string())
+        );
+        assert_eq!(
+            retrieved.model_used,
+            Some("claude-sonnet-4-20250514".to_string())
+        );
+        assert_eq!(retrieved.session_id, Some("session_abc123".to_string()));
+
+        let usage = retrieved.token_usage.unwrap();
+        assert_eq!(usage.input_tokens, 1000);
+        assert_eq!(usage.output_tokens, 500);
+        assert_eq!(usage.cache_read_input_tokens, Some(200));
+        assert_eq!(usage.cache_creation_input_tokens, Some(100));
+
+        assert_eq!(retrieved.cost_usd, Some(0.0125));
+        assert_eq!(retrieved.duration_ms, Some(45000));
+    }
+
+    #[tokio::test]
+    async fn test_create_execution_without_turn_data() {
+        let client = setup_test_db().await;
+        create_prerequisites(&client, "no_turn_data_test").await;
+
+        let repo = StepExecutionRepository::new(&client);
+        let execution = StepExecution::new(
+            Thing::from(("task", "no_turn_data_test")),
+            Thing::from(("workflow", "no_turn_data_test")),
+            "backlog",
+        );
+
+        let id = repo.create_execution(&execution).await.unwrap();
+        let retrieved = repo.get_execution(&id).await.unwrap().unwrap();
+
+        assert!(retrieved.prompt.is_none());
+        assert!(retrieved.output.is_none());
+        assert!(retrieved.model_used.is_none());
+        assert!(retrieved.session_id.is_none());
+        assert!(retrieved.token_usage.is_none());
+        assert!(retrieved.cost_usd.is_none());
+        assert!(retrieved.duration_ms.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_create_execution_with_partial_token_usage() {
+        use crate::models::TokenUsage;
+
+        let client = setup_test_db().await;
+        create_prerequisites(&client, "partial_usage_test").await;
+
+        let repo = StepExecutionRepository::new(&client);
+        // Token usage without cache fields
+        let token_usage = TokenUsage::new(500, 250);
+
+        let execution = StepExecution::new(
+            Thing::from(("task", "partial_usage_test")),
+            Thing::from(("workflow", "partial_usage_test")),
+            "step",
+        )
+        .with_token_usage(token_usage);
+
+        let id = repo.create_execution(&execution).await.unwrap();
+        let retrieved = repo.get_execution(&id).await.unwrap().unwrap();
+
+        let usage = retrieved.token_usage.unwrap();
+        assert_eq!(usage.input_tokens, 500);
+        assert_eq!(usage.output_tokens, 250);
+        assert!(usage.cache_read_input_tokens.is_none());
+        assert!(usage.cache_creation_input_tokens.is_none());
     }
 }

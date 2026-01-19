@@ -99,6 +99,29 @@ mod sql {
 
         DEFINE FIELD status ON step_execution TYPE string
             ASSERT $value IN ["in_progress", "completed", "failed"];
+
+        -- Turn data fields (populated after execution)
+        DEFINE FIELD prompt ON step_execution TYPE option<string>;
+
+        DEFINE FIELD output ON step_execution TYPE option<string>;
+
+        DEFINE FIELD model_used ON step_execution TYPE option<string>;
+
+        DEFINE FIELD session_id ON step_execution TYPE option<string>;
+
+        DEFINE FIELD token_usage ON step_execution TYPE option<object>;
+
+        DEFINE FIELD token_usage.input_tokens ON step_execution TYPE option<int>;
+
+        DEFINE FIELD token_usage.output_tokens ON step_execution TYPE option<int>;
+
+        DEFINE FIELD token_usage.cache_read_input_tokens ON step_execution TYPE option<int>;
+
+        DEFINE FIELD token_usage.cache_creation_input_tokens ON step_execution TYPE option<int>;
+
+        DEFINE FIELD cost_usd ON step_execution TYPE option<float>;
+
+        DEFINE FIELD duration_ms ON step_execution TYPE option<int>;
     "#;
 
     /// Define the session_log table for storing Claude session content during step execution
@@ -1680,6 +1703,14 @@ mod tests {
         assert!(sql::DEFINE_STEP_EXECUTION_TABLE.contains("in_progress"));
         assert!(sql::DEFINE_STEP_EXECUTION_TABLE.contains("completed"));
         assert!(sql::DEFINE_STEP_EXECUTION_TABLE.contains("failed"));
+        // Verify turn data fields
+        assert!(sql::DEFINE_STEP_EXECUTION_TABLE.contains("prompt"));
+        assert!(sql::DEFINE_STEP_EXECUTION_TABLE.contains("output"));
+        assert!(sql::DEFINE_STEP_EXECUTION_TABLE.contains("model_used"));
+        assert!(sql::DEFINE_STEP_EXECUTION_TABLE.contains("session_id"));
+        assert!(sql::DEFINE_STEP_EXECUTION_TABLE.contains("token_usage"));
+        assert!(sql::DEFINE_STEP_EXECUTION_TABLE.contains("cost_usd"));
+        assert!(sql::DEFINE_STEP_EXECUTION_TABLE.contains("duration_ms"));
     }
 
     #[tokio::test]
