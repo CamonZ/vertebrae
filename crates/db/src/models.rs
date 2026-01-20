@@ -3042,8 +3042,12 @@ mod tests {
         assert!(task.completed_at.is_none());
         assert!(task.sections.is_empty());
         assert!(task.code_refs.is_empty());
-        assert!(task.workflow_id.is_some());
-        assert!(task.current_step.is_some());
+        assert_eq!(
+            task.workflow_id,
+            Some(Thing::from(("workflow", DEFAULT_WORKFLOW_ID))),
+            "New tasks must be assigned to the default workflow"
+        );
+        assert_eq!(task.current_step, Some(0), "New tasks must start at step 0");
     }
 
     #[test]

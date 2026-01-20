@@ -277,12 +277,19 @@ impl ShowCommand {
             })
             .collect();
 
+        // Compute the derived status from workflow info
+        let derived_status = if let Some(ref wf) = workflow {
+            format!("{}:{}", wf.name, wf.current_step_name)
+        } else {
+            task.status.clone()
+        };
+
         Ok(TaskDetail {
             id: task.id.id.to_raw(),
             title: task.title,
             description: task.description,
             level: task.level,
-            status: task.status,
+            status: derived_status,
             priority: task.priority,
             tags: task.tags,
             created_at: task.created_at.map(|dt| dt.to_string()),
@@ -849,7 +856,8 @@ mod tests {
         assert_eq!(detail.id, "abc123");
         assert_eq!(detail.title, "Test Task");
         assert_eq!(detail.level, "task");
-        assert_eq!(detail.status, "in_progress");
+        // Status is derived from workflow:step (Task::new auto-assigns to Default Workflow at step 0 = backlog)
+        assert_eq!(detail.status, "Default Workflow:backlog");
         assert_eq!(detail.priority, Some("high".to_string()));
         assert!(detail.tags.is_empty(), "Tags should be empty");
 
@@ -1753,5 +1761,44 @@ mod tests {
         assert!(output.contains("Previous revision needed more tests."));
         assert!(output.contains("!! REJECTION REASON !!"));
         assert!(output.contains("Could not meet deadline after revisions."));
+    }
+
+    #[tokio::test]
+    async fn test_show_derived_status_with_advanced_step() {
+        let service = setup_test_service().await;
+
+        // Create a task (auto-assigned to Default Workflow at step 0 = backlog)
+        create_task(
+            &service,
+            "advanced_task",
+            "Task with Advanced Step",
+            "task",
+            "backlog",
+            None,
+            &[],
+        )
+        .await;
+
+        // Create workflow service and advance to step 1 (in_progress)
+        let workflow_service = DefaultWorkflowService::new(service.database().clone());
+        workflow_service
+            .advance_step("advanced_task")
+            .await
+            .unwrap();
+
+        // Verify the derived status reflects the new step
+        let cmd = ShowCommand {
+            id: "advanced_task".to_string(),
+        };
+
+        let result = cmd.execute(&service).await;
+        assert!(result.is_ok(), "Show failed: {:?}", result.err());
+
+        let detail = result.unwrap();
+        // Step 1 in the Default Workflow is "in_progress"
+        assert_eq!(
+            detail.status, "Default Workflow:in_progress",
+            "Derived status should reflect workflow:step after advancing"
+        );
     }
 }
