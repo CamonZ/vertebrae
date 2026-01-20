@@ -386,11 +386,14 @@ impl ShowCommand {
                     task_id: parent_id.clone(),
                 })?;
 
+            // Compute derived status from workflow info
+            let derived_status = Self::compute_derived_status_for_task(db, &task).await?;
+
             Ok(Some(TaskSummary {
                 id: parent_id,
                 title: task.title,
                 level: task.level.as_str().to_string(),
-                status: task.status.as_str().to_string(),
+                status: derived_status,
                 priority: task.priority.map(|p| p.as_str().to_string()),
                 tags: task.tags,
                 needs_human_review: task.needs_human_review,
@@ -408,11 +411,14 @@ impl ShowCommand {
         let mut children = Vec::new();
         for child_id in child_ids {
             if let Some(task) = db.tasks().get(&child_id).await? {
+                // Compute derived status from workflow info
+                let derived_status = Self::compute_derived_status_for_task(db, &task).await?;
+
                 children.push(TaskSummary {
                     id: child_id,
                     title: task.title,
                     level: task.level.as_str().to_string(),
-                    status: task.status.as_str().to_string(),
+                    status: derived_status,
                     priority: task.priority.map(|p| p.as_str().to_string()),
                     tags: task.tags,
                     needs_human_review: task.needs_human_review,
@@ -440,11 +446,14 @@ impl ShowCommand {
         let mut blocks = Vec::new();
         for dependent_id in dependent_ids {
             if let Some(task) = db.tasks().get(&dependent_id).await? {
+                // Compute derived status from workflow info
+                let derived_status = Self::compute_derived_status_for_task(db, &task).await?;
+
                 blocks.push(TaskSummary {
                     id: dependent_id,
                     title: task.title,
                     level: task.level.as_str().to_string(),
-                    status: task.status.as_str().to_string(),
+                    status: derived_status,
                     priority: task.priority.map(|p| p.as_str().to_string()),
                     tags: task.tags,
                     needs_human_review: task.needs_human_review,
@@ -470,6 +479,36 @@ impl ShowCommand {
         // Fetch the workflow info from the service
         let info = service.get_workflow_info(workflow_id, step_index).await?;
         Ok(Some(info))
+    }
+
+    /// Compute derived status for a task from its workflow info.
+    ///
+    /// Returns `workflow_name:step_name` if both are present,
+    /// otherwise falls back to the raw status string.
+    async fn compute_derived_status_for_task(
+        db: &Database,
+        task: &vertebrae_db::Task,
+    ) -> Result<String, DbError> {
+        // Try new first-class step system first (current_step_id)
+        if let (Some(workflow_id), Some(step_id)) = (&task.workflow_id, &task.current_step_id)
+            && let Some(workflow) = db.workflows().get(&workflow_id.id.to_raw()).await?
+            && let Some(step) = db.steps().get_by_thing(step_id).await?
+        {
+            return Ok(format!("{}:{}", workflow.name, step.name));
+        }
+
+        // Fall back to legacy system (current_step index) - get steps from workflow
+        if let (Some(workflow_id), Some(step_index)) = (&task.workflow_id, task.current_step)
+            && let Some(workflow) = db.workflows().get(&workflow_id.id.to_raw()).await?
+        {
+            let steps = db.steps().list_by_workflow(workflow_id).await?;
+            if let Some(step) = steps.get(step_index) {
+                return Ok(format!("{}:{}", workflow.name, step.name));
+            }
+        }
+
+        // Fall back to raw status
+        Ok(task.status.clone())
     }
 }
 
@@ -778,7 +817,15 @@ mod tests {
         DefaultTaskService::new(db)
     }
 
-    /// Helper to create a task using the service
+    /// Helper to create a task using the service.
+    ///
+    /// The status parameter maps to workflow steps in the Default Workflow
+    /// as created by create_default_workflow():
+    /// - "backlog" -> step 0
+    /// - "in_progress" -> step 1
+    /// - "pending_review" -> step 2
+    /// - "done" -> step 3
+    /// - "rejected" -> step 4
     async fn create_task(
         service: &DefaultTaskService,
         id: &str,
@@ -803,8 +850,25 @@ mod tests {
             _ => None,
         });
 
+        // Map status to step index in Default Workflow (as created by create_default_workflow)
+        // Steps are: backlog(0), in_progress(1), pending_review(2), done(3), rejected(4)
+        let step_index = match status {
+            "backlog" => 0,
+            "in_progress" => 1,
+            "pending_review" => 2,
+            "done" => 3,
+            "rejected" => 4,
+            _ => 0, // Default to backlog
+        };
+
+        // Create step ID in the format used by create_default_workflow: default_<step_name>
+        let step_id_str = format!("default_{}", status);
+        let step_id = surrealdb::sql::Thing::from(("step", step_id_str.as_str()));
+
         let mut task = Task::new(title, level_enum);
         task.status = status.to_string();
+        task.current_step = Some(step_index);
+        task.current_step_id = Some(step_id);
         task.priority = priority_enum;
         task.tags = tags.iter().map(|s| s.to_string()).collect();
 
@@ -856,8 +920,8 @@ mod tests {
         assert_eq!(detail.id, "abc123");
         assert_eq!(detail.title, "Test Task");
         assert_eq!(detail.level, "task");
-        // Status is derived from workflow:step (Task::new auto-assigns to Default Workflow at step 0 = backlog)
-        assert_eq!(detail.status, "Default Workflow:backlog");
+        // Status is derived from workflow:step (task created with in_progress status)
+        assert_eq!(detail.status, "Default Workflow:in_progress");
         assert_eq!(detail.priority, Some("high".to_string()));
         assert!(detail.tags.is_empty(), "Tags should be empty");
 
@@ -954,7 +1018,8 @@ mod tests {
         assert_eq!(parent.id, "parent1");
         assert_eq!(parent.title, "Parent Epic");
         assert_eq!(parent.level, "epic");
-        assert_eq!(parent.status, "in_progress");
+        // Status is derived from workflow:step
+        assert_eq!(parent.status, "Default Workflow:in_progress");
         assert_eq!(parent.priority, Some("high".to_string()));
         assert_eq!(parent.tags, vec!["backend", "core"]);
     }
@@ -1010,14 +1075,16 @@ mod tests {
         let child1 = detail.children.iter().find(|c| c.id == "child1").unwrap();
         assert_eq!(child1.title, "Child 1");
         assert_eq!(child1.level, "ticket");
-        assert_eq!(child1.status, "in_progress");
+        // Status is derived from workflow:step
+        assert_eq!(child1.status, "Default Workflow:in_progress");
         assert_eq!(child1.priority, Some("high".to_string()));
         assert_eq!(child1.tags, vec!["frontend"]);
 
         let child2 = detail.children.iter().find(|c| c.id == "child2").unwrap();
         assert_eq!(child2.title, "Child 2");
         assert_eq!(child2.level, "ticket");
-        assert_eq!(child2.status, "backlog");
+        // Status is derived from workflow:step
+        assert_eq!(child2.status, "Default Workflow:backlog");
         assert_eq!(child2.priority, Some("medium".to_string()));
         assert_eq!(child2.tags, vec!["backend"]);
     }
@@ -1054,7 +1121,8 @@ mod tests {
         assert_eq!(dep.id, "dep1");
         assert_eq!(dep.title, "Dependency Task");
         assert_eq!(dep.level, "task");
-        assert_eq!(dep.status, "in_progress");
+        // Status is derived from workflow:step
+        assert_eq!(dep.status, "Default Workflow:in_progress");
         assert_eq!(dep.priority, Some("critical".to_string()));
         assert_eq!(dep.tags, vec!["blocker", "core"]);
     }

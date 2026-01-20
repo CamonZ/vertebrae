@@ -755,13 +755,21 @@ impl<'a> GraphQueries<'a> {
             #[serde(default)]
             needs_human_review: Option<bool>,
             created_at: surrealdb::sql::Datetime,
+            #[serde(default)]
+            workflow_name: Option<String>,
+            #[serde(default)]
+            step_name: Option<String>,
         }
 
+        // Use conditional expression to get step_name from current_step_id.name if available,
+        // otherwise fall back to extracting from workflow_id.steps[current_step].name for legacy tasks
+        let step_name_expr = "IF current_step_id != NONE THEN current_step_id.name ELSE IF workflow_id != NONE AND current_step != NONE THEN workflow_id.steps[current_step].name END";
+
         let query = format!(
-            r#"SELECT id, title, level, status, priority, tags, needs_human_review, created_at FROM task
+            r#"SELECT id, title, level, status, priority, tags, needs_human_review, created_at, workflow_id.name AS workflow_name, {} AS step_name FROM task
                WHERE <-depends_on<-task CONTAINS task:{}
                AND status != "done""#,
-            task_id
+            step_name_expr, task_id
         );
 
         let mut result = self.client.query(&query).await?;
@@ -778,9 +786,8 @@ impl<'a> GraphQueries<'a> {
                 tags: row.tags,
                 needs_human_review: row.needs_human_review,
                 created_at: row.created_at.0,
-                // get_blocker_details doesn't fetch workflow info - would require additional queries
-                workflow_name: None,
-                step_name: None,
+                workflow_name: row.workflow_name,
+                step_name: row.step_name,
             })
             .collect())
     }
@@ -1728,6 +1735,54 @@ mod tests {
         assert_eq!(blockers[0].id, "blocker2");
         assert_eq!(blockers[0].title, "Active Blocker");
         assert_eq!(blockers[0].status, "in_progress");
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_get_incomplete_blockers_with_details_returns_workflow_info() {
+        let (db, temp_dir) = setup_test_db().await;
+        let graph = GraphQueries::new(db.client());
+
+        // Create a blocker with workflow_id and current_step_id set to first-class step
+        // The default workflow has steps: backlog (0), in_progress (1), pending_review (2), done (3), rejected (4)
+        let query = r#"CREATE task:blocker_with_workflow SET
+            title = "Blocker With Workflow",
+            level = "task",
+            status = "in_progress",
+            priority = "medium",
+            tags = [],
+            sections = [],
+            refs = [],
+            workflow_id = workflow:default,
+            current_step = 1,
+            current_step_id = step:default_in_progress"#;
+        db.client().query(query).await.unwrap();
+
+        create_task(&db, "task1", "Task 1", "task", "backlog").await;
+        create_depends_on(&db, "task1", "blocker_with_workflow").await;
+
+        let blockers = graph
+            .get_incomplete_blockers_with_details("task1")
+            .await
+            .unwrap();
+
+        assert_eq!(blockers.len(), 1);
+        let blocker = &blockers[0];
+        assert_eq!(blocker.id, "blocker_with_workflow");
+        assert_eq!(blocker.title, "Blocker With Workflow");
+        assert_eq!(blocker.status, "in_progress");
+        // Verify workflow info is properly fetched
+        assert_eq!(
+            blocker.workflow_name,
+            Some("Default Workflow".to_string()),
+            "Workflow name should be 'Default Workflow'"
+        );
+        assert_eq!(
+            blocker.step_name,
+            Some("in_progress".to_string()),
+            "Step name should be 'in_progress'"
+        );
 
         cleanup(&temp_dir);
     }

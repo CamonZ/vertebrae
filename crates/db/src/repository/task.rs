@@ -275,13 +275,18 @@ impl<'a> TaskRepository<'a> {
             ""
         };
 
-        // Build workflow clause - tasks always have workflow_id and current_step
-        let (workflow_clause, workflow_id) = match &task.workflow_id {
-            Some(wf_id) => (
-                ", workflow_id = $workflow_id, current_step = $current_step",
-                Some(wf_id.clone()),
-            ),
-            None => ("", None),
+        // Build workflow clause - tasks always have workflow_id, current_step, and optionally current_step_id
+        let (workflow_clause, workflow_id, current_step_id) = match &task.workflow_id {
+            Some(wf_id) => {
+                let clause = match &task.current_step_id {
+                    Some(_) => {
+                        ", workflow_id = $workflow_id, current_step = $current_step, current_step_id = $current_step_id"
+                    }
+                    None => ", workflow_id = $workflow_id, current_step = $current_step",
+                };
+                (clause, Some(wf_id.clone()), task.current_step_id.clone())
+            }
+            None => ("", None, None),
         };
         let current_step = task.current_step.unwrap_or(0);
 
@@ -309,6 +314,9 @@ impl<'a> TaskRepository<'a> {
             query_builder = query_builder
                 .bind(("workflow_id", wf_id))
                 .bind(("current_step", current_step));
+            if let Some(step_id) = current_step_id {
+                query_builder = query_builder.bind(("current_step_id", step_id));
+            }
         }
         query_builder.await?;
         Ok(())
