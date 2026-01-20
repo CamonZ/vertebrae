@@ -18,25 +18,47 @@ vtb update <task-id> --description "New description"
 # Change priority
 vtb update <task-id> --priority high
 
-# Add/replace tags
-vtb update <task-id> --tag new-tag
+# Add tags (can specify multiple)
+vtb update <task-id> --add-tag urgent --add-tag backend
+
+# Remove tags (can specify multiple)
+vtb update <task-id> --remove-tag old-tag
 
 # Change level
 vtb update <task-id> --level ticket
+
+# Set or change parent
+vtb update <task-id> --parent <parent-id>
+
+# Remove parent (orphan the task)
+vtb update <task-id> --parent ""
+
+# Edit a section inline
+vtb update <task-id> --edit-section step 0 "Updated step content"
+
+# Remove a section inline
+vtb update <task-id> --remove-section step 0
 ```
+
+## Options
+
+| Flag | Description |
+|------|-------------|
+| `--title` | New task title |
+| `-d, --description` | New description (use "" to clear) |
+| `-p, --priority` | Priority: low, medium, high, critical |
+| `--add-tag` | Add a tag (repeatable) |
+| `--remove-tag` | Remove a tag (repeatable) |
+| `--parent` | Set parent task (use "" to remove) |
+| `--edit-section` | Edit section: `<type> <ordinal> <content>` |
+| `--remove-section` | Remove section: `<type> <ordinal>` |
 
 ## Note
-For status changes, use the unified transition command:
+For status changes, use the transition command:
 ```bash
-vtb transition-to <task-id> <status>
+vtb transition-to <task-id> <workflow>
+vtb transition-to <task-id> <workflow>:<step>
 ```
-
-Available statuses: `todo`, `in_progress`, `pending_review`, `done`, `rejected`
-
-Examples:
-- `vtb transition-to <id> in_progress` - Start working
-- `vtb transition-to <id> done` - Complete task
-- `vtb transition-to <id> rejected --reason "reason"` - Reject task
 
 ## Important
 NEVER use update for status changes - use `transition-to` instead

@@ -16,7 +16,7 @@ vtb depend <task-a> --on <task-b>
 ## Remove dependency
 
 ```bash
-vtb undepend <task-a> --from <task-b>
+vtb undepend <task-a> --on <task-b>
 ```
 
 ## View dependencies

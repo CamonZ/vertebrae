@@ -18,6 +18,14 @@ vtb list --priority high          # By priority
 vtb list --tag backend            # By tag
 ```
 
+## Filtering by workflow
+
+```bash
+vtb list --workflow implementation  # Tasks in specific workflow
+vtb list --step review              # Tasks at specific step
+vtb list -w impl --step coding      # Combine workflow and step
+```
+
 ## Filtering by parent
 
 ```bash
@@ -32,6 +40,22 @@ vtb list --root                   # Show only root items (no parent)
 vtb list --all                    # Include done items (excluded by default)
 vtb list --search "auth"          # Search in title and description
 ```
+
+## Options
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--level` | `-l` | Filter by level (repeatable) |
+| `--status` | `-s` | Filter by status (repeatable) |
+| `--priority` | `-p` | Filter by priority (repeatable) |
+| `--tag` | `-t` | Filter by tag (repeatable) |
+| `--workflow` | `-w` | Filter by workflow ID |
+| `--step` | | Filter by current step name |
+| `--root` | | Show only root items |
+| `--parent` | | Show children of task |
+| `--all` | | Include done items |
+| `--search` | | Search in title/description |
+| `--flat` | | Table view instead of tree |
 
 ## Statuses
 - `backlog` - Not yet triaged

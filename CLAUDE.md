@@ -58,31 +58,118 @@ epic           Large initiative (e.g., "Refactor authentication")
 ### Quick reference
 
 ```bash
+# Task creation
 vtb add "Feature X" -l epic -d "Description"     # Create epic
 vtb add "Step 1" --parent <epic-id>              # Add child task
+vtb add "Task" --depends-on <blocker-id>         # With dependency
+
+# Dependencies
 vtb depend <task> --on <blocker>                 # Set dependency
+vtb undepend <task> --on <blocker>               # Remove dependency
+vtb blockers <task>                              # Show dependency chain
+vtb path <from> <to>                             # Find dependency path
+
+# Sections and references
 vtb section <task> step "Do this first"          # Add implementation step
 vtb section <task> constraint "Must handle X"    # Add constraint
 vtb section <task> testing_criterion "Verify Y"  # Add test criteria
 vtb ref <task> "src/file.rs:L42" --name "func"   # Link to code
-vtb transition-to <task> in_progress             # Begin work
+vtb criterion-ref <task> 1 "tests/test.rs:L10"   # Link to test criterion
+
+# Status transitions (moving ACROSS workflows)
+vtb transition-to <task> implementation          # Move to implementation workflow
+vtb transition-to <task> review                  # Move to review workflow
 vtb transition-to <task> done                    # Complete (shows unblocked)
-vtb blockers <task>                              # Show dependency chain
+
+# Step navigation (moving WITHIN a workflow)
+vtb workflow advance <task>                      # Next step in current workflow
+vtb workflow retreat <task>                      # Previous step in current workflow
+
+# Viewing
 vtb show <task>                                  # Full task details
 vtb list --status in_progress                    # What's active
+vtb list --workflow impl --step coding           # Filter by workflow/step
+vtb ready                                        # Show actionable items
+
+# Workflow management
+vtb workflow add "Name" --step review:sonnet     # Create workflow
+vtb workflow assign <task> <workflow>            # Assign to task
+
+# Data management
+vtb export -o backup.jsonl                       # Export to JSONL
+vtb import -i backup.jsonl                       # Import from JSONL
+vtb init                                         # Initialize project
+```
+
+### Workflow Navigation
+
+Tasks progress through **workflows** (e.g., `backlog`, `implementation`, `review`, `done`), and each workflow contains **steps** (e.g., `implementation` might have steps: `coding`, `testing`, `documentation`).
+
+**First, understand available workflows:**
+```bash
+vtb workflow list                    # See all configured workflows
+vtb workflow show <workflow-id>      # See steps within a workflow
+```
+
+You must check the configured workflows before using `transition-to` — workflow names and steps vary by project.
+
+**Two ways to navigate:**
+
+| Command | Use Case | Example |
+|---------|----------|---------|
+| `vtb transition-to <task> <workflow>` | Move **across** workflows | `backlog` → `implementation` |
+| `vtb transition-to <task> <workflow>:<step>` | Jump to specific step | → `review:approved` |
+| `vtb workflow advance <task>` | Move to **next step** within current workflow | `coding` → `testing` |
+| `vtb workflow retreat <task>` | Move to **previous step** within current workflow | `testing` → `coding` |
+
+**Typical flow:**
+```
+backlog → implementation:coding → implementation:testing → review:pending → review:approved → done
+         \_____advance/retreat within workflow_____/      \____advance/retreat____/
+\________________________transition-to moves across workflows_________________________/
 ```
 
 ### Skills
 
 See `skills/` for detailed command guides:
+
+**Workflow guides:**
 - `/plan` - Create implementation plans
 - `/status` - Check current state
 - `/next` - Complete and continue
-- `/ready` - Show items ready for work or triage
 - `/triage` - Move backlog items to todo
-- `/add`, `/depend`, `/section`, `/ref` - Individual commands
-- `/list`, `/blockers`, `/update`, `/delete` - Management
-- `/step-done`, `/vtb-show` - Task details and progress
+
+**Task management:**
+- `/add` - Create tasks with hierarchy and dependencies
+- `/update` - Modify task fields
+- `/delete` - Remove tasks
+- `/vtb-show` - Display task details
+- `/list` - Filter and list tasks
+- `/ready` - Show items ready for work or triage
+
+**Status and workflows:**
+- `/transition-to` - Change task status via workflows
+- `/workflow` - Manage workflows (add, list, show, assign, advance)
+- `/step` - Manage workflow steps
+- `/review` - Toggle human review flag
+- `/step-done` - Mark implementation steps complete
+
+**Dependencies:**
+- `/depend` - Create/remove dependencies
+- `/blockers` - Show dependency chain
+- `/path` - Find path between tasks
+
+**Content:**
+- `/section` - Add structured content (steps, constraints, criteria)
+- `/ref` - Link tasks to code locations
+- `/criterion-ref` - Link code to testing criteria
+
+**Advanced:**
+- `/execution` - Workflow execution history
+- `/gate` - Validation gates
+- `/export`, `/import` - Data backup/restore
+- `/init` - Initialize project
+- `/run` - Execute workflow via GUI
 
 ## Build Commands
 
@@ -216,15 +303,30 @@ vertebrae/
 │   ├── plan.md             # /plan - Create implementation plans
 │   ├── status.md           # /status - Check task state
 │   ├── next.md             # /next - Complete and continue
+│   ├── triage.md           # /triage - Move backlog to todo
+│   ├── ready.md            # /ready - Show actionable items
 │   ├── add.md              # /add - Create tasks
-│   ├── depend.md           # /depend - Manage dependencies
-│   ├── section.md          # /section - Add structured content
-│   ├── ref.md              # /ref - Link to code locations
-│   ├── list.md             # /list - Filter and list tasks
-│   ├── blockers.md         # /blockers - Show dependency chain
 │   ├── update.md           # /update - Modify task fields
 │   ├── delete.md           # /delete - Remove tasks
-│   └── vtb-show.md         # /vtb-show - Display task details
+│   ├── vtb-show.md         # /vtb-show - Display task details
+│   ├── list.md             # /list - Filter and list tasks
+│   ├── transition-to.md    # /transition-to - Change task status
+│   ├── workflow.md         # /workflow - Manage workflows
+│   ├── step.md             # /step - Manage workflow steps
+│   ├── step-done.md        # /step-done - Mark steps complete
+│   ├── review.md           # /review - Toggle human review
+│   ├── depend.md           # /depend - Manage dependencies
+│   ├── blockers.md         # /blockers - Show dependency chain
+│   ├── path.md             # /path - Find dependency path
+│   ├── section.md          # /section - Add structured content
+│   ├── ref.md              # /ref - Link to code locations
+│   ├── criterion-ref.md    # /criterion-ref - Link to test criteria
+│   ├── execution.md        # /execution - Execution history
+│   ├── gate.md             # /gate - Validation gates
+│   ├── export.md           # /export - Export to JSONL
+│   ├── import.md           # /import - Import from JSONL
+│   ├── init.md             # /init - Initialize project
+│   └── run.md              # /run - Execute via GUI
 ├── crates/
 │   ├── db/                 # vertebrae-db: Database layer
 │   │   └── src/
@@ -249,7 +351,7 @@ vertebrae/
 │   ├── cli/                # vertebrae-cli: CLI binary (vtb)
 │   │   └── src/
 │   │       ├── main.rs         # Entry point & arg parsing
-│   │       ├── commands/       # 26 subcommand implementations
+│   │       ├── commands/       # Subcommand implementations
 │   │       ├── output/         # Table & tree formatters
 │   │       ├── notification.rs # HTTP notification for GUI sync
 │   │       └── error.rs        # CLI error handling

@@ -23,7 +23,22 @@ vtb add "Task" --depends-on <blocker-id>
 
 # With priority and tags
 vtb add "Urgent fix" -p critical -t bug -t backend
+
+# Mark as needing human review
+vtb add "Sensitive change" --needs-review
 ```
+
+## Options
+
+| Flag | Description |
+|------|-------------|
+| `-l, --level` | Task level: epic, ticket, task (default: task) |
+| `-d, --description` | Detailed description |
+| `-p, --priority` | Priority: low, medium, high, critical |
+| `-t, --tag` | Add tag (repeatable) |
+| `--parent` | Parent task ID |
+| `--depends-on` | Blocker task ID (repeatable) |
+| `--needs-review` | Mark as needing human review |
 
 ## Hierarchy (use in order)
 
