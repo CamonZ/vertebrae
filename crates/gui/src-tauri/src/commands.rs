@@ -1045,3 +1045,559 @@ pub async fn delete_chat_session(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vertebrae_core::{CreateTaskOptions, DefaultTaskService};
+    use vertebrae_db::{Database, Level};
+
+    /// Helper to create an AppState with an in-memory database for testing
+    async fn create_test_app_state() -> AppState {
+        let db = Database::connect_mem()
+            .await
+            .expect("Failed to create in-memory database");
+        db.init().await.expect("Failed to initialize database");
+        let service = DefaultTaskService::new(db);
+
+        // Create a temporary project config for testing
+        let temp_dir = std::env::temp_dir().join(format!(
+            "vtb-gui-cmd-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&temp_dir).ok();
+        let project_config = ProjectConfig::with_path(temp_dir.join("projects.json"));
+
+        AppState {
+            service: RwLock::new(Some(service)),
+            project_config,
+        }
+    }
+
+    /// Helper to create an AppState without a connected project
+    async fn create_disconnected_app_state() -> AppState {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "vtb-gui-cmd-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&temp_dir).ok();
+        let project_config = ProjectConfig::with_path(temp_dir.join("projects.json"));
+
+        AppState {
+            service: RwLock::new(None),
+            project_config,
+        }
+    }
+
+    /// Helper to get a State wrapper for testing
+    /// Tauri's State is just a wrapper around &T, so we simulate it with Arc
+    fn mock_state<T>(state: &T) -> State<'_, T>
+    where
+        T: Send + Sync + 'static,
+    {
+        // SAFETY: State is just a newtype wrapper around &T
+        // This is a test-only helper to avoid needing full Tauri runtime
+        unsafe { std::mem::transmute(state) }
+    }
+
+    // ========================================================================
+    // Project Management Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_get_projects_returns_empty_list_initially() {
+        let state = create_test_app_state().await;
+        let result = get_projects(mock_state(&state)).await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_current_project_returns_none_initially() {
+        let state = create_test_app_state().await;
+        let result = get_current_project(mock_state(&state)).await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_has_project_selected_true_when_connected() {
+        let state = create_test_app_state().await;
+        let result = has_project_selected(mock_state(&state)).await;
+        assert!(result.is_ok());
+        assert!(result.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_has_project_selected_false_when_disconnected() {
+        let state = create_disconnected_app_state().await;
+        let result = has_project_selected(mock_state(&state)).await;
+        assert!(result.is_ok());
+        assert!(!result.unwrap());
+    }
+
+    // ========================================================================
+    // Task Command Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_list_tasks_returns_empty_list_initially() {
+        let state = create_test_app_state().await;
+        let result = list_tasks(mock_state(&state), None).await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_list_tasks_fails_without_project() {
+        let state = create_disconnected_app_state().await;
+        let result = list_tasks(mock_state(&state), None).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("No project selected"));
+    }
+
+    #[tokio::test]
+    async fn test_get_task_fails_for_nonexistent_task() {
+        let state = create_test_app_state().await;
+        let result = get_task(mock_state(&state), "nonexistent".to_string()).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_get_task_hierarchy_returns_empty_initially() {
+        let state = create_test_app_state().await;
+        let result = get_task_hierarchy(mock_state(&state), None, None).await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_list_tasks_with_filter() {
+        let state = create_test_app_state().await;
+        let filter = TaskFilterOptions {
+            statuses: Some(vec!["backlog".to_string()]),
+            levels: None,
+            tags: None,
+            root_only: Some(true),
+            children_of: None,
+            include_done: None,
+            search: None,
+            workflow_id: None,
+        };
+        let result = list_tasks(mock_state(&state), Some(filter)).await;
+        assert!(result.is_ok());
+    }
+
+    // ========================================================================
+    // Workflow Command Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_list_workflows_returns_default_workflow() {
+        let state = create_test_app_state().await;
+        let result = list_workflows(mock_state(&state)).await;
+        assert!(result.is_ok());
+        let workflows = result.unwrap();
+        // Database init creates a default workflow
+        assert!(!workflows.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_list_workflows_fails_without_project() {
+        let state = create_disconnected_app_state().await;
+        let result = list_workflows(mock_state(&state)).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("No project selected"));
+    }
+
+    #[tokio::test]
+    async fn test_get_workflow_returns_default() {
+        let state = create_test_app_state().await;
+        let result = get_workflow(mock_state(&state), "default".to_string()).await;
+        assert!(result.is_ok());
+        let workflow = result.unwrap();
+        assert_eq!(workflow.name, "Default Workflow");
+    }
+
+    #[tokio::test]
+    async fn test_get_workflow_fails_for_nonexistent() {
+        let state = create_test_app_state().await;
+        let result = get_workflow(mock_state(&state), "nonexistent".to_string()).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_get_workflow_with_tasks_empty() {
+        let state = create_test_app_state().await;
+        let result = get_workflow_with_tasks(mock_state(&state), "default".to_string()).await;
+        assert!(result.is_ok());
+        let wf_with_tasks = result.unwrap();
+        assert_eq!(wf_with_tasks.workflow.name, "Default Workflow");
+        assert!(wf_with_tasks.tasks.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_workflow_with_task_details_empty() {
+        let state = create_test_app_state().await;
+        let result =
+            get_workflow_with_task_details(mock_state(&state), "default".to_string()).await;
+        assert!(result.is_ok());
+        let wf_with_tasks = result.unwrap();
+        assert_eq!(wf_with_tasks.workflow.name, "Default Workflow");
+        assert!(wf_with_tasks.tasks.is_empty());
+    }
+
+    // ========================================================================
+    // Step Command Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_list_steps_for_default_workflow() {
+        let state = create_test_app_state().await;
+        let result = list_steps_for_workflow(mock_state(&state), "default".to_string()).await;
+        assert!(result.is_ok());
+        let steps = result.unwrap();
+        // Default workflow should have steps (backlog, implementation, review, done)
+        assert!(!steps.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_list_steps_fails_without_project() {
+        let state = create_disconnected_app_state().await;
+        let result = list_steps_for_workflow(mock_state(&state), "default".to_string()).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_get_step_returns_none_for_nonexistent() {
+        let state = create_test_app_state().await;
+        let result = get_step(mock_state(&state), "nonexistent".to_string()).await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    // ========================================================================
+    // Execution Command Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_get_task_executions_empty_for_nonexistent() {
+        let state = create_test_app_state().await;
+        let result = get_task_executions(mock_state(&state), "nonexistent".to_string()).await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_task_executions_fails_without_project() {
+        let state = create_disconnected_app_state().await;
+        let result = get_task_executions(mock_state(&state), "task1".to_string()).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_get_execution_logs_empty_for_nonexistent() {
+        let state = create_test_app_state().await;
+        let result = get_execution_logs(mock_state(&state), "nonexistent".to_string()).await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+    }
+
+    // ========================================================================
+    // Chat Session Command Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_create_chat_session() {
+        let state = create_test_app_state().await;
+        let result = create_chat_session(mock_state(&state), Some("/tmp".to_string())).await;
+        assert!(result.is_ok());
+        let session = result.unwrap();
+        assert_eq!(session.working_dir, Some("/tmp".to_string()));
+        assert!(session.id.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_create_chat_session_without_working_dir() {
+        let state = create_test_app_state().await;
+        let result = create_chat_session(mock_state(&state), None).await;
+        assert!(result.is_ok());
+        let session = result.unwrap();
+        assert!(session.working_dir.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_chat_session_fails_without_project() {
+        let state = create_disconnected_app_state().await;
+        let result = create_chat_session(mock_state(&state), None).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("No project selected"));
+    }
+
+    #[tokio::test]
+    async fn test_list_chat_sessions_empty_initially() {
+        let state = create_test_app_state().await;
+        let result = list_chat_sessions(mock_state(&state), None).await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_get_chat_session_none_for_nonexistent() {
+        let state = create_test_app_state().await;
+        let result = get_chat_session(mock_state(&state), "nonexistent".to_string()).await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_chat_session_roundtrip() {
+        let state = create_test_app_state().await;
+
+        // Create session
+        let create_result =
+            create_chat_session(mock_state(&state), Some("/test".to_string())).await;
+        assert!(create_result.is_ok());
+        let session = create_result.unwrap();
+        let session_id = session.id.clone().unwrap();
+
+        // Get session
+        let get_result = get_chat_session(mock_state(&state), session_id.clone()).await;
+        assert!(get_result.is_ok());
+        let retrieved = get_result.unwrap().unwrap();
+        assert_eq!(retrieved.working_dir, Some("/test".to_string()));
+
+        // Update title
+        let update_result = update_chat_session_title(
+            mock_state(&state),
+            session_id.clone(),
+            "Test Session".to_string(),
+        )
+        .await;
+        assert!(update_result.is_ok());
+
+        // Verify title updated
+        let get_result2 = get_chat_session(mock_state(&state), session_id.clone()).await;
+        assert!(get_result2.is_ok());
+        let retrieved2 = get_result2.unwrap().unwrap();
+        assert_eq!(retrieved2.title, Some("Test Session".to_string()));
+
+        // List sessions
+        let list_result = list_chat_sessions(mock_state(&state), None).await;
+        assert!(list_result.is_ok());
+        assert_eq!(list_result.unwrap().len(), 1);
+
+        // End session
+        let end_result = end_chat_session(mock_state(&state), session_id.clone()).await;
+        assert!(end_result.is_ok());
+
+        // Verify session ended
+        let get_result3 = get_chat_session(mock_state(&state), session_id.clone()).await;
+        assert!(get_result3.is_ok());
+        let retrieved3 = get_result3.unwrap().unwrap();
+        assert!(retrieved3.ended_at.is_some());
+
+        // Delete session
+        let delete_result = delete_chat_session(mock_state(&state), session_id.clone()).await;
+        assert!(delete_result.is_ok());
+
+        // Verify deleted
+        let get_result4 = get_chat_session(mock_state(&state), session_id).await;
+        assert!(get_result4.is_ok());
+        assert!(get_result4.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_add_and_get_chat_messages() {
+        let state = create_test_app_state().await;
+
+        // Create session
+        let session = create_chat_session(mock_state(&state), None).await.unwrap();
+        let session_id = session.id.unwrap();
+
+        // Add messages
+        let msg1_id = add_chat_message(mock_state(&state), session_id.clone(), "Hello".to_string())
+            .await
+            .unwrap();
+        assert!(!msg1_id.is_empty());
+
+        let msg2_id = add_chat_message(mock_state(&state), session_id.clone(), "World".to_string())
+            .await
+            .unwrap();
+        assert!(!msg2_id.is_empty());
+
+        // Get messages
+        let messages = get_chat_messages(mock_state(&state), session_id.clone())
+            .await
+            .unwrap();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].content, "Hello");
+        assert_eq!(messages[1].content, "World");
+
+        // Get session content (concatenated)
+        let content = get_chat_session_content(mock_state(&state), session_id)
+            .await
+            .unwrap();
+        assert!(content.contains("Hello"));
+        assert!(content.contains("World"));
+    }
+
+    // ========================================================================
+    // Integration Tests with Task Creation
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_tasks_with_workflow_filter() {
+        let state = create_test_app_state().await;
+
+        // Create a task using the service directly
+        {
+            let guard = state.service.read().await;
+            let service = guard.as_ref().unwrap();
+
+            let options = CreateTaskOptions::new("Test Task").with_level(Level::Task);
+            service.create_task(options).await.unwrap();
+        }
+
+        // List all tasks
+        let result = list_tasks(mock_state(&state), None).await;
+        assert!(result.is_ok());
+        let tasks = result.unwrap();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].title, "Test Task");
+    }
+
+    #[tokio::test]
+    async fn test_get_task_with_relations() {
+        let state = create_test_app_state().await;
+
+        // Create parent and child tasks
+        let (parent_id, child_id) = {
+            let guard = state.service.read().await;
+            let service = guard.as_ref().unwrap();
+
+            let parent_options = CreateTaskOptions::new("Parent").with_level(Level::Epic);
+            let parent_id = service.create_task(parent_options).await.unwrap();
+
+            let child_options = CreateTaskOptions::new("Child").with_level(Level::Task);
+            let child_id = service.create_task(child_options).await.unwrap();
+
+            service.set_parent(&child_id, &parent_id).await.unwrap();
+
+            (parent_id, child_id)
+        };
+
+        // Get parent with relations
+        let result = get_task(mock_state(&state), parent_id.clone()).await;
+        assert!(result.is_ok());
+        let parent_with_relations = result.unwrap();
+        assert_eq!(parent_with_relations.task.title, "Parent");
+        assert!(parent_with_relations.parent_id.is_none());
+        assert_eq!(parent_with_relations.children_ids.len(), 1);
+        assert!(parent_with_relations.children_ids.contains(&child_id));
+
+        // Get child with relations
+        let result2 = get_task(mock_state(&state), child_id.clone()).await;
+        assert!(result2.is_ok());
+        let child_with_relations = result2.unwrap();
+        assert_eq!(child_with_relations.task.title, "Child");
+        assert_eq!(child_with_relations.parent_id, Some(parent_id));
+        assert!(child_with_relations.children_ids.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_task_hierarchy() {
+        let state = create_test_app_state().await;
+
+        // Create hierarchy: Epic -> Ticket -> Task
+        {
+            let guard = state.service.read().await;
+            let service = guard.as_ref().unwrap();
+
+            let epic_options = CreateTaskOptions::new("Epic").with_level(Level::Epic);
+            let epic_id = service.create_task(epic_options).await.unwrap();
+
+            let ticket_options = CreateTaskOptions::new("Ticket").with_level(Level::Ticket);
+            let ticket_id = service.create_task(ticket_options).await.unwrap();
+            service.set_parent(&ticket_id, &epic_id).await.unwrap();
+
+            let task_options = CreateTaskOptions::new("Task").with_level(Level::Task);
+            let task_id = service.create_task(task_options).await.unwrap();
+            service.set_parent(&task_id, &ticket_id).await.unwrap();
+        }
+
+        // Get hierarchy
+        let result = get_task_hierarchy(mock_state(&state), None, None).await;
+        assert!(result.is_ok());
+        let hierarchy = result.unwrap();
+
+        // Should have one root (Epic)
+        assert_eq!(hierarchy.len(), 1);
+        assert_eq!(hierarchy[0].task.title, "Epic");
+
+        // Epic should have one child (Ticket)
+        assert_eq!(hierarchy[0].children.len(), 1);
+        assert_eq!(hierarchy[0].children[0].task.title, "Ticket");
+
+        // Ticket should have one child (Task)
+        assert_eq!(hierarchy[0].children[0].children.len(), 1);
+        assert_eq!(hierarchy[0].children[0].children[0].task.title, "Task");
+    }
+
+    #[tokio::test]
+    async fn test_workflow_with_tasks_integration() {
+        let state = create_test_app_state().await;
+
+        // Create a task assigned to default workflow
+        {
+            let guard = state.service.read().await;
+            let service = guard.as_ref().unwrap();
+
+            let task_options = CreateTaskOptions::new("Workflow Task").with_level(Level::Task);
+            let task_id = service.create_task(task_options).await.unwrap();
+
+            // Transition to in_progress to assign workflow
+            service
+                .transition_to(&task_id, "in_progress")
+                .await
+                .unwrap();
+        }
+
+        // Get workflow with tasks
+        let result = get_workflow_with_tasks(mock_state(&state), "default".to_string()).await;
+        assert!(result.is_ok());
+        let wf_with_tasks = result.unwrap();
+        assert_eq!(wf_with_tasks.tasks.len(), 1);
+        assert_eq!(wf_with_tasks.tasks[0].title, "Workflow Task");
+    }
+
+    // ========================================================================
+    // CommandError Tests
+    // ========================================================================
+
+    #[test]
+    fn test_command_error_task_not_found() {
+        let err = CommandError::task_not_found("abc123");
+        assert_eq!(err.message, "Task not found: abc123");
+    }
+
+    #[test]
+    fn test_command_error_workflow_not_found() {
+        let err = CommandError::workflow_not_found("wf1");
+        assert_eq!(err.message, "Workflow not found: wf1");
+    }
+
+    #[test]
+    fn test_command_error_no_project_selected() {
+        let err = CommandError::no_project_selected();
+        assert!(err.message.contains("No project selected"));
+    }
+}

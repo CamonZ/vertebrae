@@ -61,6 +61,13 @@ impl ProjectConfig {
         Ok(Self { config_path })
     }
 
+    /// Create a new project configuration manager with a custom config path.
+    /// This is primarily for testing.
+    #[cfg(test)]
+    pub fn with_path(config_path: PathBuf) -> Self {
+        Self { config_path }
+    }
+
     /// Load the project configuration from disk
     fn load(&self) -> ProjectConfigFile {
         if !self.config_path.exists() {

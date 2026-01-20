@@ -43,7 +43,7 @@ tokio = { version = "1", features = ["full"] }
 futures = "0.3"
 
 # Workspace dependencies
-vertebrae-db = { path = "../../db" }
+vertebrae-db = { path = "../../db", features = ["test-utils"] }
 vertebrae-core = { path = "../../core" }
 
 # Direct dependency for LIVE query types
