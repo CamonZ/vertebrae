@@ -45,6 +45,7 @@ pub struct TaskUpdate {
     /// Whether to set started_at to current time
     pub set_started_at: bool,
     /// Whether to conditionally set started_at only if currently NULL (null-coalescing)
+    /// This preserves existing start times when re-starting a task
     pub set_started_at_if_null: bool,
     /// New status (if Some) - references StatusDefinition.name from StatusSchema
     pub status: Option<String>,
@@ -274,24 +275,40 @@ impl<'a> TaskRepository<'a> {
             ""
         };
 
+        // Build workflow clause - tasks always have workflow_id and current_step
+        let (workflow_clause, workflow_id) = match &task.workflow_id {
+            Some(wf_id) => (
+                ", workflow_id = $workflow_id, current_step = $current_step",
+                Some(wf_id.clone()),
+            ),
+            None => ("", None),
+        };
+        let current_step = task.current_step.unwrap_or(0);
+
         let query = format!(
             r#"CREATE task:{} SET
                 title = $title,
                 level = "{}",
                 status = "{}",
                 priority = {},
-                tags = {}{}"#,
+                tags = {}{}{}"#,
             id,
             task.level.as_str(),
             task.status.as_str(),
             priority_str,
             tags_str,
-            description_clause
+            description_clause,
+            workflow_clause
         );
 
         let mut query_builder = self.client.query(&query).bind(("title", title));
         if let Some(desc) = description {
             query_builder = query_builder.bind(("description", desc));
+        }
+        if let Some(wf_id) = workflow_id {
+            query_builder = query_builder
+                .bind(("workflow_id", wf_id))
+                .bind(("current_step", current_step));
         }
         query_builder.await?;
         Ok(())

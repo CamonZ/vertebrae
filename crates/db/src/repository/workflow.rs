@@ -1331,7 +1331,7 @@ mod tests {
         let workflow_repo = WorkflowRepository::new(db.client());
         let task_repo = TaskRepository::new(db.client());
 
-        // Create tasks with different statuses (no todo status anymore)
+        // Create tasks with different statuses (tasks now have default workflow)
         let task1 = Task::new("Backlog Task", Level::Task).with_status("backlog");
         let task2 = Task::new("In Progress Task", Level::Task).with_status("in_progress");
         let task3 = Task::new("Pending Review Task", Level::Task).with_status("pending_review");
@@ -1341,6 +1341,12 @@ mod tests {
         task_repo.create("t2", &task2).await.unwrap();
         task_repo.create("t3", &task3).await.unwrap();
         task_repo.create("t4", &task4).await.unwrap();
+
+        // Unassign workflows to simulate old tasks without workflow assignment
+        task_repo.unassign_workflow("t1").await.unwrap();
+        task_repo.unassign_workflow("t2").await.unwrap();
+        task_repo.unassign_workflow("t3").await.unwrap();
+        task_repo.unassign_workflow("t4").await.unwrap();
 
         // Run migration
         let result = workflow_repo.migrate_to_default_workflow().await.unwrap();
@@ -1379,12 +1385,16 @@ mod tests {
         let workflow_repo = WorkflowRepository::new(db.client());
         let task_repo = TaskRepository::new(db.client());
 
-        // Create a rejected task and a normal task
+        // Create a rejected task and a normal task (tasks now have default workflow)
         let rejected_task = Task::new("Rejected Task", Level::Task).with_status("rejected");
         let normal_task = Task::new("Normal Task", Level::Task).with_status("in_progress");
 
         task_repo.create("rejected", &rejected_task).await.unwrap();
         task_repo.create("normal", &normal_task).await.unwrap();
+
+        // Unassign workflows to simulate old tasks without workflow assignment
+        task_repo.unassign_workflow("rejected").await.unwrap();
+        task_repo.unassign_workflow("normal").await.unwrap();
 
         // Run migration
         let result = workflow_repo.migrate_to_default_workflow().await.unwrap();
@@ -1394,7 +1404,7 @@ mod tests {
         assert!(result.has_skipped());
         assert!(result.skipped_ids.contains(&"rejected".to_string()));
 
-        // Verify rejected task still has no workflow
+        // Verify rejected task still has no workflow (status not in default workflow)
         let rejected = task_repo.get("rejected").await.unwrap().unwrap();
         assert!(rejected.workflow_id.is_none());
         assert!(rejected.current_step.is_none());
@@ -1416,9 +1426,12 @@ mod tests {
         let workflow_repo = WorkflowRepository::new(db.client());
         let task_repo = TaskRepository::new(db.client());
 
-        // Create a task
+        // Create a task (now has default workflow)
         let task = Task::new("Test Task", Level::Task).with_status("in_progress");
         task_repo.create("test", &task).await.unwrap();
+
+        // Unassign workflow to simulate old task without workflow assignment
+        task_repo.unassign_workflow("test").await.unwrap();
 
         // Run migration first time
         let result1 = workflow_repo.migrate_to_default_workflow().await.unwrap();
@@ -1446,19 +1459,15 @@ mod tests {
         let workflow_repo = WorkflowRepository::new(db.client());
         let task_repo = TaskRepository::new(db.client());
 
-        // Create a task and assign it to the workflow manually
+        // Create a task (now has default workflow assigned automatically)
         let task = Task::new("Pre-assigned Task", Level::Task).with_status("in_progress");
         task_repo.create("assigned", &task).await.unwrap();
+        // Task already has workflow from creation, no need to assign again
 
-        let workflow_thing = surrealdb::sql::Thing::from(("workflow", DEFAULT_WORKFLOW_ID));
-        task_repo
-            .assign_workflow("assigned", &workflow_thing)
-            .await
-            .unwrap();
-
-        // Create another task without workflow
+        // Create another task and unassign its workflow to simulate old task
         let task2 = Task::new("Unassigned Task", Level::Task).with_status("in_progress");
         task_repo.create("unassigned", &task2).await.unwrap();
+        task_repo.unassign_workflow("unassigned").await.unwrap();
 
         // Run migration - should only migrate the unassigned task
         let result = workflow_repo.migrate_to_default_workflow().await.unwrap();
@@ -1491,7 +1500,7 @@ mod tests {
         let workflow_repo = WorkflowRepository::new(db.client());
         let task_repo = TaskRepository::new(db.client());
 
-        // Create tasks with different statuses
+        // Create tasks with different statuses (tasks now have default workflow)
         let task1 = Task::new("Backlog Task", Level::Task).with_status("backlog");
         let task2 = Task::new("Rejected Task", Level::Task).with_status("rejected");
         let task3 = Task::new("Todo Task", Level::Task).with_status("in_progress");
@@ -1500,13 +1509,18 @@ mod tests {
         task_repo.create("t2", &task2).await.unwrap();
         task_repo.create("t3", &task3).await.unwrap();
 
+        // Unassign workflows to simulate old tasks without workflow assignment
+        task_repo.unassign_workflow("t1").await.unwrap();
+        task_repo.unassign_workflow("t2").await.unwrap();
+        task_repo.unassign_workflow("t3").await.unwrap();
+
         // Run dry-run
         let result = workflow_repo.dry_run_migration().await.unwrap();
         assert_eq!(result.migrated, 2);
         assert_eq!(result.skipped, 1);
         assert!(result.skipped_ids.contains(&"t2".to_string()));
 
-        // Verify no tasks were actually migrated
+        // Verify no tasks were actually migrated (dry-run doesn't modify)
         let t1 = task_repo.get("t1").await.unwrap().unwrap();
         assert!(t1.workflow_id.is_none());
         let t2 = task_repo.get("t2").await.unwrap().unwrap();
@@ -1526,11 +1540,14 @@ mod tests {
         let workflow_repo = WorkflowRepository::new(db.client());
         let task_repo = TaskRepository::new(db.client());
 
-        // Create a task
+        // Create a task (now has default workflow)
         let task = Task::new("Test Task", Level::Task).with_status("in_progress");
         task_repo.create("test", &task).await.unwrap();
 
-        // Get original task state
+        // Unassign workflow to simulate old task without workflow assignment
+        task_repo.unassign_workflow("test").await.unwrap();
+
+        // Get original task state (after unassign)
         let original = task_repo.get("test").await.unwrap().unwrap();
         assert!(original.workflow_id.is_none());
 
@@ -1542,7 +1559,7 @@ mod tests {
         assert_eq!(result1.migrated, 1);
         assert_eq!(result2.migrated, 1);
 
-        // Verify task state unchanged
+        // Verify task state unchanged (dry-run doesn't modify)
         let after = task_repo.get("test").await.unwrap().unwrap();
         assert!(after.workflow_id.is_none());
         assert_eq!(after.status, original.status);

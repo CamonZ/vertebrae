@@ -10,6 +10,9 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use surrealdb::sql::Thing;
 
+/// Default workflow ID for new tasks
+pub const DEFAULT_WORKFLOW_ID: &str = "default";
+
 /// Task hierarchy level
 ///
 /// Represents the granularity of a task in the hierarchy:
@@ -363,6 +366,8 @@ pub struct Task {
 
 impl Task {
     /// Create a new task with required fields
+    ///
+    /// New tasks are automatically assigned to the default 'backlog' workflow at step 0.
     pub fn new(title: impl Into<String>, level: Level) -> Self {
         Self {
             id: None,
@@ -381,8 +386,8 @@ impl Task {
             needs_human_review: None,
             revision_feedback: None,
             rejection_reason: None,
-            workflow_id: None,
-            current_step: None,
+            workflow_id: Some(Thing::from(("workflow", DEFAULT_WORKFLOW_ID))),
+            current_step: Some(0),
             current_step_id: None,
         }
     }
@@ -3037,8 +3042,8 @@ mod tests {
         assert!(task.completed_at.is_none());
         assert!(task.sections.is_empty());
         assert!(task.code_refs.is_empty());
-        assert!(task.workflow_id.is_none());
-        assert!(task.current_step.is_none());
+        assert!(task.workflow_id.is_some());
+        assert!(task.current_step.is_some());
     }
 
     #[test]
@@ -3410,17 +3415,23 @@ mod tests {
     }
 
     #[test]
-    fn test_task_workflow_serialize_omits_when_none() {
-        let task = Task::new("No Workflow", Level::Task);
+    fn test_task_workflow_serialize_includes_default_workflow() {
+        // Tasks now always have a default workflow assigned
+        let task = Task::new("With Workflow", Level::Task);
         let value = serde_json::to_value(&task).unwrap();
 
         assert!(
-            value.get("workflow_id").is_none(),
-            "workflow_id should be omitted when None"
+            value.get("workflow_id").is_some(),
+            "workflow_id should be present with default workflow"
         );
         assert!(
-            value.get("current_step").is_none(),
-            "current_step should be omitted when None"
+            value.get("current_step").is_some(),
+            "current_step should be present with default workflow"
+        );
+        assert_eq!(
+            value.get("current_step").unwrap().as_u64(),
+            Some(0),
+            "current_step should be 0 for new tasks"
         );
     }
 

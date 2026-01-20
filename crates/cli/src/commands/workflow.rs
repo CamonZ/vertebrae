@@ -2321,8 +2321,9 @@ mod tests {
     async fn test_advance_workflow_not_assigned() {
         let db = setup_test_db().await;
 
-        // Create a task without workflow assignment
+        // Create a task (now has default workflow) and unassign it
         create_test_task(&db, "abc123", "Test Task").await;
+        db.tasks().unassign_workflow("abc123").await.unwrap();
 
         let advance_cmd = WorkflowAdvanceCommand {
             task_id: "abc123".to_string(),
@@ -2491,8 +2492,9 @@ mod tests {
     async fn test_retreat_workflow_not_assigned() {
         let db = setup_test_db().await;
 
-        // Create a task without workflow assignment
+        // Create a task (now has default workflow) and unassign it
         create_test_task(&db, "abc123", "Test Task").await;
+        db.tasks().unassign_workflow("abc123").await.unwrap();
 
         let retreat_cmd = WorkflowRetreatCommand {
             task_id: "abc123".to_string(),
@@ -2595,8 +2597,9 @@ mod tests {
     async fn test_reject_task_not_assigned() {
         let db = setup_test_db().await;
 
-        // Create a task without workflow assignment
+        // Create a task (now has default workflow) and unassign it
         create_test_task(&db, "abc123", "Test Task").await;
+        db.tasks().unassign_workflow("abc123").await.unwrap();
 
         let reject_cmd = WorkflowRejectCommand {
             task_id: "abc123".to_string(),

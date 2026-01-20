@@ -2866,11 +2866,12 @@ mod tests {
     async fn test_get_derived_status_no_workflow() {
         let service = setup_test_service().await;
 
-        // Create task without workflow
+        // Create task (now has default workflow) and unassign it
         let id = service
             .create_task(CreateTaskOptions::new("No workflow task"))
             .await
             .unwrap();
+        service.db.tasks().unassign_workflow(&id).await.unwrap();
 
         // Should return the status field as-is
         let derived_status = service.get_derived_status(&id).await.unwrap();
