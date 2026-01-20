@@ -22,6 +22,7 @@ import { useWorkflows } from "../hooks/useWorkflows";
 import { useWorkflowChangeListener } from "../hooks/useWorkflowChangeListener";
 import { useTaskChangeListener } from "../hooks/useTaskChangeListener";
 import { useToastStore } from "../stores";
+import { groupTasksByStep } from "../utils";
 import { StepNode, type StepNodeData } from "../components/WorkflowPipeline";
 import {
   WorkflowZoneNode,
@@ -239,49 +240,6 @@ function calculateWorkflowZoneHeight(): number {
 }
 
 /**
- * Group tasks by their current step for a workflow
- */
-function groupTasksByStep(
-  tasks: TaskWithRelations[],
-  steps: Step[]
-): Map<string, TaskWithRelations[]> {
-  const sortedSteps = [...steps].sort((a, b) => a.order - b.order);
-  const groups = new Map<string, TaskWithRelations[]>();
-
-  // Initialize groups for each step
-  sortedSteps.forEach((step) => {
-    groups.set(step.name.toLowerCase(), []);
-  });
-
-  tasks.forEach((tr) => {
-    const taskStatus = tr.task.status?.toLowerCase();
-
-    // Done/rejected tasks go to the last step zone
-    if (taskStatus === "done" || taskStatus === "rejected") {
-      const lastStep = sortedSteps[sortedSteps.length - 1];
-      if (lastStep) {
-        groups.get(lastStep.name.toLowerCase())?.push(tr);
-      }
-      return;
-    }
-
-    // Match task status to step name
-    if (taskStatus && groups.has(taskStatus)) {
-      groups.get(taskStatus)!.push(tr);
-      return;
-    }
-
-    // Fall back to first step if status doesn't match any step
-    const firstStep = sortedSteps[0]?.name?.toLowerCase();
-    if (firstStep && groups.has(firstStep)) {
-      groups.get(firstStep)!.push(tr);
-    }
-  });
-
-  return groups;
-}
-
-/**
  * AllWorkflowsPipeline displays all workflows in a single React Flow canvas.
  * Each workflow is rendered as a zone with dashed borders containing its pipeline.
  * Features neural-pathway-inspired design with real-time updates.
@@ -296,9 +254,9 @@ export function AllWorkflowsPipeline() {
   >(new Map());
 
   // State for fetched steps per workflow
-  const [workflowStepsMap, setWorkflowStepsMap] = useState<
-    Map<string, Step[]>
-  >(new Map());
+  const [workflowStepsMap, setWorkflowStepsMap] = useState<Map<string, Step[]>>(
+    new Map()
+  );
 
   // State for selected task (for detail panel)
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
@@ -338,14 +296,11 @@ export function AllWorkflowsPipeline() {
   }, []);
 
   // Zone selection handlers (for filtered tasks panel)
-  const handleZoneClick = useCallback(
-    (workflowId: string, step: Step) => {
-      setSelectedZone({ workflowId, step });
-      setSelectedTaskId(null); // Clear task selection
-      setSelectedStep(null); // Clear step config selection
-    },
-    []
-  );
+  const handleZoneClick = useCallback((workflowId: string, step: Step) => {
+    setSelectedZone({ workflowId, step });
+    setSelectedTaskId(null); // Clear task selection
+    setSelectedStep(null); // Clear step config selection
+  }, []);
 
   const handleCloseZonePanel = useCallback(() => {
     setSelectedZone(null);
@@ -371,9 +326,8 @@ export function AllWorkflowsPipeline() {
 
           // Fetch tasks for this workflow
           try {
-            const tasksResult = await commands.getWorkflowWithTaskDetails(
-              workflowId
-            );
+            const tasksResult =
+              await commands.getWorkflowWithTaskDetails(workflowId);
             if (tasksResult.status === "ok") {
               tasksMap.set(workflowId, tasksResult.data.tasks);
             } else {
@@ -393,9 +347,7 @@ export function AllWorkflowsPipeline() {
 
           // Fetch steps for this workflow
           try {
-            const stepsResult = await commands.listStepsForWorkflow(
-              workflowId
-            );
+            const stepsResult = await commands.listStepsForWorkflow(workflowId);
             if (stepsResult.status === "ok") {
               stepsMap.set(workflowId, stepsResult.data);
             } else {
@@ -703,10 +655,7 @@ export function AllWorkflowsPipeline() {
           if (workflowSteps.length === 0) return null;
 
           // Group tasks by step
-          const tasksByStep = groupTasksByStep(
-            allWorkflowTasks,
-            workflowSteps
-          );
+          const tasksByStep = groupTasksByStep(allWorkflowTasks, workflowSteps);
           // Get tasks for selected step
           const stepTasks =
             tasksByStep.get(selectedZone.step.name.toLowerCase()) || [];
