@@ -164,6 +164,8 @@ mod tests {
                 tags: vec![],
                 needs_human_review: None,
                 created_at: chrono::Utc::now(),
+                workflow_name: None,
+                step_name: None,
             }],
         };
 
@@ -187,6 +189,8 @@ mod tests {
                 tags: vec![],
                 needs_human_review: None,
                 created_at: now,
+                workflow_name: None,
+                step_name: None,
             }],
         };
 

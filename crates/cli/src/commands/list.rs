@@ -15,7 +15,7 @@ pub struct TaskSummary {
     pub title: String,
     /// Hierarchy level
     pub level: String,
-    /// Current status
+    /// Derived status (workflow:step if available, else raw status)
     pub status: String,
     /// Optional priority
     pub priority: Option<String>,
@@ -43,6 +43,14 @@ pub struct ListCommand {
     /// Filter by tag (can be specified multiple times)
     #[arg(short, long = "tag")]
     pub tags: Vec<String>,
+
+    /// Filter by workflow ID (tasks assigned to a specific workflow)
+    #[arg(short = 'w', long = "workflow")]
+    pub workflow: Option<String>,
+
+    /// Filter by current step name within the workflow
+    #[arg(long = "step")]
+    pub step: Option<String>,
 
     /// Show only root items (no parent)
     #[arg(long)]
@@ -92,14 +100,35 @@ fn parse_priority(s: &str) -> Result<Priority, String> {
     }
 }
 
+/// Compute the derived status from workflow and step names
+///
+/// Returns `workflow_name:step_name` if both are present,
+/// otherwise falls back to the raw status string.
+fn compute_derived_status(
+    status: &str,
+    workflow_name: Option<&str>,
+    step_name: Option<&str>,
+) -> String {
+    match (workflow_name, step_name) {
+        (Some(wf), Some(step)) => format!("{}:{}", wf, step),
+        _ => status.to_string(),
+    }
+}
+
 /// Convert repository TaskSummary to CLI TaskSummary
 impl From<vertebrae_db::TaskSummary> for TaskSummary {
     fn from(summary: vertebrae_db::TaskSummary) -> Self {
+        let derived_status = compute_derived_status(
+            &summary.status,
+            summary.workflow_name.as_deref(),
+            summary.step_name.as_deref(),
+        );
+
         TaskSummary {
             id: summary.id,
             title: summary.title,
             level: summary.level.as_str().to_string(),
-            status: summary.status.as_str().to_string(),
+            status: derived_status,
             priority: summary.priority.map(|p| p.as_str().to_string()),
             tags: summary.tags,
             needs_human_review: summary.needs_human_review,
@@ -172,6 +201,16 @@ impl ListCommand {
         // Add tag filters
         if !self.tags.is_empty() {
             filter = filter.with_tags(self.tags.clone());
+        }
+
+        // Add workflow filter
+        if let Some(ref workflow_id) = self.workflow {
+            filter = filter.with_workflow_id(workflow_id);
+        }
+
+        // Add step filter
+        if let Some(ref step_name) = self.step {
+            filter = filter.with_current_step(step_name);
         }
 
         // Set structural filters
@@ -313,6 +352,8 @@ mod tests {
             statuses: vec![],
             priorities: vec![],
             tags: vec![],
+            workflow: None,
+            step: None,
             root: false,
             parent: None,
             all: false,
@@ -349,6 +390,8 @@ mod tests {
             statuses: vec![],
             priorities: vec![],
             tags: vec![],
+            workflow: None,
+            step: None,
             root: false,
             parent: None,
             all: true,
@@ -395,6 +438,8 @@ mod tests {
             statuses: vec![],
             priorities: vec![],
             tags: vec![],
+            workflow: None,
+            step: None,
             root: false,
             parent: None,
             all: false,
@@ -432,6 +477,8 @@ mod tests {
             statuses: vec![],
             priorities: vec![],
             tags: vec![],
+            workflow: None,
+            step: None,
             root: false,
             parent: None,
             all: false,
@@ -474,6 +521,8 @@ mod tests {
             statuses: vec!["backlog".to_string()],
             priorities: vec![],
             tags: vec![],
+            workflow: None,
+            step: None,
             root: false,
             parent: None,
             all: false,
@@ -520,6 +569,8 @@ mod tests {
             statuses: vec![],
             priorities: vec![Priority::High],
             tags: vec![],
+            workflow: None,
+            step: None,
             root: false,
             parent: None,
             all: false,
@@ -575,6 +626,8 @@ mod tests {
             statuses: vec![],
             priorities: vec![],
             tags: vec!["backend".to_string()],
+            workflow: None,
+            step: None,
             root: false,
             parent: None,
             all: false,
@@ -654,6 +707,8 @@ mod tests {
             statuses: vec![],
             priorities: vec![],
             tags: vec![],
+            workflow: None,
+            step: None,
             root: true,
             parent: None,
             all: false,
@@ -709,6 +764,8 @@ mod tests {
             statuses: vec![],
             priorities: vec![],
             tags: vec![],
+            workflow: None,
+            step: None,
             root: false,
             parent: Some("parent1".to_string()),
             all: false,
@@ -737,6 +794,8 @@ mod tests {
             statuses: vec![],
             priorities: vec![],
             tags: vec![],
+            workflow: None,
+            step: None,
             root: false,
             parent: Some("nonexistent".to_string()),
             all: false,
@@ -761,6 +820,8 @@ mod tests {
             statuses: vec![],
             priorities: vec![],
             tags: vec![],
+            workflow: None,
+            step: None,
             root: false,
             parent: None,
             all: false,
@@ -825,6 +886,8 @@ mod tests {
             statuses: vec![],
             priorities: vec![Priority::High],
             tags: vec!["backend".to_string()],
+            workflow: None,
+            step: None,
             root: false,
             parent: None,
             all: false,
@@ -853,6 +916,8 @@ mod tests {
             statuses: vec![],
             priorities: vec![],
             tags: vec![],
+            workflow: None,
+            step: None,
             root: true,
             parent: None,
             all: false,
@@ -875,6 +940,8 @@ mod tests {
             statuses: vec!["in_progress".to_string(), "in_progress".to_string()],
             priorities: vec![Priority::High],
             tags: vec!["backend".to_string(), "api".to_string()],
+            workflow: None,
+            step: None,
             root: true,
             parent: None,
             all: true,
@@ -901,6 +968,8 @@ mod tests {
             statuses: vec![],
             priorities: vec![],
             tags: vec![],
+            workflow: None,
+            step: None,
             root: false,
             parent: Some("parent123".to_string()),
             all: false,
@@ -923,6 +992,8 @@ mod tests {
             statuses: vec![],
             priorities: vec![],
             tags: vec![],
+            workflow: None,
+            step: None,
             root: false,
             parent: None,
             all: false,
@@ -954,6 +1025,8 @@ mod tests {
             tags: vec!["test".to_string()],
             needs_human_review: Some(true),
             created_at: chrono::Utc::now(),
+            workflow_name: None,
+            step_name: None,
         };
 
         let summary = TaskSummary::from(db_summary);
@@ -961,7 +1034,36 @@ mod tests {
         assert_eq!(summary.id, "abc123");
         assert_eq!(summary.title, "Test Task");
         assert_eq!(summary.level, "ticket");
+        // Without workflow/step, derived status falls back to raw status
         assert_eq!(summary.status, "in_progress");
+        assert_eq!(summary.priority, Some("medium".to_string()));
+        assert_eq!(summary.tags, vec!["test".to_string()]);
+        assert_eq!(summary.needs_human_review, Some(true));
+    }
+
+    #[test]
+    fn test_task_summary_from_db_task_summary_with_workflow() {
+        // Test conversion with workflow info - should compute derived status
+        let db_summary = vertebrae_db::TaskSummary {
+            id: "abc123".to_string(),
+            title: "Test Task".to_string(),
+            level: Level::Ticket,
+            status: "in_progress".to_string(),
+            priority: Some(Priority::Medium),
+            tags: vec!["test".to_string()],
+            needs_human_review: Some(true),
+            created_at: chrono::Utc::now(),
+            workflow_name: Some("Default Workflow".to_string()),
+            step_name: Some("active".to_string()),
+        };
+
+        let summary = TaskSummary::from(db_summary);
+
+        assert_eq!(summary.id, "abc123");
+        assert_eq!(summary.title, "Test Task");
+        assert_eq!(summary.level, "ticket");
+        // With workflow/step, derived status is "workflow_name:step_name"
+        assert_eq!(summary.status, "Default Workflow:active");
         assert_eq!(summary.priority, Some("medium".to_string()));
         assert_eq!(summary.tags, vec!["test".to_string()]);
         assert_eq!(summary.needs_human_review, Some(true));
@@ -1022,6 +1124,8 @@ mod tests {
             statuses: vec!["in_progress".to_string()],
             priorities: vec![Priority::High],
             tags: vec!["backend".to_string()],
+            workflow: None,
+            step: None,
             root: true,
             parent: Some("parent123".to_string()),
             all: true,
@@ -1121,6 +1225,8 @@ mod tests {
             statuses: vec![],
             priorities: vec![],
             tags: vec![],
+            workflow: None,
+            step: None,
             root: false,
             parent: None,
             all: false,
@@ -1165,6 +1271,8 @@ mod tests {
             statuses: vec![],
             priorities: vec![],
             tags: vec![],
+            workflow: None,
+            step: None,
             root: false,
             parent: None,
             all: false,
@@ -1202,6 +1310,8 @@ mod tests {
             statuses: vec![],
             priorities: vec![],
             tags: vec![],
+            workflow: None,
+            step: None,
             root: false,
             parent: None,
             all: false,
@@ -1222,6 +1332,8 @@ mod tests {
             statuses: vec![],
             priorities: vec![],
             tags: vec![],
+            workflow: None,
+            step: None,
             root: false,
             parent: None,
             all: false,
@@ -1247,6 +1359,8 @@ mod tests {
             statuses: vec![],
             priorities: vec![],
             tags: vec![],
+            workflow: None,
+            step: None,
             root: false,
             parent: None,
             all: false,
@@ -1293,6 +1407,8 @@ mod tests {
             statuses: vec!["in_progress".to_string()],
             priorities: vec![],
             tags: vec![],
+            workflow: None,
+            step: None,
             root: false,
             parent: None,
             all: false,
@@ -1322,6 +1438,8 @@ mod tests {
             statuses: vec![],
             priorities: vec![],
             tags: vec![],
+            workflow: None,
+            step: None,
             root: false,
             parent: None,
             all: false,
@@ -1348,6 +1466,8 @@ mod tests {
             statuses: vec![],
             priorities: vec![],
             tags: vec![],
+            workflow: None,
+            step: None,
             root: false,
             parent: None,
             all: false,
@@ -1379,6 +1499,8 @@ mod tests {
             statuses: vec![],
             priorities: vec![],
             tags: vec![],
+            workflow: None,
+            step: None,
             root: false,
             parent: None,
             all: false,
@@ -1441,6 +1563,8 @@ mod tests {
             statuses: vec![],
             priorities: vec![],
             tags: vec![],
+            workflow: None,
+            step: None,
             root: true,
             parent: None,
             all: false,
@@ -1490,6 +1614,8 @@ mod tests {
             statuses: vec![],
             priorities: vec![],
             tags: vec![],
+            workflow: None,
+            step: None,
             root: false,
             parent: Some("parent1".to_string()),
             all: false,
@@ -1517,6 +1643,8 @@ mod tests {
             statuses: vec![],
             priorities: vec![],
             tags: vec![],
+            workflow: None,
+            step: None,
             root: false,
             parent: None,
             all: false,
@@ -1563,6 +1691,8 @@ mod tests {
             statuses: vec![],
             priorities: vec![],
             tags: vec![],
+            workflow: None,
+            step: None,
             root: false,
             parent: None,
             all: false,
@@ -1633,6 +1763,8 @@ mod tests {
             statuses: vec![],
             priorities: vec![],
             tags: vec!["backend".to_string(), "frontend".to_string()],
+            workflow: None,
+            step: None,
             root: false,
             parent: None,
             all: false,

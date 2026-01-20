@@ -778,6 +778,9 @@ impl<'a> GraphQueries<'a> {
                 tags: row.tags,
                 needs_human_review: row.needs_human_review,
                 created_at: row.created_at.0,
+                // get_blocker_details doesn't fetch workflow info - would require additional queries
+                workflow_name: None,
+                step_name: None,
             })
             .collect())
     }

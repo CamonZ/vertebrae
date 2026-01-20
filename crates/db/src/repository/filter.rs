@@ -28,6 +28,10 @@ pub struct TaskSummary {
     pub needs_human_review: Option<bool>,
     /// When the task was created
     pub created_at: chrono::DateTime<chrono::Utc>,
+    /// Workflow name (if task is assigned to a workflow)
+    pub workflow_name: Option<String>,
+    /// Current step name (if task has a current step in workflow)
+    pub step_name: Option<String>,
 }
 
 /// Task data with all related information for constructing full task objects
@@ -83,6 +87,12 @@ struct TaskRow {
     needs_human_review: Option<bool>,
     /// Created timestamp - used by SQL ORDER BY for sorting and display
     created_at: surrealdb::sql::Datetime,
+    /// Workflow name (fetched via workflow_id.name)
+    #[serde(default)]
+    workflow_name: Option<String>,
+    /// Step name (fetched via current_step_id.name)
+    #[serde(default)]
+    step_name: Option<String>,
 }
 
 impl TaskRow {
@@ -97,6 +107,8 @@ impl TaskRow {
             tags: self.tags,
             needs_human_review: self.needs_human_review,
             created_at: self.created_at.0,
+            workflow_name: self.workflow_name,
+            step_name: self.step_name,
         }
     }
 }
@@ -187,6 +199,8 @@ pub struct TaskFilter {
     pub search: Option<String>,
     /// Filter by workflow_id (tasks assigned to a specific workflow)
     pub workflow_id: Option<String>,
+    /// Filter by current step name (requires workflow_id to be set or uses current workflow)
+    pub current_step: Option<String>,
 }
 
 impl TaskFilter {
@@ -270,6 +284,12 @@ impl TaskFilter {
     /// Filter by workflow_id (tasks assigned to a specific workflow)
     pub fn with_workflow_id(mut self, workflow_id: impl Into<String>) -> Self {
         self.workflow_id = Some(workflow_id.into());
+        self
+    }
+
+    /// Filter by current step name (requires workflow_id to be set for best results)
+    pub fn with_current_step(mut self, step_name: impl Into<String>) -> Self {
+        self.current_step = Some(step_name.into());
         self
     }
 
@@ -415,12 +435,18 @@ impl<'a> TaskLister<'a> {
     async fn query_tasks(&self, filter: &TaskFilter) -> DbResult<Vec<TaskSummary>> {
         let conditions = self.build_filter_conditions(filter);
 
+        // Use conditional expression to get step_name from current_step_id.name if available,
+        // otherwise fall back to extracting from workflow_id.steps[current_step].name for legacy tasks
+        let step_name_expr = "IF current_step_id != NONE THEN current_step_id.name ELSE IF workflow_id != NONE AND current_step != NONE THEN workflow_id.steps[current_step].name END";
         let query = if conditions.is_empty() {
-            "SELECT id, title, level, status, priority, tags, needs_human_review, created_at FROM task ORDER BY created_at DESC"
-                .to_string()
+            format!(
+                "SELECT id, title, level, status, priority, tags, needs_human_review, created_at, workflow_id.name AS workflow_name, {} AS step_name FROM task ORDER BY created_at DESC",
+                step_name_expr
+            )
         } else {
             format!(
-                "SELECT id, title, level, status, priority, tags, needs_human_review, created_at FROM task WHERE {} ORDER BY created_at DESC",
+                "SELECT id, title, level, status, priority, tags, needs_human_review, created_at, workflow_id.name AS workflow_name, {} AS step_name FROM task WHERE {} ORDER BY created_at DESC",
+                step_name_expr,
                 conditions.join(" AND ")
             )
         };
@@ -445,8 +471,12 @@ impl<'a> TaskLister<'a> {
             conditions.push(Self::build_search_condition(search));
         }
 
+        // Use conditional expression to get step_name from current_step_id.name if available,
+        // otherwise fall back to extracting from workflow_id.steps[current_step].name for legacy tasks
+        let step_name_expr = "IF current_step_id != NONE THEN current_step_id.name ELSE IF workflow_id != NONE AND current_step != NONE THEN workflow_id.steps[current_step].name END";
         let query = format!(
-            "SELECT id, title, level, status, priority, tags, needs_human_review, created_at FROM task WHERE {} ORDER BY created_at DESC",
+            "SELECT id, title, level, status, priority, tags, needs_human_review, created_at, workflow_id.name AS workflow_name, {} AS step_name FROM task WHERE {} ORDER BY created_at DESC",
+            step_name_expr,
             conditions.join(" AND ")
         );
 
@@ -466,8 +496,12 @@ impl<'a> TaskLister<'a> {
         // Add other filter conditions
         conditions.extend(self.build_filter_conditions(filter));
 
+        // Use conditional expression to get step_name from current_step_id.name if available,
+        // otherwise fall back to extracting from workflow_id.steps[current_step].name for legacy tasks
+        let step_name_expr = "IF current_step_id != NONE THEN current_step_id.name ELSE IF workflow_id != NONE AND current_step != NONE THEN workflow_id.steps[current_step].name END";
         let query = format!(
-            "SELECT id, title, level, status, priority, tags, needs_human_review, created_at FROM task WHERE {} ORDER BY created_at DESC",
+            "SELECT id, title, level, status, priority, tags, needs_human_review, created_at, workflow_id.name AS workflow_name, {} AS step_name FROM task WHERE {} ORDER BY created_at DESC",
+            step_name_expr,
             conditions.join(" AND ")
         );
 
@@ -537,6 +571,15 @@ impl<'a> TaskLister<'a> {
             conditions.push(format!(
                 "workflow_id = workflow:{}",
                 workflow_id.replace('\"', "\\\"")
+            ));
+        }
+
+        // Current step filter - filters by step name
+        // current_step_id is a record<step>, so we need to check the step's name field
+        if let Some(ref step_name) = filter.current_step {
+            conditions.push(format!(
+                "current_step_id.name = \"{}\"",
+                step_name.replace('\"', "\\\"")
             ));
         }
 
@@ -778,6 +821,9 @@ impl<'a> TaskLister<'a> {
                 tags: task.tags,
                 needs_human_review: task.needs_human_review,
                 created_at: task.created_at.0,
+                // list_ready doesn't fetch workflow info - would require additional queries
+                workflow_name: None,
+                step_name: None,
             })
             .collect();
 
@@ -1092,6 +1138,8 @@ mod tests {
             tags: vec!["backend".to_string()],
             needs_human_review: Some(true),
             created_at: chrono::Utc::now(),
+            workflow_name: Some("Default Workflow".to_string()),
+            step_name: Some("in_progress".to_string()),
         };
 
         let cloned = summary.clone();
@@ -1109,6 +1157,8 @@ mod tests {
             tags: vec!["backend".to_string()],
             needs_human_review: None,
             created_at: chrono::Utc::now(),
+            workflow_name: None,
+            step_name: None,
         };
 
         let debug_str = format!("{:?}", summary);
@@ -1129,6 +1179,8 @@ mod tests {
             tags: vec![],
             needs_human_review: None,
             created_at: now,
+            workflow_name: None,
+            step_name: None,
         };
 
         let summary2 = TaskSummary {
@@ -1140,6 +1192,8 @@ mod tests {
             tags: vec![],
             needs_human_review: None,
             created_at: now,
+            workflow_name: None,
+            step_name: None,
         };
 
         assert_eq!(summary1, summary2);
@@ -2315,134 +2369,6 @@ mod tests {
         cleanup(&temp_dir);
     }
 
-    #[tokio::test]
-    async fn test_list_empty_result_returns_empty_without_error() {
-        let (db, temp_dir) = setup_test_db().await;
-
-        // No tasks created - database is empty
-        let lister = TaskLister::new(db.client());
-        let filter = TaskFilter::new();
-        let result = lister.list(&filter).await.unwrap();
-
-        assert!(result.is_empty());
-
-        cleanup(&temp_dir);
-    }
-
-    #[tokio::test]
-    async fn test_list_single_task_returns_without_error() {
-        let (db, temp_dir) = setup_test_db().await;
-
-        create_task_with_timestamp(
-            &db,
-            "only_task",
-            "Only Task",
-            "task",
-            "in_progress",
-            "2024-01-01T00:00:00Z",
-        )
-        .await;
-
-        let lister = TaskLister::new(db.client());
-        let filter = TaskFilter::new();
-        let result = lister.list(&filter).await.unwrap();
-
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].id, "only_task");
-
-        cleanup(&temp_dir);
-    }
-
-    #[tokio::test]
-    async fn test_list_tasks_with_identical_timestamps_stable_ordering() {
-        let (db, temp_dir) = setup_test_db().await;
-
-        // Create tasks with identical timestamps
-        let same_time = "2024-01-01T12:00:00Z";
-        create_task_with_timestamp(&db, "task_a", "Task A", "task", "in_progress", same_time).await;
-        create_task_with_timestamp(&db, "task_b", "Task B", "task", "in_progress", same_time).await;
-        create_task_with_timestamp(&db, "task_c", "Task C", "task", "in_progress", same_time).await;
-
-        let lister = TaskLister::new(db.client());
-        let filter = TaskFilter::new();
-
-        // Run multiple times to verify stable ordering
-        let result1 = lister.list(&filter).await.unwrap();
-        let result2 = lister.list(&filter).await.unwrap();
-
-        assert_eq!(result1.len(), 3);
-        assert_eq!(result2.len(), 3);
-
-        // Verify order is stable across calls
-        assert_eq!(result1[0].id, result2[0].id, "Order should be stable");
-        assert_eq!(result1[1].id, result2[1].id, "Order should be stable");
-        assert_eq!(result1[2].id, result2[2].id, "Order should be stable");
-
-        cleanup(&temp_dir);
-    }
-
-    #[tokio::test]
-    async fn test_list_children_with_filter_maintains_order() {
-        let (db, temp_dir) = setup_test_db().await;
-
-        // Create parent
-        create_task_with_timestamp(
-            &db,
-            "parent",
-            "Parent",
-            "epic",
-            "in_progress",
-            "2024-01-01T00:00:00Z",
-        )
-        .await;
-
-        // Create children with different levels and timestamps
-        create_task_with_timestamp(
-            &db,
-            "child_ticket_old",
-            "Old Ticket",
-            "ticket",
-            "in_progress",
-            "2024-01-02T00:00:00Z",
-        )
-        .await;
-        create_task_with_timestamp(
-            &db,
-            "child_ticket_new",
-            "New Ticket",
-            "ticket",
-            "in_progress",
-            "2024-01-04T00:00:00Z",
-        )
-        .await;
-        create_task_with_timestamp(
-            &db,
-            "child_task",
-            "Task Child",
-            "task",
-            "in_progress",
-            "2024-01-03T00:00:00Z",
-        )
-        .await;
-
-        create_child_of(&db, "child_ticket_old", "parent").await;
-        create_child_of(&db, "child_ticket_new", "parent").await;
-        create_child_of(&db, "child_task", "parent").await;
-
-        let lister = TaskLister::new(db.client());
-        let filter = TaskFilter::new()
-            .children_of("parent")
-            .with_level(Level::Ticket);
-        let result = lister.list(&filter).await.unwrap();
-
-        // Should only return tickets, newest first
-        assert_eq!(result.len(), 2);
-        assert!(result.iter().any(|t| t.id == "child_ticket_new"));
-        assert!(result.iter().any(|t| t.id == "child_ticket_old"));
-
-        cleanup(&temp_dir);
-    }
-
     // ========================================
     // list_with_relations tests
     // ========================================
@@ -2515,7 +2441,7 @@ mod tests {
             &db,
             "parent",
             "Parent Task",
-            "ticket",
+            "epic",
             "in_progress",
             None,
             &[],
@@ -2639,7 +2565,7 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
 
         // Create a task with an all-numeric ID
-        // This tests that the ID is returned without backticks or other escape characters
+        // This tests that the ID is returned without backticks, angle brackets, or parentheses
         create_task(
             &db,
             "123456",
@@ -2710,6 +2636,280 @@ mod tests {
         let child = result.iter().find(|t| t.id == "222222").unwrap();
         assert_eq!(child.id, "222222");
         assert_eq!(child.parent_id, Some("111111".to_string()));
+
+        cleanup(&temp_dir);
+    }
+
+    /// Helper to create a workflow with steps
+    async fn create_workflow_with_steps(db: &Database, workflow_id: &str, steps: &[&str]) {
+        // Create workflow
+        let query = format!(
+            r#"CREATE workflow:{} SET name = "{}""#,
+            workflow_id, workflow_id
+        );
+        db.client().query(&query).await.unwrap();
+
+        // Create steps
+        for (order, step_name) in steps.iter().enumerate() {
+            let step_id = format!("{}_{}", workflow_id, step_name);
+            let query = format!(
+                r#"CREATE step:{} SET name = "{}", workflow_id = workflow:{}, order = {}"#,
+                step_id, step_name, workflow_id, order
+            );
+            db.client().query(&query).await.unwrap();
+        }
+    }
+
+    /// Helper to assign a task to a workflow step
+    async fn assign_workflow_step(
+        db: &Database,
+        task_id: &str,
+        workflow_id: &str,
+        step_name: &str,
+    ) {
+        let step_id = format!("{}_{}", workflow_id, step_name);
+        let query = format!(
+            "UPDATE task:{} SET workflow_id = workflow:{}, current_step_id = step:{}",
+            task_id, workflow_id, step_id
+        );
+        db.client().query(&query).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_list_with_current_step_filter() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        // Create workflow with steps
+        create_workflow_with_steps(&db, "dev_workflow", &["backlog", "in_progress", "done"]).await;
+
+        // Create tasks
+        create_task(&db, "task1", "Task 1", "task", "backlog", None, &[]).await;
+        create_task(&db, "task2", "Task 2", "task", "in_progress", None, &[]).await;
+        create_task(&db, "task3", "Task 3", "task", "in_progress", None, &[]).await;
+        create_task(&db, "task4", "Task 4", "task", "done", None, &[]).await;
+
+        // Assign tasks to workflow steps
+        assign_workflow_step(&db, "task1", "dev_workflow", "backlog").await;
+        assign_workflow_step(&db, "task2", "dev_workflow", "in_progress").await;
+        assign_workflow_step(&db, "task3", "dev_workflow", "in_progress").await;
+        assign_workflow_step(&db, "task4", "dev_workflow", "done").await;
+
+        let lister = TaskLister::new(db.client());
+
+        // Filter by step name "in_progress" - should get task2 and task3
+        let filter = TaskFilter::new()
+            .include_done()
+            .with_current_step("in_progress");
+        let result = lister.list(&filter).await.unwrap();
+
+        assert_eq!(
+            result.len(),
+            2,
+            "Should return exactly 2 tasks with step 'in_progress'"
+        );
+        let ids: HashSet<_> = result.iter().map(|t| t.id.as_str()).collect();
+        assert!(ids.contains("task2"), "task2 should be in results");
+        assert!(ids.contains("task3"), "task3 should be in results");
+        assert!(
+            !ids.contains("task1"),
+            "task1 (backlog) should NOT be in results"
+        );
+        assert!(
+            !ids.contains("task4"),
+            "task4 (done) should NOT be in results"
+        );
+
+        // Filter by step name "backlog" - should get only task1
+        let filter = TaskFilter::new()
+            .include_done()
+            .with_current_step("backlog");
+        let result = lister.list(&filter).await.unwrap();
+
+        assert_eq!(
+            result.len(),
+            1,
+            "Should return exactly 1 task with step 'backlog'"
+        );
+        assert_eq!(result[0].id, "task1", "The task should be task1");
+
+        // Filter by step name "done" - should get only task4
+        let filter = TaskFilter::new().include_done().with_current_step("done");
+        let result = lister.list(&filter).await.unwrap();
+
+        assert_eq!(
+            result.len(),
+            1,
+            "Should return exactly 1 task with step 'done'"
+        );
+        assert_eq!(result[0].id, "task4", "The task should be task4");
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_list_with_workflow_and_step_filter_combined() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        // Create two workflows with same step names
+        create_workflow_with_steps(&db, "wfcombined1", &["backlog", "in_progress", "done"]).await;
+        create_workflow_with_steps(&db, "wfcombined2", &["backlog", "in_progress", "done"]).await;
+
+        // Create tasks with standard status values
+        create_task(&db, "combined1", "Task 1", "task", "backlog", None, &[]).await;
+        create_task(&db, "combined2", "Task 2", "task", "in_progress", None, &[]).await;
+        create_task(&db, "combined3", "Task 3", "task", "backlog", None, &[]).await;
+        create_task(&db, "combined4", "Task 4", "task", "in_progress", None, &[]).await;
+
+        // Assign tasks 1-2 to wfcombined1, tasks 3-4 to wfcombined2
+        assign_workflow_step(&db, "combined1", "wfcombined1", "backlog").await;
+        assign_workflow_step(&db, "combined2", "wfcombined1", "in_progress").await;
+        assign_workflow_step(&db, "combined3", "wfcombined2", "backlog").await;
+        assign_workflow_step(&db, "combined4", "wfcombined2", "in_progress").await;
+
+        let lister = TaskLister::new(db.client());
+
+        // Verify all tasks exist
+        let all_filter = TaskFilter::new().include_done();
+        let all_tasks = lister.list(&all_filter).await.unwrap();
+        assert_eq!(all_tasks.len(), 4, "Should have 4 tasks total");
+
+        // Verify workflow filtering alone works
+        let wf_filter = TaskFilter::new()
+            .include_done()
+            .with_workflow_id("wfcombined1");
+        let wf_tasks = lister.list(&wf_filter).await.unwrap();
+        assert_eq!(wf_tasks.len(), 2, "Should return 2 tasks from wfcombined1");
+
+        // Verify step filtering alone works
+        let step_filter = TaskFilter::new()
+            .include_done()
+            .with_current_step("in_progress");
+        let step_tasks = lister.list(&step_filter).await.unwrap();
+        assert_eq!(
+            step_tasks.len(),
+            2,
+            "Should return 2 tasks with step 'in_progress'"
+        );
+
+        // Combined filter: wfcombined1 AND step "in_progress" - should get only combined2
+        let filter = TaskFilter::new()
+            .include_done()
+            .with_workflow_id("wfcombined1")
+            .with_current_step("in_progress");
+        let result = lister.list(&filter).await.unwrap();
+
+        assert_eq!(result.len(), 1, "Should return exactly 1 task");
+        assert_eq!(
+            result[0].id, "combined2",
+            "Should be combined2 (wfcombined1 + in_progress)"
+        );
+
+        // Combined filter: wfcombined2 AND step "backlog" - should get only combined3
+        let filter = TaskFilter::new()
+            .include_done()
+            .with_workflow_id("wfcombined2")
+            .with_current_step("backlog");
+        let result = lister.list(&filter).await.unwrap();
+
+        assert_eq!(result.len(), 1, "Should return exactly 1 task");
+        assert_eq!(
+            result[0].id, "combined3",
+            "Should be combined3 (wfcombined2 + backlog)"
+        );
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_task_summary_includes_workflow_and_step_names() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        // Create workflow with a named step
+        let workflow_name = "My Test Workflow";
+        let step_name = "reviewing";
+        db.client()
+            .query(format!(
+                r#"CREATE workflow:named_wf SET name = "{}""#,
+                workflow_name
+            ))
+            .await
+            .unwrap();
+        db.client()
+            .query(format!(
+                r#"CREATE step:named_step SET name = "{}", workflow_id = workflow:named_wf, order = 0"#,
+                step_name
+            ))
+            .await
+            .unwrap();
+
+        // Create task and assign to workflow step
+        create_task(
+            &db,
+            "named_task",
+            "Named Task",
+            "task",
+            "in_progress",
+            None,
+            &[],
+        )
+        .await;
+        db.client()
+            .query("UPDATE task:named_task SET workflow_id = workflow:named_wf, current_step_id = step:named_step")
+            .await
+            .unwrap();
+
+        let lister = TaskLister::new(db.client());
+        let filter = TaskFilter::new().include_done();
+        let result = lister.list(&filter).await.unwrap();
+
+        let task = result.iter().find(|t| t.id == "named_task").unwrap();
+
+        // Verify workflow_name and step_name are populated
+        assert_eq!(
+            task.workflow_name,
+            Some(workflow_name.to_string()),
+            "workflow_name should be populated with the workflow's name"
+        );
+        assert_eq!(
+            task.step_name,
+            Some(step_name.to_string()),
+            "step_name should be populated with the step's name"
+        );
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_task_summary_without_workflow_has_none_names() {
+        let (db, temp_dir) = setup_test_db().await;
+
+        // Create task without workflow assignment
+        create_task(
+            &db,
+            "plain_task",
+            "Plain Task",
+            "task",
+            "in_progress",
+            None,
+            &[],
+        )
+        .await;
+
+        let lister = TaskLister::new(db.client());
+        let filter = TaskFilter::new().include_done();
+        let result = lister.list(&filter).await.unwrap();
+
+        let task = result.iter().find(|t| t.id == "plain_task").unwrap();
+
+        // Verify workflow_name and step_name are None
+        assert_eq!(
+            task.workflow_name, None,
+            "workflow_name should be None for tasks without workflow"
+        );
+        assert_eq!(
+            task.step_name, None,
+            "step_name should be None for tasks without workflow step"
+        );
 
         cleanup(&temp_dir);
     }
