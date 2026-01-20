@@ -24,6 +24,7 @@ chrono = { version = "0.4", features = ["serde"] }
 dirs = "5"
 sha2 = "0.10"
 rand = "0.9"
+uuid = { version = "1", features = ["v7"] }
 vertebrae-db = { path = "../db" }
 vertebrae-core = { path = "../core" }
 tracing = "0.1"

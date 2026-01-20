@@ -22,3 +22,4 @@ Thumbs.db
 /scratch
 /.claude
 /crates/gui/coverage
+/vtb-export-*
