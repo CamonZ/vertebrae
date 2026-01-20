@@ -47,8 +47,6 @@ pub struct TaskUpdate {
     /// Whether to conditionally set started_at only if currently NULL (null-coalescing)
     /// This preserves existing start times when re-starting a task
     pub set_started_at_if_null: bool,
-    /// New status (if Some) - references StatusDefinition.name from StatusSchema
-    pub status: Option<String>,
     /// Workflow ID to assign (if Some)
     pub workflow_id: Option<Option<surrealdb::sql::Thing>>,
     /// Current step in the workflow (if Some)
@@ -146,12 +144,6 @@ impl TaskUpdate {
         self
     }
 
-    /// Set the task status
-    pub fn with_status(mut self, status: impl Into<String>) -> Self {
-        self.status = Some(status.into());
-        self
-    }
-
     /// Assign the task to a workflow at a specific step
     pub fn with_workflow(
         mut self,
@@ -184,7 +176,6 @@ impl TaskUpdate {
             || self.clear_sections
             || self.set_started_at
             || self.set_started_at_if_null
-            || self.status.is_some()
             || self.workflow_id.is_some()
             || self.current_step.is_some()
     }
@@ -294,12 +285,10 @@ impl<'a> TaskRepository<'a> {
             r#"CREATE task:{} SET
                 title = $title,
                 level = "{}",
-                status = "{}",
                 priority = {},
                 tags = {}{}{}"#,
             id,
             task.level.as_str(),
-            task.status.as_str(),
             priority_str,
             tags_str,
             description_clause,
@@ -540,10 +529,6 @@ impl<'a> TaskRepository<'a> {
             field_updates.push("started_at = started_at ?? time::now()".to_string());
         }
 
-        if let Some(status) = &updates.status {
-            field_updates.push(format!("status = '{}'", status));
-        }
-
         if updates.clear_sections {
             field_updates.push("sections = []".to_string());
         } else if let Some(sections) = &updates.sections {
@@ -722,6 +707,30 @@ impl<'a> TaskRepository<'a> {
         let query = format!(
             "UPDATE task:{} SET current_step = {}, updated_at = time::now()",
             task_id, step
+        );
+        self.client.query(&query).await?;
+        Ok(())
+    }
+
+    /// Update the current_step_id of a task (reference to step table).
+    ///
+    /// # Arguments
+    ///
+    /// * `task_id` - The task ID to update
+    /// * `step_id` - The step record ID
+    ///
+    /// # Errors
+    ///
+    /// Returns `DbError::Query` if the database operation fails.
+    pub async fn update_current_step_id(
+        &self,
+        task_id: &str,
+        step_id: &surrealdb::sql::Thing,
+    ) -> DbResult<()> {
+        debug!("Updating task {} to step_id {:?}", task_id, step_id);
+        let query = format!(
+            "UPDATE task:{} SET current_step_id = {}, updated_at = time::now()",
+            task_id, step_id
         );
         self.client.query(&query).await?;
         Ok(())
@@ -1077,7 +1086,6 @@ mod tests {
         let repo = TaskRepository::new(db.client());
 
         let task = Task::new("Full Task", Level::Epic)
-            .with_status("in_progress")
             .with_priority(Priority::High)
             .with_tags(["backend", "urgent"]);
 
@@ -1088,20 +1096,18 @@ mod tests {
         struct TaskRow {
             title: String,
             level: String,
-            status: String,
             priority: Option<String>,
             #[serde(default)]
             tags: Vec<String>,
         }
 
-        let query = "SELECT title, level, status, priority, tags FROM task:full1";
+        let query = "SELECT title, level, priority, tags FROM task:full1";
         let mut result = db.client().query(query).await.unwrap();
         let row: Option<TaskRow> = result.take(0).unwrap();
         let row = row.unwrap();
 
         assert_eq!(row.title, "Full Task");
         assert_eq!(row.level, "epic");
-        assert_eq!(row.status, "in_progress");
         assert_eq!(row.priority, Some("high".to_string()));
         assert!(row.tags.contains(&"backend".to_string()));
         assert!(row.tags.contains(&"urgent".to_string()));
@@ -1114,9 +1120,7 @@ mod tests {
         let (db, temp_dir) = setup_test_db().await;
         let repo = TaskRepository::new(db.client());
 
-        let task = Task::new("Get Test", Level::Ticket)
-            .with_status("in_progress")
-            .with_priority(Priority::Medium);
+        let task = Task::new("Get Test", Level::Ticket).with_priority(Priority::Medium);
 
         repo.create("get1", &task).await.unwrap();
 
@@ -1126,7 +1130,6 @@ mod tests {
         let retrieved = retrieved.unwrap();
         assert_eq!(retrieved.title, "Get Test");
         assert_eq!(retrieved.level, Level::Ticket);
-        assert_eq!(retrieved.status, "in_progress");
         assert_eq!(retrieved.priority, Some(Priority::Medium));
 
         cleanup(&temp_dir);
@@ -1143,23 +1146,8 @@ mod tests {
         cleanup(&temp_dir);
     }
 
-    #[tokio::test]
-    async fn test_update_status() {
-        let (db, temp_dir) = setup_test_db().await;
-        let repo = TaskRepository::new(db.client());
-
-        let task = Task::new("Status Test", Level::Task);
-        repo.create("status1", &task).await.unwrap();
-
-        // Update status
-        repo.update_status("status1", "in_progress").await.unwrap();
-
-        // Verify
-        let retrieved = repo.get("status1").await.unwrap().unwrap();
-        assert_eq!(retrieved.status, "in_progress");
-
-        cleanup(&temp_dir);
-    }
+    // Note: test_update_status removed - status is now derived from workflow step
+    // Status updates happen through workflow step changes, not direct status field updates
 
     #[tokio::test]
     async fn test_update_timestamp() {

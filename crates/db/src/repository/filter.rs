@@ -79,7 +79,6 @@ struct TaskRow {
     id: surrealdb::sql::Thing,
     title: String,
     level: String,
-    status: String,
     priority: Option<String>,
     #[serde(default)]
     tags: Vec<String>,
@@ -97,12 +96,18 @@ struct TaskRow {
 
 impl TaskRow {
     /// Convert a TaskRow to a TaskSummary
+    /// Status is derived from step_name (which comes from workflow)
     fn into_summary(self) -> TaskSummary {
+        // Status is derived from step_name - if no step_name, default to "backlog"
+        let status = self
+            .step_name
+            .clone()
+            .unwrap_or_else(|| "backlog".to_string());
         TaskSummary {
             id: self.id.id.to_raw(),
             title: self.title,
             level: parse_level(&self.level),
-            status: normalize_status(&self.status),
+            status,
             priority: self.priority.as_deref().map(parse_priority),
             tags: self.tags,
             needs_human_review: self.needs_human_review,
@@ -119,7 +124,6 @@ struct TaskWithRelationsRow {
     id: surrealdb::sql::Thing,
     title: String,
     level: String,
-    status: String,
     priority: Option<String>,
     #[serde(default)]
     tags: Vec<String>,
@@ -144,6 +148,9 @@ struct TaskWithRelationsRow {
     workflow_id: Option<surrealdb::sql::Thing>,
     #[serde(default)]
     current_step_id: Option<surrealdb::sql::Thing>,
+    /// Step name (fetched via current_step_id.name for deriving status)
+    #[serde(default)]
+    step_name: Option<String>,
 }
 
 /// Parse a level string into a Level enum
@@ -397,36 +404,43 @@ impl<'a> TaskLister<'a> {
 
         Ok(rows
             .into_iter()
-            .map(|row| TaskWithRelationsData {
-                id: row.id.id.to_raw(),
-                title: row.title,
-                level: parse_level(&row.level),
-                status: normalize_status(&row.status),
-                priority: row.priority.as_deref().map(parse_priority),
-                tags: row.tags,
-                needs_human_review: row.needs_human_review,
-                description: row.description,
-                sections: row.sections,
-                refs: row.refs,
-                created_at: row.created_at.0,
-                parent_id: row.parent_id.map(|t| t.id.to_raw()),
-                children_ids: row
-                    .children_ids
-                    .into_iter()
-                    .map(|t| t.id.to_raw())
-                    .collect(),
-                depends_on_ids: row
-                    .depends_on_ids
-                    .into_iter()
-                    .map(|t| t.id.to_raw())
-                    .collect(),
-                dependent_ids: row
-                    .dependent_ids
-                    .into_iter()
-                    .map(|t| t.id.to_raw())
-                    .collect(),
-                workflow_id: row.workflow_id.map(|t| t.id.to_raw()),
-                current_step_id: row.current_step_id.map(|t| t.id.to_raw()),
+            .map(|row| {
+                // Status is derived from step_name - if no step_name, default to "backlog"
+                let status = row
+                    .step_name
+                    .clone()
+                    .unwrap_or_else(|| "backlog".to_string());
+                TaskWithRelationsData {
+                    id: row.id.id.to_raw(),
+                    title: row.title,
+                    level: parse_level(&row.level),
+                    status,
+                    priority: row.priority.as_deref().map(parse_priority),
+                    tags: row.tags,
+                    needs_human_review: row.needs_human_review,
+                    description: row.description,
+                    sections: row.sections,
+                    refs: row.refs,
+                    created_at: row.created_at.0,
+                    parent_id: row.parent_id.map(|t| t.id.to_raw()),
+                    children_ids: row
+                        .children_ids
+                        .into_iter()
+                        .map(|t| t.id.to_raw())
+                        .collect(),
+                    depends_on_ids: row
+                        .depends_on_ids
+                        .into_iter()
+                        .map(|t| t.id.to_raw())
+                        .collect(),
+                    dependent_ids: row
+                        .dependent_ids
+                        .into_iter()
+                        .map(|t| t.id.to_raw())
+                        .collect(),
+                    workflow_id: row.workflow_id.map(|t| t.id.to_raw()),
+                    current_step_id: row.current_step_id.map(|t| t.id.to_raw()),
+                }
             })
             .collect())
     }
@@ -440,12 +454,12 @@ impl<'a> TaskLister<'a> {
         let step_name_expr = "IF current_step_id != NONE THEN current_step_id.name ELSE IF workflow_id != NONE AND current_step != NONE THEN workflow_id.steps[current_step].name END";
         let query = if conditions.is_empty() {
             format!(
-                "SELECT id, title, level, status, priority, tags, needs_human_review, created_at, workflow_id.name AS workflow_name, {} AS step_name FROM task ORDER BY created_at DESC",
+                "SELECT id, title, level, priority, tags, needs_human_review, created_at, workflow_id.name AS workflow_name, {} AS step_name FROM task ORDER BY created_at DESC",
                 step_name_expr
             )
         } else {
             format!(
-                "SELECT id, title, level, status, priority, tags, needs_human_review, created_at, workflow_id.name AS workflow_name, {} AS step_name FROM task WHERE {} ORDER BY created_at DESC",
+                "SELECT id, title, level, priority, tags, needs_human_review, created_at, workflow_id.name AS workflow_name, {} AS step_name FROM task WHERE {} ORDER BY created_at DESC",
                 step_name_expr,
                 conditions.join(" AND ")
             )
@@ -475,7 +489,7 @@ impl<'a> TaskLister<'a> {
         // otherwise fall back to extracting from workflow_id.steps[current_step].name for legacy tasks
         let step_name_expr = "IF current_step_id != NONE THEN current_step_id.name ELSE IF workflow_id != NONE AND current_step != NONE THEN workflow_id.steps[current_step].name END";
         let query = format!(
-            "SELECT id, title, level, status, priority, tags, needs_human_review, created_at, workflow_id.name AS workflow_name, {} AS step_name FROM task WHERE {} ORDER BY created_at DESC",
+            "SELECT id, title, level, priority, tags, needs_human_review, created_at, workflow_id.name AS workflow_name, {} AS step_name FROM task WHERE {} ORDER BY created_at DESC",
             step_name_expr,
             conditions.join(" AND ")
         );
@@ -500,7 +514,7 @@ impl<'a> TaskLister<'a> {
         // otherwise fall back to extracting from workflow_id.steps[current_step].name for legacy tasks
         let step_name_expr = "IF current_step_id != NONE THEN current_step_id.name ELSE IF workflow_id != NONE AND current_step != NONE THEN workflow_id.steps[current_step].name END";
         let query = format!(
-            "SELECT id, title, level, status, priority, tags, needs_human_review, created_at, workflow_id.name AS workflow_name, {} AS step_name FROM task WHERE {} ORDER BY created_at DESC",
+            "SELECT id, title, level, priority, tags, needs_human_review, created_at, workflow_id.name AS workflow_name, {} AS step_name FROM task WHERE {} ORDER BY created_at DESC",
             step_name_expr,
             conditions.join(" AND ")
         );
@@ -516,8 +530,10 @@ impl<'a> TaskLister<'a> {
         let mut conditions: Vec<String> = Vec::new();
 
         // Default: exclude done status unless include_done is set or statuses are specified
+        // Status is now derived from current_step_id.name, null means "backlog"
         if !filter.include_done && filter.statuses.is_empty() {
-            conditions.push("status != \"done\"".to_string());
+            conditions
+                .push("(current_step_id IS NONE OR current_step_id.name != \"done\")".to_string());
         }
 
         // Level filter (OR within type)
@@ -530,12 +546,19 @@ impl<'a> TaskLister<'a> {
             conditions.push(format!("({})", level_conditions.join(" OR ")));
         }
 
-        // Status filter (OR within type)
+        // Status filter (OR within type) - now filters by step name
+        // Special case: "backlog" means current_step_id is null
         if !filter.statuses.is_empty() {
             let status_conditions: Vec<String> = filter
                 .statuses
                 .iter()
-                .map(|s| format!("status = \"{}\"", s))
+                .map(|s| {
+                    if s == "backlog" {
+                        "current_step_id IS NONE".to_string()
+                    } else {
+                        format!("current_step_id.name = \"{}\"", s)
+                    }
+                })
                 .collect();
             conditions.push(format!("({})", status_conditions.join(" OR ")));
         }
@@ -651,18 +674,19 @@ impl<'a> TaskLister<'a> {
         // Then filter entirely in Rust using in-memory data structures
 
         // Query 1: Get ALL tasks with their parent info in one query
+        // Status is derived from current_step_id.name, defaulting to "backlog" if null
         let all_tasks_query = r#"
             SELECT
                 id,
                 title,
                 level,
-                status,
+                IF current_step_id != NONE THEN current_step_id.name ELSE "backlog" END AS status,
                 priority,
                 tags,
                 needs_human_review,
                 created_at,
                 (->child_of->task)[0].id AS parent_id,
-                (->child_of->task)[0].status AS parent_status
+                IF (->child_of->task)[0].current_step_id != NONE THEN (->child_of->task)[0].current_step_id.name ELSE "backlog" END AS parent_status
             FROM task
             ORDER BY created_at DESC
         "#;
@@ -700,10 +724,11 @@ impl<'a> TaskLister<'a> {
         let child_of_rows: Vec<ChildOfRow> = result.take(0)?;
 
         // Query 3: Get all incomplete blockers (depends_on where blocker is not done)
+        // Status is derived from current_step_id.name, defaulting to "backlog" if null
         let blockers_query = r#"
             SELECT in.id AS dependent_id, out.id AS blocker_id
             FROM depends_on
-            WHERE out.status != "done"
+            WHERE (IF out.current_step_id != NONE THEN out.current_step_id.name ELSE "backlog" END) != "done"
         "#;
 
         #[derive(Debug, Deserialize)]
@@ -911,6 +936,7 @@ mod tests {
     }
 
     /// Helper to create a task in the database
+    /// Status is derived from current_step_id - we set current_step_id to the appropriate step
     async fn create_task(
         db: &Database,
         id: &str,
@@ -937,14 +963,22 @@ mod tests {
             )
         };
 
+        // Set current_step_id for non-backlog statuses
+        // The test database init creates steps with IDs like "default_<status>"
+        let step_id_clause = if status == "backlog" {
+            "NONE".to_string()
+        } else {
+            format!("step:default_{}", status)
+        };
+
         let query = format!(
             r#"CREATE task:{} SET
                 title = "{}",
                 level = "{}",
-                status = "{}",
+                current_step_id = {},
                 priority = {},
                 tags = {}"#,
-            id, title, level, status, priority_str, tags_str
+            id, title, level, step_id_clause, priority_str, tags_str
         );
 
         db.client().query(&query).await.unwrap();
@@ -1817,6 +1851,7 @@ mod tests {
     }
 
     /// Helper to create a task with description
+    /// Status is derived from current_step_id
     async fn create_task_with_description(
         db: &Database,
         id: &str,
@@ -1825,15 +1860,22 @@ mod tests {
         level: &str,
         status: &str,
     ) {
+        // Set current_step_id for non-backlog statuses
+        let step_id_clause = if status == "backlog" {
+            "NONE".to_string()
+        } else {
+            format!("step:default_{}", status)
+        };
+
         let query = format!(
             r#"CREATE task:{} SET
                 title = "{}",
                 description = "{}",
                 level = "{}",
-                status = "{}",
+                current_step_id = {},
                 priority = NONE,
                 tags = []"#,
-            id, title, description, level, status
+            id, title, description, level, step_id_clause
         );
         db.client().query(&query).await.unwrap();
     }
@@ -2141,6 +2183,7 @@ mod tests {
     // ========================================
 
     /// Helper to create a task with a specific created_at timestamp
+    /// Status is derived from current_step_id
     async fn create_task_with_timestamp(
         db: &Database,
         id: &str,
@@ -2149,15 +2192,22 @@ mod tests {
         status: &str,
         timestamp: &str,
     ) {
+        // Set current_step_id for non-backlog statuses
+        let step_id_clause = if status == "backlog" {
+            "NONE".to_string()
+        } else {
+            format!("step:default_{}", status)
+        };
+
         let query = format!(
             r#"CREATE task:{} SET
                 title = "{}",
                 level = "{}",
-                status = "{}",
+                current_step_id = {},
                 priority = NONE,
                 tags = [],
                 created_at = d'{}'"#,
-            id, title, level, status, timestamp
+            id, title, level, step_id_clause, timestamp
         );
         db.client().query(&query).await.unwrap();
     }
@@ -2883,13 +2933,14 @@ mod tests {
     async fn test_task_summary_without_workflow_has_none_names() {
         let (db, temp_dir) = setup_test_db().await;
 
-        // Create task without workflow assignment
+        // Create task in backlog status (no current_step_id set)
+        // This represents a task that hasn't been assigned to any workflow or step
         create_task(
             &db,
             "plain_task",
             "Plain Task",
             "task",
-            "in_progress",
+            "backlog",
             None,
             &[],
         )
@@ -2901,14 +2952,15 @@ mod tests {
 
         let task = result.iter().find(|t| t.id == "plain_task").unwrap();
 
-        // Verify workflow_name and step_name are None
+        // Verify workflow_name is None (no workflow assigned)
+        // step_name is also None since current_step_id is None for backlog tasks
         assert_eq!(
             task.workflow_name, None,
             "workflow_name should be None for tasks without workflow"
         );
         assert_eq!(
             task.step_name, None,
-            "step_name should be None for tasks without workflow step"
+            "step_name should be None for backlog tasks without step assignment"
         );
 
         cleanup(&temp_dir);

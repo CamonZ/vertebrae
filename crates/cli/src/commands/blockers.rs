@@ -149,8 +149,17 @@ impl BlockersCommand {
         for blocker_id in blockers {
             // Get the blocker task summary
             if let Ok(task) = service.get_task(&blocker_id).await {
-                // By default, filter out completed blockers (status = done)
-                if !self.all && task.status == "done" {
+                // Get derived status from workflow step
+                let derived_status = service.get_derived_status(&blocker_id).await.ok();
+                // Extract just the step name (after the colon) for status checking
+                let step_name = derived_status
+                    .as_ref()
+                    .and_then(|s| s.split(':').next_back())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| "backlog".to_string());
+
+                // By default, filter out completed blockers (step = done)
+                if !self.all && step_name == "done" {
                     continue;
                 }
 
@@ -158,14 +167,16 @@ impl BlockersCommand {
                     id: blocker_id,
                     title: task.title,
                     level: task.level,
-                    status: task.status,
+                    status: step_name.clone(),
                     priority: task.priority,
                     tags: task.tags,
                     needs_human_review: task.needs_human_review,
                     created_at: task.created_at.unwrap_or_else(chrono::Utc::now),
-                    // get_blocker_chain doesn't provide workflow info
-                    workflow_name: None,
-                    step_name: None,
+                    // Get workflow name if available
+                    workflow_name: derived_status
+                        .as_ref()
+                        .and_then(|s| s.split(':').next().map(|n| n.to_string())),
+                    step_name: Some(step_name),
                 });
             }
         }
@@ -273,6 +284,7 @@ mod tests {
     }
 
     /// Helper to create a task with a specific ID in the test database
+    /// Status is derived from current_step_id - uses the default workflow steps
     async fn create_task(
         service: &DefaultTaskService,
         id: &str,
@@ -288,8 +300,21 @@ mod tests {
             _ => Level::Task,
         };
 
+        // Set up workflow step - status is derived from current_step_id
+        let current_step_id = match status {
+            "in_progress" => Some(surrealdb::sql::Thing::from(("step", "default_in_progress"))),
+            "pending_review" => Some(surrealdb::sql::Thing::from((
+                "step",
+                "default_pending_review",
+            ))),
+            "done" => Some(surrealdb::sql::Thing::from(("step", "default_done"))),
+            "rejected" => Some(surrealdb::sql::Thing::from(("step", "default_rejected"))),
+            _ => None, // backlog - no step ID
+        };
+
         let db = service.database();
-        let task = Task::new(title, level_enum).with_status(status);
+        let mut task = Task::new(title, level_enum);
+        task.current_step_id = current_step_id;
         db.tasks().create(id, &task).await.unwrap();
     }
 

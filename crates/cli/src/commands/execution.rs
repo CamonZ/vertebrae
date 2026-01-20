@@ -92,8 +92,13 @@ impl ExecutionCreateCommand {
             ))
         })?;
 
-        // Get the current step name from the task's status (which represents current workflow step)
-        let step_name = &task.status;
+        // Get the current step name from derived status (workflow:step format)
+        let derived_status = service.get_derived_status(&task_id).await?;
+        let step_name = derived_status
+            .split(':')
+            .next_back()
+            .unwrap_or("backlog")
+            .to_string();
 
         // Validate context JSON if provided
         if let Some(ref context) = self.context {
@@ -111,7 +116,7 @@ impl ExecutionCreateCommand {
 
         // Create the step execution
         let task_thing = Thing::from(("task", task_id.as_str()));
-        let mut execution = StepExecution::new(task_thing, workflow_id.clone(), step_name);
+        let mut execution = StepExecution::new(task_thing, workflow_id.clone(), &step_name);
 
         if let Some(ref context) = self.context {
             execution = execution.with_context(context);

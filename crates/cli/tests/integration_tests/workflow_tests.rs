@@ -349,14 +349,19 @@ async fn test_workflow_assign_nonexistent_task() {
 }
 
 #[tokio::test]
-async fn test_workflow_advance_no_workflow_assigned() {
+async fn test_workflow_advance_at_last_step() {
+    // Tasks are now always assigned to the default workflow.
+    // This test verifies that advancing at the last step fails gracefully.
     let ctx = TestContext::new().await;
 
-    create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
+    // Create a task at the "rejected" step (which is the actual last step, index 4)
+    // The default workflow has: backlog(0), in_progress(1), pending_review(2), done(3), rejected(4)
+    create_task(ctx.db(), "task1", "Test Task", "task", "rejected").await;
 
     let cmd = workflow_advance_cmd("task1");
     let result = cmd.execute(&ctx.workflow_service).await;
 
+    // Should fail because "rejected" is the last step
     assert!(result.is_err());
 }
 

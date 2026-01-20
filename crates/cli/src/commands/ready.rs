@@ -76,6 +76,7 @@ mod tests {
     }
 
     /// Helper to create a task in the database
+    /// Status is derived from current_step_id - uses the default workflow steps
     async fn create_task(
         service: &DefaultTaskService,
         id: &str,
@@ -90,12 +91,40 @@ mod tests {
             "task" => Level::Task,
             _ => Level::Task,
         };
+
+        // All tasks use the default workflow. Status is derived from current_step_id.
+        let workflow_id = Some(surrealdb::sql::Thing::from(("workflow", "default")));
+
+        // Set up workflow step - "backlog" is index 0, others have specific step IDs
+        let (current_step, current_step_id) = match status {
+            "backlog" => (Some(0), None),
+            "in_progress" => (
+                Some(1),
+                Some(surrealdb::sql::Thing::from(("step", "default_in_progress"))),
+            ),
+            "pending_review" => (
+                Some(2),
+                Some(surrealdb::sql::Thing::from((
+                    "step",
+                    "default_pending_review",
+                ))),
+            ),
+            "done" => (
+                Some(3),
+                Some(surrealdb::sql::Thing::from(("step", "default_done"))),
+            ),
+            "rejected" => (
+                Some(4),
+                Some(surrealdb::sql::Thing::from(("step", "default_rejected"))),
+            ),
+            _ => (Some(0), None),
+        };
+
         let task = Task {
             id: None,
             title: title.to_string(),
             description: None,
             level,
-            status: status.to_string(),
             priority: None,
             tags: vec![],
             sections: vec![],
@@ -107,9 +136,9 @@ mod tests {
             needs_human_review: None,
             revision_feedback: None,
             rejection_reason: None,
-            workflow_id: None,
-            current_step: None,
-            current_step_id: None,
+            workflow_id,
+            current_step,
+            current_step_id,
         };
 
         db.tasks().create(id, &task).await.unwrap();

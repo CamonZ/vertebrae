@@ -493,6 +493,7 @@ pub async fn get_workflow_with_task_details(
             .collect();
 
         // Construct Task object
+        // Note: status is now derived from workflow step, not stored
         let task = vertebrae_db::Task {
             id: Some(surrealdb::sql::Thing::from((
                 "task".to_string(),
@@ -501,7 +502,6 @@ pub async fn get_workflow_with_task_details(
             title: data.title,
             description: data.description,
             level: data.level,
-            status: data.status,
             priority: data.priority,
             tags: data.tags,
             created_at: Some(data.created_at),

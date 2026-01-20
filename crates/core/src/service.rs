@@ -771,9 +771,11 @@ impl TaskService for DefaultTaskService {
 
         // Build task
         let level = options.level.unwrap_or(Level::Task);
-        let status = options.status.unwrap_or_else(|| "backlog".to_string());
+        // Note: status is now derived from workflow step
+        // We'll transition to the specified status after creation
+        let target_status = options.status.unwrap_or_else(|| "backlog".to_string());
 
-        let mut task = Task::new(options.title, level).with_status(status);
+        let mut task = Task::new(options.title, level);
 
         if let Some(desc) = options.description {
             task = task.with_description(desc);
@@ -793,6 +795,30 @@ impl TaskService for DefaultTaskService {
 
         // Create in database
         self.db.tasks().create(&id, &task).await?;
+
+        // If a non-backlog status was specified, transition to that status
+        // This sets up the current_step_id properly
+        if target_status != "backlog" {
+            // Get the workflow steps to find the target step
+            if let Some(ref workflow_thing) = task.workflow_id {
+                let steps = self.db.steps().list_by_workflow(workflow_thing).await?;
+
+                // Find the step that matches the target status name
+                if let Some((idx, step)) = steps
+                    .iter()
+                    .enumerate()
+                    .find(|(_, s)| s.name.to_lowercase() == target_status)
+                {
+                    // Update current_step index
+                    self.db.tasks().update_current_step(&id, idx).await?;
+
+                    // Update current_step_id if the step has an ID
+                    if let Some(ref step_id) = step.id {
+                        self.db.tasks().update_current_step_id(&id, step_id).await?;
+                    }
+                }
+            }
+        }
 
         // Create parent relationship if specified
         if let Some(parent_id) = &options.parent_id {
@@ -1098,7 +1124,14 @@ impl TaskService for DefaultTaskService {
 
         // Get current task
         let task = self.get_task(&id).await?;
-        let from_status = task.status.clone();
+        // Status is now derived from workflow step - returns format "workflow:step" or just "step"
+        let derived_status = self.get_derived_status(&id).await?;
+        // Extract just the step name for schema validation
+        let from_status = derived_status
+            .split(':')
+            .next_back()
+            .unwrap_or(&derived_status)
+            .to_string();
 
         // Fetch the default status schema for validation
         let status_schema = self.db.status_schemas().get_default().await?;
@@ -1137,8 +1170,9 @@ impl TaskService for DefaultTaskService {
             ));
         }
 
-        // Build update
-        let mut update = TaskUpdate::new().with_status(target.clone());
+        // Build update - status is now derived from workflow step, so we need to
+        // find and set the step that matches the target status
+        let mut update = TaskUpdate::new();
 
         // Set timestamps based on transition (using status name conventions)
         if target == "in_progress" {
@@ -1146,8 +1180,31 @@ impl TaskService for DefaultTaskService {
         }
         // completed_at is handled in repository for terminal statuses
 
-        // Apply update
-        self.db.tasks().update(&id, &update).await?;
+        // Find the step in the task's workflow that matches the target status name
+        // and update current_step/current_step_id
+        if let Some(ref workflow_thing) = task.workflow_id {
+            let steps = self.db.steps().list_by_workflow(workflow_thing).await?;
+
+            // Find the step that matches the target status name
+            if let Some((idx, step)) = steps
+                .iter()
+                .enumerate()
+                .find(|(_, s)| s.name.to_lowercase() == target)
+            {
+                // Update current_step index
+                self.db.tasks().update_current_step(&id, idx).await?;
+
+                // Update current_step_id if the step has an ID
+                if let Some(ref step_id) = step.id {
+                    self.db.tasks().update_current_step_id(&id, step_id).await?;
+                }
+            }
+        }
+
+        // Apply any other updates (timestamps)
+        if update.has_updates() {
+            self.db.tasks().update(&id, &update).await?;
+        }
 
         // Auto-assign workflow if the target status has a workflow_id configured
         let assigned_workflow = if let Some(workflow_thing) = &target_definition.workflow_id {
@@ -1603,10 +1660,10 @@ impl TaskService for DefaultTaskService {
         let task_id = task_id.to_lowercase();
         let task = self.get_task(&task_id).await?;
 
-        // If no workflow assigned, return the status field as-is
+        // If no workflow assigned, return "backlog" as default
         let workflow_id = match &task.workflow_id {
             Some(wf_id) => wf_id,
-            None => return Ok(task.status.clone()),
+            None => return Ok("backlog".to_string()),
         };
 
         // Get workflow name
@@ -1634,8 +1691,8 @@ impl TaskService for DefaultTaskService {
                 .map(|s| s.name)
                 .unwrap_or_else(|| format!("step_{}", step_index))
         } else {
-            // No step information, use status as step name
-            task.status.clone()
+            // No step information, default to backlog
+            "backlog".to_string()
         };
 
         Ok(format!("{}:{}", workflow.name, step_name))
@@ -1643,13 +1700,16 @@ impl TaskService for DefaultTaskService {
 
     fn compute_derived_status(
         &self,
-        task: &Task,
+        _task: &Task,
         workflow_name: Option<&str>,
         step_name: Option<&str>,
     ) -> String {
         match (workflow_name, step_name) {
             (Some(wf_name), Some(st_name)) => format!("{}:{}", wf_name, st_name),
-            _ => task.status.clone(),
+            // If we have step name but no workflow, just use the step name
+            (None, Some(st_name)) => st_name.to_string(),
+            // Default to backlog if no workflow/step information
+            _ => "backlog".to_string(),
         }
     }
 }
@@ -1678,7 +1738,8 @@ mod tests {
         let task = service.get_task(&id).await.unwrap();
         assert_eq!(task.title, "My Task");
         assert_eq!(task.level, Level::Task);
-        assert_eq!(task.status, "backlog");
+        // Status is derived from workflow - new tasks start without a step (backlog)
+        assert!(task.current_step_id.is_none());
     }
 
     #[tokio::test]
@@ -1803,18 +1864,21 @@ mod tests {
     async fn test_transition_valid() {
         let service = setup_test_service().await;
 
+        // Create a task and transition to in_progress first
         let id = service
-            .create_task(CreateTaskOptions::new("Task").with_status("in_progress"))
+            .create_task(CreateTaskOptions::new("Task"))
             .await
             .unwrap();
 
+        // Transition from backlog to in_progress
         let result = service.transition_to(&id, "in_progress").await.unwrap();
 
-        assert_eq!(result.from_status, "in_progress");
+        assert_eq!(result.from_status, "backlog");
         assert_eq!(result.to_status, "in_progress");
 
+        // Verify that the task's current_step_id is now set
         let task = service.get_task(&id).await.unwrap();
-        assert_eq!(task.status, "in_progress");
+        assert!(task.current_step_id.is_some());
     }
 
     #[tokio::test]

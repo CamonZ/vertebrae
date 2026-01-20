@@ -164,8 +164,9 @@ impl<'a> GraphQueries<'a> {
     /// Fetch direct blockers for a task (tasks it depends on).
     async fn fetch_direct_blockers(&self, task_id: &str) -> DbResult<Vec<TaskInfoRow>> {
         // Get tasks that this task depends on via the depends_on edge
+        // Status is derived from current_step_id.name, defaulting to "backlog" if null
         let query = format!(
-            "SELECT id, title, level, status FROM task WHERE <-depends_on<-task CONTAINS task:{}",
+            "SELECT id, title, level, IF current_step_id != NONE THEN current_step_id.name ELSE \"backlog\" END AS status FROM task WHERE <-depends_on<-task CONTAINS task:{}",
             task_id
         );
 
@@ -614,10 +615,11 @@ impl<'a> GraphQueries<'a> {
     ///
     /// `true` if the task has children that are not in "done" status.
     pub async fn has_incomplete_children(&self, task_id: &str) -> DbResult<bool> {
+        // Status is derived from current_step_id.name
         let query = format!(
             r#"SELECT id FROM task
                WHERE ->child_of->task CONTAINS task:{}
-               AND status != "done""#,
+               AND (current_step_id IS NONE OR current_step_id.name != "done")"#,
             task_id
         );
 
@@ -671,10 +673,11 @@ impl<'a> GraphQueries<'a> {
             .collect();
         let ids_str = ids_quoted.join(", ");
 
+        // Status is derived from current_step_id.name
         let query = format!(
-            r#"SELECT id, title, status, level FROM task
+            r#"SELECT id, title, IF current_step_id != NONE THEN current_step_id.name ELSE "backlog" END AS status, level FROM task
                WHERE id IN [{}]
-               AND status != "done""#,
+               AND (current_step_id IS NONE OR current_step_id.name != "done")"#,
             ids_str
         );
 
@@ -704,10 +707,11 @@ impl<'a> GraphQueries<'a> {
     ///
     /// A vector of task IDs that are blocking this task and not complete.
     pub async fn get_incomplete_blockers(&self, task_id: &str) -> DbResult<Vec<String>> {
+        // Status is derived from current_step_id.name
         let query = format!(
             r#"SELECT id FROM task
                WHERE <-depends_on<-task CONTAINS task:{}
-               AND status != "done""#,
+               AND (current_step_id IS NONE OR current_step_id.name != "done")"#,
             task_id
         );
 
@@ -765,11 +769,15 @@ impl<'a> GraphQueries<'a> {
         // otherwise fall back to extracting from workflow_id.steps[current_step].name for legacy tasks
         let step_name_expr = "IF current_step_id != NONE THEN current_step_id.name ELSE IF workflow_id != NONE AND current_step != NONE THEN workflow_id.steps[current_step].name END";
 
+        // Status is derived from current_step_id.name, defaulting to "backlog" if null
+        let status_expr =
+            "IF current_step_id != NONE THEN current_step_id.name ELSE \"backlog\" END";
+
         let query = format!(
-            r#"SELECT id, title, level, status, priority, tags, needs_human_review, created_at, workflow_id.name AS workflow_name, {} AS step_name FROM task
+            r#"SELECT id, title, level, {} AS status, priority, tags, needs_human_review, created_at, workflow_id.name AS workflow_name, {} AS step_name FROM task
                WHERE <-depends_on<-task CONTAINS task:{}
-               AND status != "done""#,
-            step_name_expr, task_id
+               AND (current_step_id IS NONE OR current_step_id.name != "done")"#,
+            status_expr, step_name_expr, task_id
         );
 
         let mut result = self.client.query(&query).await?;
@@ -833,10 +841,11 @@ impl<'a> GraphQueries<'a> {
         &self,
         task_id: &str,
     ) -> DbResult<Vec<(String, String, String)>> {
+        // Status is derived from current_step_id.name
         let query = format!(
-            r#"SELECT id, title, level, status FROM task
+            r#"SELECT id, title, level, IF current_step_id != NONE THEN current_step_id.name ELSE "backlog" END AS status FROM task
                WHERE <-depends_on<-task CONTAINS task:{}
-               AND status != "done""#,
+               AND (current_step_id IS NONE OR current_step_id.name != "done")"#,
             task_id
         );
 
@@ -894,11 +903,12 @@ impl<'a> GraphQueries<'a> {
 
             // Count incomplete dependencies for this task (excluding the current task which we're completing)
             // GROUP ALL ensures we get a single aggregated count instead of one row per match
+            // Status is derived from current_step_id.name
             let count_query = format!(
                 "SELECT count() as cnt FROM task \
                  WHERE <-depends_on<-task CONTAINS task:{} \
                  AND id != task:{} \
-                 AND status != 'done' \
+                 AND (current_step_id IS NONE OR current_step_id.name != 'done') \
                  GROUP ALL",
                 dep_id, task_id
             );
@@ -952,7 +962,11 @@ impl<'a> GraphQueries<'a> {
 
         if descendants.is_empty() {
             // Leaf task - progress is based on own status
-            let query = format!(r#"SELECT status FROM task:{}"#, task_id);
+            // Status is derived from current_step_id.name
+            let query = format!(
+                r#"SELECT IF current_step_id != NONE THEN current_step_id.name ELSE "backlog" END AS status FROM task:{}"#,
+                task_id
+            );
             let mut result = self.client.query(&query).await?;
 
             #[derive(Debug, Deserialize)]
@@ -973,6 +987,7 @@ impl<'a> GraphQueries<'a> {
 
         // Has descendants - count them efficiently with a single query
         // Get the status of all descendants in one query
+        // Status is derived from current_step_id.name
         let ids_quoted: Vec<String> = descendants
             .iter()
             .map(|id| format!("task:{}", id))
@@ -981,7 +996,7 @@ impl<'a> GraphQueries<'a> {
 
         let query = format!(
             r#"SELECT count() as total,
-                      count(status = "done") as done
+                      count(current_step_id.name = "done") as done
                FROM task
                WHERE id IN [{}]
                GROUP ALL"#,
@@ -1033,16 +1048,30 @@ mod tests {
     }
 
     /// Helper to create a task in the database
+    /// Status is derived from current_step_id - uses the default workflow steps.
     async fn create_task(db: &Database, id: &str, title: &str, level: &str, status: &str) {
+        // Set current_step_id and current_step (index) for non-backlog statuses
+        // Default workflow steps are: backlog(0), in_progress(1), pending_review(2), done(3), rejected(4)
+        let (step_id_clause, current_step) = match status {
+            "backlog" => ("NONE".to_string(), 0),
+            "in_progress" => ("step:default_in_progress".to_string(), 1),
+            "pending_review" => ("step:default_pending_review".to_string(), 2),
+            "done" => ("step:default_done".to_string(), 3),
+            "rejected" => ("step:default_rejected".to_string(), 4),
+            _ => ("NONE".to_string(), 0),
+        };
+
         let query = format!(
             r#"CREATE task:{} SET
                 title = "{}",
                 level = "{}",
-                status = "{}",
+                current_step_id = {},
+                current_step = {},
+                workflow_id = workflow:default,
                 tags = [],
                 sections = [],
                 refs = []"#,
-            id, title, level, status
+            id, title, level, step_id_clause, current_step
         );
         db.client().query(&query).await.unwrap();
     }
@@ -1680,15 +1709,18 @@ mod tests {
         let graph = GraphQueries::new(db.client());
 
         // Create blocker with full details including priority and tags
+        // Status is derived from current_step_id.name
         let query = r#"CREATE task:blocker1 SET
             title = "Blocker Task",
             level = "ticket",
-            status = "in_progress",
             priority = "high",
             tags = ["backend", "urgent"],
             sections = [],
             refs = [],
-            needs_human_review = true"#;
+            needs_human_review = true,
+            workflow_id = workflow:default,
+            current_step = 1,
+            current_step_id = step:default_in_progress"#;
         db.client().query(query).await.unwrap();
 
         create_task(&db, "task1", "Task 1", "task", "backlog").await;
@@ -1746,10 +1778,10 @@ mod tests {
 
         // Create a blocker with workflow_id and current_step_id set to first-class step
         // The default workflow has steps: backlog (0), in_progress (1), pending_review (2), done (3), rejected (4)
+        // Status is derived from current_step_id.name
         let query = r#"CREATE task:blocker_with_workflow SET
             title = "Blocker With Workflow",
             level = "task",
-            status = "in_progress",
             priority = "medium",
             tags = [],
             sections = [],

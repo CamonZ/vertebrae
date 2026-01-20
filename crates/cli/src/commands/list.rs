@@ -277,12 +277,19 @@ mod tests {
 
         let tags_vec: Vec<String> = tags.iter().map(|t| t.to_string()).collect();
 
-        let mut task = Task::new(title, level_enum).with_status(status);
+        let mut task = Task::new(title, level_enum);
 
         if let Some(p) = priority_enum {
             task = task.with_priority(p);
         }
         task.tags = tags_vec;
+
+        // Set up workflow step if status is not "backlog"
+        if status != "backlog" {
+            let step_id_str = format!("default_{}", status);
+            let step_id = surrealdb::sql::Thing::from(("step", step_id_str.as_str()));
+            task.current_step_id = Some(step_id);
+        }
 
         db.tasks().create(id, &task).await.unwrap();
     }
@@ -1174,9 +1181,14 @@ mod tests {
             _ => Level::Task,
         };
 
-        let task = Task::new(title, level_enum)
-            .with_description(description)
-            .with_status(status);
+        let mut task = Task::new(title, level_enum).with_description(description);
+
+        // Set up workflow step if status is not "backlog"
+        if status != "backlog" {
+            let step_id_str = format!("default_{}", status);
+            let step_id = surrealdb::sql::Thing::from(("step", step_id_str.as_str()));
+            task.current_step_id = Some(step_id);
+        }
 
         db.tasks().create(id, &task).await.unwrap();
 

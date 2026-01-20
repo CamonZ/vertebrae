@@ -288,6 +288,9 @@ impl CodeRef {
 ///
 /// Tasks are the primary nodes in the graph, with relationships
 /// defined by `child_of` and `depends_on` edges.
+///
+/// Note: Status is now derived from workflow_id and current_step/current_step_id,
+/// not stored as a field. Use the service layer's get_derived_status() method.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
     /// Unique identifier (SurrealDB record ID)
@@ -303,9 +306,6 @@ pub struct Task {
 
     /// Hierarchy level (epic, ticket, task)
     pub level: Level,
-
-    /// Current status (references StatusDefinition.name from StatusSchema)
-    pub status: String,
 
     /// Optional priority
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -374,7 +374,6 @@ impl Task {
             title: title.into(),
             description: None,
             level,
-            status: "backlog".to_string(),
             priority: None,
             tags: Vec::new(),
             created_at: None,
@@ -395,12 +394,6 @@ impl Task {
     /// Set the description of this task
     pub fn with_description(mut self, description: impl Into<String>) -> Self {
         self.description = Some(description.into());
-        self
-    }
-
-    /// Set the status of this task
-    pub fn with_status(mut self, status: impl Into<String>) -> Self {
-        self.status = status.into();
         self
     }
 
@@ -467,7 +460,6 @@ impl PartialEq for Task {
         self.title == other.title
             && self.description == other.description
             && self.level == other.level
-            && self.status == other.status
             && self.priority == other.priority
             && self.tags == other.tags
             && self.sections == other.sections
@@ -3033,7 +3025,6 @@ mod tests {
         assert!(task.id.is_none());
         assert_eq!(task.title, "Implement feature");
         assert_eq!(task.level, Level::Task);
-        assert_eq!(task.status, "backlog");
         assert!(task.priority.is_none());
         assert!(task.tags.is_empty());
         assert!(task.created_at.is_none());
@@ -3048,12 +3039,6 @@ mod tests {
             "New tasks must be assigned to the default workflow"
         );
         assert_eq!(task.current_step, Some(0), "New tasks must start at step 0");
-    }
-
-    #[test]
-    fn test_task_with_status() {
-        let task = Task::new("Test", Level::Task).with_status("in_progress");
-        assert_eq!(task.status, "in_progress");
     }
 
     #[test]
@@ -3092,7 +3077,6 @@ mod tests {
     #[test]
     fn test_task_builder_chain() {
         let task = Task::new("Complex Task", Level::Epic)
-            .with_status("in_progress")
             .with_priority(Priority::Critical)
             .with_tags(["urgent", "backend"])
             .with_section(Section::new(SectionType::Goal, "Complete the epic"))
@@ -3100,7 +3084,6 @@ mod tests {
 
         assert_eq!(task.title, "Complex Task");
         assert_eq!(task.level, Level::Epic);
-        assert_eq!(task.status, "in_progress");
         assert_eq!(task.priority, Some(Priority::Critical));
         assert_eq!(task.tags, vec!["urgent", "backend"]);
         assert_eq!(task.sections.len(), 1);
@@ -3110,14 +3093,12 @@ mod tests {
     #[test]
     fn test_task_serialize() {
         let task = Task::new("Test Task", Level::Ticket)
-            .with_status("done")
             .with_priority(Priority::Medium)
             .with_tag("test");
 
         let value = serde_json::to_value(&task).unwrap();
         assert_eq!(value["title"], "Test Task");
         assert_eq!(value["level"], "ticket");
-        assert_eq!(value["status"], "done");
         assert_eq!(value["priority"], "medium");
         assert_eq!(value["tags"], serde_json::json!(["test"]));
     }
@@ -3128,7 +3109,6 @@ mod tests {
         let value = serde_json::to_value(&task).unwrap();
         assert_eq!(value["title"], "Minimal");
         assert_eq!(value["level"], "task");
-        assert_eq!(value["status"], "backlog"); // Default status is backlog
         assert!(value.get("priority").is_none());
         assert!(value.get("id").is_none());
     }
@@ -3138,7 +3118,6 @@ mod tests {
         let json = r#"{
             "title": "Deserialized Task",
             "level": "epic",
-            "status": "backlog",
             "priority": "low",
             "tags": ["a", "b"],
             "sections": [],
@@ -3148,7 +3127,6 @@ mod tests {
         let task: Task = serde_json::from_str(json).unwrap();
         assert_eq!(task.title, "Deserialized Task");
         assert_eq!(task.level, Level::Epic);
-        assert_eq!(task.status, "backlog");
         assert_eq!(task.priority, Some(Priority::Low));
         assert_eq!(task.tags, vec!["a", "b"]);
     }
@@ -3157,14 +3135,12 @@ mod tests {
     fn test_task_deserialize_minimal() {
         let json = r#"{
             "title": "Minimal",
-            "level": "task",
-            "status": "in_progress"
+            "level": "task"
         }"#;
 
         let task: Task = serde_json::from_str(json).unwrap();
         assert_eq!(task.title, "Minimal");
         assert_eq!(task.level, Level::Task);
-        assert_eq!(task.status, "in_progress");
         assert!(task.priority.is_none());
         assert!(task.tags.is_empty());
         assert!(task.sections.is_empty());
@@ -3309,7 +3285,6 @@ mod tests {
         let json = r#"{
             "title": "Started Task",
             "level": "task",
-            "status": "in_progress",
             "started_at": "2025-01-06T12:00:00Z"
         }"#;
 
@@ -3324,7 +3299,6 @@ mod tests {
         let json = r#"{
             "title": "Completed Task",
             "level": "task",
-            "status": "done",
             "completed_at": "2025-01-06T15:30:00Z"
         }"#;
 
@@ -3339,8 +3313,7 @@ mod tests {
     fn test_task_deserialize_without_timestamps() {
         let json = r#"{
             "title": "No Timestamps",
-            "level": "task",
-            "status": "in_progress"
+            "level": "task"
         }"#;
 
         let task: Task = serde_json::from_str(json).unwrap();
@@ -3353,7 +3326,6 @@ mod tests {
         let json = r#"{
             "title": "Full Lifecycle Task",
             "level": "task",
-            "status": "done",
             "started_at": "2025-01-06T10:00:00Z",
             "completed_at": "2025-01-06T14:00:00Z"
         }"#;
@@ -3443,9 +3415,8 @@ mod tests {
     fn test_task_workflow_roundtrip() {
         // Create a task with workflow, serialize it, then deserialize it
         let workflow_id = Thing::from(("workflow", "wf456"));
-        let original = Task::new("Workflow Task", Level::Task)
-            .with_status("in_progress")
-            .with_workflow(workflow_id.clone(), 2);
+        let original =
+            Task::new("Workflow Task", Level::Task).with_workflow(workflow_id.clone(), 2);
 
         let json = serde_json::to_string(&original).unwrap();
         let deserialized: Task = serde_json::from_str(&json).unwrap();
@@ -3458,8 +3429,7 @@ mod tests {
     fn test_task_workflow_deserialize_without_workflow() {
         let json = r#"{
             "title": "No Workflow Task",
-            "level": "task",
-            "status": "in_progress"
+            "level": "task"
         }"#;
 
         let task: Task = serde_json::from_str(json).unwrap();

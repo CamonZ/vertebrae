@@ -21,9 +21,6 @@ mod sql {
         DEFINE FIELD level ON task TYPE string
             ASSERT $value IN ["epic", "ticket", "task"];
 
-        DEFINE FIELD status ON task TYPE string
-            ASSERT $value IN ["backlog", "in_progress", "pending_review", "done", "rejected"];
-
         DEFINE FIELD priority ON task TYPE option<string>
             ASSERT $value IN [NONE, "low", "medium", "high", "critical"];
 
@@ -847,7 +844,7 @@ mod tests {
         assert!(sql::DEFINE_TASK_TABLE.contains("SCHEMAFULL"));
         assert!(sql::DEFINE_TASK_TABLE.contains("title"));
         assert!(sql::DEFINE_TASK_TABLE.contains("level"));
-        assert!(sql::DEFINE_TASK_TABLE.contains("status"));
+        // Note: status field removed - status is now derived from current_step_id
         assert!(sql::DEFINE_TASK_TABLE.contains("current_step_id"));
 
         assert!(sql::DEFINE_CHILD_OF_RELATION.contains("RELATION"));

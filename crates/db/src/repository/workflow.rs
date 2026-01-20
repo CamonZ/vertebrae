@@ -475,14 +475,12 @@ impl<'a> WorkflowRepository<'a> {
     /// Perform a dry-run check to see what would be migrated without making changes.
     ///
     /// This method analyzes all tasks without a workflow assignment and determines
-    /// how many would be migrated vs skipped, without actually performing the migration.
-    ///
-    /// Tasks with `Rejected` status are counted as skipped since that status is not
-    /// part of the default workflow.
+    /// how many would be migrated. Since status is now derived from workflow step,
+    /// all tasks without a workflow will be migrated to the default workflow at step 0.
     ///
     /// # Returns
     ///
-    /// A `MigrationResult` containing counts of tasks that would be migrated and skipped.
+    /// A `MigrationResult` containing counts of tasks that would be migrated.
     ///
     /// # Errors
     ///
@@ -490,85 +488,50 @@ impl<'a> WorkflowRepository<'a> {
     pub async fn dry_run_migration(&self) -> DbResult<MigrationResult> {
         debug!("Starting dry-run migration check");
 
-        // Helper to map status string to default workflow step
-        fn status_to_step(status: &str) -> Option<usize> {
-            match status {
-                "backlog" => Some(0),
-                "in_progress" => Some(1),
-                "pending_review" => Some(2),
-                "done" => Some(3),
-                _ => None, // rejected and unknown statuses not in default workflow
-            }
-        }
-
         // Find all tasks without workflow_id
         #[derive(Debug, Deserialize)]
-        struct TaskWithStatus {
+        #[allow(dead_code)]
+        struct TaskId {
             id: surrealdb::sql::Thing,
-            status: String,
         }
 
-        let query = "SELECT id, status FROM task WHERE workflow_id IS NONE";
+        let query = "SELECT id FROM task WHERE workflow_id IS NONE";
         let mut result = self
             .client
             .query(query)
             .await
             .map_err(|e| DbError::Query(Box::new(e)))?;
-        let tasks: Vec<TaskWithStatus> = result.take(0)?;
+        let tasks: Vec<TaskId> = result.take(0)?;
 
         debug!(
             "Found {} tasks without workflow assignment for dry-run check",
             tasks.len()
         );
 
-        let mut would_migrate = 0;
-        let mut would_skip = 0;
-        let mut skipped_ids = Vec::new();
+        // All tasks without workflow will be migrated (no status-based skipping anymore)
+        let would_migrate = tasks.len();
 
-        for task in tasks {
-            let task_id = task.id.id.to_raw();
-
-            // Get the step index for this status
-            if status_to_step(&task.status).is_some() {
-                trace!("Task {} would be migrated", task_id);
-                would_migrate += 1;
-            } else {
-                // Status not in default workflow (e.g., rejected)
-                debug!(
-                    "Task {} would be skipped (status '{}' not in default workflow)",
-                    task_id, task.status
-                );
-                skipped_ids.push(task_id);
-                would_skip += 1;
-            }
-        }
-
-        debug!(
-            "Dry-run check complete: {} would migrate, {} would skip",
-            would_migrate, would_skip
-        );
+        debug!("Dry-run check complete: {} would migrate", would_migrate);
 
         Ok(MigrationResult {
             migrated: would_migrate,
-            skipped: would_skip,
-            skipped_ids,
+            skipped: 0,
+            skipped_ids: vec![],
         })
     }
 
     /// Migrate existing tasks to use the default workflow.
     ///
     /// Finds all tasks without a workflow assignment and assigns them to the
-    /// default workflow, setting their current_step based on their current status.
-    ///
-    /// Tasks with `Rejected` status are skipped since that status is not part
-    /// of the default workflow.
+    /// default workflow at step 0 (backlog). Since status is now derived from
+    /// the workflow step, all tasks are assigned to the initial step.
     ///
     /// This migration is idempotent - running it multiple times is safe as it
     /// only affects tasks without a workflow_id.
     ///
     /// # Returns
     ///
-    /// A `MigrationResult` containing counts of migrated and skipped tasks.
+    /// A `MigrationResult` containing counts of migrated tasks.
     ///
     /// # Errors
     ///
@@ -576,17 +539,6 @@ impl<'a> WorkflowRepository<'a> {
     /// Returns `DbError::Query` if database operations fail.
     pub async fn migrate_to_default_workflow(&self) -> DbResult<MigrationResult> {
         debug!("Starting migration to default workflow");
-
-        // Helper to map status string to default workflow step
-        fn status_to_step(status: &str) -> Option<usize> {
-            match status {
-                "backlog" => Some(0),
-                "in_progress" => Some(1),
-                "pending_review" => Some(2),
-                "done" => Some(3),
-                _ => None, // rejected and unknown statuses not in default workflow
-            }
-        }
 
         // Ensure default workflow exists
         if !self.exists(DEFAULT_WORKFLOW_ID).await? {
@@ -600,66 +552,47 @@ impl<'a> WorkflowRepository<'a> {
 
         // Find all tasks without workflow_id
         #[derive(Debug, Deserialize)]
-        struct TaskWithStatus {
+        #[allow(dead_code)]
+        struct TaskId {
             id: surrealdb::sql::Thing,
-            status: String,
         }
 
-        let query = "SELECT id, status FROM task WHERE workflow_id IS NONE";
+        let query = "SELECT id FROM task WHERE workflow_id IS NONE";
         let mut result = self
             .client
             .query(query)
             .await
             .map_err(|e| DbError::Query(Box::new(e)))?;
-        let tasks: Vec<TaskWithStatus> = result.take(0)?;
+        let tasks: Vec<TaskId> = result.take(0)?;
 
         debug!("Found {} tasks without workflow assignment", tasks.len());
 
         let mut migrated = 0;
-        let mut skipped = 0;
-        let mut skipped_ids = Vec::new();
 
         for task in tasks {
             let task_id = task.id.id.to_raw();
 
-            // Get the step index for this status
-            match status_to_step(&task.status) {
-                Some(step) => {
-                    // Update the task with workflow_id and current_step
-                    let update_query = format!(
-                        "UPDATE task:{} SET workflow_id = $workflow_id, current_step = {}, updated_at = time::now()",
-                        task_id, step
-                    );
-                    self.client
-                        .query(&update_query)
-                        .bind(("workflow_id", default_workflow_thing.clone()))
-                        .await
-                        .map_err(|e| DbError::Query(Box::new(e)))?;
+            // All tasks are migrated to step 0 (backlog)
+            let update_query = format!(
+                "UPDATE task:{} SET workflow_id = $workflow_id, current_step = 0, updated_at = time::now()",
+                task_id
+            );
+            self.client
+                .query(&update_query)
+                .bind(("workflow_id", default_workflow_thing.clone()))
+                .await
+                .map_err(|e| DbError::Query(Box::new(e)))?;
 
-                    trace!("Migrated task {} to step {}", task_id, step);
-                    migrated += 1;
-                }
-                None => {
-                    // Status not in default workflow (e.g., rejected)
-                    debug!(
-                        "Skipping task {} with status '{}' (not in default workflow)",
-                        task_id, task.status
-                    );
-                    skipped_ids.push(task_id);
-                    skipped += 1;
-                }
-            }
+            trace!("Migrated task {} to step 0 (backlog)", task_id);
+            migrated += 1;
         }
 
-        debug!(
-            "Migration complete: {} migrated, {} skipped",
-            migrated, skipped
-        );
+        debug!("Migration complete: {} migrated", migrated);
 
         Ok(MigrationResult {
             migrated,
-            skipped,
-            skipped_ids,
+            skipped: 0,
+            skipped_ids: vec![],
         })
     }
 
@@ -1331,11 +1264,11 @@ mod tests {
         let workflow_repo = WorkflowRepository::new(db.client());
         let task_repo = TaskRepository::new(db.client());
 
-        // Create tasks with different statuses (tasks now have default workflow)
-        let task1 = Task::new("Backlog Task", Level::Task).with_status("backlog");
-        let task2 = Task::new("In Progress Task", Level::Task).with_status("in_progress");
-        let task3 = Task::new("Pending Review Task", Level::Task).with_status("pending_review");
-        let task4 = Task::new("Done Task", Level::Task).with_status("done");
+        // Create tasks (tasks now have default workflow automatically)
+        let task1 = Task::new("Backlog Task", Level::Task);
+        let task2 = Task::new("In Progress Task", Level::Task);
+        let task3 = Task::new("Pending Review Task", Level::Task);
+        let task4 = Task::new("Done Task", Level::Task);
 
         task_repo.create("t1", &task1).await.unwrap();
         task_repo.create("t2", &task2).await.unwrap();
@@ -1348,30 +1281,29 @@ mod tests {
         task_repo.unassign_workflow("t3").await.unwrap();
         task_repo.unassign_workflow("t4").await.unwrap();
 
-        // Run migration
+        // Run migration - all tasks should be migrated to default workflow at step 0
         let result = workflow_repo.migrate_to_default_workflow().await.unwrap();
         assert_eq!(result.migrated, 4);
         assert_eq!(result.skipped, 0);
         assert!(result.has_migrations());
         assert!(!result.has_skipped());
 
-        // Verify each task has correct workflow_id and current_step
-        // New step mapping: backlog=0, in_progress=1, pending_review=2, done=3
+        // Verify each task has workflow_id and current_step (all start at step 0 since no status info)
         let t1 = task_repo.get("t1").await.unwrap().unwrap();
         assert!(t1.workflow_id.is_some());
-        assert_eq!(t1.current_step, Some(0)); // backlog
+        assert!(t1.current_step.is_some());
 
         let t2 = task_repo.get("t2").await.unwrap().unwrap();
         assert!(t2.workflow_id.is_some());
-        assert_eq!(t2.current_step, Some(1)); // in_progress
+        assert!(t2.current_step.is_some());
 
         let t3 = task_repo.get("t3").await.unwrap().unwrap();
         assert!(t3.workflow_id.is_some());
-        assert_eq!(t3.current_step, Some(2)); // pending_review
+        assert!(t3.current_step.is_some());
 
         let t4 = task_repo.get("t4").await.unwrap().unwrap();
         assert!(t4.workflow_id.is_some());
-        assert_eq!(t4.current_step, Some(3)); // done
+        assert!(t4.current_step.is_some());
 
         cleanup(&temp_dir);
     }
@@ -1385,34 +1317,31 @@ mod tests {
         let workflow_repo = WorkflowRepository::new(db.client());
         let task_repo = TaskRepository::new(db.client());
 
-        // Create a rejected task and a normal task (tasks now have default workflow)
-        let rejected_task = Task::new("Rejected Task", Level::Task).with_status("rejected");
-        let normal_task = Task::new("Normal Task", Level::Task).with_status("in_progress");
+        // Create tasks (tasks now have default workflow automatically)
+        // Note: rejected status handling is no longer relevant since status is derived from workflow step
+        let task1 = Task::new("Task 1", Level::Task);
+        let task2 = Task::new("Task 2", Level::Task);
 
-        task_repo.create("rejected", &rejected_task).await.unwrap();
-        task_repo.create("normal", &normal_task).await.unwrap();
+        task_repo.create("t1", &task1).await.unwrap();
+        task_repo.create("t2", &task2).await.unwrap();
 
         // Unassign workflows to simulate old tasks without workflow assignment
-        task_repo.unassign_workflow("rejected").await.unwrap();
-        task_repo.unassign_workflow("normal").await.unwrap();
+        task_repo.unassign_workflow("t1").await.unwrap();
+        task_repo.unassign_workflow("t2").await.unwrap();
 
-        // Run migration
+        // Run migration - all tasks should be migrated (no status-based skipping anymore)
         let result = workflow_repo.migrate_to_default_workflow().await.unwrap();
-        assert_eq!(result.migrated, 1);
-        assert_eq!(result.skipped, 1);
+        assert_eq!(result.migrated, 2);
         assert!(result.has_migrations());
-        assert!(result.has_skipped());
-        assert!(result.skipped_ids.contains(&"rejected".to_string()));
 
-        // Verify rejected task still has no workflow (status not in default workflow)
-        let rejected = task_repo.get("rejected").await.unwrap().unwrap();
-        assert!(rejected.workflow_id.is_none());
-        assert!(rejected.current_step.is_none());
+        // Verify both tasks were migrated
+        let t1 = task_repo.get("t1").await.unwrap().unwrap();
+        assert!(t1.workflow_id.is_some());
+        assert!(t1.current_step.is_some());
 
-        // Verify normal task was migrated
-        let normal = task_repo.get("normal").await.unwrap().unwrap();
-        assert!(normal.workflow_id.is_some());
-        assert_eq!(normal.current_step, Some(1));
+        let t2 = task_repo.get("t2").await.unwrap().unwrap();
+        assert!(t2.workflow_id.is_some());
+        assert!(t2.current_step.is_some());
 
         cleanup(&temp_dir);
     }
@@ -1427,7 +1356,7 @@ mod tests {
         let task_repo = TaskRepository::new(db.client());
 
         // Create a task (now has default workflow)
-        let task = Task::new("Test Task", Level::Task).with_status("in_progress");
+        let task = Task::new("Test Task", Level::Task);
         task_repo.create("test", &task).await.unwrap();
 
         // Unassign workflow to simulate old task without workflow assignment
@@ -1445,7 +1374,7 @@ mod tests {
         // Verify task still has correct workflow
         let t = task_repo.get("test").await.unwrap().unwrap();
         assert!(t.workflow_id.is_some());
-        assert_eq!(t.current_step, Some(1));
+        assert!(t.current_step.is_some());
 
         cleanup(&temp_dir);
     }
@@ -1460,12 +1389,12 @@ mod tests {
         let task_repo = TaskRepository::new(db.client());
 
         // Create a task (now has default workflow assigned automatically)
-        let task = Task::new("Pre-assigned Task", Level::Task).with_status("in_progress");
+        let task = Task::new("Pre-assigned Task", Level::Task);
         task_repo.create("assigned", &task).await.unwrap();
         // Task already has workflow from creation, no need to assign again
 
         // Create another task and unassign its workflow to simulate old task
-        let task2 = Task::new("Unassigned Task", Level::Task).with_status("in_progress");
+        let task2 = Task::new("Unassigned Task", Level::Task);
         task_repo.create("unassigned", &task2).await.unwrap();
         task_repo.unassign_workflow("unassigned").await.unwrap();
 
@@ -1500,10 +1429,10 @@ mod tests {
         let workflow_repo = WorkflowRepository::new(db.client());
         let task_repo = TaskRepository::new(db.client());
 
-        // Create tasks with different statuses (tasks now have default workflow)
-        let task1 = Task::new("Backlog Task", Level::Task).with_status("backlog");
-        let task2 = Task::new("Rejected Task", Level::Task).with_status("rejected");
-        let task3 = Task::new("Todo Task", Level::Task).with_status("in_progress");
+        // Create tasks (tasks now have default workflow)
+        let task1 = Task::new("Task 1", Level::Task);
+        let task2 = Task::new("Task 2", Level::Task);
+        let task3 = Task::new("Task 3", Level::Task);
 
         task_repo.create("t1", &task1).await.unwrap();
         task_repo.create("t2", &task2).await.unwrap();
@@ -1514,11 +1443,10 @@ mod tests {
         task_repo.unassign_workflow("t2").await.unwrap();
         task_repo.unassign_workflow("t3").await.unwrap();
 
-        // Run dry-run
+        // Run dry-run - all tasks should be candidates for migration (no status-based skipping)
         let result = workflow_repo.dry_run_migration().await.unwrap();
-        assert_eq!(result.migrated, 2);
-        assert_eq!(result.skipped, 1);
-        assert!(result.skipped_ids.contains(&"t2".to_string()));
+        assert_eq!(result.migrated, 3);
+        assert_eq!(result.skipped, 0);
 
         // Verify no tasks were actually migrated (dry-run doesn't modify)
         let t1 = task_repo.get("t1").await.unwrap().unwrap();
@@ -1541,7 +1469,7 @@ mod tests {
         let task_repo = TaskRepository::new(db.client());
 
         // Create a task (now has default workflow)
-        let task = Task::new("Test Task", Level::Task).with_status("in_progress");
+        let task = Task::new("Test Task", Level::Task);
         task_repo.create("test", &task).await.unwrap();
 
         // Unassign workflow to simulate old task without workflow assignment
@@ -1562,7 +1490,9 @@ mod tests {
         // Verify task state unchanged (dry-run doesn't modify)
         let after = task_repo.get("test").await.unwrap().unwrap();
         assert!(after.workflow_id.is_none());
-        assert_eq!(after.status, original.status);
+        // Both tasks should have same workflow_id (None) and current_step (None)
+        assert_eq!(after.workflow_id, original.workflow_id);
+        assert_eq!(after.current_step, original.current_step);
 
         cleanup(&temp_dir);
     }

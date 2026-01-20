@@ -280,11 +280,18 @@ mod tests {
             _ => None,
         });
 
+        // Set up workflow step if status is not "backlog"
+        let current_step_id = if status != "backlog" {
+            let step_id_str = format!("default_{}", status);
+            Some(surrealdb::sql::Thing::from(("step", step_id_str.as_str())))
+        } else {
+            None
+        };
+
         let task = Task {
             title: title.to_string(),
             description: None,
             level: level_enum,
-            status: status.to_string(),
             priority: priority_enum,
             tags: tags.iter().map(|t| t.to_string()).collect(),
             sections: vec![],
@@ -299,7 +306,7 @@ mod tests {
             id: None,
             workflow_id: None,
             current_step: None,
-            current_step_id: None,
+            current_step_id,
         };
 
         db.tasks().create(id, &task).await.unwrap();
@@ -1102,12 +1109,15 @@ mod tests {
 
         let service = setup_test_db().await;
 
-        // Create task with specific values
+        // Create task with specific values - set up workflow step for in_progress status
+        // Must set both workflow_id and current_step_id for the step to be stored
+        let workflow_id = surrealdb::sql::Thing::from(("workflow", "default"));
+        let step_id = surrealdb::sql::Thing::from(("step", "default_in_progress"));
+
         let task = Task {
             title: "Original".to_string(),
             description: None,
             level: Level::Ticket,
-            status: "in_progress".to_string(),
             priority: Some(vertebrae_db::Priority::High),
             tags: vec!["backend".to_string(), "api".to_string()],
             sections: vec![Section {
@@ -1133,9 +1143,9 @@ mod tests {
             started_at: None,
             completed_at: None,
             id: None,
-            workflow_id: None,
-            current_step: None,
-            current_step_id: None,
+            workflow_id: Some(workflow_id),
+            current_step: Some(1), // in_progress is at index 1 in default workflow
+            current_step_id: Some(step_id),
         };
         service
             .database()
@@ -1171,7 +1181,8 @@ mod tests {
 
         assert_eq!(task.title, "Updated title");
         assert_eq!(task.level, Level::Ticket);
-        assert_eq!(task.status, "in_progress");
+        // Status is now derived from current_step_id
+        assert!(task.current_step_id.is_some());
         assert_eq!(task.priority, Some(vertebrae_db::Priority::High));
         // Verify tags and other fields are preserved
         assert_eq!(task.tags, vec!["backend", "api"]);
@@ -1301,7 +1312,6 @@ mod tests {
             title: "Test task".to_string(),
             description: Some("Original description".to_string()),
             level: Level::Task,
-            status: "in_progress".to_string(),
             priority: None,
             tags: vec![],
             sections: vec![],

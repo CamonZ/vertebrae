@@ -319,6 +319,9 @@ impl ShowCommand {
                 task_id: self.id.clone(),
             })?;
 
+        // Compute derived status from workflow step
+        let derived_status = Self::compute_derived_status_for_task(db, &task).await?;
+
         // Convert Task to TaskRow for display
         Ok(TaskRow {
             id: task.id.ok_or_else(|| DbError::TaskNotFound {
@@ -327,7 +330,7 @@ impl ShowCommand {
             title: task.title,
             description: task.description,
             level: task.level.as_str().to_string(),
-            status: task.status.as_str().to_string(),
+            status: derived_status,
             priority: task.priority.map(|p| p.as_str().to_string()),
             tags: task.tags,
             created_at: task.created_at.map(surrealdb::sql::Datetime::from),
@@ -507,8 +510,8 @@ impl ShowCommand {
             }
         }
 
-        // Fall back to raw status
-        Ok(task.status.clone())
+        // Fall back to default if no workflow information
+        Ok("backlog".to_string())
     }
 }
 
@@ -866,7 +869,6 @@ mod tests {
         let step_id = surrealdb::sql::Thing::from(("step", step_id_str.as_str()));
 
         let mut task = Task::new(title, level_enum);
-        task.status = status.to_string();
         task.current_step = Some(step_index);
         task.current_step_id = Some(step_id);
         task.priority = priority_enum;

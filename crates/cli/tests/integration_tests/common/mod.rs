@@ -787,21 +787,36 @@ pub fn list_cmd_all() -> ListCommand {
 // =============================================================================
 
 /// Helper to create a task directly in the database for test setup.
+/// Status is derived from current_step_id - uses the default workflow steps.
 pub async fn create_task(db: &Database, id: &str, title: &str, level: &str, status: &str) {
+    // Set current_step_id and current_step (index) for non-backlog statuses
+    // Default workflow steps are: backlog(0), in_progress(1), pending_review(2), done(3), rejected(4)
+    let (step_id_clause, current_step) = match status {
+        "backlog" => ("NONE".to_string(), 0),
+        "in_progress" => ("step:default_in_progress".to_string(), 1),
+        "pending_review" => ("step:default_pending_review".to_string(), 2),
+        "done" => ("step:default_done".to_string(), 3),
+        "rejected" => ("step:default_rejected".to_string(), 4),
+        _ => ("NONE".to_string(), 0),
+    };
+
     let query = format!(
         r#"CREATE task:{} SET
             title = "{}",
             level = "{}",
-            status = "{}",
+            current_step_id = {},
+            current_step = {},
+            workflow_id = workflow:default,
             tags = [],
             sections = [],
             refs = []"#,
-        id, title, level, status
+        id, title, level, step_id_clause, current_step
     );
     db.client().query(&query).await.unwrap();
 }
 
 /// Helper to create a task with description.
+/// Status is derived from current_step_id - uses the default workflow steps.
 #[allow(dead_code)]
 pub async fn create_task_with_description(
     db: &Database,
@@ -811,21 +826,34 @@ pub async fn create_task_with_description(
     status: &str,
     description: &str,
 ) {
+    // Set current_step_id and current_step (index) for non-backlog statuses
+    let (step_id_clause, current_step) = match status {
+        "backlog" => ("NONE".to_string(), 0),
+        "in_progress" => ("step:default_in_progress".to_string(), 1),
+        "pending_review" => ("step:default_pending_review".to_string(), 2),
+        "done" => ("step:default_done".to_string(), 3),
+        "rejected" => ("step:default_rejected".to_string(), 4),
+        _ => ("NONE".to_string(), 0),
+    };
+
     let query = format!(
         r#"CREATE task:{} SET
             title = "{}",
             level = "{}",
-            status = "{}",
+            current_step_id = {},
+            current_step = {},
+            workflow_id = workflow:default,
             description = "{}",
             tags = [],
             sections = [],
             refs = []"#,
-        id, title, level, status, description
+        id, title, level, step_id_clause, current_step, description
     );
     db.client().query(&query).await.unwrap();
 }
 
 /// Helper to create a task with tags.
+/// Status is derived from current_step_id - uses the default workflow steps.
 pub async fn create_task_with_tags(
     db: &Database,
     id: &str,
@@ -834,6 +862,16 @@ pub async fn create_task_with_tags(
     status: &str,
     tags: &[&str],
 ) {
+    // Set current_step_id and current_step (index) for non-backlog statuses
+    let (step_id_clause, current_step) = match status {
+        "backlog" => ("NONE".to_string(), 0),
+        "in_progress" => ("step:default_in_progress".to_string(), 1),
+        "pending_review" => ("step:default_pending_review".to_string(), 2),
+        "done" => ("step:default_done".to_string(), 3),
+        "rejected" => ("step:default_rejected".to_string(), 4),
+        _ => ("NONE".to_string(), 0),
+    };
+
     let tags_str = if tags.is_empty() {
         "[]".to_string()
     } else {
@@ -849,11 +887,13 @@ pub async fn create_task_with_tags(
         r#"CREATE task:{} SET
             title = "{}",
             level = "{}",
-            status = "{}",
+            current_step_id = {},
+            current_step = {},
+            workflow_id = workflow:default,
             tags = {},
             sections = [],
             refs = []"#,
-        id, title, level, status, tags_str
+        id, title, level, step_id_clause, current_step, tags_str
     );
     db.client().query(&query).await.unwrap();
 }
@@ -877,13 +917,19 @@ pub async fn create_depends_on(db: &Database, dependent_id: &str, dependency_id:
 // Query Helpers
 // =============================================================================
 
-/// Helper to get task status.
+/// Helper to get task status (derived from workflow step).
 pub async fn get_task_status(db: &Database, id: &str) -> Option<String> {
-    db.tasks()
-        .get(id)
-        .await
-        .unwrap()
-        .map(|t| t.status.as_str().to_string())
+    db.tasks().get(id).await.unwrap().map(|t| {
+        // Derive status from current_step_id
+        t.current_step_id
+            .as_ref()
+            .and_then(|step_id| {
+                // Extract step name from step ID (format: step:default_<name>)
+                let id_str = step_id.id.to_raw();
+                id_str.strip_prefix("default_").map(|s| s.to_string())
+            })
+            .unwrap_or_else(|| "backlog".to_string())
+    })
 }
 
 /// Helper to get task level.

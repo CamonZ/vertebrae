@@ -230,12 +230,15 @@ pub struct Task {
 
 impl From<vertebrae_db::Task> for Task {
     fn from(task: vertebrae_db::Task) -> Self {
+        // Note: status is now derived from workflow step
+        // This conversion uses a default; caller should update with derived status
         Task {
             id: task.id.map(|t| t.id.to_raw()),
             title: task.title,
             description: task.description,
             level: task.level.into(),
-            status: task.status,
+            // Default status - should be updated by caller with derived status
+            status: "backlog".to_string(),
             priority: task.priority.map(Into::into),
             tags: task.tags,
             created_at: task.created_at.map(|dt| dt.to_rfc3339()),

@@ -245,10 +245,12 @@ impl TransitionToCommand {
                     }
                 }
             } else {
-                // Task has no workflow - validate based on task's current status
+                // Task has no workflow - derive current status and validate
                 // Map the current status to a step in the target workflow
                 if let Some(target_step_name) = &parsed.step {
-                    let current_status = task.status.as_str();
+                    // Get derived status from service and extract step name
+                    let derived_status = service.get_derived_status(&id).await?;
+                    let current_status = derived_status.split(':').next_back().unwrap_or("backlog");
                     let workflow_thing =
                         surrealdb::sql::Thing::from(("workflow", target_workflow_id.as_str()));
                     let steps = db.steps().list_by_workflow(&workflow_thing).await?;
@@ -347,16 +349,29 @@ impl TransitionToCommand {
                 .list_by_workflow(&workflow_thing_for_steps)
                 .await?;
             if let Some(step) = steps.iter().find(|s| s.name == *step_name) {
+                // Update current_step (index)
                 service
                     .update_current_step(&id, step.order as usize)
                     .await?;
+                // Update current_step_id (reference to step record)
+                // Status is now derived from current_step_id.name
+                if let Some(ref step_id) = step.id {
+                    db.tasks().update_current_step_id(&id, step_id).await?;
+                }
             }
-            // Also update the status field for backward compatibility
-            // The step name in the default workflow matches the status name
-            db.tasks().update_status(&id, step_name).await?;
         } else if let Some(ref step_name) = target_step_name {
-            // If we have a target step from initial step resolution, update status too
-            db.tasks().update_status(&id, step_name).await?;
+            // If we have a target step from initial step resolution, find and set the step ID
+            let workflow_thing_for_steps =
+                surrealdb::sql::Thing::from(("workflow", target_workflow_id.as_str()));
+            let steps = db
+                .steps()
+                .list_by_workflow(&workflow_thing_for_steps)
+                .await?;
+            if let Some(step) = steps.iter().find(|s| &s.name == step_name)
+                && let Some(ref step_id) = step.id
+            {
+                db.tasks().update_current_step_id(&id, step_id).await?;
+            }
         }
 
         // Get unblocked tasks (for done/terminal steps)
