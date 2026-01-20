@@ -47,7 +47,7 @@ pub struct CreateTaskOptions {
     pub description: Option<String>,
     /// Task level (defaults to Task)
     pub level: Option<Level>,
-    /// Task status (defaults to "backlog") - references StatusDefinition.name from StatusSchema
+    /// Task status (defaults to "backlog") - workflow step name
     pub status: Option<String>,
     /// Task priority
     pub priority: Option<Priority>,
@@ -276,7 +276,7 @@ pub struct TaskTreeNode {
     pub title: String,
     /// Hierarchy level (epic, ticket, task)
     pub level: Level,
-    /// Current status (references StatusDefinition.name from StatusSchema)
+    /// Current status (derived from workflow step name)
     pub status: String,
     /// Optional priority
     pub priority: Option<Priority>,
@@ -1126,79 +1126,82 @@ impl TaskService for DefaultTaskService {
         let task = self.get_task(&id).await?;
         // Status is now derived from workflow step - returns format "workflow:step" or just "step"
         let derived_status = self.get_derived_status(&id).await?;
-        // Extract just the step name for schema validation
+        // Extract just the step name for validation
         let from_status = derived_status
             .split(':')
             .next_back()
             .unwrap_or(&derived_status)
             .to_string();
 
-        // Fetch the default status schema for validation
-        let status_schema = self.db.status_schemas().get_default().await?;
-        let schema = status_schema.as_ref().ok_or_else(|| {
-            ServiceError::InvalidInput("No default status schema found".to_string())
-        })?;
+        // Get the workflow for this task (default if none assigned)
+        let workflow_thing = task
+            .workflow_id
+            .clone()
+            .unwrap_or_else(|| Thing::from(("workflow", "default")));
+        let workflow_id = workflow_thing.id.to_raw();
 
-        // Validate target status exists in schema
-        let target_definition = schema.get_status(&target).ok_or_else(|| {
+        // Get workflow steps to validate the transition
+        let steps = self.db.steps().list_by_workflow(&workflow_thing).await?;
+
+        // Find the current step
+        let current_step = steps.iter().find(|s| s.name.to_lowercase() == from_status);
+
+        // Find the target step
+        let target_step = steps.iter().find(|s| s.name.to_lowercase() == target);
+
+        // Validate target step exists
+        let target_step = target_step.ok_or_else(|| {
+            let valid_steps: Vec<&str> = steps.iter().map(|s| s.name.as_str()).collect();
             ServiceError::InvalidInput(format!(
-                "Unknown status '{}'. Valid statuses: {}",
+                "Unknown step '{}' in workflow '{}'. Valid steps: {}",
                 target,
-                schema
-                    .statuses
-                    .iter()
-                    .map(|s| s.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
+                workflow_id,
+                valid_steps.join(", ")
             ))
         })?;
 
-        // Validate transition using StatusSchema.can_transition
-        if !schema.can_transition(&from_status, &target) {
-            // Build list of valid transitions from current status
-            let valid_transitions: Vec<String> = schema
-                .progressions
-                .iter()
-                .filter(|p| p.from_status == from_status)
-                .map(|p| p.to_status.clone())
-                .collect();
+        // Validate transition if we have a current step
+        if let Some(current) = current_step {
+            let target_id = target_step.id.as_ref();
+            let is_valid_transition =
+                target_id.is_some() && current.transitions_to.iter().any(|t| Some(t) == target_id);
+            let is_same_step = current.name.to_lowercase() == target;
 
-            return Err(ServiceError::invalid_transition_with_valid(
-                &from_status,
-                &target,
-                valid_transitions,
-            ));
+            if !is_valid_transition && !is_same_step {
+                // Get valid transition names for the error message
+                let valid_transitions: Vec<String> = current
+                    .transitions_to
+                    .iter()
+                    .filter_map(|t| steps.iter().find(|s| s.id.as_ref() == Some(t)))
+                    .map(|s| s.name.clone())
+                    .collect();
+
+                return Err(ServiceError::invalid_transition_with_valid(
+                    &from_status,
+                    &target,
+                    valid_transitions,
+                ));
+            }
         }
 
-        // Build update - status is now derived from workflow step, so we need to
-        // find and set the step that matches the target status
+        // Build update - status is now derived from workflow step
         let mut update = TaskUpdate::new();
 
-        // Set timestamps based on transition (using status name conventions)
+        // Set timestamps based on transition (using step name conventions)
         if target == "in_progress" {
             update = update.set_started_at_if_null();
         }
-        // completed_at is handled in repository for terminal statuses
+        // completed_at is handled in repository for terminal steps
 
-        // Find the step in the task's workflow that matches the target status name
-        // and update current_step/current_step_id
-        if let Some(ref workflow_thing) = task.workflow_id {
-            let steps = self.db.steps().list_by_workflow(workflow_thing).await?;
+        // Update current_step index
+        self.db
+            .tasks()
+            .update_current_step(&id, target_step.order as usize)
+            .await?;
 
-            // Find the step that matches the target status name
-            if let Some((idx, step)) = steps
-                .iter()
-                .enumerate()
-                .find(|(_, s)| s.name.to_lowercase() == target)
-            {
-                // Update current_step index
-                self.db.tasks().update_current_step(&id, idx).await?;
-
-                // Update current_step_id if the step has an ID
-                if let Some(ref step_id) = step.id {
-                    self.db.tasks().update_current_step_id(&id, step_id).await?;
-                }
-            }
+        // Update current_step_id if the step has an ID
+        if let Some(ref step_id) = target_step.id {
+            self.db.tasks().update_current_step_id(&id, step_id).await?;
         }
 
         // Apply any other updates (timestamps)
@@ -1206,42 +1209,9 @@ impl TaskService for DefaultTaskService {
             self.db.tasks().update(&id, &update).await?;
         }
 
-        // Auto-assign workflow if the target status has a workflow_id configured
-        let assigned_workflow = if let Some(workflow_thing) = &target_definition.workflow_id {
-            let workflow_id = workflow_thing.id.to_raw();
-
-            // Check if workflow exists before assigning
-            if self.db.workflows().exists(&workflow_id).await? {
-                // Assign the workflow (this also sets current_step to 0)
-                self.db.tasks().assign_workflow(&id, workflow_thing).await?;
-                self.db.tasks().update_current_step(&id, 0).await?;
-
-                // Get the first step name
-                let workflow = self.db.workflows().get(&workflow_id).await?;
-                let first_step_name = if let Some(wf) = &workflow {
-                    if let Some(ref wf_thing) = wf.id {
-                        let steps = self.db.steps().list_by_workflow(wf_thing).await?;
-                        steps.first().map(|s| s.name.clone()).unwrap_or_default()
-                    } else {
-                        String::new()
-                    }
-                } else {
-                    String::new()
-                };
-
-                Some(AssignedWorkflow {
-                    workflow_id,
-                    first_step_name,
-                })
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        // Get unblocked tasks if the target status has unblocks_dependents=true
-        let should_unblock = target_definition.unblocks_dependents;
+        // Determine if this step unblocks dependents
+        // Only "done" status unblocks dependents - "rejected" and other terminal steps do not
+        let should_unblock = target == "done";
 
         let unblocked_tasks = if should_unblock {
             self.db
@@ -1267,7 +1237,7 @@ impl TaskService for DefaultTaskService {
             from_status,
             to_status: target,
             unblocked_tasks,
-            assigned_workflow,
+            assigned_workflow: None,
         })
     }
 
@@ -2872,54 +2842,6 @@ mod tests {
         let blockers = service.get_blockers(&task_b).await.unwrap();
         // task_a should still be in blockers even though rejected
         assert!(!blockers.is_empty(), "Task B should still have blockers");
-    }
-
-    #[tokio::test]
-    async fn test_transition_with_custom_schema_workflow() {
-        let service = setup_test_service().await;
-
-        // First create a workflow to reference
-        let workflow_thing = Thing::from(("workflow", "default"));
-
-        // Update the default schema to add workflow_id to in_progress status
-        let schema_repo = service.database().status_schemas();
-        let schema = schema_repo.get("default").await.unwrap().unwrap();
-
-        // Create updated statuses with workflow_id on in_progress
-        let mut updated_statuses: Vec<vertebrae_db::StatusDefinition> =
-            schema.statuses.iter().cloned().collect();
-        if let Some(in_progress_status) = updated_statuses
-            .iter_mut()
-            .find(|s| s.name == "in_progress")
-        {
-            in_progress_status.workflow_id = Some(workflow_thing.clone());
-        }
-
-        let update = vertebrae_db::StatusSchemaUpdate::new().with_statuses(updated_statuses);
-        schema_repo.update("default", update).await.unwrap();
-
-        // Now create a task and transition to in_progress
-        let id = service
-            .create_task(CreateTaskOptions::new("Task with workflow").with_status("in_progress"))
-            .await
-            .unwrap();
-
-        let result = service.transition_to(&id, "in_progress").await.unwrap();
-
-        // Should have assigned the workflow
-        assert!(
-            result.assigned_workflow.is_some(),
-            "Should assign workflow when status has workflow_id"
-        );
-        let assigned = result.assigned_workflow.unwrap();
-        assert_eq!(assigned.workflow_id, "default");
-        assert!(!assigned.first_step_name.is_empty());
-
-        // Verify task now has the workflow assigned
-        let task = service.get_task(&id).await.unwrap();
-        assert!(task.workflow_id.is_some());
-        assert_eq!(task.workflow_id.unwrap().id.to_raw(), "default");
-        assert_eq!(task.current_step, Some(0));
     }
 
     // =========================================================================

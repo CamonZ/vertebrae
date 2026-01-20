@@ -24,7 +24,7 @@ impl From<vertebrae_db::Level> for TaskLevel {
     }
 }
 
-// Note: Task.status is now a String that references StatusDefinition.name from StatusSchema.
+// Note: Task.status is now a String derived from the workflow step name.
 // The frontend uses strings directly for status values.
 
 /// Task priority - mirrors db::Priority
@@ -158,7 +158,7 @@ pub struct TaskSummary {
     pub title: String,
     /// Hierarchy level
     pub level: TaskLevel,
-    /// Current status (references StatusDefinition.name from StatusSchema)
+    /// Current status (derived from workflow step name)
     pub status: String,
     /// Optional priority
     pub priority: Option<TaskPriority>,
@@ -196,7 +196,7 @@ pub struct Task {
     pub description: Option<String>,
     /// Hierarchy level
     pub level: TaskLevel,
-    /// Current status (references StatusDefinition.name from StatusSchema)
+    /// Current status (derived from workflow step name)
     pub status: String,
     /// Optional priority
     pub priority: Option<TaskPriority>,
@@ -284,7 +284,7 @@ pub struct TaskHierarchyNode {
 /// Filter options for listing tasks
 #[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
 pub struct TaskFilterOptions {
-    /// Filter by statuses (OR semantics) - status names from StatusSchema
+    /// Filter by statuses (OR semantics) - workflow step names
     pub statuses: Option<Vec<String>>,
     /// Filter by levels (OR semantics)
     pub levels: Option<Vec<TaskLevel>>,

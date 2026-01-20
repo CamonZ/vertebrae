@@ -18,7 +18,7 @@ pub struct TaskSummary {
     pub title: String,
     /// Hierarchy level
     pub level: Level,
-    /// Current status (references StatusDefinition.name from StatusSchema)
+    /// Current status (derived from workflow step name)
     pub status: String,
     /// Optional priority
     pub priority: Option<Priority>,
@@ -43,7 +43,7 @@ pub struct TaskWithRelationsData {
     pub title: String,
     /// Hierarchy level
     pub level: Level,
-    /// Current status (references StatusDefinition.name from StatusSchema)
+    /// Current status (derived from workflow step name)
     pub status: String,
     /// Optional priority
     pub priority: Option<Priority>,
@@ -190,7 +190,7 @@ fn parse_priority(s: &str) -> Priority {
 pub struct TaskFilter {
     /// Filter by levels (OR semantics)
     pub levels: Vec<Level>,
-    /// Filter by statuses (OR semantics) - status names from StatusSchema
+    /// Filter by statuses (OR semantics) - workflow step names
     pub statuses: Vec<String>,
     /// Filter by priorities (OR semantics)
     pub priorities: Vec<Priority>,

@@ -24,7 +24,6 @@ pub mod run;
 pub mod section;
 pub mod sections;
 pub mod show;
-pub mod status_schema;
 pub mod step;
 pub mod step_done;
 pub mod transition_to;
@@ -54,7 +53,6 @@ pub use run::RunCommand;
 pub use section::SectionCommand;
 pub use sections::SectionsCommand;
 pub use show::ShowCommand;
-pub use status_schema::StatusSchemaCommand;
 pub use step::StepCommand;
 pub use step_done::StepDoneCommand;
 pub use transition_to::TransitionToCommand;
@@ -126,9 +124,6 @@ pub enum Command {
     /// Mark a step as done within a task
     #[command(name = "step-done")]
     StepDone(StepDoneCommand),
-    /// Status schema management commands
-    #[command(subcommand, name = "status-schema")]
-    StatusSchema(StatusSchemaCommand),
     /// Transition a task to a specific status
     #[command(name = "transition-to")]
     TransitionTo(TransitionToCommand),
@@ -291,10 +286,6 @@ impl Command {
             Command::StepDone(cmd) => {
                 let result = cmd.execute(service).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
-            }
-            Command::StatusSchema(cmd) => {
-                let result = cmd.execute(service).await?;
-                Ok(CommandResult::Message(result))
             }
             Command::TransitionTo(cmd) => {
                 let result = cmd.execute(service).await?;

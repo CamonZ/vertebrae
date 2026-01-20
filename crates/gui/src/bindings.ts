@@ -739,7 +739,7 @@ description: string | null;
  */
 level: TaskLevel; 
 /**
- * Current status (references StatusDefinition.name from StatusSchema)
+ * Current status (derived from workflow step name)
  */
 status: string; 
 /**
@@ -812,7 +812,7 @@ export type TaskChangedEvent = { task_id: string; change_type: TaskChangeType }
  */
 export type TaskFilterOptions = { 
 /**
- * Filter by statuses (OR semantics) - status names from StatusSchema
+ * Filter by statuses (OR semantics) - workflow step names
  */
 statuses: string[] | null; 
 /**
@@ -880,7 +880,7 @@ title: string;
  */
 level: TaskLevel; 
 /**
- * Current status (references StatusDefinition.name from StatusSchema)
+ * Current status (derived from workflow step name)
  */
 status: string; 
 /**
