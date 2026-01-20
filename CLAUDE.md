@@ -87,17 +87,17 @@ See `skills/` for detailed command guides:
 ## Build Commands
 
 ```bash
-# Build the project
-cargo build
+# Build the project (quiet mode reduces output)
+cargo build --quiet
 
 # Build in release mode
-cargo build --release
+cargo build --release --quiet
 
 # Run the CLI tool
-cargo run -- <args>
+cargo run --quiet -- <args>
 
 # Run with the binary name
-cargo run --bin vtb -- <args>
+cargo run --quiet --bin vtb -- <args>
 ```
 
 ## GUI Development
@@ -163,12 +163,10 @@ cargo test --quiet
 cargo test -- --nocapture
 
 # Run tests with coverage (requires cargo-llvm-cov)
-cargo llvm-cov
-
-# Run tests with coverage quietly (only show failures)
+# Note: llvm-cov runs tests internally, so no need to run cargo test separately
 cargo llvm-cov --quiet
 
-# Run tests with coverage threshold check
+# Run tests with coverage threshold check (preferred for CI/pre-commit)
 cargo llvm-cov --quiet --fail-under-lines 85
 ```
 
@@ -196,11 +194,11 @@ cargo fmt
 # Check formatting without modifying files
 cargo fmt --check
 
-# Run clippy linter
-cargo clippy
+# Run clippy linter (quiet mode reduces output)
+cargo clippy --quiet
 
 # Run clippy treating warnings as errors
-cargo clippy -- -D warnings
+cargo clippy --quiet -- -D warnings
 ```
 
 ## Project Structure
@@ -469,12 +467,11 @@ The pre-commit hook runs the following checks:
 
 **Rust:**
 1. `cargo fmt --check` - Ensures code is properly formatted
-2. `cargo clippy -- -D warnings` - Ensures no linting warnings
-3. `cargo test --quiet` - Ensures all Rust tests pass
-4. `cargo llvm-cov --quiet --fail-under-lines 85` - Ensures coverage >= 85%
+2. `cargo clippy --quiet -- -D warnings` - Ensures no linting warnings
+3. `cargo llvm-cov --quiet --fail-under-lines 85` - Runs tests and ensures coverage >= 85%
 
 **GUI (React):**
-5. `npm run test` - Ensures all React/TypeScript tests pass
+4. `npm run test` - Ensures all React/TypeScript tests pass
 
 To bypass hooks in emergencies:
 
