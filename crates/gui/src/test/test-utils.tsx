@@ -2,6 +2,7 @@ import { render, type RenderOptions } from "@testing-library/react";
 import { ReactFlowProvider } from "@xyflow/react";
 import { BrowserRouter } from "react-router-dom";
 import type { ReactElement, ReactNode } from "react";
+import type { Task, Workflow, Step, TaskWithRelations, AgentConfig, TaskSummary } from "../bindings";
 
 /**
  * Custom render function that wraps components with necessary providers
@@ -27,151 +28,55 @@ export { userEvent } from "@testing-library/user-event";
 export { customRender as render };
 
 /**
- * Create mock workflow data for testing
+ * Create a complete AgentConfig with defaults
  */
-export function createMockWorkflow(overrides?: Partial<{
-  id: string;
-  name: string;
-  steps: Array<{
-    name: string;
-    order: number;
-    agent_config: {
-      model: string;
-      system_prompt: string;
-      append_system_prompt: string;
-      tools: string[];
-      allowed_tools: string[];
-      permission_mode: string | null;
-    };
-  }>;
-}>) {
+export function createMockAgentConfig(overrides?: Partial<AgentConfig>): AgentConfig {
   return {
-    id: "test-workflow-1",
-    name: "Test Workflow",
-    description: "A test workflow",
-    is_default: false,
-    steps: [
-      {
-        name: "backlog",
-        order: 0,
-        agent_config: {
-          model: "claude-3-sonnet",
-          system_prompt: "",
-          append_system_prompt: "",
-          tools: [],
-          allowed_tools: [],
-          permission_mode: null,
-        },
-      },
-      {
-        name: "in_progress",
-        order: 1,
-        agent_config: {
-          model: "claude-3-sonnet",
-          system_prompt: "",
-          append_system_prompt: "",
-          tools: [],
-          allowed_tools: [],
-          permission_mode: null,
-        },
-      },
-      {
-        name: "done",
-        order: 2,
-        agent_config: {
-          model: "claude-3-sonnet",
-          system_prompt: "",
-          append_system_prompt: "",
-          tools: [],
-          allowed_tools: [],
-          permission_mode: null,
-        },
-      },
-    ],
+    model: null,
+    fallback_model: null,
+    system_prompt: null,
+    append_system_prompt: null,
+    agents: null,
+    tools: [],
+    allowed_tools: [],
+    disallowed_tools: [],
+    permission_mode: null,
+    max_budget_usd: null,
+    mcp_config: [],
+    plugin_dirs: [],
+    json_schema: null,
     ...overrides,
   };
 }
 
 /**
- * Create mock Step entities for testing (first-class steps)
+ * Create a complete Step with defaults
  */
-export function createMockSteps(workflowId = "test-workflow-1") {
-  return [
-    {
-      id: "step-backlog",
-      workflow_id: workflowId,
-      name: "backlog",
-      order: 0,
-      agent_config: {
-        model: "claude-3-sonnet",
-        system_prompt: "",
-        append_system_prompt: "",
-        tools: [],
-        allowed_tools: [],
-        permission_mode: null,
-      },
-      created_at: null,
-      updated_at: null,
-    },
-    {
-      id: "step-in_progress",
-      workflow_id: workflowId,
-      name: "in_progress",
-      order: 1,
-      agent_config: {
-        model: "claude-3-sonnet",
-        system_prompt: "",
-        append_system_prompt: "",
-        tools: [],
-        allowed_tools: [],
-        permission_mode: null,
-      },
-      created_at: null,
-      updated_at: null,
-    },
-    {
-      id: "step-done",
-      workflow_id: workflowId,
-      name: "done",
-      order: 2,
-      agent_config: {
-        model: "claude-3-sonnet",
-        system_prompt: "",
-        append_system_prompt: "",
-        tools: [],
-        allowed_tools: [],
-        permission_mode: null,
-      },
-      created_at: null,
-      updated_at: null,
-    },
-  ];
+export function createMockStep(overrides?: Partial<Step>): Step {
+  return {
+    id: null,
+    name: "Test Step",
+    workflow_id: "workflow-1",
+    agent_config: createMockAgentConfig({ model: "claude-3-sonnet" }),
+    is_final: false,
+    transitions_to: [],
+    order: 0,
+    created_at: null,
+    updated_at: null,
+    ...overrides,
+  };
 }
 
 /**
- * Create mock task data for testing
+ * Create mock workflow data for testing
  */
-export function createMockTask(overrides?: Partial<{
-  id: string;
-  title: string;
-  description: string;
-  status: string;
-  level: string;
-  parent_id: string | null;
-  workflow_id: string | null;
-  current_step: number | null;
-  current_step_id: string | null;
-}>) {
+export function createMockWorkflow(overrides?: Partial<Workflow>): Workflow {
   return {
-    id: `task-${Math.random().toString(36).slice(2, 10)}`,
-    title: "Test Task",
-    description: "A test task description",
-    status: "backlog",
-    level: "task",
-    parent_id: null,
-    workflow_id: null,
-    current_step: null,
-    current_step_id: null,
+    id: "test-workflow-1",
+    name: "Test Workflow",
+    description: "A test workflow",
+    initial_step: "step-backlog",
+    metadata: {},
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     ...overrides,
@@ -179,17 +84,92 @@ export function createMockTask(overrides?: Partial<{
 }
 
 /**
+ * Create mock Step entities for testing (first-class steps)
+ */
+export function createMockSteps(workflowId = "test-workflow-1"): Step[] {
+  return [
+    createMockStep({
+      id: "step-backlog",
+      workflow_id: workflowId,
+      name: "backlog",
+      order: 0,
+    }),
+    createMockStep({
+      id: "step-in_progress",
+      workflow_id: workflowId,
+      name: "in_progress",
+      order: 1,
+    }),
+    createMockStep({
+      id: "step-done",
+      workflow_id: workflowId,
+      name: "done",
+      order: 2,
+      is_final: true,
+    }),
+  ];
+}
+
+/**
+ * Create mock task data for testing
+ */
+export function createMockTask(overrides?: Partial<Task>): Task {
+  return {
+    id: `task-${Math.random().toString(36).slice(2, 10)}`,
+    title: "Test Task",
+    description: "A test task description",
+    status: "backlog",
+    level: "task",
+    priority: null,
+    tags: [],
+    workflow_id: null,
+    current_step: null,
+    current_step_id: null,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    started_at: null,
+    completed_at: null,
+    sections: [],
+    code_refs: [],
+    needs_human_review: null,
+    revision_feedback: null,
+    rejection_reason: null,
+    ...overrides,
+  };
+}
+
+/**
+ * Create mock task summary data for testing
+ */
+export function createMockTaskSummary(overrides?: Partial<TaskSummary>): TaskSummary {
+  return {
+    id: `task-${Math.random().toString(36).slice(2, 10)}`,
+    title: "Test Task",
+    level: "task",
+    status: "backlog",
+    priority: null,
+    tags: [],
+    needs_human_review: null,
+    created_at: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
+/**
  * Create mock task with relations for testing
  */
-export function createMockTaskWithRelations(overrides?: Partial<{
-  task: ReturnType<typeof createMockTask>;
-  depends_on_ids: string[];
-  dependent_ids: string[];
-}>) {
+export function createMockTaskWithRelations(overrides?: {
+  task?: Partial<Task>;
+  parent_id?: string | null;
+  children_ids?: string[];
+  depends_on_ids?: string[];
+  dependent_ids?: string[];
+}): TaskWithRelations {
   return {
     task: createMockTask(overrides?.task),
-    depends_on_ids: [],
-    dependent_ids: [],
-    ...overrides,
+    parent_id: overrides?.parent_id ?? null,
+    children_ids: overrides?.children_ids ?? [],
+    depends_on_ids: overrides?.depends_on_ids ?? [],
+    dependent_ids: overrides?.dependent_ids ?? [],
   };
 }

@@ -25,6 +25,7 @@ function createTaskNodeProps(overrides?: Partial<TaskNodeData>) {
     positionAbsoluteX: 0,
     positionAbsoluteY: 0,
     dragging: false,
+    draggable: true,
     dragHandle: undefined,
     selectable: true,
     deletable: true,

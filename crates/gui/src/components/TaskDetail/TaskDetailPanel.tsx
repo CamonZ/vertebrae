@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import type { TaskWithRelations, TaskStatus, TaskLevel, TaskPriority, TaskChangedEvent } from '../../bindings';
+import type { TaskWithRelations, TaskLevel, TaskPriority, TaskChangedEvent } from '../../bindings';
 import { events } from '../../bindings';
 import { useTask } from '../../hooks/useTask';
 import { TaskSections } from './TaskSections';
@@ -73,10 +73,16 @@ const TABS: Tab[] = [
 ];
 
 /**
- * Get status styling
+ * Get status styling.
+ * Status is now a string that can be either:
+ * - A step name (e.g., 'backlog', 'in_progress', 'done')
+ * - A workflow:step format (e.g., 'default:in_progress')
  */
-function getStatusStyles(status: TaskStatus): { bg: string; text: string; glow?: string } {
-  switch (status) {
+function getStatusStyles(status: string): { bg: string; text: string; glow?: string } {
+  // Extract step name from potential workflow:step format
+  const stepName = status.includes(':') ? status.split(':').pop() ?? status : status;
+  
+  switch (stepName) {
     case 'backlog':
       return { bg: 'bg-bg-tertiary', text: 'text-text-muted' };
     case 'todo':

@@ -14,11 +14,10 @@ function truncateId(id: string): string {
 
 /**
  * WorkflowCard component displays a single workflow in the grid.
- * Shows workflow name, description, and step count.
+ * Shows workflow name and description.
  * Clicking navigates to the workflow detail page.
  */
 export function WorkflowCard({ workflow }: WorkflowCardProps) {
-  const stepCount = workflow.steps.length;
   const workflowId = workflow.id ?? '';
 
   return (
@@ -55,11 +54,11 @@ export function WorkflowCard({ workflow }: WorkflowCardProps) {
               strokeLinecap="round"
               strokeLinejoin="round"
               strokeWidth={1.5}
-              d="M4 6h16M4 12h16M4 18h7"
+              d="M13 10V3L4 14h7v7l9-11h-7z"
             />
           </svg>
           <span>
-            {stepCount} {stepCount === 1 ? 'step' : 'steps'}
+            {workflow.initial_step ? 'Active' : 'No steps configured'}
           </span>
         </div>
       </div>

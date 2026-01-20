@@ -2,22 +2,52 @@ import { describe, it, expect } from "vitest";
 import { screen } from "@testing-library/react";
 import { render } from "../../test/test-utils";
 import { StepNode, type StepNodeData } from "./StepNode";
+import type { AgentConfig, Step, PermissionMode } from "../../bindings";
+
+/**
+ * Create a complete AgentConfig with defaults
+ */
+function createAgentConfig(overrides?: Partial<AgentConfig>): AgentConfig {
+  return {
+    model: null,
+    fallback_model: null,
+    system_prompt: null,
+    append_system_prompt: null,
+    agents: null,
+    tools: [],
+    allowed_tools: [],
+    disallowed_tools: [],
+    permission_mode: null,
+    max_budget_usd: null,
+    mcp_config: [],
+    plugin_dirs: [],
+    json_schema: null,
+    ...overrides,
+  };
+}
+
+/**
+ * Create a complete Step with defaults
+ */
+function createStep(overrides?: Partial<Step>): Step {
+  return {
+    id: null,
+    name: "Test Step",
+    workflow_id: "workflow-1",
+    agent_config: createAgentConfig({ model: "claude-3-sonnet" }),
+    is_final: false,
+    transitions_to: [],
+    order: 0,
+    created_at: null,
+    updated_at: null,
+    ...overrides,
+  };
+}
 
 // Helper to create step node props
 function createStepNodeProps(overrides?: Partial<StepNodeData>) {
   const defaultData: StepNodeData = {
-    step: {
-      name: "Test Step",
-      order: 0,
-      agent_config: {
-        model: "claude-3-sonnet",
-        system_prompt: "",
-        append_system_prompt: "",
-        tools: [],
-        allowed_tools: [],
-        permission_mode: null,
-      },
-    },
+    step: createStep(),
     isFirst: false,
     isLast: false,
     onPlayClick: undefined,
@@ -35,6 +65,7 @@ function createStepNodeProps(overrides?: Partial<StepNodeData>) {
     positionAbsoluteX: 0,
     positionAbsoluteY: 0,
     dragging: false,
+    draggable: true,
     dragHandle: undefined,
     selectable: true,
     deletable: true,
@@ -46,18 +77,10 @@ describe("StepNode", () => {
   describe("rendering", () => {
     it("renders step name", () => {
       const props = createStepNodeProps({
-        step: {
+        step: createStep({
           name: "Review Step",
           order: 1,
-          agent_config: {
-            model: "claude-3-sonnet",
-            system_prompt: "",
-            append_system_prompt: "",
-            tools: [],
-            allowed_tools: [],
-            permission_mode: null,
-          },
-        },
+        }),
       });
 
       render(<StepNode {...props} />);
@@ -67,18 +90,11 @@ describe("StepNode", () => {
 
     it("renders step order number (1-indexed)", () => {
       const props = createStepNodeProps({
-        step: {
+        step: createStep({
           name: "Test",
           order: 2,
-          agent_config: {
-            model: "",
-            system_prompt: "",
-            append_system_prompt: "",
-            tools: [],
-            allowed_tools: [],
-            permission_mode: null,
-          },
-        },
+          agent_config: createAgentConfig(),
+        }),
       });
 
       render(<StepNode {...props} />);
@@ -89,18 +105,11 @@ describe("StepNode", () => {
 
     it("renders model name when provided", () => {
       const props = createStepNodeProps({
-        step: {
+        step: createStep({
           name: "Test",
           order: 0,
-          agent_config: {
-            model: "claude-3-opus",
-            system_prompt: "",
-            append_system_prompt: "",
-            tools: [],
-            allowed_tools: [],
-            permission_mode: null,
-          },
-        },
+          agent_config: createAgentConfig({ model: "claude-3-opus" }),
+        }),
       });
 
       render(<StepNode {...props} />);
@@ -138,18 +147,13 @@ describe("StepNode", () => {
   describe("agent config indicators", () => {
     it("shows Prompt badge when system prompt is configured", () => {
       const props = createStepNodeProps({
-        step: {
+        step: createStep({
           name: "Test",
           order: 0,
-          agent_config: {
-            model: "",
+          agent_config: createAgentConfig({
             system_prompt: "You are a helpful assistant",
-            append_system_prompt: "",
-            tools: [],
-            allowed_tools: [],
-            permission_mode: null,
-          },
-        },
+          }),
+        }),
       });
 
       render(<StepNode {...props} />);
@@ -159,18 +163,13 @@ describe("StepNode", () => {
 
     it("shows Prompt badge when append_system_prompt is configured", () => {
       const props = createStepNodeProps({
-        step: {
+        step: createStep({
           name: "Test",
           order: 0,
-          agent_config: {
-            model: "",
-            system_prompt: "",
+          agent_config: createAgentConfig({
             append_system_prompt: "Additional instructions",
-            tools: [],
-            allowed_tools: [],
-            permission_mode: null,
-          },
-        },
+          }),
+        }),
       });
 
       render(<StepNode {...props} />);
@@ -180,18 +179,14 @@ describe("StepNode", () => {
 
     it("shows tool count badge when tools are configured", () => {
       const props = createStepNodeProps({
-        step: {
+        step: createStep({
           name: "Test",
           order: 0,
-          agent_config: {
-            model: "",
-            system_prompt: "",
-            append_system_prompt: "",
+          agent_config: createAgentConfig({
             tools: ["tool1", "tool2"],
             allowed_tools: ["tool3"],
-            permission_mode: null,
-          },
-        },
+          }),
+        }),
       });
 
       render(<StepNode {...props} />);
@@ -202,23 +197,18 @@ describe("StepNode", () => {
 
     it("shows permission mode badge when set", () => {
       const props = createStepNodeProps({
-        step: {
+        step: createStep({
           name: "Test",
           order: 0,
-          agent_config: {
-            model: "",
-            system_prompt: "",
-            append_system_prompt: "",
-            tools: [],
-            allowed_tools: [],
-            permission_mode: "auto",
-          },
-        },
+          agent_config: createAgentConfig({
+            permission_mode: "bypass_permissions" as PermissionMode,
+          }),
+        }),
       });
 
       render(<StepNode {...props} />);
 
-      expect(screen.getByText("auto")).toBeInTheDocument();
+      expect(screen.getByText("bypass_permissions")).toBeInTheDocument();
     });
   });
 

@@ -6,7 +6,7 @@
  *
  * @example
  * ```typescript
- * import type { Task, TaskStatus, LoadingState } from '@/types';
+ * import type { Task, TaskLevel, LoadingState } from '@/types';
  * ```
  */
 
@@ -21,7 +21,6 @@ export type {
 
   // Task enums
   TaskLevel,
-  TaskStatus,
   TaskPriority,
 
   // Task components

@@ -1,4 +1,4 @@
-import type { TaskSummary, TaskStatus, TaskLevel, TaskPriority } from '../../bindings';
+import type { TaskSummary, TaskLevel, TaskPriority } from '../../bindings';
 import { RelativeTime } from '../RelativeTime';
 
 interface TaskRowProps {
@@ -9,10 +9,16 @@ interface TaskRowProps {
 }
 
 /**
- * Get status badge styling based on task status
+ * Get status badge styling based on task status.
+ * Status is now a string that can be either:
+ * - A step name (e.g., 'backlog', 'in_progress', 'done')
+ * - A workflow:step format (e.g., 'default:in_progress')
  */
-function getStatusStyles(status: TaskStatus): { bg: string; text: string; glow?: string } {
-  switch (status) {
+function getStatusStyles(status: string): { bg: string; text: string; glow?: string } {
+  // Extract step name from potential workflow:step format
+  const stepName = status.includes(':') ? status.split(':').pop() ?? status : status;
+  
+  switch (stepName) {
     case 'backlog':
       return { bg: 'bg-bg-tertiary', text: 'text-text-muted' };
     case 'todo':
@@ -31,10 +37,14 @@ function getStatusStyles(status: TaskStatus): { bg: string; text: string; glow?:
 }
 
 /**
- * Format status for display
+ * Format status for display.
+ * Shows the step name in a human-readable format.
  */
-function formatStatus(status: TaskStatus): string {
-  switch (status) {
+function formatStatus(status: string): string {
+  // Extract step name from potential workflow:step format
+  const stepName = status.includes(':') ? status.split(':').pop() ?? status : status;
+  
+  switch (stepName) {
     case 'backlog':
       return 'Backlog';
     case 'todo':
@@ -48,7 +58,8 @@ function formatStatus(status: TaskStatus): string {
     case 'rejected':
       return 'Rejected';
     default:
-      return status;
+      // For custom status names, capitalize first letter
+      return stepName.charAt(0).toUpperCase() + stepName.slice(1).replace(/_/g, ' ');
   }
 }
 

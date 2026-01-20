@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import type { TaskStatus, TaskLevel, TaskFilterOptions } from '../../bindings';
+import type { TaskLevel, TaskFilterOptions } from '../../bindings';
 
 export type ViewMode = 'list' | 'tree';
 
@@ -12,8 +12,11 @@ interface TaskFiltersProps {
   onShowDoneChange?: (showDone: boolean) => void;
 }
 
-/** Available status options for filtering */
-const STATUS_OPTIONS: { value: TaskStatus; label: string }[] = [
+/**
+ * Available status options for filtering.
+ * These are common workflow step names used in the default workflow.
+ */
+const STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: 'backlog', label: 'Backlog' },
   { value: 'todo', label: 'Todo' },
   { value: 'in_progress', label: 'Active' },
@@ -43,7 +46,7 @@ export function TaskFilters({
   const handleStatusChange = useCallback(
     (event: React.ChangeEvent<HTMLSelectElement>) => {
       const value = event.target.value;
-      const statuses = value ? [value as TaskStatus] : null;
+      const statuses = value ? [value] : null;
       // When 'All' is selected (no specific status), include done tasks to show everything
       const include_done = value ? filters.include_done : true;
       onFiltersChange({ ...filters, statuses, include_done });

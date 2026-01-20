@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { useTaskStore } from "./taskStore";
-import { createMockTask, createMockTaskWithRelations } from "../test/test-utils";
+import { createMockTaskWithRelations, createMockTaskSummary } from "../test/test-utils";
 
 describe("taskStore", () => {
   beforeEach(() => {
@@ -34,8 +34,8 @@ describe("taskStore", () => {
   describe("setTasks", () => {
     it("updates the tasks array", () => {
       const tasks = [
-        { id: "task-1", title: "Task 1", status: "backlog", level: "task" },
-        { id: "task-2", title: "Task 2", status: "done", level: "task" },
+        createMockTaskSummary({ id: "task-1", title: "Task 1", status: "backlog" }),
+        createMockTaskSummary({ id: "task-2", title: "Task 2", status: "done" }),
       ];
 
       useTaskStore.getState().setTasks(tasks);
@@ -45,10 +45,10 @@ describe("taskStore", () => {
 
     it("replaces existing tasks", () => {
       const initialTasks = [
-        { id: "task-1", title: "Task 1", status: "backlog", level: "task" },
+        createMockTaskSummary({ id: "task-1", title: "Task 1", status: "backlog" }),
       ];
       const newTasks = [
-        { id: "task-2", title: "Task 2", status: "done", level: "task" },
+        createMockTaskSummary({ id: "task-2", title: "Task 2", status: "done" }),
       ];
 
       useTaskStore.getState().setTasks(initialTasks);
@@ -67,7 +67,7 @@ describe("taskStore", () => {
 
     it("sets the selected task details when provided", () => {
       const taskWithRelations = createMockTaskWithRelations({
-        task: createMockTask({ id: "task-123", title: "Selected Task" }),
+        task: { id: "task-123", title: "Selected Task" },
       });
 
       useTaskStore.getState().selectTask("task-123", taskWithRelations);
