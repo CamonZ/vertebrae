@@ -49,8 +49,8 @@ pub struct TaskUpdate {
     pub set_started_at_if_null: bool,
     /// Workflow ID to assign (if Some)
     pub workflow_id: Option<Option<surrealdb::sql::Thing>>,
-    /// Current step in the workflow (if Some)
-    pub current_step: Option<Option<usize>>,
+    /// Current step ID in the workflow (if Some)
+    pub current_step_id: Option<Option<surrealdb::sql::Thing>>,
 }
 
 impl TaskUpdate {
@@ -144,21 +144,21 @@ impl TaskUpdate {
         self
     }
 
-    /// Assign the task to a workflow at a specific step
+    /// Assign the task to a workflow with a specific step
     pub fn with_workflow(
         mut self,
         workflow_id: surrealdb::sql::Thing,
-        current_step: usize,
+        step_id: surrealdb::sql::Thing,
     ) -> Self {
         self.workflow_id = Some(Some(workflow_id));
-        self.current_step = Some(Some(current_step));
+        self.current_step_id = Some(Some(step_id));
         self
     }
 
     /// Remove workflow assignment from the task
     pub fn clear_workflow(mut self) -> Self {
         self.workflow_id = Some(None);
-        self.current_step = Some(None);
+        self.current_step_id = Some(None);
         self
     }
 
@@ -177,7 +177,7 @@ impl TaskUpdate {
             || self.set_started_at
             || self.set_started_at_if_null
             || self.workflow_id.is_some()
-            || self.current_step.is_some()
+            || self.current_step_id.is_some()
     }
 }
 
@@ -266,20 +266,17 @@ impl<'a> TaskRepository<'a> {
             ""
         };
 
-        // Build workflow clause - tasks always have workflow_id, current_step, and optionally current_step_id
+        // Build workflow clause - tasks have workflow_id and optionally current_step_id
         let (workflow_clause, workflow_id, current_step_id) = match &task.workflow_id {
             Some(wf_id) => {
                 let clause = match &task.current_step_id {
-                    Some(_) => {
-                        ", workflow_id = $workflow_id, current_step = $current_step, current_step_id = $current_step_id"
-                    }
-                    None => ", workflow_id = $workflow_id, current_step = $current_step",
+                    Some(_) => ", workflow_id = $workflow_id, current_step_id = $current_step_id",
+                    None => ", workflow_id = $workflow_id",
                 };
                 (clause, Some(wf_id.clone()), task.current_step_id.clone())
             }
             None => ("", None, None),
         };
-        let current_step = task.current_step.unwrap_or(0);
 
         let query = format!(
             r#"CREATE task:{} SET
@@ -300,9 +297,7 @@ impl<'a> TaskRepository<'a> {
             query_builder = query_builder.bind(("description", desc));
         }
         if let Some(wf_id) = workflow_id {
-            query_builder = query_builder
-                .bind(("workflow_id", wf_id))
-                .bind(("current_step", current_step));
+            query_builder = query_builder.bind(("workflow_id", wf_id));
             if let Some(step_id) = current_step_id {
                 query_builder = query_builder.bind(("current_step_id", step_id));
             }
@@ -550,10 +545,12 @@ impl<'a> TaskRepository<'a> {
             }
         }
 
-        if let Some(current_step_opt) = &updates.current_step {
-            match current_step_opt {
-                Some(step) => field_updates.push(format!("current_step = {}", step)),
-                None => field_updates.push("current_step = NONE".to_string()),
+        if let Some(current_step_id_opt) = &updates.current_step_id {
+            match current_step_id_opt {
+                Some(step_id) => {
+                    field_updates.push(format!("current_step_id = {}", step_id));
+                }
+                None => field_updates.push("current_step_id = NONE".to_string()),
             }
         }
 
@@ -659,8 +656,9 @@ impl<'a> TaskRepository<'a> {
             workflow_id.id.to_raw()
         );
         // Use parameter binding for the workflow_id to ensure proper serialization
+        // Note: current_step_id should be set separately via update_current_step_id after assignment
         let query = format!(
-            "UPDATE task:{} SET workflow_id = $workflow_id, current_step = 0, updated_at = time::now()",
+            "UPDATE task:{} SET workflow_id = $workflow_id, updated_at = time::now()",
             task_id
         );
         trace!("Assign workflow query: {}", query);
@@ -673,7 +671,7 @@ impl<'a> TaskRepository<'a> {
 
     /// Remove workflow assignment from a task.
     ///
-    /// Clears both workflow_id and current_step fields.
+    /// Clears both workflow_id and current_step_id fields.
     ///
     /// # Arguments
     ///
@@ -685,28 +683,8 @@ impl<'a> TaskRepository<'a> {
     pub async fn unassign_workflow(&self, task_id: &str) -> DbResult<()> {
         debug!("Unassigning workflow from task {}", task_id);
         let query = format!(
-            "UPDATE task:{} SET workflow_id = NONE, current_step = NONE, updated_at = time::now()",
+            "UPDATE task:{} SET workflow_id = NONE, current_step_id = NONE, updated_at = time::now()",
             task_id
-        );
-        self.client.query(&query).await?;
-        Ok(())
-    }
-
-    /// Update the current step of a task in its workflow.
-    ///
-    /// # Arguments
-    ///
-    /// * `task_id` - The task ID to update
-    /// * `step` - The new step index (0-based)
-    ///
-    /// # Errors
-    ///
-    /// Returns `DbError::Query` if the database operation fails.
-    pub async fn update_current_step(&self, task_id: &str, step: usize) -> DbResult<()> {
-        debug!("Updating task {} to step {}", task_id, step);
-        let query = format!(
-            "UPDATE task:{} SET current_step = {}, updated_at = time::now()",
-            task_id, step
         );
         self.client.query(&query).await?;
         Ok(())
@@ -1433,7 +1411,6 @@ mod tests {
             retrieved.workflow_id.is_some(),
             "Task should have workflow_id"
         );
-        assert_eq!(retrieved.current_step, Some(0), "Task should be at step 0");
 
         cleanup(&temp_dir);
     }
@@ -1464,8 +1441,8 @@ mod tests {
             "Task should not have workflow_id after unassign"
         );
         assert!(
-            retrieved.current_step.is_none(),
-            "Task should not have current_step after unassign"
+            retrieved.current_step_id.is_none(),
+            "Task should not have current_step_id after unassign"
         );
 
         cleanup(&temp_dir);

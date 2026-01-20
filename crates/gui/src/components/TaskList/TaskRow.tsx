@@ -6,26 +6,28 @@ interface TaskRowProps {
   isSelected?: boolean;
   onClick?: (task: TaskSummary) => void;
   columnWidths?: Record<string, number>;
+  hideStatus?: boolean;
 }
 
 /**
- * Get status badge styling based on task status.
- * Status is now a string that can be either:
- * - A step name (e.g., 'backlog', 'in_progress', 'done')
- * - A workflow:step format (e.g., 'default:in_progress')
+ * Get step badge styling based on step name.
  */
-function getStatusStyles(status: string): { bg: string; text: string; glow?: string } {
-  // Extract step name from potential workflow:step format
-  const stepName = status.includes(':') ? status.split(':').pop() ?? status : status;
+function getStepStyles(stepName: string | null): { bg: string; text: string; glow?: string } {
+  if (!stepName) {
+    return { bg: 'bg-bg-tertiary', text: 'text-text-muted' };
+  }
   
-  switch (stepName) {
+  const normalizedStep = stepName.toLowerCase();
+  switch (normalizedStep) {
     case 'backlog':
       return { bg: 'bg-bg-tertiary', text: 'text-text-muted' };
     case 'todo':
       return { bg: 'bg-primary/10', text: 'text-primary' };
     case 'in_progress':
+    case 'in progress':
       return { bg: 'bg-warning/10', text: 'text-warning', glow: 'shadow-[0_0_8px_rgba(245,158,11,0.3)]' };
     case 'pending_review':
+    case 'review':
       return { bg: 'bg-info/10', text: 'text-info' };
     case 'done':
       return { bg: 'bg-success/10', text: 'text-success' };
@@ -37,30 +39,13 @@ function getStatusStyles(status: string): { bg: string; text: string; glow?: str
 }
 
 /**
- * Format status for display.
- * Shows the step name in a human-readable format.
+ * Format step name for display.
  */
-function formatStatus(status: string): string {
-  // Extract step name from potential workflow:step format
-  const stepName = status.includes(':') ? status.split(':').pop() ?? status : status;
+function formatStepName(stepName: string | null): string {
+  if (!stepName) return '-';
   
-  switch (stepName) {
-    case 'backlog':
-      return 'Backlog';
-    case 'todo':
-      return 'Todo';
-    case 'in_progress':
-      return 'Active';
-    case 'pending_review':
-      return 'Review';
-    case 'done':
-      return 'Done';
-    case 'rejected':
-      return 'Rejected';
-    default:
-      // For custom status names, capitalize first letter
-      return stepName.charAt(0).toUpperCase() + stepName.slice(1).replace(/_/g, ' ');
-  }
+  // Capitalize first letter and replace underscores with spaces
+  return stepName.charAt(0).toUpperCase() + stepName.slice(1).replace(/_/g, ' ');
 }
 
 /**
@@ -126,7 +111,7 @@ function truncateId(id: string): string {
  * TaskRow component displays a single task in the task list.
  * Features neural-inspired styling with glowing active states and resizable columns.
  */
-export function TaskRow({ task, isSelected = false, onClick, columnWidths = {} }: TaskRowProps) {
+export function TaskRow({ task, isSelected = false, onClick, columnWidths = {}, hideStatus = false }: TaskRowProps) {
   const handleClick = () => {
     onClick?.(task);
   };
@@ -138,10 +123,9 @@ export function TaskRow({ task, isSelected = false, onClick, columnWidths = {} }
     }
   };
 
-  const statusStyles = getStatusStyles(task.status);
+  const stepStyles = getStepStyles(task.step_name);
   const levelStyles = getLevelStyles(task.level);
   const priorityIndicator = getPriorityIndicator(task.priority);
-  const isActive = task.status === 'in_progress';
 
   return (
     <tr
@@ -180,13 +164,6 @@ export function TaskRow({ task, isSelected = false, onClick, columnWidths = {} }
         className="px-4 py-3"
       >
         <div className="flex items-center gap-2 overflow-hidden">
-          {/* Active pulse indicator */}
-          {isActive && (
-            <span className="relative flex h-2 w-2 shrink-0">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-warning opacity-75" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-warning" />
-            </span>
-          )}
           <span className={`break-words text-sm font-medium ${isSelected ? 'text-text-primary' : 'text-text-primary group-hover:text-text-primary'}`}>
             {task.title}
           </span>
@@ -209,11 +186,22 @@ export function TaskRow({ task, isSelected = false, onClick, columnWidths = {} }
         </span>
       </td>
 
-      {/* Status column */}
-      <td style={{ width: columnWidths['status'] ? `${columnWidths['status']}px` : '90px' }} className="whitespace-nowrap px-2 py-3">
-        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${statusStyles.bg} ${statusStyles.text} ${statusStyles.glow ?? ''}`}>
-          {formatStatus(task.status)}
-        </span>
+      {/* Workflow/Step column */}
+      <td style={{ width: columnWidths['status'] ? `${columnWidths['status']}px` : '180px' }} className="whitespace-nowrap px-2 py-3">
+        {hideStatus ? (
+          <span className="text-text-muted">-</span>
+        ) : (
+          <div className="flex items-center gap-1.5">
+            {task.workflow_name && (
+              <span className="inline-flex items-center rounded border border-border bg-bg-tertiary px-1.5 py-0.5 text-[10px] font-medium text-text-secondary">
+                {task.workflow_name}
+              </span>
+            )}
+            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${stepStyles.bg} ${stepStyles.text} ${stepStyles.glow ?? ''}`}>
+              {formatStepName(task.step_name)}
+            </span>
+          </div>
+        )}
       </td>
 
       {/* Priority column */}

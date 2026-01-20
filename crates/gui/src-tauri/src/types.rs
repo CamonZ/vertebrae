@@ -168,6 +168,10 @@ pub struct TaskSummary {
     pub needs_human_review: Option<bool>,
     /// When the task was created (ISO 8601 format)
     pub created_at: String,
+    /// Workflow name (if task is assigned to a workflow)
+    pub workflow_name: Option<String>,
+    /// Current step name (if task has a current step in workflow)
+    pub step_name: Option<String>,
 }
 
 impl From<vertebrae_db::TaskSummary> for TaskSummary {
@@ -181,6 +185,8 @@ impl From<vertebrae_db::TaskSummary> for TaskSummary {
             tags: summary.tags,
             needs_human_review: summary.needs_human_review,
             created_at: summary.created_at.to_rfc3339(),
+            workflow_name: summary.workflow_name,
+            step_name: summary.step_name,
         }
     }
 }
@@ -222,9 +228,7 @@ pub struct Task {
     pub rejection_reason: Option<String>,
     /// Workflow ID (string form)
     pub workflow_id: Option<String>,
-    /// Current step in workflow (0-indexed) - legacy, prefer current_step_id
-    pub current_step: Option<u32>,
-    /// Current step ID (string form) - preferred for positioning
+    /// Current step ID (string form) - used for positioning
     pub current_step_id: Option<String>,
 }
 
@@ -251,7 +255,6 @@ impl From<vertebrae_db::Task> for Task {
             revision_feedback: task.revision_feedback,
             rejection_reason: task.rejection_reason,
             workflow_id: task.workflow_id.map(|t| t.id.to_raw()),
-            current_step: task.current_step.map(|s| s as u32),
             current_step_id: task.current_step_id.map(|t| t.id.to_raw()),
         }
     }

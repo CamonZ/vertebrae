@@ -387,7 +387,7 @@ pub trait WorkflowService: Send + Sync {
     async fn get_workflow_info(
         &self,
         workflow_id: &Thing,
-        current_step: usize,
+        current_step_id: Option<&Thing>,
     ) -> ServiceResult<WorkflowInfo>;
 
     /// Migrate tasks to the default workflow
@@ -683,7 +683,7 @@ impl WorkflowService for DefaultWorkflowService {
         }
 
         // Verify workflow exists
-        let workflow = self
+        let _workflow = self
             .db
             .workflows()
             .get(&workflow_id)
@@ -691,21 +691,27 @@ impl WorkflowService for DefaultWorkflowService {
             .ok_or_else(|| ServiceError::workflow_not_found(&workflow_id))?;
 
         // Get the first step
-        let step_names = self.get_workflow_steps(&workflow).await?;
-        if step_names.is_empty() {
-            return Err(ServiceError::validation_failed("Workflow has no steps"));
-        }
-        let first_step_name = step_names[0].clone();
+        let workflow_thing = Thing::from(("workflow", workflow_id.as_str()));
+        let steps = self.db.steps().list_by_workflow(&workflow_thing).await?;
+        let first_step = steps
+            .into_iter()
+            .find(|s| s.order == 0)
+            .ok_or_else(|| ServiceError::validation_failed("Workflow has no steps"))?;
+        let first_step_name = first_step.name.clone();
 
         // Assign workflow to task
-        let workflow_thing = Thing::from(("workflow", workflow_id.as_str()));
         self.db
             .tasks()
             .assign_workflow(&task_id, &workflow_thing)
             .await?;
 
-        // Set current step to 0
-        self.db.tasks().update_current_step(&task_id, 0).await?;
+        // Set current_step_id to first step
+        if let Some(ref step_id) = first_step.id {
+            self.db
+                .tasks()
+                .update_current_step_id(&task_id, step_id)
+                .await?;
+        }
 
         // Fire mutation callback
         self.on_mutation(WorkflowMutationEvent::TaskAssignedToWorkflow {
@@ -754,23 +760,31 @@ impl WorkflowService for DefaultWorkflowService {
             ServiceError::validation_failed("Task does not have a workflow assigned")
         })?;
 
-        let current_step = task.current_step.ok_or_else(|| {
+        // Get current step from current_step_id
+        let current_step_id = task.current_step_id.clone().ok_or_else(|| {
             ServiceError::validation_failed("Task does not have a current step set")
         })?;
 
         let workflow_id = workflow_thing.id.to_raw();
 
-        // Get workflow
-        let workflow = self
+        // Get current step to find its order
+        let current_step_id_str = current_step_id.id.to_raw();
+        let current_step = self
             .db
-            .workflows()
-            .get(&workflow_id)
+            .steps()
+            .get(&current_step_id_str)
             .await?
-            .ok_or_else(|| ServiceError::workflow_not_found(&workflow_id))?;
+            .ok_or_else(|| {
+                ServiceError::InvalidInput(format!(
+                    "Current step not found: {}",
+                    current_step_id_str
+                ))
+            })?;
+        let from_step = current_step.order as usize;
 
-        let step_names = self.get_workflow_steps(&workflow).await?;
-        let total_steps = step_names.len();
-        let from_step = current_step as usize;
+        // Get all steps in workflow
+        let steps = self.db.steps().list_by_workflow(&workflow_thing).await?;
+        let total_steps = steps.len();
 
         // Check if we're at the last step
         if from_step >= total_steps - 1 {
@@ -780,13 +794,23 @@ impl WorkflowService for DefaultWorkflowService {
         }
 
         let to_step = from_step + 1;
-        let step_name = step_names[to_step].clone();
 
-        // Update task step
-        self.db
-            .tasks()
-            .update_current_step(&task_id, to_step)
-            .await?;
+        // Find the next step by order
+        let next_step = steps
+            .into_iter()
+            .find(|s| s.order == to_step as i32)
+            .ok_or_else(|| {
+                ServiceError::InvalidInput(format!("Next step at order {} not found", to_step))
+            })?;
+        let step_name = next_step.name.clone();
+
+        // Update current_step_id to next step
+        if let Some(ref step_id) = next_step.id {
+            self.db
+                .tasks()
+                .update_current_step_id(&task_id, step_id)
+                .await?;
+        }
 
         // Fire mutation callback
         self.on_mutation(WorkflowMutationEvent::TaskStepAdvanced {
@@ -824,23 +848,31 @@ impl WorkflowService for DefaultWorkflowService {
             ServiceError::validation_failed("Task does not have a workflow assigned")
         })?;
 
-        let current_step = task.current_step.ok_or_else(|| {
+        // Get current step from current_step_id
+        let current_step_id = task.current_step_id.clone().ok_or_else(|| {
             ServiceError::validation_failed("Task does not have a current step set")
         })?;
 
         let workflow_id = workflow_thing.id.to_raw();
 
-        // Get workflow
-        let workflow = self
+        // Get current step to find its order
+        let current_step_id_str = current_step_id.id.to_raw();
+        let current_step = self
             .db
-            .workflows()
-            .get(&workflow_id)
+            .steps()
+            .get(&current_step_id_str)
             .await?
-            .ok_or_else(|| ServiceError::workflow_not_found(&workflow_id))?;
+            .ok_or_else(|| {
+                ServiceError::InvalidInput(format!(
+                    "Current step not found: {}",
+                    current_step_id_str
+                ))
+            })?;
+        let from_step = current_step.order as usize;
 
-        let step_names = self.get_workflow_steps(&workflow).await?;
-        let total_steps = step_names.len();
-        let from_step = current_step as usize;
+        // Get all steps in workflow
+        let steps = self.db.steps().list_by_workflow(&workflow_thing).await?;
+        let total_steps = steps.len();
 
         // Check if we're at the first step
         if from_step == 0 {
@@ -850,13 +882,23 @@ impl WorkflowService for DefaultWorkflowService {
         }
 
         let to_step = from_step - 1;
-        let step_name = step_names[to_step].clone();
 
-        // Update task step
-        self.db
-            .tasks()
-            .update_current_step(&task_id, to_step)
-            .await?;
+        // Find the previous step by order
+        let prev_step = steps
+            .into_iter()
+            .find(|s| s.order == to_step as i32)
+            .ok_or_else(|| {
+                ServiceError::InvalidInput(format!("Previous step at order {} not found", to_step))
+            })?;
+        let step_name = prev_step.name.clone();
+
+        // Update current_step_id to previous step
+        if let Some(ref step_id) = prev_step.id {
+            self.db
+                .tasks()
+                .update_current_step_id(&task_id, step_id)
+                .await?;
+        }
 
         // Fire mutation callback
         self.on_mutation(WorkflowMutationEvent::TaskStepRetreated {
@@ -923,7 +965,7 @@ impl WorkflowService for DefaultWorkflowService {
     async fn get_workflow_info(
         &self,
         workflow_id: &Thing,
-        current_step: usize,
+        current_step_id: Option<&Thing>,
     ) -> ServiceResult<WorkflowInfo> {
         let id = workflow_id.id.to_raw();
 
@@ -936,7 +978,7 @@ impl WorkflowService for DefaultWorkflowService {
                     id,
                     name: "Deleted Workflow".to_string(),
                     current_step_name: "Unknown".to_string(),
-                    current_step_index: current_step,
+                    current_step_index: 0,
                     total_steps: 0,
                     prev_step_name: None,
                     next_step_name: None,
@@ -952,24 +994,35 @@ impl WorkflowService for DefaultWorkflowService {
                 id,
                 name: workflow.name,
                 current_step_name: "Unknown".to_string(),
-                current_step_index: current_step,
+                current_step_index: 0,
                 total_steps: 0,
                 prev_step_name: None,
                 next_step_name: None,
             });
         }
 
-        let step_idx = current_step.min(step_names.len() - 1);
-        let current_step_name = step_names[step_idx].clone();
+        let current_step_index = if let Some(current_step_id) = current_step_id {
+            let current_step_id_str = current_step_id.id.to_raw();
+            if let Some(current_step) = self.db.steps().get(&current_step_id_str).await? {
+                let order = current_step.order as usize;
+                order.min(step_names.len() - 1)
+            } else {
+                0
+            }
+        } else {
+            0
+        };
 
-        let prev_step_name = if step_idx > 0 {
-            Some(step_names[step_idx - 1].clone())
+        let current_step_name = step_names[current_step_index].clone();
+
+        let prev_step_name = if current_step_index > 0 {
+            Some(step_names[current_step_index - 1].clone())
         } else {
             None
         };
 
-        let next_step_name = if step_idx < step_names.len() - 1 {
-            Some(step_names[step_idx + 1].clone())
+        let next_step_name = if current_step_index < step_names.len() - 1 {
+            Some(step_names[current_step_index + 1].clone())
         } else {
             None
         };
@@ -978,7 +1031,7 @@ impl WorkflowService for DefaultWorkflowService {
             id,
             name: workflow.name,
             current_step_name,
-            current_step_index: current_step,
+            current_step_index,
             total_steps,
             prev_step_name,
             next_step_name,

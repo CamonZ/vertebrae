@@ -158,7 +158,7 @@ impl TransitionToCommand {
 
         // Get current workflow info
         let from_workflow = task.workflow_id.as_ref().map(|t| t.id.to_raw());
-        let from_step = task.current_step.map(|s| format!("step_{}", s));
+        let from_step = task.current_step_id.as_ref().map(|t| t.id.to_raw());
 
         // Get the database to validate the transition
         let db = service.database();
@@ -178,129 +178,76 @@ impl TransitionToCommand {
         };
 
         // Validate the transition if not skipped
-        if !self.skip_validation {
-            if let Some(current_wf_id) = &from_workflow {
-                // Check if transition is allowed
-                let allowed = db
-                    .workflow_transitions()
-                    .exists(current_wf_id, &target_workflow_id)
-                    .await?;
+        if !self.skip_validation
+            && let Some(current_wf_id) = &from_workflow
+        {
+            // Check if transition is allowed
+            let allowed = db
+                .workflow_transitions()
+                .exists(current_wf_id, &target_workflow_id)
+                .await?;
 
-                if !allowed && current_wf_id != &target_workflow_id {
-                    return Err(ServiceError::InvalidInput(format!(
-                        "Transition from workflow '{}' to '{}' is not allowed. \
-                         Use --skip-validation to bypass this check.",
-                        current_wf_id, target_workflow_id
-                    )));
-                }
+            if !allowed && current_wf_id != &target_workflow_id {
+                return Err(ServiceError::InvalidInput(format!(
+                    "Transition from workflow '{}' to '{}' is not allowed. \
+                     Use --skip-validation to bypass this check.",
+                    current_wf_id, target_workflow_id
+                )));
+            }
 
-                // If staying within the same workflow, validate step transition
-                if current_wf_id == &target_workflow_id
-                    && let Some(target_step_name) = &parsed.step
-                {
-                    let workflow_thing =
-                        surrealdb::sql::Thing::from(("workflow", target_workflow_id.as_str()));
-                    let steps = db.steps().list_by_workflow(&workflow_thing).await?;
+            // If staying within the same workflow, validate step transition
+            if current_wf_id == &target_workflow_id
+                && let Some(target_step_name) = &parsed.step
+            {
+                let workflow_thing =
+                    surrealdb::sql::Thing::from(("workflow", target_workflow_id.as_str()));
+                let steps = db.steps().list_by_workflow(&workflow_thing).await?;
 
-                    // Find current step
-                    let current_step_index = task.current_step.unwrap_or(0);
-                    let current_step = steps.iter().find(|s| s.order == current_step_index as i32);
+                // Invariant: task always has current_step_id
+                let current_step_id = task.current_step_id.as_ref().ok_or_else(|| {
+                    ServiceError::InvalidInput(format!(
+                        "Task {} is missing current_step_id (invariant violation)",
+                        id
+                    ))
+                })?;
+                let current_step = steps
+                    .iter()
+                    .find(|s| s.id.as_ref() == Some(current_step_id));
 
-                    // Find target step
-                    let target_step = steps.iter().find(|s| s.name == *target_step_name);
+                // Find target step
+                let target_step = steps.iter().find(|s| s.name == *target_step_name);
 
-                    if let (Some(current), Some(target)) = (current_step, target_step) {
-                        // Check if target is in current step's transitions_to
-                        let target_id = target.id.as_ref();
-                        let is_valid_transition = target_id.is_some()
-                            && current.transitions_to.iter().any(|t| Some(t) == target_id);
+                if let (Some(current), Some(target)) = (current_step, target_step) {
+                    // Check if target is in current step's transitions_to
+                    let target_id = target.id.as_ref();
+                    let is_valid_transition = target_id.is_some()
+                        && current.transitions_to.iter().any(|t| Some(t) == target_id);
 
-                        // Also allow transitioning to the same step
-                        let is_same_step = current.name == target.name;
+                    // Also allow transitioning to the same step
+                    let is_same_step = current.name == target.name;
 
-                        if !is_valid_transition && !is_same_step {
-                            // Get valid transition names for the error message
-                            let valid_transitions: Vec<String> = current
-                                .transitions_to
-                                .iter()
-                                .filter_map(|t| steps.iter().find(|s| s.id.as_ref() == Some(t)))
-                                .map(|s| s.name.clone())
-                                .collect();
+                    if !is_valid_transition && !is_same_step {
+                        // Get valid transition names for the error message
+                        let valid_transitions: Vec<String> = current
+                            .transitions_to
+                            .iter()
+                            .filter_map(|t| steps.iter().find(|s| s.id.as_ref() == Some(t)))
+                            .map(|s| s.name.clone())
+                            .collect();
 
-                            let hint = if valid_transitions.is_empty() {
-                                "This step has no valid transitions (terminal state). Use 'vtb list' to see other tasks.".to_string()
-                            } else {
-                                format!(
-                                    "Valid transitions from '{}': {}",
-                                    current.name,
-                                    valid_transitions.join(", ")
-                                )
-                            };
+                        let hint = if valid_transitions.is_empty() {
+                            "This step has no valid transitions (terminal state). Use 'vtb list' to see other tasks.".to_string()
+                        } else {
+                            format!(
+                                "Valid transitions from '{}': {}",
+                                current.name,
+                                valid_transitions.join(", ")
+                            )
+                        };
 
-                            return Err(ServiceError::InvalidInput(format!(
-                                "Invalid step transition from '{}' to '{}'. {}",
-                                current.name, target_step_name, hint
-                            )));
-                        }
-                    }
-                }
-            } else {
-                // Task has no workflow - derive current status and validate
-                // Map the current status to a step in the target workflow
-                if let Some(target_step_name) = &parsed.step {
-                    // Get derived status from service and extract step name
-                    let derived_status = service.get_derived_status(&id).await?;
-                    let current_status = derived_status.split(':').next_back().unwrap_or("backlog");
-                    let workflow_thing =
-                        surrealdb::sql::Thing::from(("workflow", target_workflow_id.as_str()));
-                    let steps = db.steps().list_by_workflow(&workflow_thing).await?;
-
-                    // Find current step by matching status name
-                    let current_step = steps.iter().find(|s| s.name == current_status);
-
-                    // Find target step
-                    let target_step = steps.iter().find(|s| s.name == *target_step_name);
-
-                    if let (Some(current), Some(target)) = (current_step, target_step) {
-                        // Check if target is in current step's transitions_to
-                        let target_id = target.id.as_ref();
-                        let is_valid_transition = target_id.is_some()
-                            && current.transitions_to.iter().any(|t| Some(t) == target_id);
-
-                        // Also allow transitioning to the same step
-                        let is_same_step = current.name == target.name;
-
-                        if !is_valid_transition && !is_same_step {
-                            // Get valid transition names for the error message
-                            let valid_transitions: Vec<String> = current
-                                .transitions_to
-                                .iter()
-                                .filter_map(|t| steps.iter().find(|s| s.id.as_ref() == Some(t)))
-                                .map(|s| s.name.clone())
-                                .collect();
-
-                            let hint = if valid_transitions.is_empty() {
-                                "This step has no valid transitions (terminal state). Use 'vtb list' to see other tasks.".to_string()
-                            } else {
-                                format!(
-                                    "Valid transitions from '{}': {}",
-                                    current.name,
-                                    valid_transitions.join(", ")
-                                )
-                            };
-
-                            return Err(ServiceError::InvalidInput(format!(
-                                "Invalid status transition from '{}' to '{}'. {}",
-                                current.name, target_step_name, hint
-                            )));
-                        }
-                    } else if current_step.is_none() {
-                        // Current status doesn't map to any step in the workflow
-                        // This could be 'rejected' which isn't in the default workflow
                         return Err(ServiceError::InvalidInput(format!(
-                            "Current status '{}' has no corresponding step in workflow '{}'. \
-                             Use --skip-validation to bypass this check.",
-                            current_status, target_workflow_id
+                            "Invalid step transition from '{}' to '{}'. {}",
+                            current.name, target_step_name, hint
                         )));
                     }
                 }
@@ -349,12 +296,7 @@ impl TransitionToCommand {
                 .list_by_workflow(&workflow_thing_for_steps)
                 .await?;
             if let Some(step) = steps.iter().find(|s| s.name == *step_name) {
-                // Update current_step (index)
-                service
-                    .update_current_step(&id, step.order as usize)
-                    .await?;
                 // Update current_step_id (reference to step record)
-                // Status is now derived from current_step_id.name
                 if let Some(ref step_id) = step.id {
                     db.tasks().update_current_step_id(&id, step_id).await?;
                 }

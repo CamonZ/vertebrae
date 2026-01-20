@@ -396,7 +396,6 @@ impl ImportCommand {
                         .workflow_id
                         .as_ref()
                         .map(|id| make_thing("workflow", id)),
-                    current_step: None,
                     current_step_id: task
                         .current_step_id
                         .as_ref()

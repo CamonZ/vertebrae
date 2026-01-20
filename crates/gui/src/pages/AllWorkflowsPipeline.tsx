@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, memo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import {
   ReactFlow,
   Controls,
@@ -8,13 +8,11 @@ import {
   useEdgesState,
   type Node,
   type NodeTypes,
-  type NodeProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
 import {
   commands,
-  type TaskLevel,
   type TaskWithRelations,
   type Step,
 } from "../bindings";
@@ -23,182 +21,20 @@ import { useWorkflowChangeListener } from "../hooks/useWorkflowChangeListener";
 import { useTaskChangeListener } from "../hooks/useTaskChangeListener";
 import { useToastStore } from "../stores";
 import { groupTasksByStep } from "../utils";
-import { StepNode, type StepNodeData } from "../components/WorkflowPipeline";
 import {
+  StepNode,
+  type StepNodeData,
   WorkflowZoneNode,
   type WorkflowZoneNodeData,
+  TaskZoneNode,
+  type TaskZoneNodeData,
+  LAYOUT_CONSTANTS,
+  calculateWorkflowZoneWidth,
+  calculateWorkflowZoneHeight,
 } from "../components/WorkflowPipeline";
 import { TaskDetailPanel } from "../components/TaskDetail";
 import { StepDetailPanel } from "../components/StepDetail";
 import { FilteredTasksPanel } from "../components/FilteredTasks/FilteredTasksPanel";
-
-/**
- * Zone node data type for task containers within workflow zones
- */
-type TaskZoneNodeData = {
-  label: string;
-  tasks: TaskWithRelations[];
-  executionState?: Map<
-    string,
-    { currentStep: string | number; status: string; error?: string }
-  >;
-  onTaskClick?: (taskId: string) => void;
-  selectedTaskId?: string | null;
-  onZoneClick?: (step: Step) => void;
-  step?: Step;
-  isZoneActive?: boolean;
-  [key: string]: unknown;
-};
-
-/**
- * Custom zone node component - scrollable container for tasks
- */
-const TaskZoneNode = memo(function TaskZoneNode({
-  data,
-}: NodeProps<Node<TaskZoneNodeData>>) {
-  const {
-    label,
-    tasks = [],
-    executionState,
-    onTaskClick,
-    selectedTaskId,
-    onZoneClick,
-    step,
-  } = data;
-
-  // Determine if this zone is active (currently showing filtered tasks panel)
-  const isZoneActive = data.isZoneActive ?? false;
-
-  const getStatusColor = (status: string, isSelected: boolean) => {
-    if (isSelected) {
-      return "border-primary bg-primary/20 ring-1 ring-primary/50";
-    }
-    switch (status) {
-      case "in_progress":
-        return "border-accent bg-accent/10";
-      case "completed":
-      case "done":
-        return "border-success/50 bg-success/5";
-      case "failed":
-        return "border-error bg-error/10";
-      default:
-        return "border-border bg-bg-tertiary";
-    }
-  };
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case "in_progress":
-        return "⟳";
-      case "completed":
-      case "done":
-        return "✓";
-      case "failed":
-        return "✕";
-      default:
-        return "○";
-    }
-  };
-
-  const getLevelDotColor = (level: TaskLevel) => {
-    switch (level) {
-      case "epic":
-        return "bg-info";
-      case "ticket":
-        return "bg-primary";
-      case "task":
-        return "bg-text-secondary";
-      default:
-        return "bg-text-muted";
-    }
-  };
-
-  const handleZoneClick = () => {
-    if (step && onZoneClick) {
-      onZoneClick(step);
-    }
-  };
-
-  // Determine title styles based on active state (hover via CSS)
-  const getTitleClassName = () => {
-    const base =
-      "text-xs font-semibold uppercase tracking-wider mb-2 px-1 transition-colors cursor-pointer rounded text-left";
-    if (isZoneActive) {
-      return `${base} text-primary font-bold`;
-    }
-    return `${base} text-text-muted hover:text-warning`;
-  };
-
-  return (
-    <div className="flex flex-col w-[280px] h-[280px] text-left">
-      <button
-        type="button"
-        onClick={handleZoneClick}
-        className={getTitleClassName()}
-      >
-        {label}
-      </button>
-      <div className="flex-1 overflow-y-auto overflow-x-hidden space-y-1.5 pr-1 scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
-        {tasks.map((tr) => {
-          const execState = executionState?.get(tr.task.id!);
-          const status =
-            tr.task.status === "done" || tr.task.status === "rejected"
-              ? "done"
-              : execState?.status || "waiting";
-          const isSelected = selectedTaskId === tr.task.id;
-
-          return (
-            <button
-              key={tr.task.id}
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onTaskClick?.(tr.task.id!);
-              }}
-              className={`w-full text-left rounded-lg border p-2 transition-all duration-200 ${getStatusColor(status, isSelected)} hover:border-primary/50 cursor-pointer`}
-            >
-              <div className="flex items-start gap-2">
-                <span
-                  className={`flex-shrink-0 text-xs font-bold ${
-                    status === "in_progress"
-                      ? "animate-spin text-accent"
-                      : status === "done"
-                        ? "text-success"
-                        : status === "failed"
-                          ? "text-error"
-                          : "text-text-muted"
-                  }`}
-                >
-                  {getStatusIcon(status)}
-                </span>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <span
-                      className={`flex-shrink-0 w-2 h-2 rounded-full ${getLevelDotColor(tr.task.level)}`}
-                      title={tr.task.level}
-                    />
-                    <p
-                      className="truncate text-xs font-medium text-text-primary"
-                      title={tr.task.title}
-                    >
-                      {tr.task.title}
-                    </p>
-                  </div>
-                  <code className="block truncate font-mono text-[10px] text-text-muted">
-                    {(tr.task.id ?? "").slice(0, 8)}
-                  </code>
-                </div>
-              </div>
-            </button>
-          );
-        })}
-        {tasks.length === 0 && (
-          <div className="text-xs text-text-muted italic px-1">No tasks</div>
-        )}
-      </div>
-    </div>
-  );
-});
 
 /**
  * Node type mapping for React Flow
@@ -208,36 +44,6 @@ const nodeTypes: NodeTypes = {
   taskZoneNode: TaskZoneNode,
   workflowZoneNode: WorkflowZoneNode,
 };
-
-/**
- * Layout constants
- */
-const NODE_SPACING_X = 320; // Horizontal spacing between step nodes
-const STEP_Y_OFFSET = 80; // Y offset for step nodes within workflow zone
-const TASK_ZONE_Y_OFFSET = 220; // Y offset for task zones within workflow zone
-const WORKFLOW_ZONE_PADDING = 40; // Padding around workflow zone content
-const WORKFLOW_ZONE_HEADER_HEIGHT = 80; // Height reserved for workflow header
-const WORKFLOW_ZONE_GAP = 60; // Vertical gap between workflow zones
-
-/**
- * Calculate the width needed for a workflow zone based on number of steps
- */
-function calculateWorkflowZoneWidth(stepCount: number): number {
-  if (stepCount === 0) return 400;
-  return stepCount * NODE_SPACING_X + WORKFLOW_ZONE_PADDING * 2;
-}
-
-/**
- * Calculate the height needed for a workflow zone
- */
-function calculateWorkflowZoneHeight(): number {
-  return (
-    WORKFLOW_ZONE_HEADER_HEIGHT +
-    TASK_ZONE_Y_OFFSET +
-    280 +
-    WORKFLOW_ZONE_PADDING
-  );
-}
 
 /**
  * AllWorkflowsPipeline displays all workflows in a single React Flow canvas.
@@ -431,8 +237,8 @@ export function AllWorkflowsPipeline() {
           id: `step-${workflowId}-${step.order}`,
           type: "stepNode",
           position: {
-            x: WORKFLOW_ZONE_PADDING + index * NODE_SPACING_X,
-            y: currentY + WORKFLOW_ZONE_HEADER_HEIGHT + STEP_Y_OFFSET,
+            x: LAYOUT_CONSTANTS.WORKFLOW_ZONE_PADDING + index * LAYOUT_CONSTANTS.NODE_SPACING_X,
+            y: currentY + LAYOUT_CONSTANTS.WORKFLOW_ZONE_HEADER_HEIGHT + LAYOUT_CONSTANTS.STEP_Y_OFFSET,
           },
           data: {
             step,
@@ -453,8 +259,8 @@ export function AllWorkflowsPipeline() {
           id: `task-zone-${workflowId}-${step.order}`,
           type: "taskZoneNode",
           position: {
-            x: WORKFLOW_ZONE_PADDING + index * NODE_SPACING_X - 9, // Center offset
-            y: currentY + WORKFLOW_ZONE_HEADER_HEIGHT + TASK_ZONE_Y_OFFSET,
+            x: LAYOUT_CONSTANTS.WORKFLOW_ZONE_PADDING + index * LAYOUT_CONSTANTS.NODE_SPACING_X - 9, // Center offset
+            y: currentY + LAYOUT_CONSTANTS.WORKFLOW_ZONE_HEADER_HEIGHT + LAYOUT_CONSTANTS.TASK_ZONE_Y_OFFSET,
           },
           data: {
             label: `${step.name} (${stepTasks.length})`,
@@ -477,7 +283,7 @@ export function AllWorkflowsPipeline() {
       });
 
       // Move to next workflow zone position
-      currentY += zoneHeight + WORKFLOW_ZONE_GAP;
+      currentY += zoneHeight + LAYOUT_CONSTANTS.WORKFLOW_ZONE_GAP;
     });
 
     return nodes;

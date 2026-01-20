@@ -2,7 +2,7 @@ import { createBrowserRouter, Outlet, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { AppShell } from "./components";
 import { useTheme } from "./hooks";
-import { ProjectSetupPage, TasksPage, WorkflowsPage, WorkflowDetailPage, AllWorkflowsPipeline } from "./pages";
+import { ProjectSetupPage, TasksPage, WorkflowsPage, AllWorkflowsPipeline } from "./pages";
 import { commands } from "./bindings";
 
 function RootLayout() {
@@ -101,14 +101,6 @@ export const router = createBrowserRouter([
         element: (
           <ProjectGuard>
             <AllWorkflowsPipeline />
-          </ProjectGuard>
-        ),
-      },
-      {
-        path: "workflow/:id",
-        element: (
-          <ProjectGuard>
-            <WorkflowDetailPage />
           </ProjectGuard>
         ),
       },

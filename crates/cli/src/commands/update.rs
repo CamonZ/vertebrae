@@ -305,7 +305,6 @@ mod tests {
             completed_at: None,
             id: None,
             workflow_id: None,
-            current_step: None,
             current_step_id,
         };
 
@@ -1144,7 +1143,6 @@ mod tests {
             completed_at: None,
             id: None,
             workflow_id: Some(workflow_id),
-            current_step: Some(1), // in_progress is at index 1 in default workflow
             current_step_id: Some(step_id),
         };
         service
@@ -1325,7 +1323,6 @@ mod tests {
             completed_at: None,
             id: None,
             workflow_id: None,
-            current_step: None,
             current_step_id: None,
         };
         service
@@ -2106,8 +2103,8 @@ mod tests {
             "Original",
             "task",
             "in_progress",
-            None,
-            &[],
+            Some("low"),
+            &["old"],
         )
         .await;
 

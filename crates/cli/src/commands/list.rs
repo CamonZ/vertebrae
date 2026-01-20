@@ -284,7 +284,9 @@ mod tests {
         }
         task.tags = tags_vec;
 
-        // Set up workflow step if status is not "backlog"
+        // Set up workflow and step
+        let default_workflow_id = surrealdb::sql::Thing::from(("workflow", "default"));
+        task.workflow_id = Some(default_workflow_id);
         if status != "backlog" {
             let step_id_str = format!("default_{}", status);
             let step_id = surrealdb::sql::Thing::from(("step", step_id_str.as_str()));
@@ -1183,7 +1185,9 @@ mod tests {
 
         let mut task = Task::new(title, level_enum).with_description(description);
 
-        // Set up workflow step if status is not "backlog"
+        // Set up workflow and step
+        let default_workflow_id = surrealdb::sql::Thing::from(("workflow", "default"));
+        task.workflow_id = Some(default_workflow_id);
         if status != "backlog" {
             let step_id_str = format!("default_{}", status);
             let step_id = surrealdb::sql::Thing::from(("step", step_id_str.as_str()));

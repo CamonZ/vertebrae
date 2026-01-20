@@ -898,7 +898,15 @@ needs_human_review: boolean | null;
 /**
  * When the task was created (ISO 8601 format)
  */
-created_at: string }
+created_at: string; 
+/**
+ * Workflow name (if task is assigned to a workflow)
+ */
+workflow_name: string | null; 
+/**
+ * Current step name (if task has a current step in workflow)
+ */
+step_name: string | null }
 /**
  * Task with its relations (parent, children, dependencies)
  */

@@ -95,29 +95,17 @@ mod tests {
         // All tasks use the default workflow. Status is derived from current_step_id.
         let workflow_id = Some(surrealdb::sql::Thing::from(("workflow", "default")));
 
-        // Set up workflow step - "backlog" is index 0, others have specific step IDs
-        let (current_step, current_step_id) = match status {
-            "backlog" => (Some(0), None),
-            "in_progress" => (
-                Some(1),
-                Some(surrealdb::sql::Thing::from(("step", "default_in_progress"))),
-            ),
-            "pending_review" => (
-                Some(2),
-                Some(surrealdb::sql::Thing::from((
-                    "step",
-                    "default_pending_review",
-                ))),
-            ),
-            "done" => (
-                Some(3),
-                Some(surrealdb::sql::Thing::from(("step", "default_done"))),
-            ),
-            "rejected" => (
-                Some(4),
-                Some(surrealdb::sql::Thing::from(("step", "default_rejected"))),
-            ),
-            _ => (Some(0), None),
+        // Set up workflow step - use step IDs for all statuses
+        let current_step_id = match status {
+            "backlog" => Some(surrealdb::sql::Thing::from(("step", "default_backlog"))),
+            "in_progress" => Some(surrealdb::sql::Thing::from(("step", "default_in_progress"))),
+            "pending_review" => Some(surrealdb::sql::Thing::from((
+                "step",
+                "default_pending_review",
+            ))),
+            "done" => Some(surrealdb::sql::Thing::from(("step", "default_done"))),
+            "rejected" => Some(surrealdb::sql::Thing::from(("step", "default_rejected"))),
+            _ => Some(surrealdb::sql::Thing::from(("step", "default_backlog"))),
         };
 
         let task = Task {
@@ -137,7 +125,6 @@ mod tests {
             revision_feedback: None,
             rejection_reason: None,
             workflow_id,
-            current_step,
             current_step_id,
         };
 

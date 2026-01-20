@@ -281,6 +281,44 @@ impl<'a> WorkflowRepository<'a> {
         Ok(workflows)
     }
 
+    /// Find the root workflow - the workflow that no other workflow can transition TO.
+    ///
+    /// This is the entry point workflow for new tasks. A root workflow is one that
+    /// has no incoming workflow_transitions edges from other workflows.
+    ///
+    /// # Returns
+    ///
+    /// The root workflow if found, or None if no workflows exist.
+    /// If multiple root workflows exist, returns the one with the lowest order.
+    ///
+    /// # Errors
+    ///
+    /// Returns `DbError::Query` if the database operation fails.
+    pub async fn get_root_workflow(&self) -> DbResult<Option<Workflow>> {
+        debug!("Finding root workflow (no incoming transitions)");
+
+        // Find workflows that are NOT targets of any workflow_transitions
+        let query = r#"
+            SELECT * FROM workflow
+            WHERE id NOT IN (SELECT out FROM workflow_transitions)
+            ORDER BY order ASC, created_at ASC
+            LIMIT 1
+        "#;
+
+        let mut result = self.client.query(query).await?;
+        let workflows: Vec<Workflow> = result.take(0)?;
+
+        if let Some(workflow) = workflows.into_iter().next() {
+            debug!("Found root workflow: {:?}", workflow.id);
+            Ok(Some(workflow))
+        } else {
+            debug!("No root workflow found, checking if any workflows exist");
+            // If no root workflow found by transitions, return the first workflow
+            // (this handles the case where there are no workflow_transitions at all)
+            self.list().await.map(|mut wfs| wfs.pop())
+        }
+    }
+
     /// Update a workflow.
     ///
     /// # Arguments
@@ -572,9 +610,9 @@ impl<'a> WorkflowRepository<'a> {
         for task in tasks {
             let task_id = task.id.id.to_raw();
 
-            // All tasks are migrated to step 0 (backlog)
+            // Migrate to default workflow - current_step_id will be set by caller
             let update_query = format!(
-                "UPDATE task:{} SET workflow_id = $workflow_id, current_step = 0, updated_at = time::now()",
+                "UPDATE task:{} SET workflow_id = $workflow_id, updated_at = time::now()",
                 task_id
             );
             self.client
@@ -1288,22 +1326,18 @@ mod tests {
         assert!(result.has_migrations());
         assert!(!result.has_skipped());
 
-        // Verify each task has workflow_id and current_step (all start at step 0 since no status info)
+        // Verify each task has workflow_id (migration only sets workflow_id, not step)
         let t1 = task_repo.get("t1").await.unwrap().unwrap();
         assert!(t1.workflow_id.is_some());
-        assert!(t1.current_step.is_some());
 
         let t2 = task_repo.get("t2").await.unwrap().unwrap();
         assert!(t2.workflow_id.is_some());
-        assert!(t2.current_step.is_some());
 
         let t3 = task_repo.get("t3").await.unwrap().unwrap();
         assert!(t3.workflow_id.is_some());
-        assert!(t3.current_step.is_some());
 
         let t4 = task_repo.get("t4").await.unwrap().unwrap();
         assert!(t4.workflow_id.is_some());
-        assert!(t4.current_step.is_some());
 
         cleanup(&temp_dir);
     }
@@ -1337,11 +1371,9 @@ mod tests {
         // Verify both tasks were migrated
         let t1 = task_repo.get("t1").await.unwrap().unwrap();
         assert!(t1.workflow_id.is_some());
-        assert!(t1.current_step.is_some());
 
         let t2 = task_repo.get("t2").await.unwrap().unwrap();
         assert!(t2.workflow_id.is_some());
-        assert!(t2.current_step.is_some());
 
         cleanup(&temp_dir);
     }
@@ -1374,7 +1406,6 @@ mod tests {
         // Verify task still has correct workflow
         let t = task_repo.get("test").await.unwrap().unwrap();
         assert!(t.workflow_id.is_some());
-        assert!(t.current_step.is_some());
 
         cleanup(&temp_dir);
     }
@@ -1388,15 +1419,14 @@ mod tests {
         let workflow_repo = WorkflowRepository::new(db.client());
         let task_repo = TaskRepository::new(db.client());
 
-        // Create a task (now has default workflow assigned automatically)
-        let task = Task::new("Pre-assigned Task", Level::Task);
+        // Create a task and manually assign a workflow
+        let mut task = Task::new("Pre-assigned Task", Level::Task);
+        task.workflow_id = Some(surrealdb::sql::Thing::from(("workflow", "default")));
         task_repo.create("assigned", &task).await.unwrap();
-        // Task already has workflow from creation, no need to assign again
 
-        // Create another task and unassign its workflow to simulate old task
+        // Create another task without workflow (simulates old task before migration)
         let task2 = Task::new("Unassigned Task", Level::Task);
         task_repo.create("unassigned", &task2).await.unwrap();
-        task_repo.unassign_workflow("unassigned").await.unwrap();
 
         // Run migration - should only migrate the unassigned task
         let result = workflow_repo.migrate_to_default_workflow().await.unwrap();
@@ -1490,9 +1520,9 @@ mod tests {
         // Verify task state unchanged (dry-run doesn't modify)
         let after = task_repo.get("test").await.unwrap().unwrap();
         assert!(after.workflow_id.is_none());
-        // Both tasks should have same workflow_id (None) and current_step (None)
+        // Both tasks should have same workflow_id (None) and current_step_id (None)
         assert_eq!(after.workflow_id, original.workflow_id);
-        assert_eq!(after.current_step, original.current_step);
+        assert_eq!(after.current_step_id, original.current_step_id);
 
         cleanup(&temp_dir);
     }

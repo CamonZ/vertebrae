@@ -4,6 +4,7 @@ import type { ViewMode } from "../TaskList";
 import { TaskList, TaskTreeView } from "../TaskList";
 import { useTaskHierarchy } from "../../hooks/useTaskHierarchy";
 import { useExpandedNodes } from "../../hooks/useExpandedNodes";
+import { ResizablePanel } from "../ResizablePanel";
 
 interface FilteredTasksPanelProps {
   step: Step | null;
@@ -73,10 +74,10 @@ export function FilteredTasksPanel({
       : tasks.length;
 
   return (
-    <div className="relative flex h-full w-80 flex-col border-l border-border bg-bg-secondary lg:w-96">
-      {/* Subtle glow edge */}
-      <div className="pointer-events-none absolute -left-px bottom-0 top-0 w-px bg-gradient-to-b from-primary/0 via-primary/30 to-primary/0" />
-
+    <ResizablePanel
+      storageKey="filtered-tasks-panel-width"
+      glowColor="from-primary/0 via-primary/30 to-primary/0"
+    >
       {/* Header with step info */}
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <div className="flex-1 min-w-0">
@@ -213,6 +214,7 @@ export function FilteredTasksPanel({
             selectedTaskId={selectedTaskId}
             onTaskSelect={(task) => onTaskSelect?.(task.id)}
             expandedNodes={expandedNodes}
+            hideStatus
           />
         ) : (
           <TaskList
@@ -221,6 +223,7 @@ export function FilteredTasksPanel({
             error={null}
             selectedTaskId={selectedTaskId}
             onTaskSelect={(task) => onTaskSelect?.(task.id)}
+            hideStatus
           />
         )}
       </div>
@@ -241,7 +244,7 @@ export function FilteredTasksPanel({
           )}
         </div>
       )}
-    </div>
+    </ResizablePanel>
   );
 }
 

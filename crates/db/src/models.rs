@@ -289,8 +289,8 @@ impl CodeRef {
 /// Tasks are the primary nodes in the graph, with relationships
 /// defined by `child_of` and `depends_on` edges.
 ///
-/// Note: Status is now derived from workflow_id and current_step/current_step_id,
-/// not stored as a field. Use the service layer's get_derived_status() method.
+/// Note: Status is derived from workflow_id and current_step_id, not stored as a field.
+/// Every task always has both workflow_id and current_step_id set from creation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
     /// Unique identifier (SurrealDB record ID)
@@ -355,11 +355,7 @@ pub struct Task {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workflow_id: Option<Thing>,
 
-    /// Current step index in the assigned workflow (0-based, legacy)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub current_step: Option<usize>,
-
-    /// Reference to the current step in the workflow (new first-class steps)
+    /// Reference to the current step in the workflow
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current_step_id: Option<Thing>,
 }
@@ -367,7 +363,8 @@ pub struct Task {
 impl Task {
     /// Create a new task with required fields
     ///
-    /// New tasks are automatically assigned to the default 'backlog' workflow at step 0.
+    /// New tasks are created without workflow assignment. Use the service layer's
+    /// `assign_workflow` to assign a workflow which will also set the initial step.
     pub fn new(title: impl Into<String>, level: Level) -> Self {
         Self {
             id: None,
@@ -385,8 +382,7 @@ impl Task {
             needs_human_review: None,
             revision_feedback: None,
             rejection_reason: None,
-            workflow_id: Some(Thing::from(("workflow", DEFAULT_WORKFLOW_ID))),
-            current_step: Some(0),
+            workflow_id: None,
             current_step_id: None,
         }
     }
@@ -433,22 +429,21 @@ impl Task {
         self
     }
 
-    /// Assign this task to a workflow at a specific step
-    pub fn with_workflow(mut self, workflow_id: Thing, current_step: usize) -> Self {
+    /// Assign this task to a workflow with a specific step
+    pub fn with_workflow(mut self, workflow_id: Thing, step_id: Thing) -> Self {
         self.workflow_id = Some(workflow_id);
-        self.current_step = Some(current_step);
+        self.current_step_id = Some(step_id);
         self
     }
 
     /// Clear workflow assignment from this task
     pub fn without_workflow(mut self) -> Self {
         self.workflow_id = None;
-        self.current_step = None;
         self.current_step_id = None;
         self
     }
 
-    /// Set the current step reference (new first-class step)
+    /// Set the current step reference
     pub fn with_current_step_id(mut self, step_id: Thing) -> Self {
         self.current_step_id = Some(step_id);
         self
@@ -466,7 +461,7 @@ impl PartialEq for Task {
             && self.code_refs == other.code_refs
             && self.needs_human_review == other.needs_human_review
             && self.workflow_id == other.workflow_id
-            && self.current_step == other.current_step
+            && self.current_step_id == other.current_step_id
     }
 }
 
@@ -2627,12 +2622,15 @@ mod tests {
         assert!(task.completed_at.is_none());
         assert!(task.sections.is_empty());
         assert!(task.code_refs.is_empty());
-        assert_eq!(
-            task.workflow_id,
-            Some(Thing::from(("workflow", DEFAULT_WORKFLOW_ID))),
-            "New tasks must be assigned to the default workflow"
+        // Tasks are created without workflow assignment - use service layer to assign
+        assert!(
+            task.workflow_id.is_none(),
+            "New tasks are created without workflow assignment"
         );
-        assert_eq!(task.current_step, Some(0), "New tasks must start at step 0");
+        assert!(
+            task.current_step_id.is_none(),
+            "New tasks have no current step until workflow is assigned"
+        );
     }
 
     #[test]
@@ -2953,55 +2951,58 @@ mod tests {
     #[test]
     fn test_task_with_workflow() {
         let workflow_id = Thing::from(("workflow", "wf123"));
-        let task =
-            Task::new("Task with workflow", Level::Task).with_workflow(workflow_id.clone(), 0);
+        let step_id = Thing::from(("step", "step1"));
+        let task = Task::new("Task with workflow", Level::Task)
+            .with_workflow(workflow_id.clone(), step_id.clone());
 
         assert_eq!(task.workflow_id, Some(workflow_id));
-        assert_eq!(task.current_step, Some(0));
+        assert_eq!(task.current_step_id, Some(step_id));
     }
 
     #[test]
     fn test_task_without_workflow() {
         let workflow_id = Thing::from(("workflow", "wf123"));
+        let step_id = Thing::from(("step", "step2"));
         let task = Task::new("Task", Level::Task)
-            .with_workflow(workflow_id, 2)
+            .with_workflow(workflow_id, step_id)
             .without_workflow();
 
         assert!(task.workflow_id.is_none());
-        assert!(task.current_step.is_none());
+        assert!(task.current_step_id.is_none());
     }
 
     #[test]
     fn test_task_workflow_serialize() {
         let workflow_id = Thing::from(("workflow", "wf123"));
-        let task = Task::new("Workflow Task", Level::Task).with_workflow(workflow_id, 1);
+        let step_id = Thing::from(("step", "step1"));
+        let task =
+            Task::new("Workflow Task", Level::Task).with_workflow(workflow_id, step_id.clone());
 
         let value = serde_json::to_value(&task).unwrap();
         assert!(
             value.get("workflow_id").is_some(),
             "workflow_id should be serialized"
         );
-        assert_eq!(value["current_step"], 1);
+        assert!(
+            value.get("current_step_id").is_some(),
+            "current_step_id should be serialized"
+        );
     }
 
     #[test]
-    fn test_task_workflow_serialize_includes_default_workflow() {
-        // Tasks now always have a default workflow assigned
-        let task = Task::new("With Workflow", Level::Task);
+    fn test_task_workflow_serialize_without_workflow() {
+        // Tasks are created without workflow assignment
+        let task = Task::new("Without Workflow", Level::Task);
         let value = serde_json::to_value(&task).unwrap();
 
+        // workflow_id and current_step_id are None and skip_serializing_if = "Option::is_none"
         assert!(
-            value.get("workflow_id").is_some(),
-            "workflow_id should be present with default workflow"
+            value.get("workflow_id").is_none(),
+            "workflow_id should not be present without workflow assignment"
         );
         assert!(
-            value.get("current_step").is_some(),
-            "current_step should be present with default workflow"
-        );
-        assert_eq!(
-            value.get("current_step").unwrap().as_u64(),
-            Some(0),
-            "current_step should be 0 for new tasks"
+            value.get("current_step_id").is_none(),
+            "current_step_id should not be present without workflow assignment"
         );
     }
 
@@ -3009,14 +3010,15 @@ mod tests {
     fn test_task_workflow_roundtrip() {
         // Create a task with workflow, serialize it, then deserialize it
         let workflow_id = Thing::from(("workflow", "wf456"));
-        let original =
-            Task::new("Workflow Task", Level::Task).with_workflow(workflow_id.clone(), 2);
+        let step_id = Thing::from(("step", "step2"));
+        let original = Task::new("Workflow Task", Level::Task)
+            .with_workflow(workflow_id.clone(), step_id.clone());
 
         let json = serde_json::to_string(&original).unwrap();
         let deserialized: Task = serde_json::from_str(&json).unwrap();
 
         assert_eq!(deserialized.workflow_id, Some(workflow_id));
-        assert_eq!(deserialized.current_step, Some(2));
+        assert_eq!(deserialized.current_step_id, Some(step_id));
     }
 
     #[test]
@@ -3028,14 +3030,16 @@ mod tests {
 
         let task: Task = serde_json::from_str(json).unwrap();
         assert!(task.workflow_id.is_none());
-        assert!(task.current_step.is_none());
+        assert!(task.current_step_id.is_none());
     }
 
     #[test]
     fn test_task_workflow_equality() {
         let workflow_id = Thing::from(("workflow", "wf123"));
-        let task1 = Task::new("Test", Level::Task).with_workflow(workflow_id.clone(), 0);
-        let task2 = Task::new("Test", Level::Task).with_workflow(workflow_id, 0);
+        let step_id = Thing::from(("step", "step1"));
+        let task1 =
+            Task::new("Test", Level::Task).with_workflow(workflow_id.clone(), step_id.clone());
+        let task2 = Task::new("Test", Level::Task).with_workflow(workflow_id, step_id);
         let task3 = Task::new("Test", Level::Task);
 
         assert_eq!(task1, task2);

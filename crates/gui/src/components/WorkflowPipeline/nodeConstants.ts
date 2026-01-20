@@ -26,3 +26,44 @@ export const HANDLE_SIZING = {
   borderClass: "!border-2",
   bgClass: "!bg-bg-primary",
 } as const;
+
+/**
+ * Layout constants for the AllWorkflowsPipeline canvas
+ */
+export const LAYOUT_CONSTANTS = {
+  /** Horizontal spacing between step nodes */
+  NODE_SPACING_X: 320,
+  /** Y offset for step nodes within workflow zone */
+  STEP_Y_OFFSET: 80,
+  /** Y offset for task zones within workflow zone */
+  TASK_ZONE_Y_OFFSET: 220,
+  /** Padding around workflow zone content */
+  WORKFLOW_ZONE_PADDING: 40,
+  /** Height reserved for workflow header */
+  WORKFLOW_ZONE_HEADER_HEIGHT: 80,
+  /** Vertical gap between workflow zones */
+  WORKFLOW_ZONE_GAP: 60,
+} as const;
+
+/**
+ * Calculate the width needed for a workflow zone based on number of steps
+ */
+export function calculateWorkflowZoneWidth(stepCount: number): number {
+  if (stepCount === 0) return 400;
+  return (
+    stepCount * LAYOUT_CONSTANTS.NODE_SPACING_X +
+    LAYOUT_CONSTANTS.WORKFLOW_ZONE_PADDING * 2
+  );
+}
+
+/**
+ * Calculate the height needed for a workflow zone
+ */
+export function calculateWorkflowZoneHeight(): number {
+  return (
+    LAYOUT_CONSTANTS.WORKFLOW_ZONE_HEADER_HEIGHT +
+    LAYOUT_CONSTANTS.TASK_ZONE_Y_OFFSET +
+    280 +
+    LAYOUT_CONSTANTS.WORKFLOW_ZONE_PADDING
+  );
+}

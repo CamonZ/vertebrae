@@ -6,6 +6,7 @@ import { TaskSections } from './TaskSections';
 import { TaskCodeRefs } from './TaskCodeRefs';
 import { TaskRelations } from './TaskRelations';
 import { ExecutionHistory } from './ExecutionHistory';
+import { ResizablePanel } from '../ResizablePanel';
 
 /** Debounce delay in milliseconds for batching rapid events */
 const DEBOUNCE_MS = 100;
@@ -395,10 +396,10 @@ export function TaskDetailPanel({ taskId, onClose, onTaskSelect }: TaskDetailPan
   }
 
   return (
-    <div className="relative flex h-full w-80 flex-col border-l border-border bg-bg-secondary lg:w-96">
-      {/* Subtle glow edge */}
-      <div className="pointer-events-none absolute -left-px bottom-0 top-0 w-px bg-gradient-to-b from-primary/0 via-primary/30 to-primary/0" />
-
+    <ResizablePanel
+      storageKey="task-detail-panel-width"
+      glowColor="from-primary/0 via-primary/30 to-primary/0"
+    >
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <h2 className="font-mono text-xs font-medium uppercase tracking-wider text-text-muted">Task Details</h2>
@@ -499,6 +500,6 @@ export function TaskDetailPanel({ taskId, onClose, onTaskSelect }: TaskDetailPan
           </div>
         </>
       )}
-    </div>
+    </ResizablePanel>
   );
 }

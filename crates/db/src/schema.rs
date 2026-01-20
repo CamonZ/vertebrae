@@ -46,8 +46,6 @@ mod sql {
 
         DEFINE FIELD workflow_id ON task TYPE option<record<workflow>>;
 
-        DEFINE FIELD current_step ON task TYPE option<int>;
-
         DEFINE FIELD current_step_id ON task TYPE option<record<step>>;
     "#;
 
@@ -1170,7 +1168,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_task_can_have_both_step_fields() {
+    async fn test_task_has_current_step_id() {
         let client = setup_test_db().await;
         init_schema(&client).await.unwrap();
 
@@ -1178,53 +1176,49 @@ mod tests {
         client
             .query(
                 r#"
-                CREATE workflow:both_fields SET
-                    name = "Both Fields Test";
-                CREATE step:both_step SET
-                    name = "Both Step",
-                    workflow_id = workflow:both_fields,
+                CREATE workflow:step_test SET
+                    name = "Step Test";
+                CREATE step:test_step SET
+                    name = "Test Step",
+                    workflow_id = workflow:step_test,
                     order = 0
             "#,
             )
             .await
             .unwrap();
 
-        // Create task with both current_step (legacy) and current_step_id (new)
+        // Create task with current_step_id
         let result = client
             .query(
                 r#"
-                CREATE task:both_steps SET
-                    title = "Task with Both Step Fields",
+                CREATE task:step_test SET
+                    title = "Task with Step ID",
                     level = "task",
-                    status = "in_progress",
-                    workflow_id = workflow:both_fields,
-                    current_step = 0,
-                    current_step_id = step:both_step
+                    workflow_id = workflow:step_test,
+                    current_step_id = step:test_step
             "#,
             )
             .await;
 
         assert!(
             result.is_ok(),
-            "Task with both step fields should succeed: {:?}",
+            "Task with current_step_id should succeed: {:?}",
             result.err()
         );
 
-        // Verify both fields are set
+        // Verify current_step_id is set
         #[derive(Debug, serde::Deserialize)]
-        struct BothRow {
-            current_step: Option<i32>,
+        struct StepRow {
             current_step_id: Option<surrealdb::sql::Thing>,
         }
 
         let mut query_result = client
-            .query("SELECT current_step, current_step_id FROM task:both_steps")
+            .query("SELECT current_step_id FROM task:step_test")
             .await
             .unwrap();
 
-        let row: Option<BothRow> = query_result.take(0).unwrap();
+        let row: Option<StepRow> = query_result.take(0).unwrap();
         let row = row.expect("Task should exist");
-        assert_eq!(row.current_step, Some(0), "current_step should be 0");
         assert!(
             row.current_step_id.is_some(),
             "current_step_id should be set"

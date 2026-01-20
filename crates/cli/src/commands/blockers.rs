@@ -149,14 +149,32 @@ impl BlockersCommand {
         for blocker_id in blockers {
             // Get the blocker task summary
             if let Ok(task) = service.get_task(&blocker_id).await {
-                // Get derived status from workflow step
-                let derived_status = service.get_derived_status(&blocker_id).await.ok();
-                // Extract just the step name (after the colon) for status checking
-                let step_name = derived_status
-                    .as_ref()
-                    .and_then(|s| s.split(':').next_back())
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| "backlog".to_string());
+                // Get step name and workflow name directly from task's workflow_id and current_step_id
+                let (step_name, workflow_name) = if let (Some(step_id), Some(wf_id)) =
+                    (&task.current_step_id, &task.workflow_id)
+                {
+                    let step = service
+                        .database()
+                        .steps()
+                        .get(&step_id.id.to_raw())
+                        .await
+                        .ok()
+                        .flatten();
+                    let workflow = service
+                        .database()
+                        .workflows()
+                        .get(&wf_id.id.to_raw())
+                        .await
+                        .ok()
+                        .flatten();
+                    (
+                        step.map(|s| s.name)
+                            .unwrap_or_else(|| "backlog".to_string()),
+                        workflow.map(|w| w.name),
+                    )
+                } else {
+                    ("backlog".to_string(), None)
+                };
 
                 // By default, filter out completed blockers (step = done)
                 if !self.all && step_name == "done" {
@@ -172,10 +190,7 @@ impl BlockersCommand {
                     tags: task.tags,
                     needs_human_review: task.needs_human_review,
                     created_at: task.created_at.unwrap_or_else(chrono::Utc::now),
-                    // Get workflow name if available
-                    workflow_name: derived_status
-                        .as_ref()
-                        .and_then(|s| s.split(':').next().map(|n| n.to_string())),
+                    workflow_name,
                     step_name: Some(step_name),
                 });
             }
@@ -300,7 +315,8 @@ mod tests {
             _ => Level::Task,
         };
 
-        // Set up workflow step - status is derived from current_step_id
+        // Set up workflow and step - status is derived from current_step_id
+        let default_workflow_id = surrealdb::sql::Thing::from(("workflow", "default"));
         let current_step_id = match status {
             "in_progress" => Some(surrealdb::sql::Thing::from(("step", "default_in_progress"))),
             "pending_review" => Some(surrealdb::sql::Thing::from((
@@ -314,6 +330,7 @@ mod tests {
 
         let db = service.database();
         let mut task = Task::new(title, level_enum);
+        task.workflow_id = Some(default_workflow_id);
         task.current_step_id = current_step_id;
         db.tasks().create(id, &task).await.unwrap();
     }

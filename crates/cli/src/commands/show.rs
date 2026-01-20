@@ -91,7 +91,7 @@ struct TaskRow {
     #[serde(default)]
     workflow_id: Option<surrealdb::sql::Thing>,
     #[serde(default)]
-    current_step: Option<usize>,
+    current_step_id: Option<surrealdb::sql::Thing>,
     #[serde(default)]
     sections: Vec<SectionRow>,
     #[serde(default, rename = "refs")]
@@ -207,7 +207,7 @@ impl ShowCommand {
             .fetch_workflow_info(
                 &workflow_service,
                 task.workflow_id.as_ref(),
-                task.current_step,
+                task.current_step_id.as_ref(),
             )
             .await?;
 
@@ -340,7 +340,7 @@ impl ShowCommand {
             revision_feedback: task.revision_feedback,
             rejection_reason: task.rejection_reason,
             workflow_id: task.workflow_id,
-            current_step: task.current_step,
+            current_step_id: task.current_step_id,
             sections: task
                 .sections
                 .into_iter()
@@ -472,15 +472,17 @@ impl ShowCommand {
         &self,
         service: &dyn WorkflowService,
         workflow_id: Option<&surrealdb::sql::Thing>,
-        current_step: Option<usize>,
+        current_step_id: Option<&surrealdb::sql::Thing>,
     ) -> Result<Option<WorkflowInfo>, ServiceError> {
-        let (workflow_id, step_index) = match (workflow_id, current_step) {
-            (Some(wf_id), Some(step)) => (wf_id, step),
-            _ => return Ok(None),
+        let workflow_id = match workflow_id {
+            Some(wf_id) => wf_id,
+            None => return Ok(None),
         };
 
         // Fetch the workflow info from the service
-        let info = service.get_workflow_info(workflow_id, step_index).await?;
+        let info = service
+            .get_workflow_info(workflow_id, current_step_id)
+            .await?;
         Ok(Some(info))
     }
 
@@ -492,22 +494,12 @@ impl ShowCommand {
         db: &Database,
         task: &vertebrae_db::Task,
     ) -> Result<String, DbError> {
-        // Try new first-class step system first (current_step_id)
+        // Use current_step_id to determine status
         if let (Some(workflow_id), Some(step_id)) = (&task.workflow_id, &task.current_step_id)
             && let Some(workflow) = db.workflows().get(&workflow_id.id.to_raw()).await?
             && let Some(step) = db.steps().get_by_thing(step_id).await?
         {
             return Ok(format!("{}:{}", workflow.name, step.name));
-        }
-
-        // Fall back to legacy system (current_step index) - get steps from workflow
-        if let (Some(workflow_id), Some(step_index)) = (&task.workflow_id, task.current_step)
-            && let Some(workflow) = db.workflows().get(&workflow_id.id.to_raw()).await?
-        {
-            let steps = db.steps().list_by_workflow(workflow_id).await?;
-            if let Some(step) = steps.get(step_index) {
-                return Ok(format!("{}:{}", workflow.name, step.name));
-            }
         }
 
         // Fall back to default if no workflow information
@@ -853,23 +845,13 @@ mod tests {
             _ => None,
         });
 
-        // Map status to step index in Default Workflow (as created by create_default_workflow)
-        // Steps are: backlog(0), in_progress(1), pending_review(2), done(3), rejected(4)
-        let step_index = match status {
-            "backlog" => 0,
-            "in_progress" => 1,
-            "pending_review" => 2,
-            "done" => 3,
-            "rejected" => 4,
-            _ => 0, // Default to backlog
-        };
-
-        // Create step ID in the format used by create_default_workflow: default_<step_name>
+        // Set up workflow and step
+        let default_workflow_id = surrealdb::sql::Thing::from(("workflow", "default"));
         let step_id_str = format!("default_{}", status);
         let step_id = surrealdb::sql::Thing::from(("step", step_id_str.as_str()));
 
         let mut task = Task::new(title, level_enum);
-        task.current_step = Some(step_index);
+        task.workflow_id = Some(default_workflow_id);
         task.current_step_id = Some(step_id);
         task.priority = priority_enum;
         task.tags = tags.iter().map(|s| s.to_string()).collect();

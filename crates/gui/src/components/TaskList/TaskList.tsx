@@ -9,6 +9,7 @@ interface TaskListProps {
   error: string | null;
   selectedTaskId?: string | null;
   onTaskSelect?: (task: TaskSummary) => void;
+  hideStatus?: boolean;
 }
 
 /**
@@ -120,7 +121,7 @@ const COLUMN_CONFIG = {
   id: { columnId: 'id', label: 'ID', defaultWidth: 70, minWidth: 50 },
   title: { columnId: 'title', label: 'Title', defaultWidth: 300, minWidth: 150 },
   level: { columnId: 'level', label: 'Level', defaultWidth: 70, minWidth: 50 },
-  status: { columnId: 'status', label: 'Status', defaultWidth: 90, minWidth: 50 },
+  status: { columnId: 'status', label: 'Workflow / Step', defaultWidth: 180, minWidth: 100 },
   priority: { columnId: 'priority', label: 'Priority', defaultWidth: 70, minWidth: 30 },
   tags: { columnId: 'tags', label: 'Tags', defaultWidth: 150, minWidth: 80 },
 };
@@ -136,6 +137,7 @@ export function TaskList({
   error,
   selectedTaskId,
   onTaskSelect,
+  hideStatus,
 }: TaskListProps) {
   // Initialize column widths management
   const columnIds = Object.keys(COLUMN_CONFIG);
@@ -206,6 +208,7 @@ export function TaskList({
               isSelected={selectedTaskId === task.id}
               onClick={onTaskSelect}
               columnWidths={columns}
+              hideStatus={hideStatus}
             />
           ))}
         </tbody>

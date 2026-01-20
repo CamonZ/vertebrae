@@ -92,13 +92,22 @@ impl ExecutionCreateCommand {
             ))
         })?;
 
-        // Get the current step name from derived status (workflow:step format)
-        let derived_status = service.get_derived_status(&task_id).await?;
-        let step_name = derived_status
-            .split(':')
-            .next_back()
-            .unwrap_or("backlog")
-            .to_string();
+        // Get the current step name from task's current_step_id
+        let step_id = task.current_step_id.as_ref().ok_or_else(|| {
+            ServiceError::validation_failed(format!(
+                "task '{}' has no current_step_id (invariant violation)",
+                &task_id[..6.min(task_id.len())]
+            ))
+        })?;
+        let step = service
+            .database()
+            .steps()
+            .get(&step_id.id.to_raw())
+            .await?
+            .ok_or_else(|| {
+                ServiceError::validation_failed(format!("step '{}' not found", step_id.id.to_raw()))
+            })?;
+        let step_name = step.name;
 
         // Validate context JSON if provided
         if let Some(ref context) = self.context {

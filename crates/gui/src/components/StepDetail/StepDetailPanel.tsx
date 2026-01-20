@@ -1,4 +1,5 @@
 import type { Step } from "../../bindings";
+import { ResizablePanel } from "../ResizablePanel";
 
 interface StepDetailPanelProps {
   step: Step | null;
@@ -75,10 +76,10 @@ export function StepDetailPanel({ step, onClose }: StepDetailPanelProps) {
     agent_config.tools.length + agent_config.allowed_tools.length;
 
   return (
-    <div className="relative flex h-full w-80 flex-col border-l border-border bg-bg-secondary lg:w-96">
-      {/* Subtle glow edge */}
-      <div className="pointer-events-none absolute -left-px bottom-0 top-0 w-px bg-gradient-to-b from-info/0 via-info/30 to-info/0" />
-
+    <ResizablePanel
+      storageKey="step-detail-panel-width"
+      glowColor="from-info/0 via-info/30 to-info/0"
+    >
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <h2 className="font-mono text-xs font-medium uppercase tracking-wider text-text-muted">
@@ -312,6 +313,6 @@ export function StepDetailPanel({ step, onClose }: StepDetailPanelProps) {
           </div>
         )}
       </div>
-    </div>
+    </ResizablePanel>
   );
 }

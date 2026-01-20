@@ -9,6 +9,7 @@ interface TaskTreeViewProps {
   selectedTaskId?: string | null;
   onTaskSelect?: (task: TaskSummary) => void;
   expandedNodes?: ReturnType<typeof useExpandedNodes>;
+  hideStatus?: boolean;
 }
 
 /**
@@ -136,6 +137,7 @@ export function TaskTreeView({
   selectedTaskId,
   onTaskSelect,
   expandedNodes,
+  hideStatus,
 }: TaskTreeViewProps) {
   if (error) {
     return <ErrorState error={error} />;
@@ -170,6 +172,7 @@ export function TaskTreeView({
             selectedTaskId={selectedTaskId}
             onTaskSelect={onTaskSelect}
             expandedNodes={expandedNodes}
+            hideStatus={hideStatus}
           />
         ))}
       </div>

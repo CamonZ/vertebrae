@@ -584,7 +584,7 @@ pub struct WorkflowUnassignCommand {
 impl WorkflowUnassignCommand {
     /// Execute the unassign workflow command.
     ///
-    /// Removes workflow assignment from a task, clearing workflow_id and current_step.
+    /// Removes workflow assignment from a task, clearing workflow_id and current_step_id.
     ///
     /// # Arguments
     ///
@@ -2004,7 +2004,10 @@ mod tests {
         // Verify the task was updated with workflow assignment
         let task = db.tasks().get("abc123").await.unwrap().unwrap();
         assert!(task.workflow_id.is_some(), "Task should have workflow_id");
-        assert_eq!(task.current_step, Some(0), "Task should be at step 0");
+        assert!(
+            task.current_step_id.is_some(),
+            "Task should have current_step_id set"
+        );
     }
 
     #[tokio::test]
@@ -2157,8 +2160,8 @@ mod tests {
             "Task should not have workflow_id after unassign"
         );
         assert!(
-            task.current_step.is_none(),
-            "Task should not have current_step after unassign"
+            task.current_step_id.is_none(),
+            "Task should not have current_step_id after unassign"
         );
     }
 
@@ -2247,9 +2250,12 @@ mod tests {
         };
         assign_cmd.execute(&create_service(&db)).await.unwrap();
 
-        // Verify task is at step 0
+        // Verify task has current_step_id set after assignment
         let task = db.tasks().get("abc123").await.unwrap().unwrap();
-        assert_eq!(task.current_step, Some(0));
+        assert!(
+            task.current_step_id.is_some(),
+            "Task should have current_step_id after assignment"
+        );
 
         // Advance to step 1
         let advance_cmd = WorkflowAdvanceCommand {
@@ -2259,9 +2265,12 @@ mod tests {
         assert!(result.contains("2/3"), "Should show step 2 of 3");
         assert!(result.contains("step2"), "Should show step2 name");
 
-        // Verify task is at step 1
+        // Verify task still has current_step_id set after advance
         let task = db.tasks().get("abc123").await.unwrap().unwrap();
-        assert_eq!(task.current_step, Some(1));
+        assert!(
+            task.current_step_id.is_some(),
+            "Task should have current_step_id after advance"
+        );
     }
 
     #[tokio::test]
@@ -2420,9 +2429,12 @@ mod tests {
         advance_cmd.execute(&create_service(&db)).await.unwrap();
         advance_cmd.execute(&create_service(&db)).await.unwrap();
 
-        // Verify task is at step 2
+        // Verify task has current_step_id set after advancing
         let task = db.tasks().get("abc123").await.unwrap().unwrap();
-        assert_eq!(task.current_step, Some(2));
+        assert!(
+            task.current_step_id.is_some(),
+            "Task should have current_step_id after advancing"
+        );
 
         // Retreat to step 1
         let retreat_cmd = WorkflowRetreatCommand {
@@ -2432,9 +2444,12 @@ mod tests {
         assert!(result.contains("2/3"), "Should show step 2 of 3");
         assert!(result.contains("step2"), "Should show step2 name");
 
-        // Verify task is at step 1
+        // Verify task still has current_step_id set after retreat
         let task = db.tasks().get("abc123").await.unwrap().unwrap();
-        assert_eq!(task.current_step, Some(1));
+        assert!(
+            task.current_step_id.is_some(),
+            "Task should have current_step_id after retreat"
+        );
     }
 
     #[tokio::test]
@@ -2590,7 +2605,7 @@ mod tests {
         // Verify task has no workflow assigned
         let task = db.tasks().get("abc123").await.unwrap().unwrap();
         assert!(task.workflow_id.is_none());
-        assert!(task.current_step.is_none());
+        assert!(task.current_step_id.is_none());
     }
 
     #[tokio::test]

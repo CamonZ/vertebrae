@@ -303,6 +303,8 @@ fn convert_tree_node(node: &vertebrae_core::TaskTreeNode) -> TaskHierarchyNode {
             tags: node.tags.clone(),
             needs_human_review: node.needs_human_review,
             created_at: node.created_at.to_rfc3339(),
+            workflow_name: node.workflow_name.clone(),
+            step_name: node.step_name.clone(),
         },
         children,
     }
@@ -516,7 +518,6 @@ pub async fn get_workflow_with_task_details(
             workflow_id: data
                 .workflow_id
                 .map(|id| surrealdb::sql::Thing::from(("workflow".to_string(), id))),
-            current_step: None,
             current_step_id: data
                 .current_step_id
                 .map(|id| surrealdb::sql::Thing::from(("step".to_string(), id))),

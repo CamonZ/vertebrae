@@ -15,32 +15,34 @@ interface TaskTreeNodeProps {
   selectedTaskId?: string | null;
   onTaskSelect?: (task: TaskSummary) => void;
   expandedNodes?: ReturnType<typeof useExpandedNodes>;
+  hideStatus?: boolean;
 }
 
 /**
- * Get status badge styling based on task status.
- * Status is now a string that can be either:
- * - A step name (e.g., 'backlog', 'in_progress', 'done')
- * - A workflow:step format (e.g., 'default:in_progress')
+ * Get step badge styling based on step name.
  */
-function getStatusStyles(
-  status: string
+function getStepStyles(
+  stepName: string | null
 ): { bg: string; text: string; glow?: string } {
-  // Extract step name from potential workflow:step format
-  const stepName = status.includes(':') ? status.split(':').pop() ?? status : status;
+  if (!stepName) {
+    return { bg: "bg-bg-tertiary", text: "text-text-muted" };
+  }
   
-  switch (stepName) {
+  const normalizedStep = stepName.toLowerCase();
+  switch (normalizedStep) {
     case "backlog":
       return { bg: "bg-bg-tertiary", text: "text-text-muted" };
     case "todo":
       return { bg: "bg-primary/10", text: "text-primary" };
     case "in_progress":
+    case "in progress":
       return {
         bg: "bg-warning/10",
         text: "text-warning",
         glow: "shadow-[0_0_8px_rgba(245,158,11,0.3)]",
       };
     case "pending_review":
+    case "review":
       return { bg: "bg-info/10", text: "text-info" };
     case "done":
       return { bg: "bg-success/10", text: "text-success" };
@@ -52,30 +54,13 @@ function getStatusStyles(
 }
 
 /**
- * Format status for display.
- * Shows the step name in a human-readable format.
+ * Format step name for display.
  */
-function formatStatus(status: string): string {
-  // Extract step name from potential workflow:step format
-  const stepName = status.includes(':') ? status.split(':').pop() ?? status : status;
+function formatStepName(stepName: string | null): string {
+  if (!stepName) return "-";
   
-  switch (stepName) {
-    case "backlog":
-      return "Backlog";
-    case "todo":
-      return "Todo";
-    case "in_progress":
-      return "Active";
-    case "pending_review":
-      return "Review";
-    case "done":
-      return "Done";
-    case "rejected":
-      return "Rejected";
-    default:
-      // For custom status names, capitalize first letter
-      return stepName.charAt(0).toUpperCase() + stepName.slice(1).replace(/_/g, ' ');
-  }
+  // Capitalize first letter and replace underscores with spaces
+  return stepName.charAt(0).toUpperCase() + stepName.slice(1).replace(/_/g, " ");
 }
 
 /**
@@ -163,11 +148,11 @@ export function TaskTreeNode({
   selectedTaskId,
   onTaskSelect,
   expandedNodes,
+  hideStatus,
 }: TaskTreeNodeProps) {
   const task = node.task;
   const hasChildren = node.children.length > 0;
   const isSelected = selectedTaskId === task.id;
-  const isActive = task.status === "in_progress";
 
   // Determine if this node is expanded - default to true if no expandedNodes provided
   const isExpanded = expandedNodes ? expandedNodes.isNodeExpanded(task.id) : true;
@@ -205,7 +190,7 @@ export function TaskTreeNode({
     [expandedNodes, task.id]
   );
 
-  const statusStyles = getStatusStyles(task.status);
+  const stepStyles = getStepStyles(task.step_name);
   const levelStyles = getLevelStyles(task.level);
   const priorityIndicator = getPriorityIndicator(task.priority);
 
@@ -287,14 +272,8 @@ export function TaskTreeNode({
           {truncateId(task.id)}
         </code>
 
-        {/* Title with active indicator */}
+        {/* Title */}
         <div className="flex min-w-0 flex-1 items-center gap-2">
-          {isActive && (
-            <span className="relative flex h-2 w-2 shrink-0">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-warning opacity-75" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-warning" />
-            </span>
-          )}
           <span
             className={`truncate text-sm font-medium ${
               isSelected
@@ -337,12 +316,21 @@ export function TaskTreeNode({
           {formatLevel(task.level)}
         </span>
 
-        {/* Status badge */}
-        <span
-          className={`inline-flex shrink-0 items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${statusStyles.bg} ${statusStyles.text} ${statusStyles.glow ?? ""}`}
-        >
-          {formatStatus(task.status)}
-        </span>
+        {/* Workflow/Step badges */}
+        {!hideStatus && (
+          <div className="flex shrink-0 items-center gap-1.5">
+            {task.workflow_name && (
+              <span className="inline-flex items-center rounded border border-border bg-bg-tertiary px-1.5 py-0.5 text-[10px] font-medium text-text-secondary">
+                {task.workflow_name}
+              </span>
+            )}
+            <span
+              className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${stepStyles.bg} ${stepStyles.text} ${stepStyles.glow ?? ""}`}
+            >
+              {formatStepName(task.step_name)}
+            </span>
+          </div>
+        )}
 
         {/* Priority indicator */}
         {priorityIndicator ? (
@@ -374,6 +362,7 @@ export function TaskTreeNode({
               selectedTaskId={selectedTaskId}
               onTaskSelect={onTaskSelect}
               expandedNodes={expandedNodes}
+              hideStatus={hideStatus}
             />
           ))}
         </div>
