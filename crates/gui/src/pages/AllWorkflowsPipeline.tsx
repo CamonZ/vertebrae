@@ -754,6 +754,12 @@ function AllWorkflowsPipelineInner() {
           taskCount={
             workflowTasksMap.get(selectedWorkflow.id || "")?.length || 0
           }
+          tasks={
+            workflowTasksMap
+              .get(selectedWorkflow.id || "")
+              ?.filter((t) => t.task.id !== null)
+              .map((t) => ({ id: t.task.id!, title: t.task.title })) || []
+          }
           onClose={handleCloseWorkflowPanel}
         />
       )}
