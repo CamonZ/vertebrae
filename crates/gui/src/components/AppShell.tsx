@@ -14,7 +14,7 @@ interface AppShellProps {
 export function AppShell({
   children,
   title = "Vertebrae",
-  subtitle = "Task Management",
+  subtitle = "Agent Orchestrator",
 }: AppShellProps) {
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-bg-secondary">

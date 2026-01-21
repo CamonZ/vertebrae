@@ -2,7 +2,12 @@ import { createBrowserRouter, Outlet, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { AppShell } from "./components";
 import { useTheme } from "./hooks";
-import { ProjectSetupPage, TasksPage, WorkflowsPage, AllWorkflowsPipeline } from "./pages";
+import {
+  ProjectSetupPage,
+  TasksPage,
+  WorkflowsPage,
+  AllWorkflowsPipeline,
+} from "./pages";
 import { commands } from "./bindings";
 
 function RootLayout() {
@@ -10,7 +15,7 @@ function RootLayout() {
   useTheme();
 
   return (
-    <AppShell title="Vertebrae" subtitle="Task Management">
+    <AppShell title="Vertebrae" subtitle="Agent Orchestrator">
       <Outlet />
     </AppShell>
   );

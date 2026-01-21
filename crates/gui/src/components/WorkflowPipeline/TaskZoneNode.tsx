@@ -71,7 +71,7 @@ export const TaskZoneNode = memo(function TaskZoneNode({
   };
 
   return (
-    <div className="flex flex-col w-[280px] h-[280px] text-left">
+    <div className="taskZoneNode flex flex-col w-[280px] h-[280px] text-left transition-all duration-200 hover:shadow-md">
       <button
         type="button"
         onClick={handleZoneClick}

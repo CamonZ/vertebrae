@@ -16,7 +16,7 @@ export function getStatusColor(status: string, isSelected: boolean): string {
     case "failed":
       return "border-error bg-error/10";
     default:
-      return "border-border bg-bg-tertiary";
+      return "border-border bg-bg-tertiary ring-none";
   }
 }
 

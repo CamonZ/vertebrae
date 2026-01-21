@@ -18,8 +18,8 @@ function createTask(overrides?: Partial<Task>): Task {
     tags: [],
     created_at: null,
     updated_at: null,
+    started_at: null,
     needs_human_review: false,
-    current_workflow_id: null,
     current_step_id: null,
     sections: [],
     code_refs: [],
@@ -39,7 +39,7 @@ function createTaskWithRelations(
     parent_id: null,
     children_ids: [],
     depends_on_ids: [],
-    dependents_ids: [],
+    dependent_ids: [],
     ...relationOverrides,
   };
 }
@@ -70,18 +70,19 @@ function createAgentConfig(overrides?: Partial<AgentConfig>): AgentConfig {
  * Create a complete Step with defaults
  */
 function createStep(overrides?: Partial<Step>): Step {
-  return {
+  const defaultStep: Step = {
     id: null,
     name: "Test Step",
     workflow_id: "workflow-1",
+    goal: null, // Fix: Ensure goal is string | null, not optional
     agent_config: createAgentConfig(),
     is_final: false,
     transitions_to: [],
     order: 0,
     created_at: null,
     updated_at: null,
-    ...overrides,
   };
+  return { ...defaultStep, ...overrides };
 }
 
 /**
