@@ -7,7 +7,7 @@
 use crate::error::{ServiceError, ServiceResult};
 use async_trait::async_trait;
 use std::sync::Arc;
-use vertebrae_db::{Database, Thing, Workflow};
+use vertebrae_db::{Database, Thing, Workflow, WorkflowTransition};
 
 /// Event representing a workflow mutation for cache invalidation
 #[derive(Debug, Clone)]
@@ -397,6 +397,69 @@ pub trait WorkflowService: Send + Sync {
     ///
     /// If `dry_run` is true, returns what would be migrated without making changes.
     async fn migrate_to_default_workflow(&self, dry_run: bool) -> ServiceResult<MigrationResult>;
+
+    // =========================================================================
+    // Workflow Transition Operations
+    // =========================================================================
+
+    /// Create a transition between two workflows
+    ///
+    /// # Arguments
+    ///
+    /// * `from_workflow_id` - The source workflow ID
+    /// * `to_workflow_id` - The target workflow ID
+    /// * `label` - Human-readable label for the transition
+    /// * `target_step_id` - Optional step ID to start at in the target workflow
+    ///
+    /// # Returns
+    ///
+    /// The created `WorkflowTransition`.
+    async fn create_workflow_transition(
+        &self,
+        from_workflow_id: &str,
+        to_workflow_id: &str,
+        label: &str,
+        target_step_id: Option<&str>,
+    ) -> ServiceResult<WorkflowTransition>;
+
+    /// List all workflow transitions
+    ///
+    /// If `from_workflow_id` is provided, only returns transitions from that workflow.
+    async fn list_workflow_transitions(
+        &self,
+        from_workflow_id: Option<&str>,
+    ) -> ServiceResult<Vec<WorkflowTransition>>;
+
+    /// Get transitions from a specific workflow
+    async fn get_transitions_from_workflow(
+        &self,
+        workflow_id: &str,
+    ) -> ServiceResult<Vec<WorkflowTransition>>;
+
+    /// Get transitions to a specific workflow
+    async fn get_transitions_to_workflow(
+        &self,
+        workflow_id: &str,
+    ) -> ServiceResult<Vec<WorkflowTransition>>;
+
+    /// Delete a transition between two workflows
+    ///
+    /// # Arguments
+    ///
+    /// * `from_workflow_id` - The source workflow ID
+    /// * `to_workflow_id` - The target workflow ID
+    async fn delete_workflow_transition(
+        &self,
+        from_workflow_id: &str,
+        to_workflow_id: &str,
+    ) -> ServiceResult<()>;
+
+    /// Check if a transition exists between two workflows
+    async fn workflow_transition_exists(
+        &self,
+        from_workflow_id: &str,
+        to_workflow_id: &str,
+    ) -> ServiceResult<bool>;
 }
 
 /// Default implementation of WorkflowService backed by Database
@@ -1051,6 +1114,163 @@ impl WorkflowService for DefaultWorkflowService {
             skipped: db_result.skipped,
             skipped_ids: db_result.skipped_ids,
         })
+    }
+
+    async fn create_workflow_transition(
+        &self,
+        from_workflow_id: &str,
+        to_workflow_id: &str,
+        label: &str,
+        target_step_id: Option<&str>,
+    ) -> ServiceResult<WorkflowTransition> {
+        let from_id = from_workflow_id.to_lowercase();
+        let to_id = to_workflow_id.to_lowercase();
+
+        // Validate both workflows exist
+        if !self.db.workflows().exists(&from_id).await? {
+            return Err(ServiceError::workflow_not_found(from_workflow_id));
+        }
+
+        if !self.db.workflows().exists(&to_id).await? {
+            return Err(ServiceError::workflow_not_found(to_workflow_id));
+        }
+
+        // If target_step_id is provided, validate it exists and belongs to the target workflow
+        if let Some(step_id) = target_step_id {
+            let step_id_lower = step_id.to_lowercase();
+            let step = self.db.steps().get(&step_id_lower).await?;
+            match step {
+                None => {
+                    return Err(ServiceError::InvalidInput(format!(
+                        "Target step '{}' not found",
+                        step_id
+                    )));
+                }
+                Some(s) => {
+                    let step_workflow_id = s.workflow_id.id.to_raw();
+                    if step_workflow_id != to_id {
+                        return Err(ServiceError::validation_failed(format!(
+                            "Step '{}' belongs to workflow '{}', not target workflow '{}'",
+                            step_id, step_workflow_id, to_id
+                        )));
+                    }
+                }
+            }
+        }
+
+        // Check if transition already exists
+        if self
+            .db
+            .workflow_transitions()
+            .exists(&from_id, &to_id)
+            .await?
+        {
+            return Err(ServiceError::validation_failed(format!(
+                "Transition from '{}' to '{}' already exists",
+                from_workflow_id, to_workflow_id
+            )));
+        }
+
+        let transition = self
+            .db
+            .workflow_transitions()
+            .create(&from_id, &to_id, label, target_step_id)
+            .await?;
+
+        // Fire mutation callback
+        self.on_mutation(WorkflowMutationEvent::WorkflowUpdated {
+            id: from_id.clone(),
+        });
+
+        Ok(transition)
+    }
+
+    async fn list_workflow_transitions(
+        &self,
+        from_workflow_id: Option<&str>,
+    ) -> ServiceResult<Vec<WorkflowTransition>> {
+        let transitions = match from_workflow_id {
+            Some(id) => {
+                let id = id.to_lowercase();
+                self.db
+                    .workflow_transitions()
+                    .get_from_workflow(&id)
+                    .await?
+            }
+            None => self.db.workflow_transitions().list_all().await?,
+        };
+        Ok(transitions)
+    }
+
+    async fn get_transitions_from_workflow(
+        &self,
+        workflow_id: &str,
+    ) -> ServiceResult<Vec<WorkflowTransition>> {
+        let id = workflow_id.to_lowercase();
+        let transitions = self
+            .db
+            .workflow_transitions()
+            .get_from_workflow(&id)
+            .await?;
+        Ok(transitions)
+    }
+
+    async fn get_transitions_to_workflow(
+        &self,
+        workflow_id: &str,
+    ) -> ServiceResult<Vec<WorkflowTransition>> {
+        let id = workflow_id.to_lowercase();
+        let transitions = self.db.workflow_transitions().get_to_workflow(&id).await?;
+        Ok(transitions)
+    }
+
+    async fn delete_workflow_transition(
+        &self,
+        from_workflow_id: &str,
+        to_workflow_id: &str,
+    ) -> ServiceResult<()> {
+        let from_id = from_workflow_id.to_lowercase();
+        let to_id = to_workflow_id.to_lowercase();
+
+        // Check if transition exists
+        if !self
+            .db
+            .workflow_transitions()
+            .exists(&from_id, &to_id)
+            .await?
+        {
+            return Err(ServiceError::InvalidInput(format!(
+                "Transition from '{}' to '{}' not found",
+                from_workflow_id, to_workflow_id
+            )));
+        }
+
+        self.db
+            .workflow_transitions()
+            .delete(&from_id, &to_id)
+            .await?;
+
+        // Fire mutation callback
+        self.on_mutation(WorkflowMutationEvent::WorkflowUpdated {
+            id: from_id.clone(),
+        });
+
+        Ok(())
+    }
+
+    async fn workflow_transition_exists(
+        &self,
+        from_workflow_id: &str,
+        to_workflow_id: &str,
+    ) -> ServiceResult<bool> {
+        let from_id = from_workflow_id.to_lowercase();
+        let to_id = to_workflow_id.to_lowercase();
+        let exists = self
+            .db
+            .workflow_transitions()
+            .exists(&from_id, &to_id)
+            .await?;
+        Ok(exists)
     }
 }
 

@@ -69,5 +69,5 @@ pub use workflow_service::{
 // Re-export commonly used types from vertebrae-db
 pub use vertebrae_db::{
     BlockerNode, CodeRef, Database, Level, Priority, Section, SectionType, Step, StepUpdate, Task,
-    TaskFilter, TaskSummary, TaskUpdate, Workflow,
+    TaskFilter, TaskSummary, TaskUpdate, Workflow, WorkflowTransition,
 };
