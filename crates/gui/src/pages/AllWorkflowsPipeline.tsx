@@ -6,9 +6,11 @@ import {
   BackgroundVariant,
   useNodesState,
   useEdgesState,
+  ReactFlowProvider,
   type Node,
   type Edge,
   type NodeTypes,
+  type EdgeTypes,
   MarkerType,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
@@ -18,10 +20,12 @@ import {
   type TaskWithRelations,
   type Step,
   type Workflow,
+  type WorkflowTransition,
 } from "../bindings";
 import { useWorkflows } from "../hooks/useWorkflows";
 import { useWorkflowChangeListener } from "../hooks/useWorkflowChangeListener";
 import { useTaskChangeListener } from "../hooks/useTaskChangeListener";
+import { useElkLayout, type LayoutNode, type LayoutEdge } from "../hooks";
 import { useToastStore } from "../stores";
 import { groupTasksByStep } from "../utils";
 import {
@@ -31,9 +35,13 @@ import {
   type WorkflowZoneNodeData,
   TaskZoneNode,
   type TaskZoneNodeData,
+  ElkRoutedEdge,
+  type ElkRoutedEdgeData,
   LAYOUT_CONSTANTS,
   calculateWorkflowZoneWidth,
   calculateWorkflowZoneHeight,
+  COLLAPSED_WORKFLOW_WIDTH,
+  COLLAPSED_WORKFLOW_HEIGHT,
 } from "../components/WorkflowPipeline";
 import { TaskDetailPanel } from "../components/TaskDetail";
 import { StepDetailPanel } from "../components/StepDetail";
@@ -50,11 +58,19 @@ const nodeTypes: NodeTypes = {
 };
 
 /**
+ * Edge type mapping for React Flow
+ */
+const edgeTypes: EdgeTypes = {
+  elkRouted: ElkRoutedEdge,
+};
+
+/**
  * AllWorkflowsPipeline displays all workflows in a single React Flow canvas.
  * Each workflow is rendered as a zone with dashed borders containing its pipeline.
  * Features neural-pathway-inspired design with real-time updates.
+ * Press 'c' to toggle collapsed/expanded view.
  */
-export function AllWorkflowsPipeline() {
+function AllWorkflowsPipelineInner() {
   const { workflows, isLoading, error, refetch } = useWorkflows();
   const addToast = useToastStore((state) => state.addToast);
 
@@ -75,13 +91,23 @@ export function AllWorkflowsPipeline() {
   const [selectedStep, setSelectedStep] = useState<Step | null>(null);
 
   // State for selected workflow (for workflow detail panel)
-  const [selectedWorkflow, setSelectedWorkflow] = useState<Workflow | null>(null);
+  const [selectedWorkflow, setSelectedWorkflow] = useState<Workflow | null>(
+    null
+  );
 
   // State for selected zone (workflow ID + step for filtered tasks panel)
   const [selectedZone, setSelectedZone] = useState<{
     workflowId: string;
     step: Step;
   } | null>(null);
+
+  // State for workflow transitions (edges between workflows)
+  const [workflowTransitions, setWorkflowTransitions] = useState<
+    WorkflowTransition[]
+  >([]);
+
+  // State for collapsed view toggle (press 'c' to toggle)
+  const [isCollapsed, setIsCollapsed] = useState(false);
 
   // Task selection handlers
   const handleTaskClick = useCallback((taskId: string) => {
@@ -197,6 +223,23 @@ export function AllWorkflowsPipeline() {
 
       setWorkflowTasksMap(tasksMap);
       setWorkflowStepsMap(stepsMap);
+
+      // Fetch workflow transitions (edges between workflows)
+      try {
+        const transitionsResult = await commands.listWorkflowTransitions();
+        if (transitionsResult.status === "ok") {
+          setWorkflowTransitions(transitionsResult.data);
+        } else {
+          console.warn(
+            "Failed to load workflow transitions:",
+            transitionsResult.error.message
+          );
+          setWorkflowTransitions([]);
+        }
+      } catch (err) {
+        console.warn("Failed to load workflow transitions:", String(err));
+        setWorkflowTransitions([]);
+      }
     };
 
     fetchAllWorkflowData();
@@ -214,10 +257,80 @@ export function AllWorkflowsPipeline() {
     },
   });
 
+  // Calculate workflow zone dimensions for ELK layout
+  // Always use expanded dimensions for consistent positioning
+  const workflowDimensions = useMemo(() => {
+    const dimensions = new Map<string, { width: number; height: number }>();
+    workflows.forEach((workflow) => {
+      if (!workflow.id) return;
+      // Always use full zone dimensions for ELK layout positioning
+      const workflowSteps = workflowStepsMap.get(workflow.id) || [];
+      const width = calculateWorkflowZoneWidth(workflowSteps.length);
+      const height = calculateWorkflowZoneHeight();
+      dimensions.set(workflow.id, { width, height });
+    });
+    return dimensions;
+  }, [workflows, workflowStepsMap]);
+
+  // Build ELK layout nodes from workflows
+  const elkLayoutNodes = useMemo((): LayoutNode[] => {
+    return workflows
+      .filter((w) => w.id)
+      .map((workflow) => {
+        const dims = workflowDimensions.get(workflow.id!) || { 
+          width: 800, 
+          height: 400 
+        };
+        return {
+          id: workflow.id!,
+          width: dims.width,
+          height: dims.height,
+        };
+      });
+  }, [workflows, workflowDimensions]);
+
+  // Build ELK layout edges from workflow transitions
+  const elkLayoutEdges = useMemo((): LayoutEdge[] => {
+    return workflowTransitions
+      .filter((t) => t.from_workflow_id !== t.to_workflow_id) // Skip self-loops for layout
+      .map((t, index) => ({
+        id: `elk-edge-${index}`,
+        source: t.from_workflow_id,
+        target: t.to_workflow_id,
+      }));
+  }, [workflowTransitions]);
+
+  // Calculate ELK layout positions for workflow zones
+  const {
+    nodes: elkPositions,
+    edges: elkEdgePaths,
+    isLayouting: _isLayouting,
+  } = useElkLayout(elkLayoutNodes, elkLayoutEdges, {
+    direction: "DOWN",
+    nodeSpacing: 60,
+    layerSpacing: 120,
+  });
+
+  // Keyboard shortcut to toggle collapsed view
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Only toggle if not typing in an input/textarea
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+      if (e.key === 'c' || e.key === 'C') {
+        setIsCollapsed(prev => !prev);
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   // Generate all nodes for the unified canvas
   const allNodes = useMemo(() => {
     const nodes: Node[] = [];
-    let currentY = 0;
+    let fallbackY = 0; // Fallback for when ELK hasn't calculated positions yet
 
     workflows.forEach((workflow) => {
       // Skip workflows without an ID
@@ -229,14 +342,24 @@ export function AllWorkflowsPipeline() {
       const workflowTasks = workflowTasksMap.get(workflowId) || [];
       const tasksByStep = groupTasksByStep(workflowTasks, workflowSteps);
 
-      const zoneWidth = calculateWorkflowZoneWidth(sortedSteps.length);
-      const zoneHeight = calculateWorkflowZoneHeight();
+      // Use collapsed or expanded dimensions based on toggle
+      const zoneWidth = isCollapsed
+        ? COLLAPSED_WORKFLOW_WIDTH
+        : calculateWorkflowZoneWidth(sortedSteps.length);
+      const zoneHeight = isCollapsed
+        ? COLLAPSED_WORKFLOW_HEIGHT
+        : calculateWorkflowZoneHeight();
+
+      // Use ELK-calculated position or fallback to vertical stacking
+      const elkPosition = elkPositions.get(workflowId);
+      const zoneX = elkPosition?.x ?? 0;
+      const zoneY = elkPosition?.y ?? fallbackY;
 
       // Add workflow zone node
       nodes.push({
         id: `workflow-zone-${workflowId}`,
         type: "workflowZoneNode",
-        position: { x: 0, y: currentY },
+        position: { x: zoneX, y: zoneY },
         data: {
           workflow,
           taskCount: workflowTasks.length,
@@ -245,67 +368,84 @@ export function AllWorkflowsPipeline() {
           height: zoneHeight,
           onWorkflowClick: handleWorkflowClick,
           isWorkflowSelected: selectedWorkflow?.id === workflowId,
+          isCollapsed,
         } as WorkflowZoneNodeData,
         draggable: false,
         selectable: false,
       });
 
-      // Add step nodes within this workflow zone
-      sortedSteps.forEach((step, index) => {
-        const isStepSelected =
-          selectedStep?.name === step.name &&
-          selectedStep?.order === step.order;
-        nodes.push({
-          id: `step-${workflowId}-${step.order}`,
-          type: "stepNode",
-          position: {
-            x: LAYOUT_CONSTANTS.WORKFLOW_ZONE_PADDING + index * LAYOUT_CONSTANTS.NODE_SPACING_X,
-            y: currentY + LAYOUT_CONSTANTS.WORKFLOW_ZONE_HEADER_HEIGHT + LAYOUT_CONSTANTS.STEP_Y_OFFSET,
-          },
-          data: {
-            step,
-            isFirst: index === 0,
-            isLast: index === sortedSteps.length - 1,
-            onStepClick: handleStepClick,
-            isSelected: isStepSelected,
-          } as StepNodeData,
-          draggable: false,
-        });
+      // Only add step and task nodes when expanded (not collapsed)
+      if (!isCollapsed) {
+        // Add step nodes within this workflow zone
+        sortedSteps.forEach((step, index) => {
+          const isStepSelected =
+            selectedStep?.name === step.name &&
+            selectedStep?.order === step.order;
+          nodes.push({
+            id: `step-${workflowId}-${step.order}`,
+            type: "stepNode",
+            position: {
+              x:
+                zoneX +
+                LAYOUT_CONSTANTS.WORKFLOW_ZONE_PADDING +
+                index * LAYOUT_CONSTANTS.NODE_SPACING_X,
+              y:
+                zoneY +
+                LAYOUT_CONSTANTS.WORKFLOW_ZONE_HEADER_HEIGHT +
+                LAYOUT_CONSTANTS.STEP_Y_OFFSET,
+            },
+            data: {
+              step,
+              isFirst: index === 0,
+              isLast: index === sortedSteps.length - 1,
+              onStepClick: handleStepClick,
+              isSelected: isStepSelected,
+            } as StepNodeData,
+            draggable: false,
+          });
 
-        // Add task zone node below each step
-        const stepTasks = tasksByStep.get(step.name.toLowerCase()) || [];
-        const isZoneActive =
-          selectedZone?.workflowId === workflowId &&
-          selectedZone?.step.order === step.order;
-        nodes.push({
-          id: `task-zone-${workflowId}-${step.order}`,
-          type: "taskZoneNode",
-          position: {
-            x: LAYOUT_CONSTANTS.WORKFLOW_ZONE_PADDING + index * LAYOUT_CONSTANTS.NODE_SPACING_X - 9, // Center offset
-            y: currentY + LAYOUT_CONSTANTS.WORKFLOW_ZONE_HEADER_HEIGHT + LAYOUT_CONSTANTS.TASK_ZONE_Y_OFFSET,
-          },
-          data: {
-            label: `${step.name} (${stepTasks.length})`,
-            tasks: stepTasks,
-            onTaskClick: handleTaskClick,
-            selectedTaskId,
-            step,
-            onZoneClick: () => handleZoneClick(workflowId, step),
-            isZoneActive,
-          } as TaskZoneNodeData,
-          style: {
-            background: "rgba(15, 15, 18, 0.8)",
-            border: "1px solid rgba(100, 116, 139, 0.3)",
-            borderRadius: "8px",
-            padding: "8px",
-          },
-          draggable: false,
-          selectable: true,
+          // Add task zone node below each step
+          const stepTasks = tasksByStep.get(step.name.toLowerCase()) || [];
+          const isZoneActive =
+            selectedZone?.workflowId === workflowId &&
+            selectedZone?.step.order === step.order;
+          nodes.push({
+            id: `task-zone-${workflowId}-${step.order}`,
+            type: "taskZoneNode",
+            position: {
+              x:
+                zoneX +
+                LAYOUT_CONSTANTS.WORKFLOW_ZONE_PADDING +
+                index * LAYOUT_CONSTANTS.NODE_SPACING_X -
+                9, // Center offset
+              y:
+                zoneY +
+                LAYOUT_CONSTANTS.WORKFLOW_ZONE_HEADER_HEIGHT +
+                LAYOUT_CONSTANTS.TASK_ZONE_Y_OFFSET,
+            },
+            data: {
+              label: `${step.name} (${stepTasks.length})`,
+              tasks: stepTasks,
+              onTaskClick: handleTaskClick,
+              selectedTaskId,
+              step,
+              onZoneClick: () => handleZoneClick(workflowId, step),
+              isZoneActive,
+            } as TaskZoneNodeData,
+            style: {
+              background: "rgba(15, 15, 18, 0.8)",
+              border: "1px solid rgba(100, 116, 139, 0.3)",
+              borderRadius: "8px",
+              padding: "8px",
+            },
+            draggable: false,
+            selectable: true,
+          });
         });
-      });
+      }
 
-      // Move to next workflow zone position
-      currentY += zoneHeight + LAYOUT_CONSTANTS.WORKFLOW_ZONE_GAP;
+      // Update fallback position for next workflow (in case ELK hasn't run yet)
+      fallbackY += zoneHeight + LAYOUT_CONSTANTS.WORKFLOW_ZONE_GAP;
     });
 
     return nodes;
@@ -313,6 +453,7 @@ export function AllWorkflowsPipeline() {
     workflows,
     workflowTasksMap,
     workflowStepsMap,
+    elkPositions,
     handleTaskClick,
     selectedTaskId,
     handleStepClick,
@@ -321,59 +462,119 @@ export function AllWorkflowsPipeline() {
     selectedZone,
     handleWorkflowClick,
     selectedWorkflow,
+    isCollapsed,
   ]);
 
   // Generate edges for step transitions
   const allEdges = useMemo(() => {
     const edges: Edge[] = [];
 
-    workflows.forEach((workflow) => {
-      const workflowId = workflow.id;
-      if (!workflowId) return;
+    // Only generate step-to-step edges when expanded (not collapsed)
+    if (!isCollapsed) {
+      workflows.forEach((workflow) => {
+        const workflowId = workflow.id;
+        if (!workflowId) return;
 
-      const workflowSteps = workflowStepsMap.get(workflowId) || [];
-      
-      // Create a map from step ID to step order for edge creation
-      const stepIdToOrder = new Map<string, number>();
-      workflowSteps.forEach((step) => {
-        if (step.id) {
-          stepIdToOrder.set(step.id, step.order);
-        }
-      });
+        const workflowSteps = workflowStepsMap.get(workflowId) || [];
 
-      // Generate edges based on transitions_to
-      workflowSteps.forEach((step) => {
-        if (!step.id) return;
-        
-        // Guard against missing transitions_to array
-        const transitions = step.transitions_to || [];
-        transitions.forEach((targetStepId) => {
-          const targetOrder = stepIdToOrder.get(targetStepId);
-          if (targetOrder !== undefined) {
-            edges.push({
-              id: `edge-${workflowId}-${step.order}-${targetOrder}`,
-              source: `step-${workflowId}-${step.order}`,
-              target: `step-${workflowId}-${targetOrder}`,
-              type: "smoothstep",
-              animated: false,
-              style: {
-                stroke: "rgba(99, 102, 241, 0.5)",
-                strokeWidth: 2,
-              },
-              markerEnd: {
-                type: MarkerType.ArrowClosed,
-                color: "rgba(99, 102, 241, 0.7)",
-                width: 20,
-                height: 20,
-              },
-            });
+        // Create a map from step ID to step order for edge creation
+        const stepIdToOrder = new Map<string, number>();
+        workflowSteps.forEach((step) => {
+          if (step.id) {
+            stepIdToOrder.set(step.id, step.order);
           }
         });
+
+        // Generate edges based on transitions_to
+        workflowSteps.forEach((step) => {
+          if (!step.id) return;
+
+          // Guard against missing transitions_to array
+          const transitions = step.transitions_to || [];
+          transitions.forEach((targetStepId) => {
+            const targetOrder = stepIdToOrder.get(targetStepId);
+            if (targetOrder !== undefined) {
+              edges.push({
+                id: `edge-${workflowId}-${step.order}-${targetOrder}`,
+                source: `step-${workflowId}-${step.order}`,
+                target: `step-${workflowId}-${targetOrder}`,
+                type: "smoothstep",
+                animated: false,
+                style: {
+                  stroke: "rgba(99, 102, 241, 0.5)",
+                  strokeWidth: 2,
+                },
+                markerEnd: {
+                  type: MarkerType.ArrowClosed,
+                  color: "rgba(99, 102, 241, 0.7)",
+                  width: 20,
+                  height: 20,
+                },
+              });
+            }
+          });
+        });
       });
-    });
+    }
+
+    // Generate edges for workflow-to-workflow transitions (always shown)
+    workflowTransitions
+      .filter((t) => t.from_workflow_id !== t.to_workflow_id) // Skip self-transitions
+      .forEach((transition, index) => {
+        // Only use ELK edge paths when expanded - when collapsed, use smoothstep
+        // which auto-connects to node handles at their scaled positions
+        const elkEdgeId = `elk-edge-${index}`;
+        const elkEdgePath = !isCollapsed
+          ? elkEdgePaths.get(elkEdgeId)
+          : undefined;
+
+        edges.push({
+          id: `workflow-transition-${transition.from_workflow_id}-${transition.to_workflow_id}`,
+          source: `workflow-zone-${transition.from_workflow_id}`,
+          target: `workflow-zone-${transition.to_workflow_id}`,
+          type: elkEdgePath ? "elkRouted" : "smoothstep",
+          animated: true,
+          data: elkEdgePath
+            ? ({
+                sourcePoint: elkEdgePath.sourcePoint,
+                targetPoint: elkEdgePath.targetPoint,
+                bendPoints: elkEdgePath.bendPoints,
+                label: transition.label,
+              } as ElkRoutedEdgeData)
+            : undefined,
+          label: elkEdgePath ? undefined : transition.label,
+          labelStyle: !elkEdgePath
+            ? { fill: "#a1a1aa", fontSize: 11, fontWeight: 500 }
+            : undefined,
+          labelBgStyle: !elkEdgePath
+            ? { fill: "#18181b", fillOpacity: 0.9 }
+            : undefined,
+          labelBgPadding: !elkEdgePath
+            ? ([6, 3] as [number, number])
+            : undefined,
+          labelBgBorderRadius: !elkEdgePath ? 4 : undefined,
+          style: {
+            stroke: "rgba(251, 146, 60, 0.6)", // Orange for workflow transitions
+            strokeWidth: 2,
+            strokeDasharray: "5,5", // Dashed line to distinguish from step edges
+          },
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            color: "rgba(251, 146, 60, 0.8)",
+            width: 24,
+            height: 24,
+          },
+        });
+      });
 
     return edges;
-  }, [workflows, workflowStepsMap]);
+  }, [
+    workflows,
+    workflowStepsMap,
+    workflowTransitions,
+    elkEdgePaths,
+    isCollapsed,
+  ]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(allNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(allEdges);
@@ -474,14 +675,28 @@ export function AllWorkflowsPipeline() {
         {/* Header */}
         <div className="relative border-b border-border bg-bg-primary px-6 py-4">
           <div className="neural-grid pointer-events-none absolute inset-0 opacity-20" />
-          <div className="relative">
-            <h1 className="text-lg font-semibold text-text-primary">
-              Workflow Pipelines
-            </h1>
-            <p className="mt-1 text-sm text-text-muted">
-              {workflows.length} workflow{workflows.length !== 1 ? "s" : ""}{" "}
-              visualized
-            </p>
+          <div className="relative flex items-center justify-between">
+            <div>
+              <h1 className="text-lg font-semibold text-text-primary">
+                Workflow Pipelines
+              </h1>
+              <p className="mt-1 text-sm text-text-muted">
+                {workflows.length} workflow{workflows.length !== 1 ? "s" : ""}{" "}
+                visualized
+              </p>
+            </div>
+            <button
+              onClick={() => setIsCollapsed(prev => !prev)}
+              className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                isCollapsed 
+                  ? "bg-accent/20 text-accent hover:bg-accent/30" 
+                  : "bg-bg-secondary text-text-muted hover:bg-bg-elevated"
+              }`}
+              title="Press 'c' to toggle"
+            >
+              {isCollapsed ? "Collapsed" : "Expanded"}
+              <kbd className="rounded bg-bg-primary/50 px-1.5 py-0.5 text-[10px]">c</kbd>
+            </button>
           </div>
         </div>
 
@@ -493,7 +708,7 @@ export function AllWorkflowsPipeline() {
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             nodeTypes={nodeTypes}
-            fitView
+            edgeTypes={edgeTypes}
             fitViewOptions={{ padding: 0.1, minZoom: 0.3, maxZoom: 1.5 }}
             minZoom={0.1}
             maxZoom={2}
@@ -536,7 +751,9 @@ export function AllWorkflowsPipeline() {
         <WorkflowDetailPanel
           workflow={selectedWorkflow}
           steps={workflowStepsMap.get(selectedWorkflow.id || "") || []}
-          taskCount={workflowTasksMap.get(selectedWorkflow.id || "")?.length || 0}
+          taskCount={
+            workflowTasksMap.get(selectedWorkflow.id || "")?.length || 0
+          }
           onClose={handleCloseWorkflowPanel}
         />
       )}
@@ -583,5 +800,13 @@ export function AllWorkflowsPipeline() {
           );
         })()}
     </div>
+  );
+}
+
+export function AllWorkflowsPipeline() {
+  return (
+    <ReactFlowProvider>
+      <AllWorkflowsPipelineInner />
+    </ReactFlowProvider>
   );
 }
