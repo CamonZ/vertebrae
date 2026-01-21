@@ -526,6 +526,25 @@ pub struct WorkflowWithTaskDetails {
     pub tasks: Vec<TaskWithRelations>,
 }
 
+/// Workflow transition - defines allowed transitions between workflows
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct WorkflowTransition {
+    /// Transition ID (string form)
+    pub id: Option<String>,
+    /// Source workflow ID
+    pub from_workflow_id: String,
+    /// Source workflow name
+    pub from_workflow_name: String,
+    /// Target workflow ID
+    pub to_workflow_id: String,
+    /// Target workflow name
+    pub to_workflow_name: String,
+    /// Human-readable label for this transition
+    pub label: String,
+    /// Optional target step ID in the destination workflow
+    pub target_step_id: Option<String>,
+}
+
 // ============================================================================
 // Execution Types
 // ============================================================================

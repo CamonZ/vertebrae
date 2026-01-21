@@ -177,6 +177,19 @@ async getWorkflowWithTaskDetails(id: string) : Promise<Result<WorkflowWithTaskDe
 }
 },
 /**
+ * List all workflow transitions
+ * 
+ * Returns all defined transitions between workflows, including workflow names.
+ */
+async listWorkflowTransitions() : Promise<Result<WorkflowTransition[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_workflow_transitions") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Get all step executions for a task
  * 
  * Returns a chronological list of all step executions for the given task.
@@ -1041,6 +1054,38 @@ export type WorkflowExecutionEventType =
  * Workflow failed
  */
 { Failed: { error: string } }
+/**
+ * Workflow transition - defines allowed transitions between workflows
+ */
+export type WorkflowTransition = { 
+/**
+ * Transition ID (string form)
+ */
+id: string | null; 
+/**
+ * Source workflow ID
+ */
+from_workflow_id: string; 
+/**
+ * Source workflow name
+ */
+from_workflow_name: string; 
+/**
+ * Target workflow ID
+ */
+to_workflow_id: string; 
+/**
+ * Target workflow name
+ */
+to_workflow_name: string; 
+/**
+ * Human-readable label for this transition
+ */
+label: string; 
+/**
+ * Optional target step ID in the destination workflow
+ */
+target_step_id: string | null }
 /**
  * Workflow with its associated tasks including full details and relations
  */

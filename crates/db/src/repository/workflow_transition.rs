@@ -302,6 +302,38 @@ impl<'a> WorkflowTransitionRepository<'a> {
             .collect())
     }
 
+    /// Get a transition from a specific workflow by its label.
+    ///
+    /// # Arguments
+    ///
+    /// * `from_workflow_id` - The ID of the source workflow
+    /// * `label` - The label of the transition to find
+    ///
+    /// # Returns
+    ///
+    /// `Some(WorkflowTransition)` if found, `None` otherwise.
+    pub async fn get_by_label(
+        &self,
+        from_workflow_id: &str,
+        label: &str,
+    ) -> DbResult<Option<WorkflowTransition>> {
+        let query = format!(
+            r#"SELECT * FROM workflow_transitions WHERE in = workflow:{} AND label = "{}""#,
+            from_workflow_id, label
+        );
+        let mut result = self.client.query(&query).await?;
+        let rows: Vec<TransitionRow> = result.take(0)?;
+
+        Ok(rows.into_iter().next().map(|row| WorkflowTransition {
+            id: Some(row.id),
+            from_workflow: row.r#in,
+            to_workflow: row.out,
+            label: row.label,
+            target_step: row.target_step,
+            created_at: None,
+        }))
+    }
+
     /// Seed default workflow transitions for the standard workflow system.
     ///
     /// Creates transitions between the default workflow and itself for common
@@ -649,6 +681,43 @@ mod tests {
             !transitions.is_empty(),
             "Default workflow should have transitions"
         );
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_get_by_label() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = WorkflowTransitionRepository::new(db.client());
+
+        create_workflow(&db, "wf1", "Workflow 1").await;
+        create_workflow(&db, "wf2", "Workflow 2").await;
+        create_workflow(&db, "wf3", "Workflow 3").await;
+
+        repo.create("wf1", "wf2", "approve", None).await.unwrap();
+        repo.create("wf1", "wf3", "escalate", None).await.unwrap();
+
+        // Should find by label
+        let transition = repo.get_by_label("wf1", "approve").await.unwrap();
+        assert!(transition.is_some());
+        let t = transition.unwrap();
+        assert_eq!(t.label, "approve");
+        assert_eq!(t.to_workflow.id.to_raw(), "wf2");
+
+        // Should find the other label too
+        let transition = repo.get_by_label("wf1", "escalate").await.unwrap();
+        assert!(transition.is_some());
+        let t = transition.unwrap();
+        assert_eq!(t.label, "escalate");
+        assert_eq!(t.to_workflow.id.to_raw(), "wf3");
+
+        // Non-existent label should return None
+        let transition = repo.get_by_label("wf1", "nonexistent").await.unwrap();
+        assert!(transition.is_none());
+
+        // Non-existent workflow should return None
+        let transition = repo.get_by_label("wf999", "approve").await.unwrap();
+        assert!(transition.is_none());
 
         cleanup(&temp_dir);
     }

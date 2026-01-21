@@ -373,6 +373,65 @@ pub async fn get_workflow(
     Ok(workflow.into())
 }
 
+/// List all workflow transitions
+///
+/// Returns all defined transitions between workflows, including workflow names.
+#[tauri::command]
+#[specta::specta]
+pub async fn list_workflow_transitions(
+    state: State<'_, AppState>,
+) -> Result<Vec<crate::types::WorkflowTransition>, CommandError> {
+    log::info!("list_workflow_transitions called");
+    let service_guard = state.service.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    #[allow(deprecated)]
+    let db = service.database();
+    let workflow_service = DefaultWorkflowService::new(db.clone());
+
+    // Get all transitions
+    let transitions = workflow_service.list_workflow_transitions(None).await?;
+
+    // Build a cache of workflow names
+    let workflows = workflow_service.list_workflows().await?;
+    let workflow_names: std::collections::HashMap<String, String> = workflows
+        .into_iter()
+        .map(|w| (w.id.clone(), w.name))
+        .collect();
+
+    // Convert to GUI type with workflow names
+    let result: Vec<crate::types::WorkflowTransition> = transitions
+        .into_iter()
+        .map(|t| {
+            let from_id = t.from_workflow.id.to_raw();
+            let to_id = t.to_workflow.id.to_raw();
+            crate::types::WorkflowTransition {
+                id: t.id.map(|thing| thing.id.to_raw()),
+                from_workflow_id: from_id.clone(),
+                from_workflow_name: workflow_names
+                    .get(&from_id)
+                    .cloned()
+                    .unwrap_or_else(|| from_id.clone()),
+                to_workflow_id: to_id.clone(),
+                to_workflow_name: workflow_names
+                    .get(&to_id)
+                    .cloned()
+                    .unwrap_or_else(|| to_id.clone()),
+                label: t.label,
+                target_step_id: t.target_step.map(|s| s.id.to_raw()),
+            }
+        })
+        .collect();
+
+    log::info!(
+        "list_workflow_transitions returned {} transitions",
+        result.len()
+    );
+    Ok(result)
+}
+
 /// Get a workflow with its associated tasks
 ///
 /// Returns the workflow along with all tasks that reference this workflow.
