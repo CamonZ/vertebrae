@@ -442,6 +442,8 @@ pub struct Step {
     pub name: String,
     /// Reference to the workflow this step belongs to
     pub workflow_id: String,
+    /// What this step should accomplish
+    pub goal: Option<String>,
     /// Agent configuration for this step
     pub agent_config: AgentConfig,
     /// Whether this is a final step (no outgoing transitions)
@@ -462,6 +464,7 @@ impl From<vertebrae_db::Step> for Step {
             id: step.id.map(|t| t.id.to_raw()),
             name: step.name,
             workflow_id: step.workflow_id.id.to_raw(),
+            goal: step.goal,
             agent_config: step.agent_config.into(),
             is_final: step.is_final,
             transitions_to: step.transitions_to.iter().map(|t| t.id.to_raw()).collect(),

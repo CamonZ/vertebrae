@@ -7,7 +7,9 @@ import {
   useNodesState,
   useEdgesState,
   type Node,
+  type Edge,
   type NodeTypes,
+  MarkerType,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
@@ -15,6 +17,7 @@ import {
   commands,
   type TaskWithRelations,
   type Step,
+  type Workflow,
 } from "../bindings";
 import { useWorkflows } from "../hooks/useWorkflows";
 import { useWorkflowChangeListener } from "../hooks/useWorkflowChangeListener";
@@ -34,6 +37,7 @@ import {
 } from "../components/WorkflowPipeline";
 import { TaskDetailPanel } from "../components/TaskDetail";
 import { StepDetailPanel } from "../components/StepDetail";
+import { WorkflowDetailPanel } from "../components/WorkflowDetail";
 import { FilteredTasksPanel } from "../components/FilteredTasks/FilteredTasksPanel";
 
 /**
@@ -70,6 +74,9 @@ export function AllWorkflowsPipeline() {
   // State for selected step (for step config panel)
   const [selectedStep, setSelectedStep] = useState<Step | null>(null);
 
+  // State for selected workflow (for workflow detail panel)
+  const [selectedWorkflow, setSelectedWorkflow] = useState<Workflow | null>(null);
+
   // State for selected zone (workflow ID + step for filtered tasks panel)
   const [selectedZone, setSelectedZone] = useState<{
     workflowId: string;
@@ -95,6 +102,19 @@ export function AllWorkflowsPipeline() {
   const handleStepClick = useCallback((step: Step) => {
     setSelectedStep(step);
     setSelectedTaskId(null); // Clear task selection when step is selected
+    setSelectedWorkflow(null); // Clear workflow selection
+  }, []);
+
+  // Workflow selection handlers
+  const handleWorkflowClick = useCallback((workflow: Workflow) => {
+    setSelectedWorkflow(workflow);
+    setSelectedTaskId(null); // Clear task selection
+    setSelectedStep(null); // Clear step selection
+    setSelectedZone(null); // Clear zone selection
+  }, []);
+
+  const handleCloseWorkflowPanel = useCallback(() => {
+    setSelectedWorkflow(null);
   }, []);
 
   const handleCloseStepPanel = useCallback(() => {
@@ -223,6 +243,8 @@ export function AllWorkflowsPipeline() {
           stepCount: sortedSteps.length,
           width: zoneWidth,
           height: zoneHeight,
+          onWorkflowClick: handleWorkflowClick,
+          isWorkflowSelected: selectedWorkflow?.id === workflowId,
         } as WorkflowZoneNodeData,
         draggable: false,
         selectable: false,
@@ -297,15 +319,74 @@ export function AllWorkflowsPipeline() {
     selectedStep,
     handleZoneClick,
     selectedZone,
+    handleWorkflowClick,
+    selectedWorkflow,
   ]);
 
+  // Generate edges for step transitions
+  const allEdges = useMemo(() => {
+    const edges: Edge[] = [];
+
+    workflows.forEach((workflow) => {
+      const workflowId = workflow.id;
+      if (!workflowId) return;
+
+      const workflowSteps = workflowStepsMap.get(workflowId) || [];
+      
+      // Create a map from step ID to step order for edge creation
+      const stepIdToOrder = new Map<string, number>();
+      workflowSteps.forEach((step) => {
+        if (step.id) {
+          stepIdToOrder.set(step.id, step.order);
+        }
+      });
+
+      // Generate edges based on transitions_to
+      workflowSteps.forEach((step) => {
+        if (!step.id) return;
+        
+        // Guard against missing transitions_to array
+        const transitions = step.transitions_to || [];
+        transitions.forEach((targetStepId) => {
+          const targetOrder = stepIdToOrder.get(targetStepId);
+          if (targetOrder !== undefined) {
+            edges.push({
+              id: `edge-${workflowId}-${step.order}-${targetOrder}`,
+              source: `step-${workflowId}-${step.order}`,
+              target: `step-${workflowId}-${targetOrder}`,
+              type: "smoothstep",
+              animated: false,
+              style: {
+                stroke: "rgba(99, 102, 241, 0.5)",
+                strokeWidth: 2,
+              },
+              markerEnd: {
+                type: MarkerType.ArrowClosed,
+                color: "rgba(99, 102, 241, 0.7)",
+                width: 20,
+                height: 20,
+              },
+            });
+          }
+        });
+      });
+    });
+
+    return edges;
+  }, [workflows, workflowStepsMap]);
+
   const [nodes, setNodes, onNodesChange] = useNodesState(allNodes);
-  const [edges, , onEdgesChange] = useEdgesState([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(allEdges);
 
   // Update nodes when allNodes changes
   useEffect(() => {
     setNodes(allNodes);
   }, [allNodes, setNodes]);
+
+  // Update edges when allEdges changes
+  useEffect(() => {
+    setEdges(allEdges);
+  }, [allEdges, setEdges]);
 
   // Handle loading state
   if (isLoading && workflows.length === 0) {
@@ -448,6 +529,16 @@ export function AllWorkflowsPipeline() {
       {/* Step Detail Panel */}
       {selectedStep && (
         <StepDetailPanel step={selectedStep} onClose={handleCloseStepPanel} />
+      )}
+
+      {/* Workflow Detail Panel */}
+      {selectedWorkflow && (
+        <WorkflowDetailPanel
+          workflow={selectedWorkflow}
+          steps={workflowStepsMap.get(selectedWorkflow.id || "") || []}
+          taskCount={workflowTasksMap.get(selectedWorkflow.id || "")?.length || 0}
+          onClose={handleCloseWorkflowPanel}
+        />
       )}
 
       {/* Filtered Tasks Panel */}

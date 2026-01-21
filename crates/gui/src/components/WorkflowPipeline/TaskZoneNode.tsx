@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
 import type { TaskLevel, TaskWithRelations, Step } from "../../bindings";
 import { getStatusColor, getStatusIcon, getLevelDotColor } from "./taskUtils";
@@ -42,6 +42,18 @@ export const TaskZoneNode = memo(function TaskZoneNode({
   // Determine if this zone is active (currently showing filtered tasks panel)
   const isZoneActive = data.isZoneActive ?? false;
 
+  // Calculate task breakdown by level
+  const taskBreakdown = useMemo(() => {
+    const breakdown = { epic: 0, ticket: 0, task: 0 };
+    tasks.forEach((tr) => {
+      const level = tr.task.level as TaskLevel;
+      if (level === "epic") breakdown.epic++;
+      else if (level === "ticket") breakdown.ticket++;
+      else breakdown.task++;
+    });
+    return breakdown;
+  }, [tasks]);
+
   const handleZoneClick = () => {
     if (step && onZoneClick) {
       onZoneClick(step);
@@ -51,7 +63,7 @@ export const TaskZoneNode = memo(function TaskZoneNode({
   // Determine title styles based on active state (hover via CSS)
   const getTitleClassName = () => {
     const base =
-      "text-xs font-semibold uppercase tracking-wider mb-2 px-1 transition-colors cursor-pointer rounded text-left";
+      "text-xs font-semibold uppercase tracking-wider px-1 transition-colors cursor-pointer rounded text-left";
     if (isZoneActive) {
       return `${base} text-primary font-bold`;
     }
@@ -67,6 +79,29 @@ export const TaskZoneNode = memo(function TaskZoneNode({
       >
         {label}
       </button>
+      {/* Task breakdown by level */}
+      {tasks.length > 0 && (
+        <div className="flex gap-2 px-1 mb-2 text-[10px]">
+          {taskBreakdown.epic > 0 && (
+            <span className="flex items-center gap-1 text-text-muted">
+              <span className={`w-2 h-2 rounded-full ${getLevelDotColor("epic")}`} />
+              {taskBreakdown.epic}
+            </span>
+          )}
+          {taskBreakdown.ticket > 0 && (
+            <span className="flex items-center gap-1 text-text-muted">
+              <span className={`w-2 h-2 rounded-full ${getLevelDotColor("ticket")}`} />
+              {taskBreakdown.ticket}
+            </span>
+          )}
+          {taskBreakdown.task > 0 && (
+            <span className="flex items-center gap-1 text-text-muted">
+              <span className={`w-2 h-2 rounded-full ${getLevelDotColor("task")}`} />
+              {taskBreakdown.task}
+            </span>
+          )}
+        </div>
+      )}
       <div className="flex-1 overflow-y-auto overflow-x-hidden space-y-1.5 pr-1 scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
         {tasks.map((tr) => {
           const execState = executionState?.get(tr.task.id!);

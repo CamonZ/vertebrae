@@ -13,6 +13,7 @@ function createStep(overrides?: Partial<Step>): Step {
     order: 0,
     is_final: false,
     transitions_to: [],
+    goal: null,
     created_at: null,
     updated_at: null,
     agent_config: {
@@ -70,6 +71,50 @@ describe("StepDetailPanel", () => {
       render(<StepDetailPanel step={step} />);
 
       expect(screen.getByText("Step 2 in workflow")).toBeInTheDocument();
+    });
+
+    it("displays goal when configured", () => {
+      const step = createStep({ goal: "Complete the implementation task" });
+      render(<StepDetailPanel step={step} />);
+
+      expect(screen.getByText("Complete the implementation task")).toBeInTheDocument();
+    });
+
+    it("does not display goal when not configured", () => {
+      const step = createStep({ goal: null });
+      render(<StepDetailPanel step={step} />);
+
+      expect(screen.queryByText("Complete the implementation task")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("transitions", () => {
+    it("displays transitions_to section when transitions exist", () => {
+      const step = createStep({
+        transitions_to: ["step:in_progress", "step:done"],
+      });
+      render(<StepDetailPanel step={step} />);
+
+      expect(screen.getByText("Transitions To")).toBeInTheDocument();
+      expect(screen.getByText("in_progress")).toBeInTheDocument();
+      expect(screen.getByText("done")).toBeInTheDocument();
+    });
+
+    it("strips step: prefix from transition IDs", () => {
+      const step = createStep({
+        transitions_to: ["step:review"],
+      });
+      render(<StepDetailPanel step={step} />);
+
+      expect(screen.getByText("review")).toBeInTheDocument();
+      expect(screen.queryByText("step:review")).not.toBeInTheDocument();
+    });
+
+    it("does not show transitions section when no transitions", () => {
+      const step = createStep({ transitions_to: [] });
+      render(<StepDetailPanel step={step} />);
+
+      expect(screen.queryByText("Transitions To")).not.toBeInTheDocument();
     });
   });
 

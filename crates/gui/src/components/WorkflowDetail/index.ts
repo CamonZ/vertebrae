@@ -1,0 +1,1 @@
+export { WorkflowDetailPanel } from "./WorkflowDetailPanel";

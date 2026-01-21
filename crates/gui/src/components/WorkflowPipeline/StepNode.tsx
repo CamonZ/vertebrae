@@ -77,9 +77,21 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
             <span className="absolute inset-0 animate-ping rounded-lg border border-accent opacity-20" />
           )}
         </div>
-        <div className="flex-1">
-          <h3 className="text-sm font-semibold text-text-primary">{step.name}</h3>
-          {step.agent_config.model && (
+        <div className="flex-1 min-w-0">
+          <h3
+            className="text-sm font-semibold text-text-primary truncate"
+            title={step.goal || step.name}
+          >
+            {step.name}
+          </h3>
+          {step.goal && (
+            <div className="w-2/3">
+              <p className="mt-0.5 truncate text-[10px] text-text-secondary" title={step.goal}>
+                {step.goal}
+              </p>
+            </div>
+          )}
+          {!step.goal && step.agent_config.model && (
             <p className="mt-0.5 truncate font-mono text-[10px] text-text-muted">
               {step.agent_config.model}
             </p>

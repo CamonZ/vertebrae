@@ -124,10 +124,35 @@ export function StepDetailPanel({ step, onClose }: StepDetailPanelProps) {
             </p>
           </div>
         </div>
+        {step.goal && (
+          <p className="mt-3 text-sm leading-relaxed text-text-secondary">
+            {step.goal}
+          </p>
+        )}
       </div>
 
       {/* Content */}
       <div className="flex-1 divide-y divide-border overflow-auto">
+        {/* Transitions */}
+        {step.transitions_to && step.transitions_to.length > 0 && (
+          <div className="p-4">
+            <SectionHeader title="Transitions To" />
+            <div className="flex flex-wrap gap-1.5">
+              {step.transitions_to.map((targetId, index) => (
+                <span
+                  key={`${targetId}-${index}`}
+                  className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 font-mono text-xs text-primary"
+                >
+                  <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                  </svg>
+                  {targetId.replace(/^step:/, "")}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Model Configuration */}
         <div className="p-4">
           <SectionHeader title="Model" />

@@ -11,6 +11,8 @@ export type WorkflowZoneNodeData = {
   stepCount: number;
   width: number;
   height: number;
+  onWorkflowClick?: (workflow: Workflow) => void;
+  isWorkflowSelected?: boolean;
 };
 
 export type WorkflowZoneNodeType = Node<WorkflowZoneNodeData, "workflowZoneNode">;
@@ -23,7 +25,21 @@ export type WorkflowZoneNodeType = Node<WorkflowZoneNodeData, "workflowZoneNode"
 function WorkflowZoneNodeComponent({
   data,
 }: NodeProps<WorkflowZoneNodeType>) {
-  const { workflow, taskCount, stepCount, width, height } = data;
+  const {
+    workflow,
+    taskCount,
+    stepCount,
+    width,
+    height,
+    onWorkflowClick,
+    isWorkflowSelected,
+  } = data;
+
+  const handleWorkflowClick = () => {
+    if (onWorkflowClick) {
+      onWorkflowClick(workflow);
+    }
+  };
 
   return (
     <div
@@ -35,10 +51,20 @@ function WorkflowZoneNodeComponent({
       }}
     >
       {/* Workflow header */}
-      <div className="absolute left-4 top-4 z-10">
-        <h2 className="text-lg font-semibold text-text-primary">
+      <div
+        className="absolute left-4 top-4 right-4 z-10"
+      >
+        <button
+          type="button"
+          onClick={handleWorkflowClick}
+          className={`text-lg font-semibold transition-colors text-left cursor-pointer pointer-events-auto ${
+            isWorkflowSelected
+              ? "text-primary"
+              : "text-text-primary hover:text-primary"
+          }`}
+        >
           {workflow.name}
-        </h2>
+        </button>
         <div className="mt-1 flex items-center gap-3 text-xs text-text-muted">
           <code className="font-mono">{workflow.id?.slice(0, 8)}</code>
           <span className="flex items-center gap-1">
@@ -75,7 +101,7 @@ function WorkflowZoneNodeComponent({
           </span>
         </div>
         {workflow.description && (
-          <p className="mt-2 max-w-md text-sm text-text-secondary line-clamp-1">
+          <p className="mt-2 text-sm text-text-secondary line-clamp-2">
             {workflow.description}
           </p>
         )}

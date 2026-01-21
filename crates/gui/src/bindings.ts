@@ -663,6 +663,10 @@ name: string;
  */
 workflow_id: string; 
 /**
+ * What this step should accomplish
+ */
+goal: string | null; 
+/**
  * Agent configuration for this step
  */
 agent_config: AgentConfig; 
@@ -791,11 +795,7 @@ rejection_reason: string | null;
  */
 workflow_id: string | null; 
 /**
- * Current step in workflow (0-indexed) - legacy, prefer current_step_id
- */
-current_step: number | null; 
-/**
- * Current step ID (string form) - preferred for positioning
+ * Current step ID (string form) - used for positioning
  */
 current_step_id: string | null }
 /**
