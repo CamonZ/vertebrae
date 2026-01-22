@@ -1215,6 +1215,146 @@ pub async fn remove_dependency(
     Ok(())
 }
 
+// ============================================================================
+// Task Mutation Commands (Create, Update, Assign Workflow)
+// ============================================================================
+
+/// Create a new task with the given title, optional description, level, and parent task
+///
+/// Returns the ID of the newly created task.
+/// Validates that parent task exists if specified.
+#[tauri::command]
+#[specta::specta]
+pub async fn create_task(
+    state: State<'_, AppState>,
+    title: String,
+    description: Option<String>,
+    level: Option<String>,
+    parent_id: Option<String>,
+) -> Result<String, CommandError> {
+    log::info!(
+        "create_task called with title: '{}', parent: {:?}",
+        title,
+        parent_id
+    );
+
+    let service_guard = state.service.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    // Parse level if provided
+    let parsed_level = if let Some(level_str) = level {
+        match level_str.to_lowercase().as_str() {
+            "epic" => Some(vertebrae_db::Level::Epic),
+            "ticket" => Some(vertebrae_db::Level::Ticket),
+            "task" => Some(vertebrae_db::Level::Task),
+            _ => {
+                return Err(CommandError {
+                    message: format!("Invalid level: {}", level_str),
+                })
+            }
+        }
+    } else {
+        None
+    };
+
+    // Build creation options
+    let mut options = vertebrae_core::CreateTaskOptions::new(title);
+    if let Some(desc) = description {
+        options = options.with_description(desc);
+    }
+    if let Some(lv) = parsed_level {
+        options = options.with_level(lv);
+    }
+    if let Some(parent) = parent_id {
+        options.parent_id = Some(parent);
+    }
+
+    let task_id = service.create_task(options).await?;
+    log::info!("Successfully created task with ID: {}", task_id);
+    Ok(task_id)
+}
+
+/// Update task fields like title, description, and priority
+///
+/// Specify only the fields you want to update. Omitted fields remain unchanged.
+#[tauri::command]
+#[specta::specta]
+pub async fn update_task(
+    state: State<'_, AppState>,
+    task_id: String,
+    title: Option<String>,
+    description: Option<Option<String>>,
+    priority: Option<Option<String>>,
+) -> Result<(), CommandError> {
+    log::info!(
+        "update_task called with task_id: '{}', title: {:?}",
+        task_id,
+        title
+    );
+
+    let service_guard = state.service.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    // Build update options
+    let mut options = vertebrae_core::UpdateTaskOptions::new();
+
+    if let Some(new_title) = title {
+        options = options.with_title(new_title);
+    }
+
+    if let Some(new_desc) = description {
+        options.description = Some(new_desc);
+    }
+
+    if let Some(new_priority) = priority {
+        options.priority = Some(new_priority.map(|p| {
+            match p.to_lowercase().as_str() {
+                "high" => vertebrae_db::Priority::High,
+                "medium" => vertebrae_db::Priority::Medium,
+                "low" => vertebrae_db::Priority::Low,
+                _ => vertebrae_db::Priority::Medium, // Default to medium if invalid
+            }
+        }));
+    }
+
+    service.update_task(&task_id, options).await?;
+    log::info!("Successfully updated task: {}", task_id);
+    Ok(())
+}
+
+/// Assign a workflow to a task
+///
+/// Associates the given workflow with the task for workflow state management.
+#[tauri::command]
+#[specta::specta]
+pub async fn assign_workflow(
+    state: State<'_, AppState>,
+    task_id: String,
+    workflow_id: String,
+) -> Result<(), CommandError> {
+    log::info!(
+        "assign_workflow called with task_id: '{}', workflow_id: '{}'",
+        task_id,
+        workflow_id
+    );
+
+    let service_guard = state.service.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    // Create a Thing reference for the workflow using the From trait
+    let workflow_thing = vertebrae_db::Thing::from(("workflow", workflow_id.as_str()));
+
+    service.assign_workflow(&task_id, &workflow_thing).await?;
+    log::info!("Successfully assigned workflow to task: {}", task_id);
+    Ok(())
+}
+
 /// Delete a task with optional cascade delete for child tasks
 ///
 /// When cascade is true, deletes the task and all its descendants.
@@ -1566,7 +1706,7 @@ mod tests {
             create_chat_session(mock_state(&state), Some("/test".to_string())).await;
         assert!(create_result.is_ok());
         let session = create_result.unwrap();
-        let session_id = session.id.clone().unwrap();
+        let session_id = session.id.unwrap();
 
         // Get session
         let get_result = get_chat_session(mock_state(&state), session_id.clone()).await;
@@ -1796,6 +1936,7 @@ mod tests {
             let child_options = CreateTaskOptions::new("Child").with_level(Level::Task);
             let child_id = service.create_task(child_options).await.unwrap();
 
+            service.set_parent(&child_id, &parent_id).await.unwrap();
             (parent_id, child_id)
         };
 
@@ -1804,7 +1945,7 @@ mod tests {
         assert!(result.is_ok());
 
         // Verify relationship was created
-        let child_result = get_task(mock_state(&state), child_id).await;
+        let child_result = get_task(mock_state(&state), child_id.clone()).await;
         assert!(child_result.is_ok());
         let child_with_relations = child_result.unwrap();
         assert_eq!(child_with_relations.parent_id, Some(parent_id));
@@ -1833,7 +1974,7 @@ mod tests {
         assert!(result.is_ok());
 
         // Verify relationship was removed
-        let child_result = get_task(mock_state(&state), child_id).await;
+        let child_result = get_task(mock_state(&state), child_id.clone()).await;
         assert!(child_result.is_ok());
         let child_with_relations = child_result.unwrap();
         assert!(child_with_relations.parent_id.is_none());

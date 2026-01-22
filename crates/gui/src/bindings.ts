@@ -177,6 +177,46 @@ async removeDependency(taskId: string, dependsOnId: string) : Promise<Result<nul
 }
 },
 /**
+ * Create a new task with the given title, optional description, level, and parent task
+ * 
+ * Returns the ID of the newly created task.
+ * Validates that parent task exists if specified.
+ */
+async createTask(title: string, description: string | null, level: string | null, parentId: string | null) : Promise<Result<string, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("create_task", { title, description, level, parentId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Update task fields like title, description, and priority
+ * 
+ * Specify only the fields you want to update. Omitted fields remain unchanged.
+ */
+async updateTask(taskId: string, title: string | null, description: string | null, priority: string | null) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_task", { taskId, title, description, priority }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Assign a workflow to a task
+ * 
+ * Associates the given workflow with the task for workflow state management.
+ */
+async assignWorkflow(taskId: string, workflowId: string) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("assign_workflow", { taskId, workflowId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Delete a task with optional cascade delete for child tasks
  * 
  * When cascade is true, deletes the task and all its descendants.

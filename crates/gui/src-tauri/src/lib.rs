@@ -63,6 +63,10 @@ fn create_builder() -> Builder {
             commands::remove_parent,
             commands::add_dependency,
             commands::remove_dependency,
+            // Task mutation commands
+            commands::create_task,
+            commands::update_task,
+            commands::assign_workflow,
             // Task deletion command
             commands::delete_task,
             // Workflow commands
