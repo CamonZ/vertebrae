@@ -19,7 +19,7 @@ A task management system written in Rust with CLI and GUI interfaces.
 - Sections capture implementation details (steps, constraints, testing criteria)
 - Code refs link tasks to actual source locations
 - User can see your plan and progress at any time
-- `vtb transition-to <id> done` automatically shows what's unblocked next
+- Completing a ticket automatically shows what's unblocked next
 
 ### When to use vtb (ALWAYS for non-trivial work)
 
@@ -38,20 +38,36 @@ A task management system written in Rust with CLI and GUI interfaces.
 5. **Set dependencies** → `vtb depend <task> --on <blocker>` to enforce order
 6. **Add details** → `vtb section` for steps, constraints, testing criteria
 7. **Link code** → `vtb ref` to relevant source locations
-8. **Execute** → Move ticket from backlog → `vtb transition-to <id> implementation`, then use `vtb workflow advance <id>` to move through workflow steps, **commit after completing each step**, **commit once more when calling `vtb transition-to <id> done`**, repeat
+8. **Execute** → Follow the ticket execution workflow below
 9. **Track progress** → `vtb list`, `vtb blockers`, `vtb show`
 
-**CRITICAL: Work through workflow steps using `vtb workflow advance`** - Do not skip directly to `done`. Within a workflow:
-- Use `vtb workflow advance <id>` to move to the next step (e.g., `coding` → `testing`)
-- Commit after completing significant work at each step
-- Use `vtb workflow retreat <id>` if you need to revisit previous steps
-- Only use `vtb transition-to <id> done` when the entire ticket is fully completed and tested
+### Ticket Execution Workflow
 
-**CRITICAL: You MUST commit immediately after each `vtb transition-to <id> done`** - This is non-negotiable. Each completed ticket MUST have its own commit before moving to the next task. Do NOT batch multiple tickets into a single commit. This ensures:
-- Atomic, traceable changes linked to tickets
-- Easy rollback if needed
-- Clear git history matching task progression
-- Ability to split work across sessions without losing attribution
+For each ticket, follow this workflow using `vtb workflow advance <TICKET_ID>`:
+
+1. **Review ticket** → Use `vtb show <TICKET_ID>` to see ticket details and current step
+2. **Backlog phase** → If the ticket is in `backlog`:
+   - Check if all necessary sections are present (steps, constraints, testing criteria)
+   - If sections are missing, add them with `vtb section`
+   - Once complete, advance: `vtb workflow advance <TICKET_ID>` → moves to `todo`
+3. **Todo phase** → When ready to start implementation:
+   - Advance: `vtb workflow advance <TICKET_ID>` → moves to `in_progress`
+4. **In Progress phase** → Implement the ticket:
+   - Complete the implementation work
+   - When done, advance: `vtb workflow advance <TICKET_ID>` → moves to `pending_review`
+5. **Pending Review phase** → Review the changes:
+   - Spawn an agent to review for inconsistencies with existing code
+   - Ensure tests validate actual behavior (use acceptance, integration, property, or unit tests as appropriate)
+   - If critical issues found, use `vtb workflow retreat <TICKET_ID>` to go back to `in_progress`
+6. **Commit** → If review passes:
+   - Commit the changes with ticket ID prefix: `[<TICKET_ID>] Description`
+   - If commit succeeds, advance: `vtb workflow advance <TICKET_ID>` → moves to `done`
+
+**Commit message format:** All commits MUST be prefixed with the ticket ID in brackets:
+```
+[x6cb344] Implement feature X
+[abc1234] Fix bug in Y component
+```
 
 ### Hierarchy
 
@@ -82,19 +98,13 @@ vtb section <task> testing_criterion "Verify Y"  # Add test criteria
 vtb ref <task> "src/file.rs:L42" --name "func"   # Link to code
 vtb criterion-ref <task> 1 "tests/test.rs:L10"   # Link to test criterion
 
-# Status transitions (moving ACROSS workflows)
-vtb transition-to <task> implementation          # Move to implementation workflow
-vtb transition-to <task> review                  # Move to review workflow
-vtb transition-to <task> done                    # Complete (shows unblocked)
-
-# Step navigation (moving WITHIN a workflow)
-vtb workflow advance <task>                      # Next step in current workflow
-vtb workflow retreat <task>                      # Previous step in current workflow
+# Workflow navigation
+vtb workflow advance <task>                      # Move to next step
+vtb workflow retreat <task>                      # Move to previous step
 
 # Viewing
 vtb show <task>                                  # Full task details
 vtb list --status in_progress                    # What's active
-vtb list --workflow impl --step coding           # Filter by workflow/step
 vtb ready                                        # Show actionable items
 
 # Workflow management
@@ -105,34 +115,6 @@ vtb workflow assign <task> <workflow>            # Assign to task
 vtb export -o backup.jsonl                       # Export to JSONL
 vtb import -i backup.jsonl                       # Import from JSONL
 vtb init                                         # Initialize project
-```
-
-### Workflow Navigation
-
-Tasks progress through **workflows** (e.g., `backlog`, `implementation`, `review`, `done`), and each workflow contains **steps** (e.g., `implementation` might have steps: `coding`, `testing`, `documentation`).
-
-**First, understand available workflows:**
-```bash
-vtb workflow list                    # See all configured workflows
-vtb workflow show <workflow-id>      # See steps within a workflow
-```
-
-You must check the configured workflows before using `transition-to` — workflow names and steps vary by project.
-
-**Two ways to navigate:**
-
-| Command | Use Case | Example |
-|---------|----------|---------|
-| `vtb transition-to <task> <workflow>` | Move **across** workflows | `backlog` → `implementation` |
-| `vtb transition-to <task> <workflow>:<step>` | Jump to specific step | → `review:approved` |
-| `vtb workflow advance <task>` | Move to **next step** within current workflow | `coding` → `testing` |
-| `vtb workflow retreat <task>` | Move to **previous step** within current workflow | `testing` → `coding` |
-
-**Typical flow:**
-```
-backlog → implementation:coding → implementation:testing → review:pending → review:approved → done
-         \_____advance/retreat within workflow_____/      \____advance/retreat____/
-\________________________transition-to moves across workflows_________________________/
 ```
 
 ### Skills
@@ -154,8 +136,7 @@ See `skills/` for detailed command guides:
 - `/ready` - Show items ready for work or triage
 
 **Status and workflows:**
-- `/transition-to` - Change task status via workflows
-- `/workflow` - Manage workflows (add, list, show, assign, advance)
+- `/workflow` - Manage workflows (add, list, show, assign, advance, retreat)
 - `/step` - Manage workflow steps
 - `/review` - Toggle human review flag
 - `/step-done` - Mark implementation steps complete
@@ -316,7 +297,6 @@ vertebrae/
 │   ├── delete.md           # /delete - Remove tasks
 │   ├── vtb-show.md         # /vtb-show - Display task details
 │   ├── list.md             # /list - Filter and list tasks
-│   ├── transition-to.md    # /transition-to - Change task status
 │   ├── workflow.md         # /workflow - Manage workflows
 │   ├── step.md             # /step - Manage workflow steps
 │   ├── step-done.md        # /step-done - Mark steps complete
