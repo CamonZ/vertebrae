@@ -19,3 +19,5 @@ export type {
   TerminalProps,
   TerminalDimensions,
 } from "./Terminal";
+export { FormField } from "./forms";
+export type { FormFieldProps } from "./forms";

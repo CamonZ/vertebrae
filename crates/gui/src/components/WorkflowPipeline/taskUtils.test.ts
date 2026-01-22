@@ -30,12 +30,12 @@ describe("taskUtils", () => {
 
     it("returns default styles for unknown status", () => {
       const result = getStatusColor("unknown", false);
-      expect(result).toBe("border-border bg-bg-tertiary");
+      expect(result).toBe("border-border bg-bg-tertiary ring-none");
     });
 
     it("returns default styles for pending status", () => {
       const result = getStatusColor("pending", false);
-      expect(result).toBe("border-border bg-bg-tertiary");
+      expect(result).toBe("border-border bg-bg-tertiary ring-none");
     });
 
     it("prioritizes selected over status", () => {
