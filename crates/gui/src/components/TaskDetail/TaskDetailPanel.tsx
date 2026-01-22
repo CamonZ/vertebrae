@@ -1121,8 +1121,12 @@ export function TaskDetailPanel({
                 onSectionsChanged={refetch}
               />
             )}
-            {activeTab === "code_refs" && (
-              <TaskCodeRefs codeRefs={taskData.task.code_refs} />
+            {activeTab === "code_refs" && taskData.task.id && (
+              <TaskCodeRefs
+                codeRefs={taskData.task.code_refs}
+                taskId={taskData.task.id}
+                onCodeRefsChanged={refetch}
+              />
             )}
             {activeTab === "relations" && taskData.task.id && (
               <TaskRelations

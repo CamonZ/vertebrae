@@ -1320,6 +1320,18 @@ pub async fn update_task(
         }));
     }
 
+    if let Some(new_level) = options.level {
+        update_opts.level = Some(new_level);
+    }
+
+    if let Some(review_flag) = options.needs_human_review {
+        update_opts.needs_human_review = Some(review_flag);
+    }
+
+    if let Some(new_feedback) = options.revision_feedback {
+        update_opts.revision_feedback = Some(new_feedback);
+    }
+
     update_opts.add_tags = options.add_tags;
     update_opts.remove_tags = options.remove_tags;
 
@@ -1405,6 +1417,7 @@ pub async fn delete_task(
 ///
 /// Creates a new section with the given type and content.
 /// For step and testing_criterion types, content can be optional.
+/// The order is automatically assigned based on existing sections of the same type.
 #[tauri::command]
 #[specta::specta]
 pub async fn add_section(
@@ -1442,13 +1455,23 @@ pub async fn add_section(
         }
     };
 
+    // Get current task to calculate the order
+    let task = service.get_task(&task_id).await?;
+
+    // Count existing sections of the same type to determine the order
+    let order = task
+        .sections
+        .iter()
+        .filter(|s| s.section_type == parsed_type)
+        .count() as u32;
+
     // Use provided content or empty string
     let section_content = content.unwrap_or_default();
 
     let section = vertebrae_db::Section {
         section_type: parsed_type,
         content: section_content,
-        order: None,
+        order: Some(order),
         done: None,
         done_at: None,
         refs: Vec::new(),
@@ -1688,6 +1711,179 @@ pub async fn add_criterion_ref(
 
     log::info!(
         "Successfully added code reference to testing criterion in task: {}",
+        task_id
+    );
+    Ok(())
+}
+
+// ============================================================================
+// Code Reference Commands
+// ============================================================================
+
+/// Add a code reference to a task
+///
+/// Appends a code reference with optional line numbers and description.
+#[tauri::command]
+#[specta::specta]
+pub async fn add_code_ref(
+    state: State<'_, AppState>,
+    task_id: String,
+    path: String,
+    line_start: Option<u32>,
+    line_end: Option<u32>,
+    name: Option<String>,
+    description: Option<String>,
+) -> Result<(), CommandError> {
+    log::info!(
+        "add_code_ref called with task_id: {}, path: {}",
+        task_id,
+        path
+    );
+
+    let service_guard = state.service.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    let code_ref = vertebrae_db::CodeRef {
+        path,
+        line_start,
+        line_end,
+        name,
+        description,
+    };
+
+    service.add_code_ref(&task_id, code_ref).await?;
+
+    log::info!("Successfully added code reference to task: {}", task_id);
+    Ok(())
+}
+
+/// Edit a code reference in a task by its index
+///
+/// Updates an existing code reference at the specified index.
+#[tauri::command]
+#[specta::specta]
+#[allow(clippy::too_many_arguments)]
+pub async fn edit_code_ref(
+    state: State<'_, AppState>,
+    task_id: String,
+    index: u32,
+    path: String,
+    line_start: Option<u32>,
+    line_end: Option<u32>,
+    name: Option<String>,
+    description: Option<String>,
+) -> Result<(), CommandError> {
+    let index = index as usize;
+    log::info!(
+        "edit_code_ref called with task_id: {}, index: {}",
+        task_id,
+        index
+    );
+
+    let service_guard = state.service.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    // Get the task to modify its code refs
+    let task = service.get_task(&task_id).await?;
+
+    if index >= task.code_refs.len() {
+        return Err(CommandError {
+            message: format!(
+                "Code reference index {} out of bounds for task {} (has {} refs)",
+                index,
+                task_id,
+                task.code_refs.len()
+            ),
+        });
+    }
+
+    // Create the new code ref
+    let new_ref = vertebrae_db::CodeRef {
+        path,
+        line_start,
+        line_end,
+        name,
+        description,
+    };
+
+    // Build the modified code refs list
+    let mut modified_refs: Vec<vertebrae_db::CodeRef> = task
+        .code_refs
+        .iter()
+        .enumerate()
+        .map(|(i, r)| {
+            if i == index {
+                new_ref.clone()
+            } else {
+                r.clone()
+            }
+        })
+        .collect();
+
+    // Clear all existing refs and re-add them
+    // This is a workaround since the service doesn't have a set_code_refs method
+    service.remove_code_refs(&task_id, None).await?;
+
+    for code_ref in modified_refs.drain(..) {
+        service.add_code_ref(&task_id, code_ref).await?;
+    }
+
+    log::info!(
+        "Successfully edited code reference {} in task: {}",
+        index,
+        task_id
+    );
+    Ok(())
+}
+
+/// Remove a code reference from a task by its index
+///
+/// Removes the code reference at the specified index.
+#[tauri::command]
+#[specta::specta]
+pub async fn remove_code_ref(
+    state: State<'_, AppState>,
+    task_id: String,
+    index: u32,
+) -> Result<(), CommandError> {
+    let index = index as usize;
+    log::info!(
+        "remove_code_ref called with task_id: {}, index: {}",
+        task_id,
+        index
+    );
+
+    let service_guard = state.service.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    // Get the task to verify index is valid
+    let task = service.get_task(&task_id).await?;
+
+    if index >= task.code_refs.len() {
+        return Err(CommandError {
+            message: format!(
+                "Code reference index {} out of bounds for task {} (has {} refs)",
+                index,
+                task_id,
+                task.code_refs.len()
+            ),
+        });
+    }
+
+    // Remove the code ref at the specified index
+    service
+        .remove_code_refs(&task_id, Some(vec![index]))
+        .await?;
+
+    log::info!(
+        "Successfully removed code reference {} from task: {}",
+        index,
         task_id
     );
     Ok(())

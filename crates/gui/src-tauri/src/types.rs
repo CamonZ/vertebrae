@@ -368,6 +368,12 @@ pub struct UpdateTaskOptions {
     /// Tags to remove
     #[serde(default)]
     pub remove_tags: Vec<String>,
+    /// New task level (epic, ticket, task)
+    pub level: Option<String>,
+    /// Human review flag
+    pub needs_human_review: Option<bool>,
+    /// Revision feedback text
+    pub revision_feedback: Option<Option<String>>,
 }
 
 // ============================================================================

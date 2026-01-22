@@ -75,6 +75,10 @@ fn create_builder() -> Builder {
             commands::mark_section_done,
             commands::remove_section,
             commands::add_criterion_ref,
+            // Code reference commands
+            commands::add_code_ref,
+            commands::edit_code_ref,
+            commands::remove_code_ref,
             // Workflow commands
             commands::list_workflows,
             commands::get_workflow,

@@ -301,6 +301,45 @@ async addCriterionRef(taskId: string, sectionOrdinal: number, filePath: string, 
 }
 },
 /**
+ * Add a code reference to a task
+ * 
+ * Appends a code reference with optional line numbers and description.
+ */
+async addCodeRef(taskId: string, path: string, lineStart: number | null, lineEnd: number | null, name: string | null, description: string | null) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("add_code_ref", { taskId, path, lineStart, lineEnd, name, description }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Edit a code reference in a task by its index
+ * 
+ * Updates an existing code reference at the specified index.
+ */
+async editCodeRef(taskId: string, index: number, path: string, lineStart: number | null, lineEnd: number | null, name: string | null, description: string | null) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("edit_code_ref", { taskId, index, path, lineStart, lineEnd, name, description }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Remove a code reference from a task by its index
+ * 
+ * Removes the code reference at the specified index.
+ */
+async removeCodeRef(taskId: string, index: number) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("remove_code_ref", { taskId, index }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * List all workflows
  * 
  * Returns a list of all workflows in the database.
@@ -1145,7 +1184,19 @@ add_tags?: string[];
 /**
  * Tags to remove
  */
-remove_tags?: string[] }
+remove_tags?: string[]; 
+/**
+ * New task level (epic, ticket, task)
+ */
+level: string | null; 
+/**
+ * Human review flag
+ */
+needs_human_review: boolean | null; 
+/**
+ * Revision feedback text
+ */
+revision_feedback: string | null }
 /**
  * Workflow - mirrors db::Workflow
  */

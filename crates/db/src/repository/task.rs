@@ -51,6 +51,10 @@ pub struct TaskUpdate {
     pub workflow_id: Option<Option<surrealdb::sql::Thing>>,
     /// Current step ID in the workflow (if Some)
     pub current_step_id: Option<Option<surrealdb::sql::Thing>>,
+    /// New task level (if Some)
+    pub level: Option<String>,
+    /// Revision feedback (if Some(Some(feedback)), clear if Some(None))
+    pub revision_feedback: Option<Option<String>>,
 }
 
 impl TaskUpdate {
@@ -162,6 +166,24 @@ impl TaskUpdate {
         self
     }
 
+    /// Set the task level
+    pub fn with_level(mut self, level: impl Into<String>) -> Self {
+        self.level = Some(level.into());
+        self
+    }
+
+    /// Set revision feedback
+    pub fn with_revision_feedback(mut self, feedback: impl Into<String>) -> Self {
+        self.revision_feedback = Some(Some(feedback.into()));
+        self
+    }
+
+    /// Clear revision feedback
+    pub fn clear_revision_feedback(mut self) -> Self {
+        self.revision_feedback = Some(None);
+        self
+    }
+
     /// Check if any updates are specified
     pub fn has_updates(&self) -> bool {
         self.title.is_some()
@@ -178,6 +200,8 @@ impl TaskUpdate {
             || self.set_started_at_if_null
             || self.workflow_id.is_some()
             || self.current_step_id.is_some()
+            || self.level.is_some()
+            || self.revision_feedback.is_some()
     }
 }
 
@@ -551,6 +575,21 @@ impl<'a> TaskRepository<'a> {
                     field_updates.push(format!("current_step_id = {}", step_id));
                 }
                 None => field_updates.push("current_step_id = NONE".to_string()),
+            }
+        }
+
+        if let Some(level) = &updates.level {
+            let escaped_level = level.replace('\"', "\\\"");
+            field_updates.push(format!("level = \"{}\"", escaped_level));
+        }
+
+        if let Some(feedback_opt) = &updates.revision_feedback {
+            match feedback_opt {
+                Some(feedback) => {
+                    let escaped_feedback = feedback.replace('\"', "\\\"");
+                    field_updates.push(format!("revision_feedback = \"{}\"", escaped_feedback));
+                }
+                None => field_updates.push("revision_feedback = NONE".to_string()),
             }
         }
 

@@ -136,6 +136,10 @@ pub struct UpdateTaskOptions {
     pub parent_id: Option<Option<String>>,
     /// Human review flag
     pub needs_human_review: Option<bool>,
+    /// New task level (epic, ticket, task)
+    pub level: Option<String>,
+    /// Revision feedback text
+    pub revision_feedback: Option<Option<String>>,
 }
 
 impl UpdateTaskOptions {
@@ -641,6 +645,20 @@ impl DefaultTaskService {
 
         if let Some(needs_review) = options.needs_human_review {
             update = update.with_needs_human_review(needs_review);
+        }
+
+        if let Some(level) = &options.level {
+            update = update.with_level(level);
+        }
+
+        match &options.revision_feedback {
+            Some(Some(feedback)) => {
+                update = update.with_revision_feedback(feedback);
+            }
+            Some(None) => {
+                update = update.clear_revision_feedback();
+            }
+            None => {}
         }
 
         update
