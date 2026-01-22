@@ -218,7 +218,6 @@ export const FormModal = forwardRef<HTMLDivElement, FormModalProps>(
                   ${isSubmitting && preventCloseDuringSubmit ? 'opacity-50 cursor-not-allowed' : ''}
                 `}
                 aria-label="Close modal"
-                disabled={isSubmitting && preventCloseDuringSubmit}
               >
                 <svg
                   className="h-5 w-5 text-text-secondary"
@@ -301,7 +300,6 @@ export const FormModal = forwardRef<HTMLDivElement, FormModalProps>(
                   hover:bg-background-tertiary transition-colors
                   ${isSubmitting && preventCloseDuringSubmit ? 'opacity-50 cursor-not-allowed' : ''}
                 `}
-                disabled={isSubmitting && preventCloseDuringSubmit}
               >
                 {cancelButtonText}
               </button>
@@ -320,7 +318,6 @@ export const FormModal = forwardRef<HTMLDivElement, FormModalProps>(
                     : 'bg-primary hover:bg-primary/90 text-white'}
                   transition-colors flex items-center gap-2
                 `}
-                disabled={isSubmitting}
               >
                 {isSubmitting && (
                   <svg
