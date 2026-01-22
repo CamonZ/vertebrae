@@ -12,6 +12,7 @@ import { TaskCodeRefs } from "./TaskCodeRefs";
 import { TaskRelations } from "./TaskRelations";
 import { ExecutionHistory } from "./ExecutionHistory";
 import { ResizablePanel } from "../ResizablePanel";
+import { InlineEditField } from "./InlineEditField";
 
 /** Debounce delay in milliseconds for batching rapid events */
 const DEBOUNCE_MS = 100;
@@ -270,9 +271,9 @@ function TaskDetailsTab({
   fieldError,
   onFieldClick,
   onFieldChange,
-  onFieldCancel,
   onFieldSave,
   onKeyDown,
+  onUpdateField,
   showDeleteConfirmation,
   deleteError,
   isDeleting,
@@ -282,31 +283,27 @@ function TaskDetailsTab({
   onCascadeChange,
 }: {
   taskData: TaskWithRelations;
-  editingField: "title" | "description" | "priority" | "tags" | "level" | "needs_human_review" | "revision_feedback" | null;
+  editingField: "title" | "priority" | "level" | null;
   editValues: {
     title: string;
-    description: string;
     priority: string | null;
-    tags: string;
     level: string;
-    needs_human_review: boolean;
-    revision_feedback: string;
   };
   isSubmitting: boolean;
   fieldError: string | null;
-  onFieldClick: (field: "title" | "description" | "priority" | "tags" | "level" | "needs_human_review" | "revision_feedback") => void;
+  onFieldClick: (field: "title" | "priority" | "level") => void;
   onFieldChange: (
-    field: "title" | "description" | "priority" | "tags" | "level" | "needs_human_review" | "revision_feedback",
-    value: string | boolean
+    field: "title" | "priority" | "level",
+    value: string
   ) => void;
-  onFieldCancel: () => void;
-  onFieldSave: (field: "title" | "description" | "priority" | "tags" | "level" | "needs_human_review" | "revision_feedback") => void;
+  onFieldSave: (fieldName: "title" | "priority" | "level") => void;
   onKeyDown: (
     e: React.KeyboardEvent<
       HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
     >,
-    field: "title" | "description" | "priority" | "tags" | "level" | "needs_human_review" | "revision_feedback"
+    field: "title" | "priority" | "level"
   ) => void;
+  onUpdateField: (field: string, value: string | boolean | string[]) => Promise<void>;
   showDeleteConfirmation: boolean;
   deleteError: string | null;
   isDeleting: boolean;
@@ -384,19 +381,26 @@ function TaskDetailsTab({
         </h3>
         {editingField === "level" ? (
           <div className="space-y-2">
-            <select
-              value={editValues.level}
-              onChange={(e) => onFieldChange("level", e.target.value)}
-              onKeyDown={(e) => onKeyDown(e, "level")}
-              onBlur={() => onFieldSave("level")}
-              autoFocus
-              disabled={isSubmitting}
-              className="w-full rounded border border-primary/30 bg-bg-secondary px-2 py-1.5 text-sm text-text-primary focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-50"
-            >
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-            </select>
+            <div className="flex gap-2">
+              {["epic", "ticket", "task"].map((level) => (
+                <button
+                  key={level}
+                  type="button"
+                  onClick={() => {
+                    onFieldChange("level", level);
+                    onFieldSave("level");
+                  }}
+                  disabled={isSubmitting}
+                  className={`flex-1 rounded px-3 py-1.5 text-sm font-medium transition-colors cursor-pointer ${
+                    editValues.level === level
+                      ? "bg-primary text-white"
+                      : "border border-border bg-bg-secondary text-text-secondary hover:bg-bg-tertiary"
+                  } disabled:opacity-50 disabled:cursor-not-allowed`}
+                >
+                  {level.charAt(0).toUpperCase() + level.slice(1)}
+                </button>
+              ))}
+            </div>
             {fieldError && <p className="text-xs text-error">{fieldError}</p>}
           </div>
         ) : (
@@ -404,7 +408,7 @@ function TaskDetailsTab({
             onClick={() => onFieldClick("level")}
             className="text-sm text-text-secondary cursor-pointer hover:bg-bg-hover p-2 rounded"
           >
-            {task.level}
+            {task.level.charAt(0).toUpperCase() + task.level.slice(1)}
           </p>
         )}
       </div>
@@ -425,29 +429,15 @@ function TaskDetailsTab({
         <h3 className="mb-2 font-mono text-[10px] uppercase tracking-wider text-text-muted">
           Description
         </h3>
-        {editingField === "description" ? (
-          <div className="space-y-2">
-            <textarea
-              value={editValues.description}
-              onChange={(e) => onFieldChange("description", e.target.value)}
-              onKeyDown={(e) => onKeyDown(e, "description")}
-              onBlur={() => onFieldSave("description")}
-              autoFocus
-              disabled={isSubmitting}
-              className="w-full rounded border border-primary/30 bg-bg-secondary px-2 py-1.5 text-sm text-text-primary placeholder-text-muted focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-50"
-              rows={4}
-              placeholder="Enter description"
-            />
-            {fieldError && <p className="text-xs text-error">{fieldError}</p>}
-          </div>
-        ) : (
-          <p
-            onClick={() => onFieldClick("description")}
-            className="whitespace-pre-wrap text-sm leading-relaxed text-text-secondary cursor-pointer hover:bg-bg-hover p-2 rounded"
-          >
-            {task.description || "Click to add description"}
-          </p>
-        )}
+        <InlineEditField
+          value={task.description || ""}
+          placeholder="Click to add description"
+          multiline
+          rows={4}
+          onSave={async (value) => {
+            await onUpdateField("description", value);
+          }}
+        />
       </div>
 
       {/* Tags */}
@@ -455,40 +445,14 @@ function TaskDetailsTab({
         <h3 className="mb-2 font-mono text-[10px] uppercase tracking-wider text-text-muted">
           Tags
         </h3>
-        {editingField === "tags" ? (
-          <div className="space-y-2">
-            <input
-              type="text"
-              value={editValues.tags}
-              onChange={(e) => onFieldChange("tags", e.target.value)}
-              onKeyDown={(e) => onKeyDown(e, "tags")}
-              onBlur={() => onFieldSave("tags")}
-              autoFocus
-              disabled={isSubmitting}
-              className="w-full rounded border border-primary/30 bg-bg-secondary px-2 py-1.5 text-sm text-text-primary placeholder-text-muted focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-50"
-              placeholder="Enter tags separated by commas"
-            />
-            {fieldError && <p className="text-xs text-error">{fieldError}</p>}
-          </div>
-        ) : (
-          <div
-            onClick={() => onFieldClick("tags")}
-            className="flex flex-wrap gap-1.5 cursor-pointer hover:bg-bg-hover p-2 rounded"
-          >
-            {task.tags.length > 0 ? (
-              task.tags.map((tag) => (
-                <span
-                  key={tag}
-                  className="rounded-full border border-border bg-bg-tertiary px-2 py-0.5 text-xs text-text-secondary"
-                >
-                  {tag}
-                </span>
-              ))
-            ) : (
-              <span className="text-xs text-text-muted italic">Click to add tags</span>
-            )}
-          </div>
-        )}
+        <InlineEditField
+          value={task.tags.join(", ")}
+          placeholder="Click to add tags (comma-separated)"
+          onSave={async (value) => {
+            const tags = value.split(",").map(t => t.trim()).filter(t => t.length > 0);
+            await onUpdateField("tags", tags);
+          }}
+        />
       </div>
 
       {/* Timestamps */}
@@ -516,73 +480,31 @@ function TaskDetailsTab({
         </div>
       </div>
 
-      {/* Review Flag */}
+      {/* Human Review Toggle */}
       <div className="p-4 border-b border-border">
-        <h3 className="mb-2 font-mono text-[10px] uppercase tracking-wider text-text-muted">
-          Review
-        </h3>
-        <button
-          type="button"
-          onClick={() => onFieldClick("needs_human_review")}
-          className={`w-full flex items-center gap-3 rounded-lg border p-3 transition-colors cursor-pointer ${
-            task.needs_human_review
-              ? "border-warning/30 bg-warning/10"
-              : "border-border hover:bg-bg-tertiary"
-          }`}
-        >
-          <div className="relative">
-            <svg
-              className={`h-5 w-5 ${task.needs_human_review ? "text-warning" : "text-text-muted"}`}
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={1.5}
-                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-              />
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={1.5}
-                d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
-              />
-            </svg>
-            {task.needs_human_review && (
-              <span className="absolute -right-0.5 -top-0.5 flex h-2 w-2">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-warning opacity-75" />
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-warning" />
-              </span>
-            )}
-          </div>
-          <span className={task.needs_human_review ? "text-warning font-medium" : "text-text-secondary"}>
-            {task.needs_human_review ? "Needs Human Review" : "No Review Needed"}
-          </span>
-        </button>
-        {editingField === "needs_human_review" && (
-          <div className="mt-2 flex gap-2">
-            <button
-              type="button"
-              onClick={() => {
-                onFieldChange("needs_human_review", !editValues.needs_human_review);
-                onFieldSave("needs_human_review");
-              }}
-              disabled={isSubmitting}
-              className="flex-1 rounded px-2 py-1 text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-50 cursor-pointer"
-            >
-              {editValues.needs_human_review ? "Disable Review" : "Enable Review"}
-            </button>
-            <button
-              type="button"
-              onClick={onFieldCancel}
-              disabled={isSubmitting}
-              className="flex-1 rounded px-2 py-1 text-xs font-medium bg-border text-text-muted hover:bg-border-hover disabled:opacity-50 cursor-pointer"
-            >
-              Cancel
-            </button>
-          </div>
+        <div className="flex items-center justify-between">
+          <h3 className="font-mono text-[10px] uppercase tracking-wider text-text-muted">
+            Human Review
+          </h3>
+          <button
+            type="button"
+            onClick={() => onUpdateField("needs_human_review", !(task.needs_human_review ?? false))}
+            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-bg-primary ${
+              task.needs_human_review ? "bg-warning" : "bg-bg-tertiary"
+            }`}
+            role="switch"
+            aria-checked={task.needs_human_review ?? false}
+            aria-label="Toggle human review requirement"
+          >
+            <span
+              className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                task.needs_human_review ? "translate-x-5" : "translate-x-0"
+              }`}
+            />
+          </button>
+        </div>
+        {task.needs_human_review && (
+          <p className="mt-2 text-xs text-warning">This task requires human review before completion</p>
         )}
       </div>
 
@@ -591,29 +513,15 @@ function TaskDetailsTab({
         <h3 className="mb-2 font-mono text-[10px] uppercase tracking-wider text-text-muted">
           Revision Feedback
         </h3>
-        {editingField === "revision_feedback" ? (
-          <div className="space-y-2">
-            <textarea
-              value={editValues.revision_feedback}
-              onChange={(e) => onFieldChange("revision_feedback", e.target.value)}
-              onKeyDown={(e) => onKeyDown(e, "revision_feedback")}
-              onBlur={() => onFieldSave("revision_feedback")}
-              autoFocus
-              disabled={isSubmitting}
-              className="w-full rounded border border-primary/30 bg-bg-secondary px-2 py-1.5 text-sm text-text-primary placeholder-text-muted focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-50"
-              rows={4}
-              placeholder="Enter revision feedback"
-            />
-            {fieldError && <p className="text-xs text-error">{fieldError}</p>}
-          </div>
-        ) : (
-          <p
-            onClick={() => onFieldClick("revision_feedback")}
-            className="whitespace-pre-wrap text-sm leading-relaxed text-text-secondary cursor-pointer hover:bg-bg-hover p-2 rounded"
-          >
-            {task.revision_feedback || "Click to add revision feedback"}
-          </p>
-        )}
+        <InlineEditField
+          value={task.revision_feedback || ""}
+          placeholder="Click to add revision feedback"
+          multiline
+          rows={4}
+          onSave={async (value) => {
+            await onUpdateField("revision_feedback", value);
+          }}
+        />
       </div>
 
       {/* Rejection Reason Banner */}
@@ -760,24 +668,16 @@ export function TaskDetailPanel({
 }: TaskDetailPanelProps) {
   const [activeTab, setActiveTab] = useState<TabId>("details");
   const [editingField, setEditingField] = useState<
-    "title" | "description" | "priority" | "tags" | "level" | "needs_human_review" | "revision_feedback" | null
+    "title" | "priority" | "level" | null
   >(null);
   const [editValues, setEditValues] = useState<{
     title: string;
-    description: string;
     priority: string | null;
-    tags: string;
     level: string;
-    needs_human_review: boolean;
-    revision_feedback: string;
   }>({
     title: "",
-    description: "",
     priority: null,
-    tags: "",
-    level: "low",
-    needs_human_review: false,
-    revision_feedback: "",
+    level: "task",
   });
   const [fieldError, setFieldError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -844,18 +744,14 @@ export function TaskDetailPanel({
 
   // Click-to-edit handlers
   const handleFieldClick = useCallback(
-    (fieldName: "title" | "description" | "priority" | "tags" | "level" | "needs_human_review" | "revision_feedback") => {
+    (fieldName: "title" | "priority" | "level") => {
       if (!taskData?.task) return;
 
       const task = taskData.task;
       const fieldMap = {
         title: task.title,
-        description: task.description || "",
         priority: task.priority || "",
-        tags: task.tags.join(", "),
         level: task.level,
-        needs_human_review: task.needs_human_review,
-        revision_feedback: task.revision_feedback || "",
       };
 
       setEditValues((prev) => ({ ...prev, [fieldName]: fieldMap[fieldName] }));
@@ -867,21 +763,16 @@ export function TaskDetailPanel({
 
   const handleFieldChange = useCallback(
     (
-      fieldName: "title" | "description" | "priority" | "tags" | "level" | "needs_human_review" | "revision_feedback",
-      value: string | boolean
+      fieldName: "title" | "priority" | "level",
+      value: string
     ) => {
       setEditValues((prev) => ({ ...prev, [fieldName]: value }));
     },
     []
   );
 
-  const handleFieldCancel = useCallback(() => {
-    setEditingField(null);
-    setFieldError(null);
-  }, []);
-
   const handleFieldSave = useCallback(
-    async (fieldName: "title" | "description" | "priority" | "tags" | "level" | "needs_human_review" | "revision_feedback") => {
+    async (fieldName: "title" | "priority" | "level") => {
       if (!taskData?.task.id) return;
 
       setIsSubmitting(true);
@@ -895,22 +786,16 @@ export function TaskDetailPanel({
           return;
         }
 
-        // Parse tags
-        const parsedTags = editValues.tags
-          .split(",")
-          .map((t) => t.trim())
-          .filter((t) => t.length > 0);
-
         // Build options object with only the changed field
         const options = {
           title: fieldName === "title" ? editValues.title : taskData.task.title,
-          description: fieldName === "description" ? editValues.description : taskData.task.description,
+          description: taskData.task.description,
           priority: fieldName === "priority" ? (editValues.priority as string | null) : taskData.task.priority,
-          add_tags: fieldName === "tags" ? parsedTags : [],
+          add_tags: [],
           remove_tags: [],
           level: fieldName === "level" ? editValues.level : taskData.task.level,
-          needs_human_review: fieldName === "needs_human_review" ? editValues.needs_human_review : taskData.task.needs_human_review,
-          revision_feedback: fieldName === "revision_feedback" ? editValues.revision_feedback : taskData.task.revision_feedback,
+          needs_human_review: taskData.task.needs_human_review,
+          revision_feedback: taskData.task.revision_feedback,
         };
 
         // Call updateTask command
@@ -938,15 +823,74 @@ export function TaskDetailPanel({
       e: React.KeyboardEvent<
         HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
       >,
-      fieldName: "title" | "description" | "priority" | "tags" | "level" | "needs_human_review" | "revision_feedback"
+      fieldName: "title" | "priority" | "level"
     ) => {
       if (e.key === "Escape") {
-        handleFieldCancel();
+        setEditingField(null);
+        setFieldError(null);
       } else if (e.key === "Enter" && e.ctrlKey) {
         handleFieldSave(fieldName);
       }
     },
-    [handleFieldCancel, handleFieldSave]
+    [handleFieldSave]
+  );
+
+  // Generic field update handler for InlineEditField components
+  const onUpdateField = useCallback(
+    async (field: string, value: string | boolean | string[]) => {
+      const taskId = taskData?.task.id;
+      if (!taskId) return;
+
+      const task = taskData.task;
+      
+      // Build update options based on the field being updated
+      const options: {
+        title: string;
+        description: string | null;
+        priority: string | null;
+        add_tags: string[];
+        remove_tags: string[];
+        level: string;
+        needs_human_review: boolean;
+        revision_feedback: string | null;
+      } = {
+        title: task.title,
+        description: task.description,
+        priority: task.priority,
+        add_tags: [],
+        remove_tags: [],
+        level: task.level,
+        needs_human_review: task.needs_human_review ?? false,
+        revision_feedback: task.revision_feedback,
+      };
+
+      switch (field) {
+        case "description":
+          options.description = (value as string) || null;
+          break;
+        case "tags": {
+          // For tags, we need to compute the difference
+          const newTags = value as string[];
+          const currentTags = task.tags;
+          options.add_tags = newTags.filter(t => !currentTags.includes(t));
+          options.remove_tags = currentTags.filter(t => !newTags.includes(t));
+          break;
+        }
+        case "needs_human_review":
+          options.needs_human_review = value as boolean;
+          break;
+        case "revision_feedback":
+          options.revision_feedback = (value as string) || null;
+          break;
+      }
+
+      const result = await commands.updateTask(taskId, options);
+      if (result.status === "error") {
+        throw new Error(result.error.message);
+      }
+      await refetch();
+    },
+    [taskData, refetch]
   );
 
   // Delete confirmation handlers
@@ -1158,9 +1102,9 @@ export function TaskDetailPanel({
                 fieldError={fieldError}
                 onFieldClick={handleFieldClick}
                 onFieldChange={handleFieldChange}
-                onFieldCancel={handleFieldCancel}
                 onFieldSave={handleFieldSave}
                 onKeyDown={handleKeyDown}
+                onUpdateField={onUpdateField}
                 showDeleteConfirmation={showDeleteConfirmation}
                 deleteError={deleteError}
                 isDeleting={isDeleting}
@@ -1170,7 +1114,7 @@ export function TaskDetailPanel({
                 onCascadeChange={setCascade}
               />
             )}
-            {activeTab === "sections" && (
+            {activeTab === "sections" && taskData.task.id && (
               <TaskSections
                 sections={taskData.task.sections}
                 taskId={taskData.task.id}
@@ -1180,7 +1124,7 @@ export function TaskDetailPanel({
             {activeTab === "code_refs" && (
               <TaskCodeRefs codeRefs={taskData.task.code_refs} />
             )}
-            {activeTab === "relations" && (
+            {activeTab === "relations" && taskData.task.id && (
               <TaskRelations
                 taskId={taskData.task.id}
                 parentId={taskData.parent_id}

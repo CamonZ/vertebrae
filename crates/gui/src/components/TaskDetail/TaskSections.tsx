@@ -1,9 +1,7 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import type { Section, SectionType } from '../../bindings';
 import { commands } from '../../bindings';
-import { SectionEditor } from './SectionEditor';
-import { StepEditor } from './StepEditor';
-import { TestingCriterionEditor } from './TestingCriterionEditor';
+import { InlineEditField } from './InlineEditField';
 
 interface TaskSectionsProps {
   sections: Section[];
@@ -61,12 +59,40 @@ function formatSectionType(type: SectionType): string {
 }
 
 /**
+ * Get short label for section type buttons
+ */
+function getShortLabel(type: SectionType): string {
+  switch (type) {
+    case 'goal':
+      return 'Goal';
+    case 'context':
+      return 'Context';
+    case 'current_behavior':
+      return 'Current';
+    case 'desired_behavior':
+      return 'Desired';
+    case 'step':
+      return 'Step';
+    case 'testing_criterion':
+      return 'Test';
+    case 'anti_pattern':
+      return 'Anti';
+    case 'failure_test':
+      return 'Fail';
+    case 'constraint':
+      return 'Constraint';
+    default:
+      return type;
+  }
+}
+
+/**
  * Get icon for section type
  */
 function getSectionIcon(type: SectionType): string {
   switch (type) {
     case 'goal':
-      return '\u{1F3AF}'; // Target emoji as fallback, will use SVG
+      return '\u{1F3AF}';
     case 'step':
       return '\u{1F4CB}';
     case 'testing_criterion':
@@ -85,25 +111,51 @@ interface SectionGroupProps {
   sections: Section[];
   defaultOpen?: boolean;
   taskId: string;
+  isAddingNew?: boolean;
+  onAddComplete: () => void;
   onSectionsChanged?: () => void;
 }
 
 /**
- * Collapsible section group component
+ * Collapsible section group component with inline editing
  */
-function SectionGroup({ type, sections, defaultOpen = false, taskId, onSectionsChanged }: SectionGroupProps) {
-  const [isOpen, setIsOpen] = useState(defaultOpen);
-  const [editingSection, setEditingSection] = useState<Section | null>(null);
-  const [deletingOrdinal, setDeletingOrdinal] = useState<number | null>(null);
-  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
+function SectionGroup({
+  type,
+  sections,
+  defaultOpen = false,
+  taskId,
+  isAddingNew = false,
+  onAddComplete,
+  onSectionsChanged
+}: SectionGroupProps) {
+  const [isOpen, setIsOpen] = useState(defaultOpen || isAddingNew);
+  const [editingOrder, setEditingOrder] = useState<number | null>(null);
+  const [deletingOrder, setDeletingOrder] = useState<number | null>(null);
 
-  const handleDeleteSection = useCallback(async () => {
-    if (deletingOrdinal === null) return;
+  // Auto-open when adding new
+  useEffect(() => {
+    if (isAddingNew) {
+      setIsOpen(true);
+    }
+  }, [isAddingNew]);
 
-    setIsDeleting(true);
+  const handleToggleDone = useCallback(async (section: Section) => {
     try {
-      const result = await commands.removeSection(taskId, type, deletingOrdinal);
+      const result = await commands.markSectionDone(taskId, section.order ?? 0);
+      if (result.status === 'error') {
+        console.error('Failed to toggle done:', result.error.message);
+      } else {
+        onSectionsChanged?.();
+      }
+    } catch (err) {
+      console.error('Failed to toggle done:', err);
+    }
+  }, [taskId, onSectionsChanged]);
+
+  const handleDeleteSection = useCallback(async (order: number) => {
+    setDeletingOrder(order);
+    try {
+      const result = await commands.removeSection(taskId, type, order);
       if (result.status === 'error') {
         console.error('Failed to delete section:', result.error.message);
       } else {
@@ -112,16 +164,33 @@ function SectionGroup({ type, sections, defaultOpen = false, taskId, onSectionsC
     } catch (err) {
       console.error('Failed to delete section:', err);
     } finally {
-      setIsDeleting(false);
-      setDeleteConfirmOpen(false);
-      setDeletingOrdinal(null);
+      setDeletingOrder(null);
+      setEditingOrder(null);
     }
-  }, [taskId, type, deletingOrdinal, onSectionsChanged]);
+  }, [taskId, type, onSectionsChanged]);
 
-  const handleConfirmDelete = useCallback((ordinal: number) => {
-    setDeletingOrdinal(ordinal);
-    setDeleteConfirmOpen(true);
-  }, []);
+  const handleAddSection = useCallback(async (content: string) => {
+    const result = await commands.addSection(taskId, type, content);
+    if (result.status === 'error') {
+      throw new Error(result.error.message);
+    }
+    onAddComplete();
+    onSectionsChanged?.();
+  }, [taskId, type, onAddComplete, onSectionsChanged]);
+
+  const handleEditSection = useCallback(async (section: Section, content: string) => {
+    const result = await commands.editSection(
+      taskId,
+      section.type,
+      section.order ?? 0,
+      content
+    );
+    if (result.status === 'error') {
+      throw new Error(result.error.message);
+    }
+    setEditingOrder(null);
+    onSectionsChanged?.();
+  }, [taskId, onSectionsChanged]);
 
   return (
     <div className="border-b border-border last:border-b-0">
@@ -163,16 +232,19 @@ function SectionGroup({ type, sections, defaultOpen = false, taskId, onSectionsC
           <ul className="space-y-2">
             {sections.map((section, index) => (
               <li
-                key={`${type}-${index}`}
+                key={`${type}-${section.order ?? index}`}
                 className="group flex items-start gap-2 text-sm text-text-secondary rounded-md p-2 hover:bg-bg-tertiary transition-colors"
               >
                 {type === 'step' && (
-                  <span
-                    className={`mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-xs font-medium cursor-pointer ${
+                  <button
+                    type="button"
+                    onClick={() => handleToggleDone(section)}
+                    className={`mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-xs font-medium cursor-pointer transition-colors ${
                       section.done
                         ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                        : 'bg-bg-tertiary text-text-muted'
+                        : 'bg-bg-tertiary text-text-muted hover:border hover:border-primary'
                     }`}
+                    title={section.done ? 'Mark as not done' : 'Mark as done'}
                   >
                     {section.done ? (
                       <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
@@ -185,271 +257,200 @@ function SectionGroup({ type, sections, defaultOpen = false, taskId, onSectionsC
                     ) : (
                       (section.order ?? index + 1)
                     )}
-                  </span>
+                  </button>
                 )}
                 {type !== 'step' && (
                   <span className="mt-1 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-text-muted" />
                 )}
-                <div className="flex-1 min-w-0">
-                  <span className={section.done ? 'line-through opacity-60' : ''}>
-                    {section.content}
-                  </span>
-                </div>
-                <div className="flex-shrink-0 gap-1 flex opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button
-                    type="button"
-                    onClick={() => setEditingSection(section)}
-                    className="p-1 rounded text-text-muted hover:bg-bg-tertiary hover:text-text-primary transition-colors cursor-pointer"
-                    title="Edit section"
-                    aria-label="Edit section"
+
+                {editingOrder === (section.order ?? index) ? (
+                  <InlineEditField
+                    value={section.content}
+                    onSave={async (content) => handleEditSection(section, content)}
+                    onCancel={() => setEditingOrder(null)}
+                    onDelete={() => handleDeleteSection(section.order ?? index)}
+                    isDeleting={deletingOrder === (section.order ?? index)}
+                    allowEmpty={false}
+                    startInEditMode
+                    compact
+                  />
+                ) : (
+                  <div
+                    className="flex-1 min-w-0 cursor-pointer"
+                    onClick={() => setEditingOrder(section.order ?? index)}
+                    title="Click to edit"
                   >
-                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                    </svg>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleConfirmDelete(section.ordinal ?? index)}
-                    className="p-1 rounded text-text-muted hover:bg-error/10 hover:text-error transition-colors cursor-pointer"
-                    title="Delete section"
-                    aria-label="Delete section"
-                  >
-                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                    </svg>
-                  </button>
-                </div>
+                    <span className={section.done ? 'line-through opacity-60' : ''}>
+                      {section.content}
+                    </span>
+                  </div>
+                )}
               </li>
             ))}
           </ul>
-        </div>
-      )}
 
-      {/* Delete confirmation dialog */}
-      {deleteConfirmOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm cursor-pointer" onClick={() => setDeleteConfirmOpen(false)} />
-          <div className="relative bg-background-secondary rounded-lg shadow-xl max-w-sm w-full mx-4 p-6">
-            <h3 className="text-lg font-semibold text-text-primary mb-2">Delete Section?</h3>
-            <p className="text-sm text-text-secondary mb-6">
-              This action cannot be undone. The section will be permanently deleted.
-            </p>
-            <div className="flex justify-end gap-3">
-              <button
-                type="button"
-                onClick={() => setDeleteConfirmOpen(false)}
-                disabled={isDeleting}
-                className="px-4 py-2 text-sm font-medium rounded-md border border-border hover:bg-background-tertiary transition-colors disabled:opacity-50 cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleDeleteSection}
-                disabled={isDeleting}
-                className="px-4 py-2 text-sm font-medium rounded-md bg-error/10 text-error hover:bg-error/20 transition-colors disabled:opacity-50"
-              >
-                {isDeleting ? 'Deleting...' : 'Delete'}
-              </button>
+          {/* Inline add form using InlineEditField */}
+          {isAddingNew && (
+            <div className="mt-2 p-2 bg-bg-tertiary rounded-md">
+              <InlineEditField
+                value=""
+                placeholder={`Add ${formatSectionType(type).toLowerCase()}...`}
+                onSave={handleAddSection}
+                onCancel={onAddComplete}
+                allowEmpty={false}
+                startInEditMode
+                clearOnSave
+                compact
+              />
             </div>
-          </div>
+          )}
         </div>
-      )}
-
-      {/* Edit modals */}
-      {editingSection && type === 'step' ? (
-        <StepEditor
-          taskId={taskId}
-          step={editingSection}
-          isOpen={true}
-          onClose={() => setEditingSection(null)}
-          onSave={() => {
-            setEditingSection(null);
-            onSectionsChanged?.();
-          }}
-        />
-      ) : editingSection && type === 'testing_criterion' ? (
-        <TestingCriterionEditor
-          taskId={taskId}
-          criterion={editingSection}
-          isOpen={true}
-          onClose={() => setEditingSection(null)}
-          onSave={() => {
-            setEditingSection(null);
-            onSectionsChanged?.();
-          }}
-        />
-      ) : (
-        editingSection && (
-          <SectionEditor
-            taskId={taskId}
-            section={editingSection}
-            sectionType={type}
-            isOpen={true}
-            onClose={() => setEditingSection(null)}
-            onSave={() => {
-              setEditingSection(null);
-              onSectionsChanged?.();
-            }}
-          />
-        )
       )}
     </div>
   );
 }
 
+// All available section types
+const ALL_SECTION_TYPES: SectionType[] = [
+  'goal',
+  'context',
+  'current_behavior',
+  'desired_behavior',
+  'step',
+  'constraint',
+  'testing_criterion',
+  'anti_pattern',
+  'failure_test',
+];
+
+// Define display order for section types
+const TYPE_ORDER: SectionType[] = [
+  'goal',
+  'context',
+  'current_behavior',
+  'desired_behavior',
+  'step',
+  'constraint',
+  'testing_criterion',
+  'anti_pattern',
+  'failure_test',
+];
+
 /**
  * TaskSections displays task sections grouped by type in collapsible accordions.
+ * Uses InlineEditField for consistent inline editing UX.
  */
 export function TaskSections({ sections, taskId, onSectionsChanged }: TaskSectionsProps) {
-  const [newSectionType, setNewSectionType] = useState<SectionType | null>(null);
-  const [showNewSection, setShowNewSection] = useState(false);
+  const [showTypeSelector, setShowTypeSelector] = useState(false);
+  const [addingToType, setAddingToType] = useState<SectionType | null>(null);
 
   const groupedSections = groupSectionsByType(sections);
 
-  // Define display order for section types
-  const typeOrder: SectionType[] = [
-    'goal',
-    'context',
-    'current_behavior',
-    'desired_behavior',
-    'step',
-    'constraint',
-    'testing_criterion',
-    'anti_pattern',
-    'failure_test',
-  ];
-
-  // All available section types for creation
-  const allSectionTypes: SectionType[] = [
-    'goal',
-    'context',
-    'current_behavior',
-    'desired_behavior',
-    'step',
-    'constraint',
-    'testing_criterion',
-    'anti_pattern',
-    'failure_test',
-  ];
-
   // Sort groups by predefined order
   const sortedTypes = Array.from(groupedSections.keys()).sort(
-    (a, b) => typeOrder.indexOf(a) - typeOrder.indexOf(b)
+    (a, b) => TYPE_ORDER.indexOf(a) - TYPE_ORDER.indexOf(b)
   );
 
-  const handleNewSectionTypeSelect = useCallback((type: SectionType) => {
-    setNewSectionType(type);
-    setShowNewSection(true);
+  // Types that have sections
+  const typesWithSections = new Set(sortedTypes);
+
+  // Types to show in the main list (those with sections + the one being added to)
+  const displayTypes = [...sortedTypes];
+  if (addingToType && !typesWithSections.has(addingToType)) {
+    // Insert the adding type in the correct position
+    const insertIndex = TYPE_ORDER.indexOf(addingToType);
+    let placed = false;
+    for (let i = 0; i < displayTypes.length; i++) {
+      if (TYPE_ORDER.indexOf(displayTypes[i]) > insertIndex) {
+        displayTypes.splice(i, 0, addingToType);
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) {
+      displayTypes.push(addingToType);
+    }
+  }
+
+  const handleTypeSelect = useCallback((type: SectionType) => {
+    setAddingToType(type);
+    setShowTypeSelector(false);
   }, []);
 
-  const handleNewSectionClose = useCallback(() => {
-    setShowNewSection(false);
-    setNewSectionType(null);
+  const handleAddComplete = useCallback(() => {
+    setAddingToType(null);
   }, []);
-
-  const handleNewSectionSave = useCallback(() => {
-    handleNewSectionClose();
-    onSectionsChanged?.();
-  }, [handleNewSectionClose, onSectionsChanged]);
 
   return (
     <div className="flex flex-col h-full">
-      {/* New section button */}
+      {/* Add section area */}
       <div className="border-b border-border p-4">
-        <button
-          type="button"
-          onClick={() => setShowNewSection(true)}
-          className="w-full rounded-lg border border-dashed border-primary/30 bg-primary/5 px-4 py-2.5 text-sm font-medium text-primary hover:bg-primary/10 hover:border-primary/50 transition-colors cursor-pointer"
-        >
-          <svg className="inline h-4 w-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-          Add Section
-        </button>
+        {showTypeSelector ? (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-text-primary">Select type:</span>
+              <button
+                type="button"
+                onClick={() => setShowTypeSelector(false)}
+                className="p-1 rounded text-text-muted hover:bg-bg-tertiary hover:text-text-primary transition-colors cursor-pointer"
+                title="Cancel"
+              >
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {ALL_SECTION_TYPES.map((type) => (
+                <button
+                  key={type}
+                  type="button"
+                  onClick={() => handleTypeSelect(type)}
+                  className="px-2.5 py-1.5 text-xs font-medium rounded-md border border-border bg-bg-secondary hover:bg-bg-tertiary hover:border-primary transition-colors cursor-pointer"
+                >
+                  {getShortLabel(type)}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setShowTypeSelector(true)}
+            disabled={addingToType !== null}
+            className="w-full rounded-lg border border-dashed border-primary/30 bg-primary/5 px-4 py-2.5 text-sm font-medium text-primary hover:bg-primary/10 hover:border-primary/50 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <svg className="inline h-4 w-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            Add Section
+          </button>
+        )}
       </div>
 
       {/* Sections list */}
       <div className="flex-1 overflow-auto">
-        {sections.length === 0 ? (
+        {displayTypes.length === 0 && !addingToType ? (
           <div className="px-4 py-6 text-center text-sm text-text-muted">
             No sections defined
           </div>
         ) : (
           <div className="divide-y divide-border">
-            {sortedTypes.map((type) => (
+            {displayTypes.map((type) => (
               <SectionGroup
                 key={type}
                 type={type}
                 sections={groupedSections.get(type) ?? []}
                 defaultOpen={type === 'goal' || type === 'step'}
                 taskId={taskId}
+                isAddingNew={addingToType === type}
+                onAddComplete={handleAddComplete}
                 onSectionsChanged={onSectionsChanged}
               />
             ))}
           </div>
         )}
       </div>
-
-      {/* Section type selector modal */}
-      {showNewSection && !newSectionType && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm cursor-pointer" onClick={handleNewSectionClose} />
-          <div className="relative bg-background-secondary rounded-lg shadow-xl max-w-sm w-full mx-4 p-6">
-            <h3 className="text-lg font-semibold text-text-primary mb-4">Create New Section</h3>
-            <div className="grid grid-cols-2 gap-2 max-h-96 overflow-y-auto">
-              {allSectionTypes.map((type) => (
-                <button
-                  key={type}
-                  type="button"
-                  onClick={() => handleNewSectionTypeSelect(type)}
-                  className="p-3 text-left rounded-lg border border-border hover:bg-background-tertiary hover:border-primary transition-colors cursor-pointer"
-                >
-                  <div className="font-medium text-sm text-text-primary">
-                    {formatSectionType(type)}
-                  </div>
-                </button>
-              ))}
-            </div>
-            <div className="mt-6 flex justify-end">
-              <button
-                type="button"
-                onClick={handleNewSectionClose}
-                className="px-4 py-2 text-sm font-medium rounded-md border border-border hover:bg-background-tertiary transition-colors cursor-pointer"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Section editors for new sections */}
-      {newSectionType === 'step' && showNewSection ? (
-        <StepEditor
-          taskId={taskId}
-          isOpen={true}
-          onClose={handleNewSectionClose}
-          onSave={handleNewSectionSave}
-        />
-      ) : newSectionType === 'testing_criterion' && showNewSection ? (
-        <TestingCriterionEditor
-          taskId={taskId}
-          isOpen={true}
-          onClose={handleNewSectionClose}
-          onSave={handleNewSectionSave}
-        />
-      ) : (
-        newSectionType && showNewSection && (
-          <SectionEditor
-            taskId={taskId}
-            sectionType={newSectionType}
-            isOpen={true}
-            onClose={handleNewSectionClose}
-            onSave={handleNewSectionSave}
-          />
-        )
-      )}
     </div>
   );
 }
