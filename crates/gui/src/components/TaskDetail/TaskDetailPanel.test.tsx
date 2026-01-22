@@ -214,4 +214,157 @@ describe("TaskDetailPanel - Edit Integration", () => {
       expect(screen.getByText("Test Task")).toBeInTheDocument();
     });
   });
+
+  describe("Inline editing - Title", () => {
+    it("makes title editable when clicked", () => {
+      render(
+        <TaskDetailPanel
+          taskId={mockTaskData.task.id}
+          onClose={vi.fn()}
+        />
+      );
+
+      // Click on title to edit
+      const titleElement = screen.getByText("Test Task");
+      fireEvent.click(titleElement);
+
+      // Should show input field
+      const titleInput = screen.getByDisplayValue("Test Task");
+      expect(titleInput).toBeInTheDocument();
+      expect(titleInput.tagName).toBe("INPUT");
+    });
+
+    it("shows Save and Cancel buttons when editing title", () => {
+      render(
+        <TaskDetailPanel
+          taskId={mockTaskData.task.id}
+          onClose={vi.fn()}
+        />
+      );
+
+      fireEvent.click(screen.getByText("Test Task"));
+      expect(screen.getByRole("button", { name: /^Save$/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /^Cancel$/i })).toBeInTheDocument();
+    });
+  });
+
+  describe("Inline editing - Description", () => {
+    it("makes description editable when clicked", () => {
+      render(
+        <TaskDetailPanel
+          taskId={mockTaskData.task.id}
+          onClose={vi.fn()}
+        />
+      );
+
+      // Find and click description
+      const descriptionText = screen.getByText("Test Description");
+      fireEvent.click(descriptionText);
+
+      // Should show textarea
+      const descriptionInput = screen.getByDisplayValue("Test Description");
+      expect(descriptionInput).toBeInTheDocument();
+      expect(descriptionInput.tagName).toBe("TEXTAREA");
+    });
+  });
+
+  describe("Inline editing - Tags", () => {
+    it("makes tags editable when clicked", () => {
+      render(
+        <TaskDetailPanel
+          taskId={mockTaskData.task.id}
+          onClose={vi.fn()}
+        />
+      );
+
+      // Find and click tags section
+      const tagsContainer = screen.getByText("tag1").closest("div");
+      fireEvent.click(tagsContainer!);
+
+      // Should show input with tags as comma-separated
+      const tagsInput = screen.getByDisplayValue("tag1");
+      expect(tagsInput).toBeInTheDocument();
+      expect(tagsInput.tagName).toBe("INPUT");
+    });
+  });
+
+  describe("Inline editing - Priority", () => {
+    it("Priority field is visible in details tab", () => {
+      render(
+        <TaskDetailPanel
+          taskId={mockTaskData.task.id}
+          onClose={vi.fn()}
+        />
+      );
+
+      // Priority label should be present
+      const priorityLabels = screen.getAllByText(/Priority/i);
+      expect(priorityLabels.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe("Delete confirmation - Toggle", () => {
+    it("renders Delete button in header", () => {
+      render(
+        <TaskDetailPanel
+          taskId={mockTaskData.task.id}
+          onClose={vi.fn()}
+        />
+      );
+
+      const deleteButton = screen.getByRole("button", { name: /delete/i });
+      expect(deleteButton).toBeInTheDocument();
+      expect(deleteButton).toHaveAttribute("title", "Delete this task");
+    });
+
+    it("shows delete confirmation when Delete button clicked", () => {
+      render(
+        <TaskDetailPanel
+          taskId={mockTaskData.task.id}
+          onClose={vi.fn()}
+        />
+      );
+
+      const deleteButton = screen.getByRole("button", { name: /delete/i });
+      fireEvent.click(deleteButton);
+
+      // Should show confirmation message
+      expect(screen.getByText(/Are you sure you want to delete/)).toBeInTheDocument();
+    });
+
+    it("shows Confirm Delete button when delete confirmation visible", () => {
+      render(
+        <TaskDetailPanel
+          taskId={mockTaskData.task.id}
+          onClose={vi.fn()}
+        />
+      );
+
+      // Show confirmation
+      fireEvent.click(screen.getByRole("button", { name: /delete/i }));
+
+      // Should show Confirm Delete button
+      expect(screen.getByRole("button", { name: /Confirm Delete/i })).toBeInTheDocument();
+    });
+
+    it("hides confirmation when Cancel button clicked", () => {
+      render(
+        <TaskDetailPanel
+          taskId={mockTaskData.task.id}
+          onClose={vi.fn()}
+        />
+      );
+
+      // Show confirmation
+      fireEvent.click(screen.getByRole("button", { name: /delete/i }));
+      expect(screen.getByText(/Are you sure you want to delete/)).toBeInTheDocument();
+
+      // Click Cancel
+      const cancelButtons = screen.getAllByRole("button", { name: /cancel/i });
+      fireEvent.click(cancelButtons[cancelButtons.length - 1]); // Last Cancel button is in delete section
+
+      // Confirmation should be gone
+      expect(screen.queryByText(/Are you sure you want to delete/)).not.toBeInTheDocument();
+    });
+  });
 });
