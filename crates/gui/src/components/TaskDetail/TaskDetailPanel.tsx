@@ -600,7 +600,7 @@ export function TaskDetailPanel({ taskId, onClose, onTaskSelect }: TaskDetailPan
           {/* Tab content */}
           <div className="flex-1 overflow-auto">
             {activeTab === 'details' && <TaskDetailsTab taskData={taskData} />}
-            {activeTab === 'sections' && <TaskSections sections={taskData.task.sections} />}
+            {activeTab === 'sections' && <TaskSections sections={taskData.task.sections} taskId={taskData.task.id} onSectionsChanged={refetch} />}
             {activeTab === 'code_refs' && <TaskCodeRefs codeRefs={taskData.task.code_refs} />}
             {activeTab === 'relations' && (
               <TaskRelations
