@@ -171,7 +171,43 @@ function DetailRow({ label, children }: { label: string; children: React.ReactNo
 /**
  * Task details tab content
  */
-function TaskDetailsTab({ taskData }: { taskData: TaskWithRelations }) {
+function TaskDetailsTab({
+  taskData,
+  editingField,
+  editValues,
+  isSubmitting,
+  fieldError,
+  onFieldClick,
+  onFieldChange,
+  onFieldSave,
+  onFieldCancel,
+  onKeyDown,
+  showDeleteConfirmation,
+  deleteError,
+  isDeleting,
+  cascade,
+  onCancelDelete,
+  onConfirmDelete,
+  onCascadeChange,
+}: {
+  taskData: TaskWithRelations;
+  editingField: 'title' | 'description' | 'priority' | 'tags' | null;
+  editValues: { title: string; description: string; priority: string | null; tags: string };
+  isSubmitting: boolean;
+  fieldError: string | null;
+  onFieldClick: (field: 'title' | 'description' | 'priority' | 'tags') => void;
+  onFieldChange: (field: 'title' | 'description' | 'priority' | 'tags', value: string) => void;
+  onFieldSave: (field: 'title' | 'description' | 'priority' | 'tags') => void;
+  onFieldCancel: () => void;
+  onKeyDown: (e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>, field: 'title' | 'description' | 'priority' | 'tags') => void;
+  showDeleteConfirmation: boolean;
+  deleteError: string | null;
+  isDeleting: boolean;
+  cascade: boolean;
+  onCancelDelete: () => void;
+  onConfirmDelete: () => void;
+  onCascadeChange: (value: boolean) => void;
+}) {
   const { task } = taskData;
   const statusStyles = getStatusStyles(task.status);
   const levelStyles = getLevelStyles(task.level);
@@ -194,6 +230,55 @@ function TaskDetailsTab({ taskData }: { taskData: TaskWithRelations }) {
         )}
       </div>
 
+      {/* Priority Section */}
+      <div className="p-4 border-b border-border">
+        <h3 className="mb-2 font-mono text-[10px] uppercase tracking-wider text-text-muted">
+          Priority
+        </h3>
+        {editingField === 'priority' ? (
+          <div className="space-y-2">
+            <select
+              value={editValues.priority || ''}
+              onChange={(e) => onFieldChange('priority', e.target.value)}
+              onKeyDown={(e) => onKeyDown(e, 'priority')}
+              autoFocus
+              disabled={isSubmitting}
+              className="w-full rounded border border-primary/30 bg-bg-secondary px-2 py-1.5 text-sm text-text-primary focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-50"
+            >
+              <option value="">None</option>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+              <option value="critical">Critical</option>
+            </select>
+            <div className="flex gap-2">
+              <button
+                onClick={() => onFieldSave('priority')}
+                disabled={isSubmitting}
+                className="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-50"
+              >
+                Save
+              </button>
+              <button
+                onClick={onFieldCancel}
+                disabled={isSubmitting}
+                className="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium bg-border text-text-muted hover:bg-border-hover disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </div>
+            {fieldError && <p className="text-xs text-error">{fieldError}</p>}
+          </div>
+        ) : (
+          <p
+            onClick={() => onFieldClick('priority')}
+            className="text-sm text-text-secondary cursor-pointer hover:bg-bg-hover p-2 rounded"
+          >
+            {task.priority || 'None'}
+          </p>
+        )}
+      </div>
+
       {/* Basic Info */}
       <div className="p-4">
         <div className="space-y-1 divide-y divide-border-subtle">
@@ -205,32 +290,104 @@ function TaskDetailsTab({ taskData }: { taskData: TaskWithRelations }) {
 
       {/* Description */}
       {task.description && (
-        <div className="p-4">
+        <div className="p-4 border-b border-border">
           <h3 className="mb-2 font-mono text-[10px] uppercase tracking-wider text-text-muted">
             Description
           </h3>
-          <p className="whitespace-pre-wrap text-sm leading-relaxed text-text-secondary">{task.description}</p>
+          {editingField === 'description' ? (
+            <div className="space-y-2">
+              <textarea
+                value={editValues.description}
+                onChange={(e) => onFieldChange('description', e.target.value)}
+                onKeyDown={(e) => onKeyDown(e, 'description')}
+                autoFocus
+                disabled={isSubmitting}
+                className="w-full rounded border border-primary/30 bg-bg-secondary px-2 py-1.5 text-sm text-text-primary placeholder-text-muted focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-50"
+                rows={4}
+                placeholder="Enter description"
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={() => onFieldSave('description')}
+                  disabled={isSubmitting}
+                  className="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-50"
+                >
+                  Save
+                </button>
+                <button
+                  onClick={onFieldCancel}
+                  disabled={isSubmitting}
+                  className="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium bg-border text-text-muted hover:bg-border-hover disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+              </div>
+              {fieldError && <p className="text-xs text-error">{fieldError}</p>}
+            </div>
+          ) : (
+            <p
+              onClick={() => onFieldClick('description')}
+              className="whitespace-pre-wrap text-sm leading-relaxed text-text-secondary cursor-pointer hover:bg-bg-hover p-2 rounded"
+            >
+              {task.description}
+            </p>
+          )}
         </div>
       )}
 
       {/* Tags */}
-      {task.tags.length > 0 && (
-        <div className="p-4">
+      {task.tags.length > 0 || editingField === 'tags' ? (
+        <div className="p-4 border-b border-border">
           <h3 className="mb-2 font-mono text-[10px] uppercase tracking-wider text-text-muted">
             Tags
           </h3>
-          <div className="flex flex-wrap gap-1.5">
-            {task.tags.map((tag) => (
-              <span
-                key={tag}
-                className="rounded-full border border-border bg-bg-tertiary px-2 py-0.5 text-xs text-text-secondary"
-              >
-                {tag}
-              </span>
-            ))}
-          </div>
+          {editingField === 'tags' ? (
+            <div className="space-y-2">
+              <input
+                type="text"
+                value={editValues.tags}
+                onChange={(e) => onFieldChange('tags', e.target.value)}
+                onKeyDown={(e) => onKeyDown(e, 'tags')}
+                autoFocus
+                disabled={isSubmitting}
+                className="w-full rounded border border-primary/30 bg-bg-secondary px-2 py-1.5 text-sm text-text-primary placeholder-text-muted focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-50"
+                placeholder="Enter tags separated by commas"
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={() => onFieldSave('tags')}
+                  disabled={isSubmitting}
+                  className="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-50"
+                >
+                  Save
+                </button>
+                <button
+                  onClick={onFieldCancel}
+                  disabled={isSubmitting}
+                  className="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium bg-border text-text-muted hover:bg-border-hover disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+              </div>
+              {fieldError && <p className="text-xs text-error">{fieldError}</p>}
+            </div>
+          ) : (
+            <div
+              onClick={() => onFieldClick('tags')}
+              className="flex flex-wrap gap-1.5 cursor-pointer hover:bg-bg-hover p-2 rounded"
+            >
+              {task.tags.map((tag) => (
+                <span
+                  key={tag}
+                  className="rounded-full border border-border bg-bg-tertiary px-2 py-0.5 text-xs text-text-secondary"
+                >
+                  {tag}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
-      )}
+      ) : null}
 
       {/* Timestamps */}
       <div className="p-4">
@@ -323,6 +480,79 @@ function TaskDetailsTab({ taskData }: { taskData: TaskWithRelations }) {
           </div>
         </div>
       )}
+
+      {/* Delete Confirmation Section */}
+      {showDeleteConfirmation && (
+        <div className="border-t border-error/20 bg-error/5 p-4">
+          <div className="space-y-3">
+            <div>
+              <h4 className="text-sm font-semibold text-error">Delete Task?</h4>
+              <p className="mt-1 text-sm text-text-secondary">
+                Are you sure you want to delete <span className="font-medium">{task.title}</span>?
+              </p>
+            </div>
+
+            {taskData.children_ids && taskData.children_ids.length > 0 && (
+              <div className="rounded border border-warning/20 bg-warning/5 p-2.5">
+                <p className="text-xs text-warning font-medium mb-2">
+                  This task has {taskData.children_ids.length} child task{taskData.children_ids.length !== 1 ? 's' : ''}
+                </p>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={cascade}
+                    onChange={(e) => onCascadeChange(e.target.checked)}
+                    disabled={isDeleting}
+                    className="rounded border border-border"
+                  />
+                  <span className="text-xs text-text-secondary">Delete all child tasks</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer mt-1.5">
+                  <input
+                    type="checkbox"
+                    checked={!cascade}
+                    onChange={(e) => onCascadeChange(!e.target.checked)}
+                    disabled={isDeleting}
+                    className="rounded border border-border"
+                  />
+                  <span className="text-xs text-text-secondary">Keep child tasks without parent</span>
+                </label>
+              </div>
+            )}
+
+            {deleteError && (
+              <p className="text-xs text-error bg-error/10 p-2 rounded">{deleteError}</p>
+            )}
+
+            <div className="flex gap-2">
+              <button
+                onClick={onConfirmDelete}
+                disabled={isDeleting}
+                className="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-medium bg-error/10 text-error hover:bg-error/20 disabled:opacity-50"
+              >
+                {isDeleting ? (
+                  <>
+                    <svg className="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <span>Confirm Delete</span>
+                )}
+              </button>
+              <button
+                onClick={onCancelDelete}
+                disabled={isDeleting}
+                className="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-medium bg-border text-text-muted hover:bg-border-hover disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -336,6 +566,19 @@ export function TaskDetailPanel({ taskId, onClose, onTaskSelect }: TaskDetailPan
   const [activeTab, setActiveTab] = useState<TabId>('details');
   const [isRunning, setIsRunning] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
+  const [editingField, setEditingField] = useState<'title' | 'description' | 'priority' | 'tags' | null>(null);
+  const [editValues, setEditValues] = useState<{ title: string; description: string; priority: string | null; tags: string }>({
+    title: '',
+    description: '',
+    priority: null,
+    tags: '',
+  });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [fieldError, setFieldError] = useState<string | null>(null);
+  const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
+  const [cascade, setCascade] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const { task: taskData, isLoading, error, refetch } = useTask(taskId);
 
   // Track pending refetch for debouncing
@@ -412,6 +655,127 @@ export function TaskDetailPanel({ taskId, onClose, onTaskSelect }: TaskDetailPan
     }
   }, [taskId, isRunning]);
 
+  // Click-to-edit handlers
+  const handleFieldClick = useCallback(
+    (fieldName: 'title' | 'description' | 'priority' | 'tags') => {
+      if (!taskData) return;
+      const { task } = taskData;
+      
+      setEditingField(fieldName);
+      setEditValues({
+        title: task.title,
+        description: task.description || '',
+        priority: task.priority,
+        tags: task.tags.join(', '),
+      });
+      setFieldError(null);
+    },
+    [taskData]
+  );
+
+  const handleFieldChange = useCallback(
+    (fieldName: 'title' | 'description' | 'priority' | 'tags', value: string) => {
+      setEditValues((prev) => ({ ...prev, [fieldName]: value }));
+    },
+    []
+  );
+
+  const handleFieldCancel = useCallback(() => {
+    setEditingField(null);
+    setFieldError(null);
+  }, []);
+
+  const handleFieldSave = useCallback(
+    async (fieldName: 'title' | 'description' | 'priority' | 'tags') => {
+      if (!taskData?.task.id) return;
+      
+      setIsSubmitting(true);
+      setFieldError(null);
+
+      try {
+        // Validate input
+        if (fieldName === 'title' && !editValues.title.trim()) {
+          setFieldError('Title cannot be empty');
+          setIsSubmitting(false);
+          return;
+        }
+
+        // Parse tags
+        const parsedTags = editValues.tags
+          .split(',')
+          .map((t) => t.trim())
+          .filter((t) => t.length > 0);
+
+        // Call updateTask command
+        const result = await commands.updateTask(taskData.task.id, {
+          title: fieldName === 'title' ? editValues.title : taskData.task.title,
+          description: fieldName === 'description' ? editValues.description : taskData.task.description,
+          priority: fieldName === 'priority' ? (editValues.priority as unknown) : taskData.task.priority,
+          tags: fieldName === 'tags' ? parsedTags : taskData.task.tags,
+        });
+
+        if (result.status === 'error') {
+          setFieldError(result.error.message);
+        } else {
+          setEditingField(null);
+          await refetch();
+        }
+      } catch (err) {
+        setFieldError(err instanceof Error ? err.message : 'Failed to save field');
+      } finally {
+        setIsSubmitting(false);
+      }
+    },
+    [taskData, editValues, refetch]
+  );
+
+  const handleKeyDown = useCallback(
+    (
+      e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
+      fieldName: 'title' | 'description' | 'priority' | 'tags'
+    ) => {
+      if (e.key === 'Escape') {
+        handleFieldCancel();
+      } else if (e.key === 'Enter' && e.ctrlKey) {
+        handleFieldSave(fieldName);
+      }
+    },
+    [handleFieldCancel, handleFieldSave]
+  );
+
+  // Delete confirmation handlers
+  const handleShowDeleteConfirmation = useCallback(() => {
+    setShowDeleteConfirmation(true);
+    setDeleteError(null);
+  }, []);
+
+  const handleCancelDelete = useCallback(() => {
+    setShowDeleteConfirmation(false);
+    setDeleteError(null);
+  }, []);
+
+  const handleConfirmDelete = useCallback(async () => {
+    if (!taskData?.task.id) return;
+
+    setIsDeleting(true);
+    setDeleteError(null);
+
+    try {
+      const result = await commands.deleteTask(taskData.task.id, cascade);
+
+      if (result.status === 'error') {
+        setDeleteError(result.error.message);
+      } else {
+        setShowDeleteConfirmation(false);
+        onClose?.();
+      }
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : 'Failed to delete task');
+    } finally {
+      setIsDeleting(false);
+    }
+  }, [taskData?.task.id, cascade, onClose]);
+
   if (!taskId) {
     return null;
   }
@@ -461,7 +825,7 @@ export function TaskDetailPanel({ taskId, onClose, onTaskSelect }: TaskDetailPan
           {/* Edit Button */}
           <button
             type="button"
-            onClick={() => {}}
+            onClick={() => handleFieldClick('title')}
             className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary bg-primary/10 text-primary hover:bg-primary/20 hover:shadow-glow-sm"
             aria-label="Edit task"
             title="Edit this task"
@@ -474,7 +838,7 @@ export function TaskDetailPanel({ taskId, onClose, onTaskSelect }: TaskDetailPan
           {/* Delete Button */}
           <button
             type="button"
-            onClick={() => {}}
+            onClick={handleShowDeleteConfirmation}
             className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-error bg-error/10 text-error hover:bg-error/20 hover:shadow-glow-sm"
             aria-label="Delete task"
             title="Delete this task"
@@ -552,7 +916,44 @@ export function TaskDetailPanel({ taskId, onClose, onTaskSelect }: TaskDetailPan
         <>
           {/* Task title */}
           <div className="border-b border-border px-4 py-3">
-            <h3 className="text-sm font-medium leading-snug text-text-primary">{taskData.task.title}</h3>
+            {editingField === 'title' ? (
+              <div className="space-y-2">
+                <input
+                  type="text"
+                  value={editValues.title}
+                  onChange={(e) => handleFieldChange('title', e.target.value)}
+                  onKeyDown={(e) => handleKeyDown(e, 'title')}
+                  autoFocus
+                  disabled={isSubmitting}
+                  className="w-full rounded border border-primary/30 bg-bg-secondary px-2 py-1.5 text-sm font-medium text-text-primary placeholder-text-muted focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-50"
+                  placeholder="Enter title"
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handleFieldSave('title')}
+                    disabled={isSubmitting}
+                    className="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-50"
+                  >
+                    Save
+                  </button>
+                  <button
+                    onClick={handleFieldCancel}
+                    disabled={isSubmitting}
+                    className="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium bg-border text-text-muted hover:bg-border-hover disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                </div>
+                {fieldError && <p className="text-xs text-error">{fieldError}</p>}
+              </div>
+            ) : (
+              <h3
+                onClick={() => handleFieldClick('title')}
+                className="text-sm font-medium leading-snug text-text-primary cursor-pointer hover:bg-bg-hover p-2 rounded"
+              >
+                {taskData.task.title}
+              </h3>
+            )}
           </div>
 
           {/* Tabs */}
@@ -583,7 +984,25 @@ export function TaskDetailPanel({ taskId, onClose, onTaskSelect }: TaskDetailPan
 
           {/* Tab content */}
           <div className="flex-1 overflow-auto">
-            {activeTab === 'details' && <TaskDetailsTab taskData={taskData} />}
+            {activeTab === 'details' && <TaskDetailsTab
+              taskData={taskData}
+              editingField={editingField}
+              editValues={editValues}
+              isSubmitting={isSubmitting}
+              fieldError={fieldError}
+              onFieldClick={handleFieldClick}
+              onFieldChange={handleFieldChange}
+              onFieldSave={handleFieldSave}
+              onFieldCancel={handleFieldCancel}
+              onKeyDown={handleKeyDown}
+              showDeleteConfirmation={showDeleteConfirmation}
+              deleteError={deleteError}
+              isDeleting={isDeleting}
+              cascade={cascade}
+              onCancelDelete={handleCancelDelete}
+              onConfirmDelete={handleConfirmDelete}
+              onCascadeChange={setCascade}
+            />}
             {activeTab === 'sections' && <TaskSections sections={taskData.task.sections} taskId={taskData.task.id} onSectionsChanged={refetch} />}
             {activeTab === 'code_refs' && <TaskCodeRefs codeRefs={taskData.task.code_refs} />}
             {activeTab === 'relations' && (
