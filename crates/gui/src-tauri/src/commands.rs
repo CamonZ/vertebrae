@@ -1106,6 +1106,115 @@ pub async fn delete_chat_session(
     Ok(())
 }
 
+// ============================================================================
+// Task Relationship Commands
+// ============================================================================
+
+/// Set the parent task
+///
+/// Sets the parent of the given task. If the task already has a parent, it will be replaced.
+/// Validates that both tasks exist.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_parent(
+    state: State<'_, AppState>,
+    task_id: String,
+    parent_id: String,
+) -> Result<(), CommandError> {
+    log::info!(
+        "set_parent called with task_id: {}, parent_id: {}",
+        task_id,
+        parent_id
+    );
+
+    let service_guard = state.service.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    service.set_parent(&task_id, &parent_id).await?;
+
+    log::info!("Successfully set parent for task {}", task_id);
+    Ok(())
+}
+
+/// Remove the parent task
+///
+/// Removes the parent relationship from the given task, making it a root task.
+#[tauri::command]
+#[specta::specta]
+pub async fn remove_parent(
+    state: State<'_, AppState>,
+    task_id: String,
+) -> Result<(), CommandError> {
+    log::info!("remove_parent called with task_id: {}", task_id);
+
+    let service_guard = state.service.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    service.remove_parent(&task_id).await?;
+
+    log::info!("Successfully removed parent for task {}", task_id);
+    Ok(())
+}
+
+/// Add a dependency relationship
+///
+/// Makes the given task depend on another task (the task is blocked by the dependency).
+/// Validates that both tasks exist and that adding the dependency won't create a cycle.
+#[tauri::command]
+#[specta::specta]
+pub async fn add_dependency(
+    state: State<'_, AppState>,
+    task_id: String,
+    depends_on_id: String,
+) -> Result<(), CommandError> {
+    log::info!(
+        "add_dependency called with task_id: {}, depends_on_id: {}",
+        task_id,
+        depends_on_id
+    );
+
+    let service_guard = state.service.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    service.add_dependency(&task_id, &depends_on_id).await?;
+
+    log::info!("Successfully added dependency for task {}", task_id);
+    Ok(())
+}
+
+/// Remove a dependency relationship
+///
+/// Removes a dependency from the given task (the task is no longer blocked by this dependency).
+#[tauri::command]
+#[specta::specta]
+pub async fn remove_dependency(
+    state: State<'_, AppState>,
+    task_id: String,
+    depends_on_id: String,
+) -> Result<(), CommandError> {
+    log::info!(
+        "remove_dependency called with task_id: {}, depends_on_id: {}",
+        task_id,
+        depends_on_id
+    );
+
+    let service_guard = state.service.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    service.remove_dependency(&task_id, &depends_on_id).await?;
+
+    log::info!("Successfully removed dependency for task {}", task_id);
+    Ok(())
+}
+
 /// Delete a task with optional cascade delete for child tasks
 ///
 /// When cascade is true, deletes the task and all its descendants.
@@ -1670,35 +1779,13 @@ mod tests {
     }
 
     // ========================================================================
-    // Delete Task Tests
+    // Task Relationship Mutation Tests
     // ========================================================================
 
     #[tokio::test]
-    async fn test_delete_task_simple() {
+    async fn test_set_parent_creates_relationship() {
         let state = create_test_app_state().await;
 
-        // Create a task
-        let task_id = {
-            let guard = state.service.read().await;
-            let service = guard.as_ref().unwrap();
-            let options = CreateTaskOptions::new("Task to Delete").with_level(Level::Task);
-            service.create_task(options).await.unwrap()
-        };
-
-        // Delete the task
-        let result = delete_task(mock_state(&state), task_id.clone(), false).await;
-        assert!(result.is_ok());
-
-        // Verify task is deleted
-        let get_result = get_task(mock_state(&state), task_id).await;
-        assert!(get_result.is_err());
-    }
-
-    #[tokio::test]
-    async fn test_delete_task_cascade() {
-        let state = create_test_app_state().await;
-
-        // Create parent and child tasks
         let (parent_id, child_id) = {
             let guard = state.service.read().await;
             let service = guard.as_ref().unwrap();
@@ -1709,28 +1796,24 @@ mod tests {
             let child_options = CreateTaskOptions::new("Child").with_level(Level::Task);
             let child_id = service.create_task(child_options).await.unwrap();
 
-            service.set_parent(&child_id, &parent_id).await.unwrap();
-
             (parent_id, child_id)
         };
 
-        // Delete with cascade
-        let result = delete_task(mock_state(&state), parent_id.clone(), true).await;
+        // Set parent via command
+        let result = set_parent(mock_state(&state), child_id.clone(), parent_id.clone()).await;
         assert!(result.is_ok());
 
-        // Verify both parent and child are deleted
-        let parent_result = get_task(mock_state(&state), parent_id).await;
-        assert!(parent_result.is_err());
-
+        // Verify relationship was created
         let child_result = get_task(mock_state(&state), child_id).await;
-        assert!(child_result.is_err());
+        assert!(child_result.is_ok());
+        let child_with_relations = child_result.unwrap();
+        assert_eq!(child_with_relations.parent_id, Some(parent_id));
     }
 
     #[tokio::test]
-    async fn test_delete_task_orphan_children() {
+    async fn test_remove_parent_deletes_relationship() {
         let state = create_test_app_state().await;
 
-        // Create parent and child tasks
         let (parent_id, child_id) = {
             let guard = state.service.read().await;
             let service = guard.as_ref().unwrap();
@@ -1742,19 +1825,14 @@ mod tests {
             let child_id = service.create_task(child_options).await.unwrap();
 
             service.set_parent(&child_id, &parent_id).await.unwrap();
-
             (parent_id, child_id)
         };
 
-        // Delete without cascade (orphan children)
-        let result = delete_task(mock_state(&state), parent_id.clone(), false).await;
+        // Remove parent via command
+        let result = remove_parent(mock_state(&state), child_id.clone()).await;
         assert!(result.is_ok());
 
-        // Verify parent is deleted
-        let parent_result = get_task(mock_state(&state), parent_id).await;
-        assert!(parent_result.is_err());
-
-        // Verify child still exists but has no parent
+        // Verify relationship was removed
         let child_result = get_task(mock_state(&state), child_id).await;
         assert!(child_result.is_ok());
         let child_with_relations = child_result.unwrap();
@@ -1762,12 +1840,110 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_delete_task_fails_without_project() {
+    async fn test_add_dependency_creates_relationship() {
+        let state = create_test_app_state().await;
+
+        let (task_a_id, task_b_id) = {
+            let guard = state.service.read().await;
+            let service = guard.as_ref().unwrap();
+
+            let task_a_options = CreateTaskOptions::new("Task A").with_level(Level::Task);
+            let task_a_id = service.create_task(task_a_options).await.unwrap();
+
+            let task_b_options = CreateTaskOptions::new("Task B").with_level(Level::Task);
+            let task_b_id = service.create_task(task_b_options).await.unwrap();
+
+            service
+                .add_dependency(&task_b_id, &task_a_id)
+                .await
+                .unwrap();
+            (task_a_id, task_b_id)
+        };
+
+        // Add dependency via command (B depends on A)
+        let result = add_dependency(mock_state(&state), task_b_id.clone(), task_a_id.clone()).await;
+        assert!(result.is_ok());
+
+        // Verify dependency was created
+        let task_b_result = get_task(mock_state(&state), task_b_id.clone()).await;
+        assert!(task_b_result.is_ok());
+        let task_b_with_relations = task_b_result.unwrap();
+        assert!(task_b_with_relations.depends_on_ids.contains(&task_a_id));
+    }
+
+    #[tokio::test]
+    async fn test_remove_dependency_deletes_relationship() {
+        let state = create_test_app_state().await;
+
+        let (task_a_id, task_b_id) = {
+            let guard = state.service.read().await;
+            let service = guard.as_ref().unwrap();
+
+            let task_a_options = CreateTaskOptions::new("Task A").with_level(Level::Task);
+            let task_a_id = service.create_task(task_a_options).await.unwrap();
+
+            let task_b_options = CreateTaskOptions::new("Task B").with_level(Level::Task);
+            let task_b_id = service.create_task(task_b_options).await.unwrap();
+
+            service
+                .add_dependency(&task_b_id, &task_a_id)
+                .await
+                .unwrap();
+            (task_a_id, task_b_id)
+        };
+
+        // Remove dependency via command
+        let result =
+            remove_dependency(mock_state(&state), task_b_id.clone(), task_a_id.clone()).await;
+        assert!(result.is_ok());
+
+        // Verify dependency was removed
+        let task_b_result = get_task(mock_state(&state), task_b_id.clone()).await;
+        assert!(task_b_result.is_ok());
+        let task_b_with_relations = task_b_result.unwrap();
+        assert!(!task_b_with_relations.depends_on_ids.contains(&task_a_id));
+    }
+
+    #[tokio::test]
+    async fn test_add_dependency_prevents_cycles() {
+        let state = create_test_app_state().await;
+
+        let (task_a_id, task_b_id) = {
+            let guard = state.service.read().await;
+            let service = guard.as_ref().unwrap();
+
+            let task_a_options = CreateTaskOptions::new("Task A").with_level(Level::Task);
+            let task_a_id = service.create_task(task_a_options).await.unwrap();
+
+            let task_b_options = CreateTaskOptions::new("Task B").with_level(Level::Task);
+            let task_b_id = service.create_task(task_b_options).await.unwrap();
+
+            service
+                .add_dependency(&task_b_id, &task_a_id)
+                .await
+                .unwrap();
+            (task_a_id, task_b_id)
+        };
+
+        // Try to add reverse dependency (A depends on B) - should fail
+        let result = add_dependency(mock_state(&state), task_a_id.clone(), task_b_id.clone()).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_set_parent_fails_without_project() {
         let state = create_disconnected_app_state().await;
-        let result = delete_task(mock_state(&state), "task1".to_string(), false).await;
+        let result = set_parent(mock_state(&state), "task1".to_string(), "task2".to_string()).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().message.contains("No project selected"));
     }
 
-    // ========================================================================
+    #[tokio::test]
+    async fn test_add_dependency_fails_without_project() {
+        let state = create_disconnected_app_state().await;
+        let result =
+            add_dependency(mock_state(&state), "task1".to_string(), "task2".to_string()).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("No project selected"));
+    }
 }

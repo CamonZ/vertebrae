@@ -123,6 +123,76 @@ async getTaskHierarchy(rootId: string | null, filter: TaskFilterOptions | null) 
 }
 },
 /**
+ * Set the parent task
+ * 
+ * Sets the parent of the given task. If the task already has a parent, it will be replaced.
+ * Validates that both tasks exist.
+ */
+async setParent(taskId: string, parentId: string) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_parent", { taskId, parentId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Remove the parent task
+ * 
+ * Removes the parent relationship from the given task, making it a root task.
+ */
+async removeParent(taskId: string) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("remove_parent", { taskId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Add a dependency relationship
+ * 
+ * Makes the given task depend on another task (the task is blocked by the dependency).
+ * Validates that both tasks exist and that adding the dependency won't create a cycle.
+ */
+async addDependency(taskId: string, dependsOnId: string) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("add_dependency", { taskId, dependsOnId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Remove a dependency relationship
+ * 
+ * Removes a dependency from the given task (the task is no longer blocked by this dependency).
+ */
+async removeDependency(taskId: string, dependsOnId: string) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("remove_dependency", { taskId, dependsOnId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Delete a task with optional cascade delete for child tasks
+ * 
+ * When cascade is true, deletes the task and all its descendants.
+ * When cascade is false, deletes the task but orphans its children (they lose their parent).
+ * 
+ * This operation is atomic - either fully succeeds or fully fails.
+ */
+async deleteTask(taskId: string, cascade: boolean) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_task", { taskId, cascade }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * List all workflows
  * 
  * Returns a list of all workflows in the database.

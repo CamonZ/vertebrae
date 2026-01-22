@@ -604,11 +604,13 @@ export function TaskDetailPanel({ taskId, onClose, onTaskSelect }: TaskDetailPan
             {activeTab === 'code_refs' && <TaskCodeRefs codeRefs={taskData.task.code_refs} />}
             {activeTab === 'relations' && (
               <TaskRelations
+                taskId={taskData.task.id}
                 parentId={taskData.parent_id}
                 childrenIds={taskData.children_ids}
                 dependsOnIds={taskData.depends_on_ids}
                 dependentIds={taskData.dependent_ids}
                 onTaskSelect={onTaskSelect}
+                onRelationshipChange={refetch}
               />
             )}
             {activeTab === 'history' && taskData.task.id && (

@@ -58,6 +58,13 @@ fn create_builder() -> Builder {
             commands::list_tasks,
             commands::get_task,
             commands::get_task_hierarchy,
+            // Task relationship commands
+            commands::set_parent,
+            commands::remove_parent,
+            commands::add_dependency,
+            commands::remove_dependency,
+            // Task deletion command
+            commands::delete_task,
             // Workflow commands
             commands::list_workflows,
             commands::get_workflow,
