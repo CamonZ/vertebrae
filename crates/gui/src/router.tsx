@@ -44,7 +44,7 @@ function ProjectGuard({ children }: { children: React.ReactNode }) {
           // On error, redirect to setup
           navigate("/setup", { replace: true });
         }
-      } catch (e) {
+      } catch {
         navigate("/setup", { replace: true });
       } finally {
         setIsChecking(false);

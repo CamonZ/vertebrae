@@ -11,6 +11,15 @@ export interface WorkflowExecutionEventHandler {
   onFailed?: (taskId: string, error: string) => void;
 }
 
+interface WorkflowExecutionEvent {
+  payload: {
+    workflow_id: string;
+    task_id: string;
+    event_type: 'Started' | Record<string, unknown>;
+    [key: string]: unknown;
+  };
+}
+
 /**
  * Listen to workflow execution events for a specific workflow
  *
@@ -39,7 +48,7 @@ export function useWorkflowExecutionListener(
   onFailedRef.current = handlers.onFailed;
 
   const handleExecutionEvent = useCallback(
-    (event: { payload: any }) => {
+    (event: WorkflowExecutionEvent) => {
       // Only process events for this workflow
       if (event.payload.workflow_id !== workflowId) return;
 

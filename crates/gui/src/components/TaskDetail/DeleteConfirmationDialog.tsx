@@ -1,5 +1,4 @@
 import { FormModal } from '../forms/FormModal';
-import { BooleanField } from '../forms/BooleanField';
 
 export interface DeleteConfirmationDialogProps {
   /**

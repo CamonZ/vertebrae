@@ -304,7 +304,6 @@ function AllWorkflowsPipelineInner() {
   const {
     nodes: elkPositions,
     edges: elkEdgePaths,
-    isLayouting: _isLayouting,
   } = useElkLayout(elkLayoutNodes, elkLayoutEdges, {
     direction: "DOWN",
     nodeSpacing: 60,
