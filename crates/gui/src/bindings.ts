@@ -233,6 +233,74 @@ async deleteTask(taskId: string, cascade: boolean) : Promise<Result<null, Comman
 }
 },
 /**
+ * Add a section to a task
+ * 
+ * Creates a new section with the given type and content.
+ * For step and testing_criterion types, content can be optional.
+ */
+async addSection(taskId: string, sectionType: string, content: string | null) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("add_section", { taskId, sectionType, content }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Edit a section's content by its ordinal (position)
+ * 
+ * Updates the content of an existing section identified by its type and ordinal.
+ */
+async editSection(taskId: string, sectionType: string, ordinal: number, newContent: string) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("edit_section", { taskId, sectionType, ordinal, newContent }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Toggle the completion status of a step section
+ * 
+ * Marks a step section as done or not done by toggling its done flag.
+ * For step sections only (other types will return an error).
+ */
+async markSectionDone(taskId: string, ordinal: number) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("mark_section_done", { taskId, ordinal }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Remove a section from a task by its ordinal (position)
+ * 
+ * Deletes a section identified by its type and ordinal.
+ * Remaining sections of the same type are renumbered.
+ */
+async removeSection(taskId: string, sectionType: string, ordinal: number) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("remove_section", { taskId, sectionType, ordinal }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Add a code reference to a testing criterion section
+ * 
+ * Appends a code reference to an existing testing criterion section.
+ */
+async addCriterionRef(taskId: string, sectionOrdinal: number, filePath: string, lineNumber: number | null, name: string | null) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("add_criterion_ref", { taskId, sectionOrdinal, filePath, lineNumber, name }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * List all workflows
  * 
  * Returns a list of all workflows in the database.

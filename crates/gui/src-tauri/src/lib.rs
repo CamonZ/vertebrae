@@ -69,6 +69,12 @@ fn create_builder() -> Builder {
             commands::assign_workflow,
             // Task deletion command
             commands::delete_task,
+            // Section mutation commands
+            commands::add_section,
+            commands::edit_section,
+            commands::mark_section_done,
+            commands::remove_section,
+            commands::add_criterion_ref,
             // Workflow commands
             commands::list_workflows,
             commands::get_workflow,

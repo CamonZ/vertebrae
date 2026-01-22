@@ -966,11 +966,10 @@ pub async fn end_chat_session(
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    let ended_at = chrono::Utc::now();
     service
         .database()
         .chat_sessions()
-        .end_session(&session_id, ended_at)
+        .end_session(&session_id, chrono::Utc::now())
         .await?;
 
     Ok(())
@@ -1382,6 +1381,302 @@ pub async fn delete_task(
     service.delete_task(&task_id, cascade).await?;
 
     log::info!("Successfully deleted task: {}", task_id);
+    Ok(())
+}
+
+// ============================================================================
+// Section Mutation Commands
+// ============================================================================
+
+/// Add a section to a task
+///
+/// Creates a new section with the given type and content.
+/// For step and testing_criterion types, content can be optional.
+#[tauri::command]
+#[specta::specta]
+pub async fn add_section(
+    state: State<'_, AppState>,
+    task_id: String,
+    section_type: String,
+    content: Option<String>,
+) -> Result<(), CommandError> {
+    log::info!(
+        "add_section called with task_id: {}, section_type: {}",
+        task_id,
+        section_type
+    );
+
+    let service_guard = state.service.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    // Parse section type
+    let parsed_type = match section_type.to_lowercase().as_str() {
+        "goal" => vertebrae_db::SectionType::Goal,
+        "context" => vertebrae_db::SectionType::Context,
+        "current_behavior" => vertebrae_db::SectionType::CurrentBehavior,
+        "desired_behavior" => vertebrae_db::SectionType::DesiredBehavior,
+        "step" => vertebrae_db::SectionType::Step,
+        "testing_criterion" => vertebrae_db::SectionType::TestingCriterion,
+        "anti_pattern" => vertebrae_db::SectionType::AntiPattern,
+        "failure_test" => vertebrae_db::SectionType::FailureTest,
+        "constraint" => vertebrae_db::SectionType::Constraint,
+        _ => {
+            return Err(CommandError {
+                message: format!("Invalid section type: {}", section_type),
+            })
+        }
+    };
+
+    // Use provided content or empty string
+    let section_content = content.unwrap_or_default();
+
+    let section = vertebrae_db::Section {
+        section_type: parsed_type,
+        content: section_content,
+        order: None,
+        done: None,
+        done_at: None,
+        refs: Vec::new(),
+    };
+
+    service.add_section(&task_id, section).await?;
+
+    log::info!("Successfully added section to task: {}", task_id);
+    Ok(())
+}
+
+/// Edit a section's content by its ordinal (position)
+///
+/// Updates the content of an existing section identified by its type and ordinal.
+#[tauri::command]
+#[specta::specta]
+pub async fn edit_section(
+    state: State<'_, AppState>,
+    task_id: String,
+    section_type: String,
+    ordinal: u32,
+    new_content: String,
+) -> Result<(), CommandError> {
+    log::info!(
+        "edit_section called with task_id: {}, section_type: {}, ordinal: {}",
+        task_id,
+        section_type,
+        ordinal
+    );
+
+    let service_guard = state.service.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    // Parse section type
+    let parsed_type = match section_type.to_lowercase().as_str() {
+        "goal" => vertebrae_db::SectionType::Goal,
+        "context" => vertebrae_db::SectionType::Context,
+        "current_behavior" => vertebrae_db::SectionType::CurrentBehavior,
+        "desired_behavior" => vertebrae_db::SectionType::DesiredBehavior,
+        "step" => vertebrae_db::SectionType::Step,
+        "testing_criterion" => vertebrae_db::SectionType::TestingCriterion,
+        "anti_pattern" => vertebrae_db::SectionType::AntiPattern,
+        "failure_test" => vertebrae_db::SectionType::FailureTest,
+        "constraint" => vertebrae_db::SectionType::Constraint,
+        _ => {
+            return Err(CommandError {
+                message: format!("Invalid section type: {}", section_type),
+            })
+        }
+    };
+
+    service
+        .edit_section_by_ordinal(&task_id, parsed_type, ordinal, &new_content)
+        .await?;
+
+    log::info!("Successfully edited section in task: {}", task_id);
+    Ok(())
+}
+
+/// Toggle the completion status of a step section
+///
+/// Marks a step section as done or not done by toggling its done flag.
+/// For step sections only (other types will return an error).
+#[tauri::command]
+#[specta::specta]
+pub async fn mark_section_done(
+    state: State<'_, AppState>,
+    task_id: String,
+    ordinal: u32,
+) -> Result<(), CommandError> {
+    log::info!(
+        "mark_section_done called with task_id: {}, ordinal: {}",
+        task_id,
+        ordinal
+    );
+
+    let service_guard = state.service.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    // Get the task to find the section and toggle its done status
+    let task = service.get_task(&task_id).await?;
+
+    // Find the section by type and ordinal
+    let section = task
+        .sections
+        .iter()
+        .filter(|s| s.section_type == vertebrae_db::SectionType::Step)
+        .find(|s| s.order == Some(ordinal))
+        .ok_or_else(|| CommandError {
+            message: format!(
+                "Step section with ordinal {} not found in task {}",
+                ordinal, task_id
+            ),
+        })?;
+
+    // Toggle the done status
+    let new_done_status = !section.done.unwrap_or(false);
+
+    // Update sections - find and modify the matching section
+    let mut updated_sections = task.sections.clone();
+    for section in updated_sections.iter_mut() {
+        if section.section_type == vertebrae_db::SectionType::Step && section.order == Some(ordinal)
+        {
+            section.done = Some(new_done_status);
+            section.done_at = if new_done_status {
+                Some(chrono::Utc::now())
+            } else {
+                None
+            };
+        }
+    }
+
+    // Update task with new sections using TaskUpdate
+    #[allow(deprecated)]
+    let db = service.database();
+    let update = vertebrae_db::TaskUpdate::new().with_sections(updated_sections);
+    db.tasks().update(&task_id, &update).await?;
+
+    log::info!(
+        "Successfully toggled step section done status for task: {}",
+        task_id
+    );
+    Ok(())
+}
+
+/// Remove a section from a task by its ordinal (position)
+///
+/// Deletes a section identified by its type and ordinal.
+/// Remaining sections of the same type are renumbered.
+#[tauri::command]
+#[specta::specta]
+pub async fn remove_section(
+    state: State<'_, AppState>,
+    task_id: String,
+    section_type: String,
+    ordinal: u32,
+) -> Result<(), CommandError> {
+    log::info!(
+        "remove_section called with task_id: {}, section_type: {}, ordinal: {}",
+        task_id,
+        section_type,
+        ordinal
+    );
+
+    let service_guard = state.service.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    // Parse section type
+    let parsed_type = match section_type.to_lowercase().as_str() {
+        "goal" => vertebrae_db::SectionType::Goal,
+        "context" => vertebrae_db::SectionType::Context,
+        "current_behavior" => vertebrae_db::SectionType::CurrentBehavior,
+        "desired_behavior" => vertebrae_db::SectionType::DesiredBehavior,
+        "step" => vertebrae_db::SectionType::Step,
+        "testing_criterion" => vertebrae_db::SectionType::TestingCriterion,
+        "anti_pattern" => vertebrae_db::SectionType::AntiPattern,
+        "failure_test" => vertebrae_db::SectionType::FailureTest,
+        "constraint" => vertebrae_db::SectionType::Constraint,
+        _ => {
+            return Err(CommandError {
+                message: format!("Invalid section type: {}", section_type),
+            })
+        }
+    };
+
+    service
+        .remove_section_by_ordinal(&task_id, parsed_type, ordinal)
+        .await?;
+
+    log::info!("Successfully removed section from task: {}", task_id);
+    Ok(())
+}
+
+/// Add a code reference to a testing criterion section
+///
+/// Appends a code reference to an existing testing criterion section.
+#[tauri::command]
+#[specta::specta]
+pub async fn add_criterion_ref(
+    state: State<'_, AppState>,
+    task_id: String,
+    section_ordinal: u32,
+    file_path: String,
+    line_number: Option<u32>,
+    name: Option<String>,
+) -> Result<(), CommandError> {
+    log::info!(
+        "add_criterion_ref called with task_id: {}, section_ordinal: {}, file_path: {}",
+        task_id,
+        section_ordinal,
+        file_path
+    );
+
+    let service_guard = state.service.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    // Get the task to find the section index (0-based) from ordinal
+    let task = service.get_task(&task_id).await?;
+
+    // Find the section index (0-based) by ordinal within testing_criterion sections
+    let section_index = task
+        .sections
+        .iter()
+        .enumerate()
+        .find(|(_, s)| {
+            s.section_type == vertebrae_db::SectionType::TestingCriterion
+                && s.order == Some(section_ordinal)
+        })
+        .map(|(idx, _)| idx)
+        .ok_or_else(|| CommandError {
+            message: format!(
+                "Testing criterion section with ordinal {} not found in task {}",
+                section_ordinal, task_id
+            ),
+        })?;
+
+    // Create the code reference
+    let code_ref = vertebrae_db::CodeRef {
+        path: file_path,
+        line_start: line_number,
+        line_end: None,
+        name,
+        description: None,
+    };
+
+    service
+        .append_section_ref(&task_id, section_index, &code_ref)
+        .await?;
+
+    log::info!(
+        "Successfully added code reference to testing criterion in task: {}",
+        task_id
+    );
     Ok(())
 }
 
@@ -1828,7 +2123,6 @@ mod tests {
 
             let child_options = CreateTaskOptions::new("Child").with_level(Level::Task);
             let child_id = service.create_task(child_options).await.unwrap();
-
             service.set_parent(&child_id, &parent_id).await.unwrap();
 
             (parent_id, child_id)
@@ -1935,8 +2229,8 @@ mod tests {
 
             let child_options = CreateTaskOptions::new("Child").with_level(Level::Task);
             let child_id = service.create_task(child_options).await.unwrap();
-
             service.set_parent(&child_id, &parent_id).await.unwrap();
+
             (parent_id, child_id)
         };
 
@@ -1964,8 +2258,8 @@ mod tests {
 
             let child_options = CreateTaskOptions::new("Child").with_level(Level::Task);
             let child_id = service.create_task(child_options).await.unwrap();
-
             service.set_parent(&child_id, &parent_id).await.unwrap();
+
             (parent_id, child_id)
         };
 
@@ -1993,11 +2287,11 @@ mod tests {
 
             let task_b_options = CreateTaskOptions::new("Task B").with_level(Level::Task);
             let task_b_id = service.create_task(task_b_options).await.unwrap();
-
             service
                 .add_dependency(&task_b_id, &task_a_id)
                 .await
                 .unwrap();
+
             (task_a_id, task_b_id)
         };
 
@@ -2025,11 +2319,11 @@ mod tests {
 
             let task_b_options = CreateTaskOptions::new("Task B").with_level(Level::Task);
             let task_b_id = service.create_task(task_b_options).await.unwrap();
-
             service
                 .add_dependency(&task_b_id, &task_a_id)
                 .await
                 .unwrap();
+
             (task_a_id, task_b_id)
         };
 
@@ -2058,11 +2352,11 @@ mod tests {
 
             let task_b_options = CreateTaskOptions::new("Task B").with_level(Level::Task);
             let task_b_id = service.create_task(task_b_options).await.unwrap();
-
             service
                 .add_dependency(&task_b_id, &task_a_id)
                 .await
                 .unwrap();
+
             (task_a_id, task_b_id)
         };
 
@@ -2086,5 +2380,576 @@ mod tests {
             add_dependency(mock_state(&state), "task1".to_string(), "task2".to_string()).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().message.contains("No project selected"));
+    }
+
+    // ========================================================================
+    // Section Mutation Command Tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_add_section_to_task() {
+        let state = create_test_app_state().await;
+
+        let task_id = {
+            let guard = state.service.read().await;
+            let service = guard.as_ref().unwrap();
+            let options = CreateTaskOptions::new("Task with Sections").with_level(Level::Task);
+            service.create_task(options).await.unwrap()
+        };
+
+        // Add a goal section
+        let result = add_section(
+            mock_state(&state),
+            task_id.clone(),
+            "goal".to_string(),
+            Some("This is the goal".to_string()),
+        )
+        .await;
+        assert!(result.is_ok());
+
+        // Verify section was added
+        let task_result = get_task(mock_state(&state), task_id.clone()).await;
+        assert!(task_result.is_ok());
+        let task = task_result.unwrap();
+        assert_eq!(task.task.sections.len(), 1);
+        assert_eq!(
+            task.task.sections[0].section_type,
+            crate::types::SectionType::Goal
+        );
+        assert_eq!(task.task.sections[0].content, "This is the goal");
+    }
+
+    #[tokio::test]
+    async fn test_add_multiple_sections_different_types() {
+        let state = create_test_app_state().await;
+
+        let task_id = {
+            let guard = state.service.read().await;
+            let service = guard.as_ref().unwrap();
+            let options = CreateTaskOptions::new("Multi-section Task").with_level(Level::Task);
+            let task_id = service.create_task(options).await.unwrap();
+
+            // Add multiple sections
+            let goal = vertebrae_db::Section {
+                section_type: vertebrae_db::SectionType::Goal,
+                content: "Goal 1".to_string(),
+                order: None,
+                done: None,
+                done_at: None,
+                refs: Vec::new(),
+            };
+            service.add_section(&task_id, goal).await.unwrap();
+
+            let context = vertebrae_db::Section {
+                section_type: vertebrae_db::SectionType::Context,
+                content: "Context 1".to_string(),
+                order: None,
+                done: None,
+                done_at: None,
+                refs: Vec::new(),
+            };
+            service.add_section(&task_id, context).await.unwrap();
+
+            let constraint = vertebrae_db::Section {
+                section_type: vertebrae_db::SectionType::Constraint,
+                content: "Constraint 1".to_string(),
+                order: None,
+                done: None,
+                done_at: None,
+                refs: Vec::new(),
+            };
+            service.add_section(&task_id, constraint).await.unwrap();
+
+            let step = vertebrae_db::Section {
+                section_type: vertebrae_db::SectionType::Step,
+                content: "Step 1".to_string(),
+                order: None,
+                done: None,
+                done_at: None,
+                refs: Vec::new(),
+            };
+            service.add_section(&task_id, step).await.unwrap();
+
+            task_id
+        };
+
+        // Verify all sections were added
+        let task_result = get_task(mock_state(&state), task_id.clone()).await;
+        assert!(task_result.is_ok());
+        let task = task_result.unwrap();
+        assert_eq!(task.task.sections.len(), 4);
+        assert_eq!(
+            task.task.sections[0].section_type,
+            crate::types::SectionType::Goal
+        );
+        assert_eq!(
+            task.task.sections[1].section_type,
+            crate::types::SectionType::Context
+        );
+        assert_eq!(
+            task.task.sections[2].section_type,
+            crate::types::SectionType::Constraint
+        );
+        assert_eq!(
+            task.task.sections[3].section_type,
+            crate::types::SectionType::Step
+        );
+    }
+
+    #[tokio::test]
+    async fn test_add_section_with_empty_content() {
+        let state = create_test_app_state().await;
+
+        let task_id = {
+            let guard = state.service.read().await;
+            let service = guard.as_ref().unwrap();
+            let options = CreateTaskOptions::new("Empty Section Task").with_level(Level::Task);
+            let task_id = service.create_task(options).await.unwrap();
+
+            // Add a step section with empty content
+            let step = vertebrae_db::Section {
+                section_type: vertebrae_db::SectionType::Step,
+                content: "".to_string(),
+                order: Some(0),
+                done: None,
+                done_at: None,
+                refs: Vec::new(),
+            };
+            service.add_section(&task_id, step).await.unwrap();
+            task_id
+        };
+
+        // Verify section was added with empty content
+        let task_result = get_task(mock_state(&state), task_id.clone()).await;
+        assert!(task_result.is_ok());
+        let task = task_result.unwrap();
+        assert_eq!(task.task.sections.len(), 1);
+        assert_eq!(task.task.sections[0].content, "");
+    }
+
+    #[tokio::test]
+    async fn test_edit_section_content() {
+        let state = create_test_app_state().await;
+
+        let task_id = {
+            let guard = state.service.read().await;
+            let service = guard.as_ref().unwrap();
+            let options = CreateTaskOptions::new("Edit Section Task").with_level(Level::Task);
+            let task_id = service.create_task(options).await.unwrap();
+
+            // Add a goal section with order
+            let goal = vertebrae_db::Section {
+                section_type: vertebrae_db::SectionType::Goal,
+                content: "Original goal".to_string(),
+                order: Some(0),
+                done: None,
+                done_at: None,
+                refs: Vec::new(),
+            };
+            service.add_section(&task_id, goal).await.unwrap();
+            task_id
+        };
+
+        // Edit the section
+        let result = edit_section(
+            mock_state(&state),
+            task_id.clone(),
+            "goal".to_string(),
+            0,
+            "Updated goal".to_string(),
+        )
+        .await;
+        assert!(result.is_ok());
+
+        // Verify section was updated
+        let task_result = get_task(mock_state(&state), task_id.clone()).await;
+        assert!(task_result.is_ok());
+        let task = task_result.unwrap();
+        assert_eq!(task.task.sections[0].content, "Updated goal");
+    }
+
+    #[tokio::test]
+    async fn test_edit_section_preserves_other_sections() {
+        let state = create_test_app_state().await;
+
+        let task_id = {
+            let guard = state.service.read().await;
+            let service = guard.as_ref().unwrap();
+            let options = CreateTaskOptions::new("Multi-edit Task").with_level(Level::Task);
+            let task_id = service.create_task(options).await.unwrap();
+
+            // Add multiple sections with ordering
+            let goal = vertebrae_db::Section {
+                section_type: vertebrae_db::SectionType::Goal,
+                content: "Goal 1".to_string(),
+                order: Some(0),
+                done: None,
+                done_at: None,
+                refs: Vec::new(),
+            };
+            service.add_section(&task_id, goal).await.unwrap();
+
+            let context = vertebrae_db::Section {
+                section_type: vertebrae_db::SectionType::Context,
+                content: "Context 1".to_string(),
+                order: Some(0),
+                done: None,
+                done_at: None,
+                refs: Vec::new(),
+            };
+            service.add_section(&task_id, context).await.unwrap();
+
+            let constraint = vertebrae_db::Section {
+                section_type: vertebrae_db::SectionType::Constraint,
+                content: "Constraint 1".to_string(),
+                order: Some(0),
+                done: None,
+                done_at: None,
+                refs: Vec::new(),
+            };
+            service.add_section(&task_id, constraint).await.unwrap();
+
+            let step = vertebrae_db::Section {
+                section_type: vertebrae_db::SectionType::Step,
+                content: "Step 1".to_string(),
+                order: Some(0),
+                done: None,
+                done_at: None,
+                refs: Vec::new(),
+            };
+            service.add_section(&task_id, step).await.unwrap();
+            task_id
+        };
+
+        // Edit the first section
+        let result = edit_section(
+            mock_state(&state),
+            task_id.clone(),
+            "goal".to_string(),
+            0,
+            "Updated goal".to_string(),
+        )
+        .await;
+        assert!(result.is_ok());
+
+        // Verify other sections unchanged
+        let task_result = get_task(mock_state(&state), task_id.clone()).await;
+        assert!(task_result.is_ok());
+        let task = task_result.unwrap();
+        assert_eq!(task.task.sections.len(), 4);
+        assert_eq!(task.task.sections[0].content, "Updated goal");
+        assert_eq!(task.task.sections[1].content, "Context 1");
+        assert_eq!(task.task.sections[2].content, "Constraint 1");
+        assert_eq!(task.task.sections[3].content, "Step 1");
+    }
+
+    #[tokio::test]
+    async fn test_mark_section_done_toggles_status() {
+        let state = create_test_app_state().await;
+
+        let task_id = {
+            let guard = state.service.read().await;
+            let service = guard.as_ref().unwrap();
+            let options = CreateTaskOptions::new("Step Task").with_level(Level::Task);
+            let task_id = service.create_task(options).await.unwrap();
+
+            // Add a step section
+            let step = vertebrae_db::Section {
+                section_type: vertebrae_db::SectionType::Step,
+                content: "Implementation step".to_string(),
+                order: Some(0),
+                done: Some(false),
+                done_at: None,
+                refs: Vec::new(),
+            };
+            service.add_section(&task_id, step).await.unwrap();
+            task_id
+        };
+
+        // Mark section as done
+        let result = mark_section_done(mock_state(&state), task_id.clone(), 0).await;
+        assert!(result.is_ok());
+
+        // Verify section is marked done
+        let task_result = get_task(mock_state(&state), task_id.clone()).await;
+        assert!(task_result.is_ok());
+        let task = task_result.unwrap();
+        assert_eq!(task.task.sections[0].done, Some(true));
+        assert!(task.task.sections[0].done_at.is_some());
+
+        // Toggle back to not done
+        let result = mark_section_done(mock_state(&state), task_id.clone(), 0).await;
+        assert!(result.is_ok());
+
+        // Verify section is marked not done
+        let task_result = get_task(mock_state(&state), task_id).await;
+        assert!(task_result.is_ok());
+        let task = task_result.unwrap();
+        assert_eq!(task.task.sections[0].done, Some(false));
+    }
+
+    #[tokio::test]
+    async fn test_remove_section() {
+        let state = create_test_app_state().await;
+
+        let task_id = {
+            let guard = state.service.read().await;
+            let service = guard.as_ref().unwrap();
+            let options = CreateTaskOptions::new("Remove Section Task").with_level(Level::Task);
+            let task_id = service.create_task(options).await.unwrap();
+
+            // Add two goal sections
+            for i in 0..2 {
+                let goal = vertebrae_db::Section {
+                    section_type: vertebrae_db::SectionType::Goal,
+                    content: format!("Goal {}", i),
+                    order: Some(i as u32),
+                    done: None,
+                    done_at: None,
+                    refs: Vec::new(),
+                };
+                service.add_section(&task_id, goal).await.unwrap();
+            }
+            task_id
+        };
+
+        // Verify initial state
+        {
+            let task_result = get_task(mock_state(&state), task_id.clone()).await;
+            assert!(task_result.is_ok());
+            let task = task_result.unwrap();
+            assert_eq!(task.task.sections.len(), 2);
+        }
+
+        // Remove the first section
+        let result =
+            remove_section(mock_state(&state), task_id.clone(), "goal".to_string(), 0).await;
+        assert!(result.is_ok());
+
+        // Verify section was removed
+        let task_result = get_task(mock_state(&state), task_id).await;
+        assert!(task_result.is_ok());
+        let task = task_result.unwrap();
+        assert_eq!(task.task.sections.len(), 1);
+        assert_eq!(task.task.sections[0].content, "Goal 1");
+    }
+
+    #[tokio::test]
+    async fn test_add_criterion_ref() {
+        let state = create_test_app_state().await;
+
+        let task_id = {
+            let guard = state.service.read().await;
+            let service = guard.as_ref().unwrap();
+            let options = CreateTaskOptions::new("Testing Criterion Task").with_level(Level::Task);
+            let task_id = service.create_task(options).await.unwrap();
+
+            // Add a testing criterion section
+            let criterion = vertebrae_db::Section {
+                section_type: vertebrae_db::SectionType::TestingCriterion,
+                content: "Test the feature".to_string(),
+                order: Some(0),
+                done: None,
+                done_at: None,
+                refs: Vec::new(),
+            };
+            service.add_section(&task_id, criterion).await.unwrap();
+            task_id
+        };
+
+        // Add a code reference to the testing criterion
+        let result = add_criterion_ref(
+            mock_state(&state),
+            task_id.clone(),
+            0,
+            "src/feature.rs".to_string(),
+            Some(42),
+            Some("feature_test".to_string()),
+        )
+        .await;
+        assert!(result.is_ok());
+
+        // Verify reference was added
+        let task_result = get_task(mock_state(&state), task_id).await;
+        assert!(task_result.is_ok());
+        let task = task_result.unwrap();
+        assert_eq!(task.task.sections.len(), 1);
+        assert_eq!(task.task.sections[0].refs.len(), 1);
+        assert_eq!(task.task.sections[0].refs[0].path, "src/feature.rs");
+        assert_eq!(task.task.sections[0].refs[0].line_start, Some(42));
+        assert_eq!(
+            task.task.sections[0].refs[0].name,
+            Some("feature_test".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_add_criterion_ref_without_line_number() {
+        let state = create_test_app_state().await;
+
+        let task_id = {
+            let guard = state.service.read().await;
+            let service = guard.as_ref().unwrap();
+            let options = CreateTaskOptions::new("Test Ref Task").with_level(Level::Task);
+            let task_id = service.create_task(options).await.unwrap();
+
+            // Add a testing criterion section
+            let criterion = vertebrae_db::Section {
+                section_type: vertebrae_db::SectionType::TestingCriterion,
+                content: "Test the feature".to_string(),
+                order: Some(0),
+                done: None,
+                done_at: None,
+                refs: Vec::new(),
+            };
+            service.add_section(&task_id, criterion).await.unwrap();
+            task_id
+        };
+
+        // Add a code reference to the testing criterion
+        let result = add_criterion_ref(
+            mock_state(&state),
+            task_id.clone(),
+            0,
+            "src/feature.rs".to_string(),
+            None,
+            Some("feature_test".to_string()),
+        )
+        .await;
+        assert!(result.is_ok());
+
+        // Verify reference was added
+        let task_result = get_task(mock_state(&state), task_id).await;
+        assert!(task_result.is_ok());
+        let task = task_result.unwrap();
+        assert_eq!(task.task.sections.len(), 1);
+        assert_eq!(task.task.sections[0].refs.len(), 1);
+        assert_eq!(task.task.sections[0].refs[0].path, "src/feature.rs");
+        assert_eq!(task.task.sections[0].refs[0].line_start, None);
+        assert_eq!(
+            task.task.sections[0].refs[0].name,
+            Some("feature_test".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_add_criterion_ref_without_name() {
+        let state = create_test_app_state().await;
+
+        let task_id = {
+            let guard = state.service.read().await;
+            let service = guard.as_ref().unwrap();
+            let options = CreateTaskOptions::new("Test Ref Task").with_level(Level::Task);
+            let task_id = service.create_task(options).await.unwrap();
+
+            // Add a testing criterion section
+            let criterion = vertebrae_db::Section {
+                section_type: vertebrae_db::SectionType::TestingCriterion,
+                content: "Test the feature".to_string(),
+                order: Some(0),
+                done: None,
+                done_at: None,
+                refs: Vec::new(),
+            };
+            service.add_section(&task_id, criterion).await.unwrap();
+            task_id
+        };
+
+        // Add a code reference to the testing criterion
+        let result = add_criterion_ref(
+            mock_state(&state),
+            task_id.clone(),
+            0,
+            "src/feature.rs".to_string(),
+            Some(42),
+            None,
+        )
+        .await;
+        assert!(result.is_ok());
+
+        // Verify reference was added
+        let task_result = get_task(mock_state(&state), task_id).await;
+        assert!(task_result.is_ok());
+        let task = task_result.unwrap();
+        assert_eq!(task.task.sections.len(), 1);
+        assert_eq!(task.task.sections[0].refs.len(), 1);
+        assert_eq!(task.task.sections[0].refs[0].path, "src/feature.rs");
+        assert_eq!(task.task.sections[0].refs[0].line_start, Some(42));
+        assert_eq!(task.task.sections[0].refs[0].name, None);
+    }
+
+    #[tokio::test]
+    async fn test_section_commands_fail_without_project() {
+        let state = create_disconnected_app_state().await;
+
+        let result = add_section(
+            mock_state(&state),
+            "task1".to_string(),
+            "goal".to_string(),
+            None,
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("No project selected"));
+
+        let result = edit_section(
+            mock_state(&state),
+            "task1".to_string(),
+            "goal".to_string(),
+            0,
+            "content".to_string(),
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("No project selected"));
+
+        let result = mark_section_done(mock_state(&state), "task1".to_string(), 0).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("No project selected"));
+
+        let result = remove_section(
+            mock_state(&state),
+            "task1".to_string(),
+            "goal".to_string(),
+            0,
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("No project selected"));
+
+        let result = add_criterion_ref(
+            mock_state(&state),
+            "task1".to_string(),
+            0,
+            "file.rs".to_string(),
+            None,
+            None,
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("No project selected"));
+    }
+
+    #[tokio::test]
+    async fn test_add_section_invalid_type() {
+        let state = create_test_app_state().await;
+
+        let task_id = {
+            let guard = state.service.read().await;
+            let service = guard.as_ref().unwrap();
+            let options = CreateTaskOptions::new("Invalid Type Task").with_level(Level::Task);
+            service.create_task(options).await.unwrap()
+        };
+
+        // Try to add section with invalid type
+        let result = add_section(
+            mock_state(&state),
+            task_id,
+            "invalid_type".to_string(),
+            None,
+        )
+        .await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("Invalid section type"));
     }
 }
