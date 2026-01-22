@@ -2,14 +2,11 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import type { TaskWithRelations, TaskLevel, TaskPriority, TaskChangedEvent } from '../../bindings';
 import { commands, events } from '../../bindings';
 import { useTask } from '../../hooks/useTask';
-import { useDeleteTask } from '../../hooks/useDeleteTask';
 import { TaskSections } from './TaskSections';
 import { TaskCodeRefs } from './TaskCodeRefs';
 import { TaskRelations } from './TaskRelations';
-import { TaskEditForm } from './TaskEditForm';
 import { ExecutionHistory } from './ExecutionHistory';
 import { ResizablePanel } from '../ResizablePanel';
-import { DeleteConfirmationDialog } from './DeleteConfirmationDialog';
 
 /** Debounce delay in milliseconds for batching rapid events */
 const DEBOUNCE_MS = 100;
@@ -339,18 +336,7 @@ export function TaskDetailPanel({ taskId, onClose, onTaskSelect }: TaskDetailPan
   const [activeTab, setActiveTab] = useState<TabId>('details');
   const [isRunning, setIsRunning] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
-  const [isEditFormOpen, setIsEditFormOpen] = useState(false);
   const { task: taskData, isLoading, error, refetch } = useTask(taskId);
-  const {
-    isDeleteDialogOpen,
-    openDeleteDialog,
-    closeDeleteDialog,
-    cascade,
-    setCascade,
-    isDeleting,
-    deleteError,
-    confirmDelete,
-  } = useDeleteTask(taskId);
 
   // Track pending refetch for debouncing
   const pendingRefetch = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -475,7 +461,7 @@ export function TaskDetailPanel({ taskId, onClose, onTaskSelect }: TaskDetailPan
           {/* Edit Button */}
           <button
             type="button"
-            onClick={() => setIsEditFormOpen(true)}
+            onClick={() => {}}
             className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary bg-primary/10 text-primary hover:bg-primary/20 hover:shadow-glow-sm"
             aria-label="Edit task"
             title="Edit this task"
@@ -488,32 +474,15 @@ export function TaskDetailPanel({ taskId, onClose, onTaskSelect }: TaskDetailPan
           {/* Delete Button */}
           <button
             type="button"
-            onClick={openDeleteDialog}
-            disabled={isDeleting}
-            className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-error ${
-              isDeleting
-                ? 'cursor-not-allowed bg-error/20 text-error/50'
-                : 'bg-error/10 text-error hover:bg-error/20 hover:shadow-glow-sm'
-            }`}
-            aria-label={isDeleting ? 'Deleting...' : 'Delete task'}
-            title={isDeleting ? 'Deleting task...' : 'Delete this task'}
+            onClick={() => {}}
+            className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-error bg-error/10 text-error hover:bg-error/20 hover:shadow-glow-sm"
+            aria-label="Delete task"
+            title="Delete this task"
           >
-            {isDeleting ? (
-              <>
-                <svg className="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                </svg>
-                <span>Deleting...</span>
-              </>
-            ) : (
-              <>
-                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                </svg>
-                <span>Delete</span>
-              </>
-            )}
+            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+            <span>Delete</span>
           </button>
           {onClose && (
             <button
@@ -633,32 +602,6 @@ export function TaskDetailPanel({ taskId, onClose, onTaskSelect }: TaskDetailPan
             )}
           </div>
         </>
-      )}
-
-      {/* Delete Confirmation Dialog */}
-      <DeleteConfirmationDialog
-        isOpen={isDeleteDialogOpen}
-        onClose={closeDeleteDialog}
-        onConfirm={confirmDelete}
-        isDeleting={isDeleting}
-        error={deleteError}
-        cascade={cascade}
-        onCascadeChange={setCascade}
-        taskTitle={taskData?.task.title}
-        childCount={taskData?.children_ids.length ?? 0}
-      />
-
-      {/* Edit Form Modal */}
-      {isEditFormOpen && taskData && (
-        <TaskEditForm
-          taskId={taskData.task.id}
-          currentTask={taskData.task}
-          onClose={() => setIsEditFormOpen(false)}
-          onSuccess={() => {
-            setIsEditFormOpen(false);
-            refetch();
-          }}
-        />
       )}
     </ResizablePanel>
   );

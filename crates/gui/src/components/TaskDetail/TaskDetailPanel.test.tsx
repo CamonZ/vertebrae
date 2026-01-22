@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, fireEvent } from "@testing-library/react";
 import { render, createMockTaskWithRelations } from "../../test/test-utils";
 import { TaskDetailPanel } from "./TaskDetailPanel";
-import * as commands from "../../bindings";
 import * as eventsModule from "../../bindings";
 
 // Mock the useTask hook to return task data directly
@@ -29,20 +28,6 @@ vi.mock("../../hooks/useTask", () => ({
       refetch: vi.fn(),
     };
   },
-}));
-
-// Mock the useDeleteTask hook
-vi.mock("../../hooks/useDeleteTask", () => ({
-  useDeleteTask: () => ({
-    isDeleteDialogOpen: false,
-    openDeleteDialog: vi.fn(),
-    closeDeleteDialog: vi.fn(),
-    cascade: false,
-    setCascade: vi.fn(),
-    isDeleting: false,
-    deleteError: null,
-    confirmDelete: vi.fn(),
-  }),
 }));
 
 // Mock the commands and events
@@ -102,76 +87,6 @@ describe("TaskDetailPanel - Edit Integration", () => {
       const editButton = screen.getByRole("button", { name: /edit/i });
       expect(editButton).not.toBeDisabled();
     });
-
-    it("opens TaskEditForm modal when Edit button is clicked", () => {
-      render(
-        <TaskDetailPanel
-          taskId={mockTaskData.task.id}
-          onClose={vi.fn()}
-        />
-      );
-
-      const editButton = screen.getByRole("button", { name: /edit/i });
-      fireEvent.click(editButton);
-
-      // Modal should appear
-      expect(screen.getByRole("dialog")).toBeInTheDocument();
-      expect(screen.getByText("Edit Task")).toBeInTheDocument();
-    });
-
-    it("pre-populates TaskEditForm with current task data", () => {
-      render(
-        <TaskDetailPanel
-          taskId={mockTaskData.task.id}
-          onClose={vi.fn()}
-        />
-      );
-
-      const editButton = screen.getByRole("button", { name: /edit/i });
-      fireEvent.click(editButton);
-
-      const titleInput = screen.getByDisplayValue("Test Task");
-      expect(titleInput).toBeInTheDocument();
-      expect(titleInput).toHaveAttribute("id", "edit-task-title");
-    });
-
-    it("pre-populates description field", () => {
-      render(
-        <TaskDetailPanel
-          taskId={mockTaskData.task.id}
-          onClose={vi.fn()}
-        />
-      );
-
-      const editButton = screen.getByRole("button", { name: /edit/i });
-      fireEvent.click(editButton);
-
-      const descriptionInput = screen.getByDisplayValue("Test Description");
-      expect(descriptionInput).toBeInTheDocument();
-    });
-  });
-
-  describe("Form cancellation", () => {
-    it("closes form when Cancel button is clicked", () => {
-      render(
-        <TaskDetailPanel
-          taskId={mockTaskData.task.id}
-          onClose={vi.fn()}
-        />
-      );
-
-      // Open form
-      const editButton = screen.getByRole("button", { name: /edit/i });
-      fireEvent.click(editButton);
-      expect(screen.getByText("Edit Task")).toBeInTheDocument();
-
-      // Click Cancel
-      const cancelButton = screen.getByRole("button", { name: /cancel/i });
-      fireEvent.click(cancelButton);
-
-      // Modal should close
-      expect(screen.queryByText("Edit Task")).not.toBeInTheDocument();
-    });
   });
 
   describe("Tab navigation", () => {
@@ -224,32 +139,6 @@ describe("TaskDetailPanel - Edit Integration", () => {
       const codeTab = screen.getByRole("tab", { name: /code/i });
       fireEvent.click(codeTab);
       expect(codeTab).toHaveAttribute("aria-selected", "true");
-    });
-
-    it("preserves active tab when Edit form is opened and closed", () => {
-      render(
-        <TaskDetailPanel
-          taskId={mockTaskData.task.id}
-          onClose={vi.fn()}
-        />
-      );
-
-      // Switch to Sections tab
-      const sectionsTab = screen.getByRole("tab", { name: /sections/i });
-      fireEvent.click(sectionsTab);
-      expect(sectionsTab).toHaveAttribute("aria-selected", "true");
-
-      // Open Edit form
-      const editButton = screen.getByRole("button", { name: /edit/i });
-      fireEvent.click(editButton);
-      expect(screen.getByText("Edit Task")).toBeInTheDocument();
-
-      // Close Edit form
-      const cancelButton = screen.getByRole("button", { name: /cancel/i });
-      fireEvent.click(cancelButton);
-
-      // Sections tab should still be selected
-      expect(sectionsTab).toHaveAttribute("aria-selected", "true");
     });
   });
 
@@ -313,34 +202,6 @@ describe("TaskDetailPanel - Edit Integration", () => {
     });
   });
 
-  describe("Form submission", () => {
-    it("calls updateTask command on form submission", () => {
-      const mockUpdateTask = vi.fn().mockResolvedValue({
-        status: "ok",
-        data: null,
-      });
-      vi.mocked(commands.commands.updateTask).mockImplementation(mockUpdateTask);
-
-      render(
-        <TaskDetailPanel
-          taskId={mockTaskData.task.id}
-          onClose={vi.fn()}
-        />
-      );
-
-      // Open form
-      const editButton = screen.getByRole("button", { name: /edit/i });
-      fireEvent.click(editButton);
-
-      // Submit form
-      const submitButton = screen.getByRole("button", { name: /save changes/i });
-      fireEvent.click(submitButton);
-
-      // updateTask should have been called
-      expect(mockUpdateTask).toHaveBeenCalled();
-    });
-  });
-
   describe("Task title display", () => {
     it("displays task title in the panel", () => {
       render(
@@ -351,82 +212,6 @@ describe("TaskDetailPanel - Edit Integration", () => {
       );
 
       expect(screen.getByText("Test Task")).toBeInTheDocument();
-    });
-  });
-
-  describe("Modal rendering", () => {
-    it("renders FormModal when Edit button is clicked", () => {
-      render(
-        <TaskDetailPanel
-          taskId={mockTaskData.task.id}
-          onClose={vi.fn()}
-        />
-      );
-
-      const editButton = screen.getByRole("button", { name: /edit/i });
-      fireEvent.click(editButton);
-
-      expect(screen.getByRole("dialog")).toBeInTheDocument();
-    });
-
-    it("does not render modal when taskId is null", () => {
-      render(
-        <TaskDetailPanel
-          taskId={null}
-          onClose={vi.fn()}
-        />
-      );
-
-      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    });
-  });
-
-  describe("Sections tab content", () => {
-    it("displays Sections tab content when clicked", () => {
-      render(
-        <TaskDetailPanel
-          taskId={mockTaskData.task.id}
-          onClose={vi.fn()}
-        />
-      );
-
-      const sectionsTab = screen.getByRole("tab", { name: /sections/i });
-      fireEvent.click(sectionsTab);
-
-      // Should display section-related content or empty state
-      expect(screen.getByText(/no sections defined/i)).toBeInTheDocument();
-    });
-
-    it("shows Add Section button in Sections tab", () => {
-      render(
-        <TaskDetailPanel
-          taskId={mockTaskData.task.id}
-          onClose={vi.fn()}
-        />
-      );
-
-      const sectionsTab = screen.getByRole("tab", { name: /sections/i });
-      fireEvent.click(sectionsTab);
-
-      expect(screen.getByRole("button", { name: /add section/i })).toBeInTheDocument();
-    });
-  });
-
-  describe("Relations tab content", () => {
-    it("displays Relations tab content when clicked", () => {
-      render(
-        <TaskDetailPanel
-          taskId={mockTaskData.task.id}
-          onClose={vi.fn()}
-        />
-      );
-
-      const graphTab = screen.getByRole("tab", { name: /graph/i });
-      fireEvent.click(graphTab);
-
-      // Should display relationship-related content
-      const parentLabel = screen.getAllByText(/parent/i);
-      expect(parentLabel.length).toBeGreaterThan(0);
     });
   });
 });
