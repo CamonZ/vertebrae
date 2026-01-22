@@ -262,7 +262,7 @@ describe("FormField", () => {
     });
 
     it("applies flex and items-center to error container", () => {
-      const { container } = render(
+      render(
         <FormField label="Title" error="Error message">
           <input type="text" />
         </FormField>

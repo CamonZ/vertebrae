@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { screen, within } from "@testing-library/react";
+import { screen } from "@testing-library/react";
 import { render, userEvent } from "../../test/test-utils";
 import { TextField } from "./TextField";
 
