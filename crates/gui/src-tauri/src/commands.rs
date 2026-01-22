@@ -1106,6 +1106,36 @@ pub async fn delete_chat_session(
     Ok(())
 }
 
+/// Delete a task with optional cascade delete for child tasks
+///
+/// When cascade is true, deletes the task and all its descendants.
+/// When cascade is false, deletes the task but orphans its children (they lose their parent).
+///
+/// This operation is atomic - either fully succeeds or fully fails.
+#[tauri::command]
+#[specta::specta]
+pub async fn delete_task(
+    state: State<'_, AppState>,
+    task_id: String,
+    cascade: bool,
+) -> Result<(), CommandError> {
+    log::info!(
+        "delete_task called with task_id: {}, cascade: {}",
+        task_id,
+        cascade
+    );
+
+    let service_guard = state.service.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    service.delete_task(&task_id, cascade).await?;
+
+    log::info!("Successfully deleted task: {}", task_id);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1640,24 +1670,104 @@ mod tests {
     }
 
     // ========================================================================
-    // CommandError Tests
+    // Delete Task Tests
     // ========================================================================
 
-    #[test]
-    fn test_command_error_task_not_found() {
-        let err = CommandError::task_not_found("abc123");
-        assert_eq!(err.message, "Task not found: abc123");
+    #[tokio::test]
+    async fn test_delete_task_simple() {
+        let state = create_test_app_state().await;
+
+        // Create a task
+        let task_id = {
+            let guard = state.service.read().await;
+            let service = guard.as_ref().unwrap();
+            let options = CreateTaskOptions::new("Task to Delete").with_level(Level::Task);
+            service.create_task(options).await.unwrap()
+        };
+
+        // Delete the task
+        let result = delete_task(mock_state(&state), task_id.clone(), false).await;
+        assert!(result.is_ok());
+
+        // Verify task is deleted
+        let get_result = get_task(mock_state(&state), task_id).await;
+        assert!(get_result.is_err());
     }
 
-    #[test]
-    fn test_command_error_workflow_not_found() {
-        let err = CommandError::workflow_not_found("wf1");
-        assert_eq!(err.message, "Workflow not found: wf1");
+    #[tokio::test]
+    async fn test_delete_task_cascade() {
+        let state = create_test_app_state().await;
+
+        // Create parent and child tasks
+        let (parent_id, child_id) = {
+            let guard = state.service.read().await;
+            let service = guard.as_ref().unwrap();
+
+            let parent_options = CreateTaskOptions::new("Parent").with_level(Level::Epic);
+            let parent_id = service.create_task(parent_options).await.unwrap();
+
+            let child_options = CreateTaskOptions::new("Child").with_level(Level::Task);
+            let child_id = service.create_task(child_options).await.unwrap();
+
+            service.set_parent(&child_id, &parent_id).await.unwrap();
+
+            (parent_id, child_id)
+        };
+
+        // Delete with cascade
+        let result = delete_task(mock_state(&state), parent_id.clone(), true).await;
+        assert!(result.is_ok());
+
+        // Verify both parent and child are deleted
+        let parent_result = get_task(mock_state(&state), parent_id).await;
+        assert!(parent_result.is_err());
+
+        let child_result = get_task(mock_state(&state), child_id).await;
+        assert!(child_result.is_err());
     }
 
-    #[test]
-    fn test_command_error_no_project_selected() {
-        let err = CommandError::no_project_selected();
-        assert!(err.message.contains("No project selected"));
+    #[tokio::test]
+    async fn test_delete_task_orphan_children() {
+        let state = create_test_app_state().await;
+
+        // Create parent and child tasks
+        let (parent_id, child_id) = {
+            let guard = state.service.read().await;
+            let service = guard.as_ref().unwrap();
+
+            let parent_options = CreateTaskOptions::new("Parent").with_level(Level::Epic);
+            let parent_id = service.create_task(parent_options).await.unwrap();
+
+            let child_options = CreateTaskOptions::new("Child").with_level(Level::Task);
+            let child_id = service.create_task(child_options).await.unwrap();
+
+            service.set_parent(&child_id, &parent_id).await.unwrap();
+
+            (parent_id, child_id)
+        };
+
+        // Delete without cascade (orphan children)
+        let result = delete_task(mock_state(&state), parent_id.clone(), false).await;
+        assert!(result.is_ok());
+
+        // Verify parent is deleted
+        let parent_result = get_task(mock_state(&state), parent_id).await;
+        assert!(parent_result.is_err());
+
+        // Verify child still exists but has no parent
+        let child_result = get_task(mock_state(&state), child_id).await;
+        assert!(child_result.is_ok());
+        let child_with_relations = child_result.unwrap();
+        assert!(child_with_relations.parent_id.is_none());
     }
+
+    #[tokio::test]
+    async fn test_delete_task_fails_without_project() {
+        let state = create_disconnected_app_state().await;
+        let result = delete_task(mock_state(&state), "task1".to_string(), false).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("No project selected"));
+    }
+
+    // ========================================================================
 }

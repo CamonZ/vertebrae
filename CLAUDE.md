@@ -38,8 +38,14 @@ A task management system written in Rust with CLI and GUI interfaces.
 5. **Set dependencies** → `vtb depend <task> --on <blocker>` to enforce order
 6. **Add details** → `vtb section` for steps, constraints, testing criteria
 7. **Link code** → `vtb ref` to relevant source locations
-8. **Execute** → `vtb transition-to <id> in_progress`, do work, `vtb transition-to <id> done`, **commit**, repeat
+8. **Execute** → Move ticket from backlog → `vtb transition-to <id> implementation`, then use `vtb workflow advance <id>` to move through workflow steps, **commit after completing each step**, **commit once more when calling `vtb transition-to <id> done`**, repeat
 9. **Track progress** → `vtb list`, `vtb blockers`, `vtb show`
+
+**CRITICAL: Work through workflow steps using `vtb workflow advance`** - Do not skip directly to `done`. Within a workflow:
+- Use `vtb workflow advance <id>` to move to the next step (e.g., `coding` → `testing`)
+- Commit after completing significant work at each step
+- Use `vtb workflow retreat <id>` if you need to revisit previous steps
+- Only use `vtb transition-to <id> done` when the entire ticket is fully completed and tested
 
 **CRITICAL: You MUST commit immediately after each `vtb transition-to <id> done`** - This is non-negotiable. Each completed ticket MUST have its own commit before moving to the next task. Do NOT batch multiple tickets into a single commit. This ensures:
 - Atomic, traceable changes linked to tickets

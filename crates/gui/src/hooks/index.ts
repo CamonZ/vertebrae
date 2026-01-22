@@ -1,6 +1,7 @@
 // Barrel export for all hooks
 export { useTasks } from "./useTasks";
 export { useTask } from "./useTask";
+export { useDeleteTask } from "./useDeleteTask";
 export { useTaskHierarchy } from "./useTaskHierarchy";
 export { useTaskExecutions } from "./useTaskExecutions";
 export { useTaskChangeListener } from "./useTaskChangeListener";
