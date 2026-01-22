@@ -62,33 +62,6 @@ describe("TaskDetailPanel - Edit Integration", () => {
     vi.mocked(eventsModule.events.taskChangedEvent.listen).mockResolvedValue(() => {});
   });
 
-  describe("Edit button", () => {
-    it("renders Edit button in the header", () => {
-      render(
-        <TaskDetailPanel
-          taskId={mockTaskData.task.id}
-          onClose={vi.fn()}
-        />
-      );
-
-      const editButton = screen.getByRole("button", { name: /edit/i });
-      expect(editButton).toBeInTheDocument();
-      expect(editButton).toHaveAttribute("title", "Edit this task");
-    });
-
-    it("Edit button is not disabled", () => {
-      render(
-        <TaskDetailPanel
-          taskId={mockTaskData.task.id}
-          onClose={vi.fn()}
-        />
-      );
-
-      const editButton = screen.getByRole("button", { name: /edit/i });
-      expect(editButton).not.toBeDisabled();
-    });
-  });
-
   describe("Tab navigation", () => {
     it("displays Details tab by default", () => {
       render(
@@ -173,7 +146,7 @@ describe("TaskDetailPanel - Edit Integration", () => {
   });
 
   describe("Header buttons interaction", () => {
-    it("renders Edit, Delete, and Close buttons in header", () => {
+    it("renders Delete and Close buttons in header", () => {
       render(
         <TaskDetailPanel
           taskId={mockTaskData.task.id}
@@ -181,12 +154,11 @@ describe("TaskDetailPanel - Edit Integration", () => {
         />
       );
 
-      expect(screen.getByRole("button", { name: /edit/i })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: /delete/i })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: /close panel/i })).toBeInTheDocument();
     });
 
-    it("Edit button is positioned before Delete button", () => {
+    it("Delete button is positioned before Close button", () => {
       render(
         <TaskDetailPanel
           taskId={mockTaskData.task.id}
@@ -195,10 +167,10 @@ describe("TaskDetailPanel - Edit Integration", () => {
       );
 
       const buttons = screen.getAllByRole("button");
-      const editIndex = buttons.findIndex(b => b.getAttribute("aria-label") === "Edit task");
       const deleteIndex = buttons.findIndex(b => b.getAttribute("aria-label") === "Delete task");
+      const closeIndex = buttons.findIndex(b => b.getAttribute("aria-label") === "Close panel");
 
-      expect(editIndex).toBeLessThan(deleteIndex);
+      expect(deleteIndex).toBeLessThan(closeIndex);
     });
   });
 
