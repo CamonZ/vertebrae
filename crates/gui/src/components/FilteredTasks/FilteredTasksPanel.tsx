@@ -1,5 +1,6 @@
 import { useState, useCallback, useMemo } from "react";
-import type { TaskFilterOptions, TaskSummary, TaskHierarchyNode, Step } from "../../bindings";
+import type { TaskFilterOptions, TaskSummary, TaskHierarchyNode, Step, TaskLevel } from "../../bindings";
+import { commands } from "../../bindings";
 import type { ViewMode } from "../TaskList";
 import { TaskList, TaskTreeView } from "../TaskList";
 import { useTaskHierarchy } from "../../hooks/useTaskHierarchy";
@@ -13,6 +14,130 @@ interface FilteredTasksPanelProps {
   onClose?: () => void;
   onTaskSelect?: (taskId: string) => void;
   selectedTaskId?: string | null;
+}
+
+/**
+ * Inline form for creating a new task
+ */
+function CreateTaskForm({
+  workflowId,
+  onCancel,
+  onCreated,
+}: {
+  workflowId: string;
+  onCancel: () => void;
+  onCreated: (taskId: string) => void;
+}) {
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [level, setLevel] = useState<TaskLevel>("task");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!title.trim()) return;
+
+    setIsSubmitting(true);
+    setError(null);
+
+    try {
+      // Create the task
+      const createResult = await commands.createTask(
+        title.trim(),
+        description.trim() || null,
+        level,
+        null // no parent
+      );
+
+      if (createResult.status === "error") {
+        setError(createResult.error.message);
+        setIsSubmitting(false);
+        return;
+      }
+
+      const taskId = createResult.data;
+
+      // Assign workflow to the task
+      const assignResult = await commands.assignWorkflow(taskId, workflowId);
+      if (assignResult.status === "error") {
+        setError(`Task created but workflow assignment failed: ${assignResult.error.message}`);
+        setIsSubmitting(false);
+        return;
+      }
+
+      onCreated(taskId);
+    } catch (err) {
+      setError(String(err));
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="border-b border-border px-3 py-3 bg-bg-secondary/50">
+      <div className="space-y-2">
+        {/* Title input */}
+        <input
+          type="text"
+          placeholder="Task title..."
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          className="w-full rounded-lg border border-border bg-bg-tertiary px-3 py-1.5 text-xs text-text-primary placeholder:text-text-muted transition-all focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+          autoFocus
+          disabled={isSubmitting}
+        />
+
+        {/* Description input */}
+        <textarea
+          placeholder="Description (optional)..."
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          rows={2}
+          className="w-full rounded-lg border border-border bg-bg-tertiary px-3 py-1.5 text-xs text-text-primary placeholder:text-text-muted transition-all focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 resize-none"
+          disabled={isSubmitting}
+        />
+
+        {/* Level select */}
+        <div className="flex items-center gap-2">
+          <label className="text-xs text-text-muted">Level:</label>
+          <select
+            value={level}
+            onChange={(e) => setLevel(e.target.value as TaskLevel)}
+            className="rounded-lg border border-border bg-bg-tertiary px-2 py-1 text-xs text-text-primary transition-all focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+            disabled={isSubmitting}
+          >
+            <option value="task">Task</option>
+            <option value="ticket">Ticket</option>
+            <option value="epic">Epic</option>
+          </select>
+        </div>
+
+        {/* Error message */}
+        {error && (
+          <p className="text-xs text-error">{error}</p>
+        )}
+
+        {/* Action buttons */}
+        <div className="flex items-center justify-end gap-2 pt-1">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded-lg px-3 py-1 text-xs font-medium text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary"
+            disabled={isSubmitting}
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="rounded-lg bg-primary px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-primary/90 disabled:opacity-50"
+            disabled={isSubmitting || !title.trim()}
+          >
+            {isSubmitting ? "Creating..." : "Create"}
+          </button>
+        </div>
+      </div>
+    </form>
+  );
 }
 
 /**
@@ -30,6 +155,7 @@ export function FilteredTasksPanel({
 }: FilteredTasksPanelProps) {
   const [search, setSearch] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("tree");
+  const [showCreateForm, setShowCreateForm] = useState(false);
 
   // Use expanded nodes hook to preserve tree collapse state
   const expandedNodes = useExpandedNodes();
@@ -59,6 +185,15 @@ export function FilteredTasksPanel({
   const handleViewModeChange = useCallback((mode: ViewMode) => {
     setViewMode(mode);
   }, []);
+
+  const handleTaskCreated = useCallback(
+    (taskId: string) => {
+      setShowCreateForm(false);
+      // Select the newly created task
+      onTaskSelect?.(taskId);
+    },
+    [onTaskSelect]
+  );
 
   if (!step) {
     return null;
@@ -96,24 +231,53 @@ export function FilteredTasksPanel({
             )}
           </p>
         </div>
-        {onClose && (
+        <div className="flex items-center gap-1 flex-shrink-0">
+          {/* Add task button */}
           <button
             type="button"
-            onClick={onClose}
-            className="ml-2 rounded-lg p-1.5 text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary flex-shrink-0"
-            aria-label="Close panel"
+            onClick={() => setShowCreateForm(true)}
+            className="cursor-pointer rounded-lg p-1.5 text-text-muted transition-colors hover:bg-bg-hover hover:text-success focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            aria-label="Create task"
+            title="Create new task"
           >
             <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 strokeWidth={1.5}
-                d="M6 18L18 6M6 6l12 12"
+                d="M12 4v16m8-8H4"
               />
             </svg>
           </button>
-        )}
+          {/* Close button */}
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="cursor-pointer rounded-lg p-1.5 text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              aria-label="Close panel"
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.5}
+                  d="M6 18L18 6M6 6l12 12"
+                />
+              </svg>
+            </button>
+          )}
+        </div>
       </div>
+
+      {/* Create task form */}
+      {showCreateForm && (
+        <CreateTaskForm
+          workflowId={workflowId}
+          onCancel={() => setShowCreateForm(false)}
+          onCreated={handleTaskCreated}
+        />
+      )}
 
       {/* Search and view toggle */}
       <div className="border-b border-border px-3 py-2">

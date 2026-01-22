@@ -2458,7 +2458,7 @@ mod tests {
     async fn test_remove_parent_deletes_relationship() {
         let state = create_test_app_state().await;
 
-        let (parent_id, child_id) = {
+        let (_parent_id, child_id) = {
             let guard = state.service.read().await;
             let service = guard.as_ref().unwrap();
 

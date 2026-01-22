@@ -89,7 +89,7 @@ export function StepDetailPanel({ step, onClose }: StepDetailPanelProps) {
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg p-1.5 text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            className="cursor-pointer rounded-lg p-1.5 text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             aria-label="Close panel"
           >
             <svg

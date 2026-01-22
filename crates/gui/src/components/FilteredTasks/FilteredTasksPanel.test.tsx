@@ -1,8 +1,21 @@
-import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FilteredTasksPanel } from "./FilteredTasksPanel";
 import type { TaskSummary, Step } from "../../bindings";
+import { commands } from "../../bindings";
+
+// Mock the commands module
+vi.mock("../../bindings", async () => {
+  const actual = await vi.importActual("../../bindings");
+  return {
+    ...actual,
+    commands: {
+      createTask: vi.fn(),
+      assignWorkflow: vi.fn(),
+    },
+  };
+});
 
 // Helper to create a step
 function createStep(overrides?: Partial<Step>): Step {
@@ -190,6 +203,316 @@ describe("FilteredTasksPanel", () => {
       await user.click(taskElement);
 
       expect(onTaskSelect).toHaveBeenCalledWith("task-1");
+    });
+  });
+
+  describe("create task functionality", () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    it("renders create task button with pointer cursor", () => {
+      const step = createStep();
+      render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />);
+
+      const createButton = screen.getByLabelText("Create task");
+      expect(createButton).toBeInTheDocument();
+      expect(createButton).toHaveClass("cursor-pointer");
+    });
+
+    it("renders close button with pointer cursor", () => {
+      const step = createStep();
+      const onClose = vi.fn();
+      render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" onClose={onClose} />);
+
+      const closeButton = screen.getByLabelText("Close panel");
+      expect(closeButton).toBeInTheDocument();
+      expect(closeButton).toHaveClass("cursor-pointer");
+    });
+
+    it("shows create form when add button is clicked", async () => {
+      const user = userEvent.setup();
+      const step = createStep();
+      render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />);
+
+      await user.click(screen.getByLabelText("Create task"));
+
+      expect(screen.getByPlaceholderText("Task title...")).toBeInTheDocument();
+      expect(screen.getByPlaceholderText("Description (optional)...")).toBeInTheDocument();
+      expect(screen.getByText("Level:")).toBeInTheDocument();
+      expect(screen.getByRole("combobox")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Create" })).toBeInTheDocument();
+    });
+
+    it("hides form when cancel is clicked", async () => {
+      const user = userEvent.setup();
+      const step = createStep();
+      render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />);
+
+      await user.click(screen.getByLabelText("Create task"));
+      expect(screen.getByPlaceholderText("Task title...")).toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
+      expect(screen.queryByPlaceholderText("Task title...")).not.toBeInTheDocument();
+    });
+
+    it("disables create button when title is empty", async () => {
+      const user = userEvent.setup();
+      const step = createStep();
+      render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />);
+
+      await user.click(screen.getByLabelText("Create task"));
+
+      const createButton = screen.getByRole("button", { name: "Create" });
+      expect(createButton).toBeDisabled();
+    });
+
+    it("enables create button when title is entered", async () => {
+      const user = userEvent.setup();
+      const step = createStep();
+      render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />);
+
+      await user.click(screen.getByLabelText("Create task"));
+      await user.type(screen.getByPlaceholderText("Task title..."), "New Task");
+
+      const createButton = screen.getByRole("button", { name: "Create" });
+      expect(createButton).toBeEnabled();
+    });
+
+    it("creates task and assigns workflow on submit", async () => {
+      const user = userEvent.setup();
+      const step = createStep();
+      const onTaskSelect = vi.fn();
+
+      vi.mocked(commands.createTask).mockResolvedValue({
+        status: "ok",
+        data: "new-task-id",
+      });
+      vi.mocked(commands.assignWorkflow).mockResolvedValue({
+        status: "ok",
+        data: null,
+      });
+
+      render(
+        <FilteredTasksPanel
+          step={step}
+          tasks={[]}
+          workflowId="workflow-1"
+          onTaskSelect={onTaskSelect}
+        />
+      );
+
+      await user.click(screen.getByLabelText("Create task"));
+      await user.type(screen.getByPlaceholderText("Task title..."), "My New Task");
+      await user.type(screen.getByPlaceholderText("Description (optional)..."), "Task description");
+      await user.click(screen.getByRole("button", { name: "Create" }));
+
+      await waitFor(() => {
+        expect(commands.createTask).toHaveBeenCalledWith(
+          "My New Task",
+          "Task description",
+          "task",
+          null
+        );
+      });
+
+      await waitFor(() => {
+        expect(commands.assignWorkflow).toHaveBeenCalledWith("new-task-id", "workflow-1");
+      });
+
+      await waitFor(() => {
+        expect(onTaskSelect).toHaveBeenCalledWith("new-task-id");
+      });
+
+      // Form should be hidden after success
+      expect(screen.queryByPlaceholderText("Task title...")).not.toBeInTheDocument();
+    });
+
+    it("creates task with selected level", async () => {
+      const user = userEvent.setup();
+      const step = createStep();
+
+      vi.mocked(commands.createTask).mockResolvedValue({
+        status: "ok",
+        data: "new-task-id",
+      });
+      vi.mocked(commands.assignWorkflow).mockResolvedValue({
+        status: "ok",
+        data: null,
+      });
+
+      render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />);
+
+      await user.click(screen.getByLabelText("Create task"));
+      await user.type(screen.getByPlaceholderText("Task title..."), "New Epic");
+      await user.selectOptions(screen.getByRole("combobox"), "epic");
+      await user.click(screen.getByRole("button", { name: "Create" }));
+
+      await waitFor(() => {
+        expect(commands.createTask).toHaveBeenCalledWith(
+          "New Epic",
+          null,
+          "epic",
+          null
+        );
+      });
+    });
+
+    it("displays error when createTask fails", async () => {
+      const user = userEvent.setup();
+      const step = createStep();
+
+      vi.mocked(commands.createTask).mockResolvedValue({
+        status: "error",
+        error: { message: "Failed to create task" },
+      });
+
+      render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />);
+
+      await user.click(screen.getByLabelText("Create task"));
+      await user.type(screen.getByPlaceholderText("Task title..."), "New Task");
+      await user.click(screen.getByRole("button", { name: "Create" }));
+
+      await waitFor(() => {
+        expect(screen.getByText("Failed to create task")).toBeInTheDocument();
+      });
+
+      // Form should still be visible
+      expect(screen.getByPlaceholderText("Task title...")).toBeInTheDocument();
+    });
+
+    it("displays error when assignWorkflow fails", async () => {
+      const user = userEvent.setup();
+      const step = createStep();
+
+      vi.mocked(commands.createTask).mockResolvedValue({
+        status: "ok",
+        data: "new-task-id",
+      });
+      vi.mocked(commands.assignWorkflow).mockResolvedValue({
+        status: "error",
+        error: { message: "Workflow not found" },
+      });
+
+      render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />);
+
+      await user.click(screen.getByLabelText("Create task"));
+      await user.type(screen.getByPlaceholderText("Task title..."), "New Task");
+      await user.click(screen.getByRole("button", { name: "Create" }));
+
+      await waitFor(() => {
+        expect(screen.getByText(/Task created but workflow assignment failed/)).toBeInTheDocument();
+      });
+    });
+
+    it("shows loading state during submission", async () => {
+      const user = userEvent.setup();
+      const step = createStep();
+
+      // Create a promise that we can control
+      let resolveCreateTask: (value: unknown) => void;
+      const createTaskPromise = new Promise((resolve) => {
+        resolveCreateTask = resolve;
+      });
+      vi.mocked(commands.createTask).mockReturnValue(createTaskPromise as Promise<{ status: "ok"; data: string }>);
+
+      render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />);
+
+      await user.click(screen.getByLabelText("Create task"));
+      await user.type(screen.getByPlaceholderText("Task title..."), "New Task");
+      await user.click(screen.getByRole("button", { name: "Create" }));
+
+      // Should show loading state
+      expect(screen.getByRole("button", { name: "Creating..." })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Creating..." })).toBeDisabled();
+
+      // Resolve the promise
+      resolveCreateTask!({ status: "ok", data: "new-task-id" });
+    });
+
+    it("disables inputs during submission", async () => {
+      const user = userEvent.setup();
+      const step = createStep();
+
+      let resolveCreateTask: (value: unknown) => void;
+      const createTaskPromise = new Promise((resolve) => {
+        resolveCreateTask = resolve;
+      });
+      vi.mocked(commands.createTask).mockReturnValue(createTaskPromise as Promise<{ status: "ok"; data: string }>);
+
+      render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />);
+
+      await user.click(screen.getByLabelText("Create task"));
+      await user.type(screen.getByPlaceholderText("Task title..."), "New Task");
+      await user.click(screen.getByRole("button", { name: "Create" }));
+
+      // Inputs should be disabled
+      expect(screen.getByPlaceholderText("Task title...")).toBeDisabled();
+      expect(screen.getByPlaceholderText("Description (optional)...")).toBeDisabled();
+      expect(screen.getByRole("combobox")).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+
+      // Resolve the promise
+      resolveCreateTask!({ status: "ok", data: "new-task-id" });
+    });
+
+    it("trims whitespace from title", async () => {
+      const user = userEvent.setup();
+      const step = createStep();
+
+      vi.mocked(commands.createTask).mockResolvedValue({
+        status: "ok",
+        data: "new-task-id",
+      });
+      vi.mocked(commands.assignWorkflow).mockResolvedValue({
+        status: "ok",
+        data: null,
+      });
+
+      render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />);
+
+      await user.click(screen.getByLabelText("Create task"));
+      await user.type(screen.getByPlaceholderText("Task title..."), "  Trimmed Title  ");
+      await user.click(screen.getByRole("button", { name: "Create" }));
+
+      await waitFor(() => {
+        expect(commands.createTask).toHaveBeenCalledWith(
+          "Trimmed Title",
+          null,
+          "task",
+          null
+        );
+      });
+    });
+
+    it("sends null for empty description", async () => {
+      const user = userEvent.setup();
+      const step = createStep();
+
+      vi.mocked(commands.createTask).mockResolvedValue({
+        status: "ok",
+        data: "new-task-id",
+      });
+      vi.mocked(commands.assignWorkflow).mockResolvedValue({
+        status: "ok",
+        data: null,
+      });
+
+      render(<FilteredTasksPanel step={step} tasks={[]} workflowId="workflow-1" />);
+
+      await user.click(screen.getByLabelText("Create task"));
+      await user.type(screen.getByPlaceholderText("Task title..."), "Task without description");
+      await user.click(screen.getByRole("button", { name: "Create" }));
+
+      await waitFor(() => {
+        expect(commands.createTask).toHaveBeenCalledWith(
+          "Task without description",
+          null,
+          "task",
+          null
+        );
+      });
     });
   });
 
