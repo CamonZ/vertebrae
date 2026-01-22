@@ -6,6 +6,7 @@ import { useDeleteTask } from '../../hooks/useDeleteTask';
 import { TaskSections } from './TaskSections';
 import { TaskCodeRefs } from './TaskCodeRefs';
 import { TaskRelations } from './TaskRelations';
+import { TaskEditForm } from './TaskEditForm';
 import { ExecutionHistory } from './ExecutionHistory';
 import { ResizablePanel } from '../ResizablePanel';
 import { DeleteConfirmationDialog } from './DeleteConfirmationDialog';
@@ -338,6 +339,7 @@ export function TaskDetailPanel({ taskId, onClose, onTaskSelect }: TaskDetailPan
   const [activeTab, setActiveTab] = useState<TabId>('details');
   const [isRunning, setIsRunning] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
+  const [isEditFormOpen, setIsEditFormOpen] = useState(false);
   const { task: taskData, isLoading, error, refetch } = useTask(taskId);
   const {
     isDeleteDialogOpen,
@@ -470,6 +472,19 @@ export function TaskDetailPanel({ taskId, onClose, onTaskSelect }: TaskDetailPan
               )}
             </button>
           )}
+          {/* Edit Button */}
+          <button
+            type="button"
+            onClick={() => setIsEditFormOpen(true)}
+            className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary bg-primary/10 text-primary hover:bg-primary/20 hover:shadow-glow-sm"
+            aria-label="Edit task"
+            title="Edit this task"
+          >
+            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+            </svg>
+            <span>Edit</span>
+          </button>
           {/* Delete Button */}
           <button
             type="button"
@@ -632,6 +647,19 @@ export function TaskDetailPanel({ taskId, onClose, onTaskSelect }: TaskDetailPan
         taskTitle={taskData?.task.title}
         childCount={taskData?.children_ids.length ?? 0}
       />
+
+      {/* Edit Form Modal */}
+      {isEditFormOpen && taskData && (
+        <TaskEditForm
+          taskId={taskData.task.id}
+          currentTask={taskData.task}
+          onClose={() => setIsEditFormOpen(false)}
+          onSuccess={() => {
+            setIsEditFormOpen(false);
+            refetch();
+          }}
+        />
+      )}
     </ResizablePanel>
   );
 }
