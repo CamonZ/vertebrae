@@ -57,7 +57,7 @@ export const FormField = forwardRef<HTMLDivElement, FormFieldProps>(
     },
     ref
   ) => {
-    const hasError = Boolean(error);
+    // const hasError = Boolean(error);
 
     return (
       <div ref={ref} className={`flex flex-col gap-1.5 ${className}`} {...props}>
