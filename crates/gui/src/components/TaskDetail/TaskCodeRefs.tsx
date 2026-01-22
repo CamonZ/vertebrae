@@ -68,7 +68,7 @@ function CodeRefItem({ codeRef }: CodeRefItemProps) {
       <button
         type="button"
         onClick={handleCopy}
-        className="flex-shrink-0 rounded p-1 text-text-muted opacity-0 transition-opacity hover:bg-bg-secondary hover:text-text-primary focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-border-focus group-hover:opacity-100"
+        className="flex-shrink-0 rounded p-1 text-text-muted opacity-0 transition-opacity hover:bg-bg-secondary hover:text-text-primary focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-border-focus group-hover:opacity-100 cursor-pointer"
         title="Copy path"
         aria-label={copied ? 'Copied!' : 'Copy path to clipboard'}
       >

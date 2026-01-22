@@ -288,7 +288,7 @@ export const TagField = forwardRef<HTMLDivElement, TagFieldProps>(
                   <button
                     type="button"
                     onClick={() => handleRemoveTag(index)}
-                    className="hover:bg-primary/20 rounded-full p-0.5 transition-colors"
+                    className="hover:bg-primary/20 rounded-full p-0.5 transition-colors cursor-pointer"
                     aria-label={`Remove tag ${tag}`}
                   >
                     <svg

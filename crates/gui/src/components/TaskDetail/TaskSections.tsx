@@ -128,7 +128,7 @@ function SectionGroup({ type, sections, defaultOpen = false, taskId, onSectionsC
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-bg-tertiary focus:outline-none focus:ring-2 focus:ring-inset focus:ring-border-focus"
+        className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-bg-tertiary focus:outline-none focus:ring-2 focus:ring-inset focus:ring-border-focus cursor-pointer"
         aria-expanded={isOpen}
       >
         <div className="flex items-center gap-2">
@@ -199,7 +199,7 @@ function SectionGroup({ type, sections, defaultOpen = false, taskId, onSectionsC
                   <button
                     type="button"
                     onClick={() => setEditingSection(section)}
-                    className="p-1 rounded text-text-muted hover:bg-bg-tertiary hover:text-text-primary transition-colors"
+                    className="p-1 rounded text-text-muted hover:bg-bg-tertiary hover:text-text-primary transition-colors cursor-pointer"
                     title="Edit section"
                     aria-label="Edit section"
                   >
@@ -210,7 +210,7 @@ function SectionGroup({ type, sections, defaultOpen = false, taskId, onSectionsC
                   <button
                     type="button"
                     onClick={() => handleConfirmDelete(section.ordinal ?? index)}
-                    className="p-1 rounded text-text-muted hover:bg-error/10 hover:text-error transition-colors"
+                    className="p-1 rounded text-text-muted hover:bg-error/10 hover:text-error transition-colors cursor-pointer"
                     title="Delete section"
                     aria-label="Delete section"
                   >
@@ -228,7 +228,7 @@ function SectionGroup({ type, sections, defaultOpen = false, taskId, onSectionsC
       {/* Delete confirmation dialog */}
       {deleteConfirmOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setDeleteConfirmOpen(false)} />
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm cursor-pointer" onClick={() => setDeleteConfirmOpen(false)} />
           <div className="relative bg-background-secondary rounded-lg shadow-xl max-w-sm w-full mx-4 p-6">
             <h3 className="text-lg font-semibold text-text-primary mb-2">Delete Section?</h3>
             <p className="text-sm text-text-secondary mb-6">
@@ -239,7 +239,7 @@ function SectionGroup({ type, sections, defaultOpen = false, taskId, onSectionsC
                 type="button"
                 onClick={() => setDeleteConfirmOpen(false)}
                 disabled={isDeleting}
-                className="px-4 py-2 text-sm font-medium rounded-md border border-border hover:bg-background-tertiary transition-colors disabled:opacity-50"
+                className="px-4 py-2 text-sm font-medium rounded-md border border-border hover:bg-background-tertiary transition-colors disabled:opacity-50 cursor-pointer"
               >
                 Cancel
               </button>
@@ -360,7 +360,7 @@ export function TaskSections({ sections, taskId, onSectionsChanged }: TaskSectio
         <button
           type="button"
           onClick={() => setShowNewSection(true)}
-          className="w-full rounded-lg border border-dashed border-primary/30 bg-primary/5 px-4 py-2.5 text-sm font-medium text-primary hover:bg-primary/10 hover:border-primary/50 transition-colors"
+          className="w-full rounded-lg border border-dashed border-primary/30 bg-primary/5 px-4 py-2.5 text-sm font-medium text-primary hover:bg-primary/10 hover:border-primary/50 transition-colors cursor-pointer"
         >
           <svg className="inline h-4 w-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -394,7 +394,7 @@ export function TaskSections({ sections, taskId, onSectionsChanged }: TaskSectio
       {/* Section type selector modal */}
       {showNewSection && !newSectionType && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" onClick={handleNewSectionClose} />
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm cursor-pointer" onClick={handleNewSectionClose} />
           <div className="relative bg-background-secondary rounded-lg shadow-xl max-w-sm w-full mx-4 p-6">
             <h3 className="text-lg font-semibold text-text-primary mb-4">Create New Section</h3>
             <div className="grid grid-cols-2 gap-2 max-h-96 overflow-y-auto">
@@ -403,7 +403,7 @@ export function TaskSections({ sections, taskId, onSectionsChanged }: TaskSectio
                   key={type}
                   type="button"
                   onClick={() => handleNewSectionTypeSelect(type)}
-                  className="p-3 text-left rounded-lg border border-border hover:bg-background-tertiary hover:border-primary transition-colors"
+                  className="p-3 text-left rounded-lg border border-border hover:bg-background-tertiary hover:border-primary transition-colors cursor-pointer"
                 >
                   <div className="font-medium text-sm text-text-primary">
                     {formatSectionType(type)}
@@ -415,7 +415,7 @@ export function TaskSections({ sections, taskId, onSectionsChanged }: TaskSectio
               <button
                 type="button"
                 onClick={handleNewSectionClose}
-                className="px-4 py-2 text-sm font-medium rounded-md border border-border hover:bg-background-tertiary transition-colors"
+                className="px-4 py-2 text-sm font-medium rounded-md border border-border hover:bg-background-tertiary transition-colors cursor-pointer"
               >
                 Cancel
               </button>

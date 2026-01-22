@@ -228,23 +228,10 @@ describe("TaskDetailPanel - Edit Integration", () => {
       const titleElement = screen.getByText("Test Task");
       fireEvent.click(titleElement);
 
-      // Should show input field
+      // Should show input field for editing (auto-save on blur)
       const titleInput = screen.getByDisplayValue("Test Task");
       expect(titleInput).toBeInTheDocument();
-      expect(titleInput.tagName).toBe("INPUT");
-    });
-
-    it("shows Save and Cancel buttons when editing title", () => {
-      render(
-        <TaskDetailPanel
-          taskId={mockTaskData.task.id}
-          onClose={vi.fn()}
-        />
-      );
-
-      fireEvent.click(screen.getByText("Test Task"));
-      expect(screen.getByRole("button", { name: /^Save$/i })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: /^Cancel$/i })).toBeInTheDocument();
+      expect(titleInput).toHaveAttribute("type", "text");
     });
   });
 

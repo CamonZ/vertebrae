@@ -158,92 +158,93 @@ function AllWorkflowsPipelineInner() {
     setSelectedZone(null);
   }, []);
 
-  // Fetch task details and steps for all workflows
-  useEffect(() => {
-    const fetchAllWorkflowData = async () => {
-      if (workflows.length === 0) {
-        setWorkflowTasksMap(new Map());
-        setWorkflowStepsMap(new Map());
-        return;
-      }
+  // Extracted fetch function so it can be called both on workflow changes and task changes
+  const fetchAllWorkflowData = useCallback(async () => {
+    if (workflows.length === 0) {
+      setWorkflowTasksMap(new Map());
+      setWorkflowStepsMap(new Map());
+      return;
+    }
 
-      const tasksMap = new Map<string, TaskWithRelations[]>();
-      const stepsMap = new Map<string, Step[]>();
+    const tasksMap = new Map<string, TaskWithRelations[]>();
+    const stepsMap = new Map<string, Step[]>();
 
-      try {
-        for (const workflow of workflows) {
-          // Skip workflows without an ID
-          const workflowId = workflow.id;
-          if (!workflowId) continue;
+    try {
+      for (const workflow of workflows) {
+        // Skip workflows without an ID
+        const workflowId = workflow.id;
+        if (!workflowId) continue;
 
-          // Fetch tasks for this workflow
-          try {
-            const tasksResult =
-              await commands.getWorkflowWithTaskDetails(workflowId);
-            if (tasksResult.status === "ok") {
-              tasksMap.set(workflowId, tasksResult.data.tasks);
-            } else {
-              console.warn(
-                `Failed to load tasks for workflow ${workflowId}:`,
-                tasksResult.error.message
-              );
-              tasksMap.set(workflowId, []);
-            }
-          } catch (err) {
+        // Fetch tasks for this workflow
+        try {
+          const tasksResult =
+            await commands.getWorkflowWithTaskDetails(workflowId);
+          if (tasksResult.status === "ok") {
+            tasksMap.set(workflowId, tasksResult.data.tasks);
+          } else {
             console.warn(
               `Failed to load tasks for workflow ${workflowId}:`,
-              String(err)
+              tasksResult.error.message
             );
             tasksMap.set(workflowId, []);
           }
+        } catch (err) {
+          console.warn(
+            `Failed to load tasks for workflow ${workflowId}:`,
+            String(err)
+          );
+          tasksMap.set(workflowId, []);
+        }
 
-          // Fetch steps for this workflow
-          try {
-            const stepsResult = await commands.listStepsForWorkflow(workflowId);
-            if (stepsResult.status === "ok") {
-              stepsMap.set(workflowId, stepsResult.data);
-            } else {
-              console.warn(
-                `Failed to load steps for workflow ${workflowId}:`,
-                stepsResult.error.message
-              );
-              stepsMap.set(workflowId, []);
-            }
-          } catch (err) {
+        // Fetch steps for this workflow
+        try {
+          const stepsResult = await commands.listStepsForWorkflow(workflowId);
+          if (stepsResult.status === "ok") {
+            stepsMap.set(workflowId, stepsResult.data);
+          } else {
             console.warn(
               `Failed to load steps for workflow ${workflowId}:`,
-              String(err)
+              stepsResult.error.message
             );
             stepsMap.set(workflowId, []);
           }
-        }
-      } catch (err) {
-        addToast(`Failed to load workflow data: ${String(err)}`, "error");
-      }
-
-      setWorkflowTasksMap(tasksMap);
-      setWorkflowStepsMap(stepsMap);
-
-      // Fetch workflow transitions (edges between workflows)
-      try {
-        const transitionsResult = await commands.listWorkflowTransitions();
-        if (transitionsResult.status === "ok") {
-          setWorkflowTransitions(transitionsResult.data);
-        } else {
+        } catch (err) {
           console.warn(
-            "Failed to load workflow transitions:",
-            transitionsResult.error.message
+            `Failed to load steps for workflow ${workflowId}:`,
+            String(err)
           );
-          setWorkflowTransitions([]);
+          stepsMap.set(workflowId, []);
         }
-      } catch (err) {
-        console.warn("Failed to load workflow transitions:", String(err));
+      }
+    } catch (err) {
+      addToast(`Failed to load workflow data: ${String(err)}`, "error");
+    }
+
+    setWorkflowTasksMap(tasksMap);
+    setWorkflowStepsMap(stepsMap);
+
+    // Fetch workflow transitions (edges between workflows)
+    try {
+      const transitionsResult = await commands.listWorkflowTransitions();
+      if (transitionsResult.status === "ok") {
+        setWorkflowTransitions(transitionsResult.data);
+      } else {
+        console.warn(
+          "Failed to load workflow transitions:",
+          transitionsResult.error.message
+        );
         setWorkflowTransitions([]);
       }
-    };
-
-    fetchAllWorkflowData();
+    } catch (err) {
+      console.warn("Failed to load workflow transitions:", String(err));
+      setWorkflowTransitions([]);
+    }
   }, [workflows, addToast]);
+
+  // Fetch task details and steps for all workflows
+  useEffect(() => {
+    fetchAllWorkflowData();
+  }, [fetchAllWorkflowData]);
 
   // Subscribe to workflow change events for automatic list refresh
   useWorkflowChangeListener({
@@ -252,9 +253,7 @@ function AllWorkflowsPipelineInner() {
 
   // Subscribe to task change events - reload all workflow tasks when any task changes
   useTaskChangeListener({
-    onTaskListChange: () => {
-      refetch();
-    },
+    onTaskListChange: fetchAllWorkflowData,
   });
 
   // Calculate workflow zone dimensions for ELK layout

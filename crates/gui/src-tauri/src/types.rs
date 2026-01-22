@@ -353,6 +353,23 @@ impl From<TaskFilterOptions> for vertebrae_db::TaskFilter {
     }
 }
 
+/// Options for updating a task - allows updating multiple fields at once
+#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
+pub struct UpdateTaskOptions {
+    /// New title (if provided)
+    pub title: Option<String>,
+    /// New description (if provided, null clears it)
+    pub description: Option<Option<String>>,
+    /// New priority (if provided, null clears it)
+    pub priority: Option<Option<String>>,
+    /// Tags to add
+    #[serde(default)]
+    pub add_tags: Vec<String>,
+    /// Tags to remove
+    #[serde(default)]
+    pub remove_tags: Vec<String>,
+}
+
 // ============================================================================
 // Workflow Types
 // ============================================================================

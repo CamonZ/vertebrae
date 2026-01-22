@@ -191,13 +191,13 @@ async createTask(title: string, description: string | null, level: string | null
 }
 },
 /**
- * Update task fields like title, description, and priority
+ * Update a task with multiple fields
  * 
  * Specify only the fields you want to update. Omitted fields remain unchanged.
  */
-async updateTask(taskId: string, title: string | null, description: string | null, priority: string | null) : Promise<Result<null, CommandError>> {
+async updateTask(taskId: string, options: UpdateTaskOptions) : Promise<Result<null, CommandError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("update_task", { taskId, title, description, priority }) };
+    return { status: "ok", data: await TAURI_INVOKE("update_task", { taskId, options }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -1122,6 +1122,30 @@ depends_on_ids: string[];
  * Task IDs that depend on this task
  */
 dependent_ids: string[] }
+/**
+ * Options for updating a task - allows updating multiple fields at once
+ */
+export type UpdateTaskOptions = { 
+/**
+ * New title (if provided)
+ */
+title: string | null; 
+/**
+ * New description (if provided, null clears it)
+ */
+description: string | null; 
+/**
+ * New priority (if provided, null clears it)
+ */
+priority: string | null; 
+/**
+ * Tags to add
+ */
+add_tags?: string[]; 
+/**
+ * Tags to remove
+ */
+remove_tags?: string[] }
 /**
  * Workflow - mirrors db::Workflow
  */

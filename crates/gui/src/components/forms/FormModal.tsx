@@ -186,7 +186,7 @@ export const FormModal = forwardRef<HTMLDivElement, FormModalProps>(
         {...props}
       >
         {/* Backdrop */}
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" />
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm cursor-pointer" />
 
         {/* Modal content */}
         <div
@@ -215,7 +215,7 @@ export const FormModal = forwardRef<HTMLDivElement, FormModalProps>(
                 disabled={isSubmitting && preventCloseDuringSubmit}
                 className={`
                   p-1 rounded-md hover:bg-background-tertiary transition-colors
-                  ${isSubmitting && preventCloseDuringSubmit ? 'opacity-50 cursor-not-allowed' : ''}
+                  ${isSubmitting && preventCloseDuringSubmit ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
                 `}
                 aria-label="Close modal"
               >
@@ -261,7 +261,7 @@ export const FormModal = forwardRef<HTMLDivElement, FormModalProps>(
               <button
                 type="button"
                 onClick={() => {}}
-                className="p-1 hover:bg-error/20 rounded transition-colors"
+                className="p-1 hover:bg-error/20 rounded transition-colors cursor-pointer"
                 aria-label="Dismiss error"
               >
                 <svg
@@ -298,7 +298,7 @@ export const FormModal = forwardRef<HTMLDivElement, FormModalProps>(
                 className={`
                   px-4 py-2 text-sm font-medium rounded-md border border-border
                   hover:bg-background-tertiary transition-colors
-                  ${isSubmitting && preventCloseDuringSubmit ? 'opacity-50 cursor-not-allowed' : ''}
+                  ${isSubmitting && preventCloseDuringSubmit ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
                 `}
               >
                 {cancelButtonText}
@@ -315,7 +315,7 @@ export const FormModal = forwardRef<HTMLDivElement, FormModalProps>(
                   px-4 py-2 text-sm font-medium rounded-md border border-transparent
                   ${isSubmitting
                     ? 'bg-primary/80 cursor-not-allowed'
-                    : 'bg-primary hover:bg-primary/90 text-white'}
+                    : 'bg-primary hover:bg-primary/90 text-white cursor-pointer'}
                   transition-colors flex items-center gap-2
                 `}
               >

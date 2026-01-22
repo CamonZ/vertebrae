@@ -42,7 +42,7 @@ function TaskLink({
     <button
       type="button"
       onClick={() => onClick?.(taskId)}
-      className="inline-flex items-center rounded bg-bg-tertiary px-2 py-1 font-mono text-xs text-text-secondary transition-colors hover:bg-primary/10 hover:text-primary focus:outline-none focus:ring-2 focus:ring-border-focus"
+      className="inline-flex items-center rounded bg-bg-tertiary px-2 py-1 font-mono text-xs text-text-secondary transition-colors hover:bg-primary/10 hover:text-primary focus:outline-none focus:ring-2 focus:ring-border-focus cursor-pointer"
       title={`View task ${taskId}`}
     >
       {truncateId(taskId)}
@@ -159,7 +159,7 @@ function ParentPicker({
             <button
               key={task.id}
               onClick={() => onParentChange(task.id)}
-              className="block w-full rounded bg-bg-tertiary px-3 py-2 text-left text-xs text-text-primary hover:bg-primary/10 hover:text-primary transition-colors"
+              className="block w-full rounded bg-bg-tertiary px-3 py-2 text-left text-xs text-text-primary hover:bg-primary/10 hover:text-primary transition-colors cursor-pointer"
             >
               <div className="font-mono text-[10px] text-text-muted">{truncateId(task.id)}</div>
               <div className="truncate">{task.title}</div>
@@ -172,14 +172,14 @@ function ParentPicker({
         {currentParentId && (
           <button
             onClick={() => onParentChange(null)}
-            className="flex-1 rounded bg-error/10 px-3 py-2 text-xs font-medium text-error hover:bg-error/20 transition-colors"
+            className="flex-1 rounded bg-error/10 px-3 py-2 text-xs font-medium text-error hover:bg-error/20 transition-colors cursor-pointer"
           >
             Remove Parent
           </button>
         )}
         <button
           onClick={onCancel}
-          className="flex-1 rounded border border-border px-3 py-2 text-xs font-medium text-text-secondary hover:bg-bg-tertiary transition-colors"
+          className="flex-1 rounded border border-border px-3 py-2 text-xs font-medium text-text-secondary hover:bg-bg-tertiary transition-colors cursor-pointer"
         >
           Cancel
         </button>
@@ -282,13 +282,13 @@ function DependencyPicker({
       <div className="flex gap-2 pt-2">
         <button
           onClick={() => onDependenciesChange(selectedDeps)}
-          className="flex-1 rounded bg-primary/10 px-3 py-2 text-xs font-medium text-primary hover:bg-primary/20 transition-colors"
+          className="flex-1 rounded bg-primary/10 px-3 py-2 text-xs font-medium text-primary hover:bg-primary/20 transition-colors cursor-pointer"
         >
           Apply
         </button>
         <button
           onClick={onCancel}
-          className="flex-1 rounded border border-border px-3 py-2 text-xs font-medium text-text-secondary hover:bg-bg-tertiary transition-colors"
+          className="flex-1 rounded border border-border px-3 py-2 text-xs font-medium text-text-secondary hover:bg-bg-tertiary transition-colors cursor-pointer"
         >
           Cancel
         </button>

@@ -149,7 +149,7 @@ export const BooleanField = forwardRef<HTMLButtonElement, BooleanFieldProps>(
           : "bg-background-primary text-text-primary"}
         ${disabled
           ? "opacity-50 cursor-not-allowed bg-background-secondary"
-          : "hover:bg-background-tertiary"}
+          : "hover:bg-background-tertiary cursor-pointer"}
         transition-colors
         ${className}
       `;

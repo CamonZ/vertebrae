@@ -271,7 +271,6 @@ function TaskDetailsTab({
   onFieldClick,
   onFieldChange,
   onFieldSave,
-  onFieldCancel,
   onKeyDown,
   showDeleteConfirmation,
   deleteError,
@@ -297,7 +296,6 @@ function TaskDetailsTab({
     value: string
   ) => void;
   onFieldSave: (field: "title" | "description" | "priority" | "tags") => void;
-  onFieldCancel: () => void;
   onKeyDown: (
     e: React.KeyboardEvent<
       HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
@@ -351,6 +349,7 @@ function TaskDetailsTab({
               value={editValues.priority || ""}
               onChange={(e) => onFieldChange("priority", e.target.value)}
               onKeyDown={(e) => onKeyDown(e, "priority")}
+              onBlur={() => onFieldSave("priority")}
               autoFocus
               disabled={isSubmitting}
               className="w-full rounded border border-primary/30 bg-bg-secondary px-2 py-1.5 text-sm text-text-primary focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-50"
@@ -361,22 +360,6 @@ function TaskDetailsTab({
               <option value="high">High</option>
               <option value="critical">Critical</option>
             </select>
-            <div className="flex gap-2">
-              <button
-                onClick={() => onFieldSave("priority")}
-                disabled={isSubmitting}
-                className="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-50 cursor-pointer"
-              >
-                Save
-              </button>
-              <button
-                onClick={onFieldCancel}
-                disabled={isSubmitting}
-                className="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium bg-border text-text-muted hover:bg-border-hover disabled:opacity-50 cursor-pointer"
-              >
-                Cancel
-              </button>
-            </div>
             {fieldError && <p className="text-xs text-error">{fieldError}</p>}
           </div>
         ) : (
@@ -401,105 +384,75 @@ function TaskDetailsTab({
       </div>
 
       {/* Description */}
-      {task.description && (
-        <div className="p-4 border-b border-border">
-          <h3 className="mb-2 font-mono text-[10px] uppercase tracking-wider text-text-muted">
-            Description
-          </h3>
-          {editingField === "description" ? (
-            <div className="space-y-2">
-              <textarea
-                value={editValues.description}
-                onChange={(e) => onFieldChange("description", e.target.value)}
-                onKeyDown={(e) => onKeyDown(e, "description")}
-                autoFocus
-                disabled={isSubmitting}
-                className="w-full rounded border border-primary/30 bg-bg-secondary px-2 py-1.5 text-sm text-text-primary placeholder-text-muted focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-50"
-                rows={4}
-                placeholder="Enter description"
-              />
-              <div className="flex gap-2">
-                <button
-                  onClick={() => onFieldSave("description")}
-                  disabled={isSubmitting}
-                  className="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-50 cursor-pointer"
-                >
-                  Save
-                </button>
-                <button
-                  onClick={onFieldCancel}
-                  disabled={isSubmitting}
-                  className="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium bg-border text-text-muted hover:bg-border-hover disabled:opacity-50 cursor-pointer"
-                >
-                  Cancel
-                </button>
-              </div>
-              {fieldError && <p className="text-xs text-error">{fieldError}</p>}
-            </div>
-          ) : (
-            <p
-              onClick={() => onFieldClick("description")}
-              className="whitespace-pre-wrap text-sm leading-relaxed text-text-secondary cursor-pointer hover:bg-bg-hover p-2 rounded"
-            >
-              {task.description}
-            </p>
-          )}
-        </div>
-      )}
+      <div className="p-4 border-b border-border">
+        <h3 className="mb-2 font-mono text-[10px] uppercase tracking-wider text-text-muted">
+          Description
+        </h3>
+        {editingField === "description" ? (
+          <div className="space-y-2">
+            <textarea
+              value={editValues.description}
+              onChange={(e) => onFieldChange("description", e.target.value)}
+              onKeyDown={(e) => onKeyDown(e, "description")}
+              onBlur={() => onFieldSave("description")}
+              autoFocus
+              disabled={isSubmitting}
+              className="w-full rounded border border-primary/30 bg-bg-secondary px-2 py-1.5 text-sm text-text-primary placeholder-text-muted focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-50"
+              rows={4}
+              placeholder="Enter description"
+            />
+            {fieldError && <p className="text-xs text-error">{fieldError}</p>}
+          </div>
+        ) : (
+          <p
+            onClick={() => onFieldClick("description")}
+            className="whitespace-pre-wrap text-sm leading-relaxed text-text-secondary cursor-pointer hover:bg-bg-hover p-2 rounded"
+          >
+            {task.description || "Click to add description"}
+          </p>
+        )}
+      </div>
 
       {/* Tags */}
-      {task.tags.length > 0 || editingField === "tags" ? (
-        <div className="p-4 border-b border-border">
-          <h3 className="mb-2 font-mono text-[10px] uppercase tracking-wider text-text-muted">
-            Tags
-          </h3>
-          {editingField === "tags" ? (
-            <div className="space-y-2">
-              <input
-                type="text"
-                value={editValues.tags}
-                onChange={(e) => onFieldChange("tags", e.target.value)}
-                onKeyDown={(e) => onKeyDown(e, "tags")}
-                autoFocus
-                disabled={isSubmitting}
-                className="w-full rounded border border-primary/30 bg-bg-secondary px-2 py-1.5 text-sm text-text-primary placeholder-text-muted focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-50"
-                placeholder="Enter tags separated by commas"
-              />
-              <div className="flex gap-2">
-                <button
-                  onClick={() => onFieldSave("tags")}
-                  disabled={isSubmitting}
-                  className="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-50 cursor-pointer"
-                >
-                  Save
-                </button>
-                <button
-                  onClick={onFieldCancel}
-                  disabled={isSubmitting}
-                  className="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium bg-border text-text-muted hover:bg-border-hover disabled:opacity-50 cursor-pointer"
-                >
-                  Cancel
-                </button>
-              </div>
-              {fieldError && <p className="text-xs text-error">{fieldError}</p>}
-            </div>
-          ) : (
-            <div
-              onClick={() => onFieldClick("tags")}
-              className="flex flex-wrap gap-1.5 cursor-pointer hover:bg-bg-hover p-2 rounded"
-            >
-              {task.tags.map((tag) => (
+      <div className="p-4 border-b border-border">
+        <h3 className="mb-2 font-mono text-[10px] uppercase tracking-wider text-text-muted">
+          Tags
+        </h3>
+        {editingField === "tags" ? (
+          <div className="space-y-2">
+            <input
+              type="text"
+              value={editValues.tags}
+              onChange={(e) => onFieldChange("tags", e.target.value)}
+              onKeyDown={(e) => onKeyDown(e, "tags")}
+              onBlur={() => onFieldSave("tags")}
+              autoFocus
+              disabled={isSubmitting}
+              className="w-full rounded border border-primary/30 bg-bg-secondary px-2 py-1.5 text-sm text-text-primary placeholder-text-muted focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-50"
+              placeholder="Enter tags separated by commas"
+            />
+            {fieldError && <p className="text-xs text-error">{fieldError}</p>}
+          </div>
+        ) : (
+          <div
+            onClick={() => onFieldClick("tags")}
+            className="flex flex-wrap gap-1.5 cursor-pointer hover:bg-bg-hover p-2 rounded"
+          >
+            {task.tags.length > 0 ? (
+              task.tags.map((tag) => (
                 <span
                   key={tag}
                   className="rounded-full border border-border bg-bg-tertiary px-2 py-0.5 text-xs text-text-secondary"
                 >
                   {tag}
                 </span>
-              ))}
-            </div>
-          )}
-        </div>
-      ) : null}
+              ))
+            ) : (
+              <span className="text-xs text-text-muted italic">Click to add tags</span>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Timestamps */}
       <div className="p-4">
@@ -583,7 +536,7 @@ function TaskDetailsTab({
                     strokeLinecap="round"
                     strokeLinejoin="round"
                     strokeWidth={1.5}
-                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
                   />
                 </svg>
               </div>
@@ -616,7 +569,7 @@ function TaskDetailsTab({
                     strokeLinecap="round"
                     strokeLinejoin="round"
                     strokeWidth={1.5}
-                    d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"
+                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
                   />
                 </svg>
               </div>
@@ -1211,27 +1164,12 @@ export function TaskDetailPanel({
                   value={editValues.title}
                   onChange={(e) => handleFieldChange("title", e.target.value)}
                   onKeyDown={(e) => handleKeyDown(e, "title")}
+                  onBlur={() => handleFieldSave("title")}
                   autoFocus
                   disabled={isSubmitting}
                   className="w-full rounded border border-primary/30 bg-bg-secondary px-2 py-1.5 text-sm font-medium text-text-primary placeholder-text-muted focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-50"
                   placeholder="Enter title"
                 />
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => handleFieldSave("title")}
-                    disabled={isSubmitting}
-                    className="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-50 cursor-pointer"
-                  >
-                    Save
-                  </button>
-                  <button
-                    onClick={handleFieldCancel}
-                    disabled={isSubmitting}
-                    className="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium bg-border text-text-muted hover:bg-border-hover disabled:opacity-50 cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                </div>
                 {fieldError && (
                   <p className="text-xs text-error">{fieldError}</p>
                 )}
@@ -1283,7 +1221,6 @@ export function TaskDetailPanel({
                 onFieldClick={handleFieldClick}
                 onFieldChange={handleFieldChange}
                 onFieldSave={handleFieldSave}
-                onFieldCancel={handleFieldCancel}
                 onKeyDown={handleKeyDown}
                 showDeleteConfirmation={showDeleteConfirmation}
                 deleteError={deleteError}
