@@ -9,7 +9,7 @@ use crate::types::{
     TaskWithRelations, Workflow, WorkflowWithTasks,
 };
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{Emitter, State};
 use tokio::sync::RwLock;
 use vertebrae_core::{DefaultTaskService, DefaultWorkflowService, TaskService, WorkflowService};
 
@@ -1275,22 +1275,21 @@ pub async fn create_task(
     Ok(task_id)
 }
 
-/// Update task fields like title, description, and priority
+/// Update a task with multiple fields
 ///
 /// Specify only the fields you want to update. Omitted fields remain unchanged.
 #[tauri::command]
 #[specta::specta]
 pub async fn update_task(
     state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
     task_id: String,
-    title: Option<String>,
-    description: Option<Option<String>>,
-    priority: Option<Option<String>>,
+    options: crate::types::UpdateTaskOptions,
 ) -> Result<(), CommandError> {
     log::info!(
-        "update_task called with task_id: '{}', title: {:?}",
+        "update_task called with task_id: '{}', options: {:?}",
         task_id,
-        title
+        options
     );
 
     let service_guard = state.service.read().await;
@@ -1299,29 +1298,43 @@ pub async fn update_task(
         .ok_or_else(CommandError::no_project_selected)?;
 
     // Build update options
-    let mut options = vertebrae_core::UpdateTaskOptions::new();
+    let mut update_opts = vertebrae_core::UpdateTaskOptions::new();
 
-    if let Some(new_title) = title {
-        options = options.with_title(new_title);
+    if let Some(new_title) = options.title {
+        update_opts = update_opts.with_title(new_title);
     }
 
-    if let Some(new_desc) = description {
-        options.description = Some(new_desc);
+    if let Some(new_desc) = options.description {
+        update_opts.description = Some(new_desc);
     }
 
-    if let Some(new_priority) = priority {
-        options.priority = Some(new_priority.map(|p| {
+    if let Some(new_priority) = options.priority {
+        update_opts.priority = Some(new_priority.map(|p| {
             match p.to_lowercase().as_str() {
                 "high" => vertebrae_db::Priority::High,
                 "medium" => vertebrae_db::Priority::Medium,
                 "low" => vertebrae_db::Priority::Low,
+                "critical" => vertebrae_db::Priority::Critical,
                 _ => vertebrae_db::Priority::Medium, // Default to medium if invalid
             }
         }));
     }
 
-    service.update_task(&task_id, options).await?;
+    update_opts.add_tags = options.add_tags;
+    update_opts.remove_tags = options.remove_tags;
+
+    service.update_task(&task_id, update_opts).await?;
     log::info!("Successfully updated task: {}", task_id);
+
+    // Emit task changed event so UI listeners can update
+    let _ = app_handle.emit(
+        "task-changed-event",
+        crate::events::TaskChangedEvent {
+            task_id: task_id.clone(),
+            change_type: crate::events::TaskChangeType::Updated,
+        },
+    );
+
     Ok(())
 }
 

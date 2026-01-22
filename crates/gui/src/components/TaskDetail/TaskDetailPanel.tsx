@@ -1,12 +1,17 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import type { TaskWithRelations, TaskLevel, TaskPriority, TaskChangedEvent } from '../../bindings';
-import { commands, events } from '../../bindings';
-import { useTask } from '../../hooks/useTask';
-import { TaskSections } from './TaskSections';
-import { TaskCodeRefs } from './TaskCodeRefs';
-import { TaskRelations } from './TaskRelations';
-import { ExecutionHistory } from './ExecutionHistory';
-import { ResizablePanel } from '../ResizablePanel';
+import { useState, useEffect, useRef, useCallback } from "react";
+import type {
+  TaskWithRelations,
+  TaskLevel,
+  TaskPriority,
+  TaskChangedEvent,
+} from "../../bindings";
+import { commands, events } from "../../bindings";
+import { useTask } from "../../hooks/useTask";
+import { TaskSections } from "./TaskSections";
+import { TaskCodeRefs } from "./TaskCodeRefs";
+import { TaskRelations } from "./TaskRelations";
+import { ExecutionHistory } from "./ExecutionHistory";
+import { ResizablePanel } from "../ResizablePanel";
 
 /** Debounce delay in milliseconds for batching rapid events */
 const DEBOUNCE_MS = 100;
@@ -17,7 +22,7 @@ interface TaskDetailPanelProps {
   onTaskSelect?: (taskId: string) => void;
 }
 
-type TabId = 'details' | 'sections' | 'code_refs' | 'relations' | 'history';
+type TabId = "details" | "sections" | "code_refs" | "relations" | "history";
 
 interface Tab {
   id: TabId;
@@ -27,47 +32,97 @@ interface Tab {
 
 const TABS: Tab[] = [
   {
-    id: 'details',
-    label: 'Details',
+    id: "details",
+    label: "Details",
     icon: (
-      <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+      <svg
+        className="h-3.5 w-3.5"
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={1.5}
+          d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+        />
       </svg>
     ),
   },
   {
-    id: 'sections',
-    label: 'Sections',
+    id: "sections",
+    label: "Sections",
     icon: (
-      <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 6h16M4 12h16M4 18h7" />
+      <svg
+        className="h-3.5 w-3.5"
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={1.5}
+          d="M4 6h16M4 12h16M4 18h7"
+        />
       </svg>
     ),
   },
   {
-    id: 'code_refs',
-    label: 'Code',
+    id: "code_refs",
+    label: "Code",
     icon: (
-      <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+      <svg
+        className="h-3.5 w-3.5"
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={1.5}
+          d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"
+        />
       </svg>
     ),
   },
   {
-    id: 'relations',
-    label: 'Graph',
+    id: "relations",
+    label: "Graph",
     icon: (
-      <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+      <svg
+        className="h-3.5 w-3.5"
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={1.5}
+          d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"
+        />
       </svg>
     ),
   },
   {
-    id: 'history',
-    label: 'History',
+    id: "history",
+    label: "History",
     icon: (
-      <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+      <svg
+        className="h-3.5 w-3.5"
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth={1.5}
+          d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+        />
       </svg>
     ),
   },
@@ -79,59 +134,87 @@ const TABS: Tab[] = [
  * - A step name (e.g., 'backlog', 'in_progress', 'done')
  * - A workflow:step format (e.g., 'default:in_progress')
  */
-function getStatusStyles(status: string): { bg: string; text: string; glow?: string } {
+function getStatusStyles(status: string): {
+  bg: string;
+  text: string;
+  glow?: string;
+} {
   // Extract step name from potential workflow:step format
-  const stepName = status.includes(':') ? status.split(':').pop() ?? status : status;
-  
+  const stepName = status.includes(":")
+    ? (status.split(":").pop() ?? status)
+    : status;
+
   switch (stepName) {
-    case 'backlog':
-      return { bg: 'bg-bg-tertiary', text: 'text-text-muted' };
-    case 'todo':
-      return { bg: 'bg-primary/10', text: 'text-primary' };
-    case 'in_progress':
-      return { bg: 'bg-warning/10', text: 'text-warning', glow: 'shadow-[0_0_8px_rgba(245,158,11,0.3)]' };
-    case 'pending_review':
-      return { bg: 'bg-info/10', text: 'text-info' };
-    case 'done':
-      return { bg: 'bg-success/10', text: 'text-success' };
-    case 'rejected':
-      return { bg: 'bg-error/10', text: 'text-error' };
+    case "backlog":
+      return { bg: "bg-bg-tertiary", text: "text-text-muted" };
+    case "todo":
+      return { bg: "bg-primary/10", text: "text-primary" };
+    case "in_progress":
+      return {
+        bg: "bg-warning/10",
+        text: "text-warning",
+        glow: "shadow-[0_0_8px_rgba(245,158,11,0.3)]",
+      };
+    case "pending_review":
+      return { bg: "bg-info/10", text: "text-info" };
+    case "done":
+      return { bg: "bg-success/10", text: "text-success" };
+    case "rejected":
+      return { bg: "bg-error/10", text: "text-error" };
     default:
-      return { bg: 'bg-bg-tertiary', text: 'text-text-muted' };
+      return { bg: "bg-bg-tertiary", text: "text-text-muted" };
   }
 }
 
 /**
  * Get level styling
  */
-function getLevelStyles(level: TaskLevel): { bg: string; text: string; border: string } {
+function getLevelStyles(level: TaskLevel): {
+  bg: string;
+  text: string;
+  border: string;
+} {
   switch (level) {
-    case 'epic':
-      return { bg: 'bg-info/10', text: 'text-info', border: 'border-info/30' };
-    case 'ticket':
-      return { bg: 'bg-primary/10', text: 'text-primary', border: 'border-primary/30' };
-    case 'task':
-      return { bg: 'bg-bg-tertiary', text: 'text-text-secondary', border: 'border-border' };
+    case "epic":
+      return { bg: "bg-info/10", text: "text-info", border: "border-info/30" };
+    case "ticket":
+      return {
+        bg: "bg-primary/10",
+        text: "text-primary",
+        border: "border-primary/30",
+      };
+    case "task":
+      return {
+        bg: "bg-bg-tertiary",
+        text: "text-text-secondary",
+        border: "border-border",
+      };
     default:
-      return { bg: 'bg-bg-tertiary', text: 'text-text-muted', border: 'border-border' };
+      return {
+        bg: "bg-bg-tertiary",
+        text: "text-text-muted",
+        border: "border-border",
+      };
   }
 }
 
 /**
  * Get priority styling
  */
-function getPriorityStyles(priority: TaskPriority | null): { indicator: string; color: string } | null {
+function getPriorityStyles(
+  priority: TaskPriority | null
+): { indicator: string; color: string } | null {
   if (!priority) return null;
 
   switch (priority) {
-    case 'critical':
-      return { indicator: '!!!', color: 'text-error' };
-    case 'high':
-      return { indicator: '!!', color: 'text-warning' };
-    case 'medium':
-      return { indicator: '!', color: 'text-text-secondary' };
-    case 'low':
-      return { indicator: '-', color: 'text-text-muted' };
+    case "critical":
+      return { indicator: "!!!", color: "text-error" };
+    case "high":
+      return { indicator: "!!", color: "text-warning" };
+    case "medium":
+      return { indicator: "!", color: "text-text-secondary" };
+    case "low":
+      return { indicator: "-", color: "text-text-muted" };
     default:
       return null;
   }
@@ -141,15 +224,15 @@ function getPriorityStyles(priority: TaskPriority | null): { indicator: string; 
  * Format datetime for display
  */
 function formatDateTime(isoString: string | null): string {
-  if (!isoString) return '-';
+  if (!isoString) return "-";
 
   try {
     const date = new Date(isoString);
     return date.toLocaleString(undefined, {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
     });
   } catch {
     return isoString;
@@ -159,10 +242,18 @@ function formatDateTime(isoString: string | null): string {
 /**
  * Detail row component
  */
-function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
+function DetailRow({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="flex items-center justify-between py-2">
-      <span className="font-mono text-[10px] uppercase tracking-wider text-text-muted">{label}</span>
+      <span className="font-mono text-[10px] uppercase tracking-wider text-text-muted">
+        {label}
+      </span>
       <span className="text-sm text-text-primary">{children}</span>
     </div>
   );
@@ -191,15 +282,28 @@ function TaskDetailsTab({
   onCascadeChange,
 }: {
   taskData: TaskWithRelations;
-  editingField: 'title' | 'description' | 'priority' | 'tags' | null;
-  editValues: { title: string; description: string; priority: string | null; tags: string };
+  editingField: "title" | "description" | "priority" | "tags" | null;
+  editValues: {
+    title: string;
+    description: string;
+    priority: string | null;
+    tags: string;
+  };
   isSubmitting: boolean;
   fieldError: string | null;
-  onFieldClick: (field: 'title' | 'description' | 'priority' | 'tags') => void;
-  onFieldChange: (field: 'title' | 'description' | 'priority' | 'tags', value: string) => void;
-  onFieldSave: (field: 'title' | 'description' | 'priority' | 'tags') => void;
+  onFieldClick: (field: "title" | "description" | "priority" | "tags") => void;
+  onFieldChange: (
+    field: "title" | "description" | "priority" | "tags",
+    value: string
+  ) => void;
+  onFieldSave: (field: "title" | "description" | "priority" | "tags") => void;
   onFieldCancel: () => void;
-  onKeyDown: (e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>, field: 'title' | 'description' | 'priority' | 'tags') => void;
+  onKeyDown: (
+    e: React.KeyboardEvent<
+      HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
+    >,
+    field: "title" | "description" | "priority" | "tags"
+  ) => void;
   showDeleteConfirmation: boolean;
   deleteError: string | null;
   isDeleting: boolean;
@@ -217,14 +321,20 @@ function TaskDetailsTab({
     <div className="divide-y divide-border">
       {/* Status Badges */}
       <div className="flex flex-wrap gap-2 p-4">
-        <span className={`inline-flex items-center rounded border px-2 py-1 text-[10px] font-medium uppercase tracking-wider ${levelStyles.bg} ${levelStyles.text} ${levelStyles.border}`}>
+        <span
+          className={`inline-flex items-center rounded border px-2 py-1 text-[10px] font-medium uppercase tracking-wider ${levelStyles.bg} ${levelStyles.text} ${levelStyles.border}`}
+        >
           {task.level}
         </span>
-        <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${statusStyles.bg} ${statusStyles.text} ${statusStyles.glow ?? ''}`}>
-          {task.status.replace('_', ' ')}
+        <span
+          className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${statusStyles.bg} ${statusStyles.text} ${statusStyles.glow ?? ""}`}
+        >
+          {task.status.replace("_", " ")}
         </span>
         {priorityStyles && (
-          <span className={`font-mono text-sm font-bold ${priorityStyles.color}`}>
+          <span
+            className={`font-mono text-sm font-bold ${priorityStyles.color}`}
+          >
             {priorityStyles.indicator}
           </span>
         )}
@@ -235,12 +345,12 @@ function TaskDetailsTab({
         <h3 className="mb-2 font-mono text-[10px] uppercase tracking-wider text-text-muted">
           Priority
         </h3>
-        {editingField === 'priority' ? (
+        {editingField === "priority" ? (
           <div className="space-y-2">
             <select
-              value={editValues.priority || ''}
-              onChange={(e) => onFieldChange('priority', e.target.value)}
-              onKeyDown={(e) => onKeyDown(e, 'priority')}
+              value={editValues.priority || ""}
+              onChange={(e) => onFieldChange("priority", e.target.value)}
+              onKeyDown={(e) => onKeyDown(e, "priority")}
               autoFocus
               disabled={isSubmitting}
               className="w-full rounded border border-primary/30 bg-bg-secondary px-2 py-1.5 text-sm text-text-primary focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-50"
@@ -253,16 +363,16 @@ function TaskDetailsTab({
             </select>
             <div className="flex gap-2">
               <button
-                onClick={() => onFieldSave('priority')}
+                onClick={() => onFieldSave("priority")}
                 disabled={isSubmitting}
-                className="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-50"
+                className="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-50 cursor-pointer"
               >
                 Save
               </button>
               <button
                 onClick={onFieldCancel}
                 disabled={isSubmitting}
-                className="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium bg-border text-text-muted hover:bg-border-hover disabled:opacity-50"
+                className="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium bg-border text-text-muted hover:bg-border-hover disabled:opacity-50 cursor-pointer"
               >
                 Cancel
               </button>
@@ -271,10 +381,10 @@ function TaskDetailsTab({
           </div>
         ) : (
           <p
-            onClick={() => onFieldClick('priority')}
+            onClick={() => onFieldClick("priority")}
             className="text-sm text-text-secondary cursor-pointer hover:bg-bg-hover p-2 rounded"
           >
-            {task.priority || 'None'}
+            {task.priority || "None"}
           </p>
         )}
       </div>
@@ -283,7 +393,9 @@ function TaskDetailsTab({
       <div className="p-4">
         <div className="space-y-1 divide-y divide-border-subtle">
           <DetailRow label="ID">
-            <code className="rounded bg-bg-tertiary px-1.5 py-0.5 font-mono text-xs">{task.id?.slice(0, 8) ?? '-'}</code>
+            <code className="rounded bg-bg-tertiary px-1.5 py-0.5 font-mono text-xs">
+              {task.id?.slice(0, 8) ?? "-"}
+            </code>
           </DetailRow>
         </div>
       </div>
@@ -294,12 +406,12 @@ function TaskDetailsTab({
           <h3 className="mb-2 font-mono text-[10px] uppercase tracking-wider text-text-muted">
             Description
           </h3>
-          {editingField === 'description' ? (
+          {editingField === "description" ? (
             <div className="space-y-2">
               <textarea
                 value={editValues.description}
-                onChange={(e) => onFieldChange('description', e.target.value)}
-                onKeyDown={(e) => onKeyDown(e, 'description')}
+                onChange={(e) => onFieldChange("description", e.target.value)}
+                onKeyDown={(e) => onKeyDown(e, "description")}
                 autoFocus
                 disabled={isSubmitting}
                 className="w-full rounded border border-primary/30 bg-bg-secondary px-2 py-1.5 text-sm text-text-primary placeholder-text-muted focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-50"
@@ -308,16 +420,16 @@ function TaskDetailsTab({
               />
               <div className="flex gap-2">
                 <button
-                  onClick={() => onFieldSave('description')}
+                  onClick={() => onFieldSave("description")}
                   disabled={isSubmitting}
-                  className="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-50"
+                  className="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-50 cursor-pointer"
                 >
                   Save
                 </button>
                 <button
                   onClick={onFieldCancel}
                   disabled={isSubmitting}
-                  className="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium bg-border text-text-muted hover:bg-border-hover disabled:opacity-50"
+                  className="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium bg-border text-text-muted hover:bg-border-hover disabled:opacity-50 cursor-pointer"
                 >
                   Cancel
                 </button>
@@ -326,7 +438,7 @@ function TaskDetailsTab({
             </div>
           ) : (
             <p
-              onClick={() => onFieldClick('description')}
+              onClick={() => onFieldClick("description")}
               className="whitespace-pre-wrap text-sm leading-relaxed text-text-secondary cursor-pointer hover:bg-bg-hover p-2 rounded"
             >
               {task.description}
@@ -336,18 +448,18 @@ function TaskDetailsTab({
       )}
 
       {/* Tags */}
-      {task.tags.length > 0 || editingField === 'tags' ? (
+      {task.tags.length > 0 || editingField === "tags" ? (
         <div className="p-4 border-b border-border">
           <h3 className="mb-2 font-mono text-[10px] uppercase tracking-wider text-text-muted">
             Tags
           </h3>
-          {editingField === 'tags' ? (
+          {editingField === "tags" ? (
             <div className="space-y-2">
               <input
                 type="text"
                 value={editValues.tags}
-                onChange={(e) => onFieldChange('tags', e.target.value)}
-                onKeyDown={(e) => onKeyDown(e, 'tags')}
+                onChange={(e) => onFieldChange("tags", e.target.value)}
+                onKeyDown={(e) => onKeyDown(e, "tags")}
                 autoFocus
                 disabled={isSubmitting}
                 className="w-full rounded border border-primary/30 bg-bg-secondary px-2 py-1.5 text-sm text-text-primary placeholder-text-muted focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-50"
@@ -355,16 +467,16 @@ function TaskDetailsTab({
               />
               <div className="flex gap-2">
                 <button
-                  onClick={() => onFieldSave('tags')}
+                  onClick={() => onFieldSave("tags")}
                   disabled={isSubmitting}
-                  className="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-50"
+                  className="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-50 cursor-pointer"
                 >
                   Save
                 </button>
                 <button
                   onClick={onFieldCancel}
                   disabled={isSubmitting}
-                  className="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium bg-border text-text-muted hover:bg-border-hover disabled:opacity-50"
+                  className="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium bg-border text-text-muted hover:bg-border-hover disabled:opacity-50 cursor-pointer"
                 >
                   Cancel
                 </button>
@@ -373,7 +485,7 @@ function TaskDetailsTab({
             </div>
           ) : (
             <div
-              onClick={() => onFieldClick('tags')}
+              onClick={() => onFieldClick("tags")}
               className="flex flex-wrap gap-1.5 cursor-pointer hover:bg-bg-hover p-2 rounded"
             >
               {task.tags.map((tag) => (
@@ -395,13 +507,21 @@ function TaskDetailsTab({
           Timeline
         </h3>
         <div className="space-y-1">
-          <DetailRow label="Created">{formatDateTime(task.created_at)}</DetailRow>
-          <DetailRow label="Updated">{formatDateTime(task.updated_at)}</DetailRow>
+          <DetailRow label="Created">
+            {formatDateTime(task.created_at)}
+          </DetailRow>
+          <DetailRow label="Updated">
+            {formatDateTime(task.updated_at)}
+          </DetailRow>
           {task.started_at && (
-            <DetailRow label="Started">{formatDateTime(task.started_at)}</DetailRow>
+            <DetailRow label="Started">
+              {formatDateTime(task.started_at)}
+            </DetailRow>
           )}
           {task.completed_at && (
-            <DetailRow label="Completed">{formatDateTime(task.completed_at)}</DetailRow>
+            <DetailRow label="Completed">
+              {formatDateTime(task.completed_at)}
+            </DetailRow>
           )}
         </div>
       </div>
@@ -417,8 +537,18 @@ function TaskDetailsTab({
                 stroke="currentColor"
                 viewBox="0 0 24 24"
               >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.5}
+                  d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.5}
+                  d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                />
               </svg>
               <span className="absolute -right-0.5 -top-0.5 flex h-2 w-2">
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-warning opacity-75" />
@@ -426,8 +556,12 @@ function TaskDetailsTab({
               </span>
             </div>
             <div>
-              <p className="text-sm font-medium text-warning">Needs Human Review</p>
-              <p className="text-xs text-text-muted">This task requires manual verification</p>
+              <p className="text-sm font-medium text-warning">
+                Needs Human Review
+              </p>
+              <p className="text-xs text-text-muted">
+                This task requires manual verification
+              </p>
             </div>
           </div>
         </div>
@@ -445,12 +579,21 @@ function TaskDetailsTab({
                   stroke="currentColor"
                   viewBox="0 0 24 24"
                 >
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={1.5}
+                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                  />
                 </svg>
               </div>
               <div className="min-w-0 flex-1">
-                <h4 className="text-sm font-semibold text-warning">Revision Required</h4>
-                <p className="mt-1 whitespace-pre-wrap text-sm text-text-secondary">{task.revision_feedback}</p>
+                <h4 className="text-sm font-semibold text-warning">
+                  Revision Required
+                </h4>
+                <p className="mt-1 whitespace-pre-wrap text-sm text-text-secondary">
+                  {task.revision_feedback}
+                </p>
               </div>
             </div>
           </div>
@@ -469,12 +612,21 @@ function TaskDetailsTab({
                   stroke="currentColor"
                   viewBox="0 0 24 24"
                 >
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={1.5}
+                    d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"
+                  />
                 </svg>
               </div>
               <div className="min-w-0 flex-1">
-                <h4 className="text-sm font-semibold text-error">Rejection Reason</h4>
-                <p className="mt-1 whitespace-pre-wrap text-sm text-text-secondary">{task.rejection_reason}</p>
+                <h4 className="text-sm font-semibold text-error">
+                  Rejection Reason
+                </h4>
+                <p className="mt-1 whitespace-pre-wrap text-sm text-text-secondary">
+                  {task.rejection_reason}
+                </p>
               </div>
             </div>
           </div>
@@ -488,14 +640,16 @@ function TaskDetailsTab({
             <div>
               <h4 className="text-sm font-semibold text-error">Delete Task?</h4>
               <p className="mt-1 text-sm text-text-secondary">
-                Are you sure you want to delete <span className="font-medium">{task.title}</span>?
+                Are you sure you want to delete{" "}
+                <span className="font-medium">{task.title}</span>?
               </p>
             </div>
 
             {taskData.children_ids && taskData.children_ids.length > 0 && (
               <div className="rounded border border-warning/20 bg-warning/5 p-2.5">
                 <p className="text-xs text-warning font-medium mb-2">
-                  This task has {taskData.children_ids.length} child task{taskData.children_ids.length !== 1 ? 's' : ''}
+                  This task has {taskData.children_ids.length} child task
+                  {taskData.children_ids.length !== 1 ? "s" : ""}
                 </p>
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
@@ -505,7 +659,9 @@ function TaskDetailsTab({
                     disabled={isDeleting}
                     className="rounded border border-border"
                   />
-                  <span className="text-xs text-text-secondary">Delete all child tasks</span>
+                  <span className="text-xs text-text-secondary">
+                    Delete all child tasks
+                  </span>
                 </label>
                 <label className="flex items-center gap-2 cursor-pointer mt-1.5">
                   <input
@@ -515,26 +671,45 @@ function TaskDetailsTab({
                     disabled={isDeleting}
                     className="rounded border border-border"
                   />
-                  <span className="text-xs text-text-secondary">Keep child tasks without parent</span>
+                  <span className="text-xs text-text-secondary">
+                    Keep child tasks without parent
+                  </span>
                 </label>
               </div>
             )}
 
             {deleteError && (
-              <p className="text-xs text-error bg-error/10 p-2 rounded">{deleteError}</p>
+              <p className="text-xs text-error bg-error/10 p-2 rounded">
+                {deleteError}
+              </p>
             )}
 
             <div className="flex gap-2">
               <button
                 onClick={onConfirmDelete}
                 disabled={isDeleting}
-                className="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-medium bg-error/10 text-error hover:bg-error/20 disabled:opacity-50"
+                className="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-medium bg-error/10 text-error hover:bg-error/20 disabled:opacity-50 cursor-pointer"
               >
                 {isDeleting ? (
                   <>
-                    <svg className="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    <svg
+                      className="h-3.5 w-3.5 animate-spin"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      />
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      />
                     </svg>
                     <span>Deleting...</span>
                   </>
@@ -545,7 +720,7 @@ function TaskDetailsTab({
               <button
                 onClick={onCancelDelete}
                 disabled={isDeleting}
-                className="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-medium bg-border text-text-muted hover:bg-border-hover disabled:opacity-50"
+                className="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-medium bg-border text-text-muted hover:bg-border-hover disabled:opacity-50 cursor-pointer"
               >
                 Cancel
               </button>
@@ -562,16 +737,27 @@ function TaskDetailsTab({
  * Features neural-pathway-inspired design with glowing accents.
  * Automatically refreshes when task change events are received.
  */
-export function TaskDetailPanel({ taskId, onClose, onTaskSelect }: TaskDetailPanelProps) {
-  const [activeTab, setActiveTab] = useState<TabId>('details');
+export function TaskDetailPanel({
+  taskId,
+  onClose,
+  onTaskSelect,
+}: TaskDetailPanelProps) {
+  const [activeTab, setActiveTab] = useState<TabId>("details");
   const [isRunning, setIsRunning] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
-  const [editingField, setEditingField] = useState<'title' | 'description' | 'priority' | 'tags' | null>(null);
-  const [editValues, setEditValues] = useState<{ title: string; description: string; priority: string | null; tags: string }>({
-    title: '',
-    description: '',
+  const [editingField, setEditingField] = useState<
+    "title" | "description" | "priority" | "tags" | null
+  >(null);
+  const [editValues, setEditValues] = useState<{
+    title: string;
+    description: string;
+    priority: string | null;
+    tags: string;
+  }>({
+    title: "",
+    description: "",
     priority: null,
-    tags: '',
+    tags: "",
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [fieldError, setFieldError] = useState<string | null>(null);
@@ -639,17 +825,19 @@ export function TaskDetailPanel({ taskId, onClose, onTaskSelect }: TaskDetailPan
   // Handle running the workflow
   const handleRunWorkflow = useCallback(async () => {
     if (!taskId || isRunning) return;
-    
+
     setIsRunning(true);
     setRunError(null);
-    
+
     try {
       const result = await commands.runWorkflow(taskId);
-      if (result.status === 'error') {
+      if (result.status === "error") {
         setRunError(result.error.message);
       }
     } catch (err) {
-      setRunError(err instanceof Error ? err.message : 'Failed to run workflow');
+      setRunError(
+        err instanceof Error ? err.message : "Failed to run workflow"
+      );
     } finally {
       setIsRunning(false);
     }
@@ -657,16 +845,16 @@ export function TaskDetailPanel({ taskId, onClose, onTaskSelect }: TaskDetailPan
 
   // Click-to-edit handlers
   const handleFieldClick = useCallback(
-    (fieldName: 'title' | 'description' | 'priority' | 'tags') => {
+    (fieldName: "title" | "description" | "priority" | "tags") => {
       if (!taskData) return;
       const { task } = taskData;
-      
+
       setEditingField(fieldName);
       setEditValues({
         title: task.title,
-        description: task.description || '',
+        description: task.description || "",
         priority: task.priority,
-        tags: task.tags.join(', '),
+        tags: task.tags.join(", "),
       });
       setFieldError(null);
     },
@@ -674,7 +862,10 @@ export function TaskDetailPanel({ taskId, onClose, onTaskSelect }: TaskDetailPan
   );
 
   const handleFieldChange = useCallback(
-    (fieldName: 'title' | 'description' | 'priority' | 'tags', value: string) => {
+    (
+      fieldName: "title" | "description" | "priority" | "tags",
+      value: string
+    ) => {
       setEditValues((prev) => ({ ...prev, [fieldName]: value }));
     },
     []
@@ -686,42 +877,48 @@ export function TaskDetailPanel({ taskId, onClose, onTaskSelect }: TaskDetailPan
   }, []);
 
   const handleFieldSave = useCallback(
-    async (fieldName: 'title' | 'description' | 'priority' | 'tags') => {
+    async (fieldName: "title" | "description" | "priority" | "tags") => {
       if (!taskData?.task.id) return;
-      
+
       setIsSubmitting(true);
       setFieldError(null);
 
       try {
         // Validate input
-        if (fieldName === 'title' && !editValues.title.trim()) {
-          setFieldError('Title cannot be empty');
+        if (fieldName === "title" && !editValues.title.trim()) {
+          setFieldError("Title cannot be empty");
           setIsSubmitting(false);
           return;
         }
 
         // Parse tags
         const parsedTags = editValues.tags
-          .split(',')
+          .split(",")
           .map((t) => t.trim())
           .filter((t) => t.length > 0);
 
-        // Call updateTask command
-        const result = await commands.updateTask(taskData.task.id, {
-          title: fieldName === 'title' ? editValues.title : taskData.task.title,
-          description: fieldName === 'description' ? editValues.description : taskData.task.description,
-          priority: fieldName === 'priority' ? (editValues.priority as unknown) : taskData.task.priority,
-          tags: fieldName === 'tags' ? parsedTags : taskData.task.tags,
-        });
+        // Build options object with only the changed field
+        const options = {
+          title: fieldName === "title" ? editValues.title : null,
+          description: fieldName === "description" ? editValues.description : null,
+          priority: fieldName === "priority" ? (editValues.priority as string | null) : null,
+          add_tags: fieldName === "tags" ? parsedTags : [],
+          remove_tags: [],
+        };
 
-        if (result.status === 'error') {
+        // Call updateTask command
+        const result = await commands.updateTask(taskData.task.id, options);
+
+        if (result.status === "error") {
           setFieldError(result.error.message);
         } else {
           setEditingField(null);
           await refetch();
         }
       } catch (err) {
-        setFieldError(err instanceof Error ? err.message : 'Failed to save field');
+        setFieldError(
+          err instanceof Error ? err.message : "Failed to save field"
+        );
       } finally {
         setIsSubmitting(false);
       }
@@ -731,12 +928,14 @@ export function TaskDetailPanel({ taskId, onClose, onTaskSelect }: TaskDetailPan
 
   const handleKeyDown = useCallback(
     (
-      e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
-      fieldName: 'title' | 'description' | 'priority' | 'tags'
+      e: React.KeyboardEvent<
+        HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
+      >,
+      fieldName: "title" | "description" | "priority" | "tags"
     ) => {
-      if (e.key === 'Escape') {
+      if (e.key === "Escape") {
         handleFieldCancel();
-      } else if (e.key === 'Enter' && e.ctrlKey) {
+      } else if (e.key === "Enter" && e.ctrlKey) {
         handleFieldSave(fieldName);
       }
     },
@@ -763,14 +962,16 @@ export function TaskDetailPanel({ taskId, onClose, onTaskSelect }: TaskDetailPan
     try {
       const result = await commands.deleteTask(taskData.task.id, cascade);
 
-      if (result.status === 'error') {
+      if (result.status === "error") {
         setDeleteError(result.error.message);
       } else {
         setShowDeleteConfirmation(false);
         onClose?.();
       }
     } catch (err) {
-      setDeleteError(err instanceof Error ? err.message : 'Failed to delete task');
+      setDeleteError(
+        err instanceof Error ? err.message : "Failed to delete task"
+      );
     } finally {
       setIsDeleting(false);
     }
@@ -787,7 +988,9 @@ export function TaskDetailPanel({ taskId, onClose, onTaskSelect }: TaskDetailPan
     >
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
-        <h2 className="font-mono text-xs font-medium uppercase tracking-wider text-text-muted">Task Details</h2>
+        <h2 className="font-mono text-xs font-medium uppercase tracking-wider text-text-muted">
+          Task Details
+        </h2>
         <div className="flex items-center gap-2">
           {/* Run Workflow Button - only show if task has a workflow */}
           {taskData?.task.workflow_id && (
@@ -795,27 +998,58 @@ export function TaskDetailPanel({ taskId, onClose, onTaskSelect }: TaskDetailPan
               type="button"
               onClick={handleRunWorkflow}
               disabled={isRunning}
-              className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
-                isRunning
-                  ? 'cursor-not-allowed bg-primary/20 text-primary/50'
-                  : 'bg-primary/10 text-primary hover:bg-primary/20 hover:shadow-glow-sm'
-              }`}
-              aria-label={isRunning ? 'Running workflow...' : 'Run workflow'}
-              title={isRunning ? 'Running workflow...' : 'Run workflow for this task'}
+              className={`cursor-pointer flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary ${isRunning
+                ? "cursor-not-allowed bg-primary/20 text-primary/50"
+                : "bg-primary/10 text-primary hover:bg-primary/20 hover:shadow-glow-sm"
+                }`}
+              aria-label={isRunning ? "Running workflow..." : "Run workflow"}
+              title={
+                isRunning ? "Running workflow..." : "Run workflow for this task"
+              }
             >
               {isRunning ? (
                 <>
-                  <svg className="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  <svg
+                    className="h-3.5 w-3.5 animate-spin"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                    />
                   </svg>
                   <span>Running...</span>
                 </>
               ) : (
                 <>
-                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  <svg
+                    className="h-3.5 w-3.5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M14.752 11.168l-3.197-12.142A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"
+                    />
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                    />
                   </svg>
                   <span>Run</span>
                 </>
@@ -825,13 +1059,23 @@ export function TaskDetailPanel({ taskId, onClose, onTaskSelect }: TaskDetailPan
           {/* Edit Button */}
           <button
             type="button"
-            onClick={() => handleFieldClick('title')}
-            className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary bg-primary/10 text-primary hover:bg-primary/20 hover:shadow-glow-sm"
+            onClick={() => handleFieldClick("title")}
+            className="cursor-pointer flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary bg-primary/10 text-primary hover:bg-primary/20 hover:shadow-glow-sm"
             aria-label="Edit task"
             title="Edit this task"
           >
-            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+            <svg
+              className="h-3.5 w-3.5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+              />
             </svg>
             <span>Edit</span>
           </button>
@@ -839,12 +1083,22 @@ export function TaskDetailPanel({ taskId, onClose, onTaskSelect }: TaskDetailPan
           <button
             type="button"
             onClick={handleShowDeleteConfirmation}
-            className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-error bg-error/10 text-error hover:bg-error/20 hover:shadow-glow-sm"
+            className="cursor-pointer flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-error bg-error/10 text-error hover:bg-error/20 hover:shadow-glow-sm"
             aria-label="Delete task"
             title="Delete this task"
           >
-            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            <svg
+              className="h-3.5 w-3.5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M19 7l-.867 12.142A1 1 0 0016.138 21H7.862a1 1 0 00-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+              />
             </svg>
             <span>Delete</span>
           </button>
@@ -855,8 +1109,18 @@ export function TaskDetailPanel({ taskId, onClose, onTaskSelect }: TaskDetailPan
               className="rounded-lg p-1.5 text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               aria-label="Close panel"
             >
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" />
+              <svg
+                className="h-4 w-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.5}
+                  d="M6 18L18 6M6 6l12 12"
+                />
               </svg>
             </button>
           )}
@@ -874,8 +1138,18 @@ export function TaskDetailPanel({ taskId, onClose, onTaskSelect }: TaskDetailPan
               className="rounded p-0.5 text-error/60 hover:bg-error/10 hover:text-error"
               aria-label="Dismiss error"
             >
-              <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              <svg
+                className="h-3 w-3"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.5}
+                  d="M6 18L18 6M6 6l12 12"
+                />
               </svg>
             </button>
           </div>
@@ -901,12 +1175,26 @@ export function TaskDetailPanel({ taskId, onClose, onTaskSelect }: TaskDetailPan
           <div className="text-center">
             <div className="relative mx-auto mb-3 inline-block">
               <div className="absolute inset-0 rounded-full bg-error/20 blur-lg" />
-              <svg className="relative h-10 w-10 text-error" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              <svg
+                className="relative h-10 w-10 text-error"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.5}
+                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                />
               </svg>
             </div>
-            <p className="mb-2 text-sm font-medium text-text-primary">Failed to load task</p>
-            <p className="rounded-lg border border-error/20 bg-error/5 px-3 py-2 font-mono text-xs text-error">{error}</p>
+            <p className="mb-2 text-sm font-medium text-text-primary">
+              Failed to load task
+            </p>
+            <p className="rounded-lg border border-error/20 bg-error/5 px-3 py-2 font-mono text-xs text-error">
+              {error}
+            </p>
           </div>
         </div>
       )}
@@ -916,13 +1204,13 @@ export function TaskDetailPanel({ taskId, onClose, onTaskSelect }: TaskDetailPan
         <>
           {/* Task title */}
           <div className="border-b border-border px-4 py-3">
-            {editingField === 'title' ? (
+            {editingField === "title" ? (
               <div className="space-y-2">
                 <input
                   type="text"
                   value={editValues.title}
-                  onChange={(e) => handleFieldChange('title', e.target.value)}
-                  onKeyDown={(e) => handleKeyDown(e, 'title')}
+                  onChange={(e) => handleFieldChange("title", e.target.value)}
+                  onKeyDown={(e) => handleKeyDown(e, "title")}
                   autoFocus
                   disabled={isSubmitting}
                   className="w-full rounded border border-primary/30 bg-bg-secondary px-2 py-1.5 text-sm font-medium text-text-primary placeholder-text-muted focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-50"
@@ -930,25 +1218,27 @@ export function TaskDetailPanel({ taskId, onClose, onTaskSelect }: TaskDetailPan
                 />
                 <div className="flex gap-2">
                   <button
-                    onClick={() => handleFieldSave('title')}
+                    onClick={() => handleFieldSave("title")}
                     disabled={isSubmitting}
-                    className="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-50"
+                    className="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-50 cursor-pointer"
                   >
                     Save
                   </button>
                   <button
                     onClick={handleFieldCancel}
                     disabled={isSubmitting}
-                    className="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium bg-border text-text-muted hover:bg-border-hover disabled:opacity-50"
+                    className="flex items-center gap-1.5 rounded px-2 py-1 text-xs font-medium bg-border text-text-muted hover:bg-border-hover disabled:opacity-50 cursor-pointer"
                   >
                     Cancel
                   </button>
                 </div>
-                {fieldError && <p className="text-xs text-error">{fieldError}</p>}
+                {fieldError && (
+                  <p className="text-xs text-error">{fieldError}</p>
+                )}
               </div>
             ) : (
               <h3
-                onClick={() => handleFieldClick('title')}
+                onClick={() => handleFieldClick("title")}
                 className="text-sm font-medium leading-snug text-text-primary cursor-pointer hover:bg-bg-hover p-2 rounded"
               >
                 {taskData.task.title}
@@ -964,11 +1254,10 @@ export function TaskDetailPanel({ taskId, onClose, onTaskSelect }: TaskDetailPan
                   key={tab.id}
                   type="button"
                   onClick={() => setActiveTab(tab.id)}
-                  className={`relative flex flex-1 items-center justify-center gap-1.5 px-2 py-2.5 text-[11px] font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary ${
-                    activeTab === tab.id
-                      ? 'text-primary'
-                      : 'text-text-muted hover:text-text-secondary'
-                  }`}
+                  className={`relative flex flex-1 items-center justify-center gap-1.5 px-2 py-2.5 text-[11px] font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary ${activeTab === tab.id
+                    ? "text-primary"
+                    : "text-text-muted hover:text-text-secondary"
+                    }`}
                   aria-selected={activeTab === tab.id}
                   role="tab"
                 >
@@ -984,28 +1273,38 @@ export function TaskDetailPanel({ taskId, onClose, onTaskSelect }: TaskDetailPan
 
           {/* Tab content */}
           <div className="flex-1 overflow-auto">
-            {activeTab === 'details' && <TaskDetailsTab
-              taskData={taskData}
-              editingField={editingField}
-              editValues={editValues}
-              isSubmitting={isSubmitting}
-              fieldError={fieldError}
-              onFieldClick={handleFieldClick}
-              onFieldChange={handleFieldChange}
-              onFieldSave={handleFieldSave}
-              onFieldCancel={handleFieldCancel}
-              onKeyDown={handleKeyDown}
-              showDeleteConfirmation={showDeleteConfirmation}
-              deleteError={deleteError}
-              isDeleting={isDeleting}
-              cascade={cascade}
-              onCancelDelete={handleCancelDelete}
-              onConfirmDelete={handleConfirmDelete}
-              onCascadeChange={setCascade}
-            />}
-            {activeTab === 'sections' && <TaskSections sections={taskData.task.sections} taskId={taskData.task.id} onSectionsChanged={refetch} />}
-            {activeTab === 'code_refs' && <TaskCodeRefs codeRefs={taskData.task.code_refs} />}
-            {activeTab === 'relations' && (
+            {activeTab === "details" && (
+              <TaskDetailsTab
+                taskData={taskData}
+                editingField={editingField}
+                editValues={editValues}
+                isSubmitting={isSubmitting}
+                fieldError={fieldError}
+                onFieldClick={handleFieldClick}
+                onFieldChange={handleFieldChange}
+                onFieldSave={handleFieldSave}
+                onFieldCancel={handleFieldCancel}
+                onKeyDown={handleKeyDown}
+                showDeleteConfirmation={showDeleteConfirmation}
+                deleteError={deleteError}
+                isDeleting={isDeleting}
+                cascade={cascade}
+                onCancelDelete={handleCancelDelete}
+                onConfirmDelete={handleConfirmDelete}
+                onCascadeChange={setCascade}
+              />
+            )}
+            {activeTab === "sections" && (
+              <TaskSections
+                sections={taskData.task.sections}
+                taskId={taskData.task.id}
+                onSectionsChanged={refetch}
+              />
+            )}
+            {activeTab === "code_refs" && (
+              <TaskCodeRefs codeRefs={taskData.task.code_refs} />
+            )}
+            {activeTab === "relations" && (
               <TaskRelations
                 taskId={taskData.task.id}
                 parentId={taskData.parent_id}
@@ -1016,7 +1315,7 @@ export function TaskDetailPanel({ taskId, onClose, onTaskSelect }: TaskDetailPan
                 onRelationshipChange={refetch}
               />
             )}
-            {activeTab === 'history' && taskData.task.id && (
+            {activeTab === "history" && taskData.task.id && (
               <ExecutionHistory taskId={taskData.task.id} />
             )}
           </div>
