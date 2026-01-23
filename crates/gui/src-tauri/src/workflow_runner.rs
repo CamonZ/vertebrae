@@ -43,6 +43,28 @@ pub fn find_claude_binary() -> Result<PathBuf, String> {
     )
 }
 
+/// Parse orchestrator output from stdout, handling markdown-wrapped JSON
+fn parse_orchestrator_from_stdout(output: &str) -> Result<OrchestratorOutput, String> {
+    log::warn!("[WorkflowRunner] Parsing orchestrator output from stdout");
+
+    // Try to extract JSON from the output - handles markdown code blocks
+    let json_start = output.find('{');
+    let json_end = output.rfind('}');
+
+    match (json_start, json_end) {
+        (Some(start), Some(end)) if end > start => {
+            let json_str = &output[start..=end];
+            log::info!(
+                "[WorkflowRunner] Extracted JSON ({} chars) from stdout",
+                json_str.len()
+            );
+            OrchestratorOutput::from_json(json_str)
+                .map_err(|e| format!("Failed to parse JSON from stdout: {}", e))
+        }
+        _ => Err("Orchestrator did not produce valid JSON output".to_string()),
+    }
+}
+
 /// Execute a workflow for a task
 ///
 /// Fetches the task and its assigned workflow, then executes each step sequentially.
@@ -190,8 +212,16 @@ async fn execute_step_two_phase(
         run_orchestrator(&step, task_id, workflow_id, db, app_handle).await?;
 
     // Phase 2: Run execution agent with the generated prompt
-    let transition_result =
-        run_execution(&step, &exec_id, &orchestrator_output, db, app_handle).await?;
+    let transition_result = run_execution(
+        &step,
+        &exec_id,
+        task_id,
+        workflow_id,
+        &orchestrator_output,
+        db,
+        app_handle,
+    )
+    .await?;
 
     // Determine if we should continue based on transition result and auto_advance
     let should_continue = match transition_result.as_str() {
@@ -291,8 +321,12 @@ async fn run_orchestrator(
     let orchestrator_config = orchestrator_agent_config();
     let mut cmd = Command::new(&claude_path);
 
+    // Collect args for logging
+    let mut all_args: Vec<String> = Vec::new();
+
     // Add orchestrator agent config args
     for arg in orchestrator_config.to_cli_args() {
+        all_args.push(arg.clone());
         cmd.arg(arg);
     }
 
@@ -304,14 +338,32 @@ async fn run_orchestrator(
     let orchestrator_prompt = format!(
         "Analyze task {} at workflow step {} (step_id: {}).\n\
         Step goal: {}\n\
-        Generate the execution prompt and create a StepExecution record with:\n\
-        vtb execution create {} --prompt '<your-json-output>'\n\
-        Execution ID to update: {}",
-        task_id, step.name, step_id, step_goal, task_id, exec_id
+        Generate a JSON execution prompt with goal, steps, constraints, and success_criteria.",
+        task_id, step.name, step_id, step_goal
     );
+
+    // Log the orchestrator prompt for debugging
+    log::info!(
+        "[WorkflowRunner] Phase 1 orchestrator prompt:\n{}",
+        orchestrator_prompt
+    );
+
+    all_args.push("--print".to_string());
+    all_args.push(orchestrator_prompt.clone());
 
     cmd.arg("--print");
     cmd.arg(&orchestrator_prompt);
+
+    // Log the full CLI command
+    log::info!(
+        "[WorkflowRunner] Claude CLI command: {:?} {}",
+        claude_path,
+        all_args
+            .iter()
+            .map(|a| format!("{:?}", a))
+            .collect::<Vec<_>>()
+            .join(" ")
+    );
 
     // Set up pipes
     cmd.stdout(std::process::Stdio::piped())
@@ -342,6 +394,13 @@ async fn run_orchestrator(
         output.push_str(&line);
         line.clear();
     }
+
+    // Log raw output from orchestrator
+    log::info!(
+        "[WorkflowRunner] Orchestrator raw stdout ({} bytes):\n{}",
+        output.len(),
+        output
+    );
 
     // 6. Wait for completion
     let status = child
@@ -379,45 +438,21 @@ async fn run_orchestrator(
 
     log::info!("[WorkflowRunner] Orchestrator completed successfully");
 
-    // 7. Fetch the updated execution record to get the prompt
-    let updated_execution = db
-        .executions()
-        .get_execution(&exec_id)
-        .await
-        .map_err(|e| format!("Failed to get execution: {}", e))?
-        .ok_or_else(|| "Execution record not found".to_string())?;
+    // 7. Parse the orchestrator output JSON from stdout
+    let orchestrator_output = parse_orchestrator_from_stdout(&output)?;
 
-    // 8. Parse the orchestrator output as JSON
-    let orchestrator_output = if let Some(prompt_json) = updated_execution.prompt {
-        OrchestratorOutput::from_json(&prompt_json)
-            .map_err(|e| format!("Failed to parse orchestrator output: {}", e))?
-    } else {
-        // If orchestrator didn't create the prompt via vtb, try to parse from stdout
-        log::warn!("[WorkflowRunner] No prompt in execution record, trying to parse from stdout");
-
-        // Try to extract JSON from the output
-        let json_start = output.find('{');
-        let json_end = output.rfind('}');
-
-        match (json_start, json_end) {
-            (Some(start), Some(end)) if end > start => {
-                let json_str = &output[start..=end];
-                OrchestratorOutput::from_json(json_str)
-                    .map_err(|e| format!("Failed to parse JSON from stdout: {}", e))?
-            }
-            _ => {
-                return Err("Orchestrator did not produce valid JSON output".to_string());
-            }
-        }
-    };
-
-    // 9. Update execution with orchestrator output
+    // 8. Update execution record with raw orchestrator output and the generated prompt
+    let execution_prompt = orchestrator_output.to_execution_prompt(task_id);
     db.executions()
-        .update_execution(&exec_id, Some(output), None)
+        .update_execution(
+            &exec_id,
+            Some(output.clone()),
+            Some(execution_prompt.clone()),
+        )
         .await
         .map_err(|e| format!("Failed to update execution: {}", e))?;
 
-    // 10. Emit orchestrator completed event
+    // 9. Emit orchestrator completed event
     let _ = app_handle.emit(
         "workflow-execution-event",
         &WorkflowExecutionEvent {
@@ -434,6 +469,19 @@ async fn run_orchestrator(
         orchestrator_output.goal
     );
 
+    // Log full orchestrator output for debugging
+    log::info!(
+        "[WorkflowRunner] Orchestrator output:\n\
+         ├── Goal: {}\n\
+         ├── Steps: {:?}\n\
+         ├── Constraints: {:?}\n\
+         └── Success Criteria: {:?}",
+        orchestrator_output.goal,
+        orchestrator_output.steps,
+        orchestrator_output.constraints,
+        orchestrator_output.success_criteria
+    );
+
     Ok((exec_id, orchestrator_output))
 }
 
@@ -444,13 +492,12 @@ async fn run_orchestrator(
 async fn run_execution(
     step: &vertebrae_db::Step,
     exec_id: &str,
+    task_id: &str,
+    workflow_id: &str,
     orchestrator_output: &OrchestratorOutput,
     db: &Database,
     app_handle: &AppHandle,
 ) -> Result<String, String> {
-    let task_id = &orchestrator_output.context.task_id;
-    let workflow_id = &orchestrator_output.context.workflow_name;
-
     log::info!(
         "[WorkflowRunner] Phase 2: Running execution for step: {}",
         step.name
@@ -482,9 +529,6 @@ async fn run_execution(
         // Build config from step's agents and skills
         let mut config = vertebrae_db::AgentConfig::new();
 
-        // Add agents as --agent-path args (handled separately)
-        // Add skills (these would be added as allowed tools or via agents)
-
         // For now, use the step's goal as an append system prompt if available
         if let Some(ref goal) = step.goal {
             config = config.with_append_system_prompt(format!(
@@ -513,43 +557,13 @@ async fn run_execution(
     cmd.arg(PermissionMode::BypassPermissions.as_str());
 
     // Build the execution prompt from orchestrator output
-    let execution_prompt = format!(
-        "## Goal\n{}\n\n\
-        ## Context\n\
-        Task: {} - {}\n\
-        Workflow: {}\n\
-        Step: {}\n\n\
-        ## Steps to Execute\n{}\n\n\
-        ## Constraints\n{}\n\n\
-        ## Success Criteria\n{}\n\n\
-        When complete, use `vtb workflow advance {}` to advance to the next step, \
-        or `vtb workflow retreat {}` if changes are needed.",
-        orchestrator_output.goal,
-        orchestrator_output.context.task_id,
-        orchestrator_output.context.task_title,
-        orchestrator_output.context.workflow_name,
-        orchestrator_output.context.step_name,
-        orchestrator_output
-            .steps
-            .iter()
-            .enumerate()
-            .map(|(i, s)| format!("{}. {}", i + 1, s))
-            .collect::<Vec<_>>()
-            .join("\n"),
-        orchestrator_output
-            .constraints
-            .iter()
-            .map(|c| format!("- {}", c))
-            .collect::<Vec<_>>()
-            .join("\n"),
-        orchestrator_output
-            .success_criteria
-            .iter()
-            .map(|c| format!("- {}", c))
-            .collect::<Vec<_>>()
-            .join("\n"),
-        task_id,
-        task_id
+    // Note: success_criteria is NOT included in the prompt (used for evaluation later)
+    let execution_prompt = orchestrator_output.to_execution_prompt(task_id);
+
+    // Log the execution prompt for debugging
+    log::info!(
+        "[WorkflowRunner] Phase 2 execution prompt:\n{}",
+        execution_prompt
     );
 
     // Add execution prompt
@@ -670,9 +684,8 @@ async fn run_execution(
         .await
         .map_err(|e| format!("Failed to wait: {}", e))?;
 
-    // Determine transition result
-    let transition_result =
-        detected_transition.unwrap_or_else(|| orchestrator_output.transition_hint.to_string());
+    // Determine transition result - default to "advance" if not detected from executor output
+    let transition_result = detected_transition.unwrap_or_else(|| "advance".to_string());
 
     if status.success() {
         log::info!("[WorkflowRunner] Execution completed successfully");
