@@ -237,6 +237,7 @@ async deleteTask(taskId: string, cascade: boolean) : Promise<Result<null, Comman
  * 
  * Creates a new section with the given type and content.
  * For step and testing_criterion types, content can be optional.
+ * The order is automatically assigned based on existing sections of the same type.
  */
 async addSection(taskId: string, sectionType: string, content: string | null) : Promise<Result<null, CommandError>> {
     try {
@@ -461,6 +462,45 @@ async getStep(stepId: string) : Promise<Result<Step | null, CommandError>> {
 }
 },
 /**
+ * Create a new step for a workflow
+ * 
+ * Creates a new first-class Step entity with the given properties.
+ */
+async createStep(workflowId: string, name: string, goal: string | null, agents: string[], skills: string[], order: number, isFinal: boolean, transitionsTo: string[]) : Promise<Result<Step, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("create_step", { workflowId, name, goal, agents, skills, order, isFinal, transitionsTo }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Update an existing step
+ * 
+ * Updates the step with the given ID. Only fields that are Some will be updated.
+ */
+async updateStep(stepId: string, name: string | null, goal: string | null, agents: string[] | null, skills: string[] | null, order: number | null, isFinal: boolean | null, transitionsTo: string[] | null) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_step", { stepId, name, goal, agents, skills, order, isFinal, transitionsTo }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Delete a step
+ * 
+ * Deletes the step with the given ID.
+ */
+async deleteStep(stepId: string) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_step", { stepId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Start a workflow execution for a task
  */
 async runWorkflow(taskId: string) : Promise<Result<null, CommandError>> {
@@ -627,12 +667,14 @@ async deleteChatSession(sessionId: string) : Promise<Result<null, CommandError>>
 export const events = __makeEvents__<{
 ptyExitEvent: PtyExitEvent,
 ptyOutputEvent: PtyOutputEvent,
+stepChangedEvent: StepChangedEvent,
 taskChangedEvent: TaskChangedEvent,
 workflowChangedEvent: WorkflowChangedEvent,
 workflowExecutionEvent: WorkflowExecutionEvent
 }>({
 ptyExitEvent: "pty-exit-event",
 ptyOutputEvent: "pty-output-event",
+stepChangedEvent: "step-changed-event",
 taskChangedEvent: "task-changed-event",
 workflowChangedEvent: "workflow-changed-event",
 workflowExecutionEvent: "workflow-execution-event"
@@ -897,6 +939,14 @@ workflow_id: string;
  */
 goal: string | null; 
 /**
+ * Paths to .claude/agents/ files for this step
+ */
+agents?: string[]; 
+/**
+ * Skill names available for this step
+ */
+skills?: string[]; 
+/**
  * Agent configuration for this step
  */
 agent_config: AgentConfig; 
@@ -920,6 +970,15 @@ created_at: string | null;
  * Last update timestamp (ISO 8601 string)
  */
 updated_at: string | null }
+/**
+ * The type of change that occurred on a step.
+ */
+export type StepChangeType = "Created" | "Updated" | "Deleted"
+/**
+ * Event payload for step changes.
+ * Emitted when a step is created, updated, or deleted.
+ */
+export type StepChangedEvent = { step_id: string; workflow_id: string; change_type: StepChangeType }
 /**
  * Step execution record - mirrors db::StepExecution
  */

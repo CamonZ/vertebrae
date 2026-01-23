@@ -748,6 +748,227 @@ pub async fn get_step(
     }
 }
 
+/// Create a new step for a workflow
+///
+/// Creates a new first-class Step entity with the given properties.
+#[tauri::command]
+#[specta::specta]
+#[allow(clippy::too_many_arguments)]
+pub async fn create_step(
+    state: State<'_, AppState>,
+    workflow_id: String,
+    name: String,
+    goal: Option<String>,
+    agents: Vec<String>,
+    skills: Vec<String>,
+    order: i32,
+    is_final: bool,
+    transitions_to: Vec<String>,
+) -> Result<Step, CommandError> {
+    log::info!(
+        "create_step called: workflow={}, name={}, order={}",
+        workflow_id,
+        name,
+        order
+    );
+    let service_guard = state.service.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    #[allow(deprecated)]
+    let db = service.database();
+    let workflow_thing = surrealdb::sql::Thing::from(("workflow", workflow_id.as_str()));
+
+    // Build transitions_to list
+    let transitions: Vec<surrealdb::sql::Thing> = transitions_to
+        .iter()
+        .map(|id| surrealdb::sql::Thing::from(("step", id.as_str())))
+        .collect();
+
+    // Build the step
+    let mut step = vertebrae_db::Step::new(&name, workflow_thing)
+        .with_agents(agents)
+        .with_skills(skills)
+        .with_order(order)
+        .with_is_final(is_final)
+        .with_transitions_to(transitions);
+
+    if let Some(goal) = goal {
+        step = step.with_goal(&goal);
+    }
+
+    match db.steps().create(&step).await {
+        Ok(created) => {
+            log::info!("create_step succeeded: {:?}", created.id);
+            Ok(created.into())
+        }
+        Err(e) => {
+            log::error!("create_step error: {:?}", e);
+            Err(e.into())
+        }
+    }
+}
+
+/// Update an existing step
+///
+/// Updates the step with the given ID. Only fields that are Some will be updated.
+#[tauri::command]
+#[specta::specta]
+#[allow(clippy::too_many_arguments)]
+pub async fn update_step(
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+    step_id: String,
+    name: Option<String>,
+    goal: Option<String>,
+    agents: Option<Vec<String>>,
+    skills: Option<Vec<String>>,
+    order: Option<i32>,
+    is_final: Option<bool>,
+    transitions_to: Option<Vec<String>>,
+) -> Result<(), CommandError> {
+    log::info!(
+        "update_step called with step_id: '{}', name: {:?}, goal: {:?}, agents: {:?}, skills: {:?}, order: {:?}, is_final: {:?}, transitions_to: {:?}",
+        step_id,
+        name,
+        goal,
+        agents,
+        skills,
+        order,
+        is_final,
+        transitions_to
+    );
+    let service_guard = state.service.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    #[allow(deprecated)]
+    let db = service.database();
+
+    // Verify step exists
+    let existing = db.steps().get(&step_id).await?;
+    if existing.is_none() {
+        return Err(CommandError {
+            message: format!("Step not found: {}", step_id),
+        });
+    }
+
+    // Build the update
+    let mut update = vertebrae_db::StepUpdate::new();
+
+    if let Some(name) = name {
+        update = update.with_name(&name);
+    }
+
+    if let Some(goal) = goal {
+        update = update.with_goal(&goal);
+    }
+
+    if let Some(agents) = agents {
+        update = update.with_agents(agents);
+    }
+
+    if let Some(skills) = skills {
+        update = update.with_skills(skills);
+    }
+
+    if let Some(order) = order {
+        update = update.with_order(order);
+    }
+
+    if let Some(is_final) = is_final {
+        update = update.with_is_final(is_final);
+    }
+
+    if let Some(transitions) = transitions_to {
+        let transition_things: Vec<surrealdb::sql::Thing> = transitions
+            .iter()
+            .map(|id| surrealdb::sql::Thing::from(("step", id.as_str())))
+            .collect();
+        update = update.with_transitions_to(transition_things);
+    }
+
+    match db.steps().update(&step_id, &update).await {
+        Ok(_) => {
+            log::info!("update_step succeeded for step: {}", step_id);
+
+            // Get the step to find its workflow_id
+            if let Some(step) = db.steps().get(&step_id).await? {
+                // Emit step changed event for detail panel listeners
+                if let Some(id) = step.id {
+                    let _ = app_handle.emit(
+                        "step-changed-event",
+                        crate::events::StepChangedEvent {
+                            step_id: id.id.to_raw(),
+                            workflow_id: step.workflow_id.id.to_raw(),
+                            change_type: crate::events::StepChangeType::Updated,
+                        },
+                    );
+                }
+            }
+
+            Ok(())
+        }
+        Err(e) => {
+            log::error!("update_step error: {:?}", e);
+            Err(e.into())
+        }
+    }
+}
+
+/// Delete a step
+///
+/// Deletes the step with the given ID.
+#[tauri::command]
+#[specta::specta]
+pub async fn delete_step(
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+    step_id: String,
+) -> Result<(), CommandError> {
+    log::info!("delete_step called for step: {}", step_id);
+    let service_guard = state.service.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    #[allow(deprecated)]
+    let db = service.database();
+
+    // Verify step exists and capture workflow_id before deletion
+    let existing = db.steps().get(&step_id).await?;
+    if existing.is_none() {
+        return Err(CommandError {
+            message: format!("Step not found: {}", step_id),
+        });
+    }
+    let workflow_id = existing.unwrap().workflow_id.id.to_raw();
+
+    match db.steps().delete(&step_id).await {
+        Ok(_) => {
+            log::info!("delete_step succeeded for step: {}", step_id);
+
+            // Emit step changed event for detail panel listeners
+            let _ = app_handle.emit(
+                "step-changed-event",
+                crate::events::StepChangedEvent {
+                    step_id: step_id.clone(),
+                    workflow_id,
+                    change_type: crate::events::StepChangeType::Deleted,
+                },
+            );
+
+            Ok(())
+        }
+        Err(e) => {
+            log::error!("delete_step error: {:?}", e);
+            Err(e.into())
+        }
+    }
+}
+
 // ============================================================================
 // Workflow Execution Commands
 // ============================================================================
@@ -2678,7 +2899,6 @@ mod tests {
                 refs: Vec::new(),
             };
             service.add_section(&task_id, step).await.unwrap();
-
             task_id
         };
 

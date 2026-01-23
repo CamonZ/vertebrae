@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import {
   ReactFlow,
   Controls,
@@ -87,8 +87,8 @@ function AllWorkflowsPipelineInner() {
   // State for selected task (for detail panel)
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
 
-  // State for selected step (for step config panel)
-  const [selectedStep, setSelectedStep] = useState<Step | null>(null);
+  // State for selected step ID (for step config panel)
+  const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
 
   // State for selected workflow (for workflow detail panel)
   const [selectedWorkflow, setSelectedWorkflow] = useState<Workflow | null>(
@@ -112,7 +112,7 @@ function AllWorkflowsPipelineInner() {
   // Task selection handlers
   const handleTaskClick = useCallback((taskId: string) => {
     setSelectedTaskId(taskId);
-    setSelectedStep(null); // Clear step selection when task is selected
+    setSelectedStepId(null); // Clear step selection when task is selected
   }, []);
 
   const handleCloseTaskPanel = useCallback(() => {
@@ -121,12 +121,12 @@ function AllWorkflowsPipelineInner() {
 
   const handleRelatedTaskSelect = useCallback((taskId: string) => {
     setSelectedTaskId(taskId);
-    setSelectedStep(null);
+    setSelectedStepId(null);
   }, []);
 
   // Step selection handlers
   const handleStepClick = useCallback((step: Step) => {
-    setSelectedStep(step);
+    setSelectedStepId(step.id || null);
     setSelectedTaskId(null); // Clear task selection when step is selected
     setSelectedWorkflow(null); // Clear workflow selection
   }, []);
@@ -135,7 +135,7 @@ function AllWorkflowsPipelineInner() {
   const handleWorkflowClick = useCallback((workflow: Workflow) => {
     setSelectedWorkflow(workflow);
     setSelectedTaskId(null); // Clear task selection
-    setSelectedStep(null); // Clear step selection
+    setSelectedStepId(null); // Clear step selection
     setSelectedZone(null); // Clear zone selection
   }, []);
 
@@ -144,14 +144,14 @@ function AllWorkflowsPipelineInner() {
   }, []);
 
   const handleCloseStepPanel = useCallback(() => {
-    setSelectedStep(null);
+    setSelectedStepId(null);
   }, []);
 
   // Zone selection handlers (for filtered tasks panel)
   const handleZoneClick = useCallback((workflowId: string, step: Step) => {
     setSelectedZone({ workflowId, step });
     setSelectedTaskId(null); // Clear task selection
-    setSelectedStep(null); // Clear step config selection
+    setSelectedStepId(null); // Clear step config selection
   }, []);
 
   const handleCloseZonePanel = useCallback(() => {
@@ -241,6 +241,23 @@ function AllWorkflowsPipelineInner() {
     }
   }, [workflows, addToast]);
 
+  // Store fetchAllWorkflowData in a ref to avoid dependency cycles
+  const fetchAllWorkflowDataRef = useRef(fetchAllWorkflowData);
+  useEffect(() => {
+    fetchAllWorkflowDataRef.current = fetchAllWorkflowData;
+  }, [fetchAllWorkflowData]);
+
+  // Handle step updates (refetch workflow steps)
+  const handleStepUpdated = useCallback(async () => {
+    await fetchAllWorkflowDataRef.current();
+  }, []);
+
+  // Handle step deletion (refetch and close panel)
+  const handleStepDeleted = useCallback(async () => {
+    await fetchAllWorkflowDataRef.current();
+    setSelectedStepId(null);
+  }, []);
+
   // Fetch task details and steps for all workflows
   useEffect(() => {
     fetchAllWorkflowData();
@@ -255,6 +272,9 @@ function AllWorkflowsPipelineInner() {
   useTaskChangeListener({
     onTaskListChange: fetchAllWorkflowData,
   });
+
+  // Note: StepDetailPanel now handles its own data fetching via useStep hook
+  // and listens to StepChangedEvent for updates, so we don't need to sync here
 
   // Calculate workflow zone dimensions for ELK layout
   // Always use expanded dimensions for consistent positioning
@@ -376,9 +396,7 @@ function AllWorkflowsPipelineInner() {
       if (!isCollapsed) {
         // Add step nodes within this workflow zone
         sortedSteps.forEach((step, index) => {
-          const isStepSelected =
-            selectedStep?.name === step.name &&
-            selectedStep?.order === step.order;
+          const isStepSelected = selectedStepId === step.id;
           nodes.push({
             id: `step-${workflowId}-${step.order}`,
             type: "stepNode",
@@ -455,7 +473,7 @@ function AllWorkflowsPipelineInner() {
     handleTaskClick,
     selectedTaskId,
     handleStepClick,
-    selectedStep,
+    selectedStepId,
     handleZoneClick,
     selectedZone,
     handleWorkflowClick,
@@ -740,8 +758,14 @@ function AllWorkflowsPipelineInner() {
       )}
 
       {/* Step Detail Panel */}
-      {selectedStep && (
-        <StepDetailPanel step={selectedStep} onClose={handleCloseStepPanel} />
+      {selectedStepId && (
+        <StepDetailPanel
+          stepId={selectedStepId}
+          allSteps={Array.from(workflowStepsMap.values()).flat()}
+          onClose={handleCloseStepPanel}
+          onUpdated={handleStepUpdated}
+          onDeleted={handleStepDeleted}
+        />
       )}
 
       {/* Workflow Detail Panel */}

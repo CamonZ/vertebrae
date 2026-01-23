@@ -8,6 +8,8 @@ export { useTaskChangeListener } from "./useTaskChangeListener";
 export { useWorkflows } from "./useWorkflows";
 export { useWorkflow } from "./useWorkflow";
 export { useWorkflowChangeListener } from "./useWorkflowChangeListener";
+export { useStep } from "./useStep";
+export { useStepChangeListener } from "./useStepChangeListener";
 export { useTheme } from "./useTheme";
 export { useExpandedNodes } from "./useExpandedNodes";
 export { useResizableColumns } from "./useResizableColumns";

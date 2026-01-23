@@ -11,8 +11,10 @@ import { TaskSections } from "./TaskSections";
 import { TaskCodeRefs } from "./TaskCodeRefs";
 import { TaskRelations } from "./TaskRelations";
 import { ExecutionHistory } from "./ExecutionHistory";
+import { DeleteConfirmation } from "../DeleteConfirmation";
 import { ResizablePanel } from "../ResizablePanel";
 import { InlineEditField } from "./InlineEditField";
+import { Toggle } from "../Toggle";
 
 /** Debounce delay in milliseconds for batching rapid events */
 const DEBOUNCE_MS = 100;
@@ -486,22 +488,12 @@ function TaskDetailsTab({
           <h3 className="font-mono text-[10px] uppercase tracking-wider text-text-muted">
             Human Review
           </h3>
-          <button
-            type="button"
-            onClick={() => onUpdateField("needs_human_review", !(task.needs_human_review ?? false))}
-            className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-bg-primary ${
-              task.needs_human_review ? "bg-warning" : "bg-bg-tertiary"
-            }`}
-            role="switch"
-            aria-checked={task.needs_human_review ?? false}
-            aria-label="Toggle human review requirement"
-          >
-            <span
-              className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                task.needs_human_review ? "translate-x-5" : "translate-x-0"
-              }`}
-            />
-          </button>
+          <Toggle
+            checked={task.needs_human_review ?? false}
+            onChange={(checked) => onUpdateField("needs_human_review", checked)}
+            label="Toggle human review requirement"
+            activeColor="warning"
+          />
         </div>
         {task.needs_human_review && (
           <p className="mt-2 text-xs text-warning">This task requires human review before completion</p>
@@ -559,98 +551,47 @@ function TaskDetailsTab({
 
       {/* Delete Confirmation Section */}
       {showDeleteConfirmation && (
-        <div className="border-t border-error/20 bg-error/5 p-4">
-          <div className="space-y-3">
-            <div>
-              <h4 className="text-sm font-semibold text-error">Delete Task?</h4>
-              <p className="mt-1 text-sm text-text-secondary">
-                Are you sure you want to delete{" "}
-                <span className="font-medium">{task.title}</span>?
+        <DeleteConfirmation
+          itemType="Task"
+          itemName={task.title}
+          isDeleting={isDeleting}
+          error={deleteError}
+          onConfirm={onConfirmDelete}
+          onCancel={onCancelDelete}
+        >
+          {taskData.children_ids && taskData.children_ids.length > 0 && (
+            <div className="rounded border border-warning/20 bg-warning/5 p-2.5">
+              <p className="text-xs text-warning font-medium mb-2">
+                This task has {taskData.children_ids.length} child task
+                {taskData.children_ids.length !== 1 ? "s" : ""}
               </p>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={cascade}
+                  onChange={(e) => onCascadeChange(e.target.checked)}
+                  disabled={isDeleting}
+                  className="rounded border border-border"
+                />
+                <span className="text-xs text-text-secondary">
+                  Delete all child tasks
+                </span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer mt-1.5">
+                <input
+                  type="checkbox"
+                  checked={!cascade}
+                  onChange={(e) => onCascadeChange(!e.target.checked)}
+                  disabled={isDeleting}
+                  className="rounded border border-border"
+                />
+                <span className="text-xs text-text-secondary">
+                  Keep child tasks without parent
+                </span>
+              </label>
             </div>
-
-            {taskData.children_ids && taskData.children_ids.length > 0 && (
-              <div className="rounded border border-warning/20 bg-warning/5 p-2.5">
-                <p className="text-xs text-warning font-medium mb-2">
-                  This task has {taskData.children_ids.length} child task
-                  {taskData.children_ids.length !== 1 ? "s" : ""}
-                </p>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={cascade}
-                    onChange={(e) => onCascadeChange(e.target.checked)}
-                    disabled={isDeleting}
-                    className="rounded border border-border"
-                  />
-                  <span className="text-xs text-text-secondary">
-                    Delete all child tasks
-                  </span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer mt-1.5">
-                  <input
-                    type="checkbox"
-                    checked={!cascade}
-                    onChange={(e) => onCascadeChange(!e.target.checked)}
-                    disabled={isDeleting}
-                    className="rounded border border-border"
-                  />
-                  <span className="text-xs text-text-secondary">
-                    Keep child tasks without parent
-                  </span>
-                </label>
-              </div>
-            )}
-
-            {deleteError && (
-              <p className="text-xs text-error bg-error/10 p-2 rounded">
-                {deleteError}
-              </p>
-            )}
-
-            <div className="flex gap-2">
-              <button
-                onClick={onConfirmDelete}
-                disabled={isDeleting}
-                className="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-medium bg-error/10 text-error hover:bg-error/20 disabled:opacity-50 cursor-pointer"
-              >
-                {isDeleting ? (
-                  <>
-                    <svg
-                      className="h-3.5 w-3.5 animate-spin"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                    >
-                      <circle
-                        className="opacity-25"
-                        cx="12"
-                        cy="12"
-                        r="10"
-                        stroke="currentColor"
-                        strokeWidth="4"
-                      />
-                      <path
-                        className="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                      />
-                    </svg>
-                    <span>Deleting...</span>
-                  </>
-                ) : (
-                  <span>Confirm Delete</span>
-                )}
-              </button>
-              <button
-                onClick={onCancelDelete}
-                disabled={isDeleting}
-                className="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-medium bg-border text-text-muted hover:bg-border-hover disabled:opacity-50 cursor-pointer"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
+          )}
+        </DeleteConfirmation>
       )}
     </div>
   );

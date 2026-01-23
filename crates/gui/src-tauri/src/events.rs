@@ -45,6 +45,23 @@ pub enum WorkflowChangeType {
     TaskRejected,
 }
 
+/// Event payload for step changes.
+/// Emitted when a step is created, updated, or deleted.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct StepChangedEvent {
+    pub step_id: String,
+    pub workflow_id: String,
+    pub change_type: StepChangeType,
+}
+
+/// The type of change that occurred on a step.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub enum StepChangeType {
+    Created,
+    Updated,
+    Deleted,
+}
+
 /// Event payload for workflow execution progress.
 /// Emitted during workflow step execution to track progress.
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]

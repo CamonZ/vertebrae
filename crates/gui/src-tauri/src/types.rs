@@ -467,6 +467,12 @@ pub struct Step {
     pub workflow_id: String,
     /// What this step should accomplish
     pub goal: Option<String>,
+    /// Paths to .claude/agents/ files for this step
+    #[serde(default)]
+    pub agents: Vec<String>,
+    /// Skill names available for this step
+    #[serde(default)]
+    pub skills: Vec<String>,
     /// Agent configuration for this step
     pub agent_config: AgentConfig,
     /// Whether this is a final step (no outgoing transitions)
@@ -488,6 +494,8 @@ impl From<vertebrae_db::Step> for Step {
             name: step.name,
             workflow_id: step.workflow_id.id.to_raw(),
             goal: step.goal,
+            agents: step.agents,
+            skills: step.skills,
             agent_config: step.agent_config.into(),
             is_final: step.is_final,
             transitions_to: step.transitions_to.iter().map(|t| t.id.to_raw()).collect(),

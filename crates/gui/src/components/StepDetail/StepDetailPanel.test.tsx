@@ -1,18 +1,42 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { StepDetailPanel } from "./StepDetailPanel";
 import type { Step } from "../../bindings";
+import * as hooks from "../../hooks";
+import * as bindings from "../../bindings";
+
+// Mock the hooks
+vi.mock("../../hooks", () => ({
+  useStep: vi.fn(),
+  useStepChangeListener: vi.fn(),
+}));
+
+// Mock the bindings commands
+vi.mock("../../bindings", async () => {
+  const actual = await vi.importActual("../../bindings");
+  return {
+    ...actual,
+    commands: {
+      updateStep: vi.fn(),
+      deleteStep: vi.fn(),
+    },
+  };
+});
+
+// confirm is already defined globally, so we just mock it in tests
 
 // Helper to create a step with defaults
 function createStep(overrides?: Partial<Step>): Step {
   return {
-    id: null,
+    id: "step-test",
     name: "Test Step",
     workflow_id: "workflow-1",
     order: 0,
     is_final: false,
     transitions_to: [],
+    agents: [],
+    skills: [],
     goal: null,
     created_at: null,
     updated_at: null,
@@ -36,355 +60,267 @@ function createStep(overrides?: Partial<Step>): Step {
 }
 
 describe("StepDetailPanel", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Default mock setup
+    vi.mocked(hooks.useStep).mockReturnValue({
+      step: createStep(),
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    vi.mocked(hooks.useStepChangeListener).mockReturnValue(undefined);
+  });
+
   describe("rendering", () => {
-    it("returns null when step is null", () => {
+    it("returns null when step is not loaded", () => {
+      vi.mocked(hooks.useStep).mockReturnValue({
+        step: null,
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
+
       const { container } = render(
-        <StepDetailPanel step={null} />
+        <StepDetailPanel stepId="step-test" allSteps={[]} />
       );
       expect(container.firstChild).toBeNull();
     });
 
     it("renders panel header with 'Step Configuration' title", () => {
-      const step = createStep();
-      render(<StepDetailPanel step={step} />);
-
+      render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
       expect(screen.getByText("Step Configuration")).toBeInTheDocument();
     });
 
-    it("renders step name in panel title", () => {
+    it("renders step name in editable field", () => {
       const step = createStep({ name: "Development" });
-      render(<StepDetailPanel step={step} />);
+      vi.mocked(hooks.useStep).mockReturnValue({
+        step,
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
 
-      expect(screen.getByRole("heading", { name: "Development" })).toBeInTheDocument();
+      render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
+      expect(screen.getByText("Development")).toBeInTheDocument();
     });
 
     it("renders step order badge (1-indexed)", () => {
       const step = createStep({ order: 2 });
-      render(<StepDetailPanel step={step} />);
+      vi.mocked(hooks.useStep).mockReturnValue({
+        step,
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
 
+      render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
       // Order 2 displays as "3" (1-indexed)
       expect(screen.getByText("3")).toBeInTheDocument();
     });
 
-    it("renders step position text", () => {
-      const step = createStep({ order: 1 });
-      render(<StepDetailPanel step={step} />);
-
-      expect(screen.getByText("Step 2 in workflow")).toBeInTheDocument();
-    });
-
     it("displays goal when configured", () => {
       const step = createStep({ goal: "Complete the implementation task" });
-      render(<StepDetailPanel step={step} />);
+      vi.mocked(hooks.useStep).mockReturnValue({
+        step,
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
 
+      render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
       expect(screen.getByText("Complete the implementation task")).toBeInTheDocument();
     });
 
-    it("does not display goal when not configured", () => {
-      const step = createStep({ goal: null });
-      render(<StepDetailPanel step={step} />);
+    it("displays agents section with count", () => {
+      const step = createStep({ agents: [".claude/agents/reviewer.md"] });
+      vi.mocked(hooks.useStep).mockReturnValue({
+        step,
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
 
-      expect(screen.queryByText("Complete the implementation task")).not.toBeInTheDocument();
+      render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
+      expect(screen.getByText("Agents (1)")).toBeInTheDocument();
+      expect(screen.getByText(".claude/agents/reviewer.md")).toBeInTheDocument();
+    });
+
+    it("displays skills section with count", () => {
+      const step = createStep({ skills: ["code-review", "security-audit"] });
+      vi.mocked(hooks.useStep).mockReturnValue({
+        step,
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
+
+      render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
+      expect(screen.getByText("Skills (2)")).toBeInTheDocument();
+      expect(screen.getByText("code-review")).toBeInTheDocument();
+      expect(screen.getByText("security-audit")).toBeInTheDocument();
+    });
+
+    it("displays final step toggle", () => {
+      const step = createStep({ is_final: true });
+      vi.mocked(hooks.useStep).mockReturnValue({
+        step,
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
+
+      render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
+      expect(screen.getByText(/final step/i)).toBeInTheDocument();
+    });
+
+    it("displays transitions section", () => {
+      const step1 = createStep({ id: "step-1", name: "Step 1" });
+      const step2 = createStep({ id: "step-2", name: "Step 2" });
+      const step = createStep({
+        transitions_to: ["step-1", "step-2"],
+      });
+      vi.mocked(hooks.useStep).mockReturnValue({
+        step,
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
+
+      render(<StepDetailPanel stepId="step-test" allSteps={[step1, step2]} />);
+      expect(screen.getByText("Transitions (2)")).toBeInTheDocument();
+      expect(screen.getByText("Step 1")).toBeInTheDocument();
+      expect(screen.getByText("Step 2")).toBeInTheDocument();
+    });
+
+    it("displays model section", () => {
+      const step = createStep({
+        agent_config: {
+          model: "opus",
+          fallback_model: null,
+          system_prompt: null,
+          append_system_prompt: null,
+          tools: ["browser"],
+          allowed_tools: [],
+          disallowed_tools: [],
+          permission_mode: null,
+          max_budget_usd: null,
+          mcp_config: [],
+          plugin_dirs: [],
+          agents: null,
+          json_schema: null,
+        },
+      });
+      vi.mocked(hooks.useStep).mockReturnValue({
+        step,
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
+
+      render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
+      expect(screen.getByText("Model")).toBeInTheDocument();
+      expect(screen.getByText("opus")).toBeInTheDocument();
+    });
+
+    it("displays timeline section", () => {
+      const now = new Date().toISOString();
+      const step = createStep({
+        created_at: now,
+        updated_at: now,
+      });
+      vi.mocked(hooks.useStep).mockReturnValue({
+        step,
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
+
+      render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
+      expect(screen.getByText("Timeline")).toBeInTheDocument();
     });
   });
 
-  describe("transitions", () => {
-    it("displays transitions_to section when transitions exist", () => {
-      const step = createStep({
-        transitions_to: ["step:in_progress", "step:done"],
+  describe("delete", () => {
+    it("shows delete button", () => {
+      render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
+      expect(screen.getByLabelText("Delete step")).toBeInTheDocument();
+    });
+
+    it("shows confirmation section when delete is clicked", async () => {
+      const user = userEvent.setup();
+
+      render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
+
+      const deleteButton = screen.getByLabelText("Delete step");
+      await user.click(deleteButton);
+
+      // Confirmation section should appear
+      expect(screen.getByText("Delete Step?")).toBeInTheDocument();
+      expect(screen.getByText(/Are you sure you want to delete/)).toBeInTheDocument();
+      expect(screen.getByText("Confirm Delete")).toBeInTheDocument();
+      expect(screen.getByText("Cancel")).toBeInTheDocument();
+      expect(bindings.commands.deleteStep).not.toHaveBeenCalled();
+    });
+
+    it("hides confirmation when cancel is clicked", async () => {
+      const user = userEvent.setup();
+
+      render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
+
+      // Show confirmation
+      await user.click(screen.getByLabelText("Delete step"));
+      expect(screen.getByText("Delete Step?")).toBeInTheDocument();
+
+      // Click cancel
+      await user.click(screen.getByText("Cancel"));
+
+      // Confirmation should be hidden
+      expect(screen.queryByText("Delete Step?")).not.toBeInTheDocument();
+    });
+
+    it("calls deleteStep when confirmed", async () => {
+      const user = userEvent.setup();
+      const onDeleted = vi.fn();
+
+      vi.mocked(bindings.commands.deleteStep).mockResolvedValue({
+        status: "ok",
+        data: null,
       });
-      render(<StepDetailPanel step={step} />);
 
-      expect(screen.getByText("Transitions To")).toBeInTheDocument();
-      expect(screen.getByText("in_progress")).toBeInTheDocument();
-      expect(screen.getByText("done")).toBeInTheDocument();
-    });
+      render(<StepDetailPanel stepId="step-test" allSteps={[]} onDeleted={onDeleted} />);
 
-    it("strips step: prefix from transition IDs", () => {
-      const step = createStep({
-        transitions_to: ["step:review"],
-      });
-      render(<StepDetailPanel step={step} />);
+      // Show confirmation
+      await user.click(screen.getByLabelText("Delete step"));
 
-      expect(screen.getByText("review")).toBeInTheDocument();
-      expect(screen.queryByText("step:review")).not.toBeInTheDocument();
-    });
+      // Confirm delete
+      await user.click(screen.getByText("Confirm Delete"));
 
-    it("does not show transitions section when no transitions", () => {
-      const step = createStep({ transitions_to: [] });
-      render(<StepDetailPanel step={step} />);
-
-      expect(screen.queryByText("Transitions To")).not.toBeInTheDocument();
-    });
-  });
-
-  describe("model configuration", () => {
-    it("shows 'Default' when no model is configured", () => {
-      const step = createStep({
-        agent_config: {
-          ...createStep().agent_config,
-          model: null,
-        },
-      });
-      render(<StepDetailPanel step={step} />);
-
-      // Find the Model section and verify it shows Default
-      const modelSection = screen.getByText("Model").closest("div");
-      expect(modelSection).toBeInTheDocument();
-      // Both model and permission mode show "Default", which is correct behavior
-      expect(screen.getAllByText("Default")).toHaveLength(2);
-    });
-
-    it("displays configured model name", () => {
-      const step = createStep({
-        agent_config: {
-          ...createStep().agent_config,
-          model: "claude-3-opus",
-        },
-      });
-      render(<StepDetailPanel step={step} />);
-
-      expect(screen.getByText("claude-3-opus")).toBeInTheDocument();
-    });
-
-    it("displays fallback model when configured", () => {
-      const step = createStep({
-        agent_config: {
-          ...createStep().agent_config,
-          model: "claude-3-opus",
-          fallback_model: "claude-3-sonnet",
-        },
-      });
-      render(<StepDetailPanel step={step} />);
-
-      expect(screen.getByText("claude-3-sonnet")).toBeInTheDocument();
-    });
-  });
-
-  describe("system prompt", () => {
-    it("displays system prompt override when configured", () => {
-      const step = createStep({
-        agent_config: {
-          ...createStep().agent_config,
-          system_prompt: "You are a helpful assistant",
-        },
-      });
-      render(<StepDetailPanel step={step} />);
-
-      expect(screen.getByText("System Prompt")).toBeInTheDocument();
-      expect(screen.getByText("You are a helpful assistant")).toBeInTheDocument();
-    });
-
-    it("displays append system prompt when configured", () => {
-      const step = createStep({
-        agent_config: {
-          ...createStep().agent_config,
-          append_system_prompt: "Additional instructions here",
-        },
-      });
-      render(<StepDetailPanel step={step} />);
-
-      expect(screen.getByText("System Prompt")).toBeInTheDocument();
-      expect(screen.getByText("Additional instructions here")).toBeInTheDocument();
-    });
-
-    it("does not show system prompt section when none configured", () => {
-      const step = createStep();
-      render(<StepDetailPanel step={step} />);
-
-      expect(screen.queryByText("System Prompt")).not.toBeInTheDocument();
-    });
-  });
-
-  describe("tools configuration", () => {
-    it("displays built-in tools count in header", () => {
-      const step = createStep({
-        agent_config: {
-          ...createStep().agent_config,
-          tools: ["read", "write", "execute"],
-          allowed_tools: ["bash"],
-        },
-      });
-      render(<StepDetailPanel step={step} />);
-
-      // Total tools = 3 + 1 = 4
-      expect(screen.getByText("Tools (4)")).toBeInTheDocument();
-    });
-
-    it("displays built-in tools as tags", () => {
-      const step = createStep({
-        agent_config: {
-          ...createStep().agent_config,
-          tools: ["read", "write"],
-        },
-      });
-      render(<StepDetailPanel step={step} />);
-
-      expect(screen.getByText("read")).toBeInTheDocument();
-      expect(screen.getByText("write")).toBeInTheDocument();
-    });
-
-    it("displays allowed tools", () => {
-      const step = createStep({
-        agent_config: {
-          ...createStep().agent_config,
-          allowed_tools: ["bash", "python"],
-        },
-      });
-      render(<StepDetailPanel step={step} />);
-
-      expect(screen.getByText("bash")).toBeInTheDocument();
-      expect(screen.getByText("python")).toBeInTheDocument();
-    });
-
-    it("displays disallowed tools with error styling", () => {
-      const step = createStep({
-        agent_config: {
-          ...createStep().agent_config,
-          disallowed_tools: ["dangerous_tool"],
-        },
-      });
-      render(<StepDetailPanel step={step} />);
-
-      expect(screen.getByText("dangerous_tool")).toBeInTheDocument();
-    });
-
-    it("shows 'Using default tools' when no tools configured", () => {
-      const step = createStep();
-      render(<StepDetailPanel step={step} />);
-
-      expect(screen.getByText("Using default tools")).toBeInTheDocument();
-    });
-  });
-
-  describe("permissions", () => {
-    it("shows 'Default' when no permission mode configured", () => {
-      const step = createStep();
-      render(<StepDetailPanel step={step} />);
-
-      // Find the permission mode "Default" text (there's also model Default)
-      const modeSection = screen.getByText("Mode").closest("div");
-      expect(modeSection).toBeInTheDocument();
-    });
-
-    it("displays configured permission mode", () => {
-      const step = createStep({
-        agent_config: {
-          ...createStep().agent_config,
-          permission_mode: "plan",
-        },
-      });
-      render(<StepDetailPanel step={step} />);
-
-      expect(screen.getByText("plan")).toBeInTheDocument();
-    });
-
-    it("displays budget when configured", () => {
-      const step = createStep({
-        agent_config: {
-          ...createStep().agent_config,
-          max_budget_usd: 10.5,
-        },
-      });
-      render(<StepDetailPanel step={step} />);
-
-      expect(screen.getByText("$10.50")).toBeInTheDocument();
-    });
-  });
-
-  describe("MCP configuration", () => {
-    it("displays MCP servers when configured", () => {
-      const step = createStep({
-        agent_config: {
-          ...createStep().agent_config,
-          mcp_config: ["server1", "server2"],
-        },
-      });
-      render(<StepDetailPanel step={step} />);
-
-      expect(screen.getByText("MCP Servers")).toBeInTheDocument();
-      expect(screen.getByText("server1")).toBeInTheDocument();
-      expect(screen.getByText("server2")).toBeInTheDocument();
-    });
-
-    it("does not show MCP section when no servers configured", () => {
-      const step = createStep();
-      render(<StepDetailPanel step={step} />);
-
-      expect(screen.queryByText("MCP Servers")).not.toBeInTheDocument();
-    });
-  });
-
-  describe("plugin directories", () => {
-    it("displays plugin directories when configured", () => {
-      const step = createStep({
-        agent_config: {
-          ...createStep().agent_config,
-          plugin_dirs: ["/path/to/plugins", "/another/path"],
-        },
-      });
-      render(<StepDetailPanel step={step} />);
-
-      expect(screen.getByText("Plugin Directories")).toBeInTheDocument();
-      expect(screen.getByText("/path/to/plugins")).toBeInTheDocument();
-      expect(screen.getByText("/another/path")).toBeInTheDocument();
-    });
-  });
-
-  describe("custom agents", () => {
-    it("displays custom agents when configured", () => {
-      const step = createStep({
-        agent_config: {
-          ...createStep().agent_config,
-          agents: "custom agent config here",
-        },
-      });
-      render(<StepDetailPanel step={step} />);
-
-      expect(screen.getByText("Custom Agents")).toBeInTheDocument();
-      expect(screen.getByText("custom agent config here")).toBeInTheDocument();
-    });
-  });
-
-  describe("JSON schema", () => {
-    it("displays output schema when configured", () => {
-      const step = createStep({
-        agent_config: {
-          ...createStep().agent_config,
-          json_schema: '{"type": "object"}',
-        },
-      });
-      render(<StepDetailPanel step={step} />);
-
-      expect(screen.getByText("Output Schema")).toBeInTheDocument();
-      expect(screen.getByText('{"type": "object"}')).toBeInTheDocument();
+      expect(bindings.commands.deleteStep).toHaveBeenCalledWith("step-test");
+      expect(onDeleted).toHaveBeenCalledTimes(1);
     });
   });
 
   describe("close button", () => {
     it("renders close button when onClose is provided", () => {
-      const step = createStep();
       const onClose = vi.fn();
-      render(<StepDetailPanel step={step} onClose={onClose} />);
-
+      render(<StepDetailPanel stepId="step-test" allSteps={[]} onClose={onClose} />);
       expect(screen.getByLabelText("Close panel")).toBeInTheDocument();
     });
 
     it("calls onClose when close button is clicked", async () => {
       const user = userEvent.setup();
-      const step = createStep();
       const onClose = vi.fn();
-      render(<StepDetailPanel step={step} onClose={onClose} />);
+      render(<StepDetailPanel stepId="step-test" allSteps={[]} onClose={onClose} />);
 
-      await user.click(screen.getByLabelText("Close panel"));
+      const closeButton = screen.getByLabelText("Close panel");
+      await user.click(closeButton);
 
       expect(onClose).toHaveBeenCalledTimes(1);
     });
 
     it("does not render close button when onClose is not provided", () => {
-      const step = createStep();
-      render(<StepDetailPanel step={step} />);
-
+      render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
       expect(screen.queryByLabelText("Close panel")).not.toBeInTheDocument();
     });
   });

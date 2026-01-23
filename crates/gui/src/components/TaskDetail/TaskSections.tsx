@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import type { Section, SectionType } from '../../bindings';
 import { commands } from '../../bindings';
+import { EditableList } from '../EditableList';
 import { InlineEditField } from './InlineEditField';
 
 interface TaskSectionsProps {
@@ -129,8 +130,6 @@ function SectionGroup({
   onSectionsChanged
 }: SectionGroupProps) {
   const [isOpen, setIsOpen] = useState(defaultOpen || isAddingNew);
-  const [editingOrder, setEditingOrder] = useState<number | null>(null);
-  const [deletingOrder, setDeletingOrder] = useState<number | null>(null);
 
   // Auto-open when adding new
   useEffect(() => {
@@ -139,7 +138,9 @@ function SectionGroup({
     }
   }, [isAddingNew]);
 
-  const handleToggleDone = useCallback(async (section: Section) => {
+  const handleToggleDone = useCallback(async (index: number) => {
+    const section = sections[index];
+    if (!section) return;
     try {
       const result = await commands.markSectionDone(taskId, section.order ?? 0);
       if (result.status === 'error') {
@@ -150,12 +151,13 @@ function SectionGroup({
     } catch (err) {
       console.error('Failed to toggle done:', err);
     }
-  }, [taskId, onSectionsChanged]);
+  }, [taskId, sections, onSectionsChanged]);
 
-  const handleDeleteSection = useCallback(async (order: number) => {
-    setDeletingOrder(order);
+  const handleDeleteSection = useCallback(async (index: number) => {
+    const section = sections[index];
+    if (!section) return;
     try {
-      const result = await commands.removeSection(taskId, type, order);
+      const result = await commands.removeSection(taskId, type, section.order ?? 0);
       if (result.status === 'error') {
         console.error('Failed to delete section:', result.error.message);
       } else {
@@ -163,11 +165,8 @@ function SectionGroup({
       }
     } catch (err) {
       console.error('Failed to delete section:', err);
-    } finally {
-      setDeletingOrder(null);
-      setEditingOrder(null);
     }
-  }, [taskId, type, onSectionsChanged]);
+  }, [taskId, type, sections, onSectionsChanged]);
 
   const handleAddSection = useCallback(async (content: string) => {
     const result = await commands.addSection(taskId, type, content);
@@ -178,7 +177,9 @@ function SectionGroup({
     onSectionsChanged?.();
   }, [taskId, type, onAddComplete, onSectionsChanged]);
 
-  const handleEditSection = useCallback(async (section: Section, content: string) => {
+  const handleEditSection = useCallback(async (index: number, content: string) => {
+    const section = sections[index];
+    if (!section) return;
     const result = await commands.editSection(
       taskId,
       section.type,
@@ -188,9 +189,12 @@ function SectionGroup({
     if (result.status === 'error') {
       throw new Error(result.error.message);
     }
-    setEditingOrder(null);
     onSectionsChanged?.();
-  }, [taskId, onSectionsChanged]);
+  }, [taskId, sections, onSectionsChanged]);
+
+  // Prepare data for EditableList
+  const items = sections.map(s => s.content);
+  const itemStates = sections.map(s => ({ done: s.done ?? false }));
 
   return (
     <div className="border-b border-border last:border-b-0">
@@ -229,80 +233,45 @@ function SectionGroup({
 
       {isOpen && (
         <div className="bg-bg-secondary px-4 pb-3">
-          <ul className="space-y-2">
-            {sections.map((section, index) => (
-              <li
-                key={`${type}-${section.order ?? index}`}
-                className="group flex items-start gap-2 text-sm text-text-secondary rounded-md p-2 hover:bg-bg-tertiary transition-colors"
-              >
-                {type === 'step' && (
-                  <button
-                    type="button"
-                    onClick={() => handleToggleDone(section)}
-                    className={`mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-xs font-medium cursor-pointer transition-colors ${
-                      section.done
-                        ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                        : 'bg-bg-tertiary text-text-muted hover:border hover:border-primary'
-                    }`}
-                    title={section.done ? 'Mark as not done' : 'Mark as done'}
-                  >
-                    {section.done ? (
-                      <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
-                        <path
-                          fillRule="evenodd"
-                          d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                          clipRule="evenodd"
-                        />
-                      </svg>
-                    ) : (
-                      (section.order ?? index + 1)
-                    )}
-                  </button>
-                )}
-                {type !== 'step' && (
-                  <span className="mt-1 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-text-muted" />
-                )}
-
-                {editingOrder === (section.order ?? index) ? (
-                  <InlineEditField
-                    value={section.content}
-                    onSave={async (content) => handleEditSection(section, content)}
-                    onCancel={() => setEditingOrder(null)}
-                    onDelete={() => handleDeleteSection(section.order ?? index)}
-                    isDeleting={deletingOrder === (section.order ?? index)}
-                    allowEmpty={false}
-                    startInEditMode
-                    compact
-                  />
-                ) : (
-                  <div
-                    className="flex-1 min-w-0 cursor-pointer"
-                    onClick={() => setEditingOrder(section.order ?? index)}
-                    title="Click to edit"
-                  >
-                    <span className={section.done ? 'line-through opacity-60' : ''}>
-                      {section.content}
-                    </span>
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
-
-          {/* Inline add form using InlineEditField */}
-          {isAddingNew && (
-            <div className="mt-2 p-2 bg-bg-tertiary rounded-md">
-              <InlineEditField
-                value=""
+          {isAddingNew ? (
+            <>
+              <EditableList
+                items={items}
+                emptyText={`No ${formatSectionType(type).toLowerCase()}`}
                 placeholder={`Add ${formatSectionType(type).toLowerCase()}...`}
-                onSave={handleAddSection}
-                onCancel={onAddComplete}
-                allowEmpty={false}
-                startInEditMode
-                clearOnSave
-                compact
+                onAdd={handleAddSection}
+                onEdit={handleEditSection}
+                onDelete={handleDeleteSection}
+                variant={type === 'step' ? 'step' : 'bullet'}
+                itemStates={itemStates}
+                onToggleDone={handleToggleDone}
               />
-            </div>
+              {/* Show the add form when isAddingNew */}
+              <div className="mt-2 p-2 bg-bg-tertiary rounded-md">
+                <InlineEditField
+                  value=""
+                  placeholder={`Add ${formatSectionType(type).toLowerCase()}...`}
+                  onSave={handleAddSection}
+                  onCancel={onAddComplete}
+                  allowEmpty={false}
+                  startInEditMode
+                  clearOnSave
+                  compact
+                />
+              </div>
+            </>
+          ) : (
+            <EditableList
+              items={items}
+              emptyText={`No ${formatSectionType(type).toLowerCase()}`}
+              placeholder={`Add ${formatSectionType(type).toLowerCase()}...`}
+              onAdd={handleAddSection}
+              onEdit={handleEditSection}
+              onDelete={handleDeleteSection}
+              variant={type === 'step' ? 'step' : 'bullet'}
+              itemStates={itemStates}
+              onToggleDone={handleToggleDone}
+            />
           )}
         </div>
       )}

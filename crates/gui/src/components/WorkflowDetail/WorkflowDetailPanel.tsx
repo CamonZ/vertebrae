@@ -9,6 +9,8 @@ interface WorkflowDetailPanelProps {
   taskCount?: number;
   tasks?: { id: string; title: string }[];
   onClose?: () => void;
+  onStepSelect?: (step: Step) => void;
+  onStepCreated?: () => void;
 }
 
 /**
@@ -71,6 +73,8 @@ export function WorkflowDetailPanel({
   taskCount = 0,
   tasks = [],
   onClose,
+  onStepSelect,
+  onStepCreated,
 }: WorkflowDetailPanelProps) {
   const [isRunning, setIsRunning] = useState(false);
   const [runProgress, setRunProgress] = useState({ current: 0, total: 0 });
@@ -285,14 +289,57 @@ export function WorkflowDetailPanel({
         {/* Steps */}
         {steps.length > 0 && (
           <div className="p-4">
-            <SectionHeader title={`Steps (${steps.length})`} />
+            <div className="mb-2 flex items-center justify-between">
+              <SectionHeader title={`Steps (${steps.length})`} />
+              {onStepCreated && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    // Create a new step with the next order number
+                    const nextOrder = Math.max(...steps.map((s) => s.order), -1) + 1;
+                    const workflowId = workflow?.id || "";
+                    void commands
+                      .createStep(
+                        workflowId,
+                        "",
+                        null,
+                        [],
+                        [],
+                        nextOrder,
+                        false,
+                        []
+                      )
+                      .then((result) => {
+                        if (result.status === "ok") {
+                          onStepCreated();
+                          if (result.data && onStepSelect) {
+                            onStepSelect(result.data);
+                          }
+                        }
+                      });
+                  }}
+                  className="cursor-pointer rounded-lg p-1.5 text-text-muted transition-colors hover:bg-bg-hover hover:text-success focus:outline-none focus-visible:ring-2 focus-visible:ring-success"
+                  aria-label="Create step"
+                  title="Create new step"
+                >
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" />
+                  </svg>
+                </button>
+              )}
+            </div>
             <div className="space-y-2">
               {steps
                 .sort((a, b) => a.order - b.order)
                 .map((step) => (
                   <div
                     key={step.id || step.name}
-                    className="flex items-center gap-3 rounded-lg border border-border bg-bg-tertiary p-2"
+                    onClick={() => onStepSelect?.(step)}
+                    className={`flex items-center gap-3 rounded-lg border border-border bg-bg-tertiary p-2 transition-colors ${
+                      onStepSelect
+                        ? "cursor-pointer hover:border-primary/50 hover:bg-bg-hover"
+                        : ""
+                    }`}
                   >
                     <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded border border-primary/30 bg-primary/10 font-mono text-xs font-bold text-primary">
                       {step.order + 1}

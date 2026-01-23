@@ -18,7 +18,7 @@ use vertebrae_core::DefaultTaskService;
 use vertebrae_db::Database;
 
 use commands::AppState;
-use events::{TaskChangedEvent, WorkflowChangedEvent, WorkflowExecutionEvent};
+use events::{StepChangedEvent, TaskChangedEvent, WorkflowChangedEvent, WorkflowExecutionEvent};
 use project_config::ProjectConfig;
 use pty_manager::{PtyExitEvent, PtyManager, PtyOutputEvent};
 
@@ -91,6 +91,9 @@ fn create_builder() -> Builder {
             // Step commands (first-class workflow steps)
             commands::list_steps_for_workflow,
             commands::get_step,
+            commands::create_step,
+            commands::update_step,
+            commands::delete_step,
             // Workflow execution commands
             commands::run_workflow,
             // PTY commands
@@ -112,6 +115,7 @@ fn create_builder() -> Builder {
         .events(collect_events![
             TaskChangedEvent,
             WorkflowChangedEvent,
+            StepChangedEvent,
             WorkflowExecutionEvent,
             PtyOutputEvent,
             PtyExitEvent

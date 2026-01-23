@@ -587,6 +587,12 @@ impl Step {
         self
     }
 
+    /// Set all transitions at once (replaces existing list)
+    pub fn with_transitions_to(mut self, transitions: Vec<Thing>) -> Self {
+        self.transitions_to = transitions;
+        self
+    }
+
     /// Set the order for this step
     pub fn with_order(mut self, order: i32) -> Self {
         self.order = order;
