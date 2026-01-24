@@ -11,12 +11,10 @@ use axum::{
     Router,
 };
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::net::TcpListener;
 use vertebrae_core::DefaultTaskService;
-use vertebrae_db::Database;
 
 use crate::commands::AppState;
 use crate::events::{TaskChangeType, TaskChangedEvent, WorkflowChangeType, WorkflowChangedEvent};
@@ -31,29 +29,29 @@ pub const DEFAULT_NOTIFICATION_PORT: u16 = 17273;
 async fn reconnect_database(app_handle: &AppHandle) -> Result<(), String> {
     let state = app_handle.state::<AppState>();
 
-    // Get current project path
-    let project_path = state
-        .project_config
-        .get_current_project()
+    // Get current service to access its database for reconnection
+    let service_guard = state.service.read().await;
+    let service = service_guard
+        .as_ref()
         .ok_or_else(|| "No project selected".to_string())?;
 
-    let db_path = PathBuf::from(&project_path).join(".vtb/data");
+    let db = service.database();
     log::info!(
         "[NotificationServer] Reconnecting to database at: {:?}",
-        db_path
+        db.path()
     );
 
-    // Connect to database
-    let db = Database::connect(&db_path)
+    // Use Database::reconnect() to get a fresh connection
+    let new_db = db
+        .reconnect()
         .await
-        .map_err(|e| format!("Failed to connect to database: {}", e))?;
+        .map_err(|e| format!("Failed to reconnect to database: {}", e))?;
 
-    db.init()
-        .await
-        .map_err(|e| format!("Failed to initialize database: {}", e))?;
+    // We need to drop the read guard before acquiring write guard
+    drop(service_guard);
 
-    // Update the service in AppState
-    let new_service = DefaultTaskService::new(db);
+    // Update the service in AppState with fresh database connection
+    let new_service = DefaultTaskService::new(new_db);
     let mut service_guard = state.service.write().await;
     *service_guard = Some(new_service);
 

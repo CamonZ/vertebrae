@@ -237,6 +237,25 @@ impl Database {
         &self.path
     }
 
+    /// Reconnect to the database to pick up changes from external processes.
+    ///
+    /// SurrealKV doesn't support concurrent access from multiple processes well,
+    /// so we need to reconnect to see changes made by other processes (like CLI).
+    ///
+    /// # Returns
+    ///
+    /// A new Database instance connected to the same path with fresh state.
+    ///
+    /// # Errors
+    ///
+    /// Returns `DbError::Connection` if reconnection fails.
+    /// Returns `DbError::Schema` if schema initialization fails.
+    pub async fn reconnect(&self) -> DbResult<Self> {
+        let db = Self::connect(&self.path).await?;
+        db.init().await?;
+        Ok(db)
+    }
+
     /// Get the default database path based on project root.
     ///
     /// Uses `git rev-parse --show-toplevel` to find the project root and
@@ -534,6 +553,29 @@ mod tests {
         // Second init should not fail
         let result = db.init().await;
         assert!(result.is_ok(), "Second init failed: {:?}", result.err());
+
+        // Clean up
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_reconnect() {
+        // Create a temporary directory for testing
+        let temp_dir = env::temp_dir().join(format!("vtb-test-reconnect-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&temp_dir);
+
+        let db = Database::connect(&temp_dir).await.unwrap();
+        db.init().await.unwrap();
+
+        // Verify path is stored correctly
+        assert_eq!(db.path(), temp_dir);
+
+        // Reconnect should return a new database instance with the same path
+        let db2 = db.reconnect().await;
+        assert!(db2.is_ok(), "Reconnect failed: {:?}", db2.err());
+
+        let db2 = db2.unwrap();
+        assert_eq!(db2.path(), temp_dir);
 
         // Clean up
         let _ = std::fs::remove_dir_all(&temp_dir);
