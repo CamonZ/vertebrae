@@ -746,10 +746,13 @@ impl<'a> TaskRepository<'a> {
     ) -> DbResult<()> {
         debug!("Updating task {} to step_id {:?}", task_id, step_id);
         let query = format!(
-            "UPDATE task:{} SET current_step_id = {}, updated_at = time::now()",
-            task_id, step_id
+            "UPDATE task:{} SET current_step_id = $step_id, updated_at = time::now()",
+            task_id
         );
-        self.client.query(&query).await?;
+        self.client
+            .query(&query)
+            .bind(("step_id", step_id.clone()))
+            .await?;
         Ok(())
     }
 
@@ -1482,6 +1485,40 @@ mod tests {
         assert!(
             retrieved.current_step_id.is_none(),
             "Task should not have current_step_id after unassign"
+        );
+
+        cleanup(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_update_current_step_id() {
+        let (db, temp_dir) = setup_test_db().await;
+        let repo = TaskRepository::new(db.client());
+
+        // Create a task
+        let task = Task::new("Step ID Test", Level::Task);
+        repo.create("step1", &task).await.unwrap();
+
+        // Create a step_id Thing
+        let step_id = surrealdb::sql::Thing::from(("step", "workflow_todo"));
+
+        // Update the current step ID
+        repo.update_current_step_id("step1", &step_id)
+            .await
+            .unwrap();
+
+        // Verify the task was updated
+        let retrieved = repo.get("step1").await.unwrap().unwrap();
+        assert!(
+            retrieved.current_step_id.is_some(),
+            "Task should have current_step_id"
+        );
+        let current_step = retrieved.current_step_id.unwrap();
+        assert_eq!(current_step.tb, "step", "Step table should be 'step'");
+        assert_eq!(
+            current_step.id.to_raw(),
+            "workflow_todo",
+            "Step ID should match"
         );
 
         cleanup(&temp_dir);
