@@ -1,5 +1,6 @@
-import type { StepExecution, ExecutionStatus } from '../../bindings';
-import { useTaskExecutions } from '../../hooks';
+import { useState, useMemo } from 'react';
+import type { StepExecution, ExecutionStatus, SessionLog } from '../../bindings';
+import { useTaskExecutions, useExecutionLogs } from '../../hooks';
 
 interface ExecutionHistoryProps {
   taskId: string;
@@ -16,6 +17,22 @@ function formatDateTime(isoString: string): string {
       day: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
+    });
+  } catch {
+    return isoString;
+  }
+}
+
+/**
+ * Format datetime for session logs (shorter format)
+ */
+function formatLogTime(isoString: string): string {
+  try {
+    const date = new Date(isoString);
+    return date.toLocaleString(undefined, {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
     });
   } catch {
     return isoString;
@@ -121,11 +138,40 @@ function TimelineNode({ status }: { status: ExecutionStatus }) {
 }
 
 /**
- * Single execution entry in the timeline
+ * Session log entry display
+ */
+function SessionLogEntry({ log }: { log: SessionLog }) {
+  return (
+    <div className="border-l-2 border-border pl-3 py-2">
+      <div className="flex items-start justify-between gap-2">
+        <pre className="flex-1 whitespace-pre-wrap break-words font-mono text-xs text-text-primary">
+          {log.content}
+        </pre>
+        <span className="shrink-0 font-mono text-[10px] text-text-muted">
+          {formatLogTime(log.created_at)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Single execution entry in the timeline with expandable session logs
  */
 function ExecutionEntry({ execution, isLast, index }: { execution: StepExecution; isLast: boolean; index: number }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const { logs, isLoading, error, hasFetched, fetchLogs } = useExecutionLogs();
   const styles = getStatusStyles(execution.status);
   const isActive = execution.status === 'in_progress';
+
+  const handleToggle = () => {
+    const newExpanded = !isExpanded;
+    setIsExpanded(newExpanded);
+    // Lazy load logs when first expanded
+    if (newExpanded && !hasFetched && execution.id) {
+      fetchLogs(execution.id);
+    }
+  };
 
   return (
     <div
@@ -144,12 +190,28 @@ function ExecutionEntry({ execution, isLast, index }: { execution: StepExecution
 
       {/* Content */}
       <div className="flex-1 pb-6">
-        <div className="flex items-start justify-between gap-2">
-          <div>
-            <h4 className="text-sm font-medium text-text-primary">{execution.step_name}</h4>
-            <p className="mt-0.5 text-xs text-text-muted">
-              {formatDateTime(execution.started_at)}
-            </p>
+        <button
+          type="button"
+          onClick={handleToggle}
+          className="flex w-full items-start justify-between gap-2 text-left hover:bg-bg-tertiary/50 -mx-2 px-2 py-1 rounded transition-colors cursor-pointer"
+        >
+          <div className="flex items-center gap-2">
+            {/* Chevron */}
+            <svg
+              className={`h-3 w-3 text-text-muted transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+            <div>
+              <h4 className="text-sm font-medium text-text-primary">{execution.step_name}</h4>
+              <p className="mt-0.5 text-xs text-text-muted">
+                {formatDateTime(execution.started_at)}
+              </p>
+            </div>
           </div>
           <div className="flex flex-col items-end gap-1">
             <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${styles.bg} ${styles.text}`}>
@@ -159,7 +221,36 @@ function ExecutionEntry({ execution, isLast, index }: { execution: StepExecution
               {formatDuration(execution.started_at, execution.completed_at)}
             </span>
           </div>
-        </div>
+        </button>
+
+        {/* Expanded session logs */}
+        {isExpanded && (
+          <div className="mt-2 ml-5 space-y-1">
+            {isLoading && (
+              <div className="flex items-center gap-2 py-2">
+                <div className="h-3 w-3 animate-spin rounded-full border border-border border-t-primary" />
+                <span className="text-xs text-text-muted">Loading logs...</span>
+              </div>
+            )}
+            {error && (
+              <div className="rounded border border-error/20 bg-error/5 px-2 py-1 text-xs text-error">
+                {error}
+              </div>
+            )}
+            {!isLoading && !error && logs.length === 0 && hasFetched && (
+              <div className="py-2 text-xs text-text-muted italic">
+                No session logs
+              </div>
+            )}
+            {!isLoading && logs.length > 0 && (
+              <div className="max-h-64 overflow-y-auto space-y-1 rounded border border-border bg-bg-tertiary p-2">
+                {logs.map((log, logIndex) => (
+                  <SessionLogEntry key={log.id ?? logIndex} log={log} />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -171,6 +262,15 @@ function ExecutionEntry({ execution, isLast, index }: { execution: StepExecution
  */
 export function ExecutionHistory({ taskId }: ExecutionHistoryProps) {
   const { executions, isLoading, error } = useTaskExecutions(taskId);
+
+  // Sort executions descending (newest first)
+  const sortedExecutions = useMemo(() => {
+    return [...executions].sort((a, b) => {
+      const dateA = new Date(a.started_at).getTime();
+      const dateB = new Date(b.started_at).getTime();
+      return dateB - dateA;
+    });
+  }, [executions]);
 
   if (isLoading) {
     return (
@@ -230,15 +330,15 @@ export function ExecutionHistory({ taskId }: ExecutionHistoryProps) {
       </h3>
       <div className="relative">
         {/* Signal flow overlay for active executions */}
-        {executions.some(e => e.status === 'in_progress') && (
+        {sortedExecutions.some(e => e.status === 'in_progress') && (
           <div className="animate-signal-flow pointer-events-none absolute inset-0 opacity-30" />
         )}
 
-        {executions.map((execution, index) => (
+        {sortedExecutions.map((execution, index) => (
           <ExecutionEntry
             key={execution.id ?? `${execution.step_name}-${index}`}
             execution={execution}
-            isLast={index === executions.length - 1}
+            isLast={index === sortedExecutions.length - 1}
             index={index}
           />
         ))}
