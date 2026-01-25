@@ -41,6 +41,7 @@
 //! ```
 
 pub mod error;
+pub mod execution_service;
 pub mod id_generator;
 pub mod orchestrator;
 pub mod service;
@@ -49,6 +50,9 @@ pub mod workflow_service;
 
 // Re-export main types for convenience
 pub use error::{ServiceError, ServiceResult};
+pub use execution_service::{
+    DefaultExecutionService, ExecutionMutationCallback, ExecutionMutationEvent, ExecutionService,
+};
 pub use orchestrator::{
     ORCHESTRATOR_AGENT_PATH, ORCHESTRATOR_MODEL, ORCHESTRATOR_PROMPT_TEMPLATE, OrchestratorOutput,
     orchestrator_agent_config, orchestrator_output_schema, orchestrator_prompt,
