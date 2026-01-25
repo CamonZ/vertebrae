@@ -668,14 +668,18 @@ export const events = __makeEvents__<{
 ptyExitEvent: PtyExitEvent,
 ptyOutputEvent: PtyOutputEvent,
 stepChangedEvent: StepChangedEvent,
+stepExecutionChangedEvent: StepExecutionChangedEvent,
 taskChangedEvent: TaskChangedEvent,
+taskStepChangedEvent: TaskStepChangedEvent,
 workflowChangedEvent: WorkflowChangedEvent,
 workflowExecutionEvent: WorkflowExecutionEvent
 }>({
 ptyExitEvent: "pty-exit-event",
 ptyOutputEvent: "pty-output-event",
 stepChangedEvent: "step-changed-event",
+stepExecutionChangedEvent: "step-execution-changed-event",
 taskChangedEvent: "task-changed-event",
+taskStepChangedEvent: "task-step-changed-event",
 workflowChangedEvent: "workflow-changed-event",
 workflowExecutionEvent: "workflow-execution-event"
 })
@@ -1012,6 +1016,19 @@ completed_at: string | null;
  */
 status: ExecutionStatus }
 /**
+ * The type of change that occurred on a step execution.
+ */
+export type StepExecutionChangeType = "Created" | "StatusChanged"
+/**
+ * Event payload for step execution changes.
+ * Emitted when a step execution is created or its status changes.
+ */
+export type StepExecutionChangedEvent = { execution_id: string; task_id: string; workflow_id: string; step_name: string; status: StepExecutionStatus; change_type: StepExecutionChangeType }
+/**
+ * Status of a step execution (mirrors db::ExecutionStatus for frontend)
+ */
+export type StepExecutionStatus = "Pending" | "Running" | "Completed" | "Failed"
+/**
  * Full task details - mirrors db::Task but with string IDs and dates
  */
 export type Task = { 
@@ -1152,6 +1169,12 @@ export type TaskLevel = "epic" | "ticket" | "task"
  * Task priority - mirrors db::Priority
  */
 export type TaskPriority = "low" | "medium" | "high" | "critical"
+/**
+ * Event payload for task current step changes.
+ * Emitted when a task's current_step_id is updated during workflow execution.
+ * Includes the new step info so frontend can update directly without refetching.
+ */
+export type TaskStepChangedEvent = { task_id: string; step_id: string; step_name: string }
 /**
  * Summary of a task for list views - mirrors db::TaskSummary
  */

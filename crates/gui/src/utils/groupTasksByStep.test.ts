@@ -63,20 +63,47 @@ function createStep(id: string, name: string, order: number): Step {
 }
 
 describe("groupTasksByStep", () => {
-  const steps: Step[] = [
+  // Steps with random IDs (new format)
+  const stepsWithRandomIds: Step[] = [
+    createStep("abc123xyz", "todo", 0),
+    createStep("def456uvw", "in_progress", 1),
+    createStep("ghi789rst", "done", 2),
+  ];
+
+  // Steps with legacy IDs (workflow_id_step_name format)
+  const stepsWithLegacyIds: Step[] = [
     createStep("x1cff77_todo", "todo", 0),
     createStep("x1cff77_in_progress", "in_progress", 1),
     createStep("x1cff77_done", "done", 2),
   ];
 
-  it("groups tasks by matching step name as suffix", () => {
+  it("groups tasks by direct step ID match (new format)", () => {
+    const tasks: TaskWithRelations[] = [
+      createTaskWithRelations("task1", "abc123xyz"),
+      createTaskWithRelations("task2", "def456uvw"),
+      createTaskWithRelations("task3", "ghi789rst"),
+    ];
+
+    const groups = groupTasksByStep(tasks, stepsWithRandomIds);
+
+    expect(groups.get("todo")?.length).toBe(1);
+    expect(groups.get("todo")?.[0].task.id).toBe("task1");
+
+    expect(groups.get("in_progress")?.length).toBe(1);
+    expect(groups.get("in_progress")?.[0].task.id).toBe("task2");
+
+    expect(groups.get("done")?.length).toBe(1);
+    expect(groups.get("done")?.[0].task.id).toBe("task3");
+  });
+
+  it("groups tasks by matching step name as suffix (legacy format)", () => {
     const tasks: TaskWithRelations[] = [
       createTaskWithRelations("task1", "default_todo"),
       createTaskWithRelations("task2", "default_done"),
       createTaskWithRelations("task3", "x1cff77_in_progress"),
     ];
 
-    const groups = groupTasksByStep(tasks, steps);
+    const groups = groupTasksByStep(tasks, stepsWithLegacyIds);
 
     expect(groups.get("todo")?.length).toBe(1);
     expect(groups.get("todo")?.[0].task.id).toBe("task1");
@@ -94,7 +121,7 @@ describe("groupTasksByStep", () => {
       createTaskWithRelations("task2", "workflow123_in_progress"),
     ];
 
-    const groups = groupTasksByStep(tasks, steps);
+    const groups = groupTasksByStep(tasks, stepsWithLegacyIds);
 
     expect(groups.get("in_progress")?.length).toBe(2);
     expect(groups.get("in_progress")?.[0].task.id).toBe("task1");
@@ -104,25 +131,25 @@ describe("groupTasksByStep", () => {
   it("falls back to first step when current_step_id is null", () => {
     const tasks: TaskWithRelations[] = [createTaskWithRelations("task1", null)];
 
-    const groups = groupTasksByStep(tasks, steps);
+    const groups = groupTasksByStep(tasks, stepsWithLegacyIds);
 
     expect(groups.get("todo")?.length).toBe(1);
     expect(groups.get("todo")?.[0].task.id).toBe("task1");
   });
 
-  it("falls back to first step when step name does not match", () => {
+  it("falls back to first step when step ID does not match", () => {
     const tasks: TaskWithRelations[] = [
-      createTaskWithRelations("task1", "default_unknown_step"),
+      createTaskWithRelations("task1", "unknown_random_id"),
     ];
 
-    const groups = groupTasksByStep(tasks, steps);
+    const groups = groupTasksByStep(tasks, stepsWithRandomIds);
 
     expect(groups.get("todo")?.length).toBe(1);
     expect(groups.get("todo")?.[0].task.id).toBe("task1");
   });
 
   it("initializes empty arrays for all steps", () => {
-    const groups = groupTasksByStep([], steps);
+    const groups = groupTasksByStep([], stepsWithLegacyIds);
 
     expect(groups.get("todo")).toEqual([]);
     expect(groups.get("in_progress")).toEqual([]);
@@ -146,13 +173,25 @@ describe("groupTasksByStep", () => {
     expect(groups.get("todo")?.length).toBe(1);
   });
 
-  it("handles case-insensitive step matching", () => {
+  it("handles case-insensitive step ID matching", () => {
+    const tasks: TaskWithRelations[] = [
+      createTaskWithRelations("task1", "ABC123XYZ"),
+      createTaskWithRelations("task2", "GHI789RST"),
+    ];
+
+    const groups = groupTasksByStep(tasks, stepsWithRandomIds);
+
+    expect(groups.get("todo")?.length).toBe(1);
+    expect(groups.get("done")?.length).toBe(1);
+  });
+
+  it("handles case-insensitive legacy step matching", () => {
     const tasks: TaskWithRelations[] = [
       createTaskWithRelations("task1", "DEFAULT_TODO"),
       createTaskWithRelations("task2", "x1cff77_DONE"),
     ];
 
-    const groups = groupTasksByStep(tasks, steps);
+    const groups = groupTasksByStep(tasks, stepsWithLegacyIds);
 
     expect(groups.get("todo")?.length).toBe(1);
     expect(groups.get("done")?.length).toBe(1);
@@ -165,7 +204,7 @@ describe("groupTasksByStep", () => {
       createTaskWithRelations("task3", "other_workflow_done"),
     ];
 
-    const groups = groupTasksByStep(tasks, steps);
+    const groups = groupTasksByStep(tasks, stepsWithLegacyIds);
 
     expect(groups.get("done")?.length).toBe(3);
   });
@@ -198,9 +237,23 @@ describe("groupTasksByStep", () => {
       createTaskWithRelations("task2", "todo"),
     ];
 
-    const groups = groupTasksByStep(tasks, steps);
+    const groups = groupTasksByStep(tasks, stepsWithLegacyIds);
 
     expect(groups.get("done")?.length).toBe(1);
     expect(groups.get("todo")?.length).toBe(1);
+  });
+
+  it("prefers direct ID match over suffix match", () => {
+    // If a step ID happens to match both directly and as a suffix
+    // (e.g., task has ID "abc123xyz" and there's a step with that ID),
+    // direct match should win
+    const tasks: TaskWithRelations[] = [
+      createTaskWithRelations("task1", "abc123xyz"),
+    ];
+
+    const groups = groupTasksByStep(tasks, stepsWithRandomIds);
+
+    expect(groups.get("todo")?.length).toBe(1);
+    expect(groups.get("todo")?.[0].task.id).toBe("task1");
   });
 });

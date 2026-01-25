@@ -62,6 +62,44 @@ pub enum StepChangeType {
     Deleted,
 }
 
+/// Event payload for task current step changes.
+/// Emitted when a task's current_step_id is updated during workflow execution.
+/// Includes the new step info so frontend can update directly without refetching.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct TaskStepChangedEvent {
+    pub task_id: String,
+    pub step_id: String,
+    pub step_name: String,
+}
+
+/// Event payload for step execution changes.
+/// Emitted when a step execution is created or its status changes.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct StepExecutionChangedEvent {
+    pub execution_id: String,
+    pub task_id: String,
+    pub workflow_id: String,
+    pub step_name: String,
+    pub status: StepExecutionStatus,
+    pub change_type: StepExecutionChangeType,
+}
+
+/// Status of a step execution (mirrors db::ExecutionStatus for frontend)
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub enum StepExecutionStatus {
+    Pending,
+    Running,
+    Completed,
+    Failed,
+}
+
+/// The type of change that occurred on a step execution.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub enum StepExecutionChangeType {
+    Created,
+    StatusChanged,
+}
+
 /// Event payload for workflow execution progress.
 /// Emitted during workflow step execution to track progress.
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]

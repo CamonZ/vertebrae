@@ -1243,7 +1243,7 @@ impl std::fmt::Display for PermissionMode {
 ///     .with_allowed_tools(vec!["Read".to_string(), "Grep".to_string()]);
 ///
 /// let args = config.to_cli_args();
-/// // args would be: ["--model", "sonnet", "--system-prompt", "You are a code reviewer", "--allowed-tools", "Read", "Grep"]
+/// // args would be: ["--model", "sonnet", "--systemPrompt", "You are a code reviewer", "--allowedTools", "Read", "Grep"]
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AgentConfig {
@@ -1401,7 +1401,7 @@ impl AgentConfig {
     ///     .with_max_budget_usd(5.0);
     ///
     /// let args = config.to_cli_args();
-    /// assert_eq!(args, vec!["--model", "sonnet", "--max-budget-usd", "5"]);
+    /// assert_eq!(args, vec!["--model", "sonnet", "--maxBudgetUsd", "5"]);
     /// ```
     pub fn to_cli_args(&self) -> Vec<String> {
         let mut args = Vec::new();
@@ -1414,19 +1414,19 @@ impl AgentConfig {
 
         // Fallback model
         if let Some(ref model) = self.fallback_model {
-            args.push("--fallback-model".to_string());
+            args.push("--fallbackModel".to_string());
             args.push(model.clone());
         }
 
         // System prompt
         if let Some(ref prompt) = self.system_prompt {
-            args.push("--system-prompt".to_string());
+            args.push("--systemPrompt".to_string());
             args.push(prompt.clone());
         }
 
         // Append system prompt
         if let Some(ref prompt) = self.append_system_prompt {
-            args.push("--append-system-prompt".to_string());
+            args.push("--appendSystemPrompt".to_string());
             args.push(prompt.clone());
         }
 
@@ -1444,38 +1444,38 @@ impl AgentConfig {
 
         // Allowed tools
         if !self.allowed_tools.is_empty() {
-            args.push("--allowed-tools".to_string());
+            args.push("--allowedTools".to_string());
             args.extend(self.allowed_tools.iter().cloned());
         }
 
         // Disallowed tools
         if !self.disallowed_tools.is_empty() {
-            args.push("--disallowed-tools".to_string());
+            args.push("--disallowedTools".to_string());
             args.extend(self.disallowed_tools.iter().cloned());
         }
 
         // Permission mode
         if let Some(ref mode) = self.permission_mode {
-            args.push("--permission-mode".to_string());
+            args.push("--permissionMode".to_string());
             args.push(mode.as_str().to_string());
         }
 
         // Max budget USD
         if let Some(budget) = self.max_budget_usd {
-            args.push("--max-budget-usd".to_string());
+            args.push("--maxBudgetUsd".to_string());
             // Format without trailing zeros for cleaner output
             args.push(format_float(budget));
         }
 
         // MCP config
         for config in &self.mcp_config {
-            args.push("--mcp-config".to_string());
+            args.push("--mcpConfig".to_string());
             args.push(config.clone());
         }
 
         // Plugin dirs
         for dir in &self.plugin_dirs {
-            args.push("--plugin-dir".to_string());
+            args.push("--pluginDir".to_string());
             args.push(dir.clone());
         }
 
@@ -3895,21 +3895,21 @@ mod tests {
     fn test_agent_config_to_cli_args_fallback_model() {
         let config = AgentConfig::new().with_fallback_model("haiku");
         let args = config.to_cli_args();
-        assert_eq!(args, vec!["--fallback-model", "haiku"]);
+        assert_eq!(args, vec!["--fallbackModel", "haiku"]);
     }
 
     #[test]
     fn test_agent_config_to_cli_args_system_prompt() {
         let config = AgentConfig::new().with_system_prompt("You are helpful");
         let args = config.to_cli_args();
-        assert_eq!(args, vec!["--system-prompt", "You are helpful"]);
+        assert_eq!(args, vec!["--systemPrompt", "You are helpful"]);
     }
 
     #[test]
     fn test_agent_config_to_cli_args_append_system_prompt() {
         let config = AgentConfig::new().with_append_system_prompt("Be concise");
         let args = config.to_cli_args();
-        assert_eq!(args, vec!["--append-system-prompt", "Be concise"]);
+        assert_eq!(args, vec!["--appendSystemPrompt", "Be concise"]);
     }
 
     #[test]
@@ -3932,35 +3932,35 @@ mod tests {
         let config = AgentConfig::new()
             .with_allowed_tools(vec!["Bash(git:*)".to_string(), "Read".to_string()]);
         let args = config.to_cli_args();
-        assert_eq!(args, vec!["--allowed-tools", "Bash(git:*)", "Read"]);
+        assert_eq!(args, vec!["--allowedTools", "Bash(git:*)", "Read"]);
     }
 
     #[test]
     fn test_agent_config_to_cli_args_disallowed_tools() {
         let config = AgentConfig::new().with_disallowed_tools(vec!["Bash(rm:*)".to_string()]);
         let args = config.to_cli_args();
-        assert_eq!(args, vec!["--disallowed-tools", "Bash(rm:*)"]);
+        assert_eq!(args, vec!["--disallowedTools", "Bash(rm:*)"]);
     }
 
     #[test]
     fn test_agent_config_to_cli_args_permission_mode() {
         let config = AgentConfig::new().with_permission_mode(PermissionMode::AcceptEdits);
         let args = config.to_cli_args();
-        assert_eq!(args, vec!["--permission-mode", "acceptEdits"]);
+        assert_eq!(args, vec!["--permissionMode", "acceptEdits"]);
     }
 
     #[test]
     fn test_agent_config_to_cli_args_max_budget_whole_number() {
         let config = AgentConfig::new().with_max_budget_usd(5.0);
         let args = config.to_cli_args();
-        assert_eq!(args, vec!["--max-budget-usd", "5"]);
+        assert_eq!(args, vec!["--maxBudgetUsd", "5"]);
     }
 
     #[test]
     fn test_agent_config_to_cli_args_max_budget_decimal() {
         let config = AgentConfig::new().with_max_budget_usd(5.5);
         let args = config.to_cli_args();
-        assert_eq!(args, vec!["--max-budget-usd", "5.5"]);
+        assert_eq!(args, vec!["--maxBudgetUsd", "5.5"]);
     }
 
     #[test]
@@ -3970,12 +3970,7 @@ mod tests {
         let args = config.to_cli_args();
         assert_eq!(
             args,
-            vec![
-                "--mcp-config",
-                "config1.json",
-                "--mcp-config",
-                "config2.json"
-            ]
+            vec!["--mcpConfig", "config1.json", "--mcpConfig", "config2.json"]
         );
     }
 
@@ -3983,7 +3978,7 @@ mod tests {
     fn test_agent_config_to_cli_args_plugin_dirs() {
         let config = AgentConfig::new().with_plugin_dirs(vec!["/path/to/plugins".to_string()]);
         let args = config.to_cli_args();
-        assert_eq!(args, vec!["--plugin-dir", "/path/to/plugins"]);
+        assert_eq!(args, vec!["--pluginDir", "/path/to/plugins"]);
     }
 
     #[test]
@@ -4006,9 +4001,9 @@ mod tests {
             vec![
                 "--model",
                 "sonnet",
-                "--permission-mode",
+                "--permissionMode",
                 "default",
-                "--max-budget-usd",
+                "--maxBudgetUsd",
                 "5"
             ]
         );

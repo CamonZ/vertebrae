@@ -50,9 +50,8 @@ pub mod workflow_service;
 // Re-export main types for convenience
 pub use error::{ServiceError, ServiceResult};
 pub use orchestrator::{
-    ORCHESTRATOR_AGENT_PATH, ORCHESTRATOR_ALLOWED_TOOLS, ORCHESTRATOR_DISALLOWED_TOOLS,
-    ORCHESTRATOR_MODEL, ORCHESTRATOR_SYSTEM_PROMPT, OrchestratorOutput, orchestrator_agent_config,
-    orchestrator_output_schema,
+    ORCHESTRATOR_AGENT_PATH, ORCHESTRATOR_MODEL, ORCHESTRATOR_PROMPT_TEMPLATE, OrchestratorOutput,
+    orchestrator_agent_config, orchestrator_output_schema, orchestrator_prompt,
 };
 pub use service::{
     CreateTaskOptions, DefaultTaskService, MutationCallback, MutationEvent, TaskService,

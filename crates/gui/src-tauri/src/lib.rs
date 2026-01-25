@@ -18,7 +18,10 @@ use vertebrae_core::DefaultTaskService;
 use vertebrae_db::Database;
 
 use commands::AppState;
-use events::{StepChangedEvent, TaskChangedEvent, WorkflowChangedEvent, WorkflowExecutionEvent};
+use events::{
+    StepChangedEvent, StepExecutionChangedEvent, TaskChangedEvent, TaskStepChangedEvent,
+    WorkflowChangedEvent, WorkflowExecutionEvent,
+};
 use project_config::ProjectConfig;
 use pty_manager::{PtyExitEvent, PtyManager, PtyOutputEvent};
 
@@ -114,8 +117,10 @@ fn create_builder() -> Builder {
         ])
         .events(collect_events![
             TaskChangedEvent,
+            TaskStepChangedEvent,
             WorkflowChangedEvent,
             StepChangedEvent,
+            StepExecutionChangedEvent,
             WorkflowExecutionEvent,
             PtyOutputEvent,
             PtyExitEvent
