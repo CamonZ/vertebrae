@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
-import type { StepExecution, ExecutionStatus, SessionLog } from '../../bindings';
+import type { StepExecution, ExecutionStatus } from '../../bindings';
 import { useTaskExecutions, useExecutionLogs } from '../../hooks';
+import { ConversationLogViewer } from './ConversationLogViewer';
 
 interface ExecutionHistoryProps {
   taskId: string;
@@ -23,21 +24,6 @@ function formatDateTime(isoString: string): string {
   }
 }
 
-/**
- * Format datetime for session logs (shorter format)
- */
-function formatLogTime(isoString: string): string {
-  try {
-    const date = new Date(isoString);
-    return date.toLocaleString(undefined, {
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-    });
-  } catch {
-    return isoString;
-  }
-}
 
 /**
  * Calculate duration between two timestamps
@@ -137,23 +123,6 @@ function TimelineNode({ status }: { status: ExecutionStatus }) {
   );
 }
 
-/**
- * Session log entry display
- */
-function SessionLogEntry({ log }: { log: SessionLog }) {
-  return (
-    <div className="border-l-2 border-border pl-3 py-2">
-      <div className="flex items-start justify-between gap-2">
-        <pre className="flex-1 whitespace-pre-wrap break-words font-mono text-xs text-text-primary">
-          {log.content}
-        </pre>
-        <span className="shrink-0 font-mono text-[10px] text-text-muted">
-          {formatLogTime(log.created_at)}
-        </span>
-      </div>
-    </div>
-  );
-}
 
 /**
  * Single execution entry in the timeline with expandable session logs
@@ -243,10 +212,8 @@ function ExecutionEntry({ execution, isLast, index }: { execution: StepExecution
               </div>
             )}
             {!isLoading && logs.length > 0 && (
-              <div className="max-h-64 overflow-y-auto space-y-1 rounded border border-border bg-bg-tertiary p-2">
-                {logs.map((log, logIndex) => (
-                  <SessionLogEntry key={log.id ?? logIndex} log={log} />
-                ))}
+              <div className="max-h-96 overflow-y-auto rounded border border-border bg-bg-tertiary p-3">
+                <ConversationLogViewer logs={logs} initialLimit={30} />
               </div>
             )}
           </div>

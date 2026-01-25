@@ -65,3 +65,22 @@ export type {
   AsyncReturnType,
   UnwrapResult,
 } from "./utils";
+
+// Conversation log types
+export type {
+  ClaudeRawMessage,
+  ClaudeContentItem,
+  ConversationEvent,
+  SessionStartEvent,
+  SessionEndEvent,
+  ThinkingEvent,
+  ToolCallEvent,
+  ToolResultEvent,
+} from "./conversation";
+
+export {
+  parseClaudeMessage,
+  parseSessionLogs,
+  getToolIcon,
+  TOOL_ICONS,
+} from "./conversation";

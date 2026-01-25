@@ -27,12 +27,21 @@ const mockExecution = (
   ...overrides,
 });
 
+// Helper to create JSON log content that ConversationLogViewer can parse
+const createThinkingLog = (text: string) =>
+  JSON.stringify({
+    type: "assistant",
+    message: {
+      content: [{ type: "text", text }],
+    },
+  });
+
 const mockSessionLog = (
   overrides: Partial<SessionLog> = {}
 ): SessionLog => ({
   id: "log-1",
   step_execution_id: "exec-1",
-  content: "Log content here",
+  content: createThinkingLog("Log content here"),
   created_at: "2024-01-01T10:02:00Z",
   ...overrides,
 });
@@ -204,7 +213,7 @@ describe("ExecutionHistory", () => {
 
       mockGetExecutionLogs.mockResolvedValue({
         status: "ok",
-        data: [mockSessionLog({ content: "Session log content" })],
+        data: [mockSessionLog({ content: createThinkingLog("Session log content") })],
       });
 
       render(<ExecutionHistory taskId="task-1" />);
@@ -217,6 +226,7 @@ describe("ExecutionHistory", () => {
       fireEvent.click(screen.getByRole("button"));
 
       await waitFor(() => {
+        // Content is now parsed and displayed by ConversationLogViewer
         expect(screen.getByText("Session log content")).toBeInTheDocument();
       });
     });
@@ -338,7 +348,7 @@ describe("ExecutionHistory", () => {
 
       mockGetExecutionLogs.mockResolvedValue({
         status: "ok",
-        data: [mockSessionLog({ content: "Log for exec-1" })],
+        data: [mockSessionLog({ content: createThinkingLog("Log for exec-1") })],
       });
 
       render(<ExecutionHistory taskId="task-1" />);
