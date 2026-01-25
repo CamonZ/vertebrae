@@ -303,8 +303,8 @@ impl ExportCommand {
             }
         }
 
-        // 1d. Map task IDs
-        let tasks = db.tasks().export_all().await?;
+        // 1d. Map task IDs (using TaskService instead of direct database access)
+        let tasks = service.export_all_tasks().await?;
         for (old_id, _) in &tasks {
             mapper.task(old_id);
         }
@@ -425,8 +425,8 @@ impl ExportCommand {
             })));
         }
 
-        // 2e. Export child_of relationships
-        let child_of_relations = db.relationships().export_all_child_of().await?;
+        // 2e. Export child_of relationships (using TaskService instead of direct database access)
+        let child_of_relations = service.export_child_of_relations().await?;
         let child_of_count = child_of_relations.len();
         for (child_old, parent_old) in child_of_relations {
             let child = mapper.get_task(&child_old).unwrap_or_default();
@@ -434,8 +434,8 @@ impl ExportCommand {
             records.push(ExportRecord::ChildOf { child, parent });
         }
 
-        // 2f. Export depends_on relationships
-        let depends_on_relations = db.relationships().export_all_depends_on().await?;
+        // 2f. Export depends_on relationships (using TaskService instead of direct database access)
+        let depends_on_relations = service.export_depends_on_relations().await?;
         let depends_on_count = depends_on_relations.len();
         for (task_old, blocker_old) in depends_on_relations {
             let task = mapper.get_task(&task_old).unwrap_or_default();

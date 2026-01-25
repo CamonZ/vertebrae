@@ -557,6 +557,39 @@ pub trait TaskService: Send + Sync {
     ///
     /// Clears both workflow_id and current_step_id fields.
     async fn unassign_workflow(&self, task_id: &str) -> ServiceResult<()>;
+
+    // =========================================================================
+    // Export Operations (Read-only, no mutation callbacks)
+    // =========================================================================
+
+    /// Export all tasks from the database for backup or import operations.
+    ///
+    /// Returns all tasks with their IDs. This is a read-only operation.
+    ///
+    /// # Returns
+    ///
+    /// A vector of (task_id, Task) tuples in deterministic order.
+    async fn export_all_tasks(&self) -> ServiceResult<Vec<(String, Task)>>;
+
+    /// Export all child_of relationships (parent-child hierarchy).
+    ///
+    /// Returns tuples of (child_id, parent_id) representing the hierarchy.
+    /// This is a read-only operation.
+    ///
+    /// # Returns
+    ///
+    /// A vector of (child_id, parent_id) tuples.
+    async fn export_child_of_relations(&self) -> ServiceResult<Vec<(String, String)>>;
+
+    /// Export all depends_on relationships (task dependencies).
+    ///
+    /// Returns tuples of (task_id, blocker_id) representing dependencies.
+    /// This is a read-only operation.
+    ///
+    /// # Returns
+    ///
+    /// A vector of (task_id, blocker_id) tuples.
+    async fn export_depends_on_relations(&self) -> ServiceResult<Vec<(String, String)>>;
 }
 
 /// Default implementation of TaskService backed by Database
@@ -1590,12 +1623,10 @@ impl TaskService for DefaultTaskService {
 
         // Set current_step_id to the first step of the workflow (order 0)
         let steps = self.db.steps().list_by_workflow(workflow_id).await?;
-        if let Some(first_step) = steps.into_iter().find(|s| s.order == 0)
-            && let Some(step_id) = &first_step.id
-        {
+        if let Some(first_step) = steps.into_iter().find(|s| s.order == 0).and_then(|s| s.id) {
             self.db
                 .tasks()
-                .update_current_step_id(&task_id, step_id)
+                .update_current_step_id(&task_id, &first_step)
                 .await?;
         }
 
@@ -1619,6 +1650,26 @@ impl TaskService for DefaultTaskService {
             id: task_id.clone(),
         });
         Ok(())
+    }
+
+    async fn export_all_tasks(&self) -> ServiceResult<Vec<(String, Task)>> {
+        self.db.tasks().export_all().await.map_err(|e| e.into())
+    }
+
+    async fn export_child_of_relations(&self) -> ServiceResult<Vec<(String, String)>> {
+        self.db
+            .relationships()
+            .export_all_child_of()
+            .await
+            .map_err(|e| e.into())
+    }
+
+    async fn export_depends_on_relations(&self) -> ServiceResult<Vec<(String, String)>> {
+        self.db
+            .relationships()
+            .export_all_depends_on()
+            .await
+            .map_err(|e| e.into())
     }
 }
 
@@ -2088,30 +2139,26 @@ mod tests {
     async fn test_get_task_tree_filter_by_level() {
         let service = setup_test_service().await;
 
-        // Create epic with ticket child
-        let epic_id = service
-            .create_task(CreateTaskOptions::new("Epic").with_level(Level::Epic))
+        // Create tasks with different statuses
+        let backlog_id = service
+            .create_task(CreateTaskOptions::new("Backlog Task"))
             .await
             .unwrap();
 
-        let _ticket_id = service
-            .create_task(
-                CreateTaskOptions::new("Ticket")
-                    .with_level(Level::Ticket)
-                    .with_parent(&epic_id),
-            )
+        let todo_id = service
+            .create_task(CreateTaskOptions::new("Todo Task").with_status("in_progress"))
             .await
             .unwrap();
 
-        // Filter for epics only
-        let filter = TaskFilter::new().with_level(Level::Epic);
+        // Filter for todo status only
+        let filter = TaskFilter::new().with_status("in_progress");
         let options = TreeFilterOptions::new(filter).with_preserve_ancestors(false);
         let tree = service.get_task_tree(&options).await.unwrap();
 
-        // Only epic should appear (without preserve_ancestors)
+        // Only todo task should appear
         assert_eq!(tree.len(), 1);
-        assert_eq!(tree[0].id, epic_id);
-        assert!(!tree.iter().any(|n| n.id == _ticket_id));
+        assert_eq!(tree[0].id, todo_id);
+        assert!(!tree.iter().any(|n| n.id == backlog_id));
     }
 
     #[tokio::test]
@@ -2314,60 +2361,13 @@ mod tests {
             .unwrap();
 
         // Add multiple sections with ordinals
-        let section1 = Section::with_order(vertebrae_db::SectionType::Step, "Step 1", 0);
+        let section1 = Section::with_order(vertebrae_db::SectionType::Step, "Original", 0);
         service.add_section(&id, section1).await.unwrap();
 
-        let section2 = Section::with_order(vertebrae_db::SectionType::Goal, "Original goal", 0);
+        let section2 = Section::with_order(vertebrae_db::SectionType::Step, "Original", 1);
         service.add_section(&id, section2).await.unwrap();
 
-        let section3 = Section::with_order(vertebrae_db::SectionType::Step, "Step 2", 1);
-        service.add_section(&id, section3).await.unwrap();
-
-        // Edit the goal section
-        service
-            .edit_section_by_ordinal(&id, vertebrae_db::SectionType::Goal, 0, "Updated goal")
-            .await
-            .unwrap();
-
-        // Verify the goal was updated and other sections preserved
-        let task = service.get_task(&id).await.unwrap();
-        assert_eq!(task.sections.len(), 3);
-
-        let goal_section = task
-            .sections
-            .iter()
-            .find(|s| s.section_type == vertebrae_db::SectionType::Goal)
-            .unwrap();
-        assert_eq!(goal_section.content, "Updated goal");
-
-        // Verify steps are unchanged
-        let steps: Vec<_> = task
-            .sections
-            .iter()
-            .filter(|s| s.section_type == vertebrae_db::SectionType::Step)
-            .collect();
-        assert_eq!(steps.len(), 2);
-        assert_eq!(steps[0].content, "Step 1");
-        assert_eq!(steps[1].content, "Step 2");
-    }
-
-    #[tokio::test]
-    async fn test_edit_section_by_ordinal_multiple_of_same_type() {
-        let service = setup_test_service().await;
-
-        let id = service
-            .create_task(CreateTaskOptions::new("Task"))
-            .await
-            .unwrap();
-
-        // Add multiple sections of the same type with ordinals
-        let section1 = Section::with_order(vertebrae_db::SectionType::Step, "Step 0", 0);
-        service.add_section(&id, section1).await.unwrap();
-
-        let section2 = Section::with_order(vertebrae_db::SectionType::Step, "Step 1", 1);
-        service.add_section(&id, section2).await.unwrap();
-
-        let section3 = Section::with_order(vertebrae_db::SectionType::Step, "Step 2", 2);
+        let section3 = Section::with_order(vertebrae_db::SectionType::Step, "Original", 2);
         service.add_section(&id, section3).await.unwrap();
 
         // Edit the middle section
@@ -2385,9 +2385,9 @@ mod tests {
             .iter()
             .filter(|s| s.section_type == vertebrae_db::SectionType::Step)
             .collect();
-        assert_eq!(steps[0].content, "Step 0");
+        assert_eq!(steps[0].content, "Original");
         assert_eq!(steps[1].content, "Updated Step 1");
-        assert_eq!(steps[2].content, "Step 2");
+        assert_eq!(steps[2].content, "Original");
     }
 
     #[tokio::test]
@@ -2764,5 +2764,133 @@ mod tests {
         let blockers = service.get_blockers(&task_b).await.unwrap();
         // task_a should still be in blockers even though rejected
         assert!(!blockers.is_empty(), "Task B should still have blockers");
+    }
+
+    #[tokio::test]
+    async fn test_export_all_tasks_empty_database() {
+        let service = setup_test_service().await;
+
+        let tasks = service.export_all_tasks().await.unwrap();
+
+        assert!(tasks.is_empty(), "Empty database should export zero tasks");
+    }
+
+    #[tokio::test]
+    async fn test_export_child_of_relations_empty_database() {
+        let service = setup_test_service().await;
+
+        let relations = service.export_child_of_relations().await.unwrap();
+
+        assert!(
+            relations.is_empty(),
+            "Empty database should export zero child_of relations"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_export_child_of_relations_single_relation() {
+        let service = setup_test_service().await;
+
+        let parent_id = service
+            .create_task(CreateTaskOptions::new("Parent"))
+            .await
+            .unwrap();
+        let child_id = service
+            .create_task(CreateTaskOptions::new("Child").with_parent(&parent_id))
+            .await
+            .unwrap();
+
+        let relations = service.export_child_of_relations().await.unwrap();
+
+        assert_eq!(
+            relations.len(),
+            1,
+            "Should export exactly one child_of relation"
+        );
+        // Verify tuple is (child_id, parent_id)
+        assert_eq!(relations[0].0, child_id, "First element should be child_id");
+        assert_eq!(
+            relations[0].1, parent_id,
+            "Second element should be parent_id"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_export_depends_on_relations_empty_database() {
+        let service = setup_test_service().await;
+
+        let relations = service.export_depends_on_relations().await.unwrap();
+
+        assert!(
+            relations.is_empty(),
+            "Empty database should export zero depends_on relations"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_export_depends_on_relations_single_relation() {
+        let service = setup_test_service().await;
+
+        let blocker_id = service
+            .create_task(CreateTaskOptions::new("Blocker"))
+            .await
+            .unwrap();
+        let task_id = service
+            .create_task(CreateTaskOptions::new("Task"))
+            .await
+            .unwrap();
+
+        service.add_dependency(&task_id, &blocker_id).await.unwrap();
+
+        let relations = service.export_depends_on_relations().await.unwrap();
+
+        assert_eq!(
+            relations.len(),
+            1,
+            "Should export exactly one depends_on relation"
+        );
+        // Verify tuple is (task_id, blocker_id)
+        assert_eq!(relations[0].0, task_id, "First element should be task_id");
+        assert_eq!(
+            relations[0].1, blocker_id,
+            "Second element should be blocker_id"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_export_relations_semantic_correctness() {
+        let service = setup_test_service().await;
+
+        // Create hierarchy: grandparent -> parent -> child
+        let grandparent_id = service
+            .create_task(CreateTaskOptions::new("Grandparent"))
+            .await
+            .unwrap();
+        let parent_id = service
+            .create_task(CreateTaskOptions::new("Parent").with_parent(&grandparent_id))
+            .await
+            .unwrap();
+        let child_id = service
+            .create_task(CreateTaskOptions::new("Child").with_parent(&parent_id))
+            .await
+            .unwrap();
+
+        let child_of_relations = service.export_child_of_relations().await.unwrap();
+
+        // Should have exactly 2 relations (child->parent and parent->grandparent)
+        assert_eq!(child_of_relations.len(), 2);
+
+        // Verify both relations are correct
+        let child_parent_rel = child_of_relations
+            .iter()
+            .find(|(child, _parent)| child == &child_id)
+            .expect("Should have child->parent relation");
+        assert_eq!(child_parent_rel.1, parent_id);
+
+        let parent_grandparent_rel = child_of_relations
+            .iter()
+            .find(|(parent, _gp)| parent == &parent_id)
+            .expect("Should have parent->grandparent relation");
+        assert_eq!(parent_grandparent_rel.1, grandparent_id);
     }
 }

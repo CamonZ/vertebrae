@@ -460,6 +460,19 @@ pub trait WorkflowService: Send + Sync {
         from_workflow_id: &str,
         to_workflow_id: &str,
     ) -> ServiceResult<bool>;
+
+    // =========================================================================
+    // Export Operations (Read-only, no mutation callbacks)
+    // =========================================================================
+
+    /// Export all workflows from the database for backup or import operations.
+    ///
+    /// Returns all workflows with their IDs. This is a read-only operation.
+    ///
+    /// # Returns
+    ///
+    /// A vector of (workflow_id, Workflow) tuples in deterministic order.
+    async fn export_all_workflows(&self) -> ServiceResult<Vec<(String, Workflow)>>;
 }
 
 /// Default implementation of WorkflowService backed by Database
@@ -1272,6 +1285,17 @@ impl WorkflowService for DefaultWorkflowService {
             .await?;
         Ok(exists)
     }
+
+    async fn export_all_workflows(&self) -> ServiceResult<Vec<(String, Workflow)>> {
+        let workflows = self.db.workflows().list().await?;
+        let mut exported = Vec::new();
+        for workflow in workflows {
+            if let Some(id) = workflow.id.as_ref().map(|thing| thing.id.to_raw()) {
+                exported.push((id, workflow));
+            }
+        }
+        Ok(exported)
+    }
 }
 
 #[cfg(test)]
@@ -1466,5 +1490,18 @@ mod tests {
         // Should be 0 since database is empty
         assert_eq!(result.migrated, 0);
         assert_eq!(result.skipped, 0);
+    }
+
+    #[tokio::test]
+    async fn test_export_all_workflows_empty_database() {
+        let service = setup_test_service().await;
+
+        let workflows = service.export_all_workflows().await.unwrap();
+
+        // db.init() creates a default workflow, so we expect at least 1
+        assert!(
+            !workflows.is_empty(),
+            "Should export at least the default workflow"
+        );
     }
 }
