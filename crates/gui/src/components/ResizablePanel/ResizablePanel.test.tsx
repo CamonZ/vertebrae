@@ -149,7 +149,7 @@ describe("ResizablePanel", () => {
       localStorageMock.getItem.mockReturnValueOnce("1000"); // Above maxWidth
 
       const { container } = render(
-        <ResizablePanel storageKey="test-panel-width" defaultWidth={400}>
+        <ResizablePanel storageKey="test-panel-width" defaultWidth={400} maxWidth={600}>
           <div>Content</div>
         </ResizablePanel>
       );

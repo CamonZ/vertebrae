@@ -17,7 +17,6 @@ interface ResizablePanelProps {
 }
 
 const DEFAULT_MIN_WIDTH = 280;
-const DEFAULT_MAX_WIDTH = 600;
 const DEFAULT_WIDTH = 384; // lg:w-96 = 24rem = 384px
 
 /**
@@ -27,7 +26,7 @@ const DEFAULT_WIDTH = 384; // lg:w-96 = 24rem = 384px
 export function ResizablePanel({
   children,
   minWidth = DEFAULT_MIN_WIDTH,
-  maxWidth = DEFAULT_MAX_WIDTH,
+  maxWidth,
   defaultWidth = DEFAULT_WIDTH,
   storageKey,
   glowColor = "from-primary/0 via-primary/30 to-primary/0",
@@ -39,7 +38,7 @@ export function ResizablePanel({
       const stored = localStorage.getItem(storageKey);
       if (stored) {
         const parsed = parseInt(stored, 10);
-        if (!isNaN(parsed) && parsed >= minWidth && parsed <= maxWidth) {
+        if (!isNaN(parsed) && parsed >= minWidth && (maxWidth === undefined || parsed <= maxWidth)) {
           return parsed;
         }
       }
@@ -70,8 +69,11 @@ export function ResizablePanel({
       const viewportWidth = window.innerWidth;
       const newWidth = viewportWidth - e.clientX;
 
-      // Clamp to min/max
-      const clampedWidth = Math.min(Math.max(newWidth, minWidth), maxWidth);
+      // Clamp to min (and max if specified)
+      let clampedWidth = Math.max(newWidth, minWidth);
+      if (maxWidth !== undefined) {
+        clampedWidth = Math.min(clampedWidth, maxWidth);
+      }
       setWidth(clampedWidth);
     },
     [isResizing, minWidth, maxWidth]
@@ -120,7 +122,7 @@ export function ResizablePanel({
         onKeyDown={(e) => {
           // Allow keyboard resizing with arrow keys
           if (e.key === "ArrowLeft") {
-            setWidth((w) => Math.min(w + 10, maxWidth));
+            setWidth((w) => maxWidth !== undefined ? Math.min(w + 10, maxWidth) : w + 10);
           } else if (e.key === "ArrowRight") {
             setWidth((w) => Math.max(w - 10, minWidth));
           }
