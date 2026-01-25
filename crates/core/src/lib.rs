@@ -45,6 +45,7 @@ pub mod execution_service;
 pub mod id_generator;
 pub mod orchestrator;
 pub mod service;
+pub mod services;
 pub mod step_service;
 pub mod workflow_service;
 
@@ -62,6 +63,7 @@ pub use service::{
     TaskTreeNode, TaskWithRelations, TransitionResult, TreeFilterOptions, UnblockedTask,
     UpdateTaskOptions,
 };
+pub use services::VertebraeServices;
 pub use step_service::{DefaultStepService, StepService};
 pub use workflow_service::{
     AssignResult, CreateWorkflowOptions, DefaultWorkflowService, MigrationResult, RejectResult,
