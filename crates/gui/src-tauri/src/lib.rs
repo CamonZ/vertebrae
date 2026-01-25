@@ -131,7 +131,9 @@ fn create_builder() -> Builder {
 pub fn run() {
     let builder = create_builder();
 
-    let mut tauri_app_builder = tauri::Builder::default().plugin(tauri_plugin_dialog::init());
+    let mut tauri_app_builder = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_window_state::Builder::new().build());
 
     if cfg!(debug_assertions) {
         tauri_app_builder = tauri_app_builder.plugin(
