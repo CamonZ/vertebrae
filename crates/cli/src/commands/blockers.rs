@@ -138,11 +138,7 @@ impl BlockersCommand {
     ) -> Result<Vec<vertebrae_db::TaskSummary>, ServiceError> {
         // Get tasks that this task depends on via the depends_on relationship
         // Using service layer method that returns full task details
-        let blockers = service
-            .database()
-            .relationships()
-            .get_dependencies(task_id)
-            .await?;
+        let blockers = service.get_dependencies(task_id).await?;
 
         // Fetch full task details for each blocker
         let mut result = Vec::new();

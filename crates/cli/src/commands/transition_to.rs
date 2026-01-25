@@ -323,7 +323,7 @@ impl TransitionToCommand {
             // Terminal steps: done, rejected
             if step_name == "done" || step_name == "rejected" {
                 // Find tasks that depend on this task
-                let dependents = db.relationships().get_dependents(&id).await?;
+                let dependents = service.get_dependents(&id).await?;
 
                 for dependent_id in dependents {
                     // Check if this dependent has any remaining incomplete blockers

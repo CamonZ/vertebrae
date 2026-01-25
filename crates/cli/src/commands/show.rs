@@ -182,22 +182,10 @@ impl ShowCommand {
         })?;
 
         // Fetch related data in parallel-ish manner
-        let parent = self
-            .fetch_parent(db, &id)
-            .await
-            .map_err(ServiceError::Database)?;
-        let children = self
-            .fetch_children(db, &id)
-            .await
-            .map_err(ServiceError::Database)?;
-        let blocked_by = self
-            .fetch_blocked_by(db, &id)
-            .await
-            .map_err(ServiceError::Database)?;
-        let blocks = self
-            .fetch_blocks(db, &id)
-            .await
-            .map_err(ServiceError::Database)?;
+        let parent = self.fetch_parent(service, &id).await?;
+        let children = self.fetch_children(service, &id).await?;
+        let blocked_by = self.fetch_blocked_by(service, &id).await?;
+        let blocks = self.fetch_blocks(service, &id).await?;
 
         // Create workflow service for fetching workflow info
         let workflow_service = DefaultWorkflowService::new(db.clone());
@@ -288,9 +276,9 @@ impl ShowCommand {
             id: task.id.id.to_raw(),
             title: task.title,
             description: task.description,
-            level: task.level,
+            level: task.level.as_str().to_string(),
             status: derived_status,
-            priority: task.priority,
+            priority: task.priority.map(|p| p.as_str().to_string()),
             tags: task.tags,
             created_at: task.created_at.map(|dt| dt.to_string()),
             updated_at: task.updated_at.map(|dt| dt.to_string()),
@@ -376,21 +364,23 @@ impl ShowCommand {
     }
 
     /// Fetch the parent task (if any) using the repository layer.
-    async fn fetch_parent(&self, db: &Database, id: &str) -> Result<Option<TaskSummary>, DbError> {
-        // Use repository method to get parent ID
-        let parent_id = db.relationships().get_parent(id).await?;
+    async fn fetch_parent(
+        &self,
+        service: &dyn TaskService,
+        id: &str,
+    ) -> Result<Option<TaskSummary>, ServiceError> {
+        // Use service method to get parent ID
+        let parent_id = service.get_parent(id).await?;
 
         if let Some(parent_id) = parent_id {
-            let task = db
-                .tasks()
-                .get(&parent_id)
-                .await?
-                .ok_or_else(|| DbError::TaskNotFound {
-                    task_id: parent_id.clone(),
-                })?;
+            let task = service.get_task(&parent_id).await?;
 
             // Compute derived status from workflow info
-            let derived_status = Self::compute_derived_status_for_task(db, &task).await?;
+            #[allow(deprecated)]
+            let db = service.database();
+            let derived_status = Self::compute_derived_status_for_task(db, &task)
+                .await
+                .map_err(ServiceError::Database)?;
 
             Ok(Some(TaskSummary {
                 id: parent_id,
@@ -407,15 +397,28 @@ impl ShowCommand {
     }
 
     /// Fetch children tasks using the repository layer.
-    async fn fetch_children(&self, db: &Database, id: &str) -> Result<Vec<TaskSummary>, DbError> {
-        // Use repository method to get child IDs
-        let child_ids = db.relationships().get_children(id).await?;
+    async fn fetch_children(
+        &self,
+        service: &dyn TaskService,
+        id: &str,
+    ) -> Result<Vec<TaskSummary>, ServiceError> {
+        // Use service method to get child IDs
+        let child_ids = service.get_children(id).await?;
 
         let mut children = Vec::new();
+        #[allow(deprecated)]
+        let db = service.database();
         for child_id in child_ids {
-            if let Some(task) = db.tasks().get(&child_id).await? {
+            if let Some(task) = db
+                .tasks()
+                .get(&child_id)
+                .await
+                .map_err(ServiceError::Database)?
+            {
                 // Compute derived status from workflow info
-                let derived_status = Self::compute_derived_status_for_task(db, &task).await?;
+                let derived_status = Self::compute_derived_status_for_task(db, &task)
+                    .await
+                    .map_err(ServiceError::Database)?;
 
                 children.push(TaskSummary {
                     id: child_id,
@@ -434,23 +437,40 @@ impl ShowCommand {
 
     /// Fetch tasks that this task depends on (blocked by).
     /// Only returns incomplete blockers (status != done).
-    async fn fetch_blocked_by(&self, db: &Database, id: &str) -> Result<Vec<TaskSummary>, DbError> {
+    async fn fetch_blocked_by(
+        &self,
+        service: &dyn TaskService,
+        id: &str,
+    ) -> Result<Vec<TaskSummary>, ServiceError> {
         // Use the service layer method to get incomplete blockers with details
-        let blockers = db.graph().get_incomplete_blockers_with_details(id).await?;
+        let blockers = service.get_incomplete_blockers_with_details(id).await?;
 
         Ok(blockers.into_iter().map(TaskSummary::from).collect())
     }
 
     /// Fetch tasks that are blocked by this task.
-    async fn fetch_blocks(&self, db: &Database, id: &str) -> Result<Vec<TaskSummary>, DbError> {
-        // Use repository method to get dependent task IDs (tasks blocked by this one)
-        let dependent_ids = db.relationships().get_dependents(id).await?;
+    async fn fetch_blocks(
+        &self,
+        service: &dyn TaskService,
+        id: &str,
+    ) -> Result<Vec<TaskSummary>, ServiceError> {
+        // Use service method to get dependent task IDs (tasks blocked by this one)
+        let dependent_ids = service.get_dependents(id).await?;
 
         let mut blocks = Vec::new();
+        #[allow(deprecated)]
+        let db = service.database();
         for dependent_id in dependent_ids {
-            if let Some(task) = db.tasks().get(&dependent_id).await? {
+            if let Some(task) = db
+                .tasks()
+                .get(&dependent_id)
+                .await
+                .map_err(ServiceError::Database)?
+            {
                 // Compute derived status from workflow info
-                let derived_status = Self::compute_derived_status_for_task(db, &task).await?;
+                let derived_status = Self::compute_derived_status_for_task(db, &task)
+                    .await
+                    .map_err(ServiceError::Database)?;
 
                 blocks.push(TaskSummary {
                     id: dependent_id,

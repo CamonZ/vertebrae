@@ -471,6 +471,32 @@ pub trait TaskService: Send + Sync {
         id: &str,
     ) -> ServiceResult<Vec<TaskSummary>>;
 
+    /// Get the parent task ID of a task
+    ///
+    /// Returns `Some(parent_id)` if the task has a parent, `None` otherwise.
+    /// This is a read-only query operation.
+    async fn get_parent(&self, task_id: &str) -> ServiceResult<Option<String>>;
+
+    /// Get all child task IDs of a task
+    ///
+    /// Returns a vector of direct child task IDs. Returns an empty vector
+    /// if the task has no children. This is a read-only query operation.
+    async fn get_children(&self, task_id: &str) -> ServiceResult<Vec<String>>;
+
+    /// Get all task IDs that this task depends on (its blockers)
+    ///
+    /// Returns a vector of task IDs that this task has dependencies on.
+    /// Returns an empty vector if there are no dependencies.
+    /// This is a read-only query operation.
+    async fn get_dependencies(&self, task_id: &str) -> ServiceResult<Vec<String>>;
+
+    /// Get all task IDs that depend on this task (reverse dependencies)
+    ///
+    /// Returns a vector of task IDs that depend on this task (tasks that would
+    /// be unblocked when this task is completed). Returns an empty vector if
+    /// no tasks depend on this one. This is a read-only query operation.
+    async fn get_dependents(&self, task_id: &str) -> ServiceResult<Vec<String>>;
+
     // =========================================================================
     // Sections and Code References
     // =========================================================================
@@ -1399,6 +1425,26 @@ impl TaskService for DefaultTaskService {
             .graph()
             .get_incomplete_blockers_with_details(&id)
             .await?)
+    }
+
+    async fn get_parent(&self, task_id: &str) -> ServiceResult<Option<String>> {
+        let task_id = task_id.to_lowercase();
+        Ok(self.db.relationships().get_parent(&task_id).await?)
+    }
+
+    async fn get_children(&self, task_id: &str) -> ServiceResult<Vec<String>> {
+        let task_id = task_id.to_lowercase();
+        Ok(self.db.relationships().get_children(&task_id).await?)
+    }
+
+    async fn get_dependencies(&self, task_id: &str) -> ServiceResult<Vec<String>> {
+        let task_id = task_id.to_lowercase();
+        Ok(self.db.relationships().get_dependencies(&task_id).await?)
+    }
+
+    async fn get_dependents(&self, task_id: &str) -> ServiceResult<Vec<String>> {
+        let task_id = task_id.to_lowercase();
+        Ok(self.db.relationships().get_dependents(&task_id).await?)
     }
 
     async fn add_section(&self, id: &str, section: Section) -> ServiceResult<()> {
