@@ -471,6 +471,52 @@ pub trait TaskService: Send + Sync {
         id: &str,
     ) -> ServiceResult<Vec<TaskSummary>>;
 
+    /// Find the shortest path between two tasks through their dependencies
+    ///
+    /// Uses BFS to find the shortest path of task IDs that connects the source
+    /// task to the target task by following dependency edges (depends_on).
+    ///
+    /// # Arguments
+    ///
+    /// * `from_id` - The source task ID (starting point)
+    /// * `to_id` - The target task ID (ending point)
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Some(path))` - Path found as a vector of task IDs ordered from source
+    ///   to target, including both endpoints. If `from_id == to_id` (after normalization),
+    ///   returns `Some(vec![from_id])`.
+    /// * `Ok(None)` - No path exists between the two tasks
+    /// * `Err(ServiceError::TaskNotFound)` - If either `from_id` or `to_id` doesn't exist
+    ///
+    /// # Behavior
+    ///
+    /// - Task IDs are normalized to lowercase before lookup
+    /// - Traverses `depends_on` edges only (not hierarchy edges)
+    /// - Uses breadth-first search for shortest path
+    /// - Returns None if the target is unreachable from the source
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// // Direct dependency: A depends on B
+    /// let path = service.find_path("a", "b").await?;
+    /// assert_eq!(path, Some(vec!["a".to_string(), "b".to_string()]));
+    ///
+    /// // Same task
+    /// let path = service.find_path("a", "a").await?;
+    /// assert_eq!(path, Some(vec!["a".to_string()]));
+    ///
+    /// // No path exists
+    /// let path = service.find_path("x", "y").await?;
+    /// assert_eq!(path, None);
+    ///
+    /// // Non-existent task
+    /// let result = service.find_path("a", "nonexistent").await;
+    /// assert!(matches!(result, Err(ServiceError::TaskNotFound(_))));
+    /// ```
+    async fn find_path(&self, from_id: &str, to_id: &str) -> ServiceResult<Option<Vec<String>>>;
+
     /// Get the parent task ID of a task
     ///
     /// Returns `Some(parent_id)` if the task has a parent, `None` otherwise.
@@ -1425,6 +1471,21 @@ impl TaskService for DefaultTaskService {
             .graph()
             .get_incomplete_blockers_with_details(&id)
             .await?)
+    }
+
+    async fn find_path(&self, from_id: &str, to_id: &str) -> ServiceResult<Option<Vec<String>>> {
+        let from_id = from_id.to_lowercase();
+        let to_id = to_id.to_lowercase();
+
+        // Verify both tasks exist
+        if !self.db.tasks().exists(&from_id).await? {
+            return Err(ServiceError::task_not_found(&from_id));
+        }
+        if !self.db.tasks().exists(&to_id).await? {
+            return Err(ServiceError::task_not_found(&to_id));
+        }
+
+        Ok(self.db.graph().find_path(&from_id, &to_id).await?)
     }
 
     async fn get_parent(&self, task_id: &str) -> ServiceResult<Option<String>> {

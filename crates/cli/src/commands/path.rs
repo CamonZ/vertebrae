@@ -74,9 +74,8 @@ impl PathCommand {
             });
         }
 
-        // Find the path using the graph repository
-        let db = service.database();
-        let path_ids = db.graph().find_path(&from_id, &to_id).await?;
+        // Find the path using the service
+        let path_ids = service.find_path(&from_id, &to_id).await?;
 
         // Convert path IDs to TaskSummary with titles
         let path = match path_ids {
