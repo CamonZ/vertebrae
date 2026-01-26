@@ -364,24 +364,12 @@ impl<'a> RelationshipRepository<'a> {
 mod tests {
     use super::*;
     use crate::Database;
-    use std::env;
 
     /// Helper to create a test database
-    async fn setup_test_db() -> (Database, std::path::PathBuf) {
-        let temp_dir = env::temp_dir().join(format!(
-            "vtb-rel-repo-test-{}-{:?}-{}",
-            std::process::id(),
-            std::thread::current().id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-
-        let db = Database::connect(&temp_dir).await.unwrap();
+    async fn setup_test_db() -> Database {
+        let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-
-        (db, temp_dir)
+        db
     }
 
     /// Helper to create a task in the database
@@ -400,9 +388,7 @@ mod tests {
     }
 
     /// Clean up test database
-    fn cleanup(path: &std::path::Path) {
-        let _ = std::fs::remove_dir_all(path);
-    }
+    // No cleanup needed for in-memory database
 
     // ========================================
     // child_of tests
@@ -410,7 +396,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_and_get_parent() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = RelationshipRepository::new(db.client());
 
         create_task(&db, "parent1", "Parent Task").await;
@@ -422,26 +408,22 @@ mod tests {
         // Verify parent
         let parent = repo.get_parent("child1").await.unwrap();
         assert_eq!(parent, Some("parent1".to_string()));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_parent_no_parent() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = RelationshipRepository::new(db.client());
 
         create_task(&db, "orphan", "Orphan Task").await;
 
         let parent = repo.get_parent("orphan").await.unwrap();
         assert!(parent.is_none());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_children() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = RelationshipRepository::new(db.client());
 
         create_task(&db, "parent1", "Parent Task").await;
@@ -455,26 +437,22 @@ mod tests {
         assert_eq!(children.len(), 2);
         assert!(children.contains(&"child1".to_string()));
         assert!(children.contains(&"child2".to_string()));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_children_no_children() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = RelationshipRepository::new(db.client());
 
         create_task(&db, "lonely", "Lonely Task").await;
 
         let children = repo.get_children("lonely").await.unwrap();
         assert!(children.is_empty());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_remove_child_of() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = RelationshipRepository::new(db.client());
 
         create_task(&db, "parent1", "Parent Task").await;
@@ -492,13 +470,11 @@ mod tests {
         // Verify relationship is gone
         let parent = repo.get_parent("child1").await.unwrap();
         assert!(parent.is_none());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_orphan_children() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = RelationshipRepository::new(db.client());
 
         create_task(&db, "parent1", "Parent Task").await;
@@ -520,8 +496,6 @@ mod tests {
         // Verify parent has no children
         let children = repo.get_children("parent1").await.unwrap();
         assert!(children.is_empty());
-
-        cleanup(&temp_dir);
     }
 
     // ========================================
@@ -530,7 +504,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_and_check_depends_on() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = RelationshipRepository::new(db.client());
 
         create_task(&db, "blocker", "Blocker Task").await;
@@ -554,13 +528,11 @@ mod tests {
             .await
             .unwrap();
         assert!(!reverse);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_depends_on_exists_no_dependency() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = RelationshipRepository::new(db.client());
 
         create_task(&db, "task1", "Task 1").await;
@@ -568,13 +540,11 @@ mod tests {
 
         let exists = repo.depends_on_exists("task1", "task2").await.unwrap();
         assert!(!exists);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_dependencies() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = RelationshipRepository::new(db.client());
 
         create_task(&db, "blocker1", "Blocker 1").await;
@@ -592,26 +562,22 @@ mod tests {
         assert_eq!(deps.len(), 2);
         assert!(deps.contains(&"blocker1".to_string()));
         assert!(deps.contains(&"blocker2".to_string()));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_dependencies_none() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = RelationshipRepository::new(db.client());
 
         create_task(&db, "independent", "Independent Task").await;
 
         let deps = repo.get_dependencies("independent").await.unwrap();
         assert!(deps.is_empty());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_dependents() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = RelationshipRepository::new(db.client());
 
         create_task(&db, "blocker", "Blocker Task").await;
@@ -625,26 +591,22 @@ mod tests {
         assert_eq!(dependents.len(), 2);
         assert!(dependents.contains(&"dep1".to_string()));
         assert!(dependents.contains(&"dep2".to_string()));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_dependents_none() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = RelationshipRepository::new(db.client());
 
         create_task(&db, "noblockers", "No Blockers Task").await;
 
         let dependents = repo.get_dependents("noblockers").await.unwrap();
         assert!(dependents.is_empty());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_remove_depends_on() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = RelationshipRepository::new(db.client());
 
         create_task(&db, "blocker", "Blocker Task").await;
@@ -672,13 +634,11 @@ mod tests {
             .await
             .unwrap();
         assert!(!exists);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_remove_depends_on_specific() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = RelationshipRepository::new(db.client());
 
         create_task(&db, "blocker1", "Blocker 1").await;
@@ -708,13 +668,11 @@ mod tests {
             .unwrap();
         assert!(!exists1);
         assert!(exists2);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_remove_all_dependencies() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = RelationshipRepository::new(db.client());
 
         create_task(&db, "blocker1", "Blocker 1").await;
@@ -734,13 +692,11 @@ mod tests {
         // Verify all gone
         let deps = repo.get_dependencies("dependent").await.unwrap();
         assert!(deps.is_empty());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_remove_all_dependents() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = RelationshipRepository::new(db.client());
 
         create_task(&db, "blocker", "Blocker Task").await;
@@ -756,8 +712,6 @@ mod tests {
         // Verify all dependents removed
         let dependents = repo.get_dependents("blocker").await.unwrap();
         assert!(dependents.is_empty());
-
-        cleanup(&temp_dir);
     }
 
     // ========================================
@@ -766,7 +720,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_remove_all_relationships() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = RelationshipRepository::new(db.client());
 
         // Create a complex relationship structure
@@ -823,21 +777,17 @@ mod tests {
 
         // Dependent should have lost its dependency
         assert!(!repo.depends_on_exists("dependent", "target").await.unwrap());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_remove_all_relationships_no_relationships() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = RelationshipRepository::new(db.client());
 
         create_task(&db, "lonely", "Lonely Task").await;
 
         // Should not error even if no relationships exist
         repo.remove_all_relationships("lonely").await.unwrap();
-
-        cleanup(&temp_dir);
     }
 
     // ========================================
@@ -846,7 +796,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_duplicate_child_of() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = RelationshipRepository::new(db.client());
 
         create_task(&db, "parent", "Parent").await;
@@ -859,13 +809,11 @@ mod tests {
         // Parent should still be correct
         let parent = repo.get_parent("child").await.unwrap();
         assert_eq!(parent, Some("parent".to_string()));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_create_duplicate_depends_on() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = RelationshipRepository::new(db.client());
 
         create_task(&db, "blocker", "Blocker").await;
@@ -885,26 +833,22 @@ mod tests {
             .await
             .unwrap();
         assert!(exists);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_remove_nonexistent_child_of() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = RelationshipRepository::new(db.client());
 
         create_task(&db, "task", "Task").await;
 
         // Should not error when removing non-existent relationship
         repo.remove_child_of("task").await.unwrap();
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_remove_nonexistent_depends_on() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = RelationshipRepository::new(db.client());
 
         create_task(&db, "task1", "Task 1").await;
@@ -912,7 +856,5 @@ mod tests {
 
         // Should not error when removing non-existent relationship
         repo.remove_depends_on("task1", "task2").await.unwrap();
-
-        cleanup(&temp_dir);
     }
 }

@@ -4,8 +4,10 @@
 //! Handles retries, status updates, and event emission.
 
 use chrono::Utc;
+use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
-use vertebrae_db::{Database, ExecutionStatus, StepExecution, Thing};
+use vertebrae_core::{ExecutionService, TaskService};
+use vertebrae_db::{ExecutionStatus, StepExecution, Thing};
 
 use crate::events::{
     StepExecutionChangeType, StepExecutionChangedEvent, StepExecutionStatus,
@@ -29,7 +31,8 @@ pub async fn execute_step_two_phase(
     step: vertebrae_db::Step,
     task_id: &str,
     workflow_id: &str,
-    db: &Database,
+    tasks: &Arc<dyn TaskService>,
+    executions: &Arc<dyn ExecutionService>,
     app_handle: &AppHandle,
 ) -> Result<(), String> {
     trace(
@@ -62,26 +65,34 @@ pub async fn execute_step_two_phase(
         );
 
         // Create execution record at start of each attempt
-        let exec_id =
-            match create_execution_record(&step, task_id, workflow_id, db, app_handle).await {
-                Ok(id) => id,
-                Err(e) => {
-                    last_error = e;
-                    if attempt < MAX_RETRIES {
-                        trace(task_id, "Will retry in 2 seconds...");
-                        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-                        continue;
-                    }
-                    trace(
-                        task_id,
-                        &format!(
-                            "<<< execute_step_two_phase RETURNING Err after {} attempts",
-                            MAX_RETRIES
-                        ),
-                    );
-                    return Err(last_error);
+        let exec_id = match create_execution_record(
+            &step,
+            task_id,
+            workflow_id,
+            tasks,
+            executions,
+            app_handle,
+        )
+        .await
+        {
+            Ok(id) => id,
+            Err(e) => {
+                last_error = e;
+                if attempt < MAX_RETRIES {
+                    trace(task_id, "Will retry in 2 seconds...");
+                    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                    continue;
                 }
-            };
+                trace(
+                    task_id,
+                    &format!(
+                        "<<< execute_step_two_phase RETURNING Err after {} attempts",
+                        MAX_RETRIES
+                    ),
+                );
+                return Err(last_error);
+            }
+        };
 
         // Phase 1: Run orchestrator to generate prompt
         trace(
@@ -93,7 +104,7 @@ pub async fn execute_step_two_phase(
             &exec_id,
             task_id,
             workflow_id,
-            db,
+            executions,
             app_handle,
         )
         .await
@@ -121,9 +132,8 @@ pub async fn execute_step_two_phase(
                 );
 
                 // Mark execution as failed
-                let fresh_db = reconnect_or_fallback(db, task_id, &exec_id).await;
                 let _ = update_execution_status(
-                    &fresh_db,
+                    executions,
                     app_handle,
                     &exec_id,
                     task_id,
@@ -170,7 +180,7 @@ pub async fn execute_step_two_phase(
             task_id,
             workflow_id,
             &orchestrator_output,
-            db,
+            executions,
             app_handle,
         )
         .await
@@ -182,9 +192,8 @@ pub async fn execute_step_two_phase(
                 );
 
                 // Mark execution as completed
-                let fresh_db = reconnect_or_fallback(db, task_id, &exec_id).await;
                 if let Err(e) = update_execution_status(
-                    &fresh_db,
+                    executions,
                     app_handle,
                     &exec_id,
                     task_id,
@@ -239,9 +248,8 @@ pub async fn execute_step_two_phase(
                 );
 
                 // Mark execution as failed
-                let fresh_db = reconnect_or_fallback(db, task_id, &exec_id).await;
                 let _ = update_execution_status(
-                    &fresh_db,
+                    executions,
                     app_handle,
                     &exec_id,
                     task_id,
@@ -294,11 +302,12 @@ async fn create_execution_record(
     step: &vertebrae_db::Step,
     task_id: &str,
     workflow_id: &str,
-    db: &Database,
+    tasks: &Arc<dyn TaskService>,
+    executions: &Arc<dyn ExecutionService>,
     app_handle: &AppHandle,
 ) -> Result<String, String> {
     // Reconnect to database before creating execution (CLI may have modified it)
-    let fresh_db = reconnect_or_fallback(db, task_id, "new").await;
+    let _fresh_db = reconnect_or_fallback(tasks, task_id, "new").await;
 
     trace(
         task_id,
@@ -323,7 +332,7 @@ async fn create_execution_record(
         duration_ms: None,
     };
 
-    match fresh_db.executions().create_execution(&execution).await {
+    match executions.create_execution(execution).await {
         Ok(id) => {
             trace(
                 task_id,

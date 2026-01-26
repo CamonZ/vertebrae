@@ -372,24 +372,12 @@ impl<'a> WorkflowTransitionRepository<'a> {
 mod tests {
     use super::*;
     use crate::Database;
-    use std::env;
 
     /// Helper to create a test database
-    async fn setup_test_db() -> (Database, std::path::PathBuf) {
-        let temp_dir = env::temp_dir().join(format!(
-            "vtb-wf-trans-repo-test-{}-{:?}-{}",
-            std::process::id(),
-            std::thread::current().id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-
-        let db = Database::connect(&temp_dir).await.unwrap();
+    async fn setup_test_db() -> Database {
+        let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-
-        (db, temp_dir)
+        db
     }
 
     /// Helper to create a workflow in the database
@@ -417,13 +405,11 @@ mod tests {
     }
 
     /// Clean up test database
-    fn cleanup(path: &std::path::Path) {
-        let _ = std::fs::remove_dir_all(path);
-    }
+    // No cleanup needed for in-memory database
 
     #[tokio::test]
     async fn test_create_transition() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = WorkflowTransitionRepository::new(db.client());
 
         create_workflow(&db, "wf1", "Workflow 1").await;
@@ -438,13 +424,11 @@ mod tests {
         assert_eq!(transition.from_workflow.id.to_raw(), "wf1");
         assert_eq!(transition.to_workflow.id.to_raw(), "wf2");
         assert!(transition.target_step.is_none());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_create_transition_with_target_step() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = WorkflowTransitionRepository::new(db.client());
 
         create_workflow(&db, "wf1", "Workflow 1").await;
@@ -459,13 +443,11 @@ mod tests {
         assert_eq!(transition.label, "Go to Workflow 2 Step 1");
         assert!(transition.target_step.is_some());
         assert_eq!(transition.target_step.unwrap().id.to_raw(), "step1");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_from_workflow() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = WorkflowTransitionRepository::new(db.client());
 
         create_workflow(&db, "wf1", "Workflow 1").await;
@@ -481,13 +463,11 @@ mod tests {
         let labels: Vec<&str> = transitions.iter().map(|t| t.label.as_str()).collect();
         assert!(labels.contains(&"To WF2"));
         assert!(labels.contains(&"To WF3"));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_to_workflow() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = WorkflowTransitionRepository::new(db.client());
 
         create_workflow(&db, "wf1", "Workflow 1").await;
@@ -503,13 +483,11 @@ mod tests {
         let labels: Vec<&str> = transitions.iter().map(|t| t.label.as_str()).collect();
         assert!(labels.contains(&"WF1 to WF3"));
         assert!(labels.contains(&"WF2 to WF3"));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_exists() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = WorkflowTransitionRepository::new(db.client());
 
         create_workflow(&db, "wf1", "Workflow 1").await;
@@ -526,13 +504,11 @@ mod tests {
 
         // Reverse direction should not exist
         assert!(!repo.exists("wf2", "wf1").await.unwrap());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_delete() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = WorkflowTransitionRepository::new(db.client());
 
         create_workflow(&db, "wf1", "Workflow 1").await;
@@ -543,13 +519,11 @@ mod tests {
 
         repo.delete("wf1", "wf2").await.unwrap();
         assert!(!repo.exists("wf1", "wf2").await.unwrap());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_delete_all_from() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = WorkflowTransitionRepository::new(db.client());
 
         create_workflow(&db, "wf1", "Workflow 1").await;
@@ -564,13 +538,11 @@ mod tests {
         repo.delete_all_from("wf1").await.unwrap();
 
         assert_eq!(repo.get_from_workflow("wf1").await.unwrap().len(), 0);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_delete_all_to() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = WorkflowTransitionRepository::new(db.client());
 
         create_workflow(&db, "wf1", "Workflow 1").await;
@@ -585,13 +557,11 @@ mod tests {
         repo.delete_all_to("wf3").await.unwrap();
 
         assert_eq!(repo.get_to_workflow("wf3").await.unwrap().len(), 0);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_all() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = WorkflowTransitionRepository::new(db.client());
 
         create_workflow(&db, "wf1", "Workflow 1").await;
@@ -606,39 +576,33 @@ mod tests {
 
         let all = repo.list_all().await.unwrap();
         assert_eq!(all.len(), initial_count + 2);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_from_workflow_empty() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = WorkflowTransitionRepository::new(db.client());
 
         create_workflow(&db, "wf1", "Workflow 1").await;
 
         let transitions = repo.get_from_workflow("wf1").await.unwrap();
         assert!(transitions.is_empty());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_to_workflow_empty() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = WorkflowTransitionRepository::new(db.client());
 
         create_workflow(&db, "wf1", "Workflow 1").await;
 
         let transitions = repo.get_to_workflow("wf1").await.unwrap();
         assert!(transitions.is_empty());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_delete_nonexistent_transition() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = WorkflowTransitionRepository::new(db.client());
 
         create_workflow(&db, "wf1", "Workflow 1").await;
@@ -646,13 +610,11 @@ mod tests {
 
         // Should not error when deleting non-existent transition
         repo.delete("wf1", "wf2").await.unwrap();
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_seed_default_transitions() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = WorkflowTransitionRepository::new(db.client());
 
         // Note: setup_test_db calls db.init() which already seeds default transitions
@@ -666,13 +628,11 @@ mod tests {
         // Calling seed again should return false (already exists)
         let seeded = repo.seed_default_transitions().await.unwrap();
         assert!(!seeded, "Should not re-seed if transitions already exist");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_seed_default_transitions_creates_default_workflow_transition() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = WorkflowTransitionRepository::new(db.client());
 
         // After init, there should be a transition for the default workflow
@@ -681,13 +641,11 @@ mod tests {
             !transitions.is_empty(),
             "Default workflow should have transitions"
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_by_label() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = WorkflowTransitionRepository::new(db.client());
 
         create_workflow(&db, "wf1", "Workflow 1").await;
@@ -718,7 +676,5 @@ mod tests {
         // Non-existent workflow should return None
         let transition = repo.get_by_label("wf999", "approve").await.unwrap();
         assert!(transition.is_none());
-
-        cleanup(&temp_dir);
     }
 }

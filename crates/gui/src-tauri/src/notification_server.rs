@@ -14,7 +14,8 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::net::TcpListener;
-use vertebrae_core::DefaultTaskService;
+use vertebrae_core::VertebraeServices;
+use vertebrae_db::Database;
 
 use crate::commands::AppState;
 use crate::events::{TaskChangeType, TaskChangedEvent, WorkflowChangeType, WorkflowChangedEvent};
@@ -29,31 +30,41 @@ pub const DEFAULT_NOTIFICATION_PORT: u16 = 17273;
 async fn reconnect_database(app_handle: &AppHandle) -> Result<(), String> {
     let state = app_handle.state::<AppState>();
 
-    // Get current service to access its database for reconnection
-    let service_guard = state.service.read().await;
-    let service = service_guard
+    // Get current services to access database information for reconnection
+    let service_guard = state.services.read().await;
+    let _services = service_guard
         .as_ref()
         .ok_or_else(|| "No project selected".to_string())?;
 
-    let db = service.database();
+    // Get the current project path from app state
+    let current_project = state
+        .project_config
+        .get_current_project()
+        .ok_or_else(|| "No project selected".to_string())?;
+
+    let db_path = std::path::PathBuf::from(current_project).join(".vtb/data");
     log::info!(
         "[NotificationServer] Reconnecting to database at: {:?}",
-        db.path()
+        db_path
     );
 
-    // Use Database::reconnect() to get a fresh connection
-    let new_db = db
-        .reconnect()
+    // Create a fresh connection to the database
+    let new_db = Database::connect(&db_path)
         .await
         .map_err(|e| format!("Failed to reconnect to database: {}", e))?;
+
+    new_db
+        .init()
+        .await
+        .map_err(|e| format!("Failed to reinitialize database: {}", e))?;
 
     // We need to drop the read guard before acquiring write guard
     drop(service_guard);
 
-    // Update the service in AppState with fresh database connection
-    let new_service = DefaultTaskService::new(new_db);
-    let mut service_guard = state.service.write().await;
-    *service_guard = Some(new_service);
+    // Update the services in AppState with fresh database connection
+    let new_services = VertebraeServices::new(new_db);
+    let mut service_guard = state.services.write().await;
+    *service_guard = Some(new_services);
 
     log::info!("[NotificationServer] Database reconnected successfully");
     Ok(())
@@ -215,19 +226,29 @@ async fn handle_run_workflow(
 
     // Get database from app state
     let state = app_handle.state::<AppState>();
-    let service_guard = state.service.read().await;
+    let service_guard = state.services.read().await;
     let service = service_guard.as_ref().ok_or_else(|| ErrorResponse {
         error: "No project selected".to_string(),
     })?;
 
-    let db = service.database().clone();
+    let tasks_arc = service.tasks_arc();
+    let workflows_arc = service.workflows_arc();
+    let executions_arc = service.executions_arc();
+    let steps_arc = service.steps_arc();
     let task_id = payload.task_id.clone();
     let app_handle_clone = app_handle.as_ref().clone();
 
     // Spawn execution in background
     tauri::async_runtime::spawn(async move {
-        if let Err(e) =
-            crate::workflow_runner::execute_workflow(task_id, db, app_handle_clone).await
+        if let Err(e) = crate::workflow_runner::execute_workflow(
+            task_id,
+            tasks_arc,
+            workflows_arc,
+            executions_arc,
+            steps_arc,
+            app_handle_clone,
+        )
+        .await
         {
             log::error!("[NotificationServer] Workflow execution failed: {}", e);
         }

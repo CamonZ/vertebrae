@@ -40,6 +40,7 @@
 //! }
 //! ```
 
+pub mod chat_session_service;
 pub mod error;
 pub mod execution_service;
 pub mod id_generator;
@@ -50,6 +51,10 @@ pub mod step_service;
 pub mod workflow_service;
 
 // Re-export main types for convenience
+pub use chat_session_service::{
+    ChatSessionMutationCallback, ChatSessionMutationEvent, ChatSessionService,
+    DefaultChatSessionService,
+};
 pub use error::{ServiceError, ServiceResult};
 pub use execution_service::{
     DefaultExecutionService, ExecutionMutationCallback, ExecutionMutationEvent, ExecutionService,

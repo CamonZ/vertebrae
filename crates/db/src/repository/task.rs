@@ -1108,6 +1108,67 @@ impl<'a> TaskRepository<'a> {
         );
         Ok(())
     }
+
+    /// Toggle the done status of a step section in a task
+    ///
+    /// Finds step sections and toggles the done status of the step at the given ordinal (0-based).
+    /// Updates done and done_at atomically.
+    pub async fn toggle_step_done(&self, id: &str, ordinal: u32) -> DbResult<()> {
+        debug!("Toggling step ordinal {} in task {}", ordinal, id);
+
+        // First, get the task and its sections
+        let task = self.get(id).await?.ok_or_else(|| DbError::TaskNotFound {
+            task_id: id.to_string(),
+        })?;
+
+        // Find all step sections and filter by ordinal
+        let step_position = task
+            .sections
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.section_type == SectionType::Step)
+            .find(|(_, s)| s.order == Some(ordinal));
+
+        let (original_idx, section) = step_position.ok_or_else(|| DbError::ValidationError {
+            message: format!("Step with ordinal {} not found in task {}", ordinal, id),
+        })?;
+
+        // Toggle the done status
+        let new_done_status = !section.done.unwrap_or(false);
+
+        // Update the section at original_idx
+        let mut new_sections = task.sections.clone();
+        if let Some(section) = new_sections.get_mut(original_idx) {
+            section.done = Some(new_done_status);
+            section.done_at = if new_done_status {
+                Some(chrono::Utc::now())
+            } else {
+                None
+            };
+        }
+
+        // Serialize sections to JSON for the query
+        let sections_json =
+            serde_json::to_string(&new_sections).map_err(|e| DbError::InvalidPath {
+                path: std::path::PathBuf::from(id),
+                reason: format!("Failed to serialize sections: {}", e),
+            })?;
+
+        // Update the task with the new sections array
+        let query = format!(
+            "UPDATE task:{} SET sections = {}, updated_at = time::now()",
+            id, sections_json
+        );
+
+        trace!("Query: {}", query);
+        self.client.query(&query).await?;
+
+        debug!(
+            "Successfully toggled step ordinal {} to done={} in task {}",
+            ordinal, new_done_status, id
+        );
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -1115,45 +1176,29 @@ mod tests {
     use super::*;
     use crate::Database;
     use crate::models::Level;
-    use std::env;
 
     /// Helper to create a test database
-    async fn setup_test_db() -> (Database, std::path::PathBuf) {
-        let temp_dir = env::temp_dir().join(format!(
-            "vtb-task-repo-test-{}-{:?}-{}",
-            std::process::id(),
-            std::thread::current().id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-
-        let db = Database::connect(&temp_dir).await.unwrap();
+    async fn setup_test_db() -> Database {
+        let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-
-        (db, temp_dir)
+        db
     }
 
     /// Clean up test database
-    fn cleanup(path: &std::path::Path) {
-        let _ = std::fs::remove_dir_all(path);
-    }
+    // No cleanup needed for in-memory database
 
     #[tokio::test]
     async fn test_exists_returns_false_for_nonexistent() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = TaskRepository::new(db.client());
 
         let exists = repo.exists("nonexistent").await.unwrap();
         assert!(!exists);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_create_and_exists() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = TaskRepository::new(db.client());
 
         let task = Task::new("Test Task", Level::Task);
@@ -1161,13 +1206,11 @@ mod tests {
 
         let exists = repo.exists("test1").await.unwrap();
         assert!(exists);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_create_with_all_fields() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = TaskRepository::new(db.client());
 
         let task = Task::new("Full Task", Level::Epic)
@@ -1196,13 +1239,11 @@ mod tests {
         assert_eq!(row.priority, Some("high".to_string()));
         assert!(row.tags.contains(&"backend".to_string()));
         assert!(row.tags.contains(&"urgent".to_string()));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_existing_task() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = TaskRepository::new(db.client());
 
         let task = Task::new("Get Test", Level::Ticket).with_priority(Priority::Medium);
@@ -1216,19 +1257,15 @@ mod tests {
         assert_eq!(retrieved.title, "Get Test");
         assert_eq!(retrieved.level, Level::Ticket);
         assert_eq!(retrieved.priority, Some(Priority::Medium));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_nonexistent_task() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = TaskRepository::new(db.client());
 
         let retrieved = repo.get("nonexistent").await.unwrap();
         assert!(retrieved.is_none());
-
-        cleanup(&temp_dir);
     }
 
     // Note: test_update_status removed - status is now derived from workflow step
@@ -1236,7 +1273,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_timestamp() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = TaskRepository::new(db.client());
 
         let task = Task::new("Timestamp Test", Level::Task);
@@ -1257,13 +1294,11 @@ mod tests {
 
         assert!(row.is_some());
         assert!(row.unwrap().updated_at.is_some());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_update_title() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = TaskRepository::new(db.client());
 
         let task = Task::new("Original Title", Level::Task);
@@ -1274,13 +1309,11 @@ mod tests {
 
         let retrieved = repo.get("upd1").await.unwrap().unwrap();
         assert_eq!(retrieved.title, "New Title");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_update_priority() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = TaskRepository::new(db.client());
 
         let task = Task::new("Priority Test", Level::Task);
@@ -1291,13 +1324,11 @@ mod tests {
 
         let retrieved = repo.get("upd2").await.unwrap().unwrap();
         assert_eq!(retrieved.priority, Some(Priority::Critical));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_update_clear_priority() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = TaskRepository::new(db.client());
 
         let task = Task::new("Clear Priority", Level::Task).with_priority(Priority::High);
@@ -1308,13 +1339,11 @@ mod tests {
 
         let retrieved = repo.get("upd3").await.unwrap().unwrap();
         assert!(retrieved.priority.is_none());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_update_add_tags() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = TaskRepository::new(db.client());
 
         let task = Task::new("Tag Test", Level::Task).with_tag("existing");
@@ -1327,13 +1356,11 @@ mod tests {
         assert!(retrieved.tags.contains(&"existing".to_string()));
         assert!(retrieved.tags.contains(&"new1".to_string()));
         assert!(retrieved.tags.contains(&"new2".to_string()));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_update_remove_tags() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = TaskRepository::new(db.client());
 
         let task = Task::new("Remove Tag Test", Level::Task).with_tags(["keep", "remove"]);
@@ -1345,13 +1372,11 @@ mod tests {
         let retrieved = repo.get("upd5").await.unwrap().unwrap();
         assert!(retrieved.tags.contains(&"keep".to_string()));
         assert!(!retrieved.tags.contains(&"remove".to_string()));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_update_add_duplicate_tag() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = TaskRepository::new(db.client());
 
         let task = Task::new("Duplicate Tag Test", Level::Task).with_tag("existing");
@@ -1364,13 +1389,11 @@ mod tests {
         // Should only have one instance of the tag
         assert_eq!(retrieved.tags.len(), 1);
         assert_eq!(retrieved.tags[0], "existing");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_update_no_changes() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = TaskRepository::new(db.client());
 
         let task = Task::new("No Change Test", Level::Task);
@@ -1381,13 +1404,11 @@ mod tests {
 
         // Should not error
         repo.update("upd7", &updates).await.unwrap();
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_delete() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = TaskRepository::new(db.client());
 
         let task = Task::new("Delete Test", Level::Task);
@@ -1398,19 +1419,15 @@ mod tests {
         repo.delete("del1").await.unwrap();
 
         assert!(!repo.exists("del1").await.unwrap());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_delete_nonexistent() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = TaskRepository::new(db.client());
 
         // Should not error when deleting non-existent task
         repo.delete("nonexistent").await.unwrap();
-
-        cleanup(&temp_dir);
     }
 
     #[test]
@@ -1442,7 +1459,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_needs_human_review_on_task_without_field() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = TaskRepository::new(db.client());
 
         // Create a task WITHOUT setting needs_human_review (should be null)
@@ -1467,13 +1484,11 @@ mod tests {
             Some(true),
             "needs_human_review should be true after update"
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_update_needs_human_review_toggle() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = TaskRepository::new(db.client());
 
         // Create a task with needs_human_review = false
@@ -1493,13 +1508,11 @@ mod tests {
 
         let retrieved = repo.get("nhr2").await.unwrap().unwrap();
         assert_eq!(retrieved.needs_human_review, Some(false));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_assign_workflow() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = TaskRepository::new(db.client());
 
         // Create a task
@@ -1518,13 +1531,11 @@ mod tests {
             retrieved.workflow_id.is_some(),
             "Task should have workflow_id"
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_unassign_workflow() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = TaskRepository::new(db.client());
 
         // Create a task and assign it
@@ -1551,13 +1562,11 @@ mod tests {
             retrieved.current_step_id.is_none(),
             "Task should not have current_step_id after unassign"
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_update_current_step_id() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = TaskRepository::new(db.client());
 
         // Create a task
@@ -1585,13 +1594,11 @@ mod tests {
             "workflow_todo",
             "Step ID should match"
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_update_description() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = TaskRepository::new(db.client());
 
         let task = Task::new("Description Test", Level::Task);
@@ -1607,13 +1614,11 @@ mod tests {
             retrieved.description,
             Some("This is a description".to_string())
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_update_clear_description() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = TaskRepository::new(db.client());
 
         // Create task with initial description
@@ -1641,8 +1646,6 @@ mod tests {
         // Verify description was cleared
         let retrieved = repo.get("desc2").await.unwrap().unwrap();
         assert!(retrieved.description.is_none());
-
-        cleanup(&temp_dir);
     }
 
     #[test]
@@ -1662,7 +1665,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_append_ref_to_empty_refs() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = TaskRepository::new(db.client());
 
         // Create task without refs
@@ -1677,13 +1680,11 @@ mod tests {
         let retrieved = repo.get("ref1").await.unwrap().unwrap();
         assert_eq!(retrieved.code_refs.len(), 1);
         assert_eq!(retrieved.code_refs[0].path, "src/main.rs");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_append_ref_to_existing_refs() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = TaskRepository::new(db.client());
 
         // Create task with initial ref
@@ -1706,13 +1707,11 @@ mod tests {
         assert_eq!(retrieved.code_refs[0].path, "src/lib.rs");
         assert_eq!(retrieved.code_refs[1].path, "src/main.rs");
         assert_eq!(retrieved.code_refs[1].line_start, Some(42));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_append_ref_updates_timestamp() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = TaskRepository::new(db.client());
 
         // Create task
@@ -1737,13 +1736,11 @@ mod tests {
             updated.updated_at != initial_updated,
             "updated_at should change after append_ref"
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_append_ref_with_all_fields() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = TaskRepository::new(db.client());
 
         // Create task
@@ -1768,13 +1765,11 @@ mod tests {
             ref_retrieved.description,
             Some("Main data processing function".to_string())
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_append_ref_to_null_refs() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = TaskRepository::new(db.client());
 
         // Create task with explicitly null refs
@@ -1795,8 +1790,6 @@ mod tests {
         let retrieved = repo.get("ref5").await.unwrap().unwrap();
         assert_eq!(retrieved.code_refs.len(), 1);
         assert_eq!(retrieved.code_refs[0].path, "src/null_test.rs");
-
-        cleanup(&temp_dir);
     }
 
     // ========================================
@@ -1805,7 +1798,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_append_section_ref_to_empty_refs() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = TaskRepository::new(db.client());
 
         // Create task with a section that has empty refs
@@ -1829,13 +1822,11 @@ mod tests {
         assert_eq!(retrieved.sections.len(), 1);
         assert_eq!(retrieved.sections[0].refs.len(), 1);
         assert_eq!(retrieved.sections[0].refs[0].path, "src/test.rs");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_append_section_ref_to_existing_refs() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = TaskRepository::new(db.client());
 
         // Create task with a section that already has refs
@@ -1859,13 +1850,11 @@ mod tests {
         assert_eq!(retrieved.sections[0].refs.len(), 2);
         assert_eq!(retrieved.sections[0].refs[0].path, "src/existing.rs");
         assert_eq!(retrieved.sections[0].refs[1].path, "src/new.rs");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_append_section_ref_invalid_section_index() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = TaskRepository::new(db.client());
 
         // Create task with one section
@@ -1890,13 +1879,11 @@ mod tests {
             }
             other => panic!("Expected ValidationError, got: {:?}", other),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_append_section_ref_task_not_found() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = TaskRepository::new(db.client());
 
         // Try to append to nonexistent task
@@ -1910,13 +1897,11 @@ mod tests {
             }
             other => panic!("Expected TaskNotFound, got: {:?}", other),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_append_section_ref_to_null_refs() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = TaskRepository::new(db.client());
 
         // Create task with a section that has no refs field (null/missing)
@@ -1939,8 +1924,6 @@ mod tests {
         let retrieved = repo.get("secref4").await.unwrap().unwrap();
         assert_eq!(retrieved.sections[0].refs.len(), 1);
         assert_eq!(retrieved.sections[0].refs[0].path, "src/null_test.rs");
-
-        cleanup(&temp_dir);
     }
 
     // ========================================
@@ -1949,7 +1932,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_remove_section_single() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = TaskRepository::new(db.client());
 
         // Create task with a single step section
@@ -1970,13 +1953,11 @@ mod tests {
         // Verify sections is now empty
         let retrieved = repo.get("remsec1").await.unwrap().unwrap();
         assert!(retrieved.sections.is_empty());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_remove_section_renumbers_ordinals() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = TaskRepository::new(db.client());
 
         // Create task with three step sections
@@ -2005,13 +1986,11 @@ mod tests {
         assert_eq!(retrieved.sections[0].order, Some(1));
         assert_eq!(retrieved.sections[1].content, "Step 3");
         assert_eq!(retrieved.sections[1].order, Some(2)); // Renumbered from 3 to 2
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_remove_section_preserves_other_types() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = TaskRepository::new(db.client());
 
         // Create task with mixed section types
@@ -2064,13 +2043,11 @@ mod tests {
             .unwrap();
         assert_eq!(constraint.content, "A constraint");
         assert_eq!(constraint.order, Some(1));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_remove_section_not_found() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = TaskRepository::new(db.client());
 
         // Create task with a goal section
@@ -2094,13 +2071,11 @@ mod tests {
             }
             other => panic!("Expected ValidationError, got: {:?}", other),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_remove_section_wrong_ordinal() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = TaskRepository::new(db.client());
 
         // Create task with a step at ordinal 1
@@ -2124,13 +2099,11 @@ mod tests {
             }
             other => panic!("Expected ValidationError, got: {:?}", other),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_remove_section_task_not_found() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = TaskRepository::new(db.client());
 
         // Try to remove section from nonexistent task
@@ -2145,7 +2118,5 @@ mod tests {
             }
             other => panic!("Expected TaskNotFound, got: {:?}", other),
         }
-
-        cleanup(&temp_dir);
     }
 }

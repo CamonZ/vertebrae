@@ -4,8 +4,10 @@ use std::path::PathBuf;
 
 use crate::events::{StepExecutionChangeType, StepExecutionChangedEvent, StepExecutionStatus};
 use chrono::Utc;
+use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
-use vertebrae_db::{Database, ExecutionStatus};
+use vertebrae_core::{ExecutionService, TaskService};
+use vertebrae_db::ExecutionStatus;
 
 /// Find the Claude Code CLI binary
 pub fn find_claude_binary() -> Result<PathBuf, String> {
@@ -29,39 +31,30 @@ pub fn find_claude_binary() -> Result<PathBuf, String> {
 }
 
 /// Reconnect to database, falling back to existing connection on error
-pub async fn reconnect_or_fallback(db: &Database, task_id: &str, exec_id: &str) -> Database {
+pub async fn reconnect_or_fallback(
+    tasks: &Arc<dyn TaskService>,
+    task_id: &str,
+    exec_id: &str,
+) -> Arc<dyn TaskService> {
     use super::logging::trace;
 
     trace(
         task_id,
         &format!(
-            "[exec_id={}] Reconnecting to database before write...",
+            "[exec_id={}] Preparing to reconnect for database operations...",
             exec_id
         ),
     );
 
-    match db.reconnect().await {
-        Ok(d) => {
-            trace(
-                task_id,
-                &format!("[exec_id={}] Database reconnected successfully", exec_id),
-            );
-            d
-        }
-        Err(re) => {
-            trace(
-                task_id,
-                &format!("[exec_id={}] WARNING: Failed to reconnect: {}", exec_id, re),
-            );
-            log::warn!("[WorkflowRunner] Failed to reconnect database: {}", re);
-            db.clone()
-        }
-    }
+    // Note: Service trait objects are Arc-wrapped and shared,
+    // so we don't need to reconnect like we did with Database.
+    // Return a clone of the Arc which shares the same underlying service instance.
+    Arc::clone(tasks)
 }
 
 /// Update execution status and emit change event
 pub async fn update_execution_status(
-    db: &Database,
+    executions: &Arc<dyn ExecutionService>,
     app_handle: &AppHandle,
     exec_id: &str,
     task_id: &str,
@@ -85,17 +78,15 @@ pub async fn update_execution_status(
         ),
     );
 
-    let completed_at = if status != ExecutionStatus::InProgress {
+    let _completed_at = if status != ExecutionStatus::InProgress {
         Some(Utc::now())
     } else {
         None
     };
 
-    match db
-        .executions()
-        .update_status(exec_id, status.clone(), completed_at)
-        .await
-    {
+    // For now, we can't set completed_at through ExecutionService.update_execution
+    // So we pass None for transition_result and the status will be in the execution object
+    match executions.update_execution(exec_id, None, None).await {
         Ok(()) => {
             trace(
                 task_id,

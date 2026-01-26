@@ -1027,24 +1027,11 @@ mod tests {
     use super::*;
     use crate::Database;
     use crate::models::{Level, Priority};
-    use std::env;
-
-    /// Helper to create a test database
-    async fn setup_test_db() -> (Database, std::path::PathBuf) {
-        let temp_dir = env::temp_dir().join(format!(
-            "vtb-graph-test-{}-{:?}-{}",
-            std::process::id(),
-            std::thread::current().id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-
-        let db = Database::connect(&temp_dir).await.unwrap();
+    /// Helper to create a test database (in-memory)
+    async fn setup_test_db() -> Database {
+        let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-
-        (db, temp_dir)
+        db
     }
 
     /// Helper to create a task in the database
@@ -1091,10 +1078,7 @@ mod tests {
         db.client().query(&query).await.unwrap();
     }
 
-    /// Clean up test database
-    fn cleanup(path: &std::path::Path) {
-        let _ = std::fs::remove_dir_all(path);
-    }
+    // No cleanup needed for in-memory database
 
     // ========================================
     // get_blockers tests
@@ -1102,20 +1086,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_blockers_no_blockers() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         create_task(&db, "task1", "Independent Task", "task", "in_progress").await;
 
         let blockers = graph.get_blockers("task1", None).await.unwrap();
         assert!(blockers.is_empty());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_blockers_single_blocker() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         create_task(&db, "blocker1", "Blocker Task", "task", "in_progress").await;
@@ -1129,13 +1111,11 @@ mod tests {
         assert_eq!(blockers[0].level, "task");
         assert_eq!(blockers[0].status, "in_progress");
         assert!(blockers[0].children.is_empty());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_blockers_transitive() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         // Create chain: task1 -> blocker1 -> blocker2
@@ -1158,13 +1138,11 @@ mod tests {
         assert_eq!(blockers[0].id, "blocker1");
         assert_eq!(blockers[0].children.len(), 1);
         assert_eq!(blockers[0].children[0].id, "blocker2");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_blockers_with_depth_limit() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         // Create chain: task1 -> blocker1 -> blocker2 -> blocker3
@@ -1188,13 +1166,11 @@ mod tests {
         assert_eq!(blockers[0].children.len(), 1);
         assert_eq!(blockers[0].children[0].id, "blocker2");
         assert!(blockers[0].children[0].children.is_empty());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_blockers_depth_zero() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         create_task(&db, "blocker1", "Blocker", "task", "in_progress").await;
@@ -1204,13 +1180,11 @@ mod tests {
         // Depth 0 should show no blockers
         let blockers = graph.get_blockers("task1", Some(0)).await.unwrap();
         assert!(blockers.is_empty());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_blockers_multiple_direct() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         create_task(&db, "blocker1", "Blocker 1", "task", "in_progress").await;
@@ -1226,8 +1200,6 @@ mod tests {
         let blocker_ids: HashSet<_> = blockers.iter().map(|b| b.id.as_str()).collect();
         assert!(blocker_ids.contains("blocker1"));
         assert!(blocker_ids.contains("blocker2"));
-
-        cleanup(&temp_dir);
     }
 
     // ========================================
@@ -1236,7 +1208,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_find_path_same_task() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         create_task(&db, "taska", "Task A", "task", "in_progress").await;
@@ -1244,13 +1216,11 @@ mod tests {
         let path = graph.find_path("taska", "taska").await.unwrap();
         assert!(path.is_some());
         assert_eq!(path.unwrap(), vec!["taska"]);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_find_path_direct() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         create_task(&db, "taska", "Task A", "task", "in_progress").await;
@@ -1260,13 +1230,11 @@ mod tests {
         let path = graph.find_path("taska", "taskb").await.unwrap();
         assert!(path.is_some());
         assert_eq!(path.unwrap(), vec!["taska", "taskb"]);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_find_path_transitive() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         // Create chain: A -> B -> C
@@ -1279,13 +1247,11 @@ mod tests {
         let path = graph.find_path("taska", "taskc").await.unwrap();
         assert!(path.is_some());
         assert_eq!(path.unwrap(), vec!["taska", "taskb", "taskc"]);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_find_path_no_path() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         create_task(&db, "taska", "Task A", "task", "in_progress").await;
@@ -1294,13 +1260,11 @@ mod tests {
 
         let path = graph.find_path("taska", "taskb").await.unwrap();
         assert!(path.is_none());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_find_path_wrong_direction() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         create_task(&db, "taska", "Task A", "task", "in_progress").await;
@@ -1310,8 +1274,6 @@ mod tests {
         // Path in reverse direction should not exist
         let path = graph.find_path("taskb", "taska").await.unwrap();
         assert!(path.is_none());
-
-        cleanup(&temp_dir);
     }
 
     // ========================================
@@ -1320,7 +1282,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_would_create_cycle_no_cycle() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         create_task(&db, "taska", "Task A", "task", "in_progress").await;
@@ -1328,13 +1290,11 @@ mod tests {
 
         let would_cycle = graph.would_create_cycle("taska", "taskb").await.unwrap();
         assert!(!would_cycle);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_would_create_cycle_direct() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         create_task(&db, "taska", "Task A", "task", "in_progress").await;
@@ -1344,13 +1304,11 @@ mod tests {
         // Creating B -> A would create a cycle (A -> B -> A)
         let would_cycle = graph.would_create_cycle("taskb", "taska").await.unwrap();
         assert!(would_cycle);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_would_create_cycle_transitive() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         create_task(&db, "taska", "Task A", "task", "in_progress").await;
@@ -1364,13 +1322,11 @@ mod tests {
         // Creating C -> A would create a transitive cycle
         let would_cycle = graph.would_create_cycle("taskc", "taska").await.unwrap();
         assert!(would_cycle);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_cycle_path() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         create_task(&db, "taska", "Task A", "task", "in_progress").await;
@@ -1382,13 +1338,11 @@ mod tests {
         let path = cycle_path.unwrap();
         assert!(path.contains(&"taska".to_string()));
         assert!(path.contains(&"taskb".to_string()));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_cycle_path_no_cycle() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         create_task(&db, "taska", "Task A", "task", "in_progress").await;
@@ -1397,13 +1351,11 @@ mod tests {
 
         let cycle_path = graph.get_cycle_path("taska", "taskb").await.unwrap();
         assert!(cycle_path.is_none());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_cycle_path_transitive() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         create_task(&db, "taska", "Task A", "task", "in_progress").await;
@@ -1422,8 +1374,6 @@ mod tests {
         assert!(path.contains(&"taska".to_string()));
         assert!(path.contains(&"taskb".to_string()));
         assert!(path.contains(&"taskc".to_string()));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
@@ -1440,7 +1390,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_detect_cycle_no_cycle() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         create_task(&db, "taska", "Task A", "task", "in_progress").await;
@@ -1450,13 +1400,11 @@ mod tests {
         // No cycle in this graph
         let cycle = graph.detect_cycle("taska").await.unwrap();
         assert!(cycle.is_none());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_detect_cycle_no_dependencies() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         create_task(&db, "taska", "Task A", "task", "in_progress").await;
@@ -1464,8 +1412,6 @@ mod tests {
         // No dependencies at all
         let cycle = graph.detect_cycle("taska").await.unwrap();
         assert!(cycle.is_none());
-
-        cleanup(&temp_dir);
     }
 
     // ========================================
@@ -1474,20 +1420,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_all_descendants_none() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         create_task(&db, "parent", "Parent Task", "epic", "in_progress").await;
 
         let descendants = graph.get_all_descendants("parent").await.unwrap();
         assert!(descendants.is_empty());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_all_descendants_direct_children() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         create_task(&db, "parent", "Parent", "epic", "in_progress").await;
@@ -1501,13 +1445,11 @@ mod tests {
         assert_eq!(descendants.len(), 2);
         assert!(descendants.contains(&"child1".to_string()));
         assert!(descendants.contains(&"child2".to_string()));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_all_descendants_deep_hierarchy() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         // Create: parent -> child -> grandchild
@@ -1522,8 +1464,6 @@ mod tests {
         assert_eq!(descendants.len(), 2);
         assert!(descendants.contains(&"child".to_string()));
         assert!(descendants.contains(&"grandchild".to_string()));
-
-        cleanup(&temp_dir);
     }
 
     // ========================================
@@ -1532,20 +1472,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_ancestor_chain_no_parent() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         create_task(&db, "root", "Root Task", "epic", "in_progress").await;
 
         let ancestors = graph.get_ancestor_chain("root").await.unwrap();
         assert!(ancestors.is_empty());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_ancestor_chain_single_parent() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         create_task(&db, "parent", "Parent", "epic", "in_progress").await;
@@ -1554,13 +1492,11 @@ mod tests {
 
         let ancestors = graph.get_ancestor_chain("child").await.unwrap();
         assert_eq!(ancestors, vec!["parent"]);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_ancestor_chain_multiple_levels() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         create_task(&db, "grandparent", "Grandparent", "epic", "in_progress").await;
@@ -1572,8 +1508,6 @@ mod tests {
 
         let ancestors = graph.get_ancestor_chain("child").await.unwrap();
         assert_eq!(ancestors, vec!["parent", "grandparent"]);
-
-        cleanup(&temp_dir);
     }
 
     // ========================================
@@ -1582,20 +1516,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_has_incomplete_children_no_children() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         create_task(&db, "parent", "Parent", "epic", "in_progress").await;
 
         let has_incomplete = graph.has_incomplete_children("parent").await.unwrap();
         assert!(!has_incomplete);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_has_incomplete_children_all_complete() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         create_task(&db, "parent", "Parent", "epic", "in_progress").await;
@@ -1607,13 +1539,11 @@ mod tests {
 
         let has_incomplete = graph.has_incomplete_children("parent").await.unwrap();
         assert!(!has_incomplete);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_has_incomplete_children_some_incomplete() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         create_task(&db, "parent", "Parent", "epic", "in_progress").await;
@@ -1625,8 +1555,6 @@ mod tests {
 
         let has_incomplete = graph.has_incomplete_children("parent").await.unwrap();
         assert!(has_incomplete);
-
-        cleanup(&temp_dir);
     }
 
     // ========================================
@@ -1635,20 +1563,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_incomplete_blockers_none() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         create_task(&db, "task1", "Task 1", "task", "in_progress").await;
 
         let blockers = graph.get_incomplete_blockers("task1").await.unwrap();
         assert!(blockers.is_empty());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_incomplete_blockers_all_complete() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         create_task(&db, "blocker1", "Blocker 1", "task", "done").await;
@@ -1660,13 +1586,11 @@ mod tests {
 
         let blockers = graph.get_incomplete_blockers("task1").await.unwrap();
         assert!(blockers.is_empty());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_incomplete_blockers_some_incomplete() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         create_task(&db, "blocker1", "Blocker 1", "task", "done").await;
@@ -1679,8 +1603,6 @@ mod tests {
         let blockers = graph.get_incomplete_blockers("task1").await.unwrap();
         assert_eq!(blockers.len(), 1);
         assert!(blockers.contains(&"blocker2".to_string()));
-
-        cleanup(&temp_dir);
     }
 
     // ========================================
@@ -1689,7 +1611,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_incomplete_blockers_with_details_empty_when_no_blockers() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         create_task(&db, "task1", "Task 1", "task", "in_progress").await;
@@ -1699,13 +1621,11 @@ mod tests {
             .await
             .unwrap();
         assert!(blockers.is_empty());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_incomplete_blockers_with_details_returns_incomplete() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         // Create blocker with full details including priority and tags
@@ -1740,13 +1660,11 @@ mod tests {
         assert_eq!(blocker.priority, Some(Priority::High));
         assert_eq!(blocker.tags, vec!["backend", "urgent"]);
         assert_eq!(blocker.needs_human_review, Some(true));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_incomplete_blockers_with_details_excludes_completed() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         // Create two blockers: one done, one in_progress
@@ -1767,13 +1685,11 @@ mod tests {
         assert_eq!(blockers[0].id, "blocker2");
         assert_eq!(blockers[0].title, "Active Blocker");
         assert_eq!(blockers[0].status, "in_progress");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_incomplete_blockers_with_details_returns_workflow_info() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         // Create a blocker with workflow_id and current_step_id set to first-class step
@@ -1815,8 +1731,6 @@ mod tests {
             Some("in_progress".to_string()),
             "Step name should be 'in_progress'"
         );
-
-        cleanup(&temp_dir);
     }
 
     // ========================================
@@ -1825,20 +1739,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_incomplete_descendants_no_children() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         create_task(&db, "task1", "Task 1", "task", "in_progress").await;
 
         let incomplete = graph.get_incomplete_descendants("task1").await.unwrap();
         assert!(incomplete.is_empty());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_incomplete_descendants_all_complete() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         create_task(&db, "parent", "Parent", "ticket", "in_progress").await;
@@ -1850,13 +1762,11 @@ mod tests {
 
         let incomplete = graph.get_incomplete_descendants("parent").await.unwrap();
         assert!(incomplete.is_empty());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_incomplete_descendants_some_incomplete() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         create_task(&db, "parent", "Parent", "ticket", "in_progress").await;
@@ -1875,13 +1785,11 @@ mod tests {
         assert!(incomplete_ids.contains("child2"));
         assert!(incomplete_ids.contains("child3"));
         assert!(!incomplete_ids.contains("child1"));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_incomplete_descendants_nested_hierarchy() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         // Epic -> Ticket -> Tasks (nested hierarchy)
@@ -1911,13 +1819,11 @@ mod tests {
             !incomplete_ids.contains("task1"),
             "task1 should not be in incomplete list"
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_incomplete_descendants_returns_correct_info() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         create_task(&db, "parent", "Parent Epic", "epic", "in_progress").await;
@@ -1933,13 +1839,11 @@ mod tests {
         assert_eq!(child.title, "Incomplete Child");
         assert_eq!(child.status, "backlog");
         assert_eq!(child.level, "ticket");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_incomplete_descendants_deep_nesting() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         // Create a 4-level deep hierarchy
@@ -1963,8 +1867,6 @@ mod tests {
         assert!(incomplete_ids.contains("task2"));
         assert!(!incomplete_ids.contains("ticket1"));
         assert!(!incomplete_ids.contains("task1"));
-
-        cleanup(&temp_dir);
     }
 
     // ========================================
@@ -2005,7 +1907,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_diamond_dependency_graph() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         // Diamond: A -> (B, C) -> D
@@ -2026,8 +1928,6 @@ mod tests {
         assert_eq!(path.len(), 3); // A -> B/C -> D
         assert_eq!(path[0], "taska");
         assert_eq!(path[2], "taskd");
-
-        cleanup(&temp_dir);
     }
 
     // ========================================
@@ -2092,7 +1992,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_progress_leaf_task_done() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         create_task(&db, "task1", "Task 1", "task", "done").await;
@@ -2102,13 +2002,11 @@ mod tests {
         assert_eq!(progress.total_count, 1);
         assert_eq!(progress.percentage, 100);
         assert!(progress.is_complete());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_progress_leaf_task_not_done() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         create_task(&db, "task1", "Task 1", "task", "in_progress").await;
@@ -2118,13 +2016,11 @@ mod tests {
         assert_eq!(progress.total_count, 1);
         assert_eq!(progress.percentage, 0);
         assert!(progress.is_empty());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_progress_leaf_task_in_progress() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         create_task(&db, "task1", "Task 1", "task", "in_progress").await;
@@ -2133,13 +2029,11 @@ mod tests {
         assert_eq!(progress.done_count, 0);
         assert_eq!(progress.total_count, 1);
         assert_eq!(progress.percentage, 0);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_progress_epic_with_tickets() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         // Epic with 3 tickets: 2 done, 1 todo
@@ -2156,13 +2050,11 @@ mod tests {
         assert_eq!(progress.done_count, 2);
         assert_eq!(progress.total_count, 3);
         assert_eq!(progress.percentage, 67);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_progress_all_descendants_done() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         // Ticket with 4 tasks all done
@@ -2182,13 +2074,11 @@ mod tests {
         assert_eq!(progress.total_count, 4);
         assert_eq!(progress.percentage, 100);
         assert!(progress.is_complete());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_progress_nested_descendants() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         // Epic -> Ticket -> Task (all counted)
@@ -2206,13 +2096,11 @@ mod tests {
         assert_eq!(progress.total_count, 3);
         assert_eq!(progress.done_count, 2);
         assert_eq!(progress.percentage, 67);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_progress_no_descendants_done() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let graph = GraphQueries::new(db.client());
 
         create_task(&db, "epic1", "Epic 1", "epic", "in_progress").await;
@@ -2227,7 +2115,5 @@ mod tests {
         assert_eq!(progress.total_count, 2);
         assert_eq!(progress.percentage, 0);
         assert!(progress.is_empty());
-
-        cleanup(&temp_dir);
     }
 }

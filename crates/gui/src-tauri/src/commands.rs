@@ -11,12 +11,12 @@ use crate::types::{
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, State};
 use tokio::sync::RwLock;
-use vertebrae_core::{DefaultTaskService, DefaultWorkflowService, TaskService, WorkflowService};
+use vertebrae_core::VertebraeServices;
 
-/// Application state holding the task service
+/// Application state holding the services
 pub struct AppState {
-    /// Task service (None until a project is selected)
-    pub service: RwLock<Option<DefaultTaskService>>,
+    /// Unified services container (None until a project is selected)
+    pub services: RwLock<Option<VertebraeServices>>,
     /// Project configuration manager
     pub project_config: ProjectConfig,
 }
@@ -156,11 +156,11 @@ pub async fn set_current_project(
             message: format!("Failed to initialize database: {}", e),
         })?;
 
-        let service = DefaultTaskService::new(db);
-        let mut service_lock = state.service.write().await;
-        *service_lock = Some(service);
+        let services = vertebrae_core::VertebraeServices::new(db);
+        let mut service_lock = state.services.write().await;
+        *service_lock = Some(services);
     } else {
-        let mut service_lock = state.service.write().await;
+        let mut service_lock = state.services.write().await;
         *service_lock = None;
     }
 
@@ -171,7 +171,7 @@ pub async fn set_current_project(
 #[tauri::command]
 #[specta::specta]
 pub async fn has_project_selected(state: State<'_, AppState>) -> Result<bool, CommandError> {
-    let service_lock = state.service.read().await;
+    let service_lock = state.services.read().await;
     Ok(service_lock.is_some())
 }
 
@@ -185,13 +185,13 @@ pub async fn list_tasks(
     filter: Option<TaskFilterOptions>,
 ) -> Result<Vec<TaskSummary>, CommandError> {
     log::info!("list_tasks called with filter: {:?}", filter);
-    let service_guard = state.service.read().await;
+    let service_guard = state.services.read().await;
     let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
     let db_filter: vertebrae_db::TaskFilter = filter.unwrap_or_default().into();
-    match service.list_tasks(&db_filter).await {
+    match service.tasks().list_tasks(&db_filter).await {
         Ok(summaries) => {
             log::info!("list_tasks returned {} tasks", summaries.len());
             Ok(summaries.into_iter().map(Into::into).collect())
@@ -212,13 +212,13 @@ pub async fn get_task(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<TaskWithRelations, CommandError> {
-    let service_guard = state.service.read().await;
+    let service_guard = state.services.read().await;
     let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
     // Get the task with relations using the service
-    let task_with_relations = service.get_task_with_relations(&id).await?;
+    let task_with_relations = service.tasks().get_task_with_relations(&id).await?;
 
     Ok(TaskWithRelations {
         task: task_with_relations.task.into(),
@@ -240,7 +240,7 @@ pub async fn get_task_hierarchy(
     root_id: Option<String>,
     filter: Option<TaskFilterOptions>,
 ) -> Result<Vec<TaskHierarchyNode>, CommandError> {
-    let service_guard = state.service.read().await;
+    let service_guard = state.services.read().await;
     let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
@@ -252,7 +252,7 @@ pub async fn get_task_hierarchy(
     };
 
     let tree_options = vertebrae_core::TreeFilterOptions::new(db_filter);
-    let tree = service.get_task_tree(&tree_options).await?;
+    let tree = service.tasks().get_task_tree(&tree_options).await?;
 
     match root_id {
         Some(id) => {
@@ -321,14 +321,12 @@ fn convert_tree_node(node: &vertebrae_core::TaskTreeNode) -> TaskHierarchyNode {
 #[specta::specta]
 pub async fn list_workflows(state: State<'_, AppState>) -> Result<Vec<Workflow>, CommandError> {
     log::info!("list_workflows called");
-    let service_guard = state.service.read().await;
+    let service_guard = state.services.read().await;
     let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    #[allow(deprecated)]
-    let db = service.database();
-    let workflow_service = DefaultWorkflowService::new(db.clone());
+    let workflow_service = service.workflows();
 
     match workflow_service.list_workflows().await {
         Ok(summaries) => {
@@ -359,14 +357,12 @@ pub async fn get_workflow(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<Workflow, CommandError> {
-    let service_guard = state.service.read().await;
+    let service_guard = state.services.read().await;
     let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    #[allow(deprecated)]
-    let db = service.database();
-    let workflow_service = DefaultWorkflowService::new(db.clone());
+    let workflow_service = service.workflows();
 
     let workflow = workflow_service.get_workflow(&id).await?;
 
@@ -382,14 +378,12 @@ pub async fn list_workflow_transitions(
     state: State<'_, AppState>,
 ) -> Result<Vec<crate::types::WorkflowTransition>, CommandError> {
     log::info!("list_workflow_transitions called");
-    let service_guard = state.service.read().await;
+    let service_guard = state.services.read().await;
     let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    #[allow(deprecated)]
-    let db = service.database();
-    let workflow_service = DefaultWorkflowService::new(db.clone());
+    let workflow_service = service.workflows();
 
     // Get all transitions
     let transitions = workflow_service.list_workflow_transitions(None).await?;
@@ -441,21 +435,19 @@ pub async fn get_workflow_with_tasks(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<WorkflowWithTasks, CommandError> {
-    let service_guard = state.service.read().await;
+    let service_guard = state.services.read().await;
     let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    #[allow(deprecated)]
-    let db = service.database();
-    let workflow_service = DefaultWorkflowService::new(db.clone());
+    let workflow_service = service.workflows();
 
     // Get the workflow
     let workflow = workflow_service.get_workflow(&id).await?;
 
     // Get tasks associated with this workflow using the service
     let filter = vertebrae_db::TaskFilter::new().include_done();
-    let all_tasks = service.list_tasks(&filter).await?;
+    let all_tasks = service.tasks().list_tasks(&filter).await?;
 
     // Filter tasks that have this workflow_id
     // Tasks store workflow_id as Thing, so we need to match the id portion
@@ -468,7 +460,7 @@ pub async fn get_workflow_with_tasks(
     // We need to get full tasks to check workflow_id since TaskSummary doesn't include it
     let mut tasks = Vec::new();
     for summary in all_tasks {
-        if let Ok(task) = service.get_task(&summary.id).await {
+        if let Ok(task) = service.tasks().get_task(&summary.id).await {
             if let Some(ref wf_id) = task.workflow_id {
                 if wf_id.id.to_raw() == workflow_id_str {
                     tasks.push(summary.into());
@@ -500,14 +492,12 @@ pub async fn get_workflow_with_task_details(
     );
     let start_time = std::time::Instant::now();
 
-    let service_guard = state.service.read().await;
+    let service_guard = state.services.read().await;
     let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    #[allow(deprecated)]
-    let db = service.database();
-    let workflow_service = DefaultWorkflowService::new(db.clone());
+    let workflow_service = service.workflows();
 
     // Get the workflow
     let wf_start = std::time::Instant::now();
@@ -524,75 +514,41 @@ pub async fn get_workflow_with_task_details(
         .map(|t| t.id.to_raw())
         .unwrap_or_default();
 
-    // Query tasks with relations in a single optimized query
+    // Query tasks with filter for the workflow
     let query_start = std::time::Instant::now();
     let filter = vertebrae_db::TaskFilter::new()
         .include_done()
-        .with_workflow_id(workflow_id_str);
-    let tasks_with_relations_data = db.list_tasks().list_with_relations(&filter).await?;
+        .with_workflow_id(workflow_id_str.clone());
+    let task_summaries = service.tasks().list_tasks(&filter).await?;
+
+    let mut tasks_with_relations = Vec::new();
+    for summary in task_summaries {
+        if let Ok(task_with_relations) = service.tasks().get_task_with_relations(&summary.id).await
+        {
+            tasks_with_relations.push(task_with_relations);
+        }
+    }
     log::info!(
         "[get_workflow_with_task_details] Fetched {} tasks with relations in {}ms",
-        tasks_with_relations_data.len(),
+        tasks_with_relations.len(),
         query_start.elapsed().as_millis()
     );
 
-    // Convert TaskWithRelationsData to TaskWithRelations for the GUI
     let convert_start = std::time::Instant::now();
-    let mut tasks = Vec::new();
-    for data in tasks_with_relations_data {
-        // Reconstruct sections and refs from JSON
-        let sections: Vec<vertebrae_db::Section> = data
-            .sections
-            .iter()
-            .filter_map(|v| serde_json::from_value(v.clone()).ok())
-            .collect();
-
-        let code_refs: Vec<vertebrae_db::CodeRef> = data
-            .refs
-            .iter()
-            .filter_map(|v| serde_json::from_value(v.clone()).ok())
-            .collect();
-
-        // Construct Task object
-        // Note: status is now derived from workflow step, not stored
-        let task = vertebrae_db::Task {
-            id: Some(surrealdb::sql::Thing::from((
-                "task".to_string(),
-                data.id.clone(),
-            ))),
-            title: data.title,
-            description: data.description,
-            level: data.level,
-            priority: data.priority,
-            tags: data.tags,
-            created_at: Some(data.created_at),
-            updated_at: None,
-            started_at: None,
-            completed_at: None,
-            sections,
-            code_refs,
-            needs_human_review: data.needs_human_review,
-            revision_feedback: None,
-            rejection_reason: None,
-            workflow_id: data
-                .workflow_id
-                .map(|id| surrealdb::sql::Thing::from(("workflow".to_string(), id))),
-            current_step_id: data
-                .current_step_id
-                .map(|id| surrealdb::sql::Thing::from(("step".to_string(), id))),
-        };
-
-        tasks.push(TaskWithRelations {
-            task: task.into(),
-            parent_id: data.parent_id,
-            children_ids: data.children_ids,
-            depends_on_ids: data.depends_on_ids,
-            dependent_ids: data.dependent_ids,
-        });
-    }
+    // Convert TaskWithRelations to GUI format
+    let tasks_gui: Vec<TaskWithRelations> = tasks_with_relations
+        .into_iter()
+        .map(|twr| TaskWithRelations {
+            task: twr.task.into(),
+            parent_id: twr.parent_id,
+            children_ids: twr.children_ids,
+            depends_on_ids: twr.depends_on_ids,
+            dependent_ids: twr.dependent_ids,
+        })
+        .collect();
     log::info!(
         "[get_workflow_with_task_details] Converted {} tasks to GUI types in {}ms",
-        tasks.len(),
+        tasks_gui.len(),
         convert_start.elapsed().as_millis()
     );
 
@@ -603,7 +559,7 @@ pub async fn get_workflow_with_task_details(
 
     Ok(crate::types::WorkflowWithTaskDetails {
         workflow: workflow.into(),
-        tasks,
+        tasks: tasks_gui,
     })
 }
 
@@ -622,13 +578,12 @@ pub async fn get_task_executions(
     task_id: String,
 ) -> Result<Vec<StepExecution>, CommandError> {
     log::info!("get_task_executions called for task: {}", task_id);
-    let service_guard = state.service.read().await;
+    let service_guard = state.services.read().await;
     let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
     match service
-        .database()
         .executions()
         .list_executions_for_task(&task_id)
         .await
@@ -658,13 +613,12 @@ pub async fn get_execution_logs(
     execution_id: String,
 ) -> Result<Vec<SessionLog>, CommandError> {
     log::info!("get_execution_logs called for execution: {}", execution_id);
-    let service_guard = state.service.read().await;
+    let service_guard = state.services.read().await;
     let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
     match service
-        .database()
         .executions()
         .list_logs_for_execution(&execution_id)
         .await
@@ -697,16 +651,18 @@ pub async fn list_steps_for_workflow(
         "list_steps_for_workflow called for workflow: {}",
         workflow_id
     );
-    let service_guard = state.service.read().await;
+    let service_guard = state.services.read().await;
     let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    #[allow(deprecated)]
-    let db = service.database();
     let workflow_thing = surrealdb::sql::Thing::from(("workflow", workflow_id.as_str()));
 
-    match db.steps().list_by_workflow(&workflow_thing).await {
+    match service
+        .steps()
+        .list_steps_for_workflow(&workflow_thing)
+        .await
+    {
         Ok(steps) => {
             log::info!("list_steps_for_workflow returned {} steps", steps.len());
             Ok(steps.into_iter().map(Into::into).collect())
@@ -728,15 +684,12 @@ pub async fn get_step(
     step_id: String,
 ) -> Result<Option<Step>, CommandError> {
     log::info!("get_step called for step: {}", step_id);
-    let service_guard = state.service.read().await;
+    let service_guard = state.services.read().await;
     let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    #[allow(deprecated)]
-    let db = service.database();
-
-    match db.steps().get(&step_id).await {
+    match service.steps().get_step(&step_id).await {
         Ok(step) => {
             log::info!("get_step returned: {:?}", step.is_some());
             Ok(step.map(Into::into))
@@ -771,13 +724,11 @@ pub async fn create_step(
         name,
         order
     );
-    let service_guard = state.service.read().await;
+    let service_guard = state.services.read().await;
     let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    #[allow(deprecated)]
-    let db = service.database();
     let workflow_thing = surrealdb::sql::Thing::from(("workflow", workflow_id.as_str()));
 
     // Build transitions_to list
@@ -798,7 +749,7 @@ pub async fn create_step(
         step = step.with_goal(&goal);
     }
 
-    match db.steps().create(&step).await {
+    match service.steps().create_step(&step).await {
         Ok(created) => {
             log::info!("create_step succeeded: {:?}", created.id);
             Ok(created.into())
@@ -839,16 +790,13 @@ pub async fn update_step(
         is_final,
         transitions_to
     );
-    let service_guard = state.service.read().await;
+    let service_guard = state.services.read().await;
     let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    #[allow(deprecated)]
-    let db = service.database();
-
     // Verify step exists
-    let existing = db.steps().get(&step_id).await?;
+    let existing = service.steps().get_step(&step_id).await?;
     if existing.is_none() {
         return Err(CommandError {
             message: format!("Step not found: {}", step_id),
@@ -890,12 +838,12 @@ pub async fn update_step(
         update = update.with_transitions_to(transition_things);
     }
 
-    match db.steps().update(&step_id, &update).await {
+    match service.steps().update_step(&step_id, &update).await {
         Ok(_) => {
             log::info!("update_step succeeded for step: {}", step_id);
 
             // Get the step to find its workflow_id
-            if let Some(step) = db.steps().get(&step_id).await? {
+            if let Some(step) = service.steps().get_step(&step_id).await? {
                 // Emit step changed event for detail panel listeners
                 if let Some(id) = step.id {
                     let _ = app_handle.emit(
@@ -929,16 +877,13 @@ pub async fn delete_step(
     step_id: String,
 ) -> Result<(), CommandError> {
     log::info!("delete_step called for step: {}", step_id);
-    let service_guard = state.service.read().await;
+    let service_guard = state.services.read().await;
     let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    #[allow(deprecated)]
-    let db = service.database();
-
     // Verify step exists and capture workflow_id before deletion
-    let existing = db.steps().get(&step_id).await?;
+    let existing = service.steps().get_step(&step_id).await?;
     if existing.is_none() {
         return Err(CommandError {
             message: format!("Step not found: {}", step_id),
@@ -946,7 +891,7 @@ pub async fn delete_step(
     }
     let workflow_id = existing.unwrap().workflow_id.id.to_raw();
 
-    match db.steps().delete(&step_id).await {
+    match service.steps().delete_step(&step_id).await {
         Ok(_) => {
             log::info!("delete_step succeeded for step: {}", step_id);
 
@@ -983,13 +928,14 @@ pub async fn run_workflow(
 ) -> Result<(), CommandError> {
     log::info!("run_workflow called for task: {}", task_id);
 
-    let service_guard = state.service.read().await;
+    let service_guard = state.services.read().await;
     let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
     // Verify task has a workflow assigned
     let task = service
+        .tasks()
         .get_task(&task_id)
         .await
         .map_err(CommandError::from)?;
@@ -1001,14 +947,28 @@ pub async fn run_workflow(
     }
 
     // Spawn execution in background
-    let db = service.database().clone();
-    let task_id_clone = task_id.clone();
+    tauri::async_runtime::spawn({
+        // Capture individual Arc-wrapped services for the spawned task
+        let tasks = service_guard.as_ref().unwrap().tasks_arc();
+        let workflows = service_guard.as_ref().unwrap().workflows_arc();
+        let executions = service_guard.as_ref().unwrap().executions_arc();
+        let steps = service_guard.as_ref().unwrap().steps_arc();
+        let task_id_clone = task_id.clone();
+        let app_handle_clone = app_handle.clone();
 
-    tauri::async_runtime::spawn(async move {
-        if let Err(e) =
-            crate::workflow_runner::execute_workflow(task_id_clone, db, app_handle).await
-        {
-            log::error!("Workflow execution failed: {}", e);
+        async move {
+            if let Err(e) = crate::workflow_runner::execute_workflow(
+                task_id_clone,
+                tasks,
+                workflows,
+                executions,
+                steps,
+                app_handle_clone,
+            )
+            .await
+            {
+                log::error!("Workflow execution failed: {}", e);
+            }
         }
     });
 
@@ -1112,19 +1072,24 @@ pub async fn create_chat_session(
         working_dir
     );
 
-    let guard = state.service.read().await;
+    let guard = state.services.read().await;
     let service = guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
     let db_session = vertebrae_db::ChatSession::new(working_dir);
-    let created = service
-        .database()
-        .chat_sessions()
-        .create_session(&db_session)
-        .await?;
+    let created_id = service.chat_sessions().create_session(db_session).await?;
 
-    Ok(created.into())
+    // Fetch the created session to return it
+    let session = service
+        .chat_sessions()
+        .get_session(&created_id)
+        .await?
+        .ok_or_else(|| CommandError {
+            message: format!("Created session {} not found", created_id),
+        })?;
+
+    Ok(session.into())
 }
 
 /// Get a chat session by ID
@@ -1136,16 +1101,12 @@ pub async fn get_chat_session(
 ) -> Result<Option<crate::types::ChatSession>, CommandError> {
     log::info!("get_chat_session called with session_id: {}", session_id);
 
-    let guard = state.service.read().await;
+    let guard = state.services.read().await;
     let service = guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    let session = service
-        .database()
-        .chat_sessions()
-        .get_session(&session_id)
-        .await?;
+    let session = service.chat_sessions().get_session(&session_id).await?;
 
     Ok(session.map(|s| s.into()))
 }
@@ -1159,13 +1120,12 @@ pub async fn list_chat_sessions(
 ) -> Result<Vec<crate::types::ChatSession>, CommandError> {
     log::info!("list_chat_sessions called with limit: {:?}", limit);
 
-    let guard = state.service.read().await;
+    let guard = state.services.read().await;
     let service = guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
     let sessions = service
-        .database()
         .chat_sessions()
         .list_sessions(limit.map(|l| l as usize))
         .await?;
@@ -1182,16 +1142,12 @@ pub async fn end_chat_session(
 ) -> Result<(), CommandError> {
     log::info!("end_chat_session called with session_id: {}", session_id);
 
-    let guard = state.service.read().await;
+    let guard = state.services.read().await;
     let service = guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    service
-        .database()
-        .chat_sessions()
-        .end_session(&session_id, chrono::Utc::now())
-        .await?;
+    service.chat_sessions().end_session(&session_id).await?;
 
     Ok(())
 }
@@ -1210,13 +1166,12 @@ pub async fn update_chat_session_title(
         title
     );
 
-    let guard = state.service.read().await;
+    let guard = state.services.read().await;
     let service = guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
     service
-        .database()
         .chat_sessions()
         .update_title(&session_id, &title)
         .await?;
@@ -1238,18 +1193,14 @@ pub async fn add_chat_message(
         content.len()
     );
 
-    let guard = state.service.read().await;
+    let guard = state.services.read().await;
     let service = guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
     let session_thing = surrealdb::sql::Thing::from(("chat_session", session_id.as_str()));
     let message = vertebrae_db::ChatMessage::new(session_thing, content);
-    let id = service
-        .database()
-        .chat_sessions()
-        .add_message(&message)
-        .await?;
+    let id = service.chat_sessions().add_message(message).await?;
 
     Ok(id)
 }
@@ -1263,16 +1214,12 @@ pub async fn get_chat_messages(
 ) -> Result<Vec<crate::types::ChatMessage>, CommandError> {
     log::info!("get_chat_messages called with session_id: {}", session_id);
 
-    let guard = state.service.read().await;
+    let guard = state.services.read().await;
     let service = guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    let messages = service
-        .database()
-        .chat_sessions()
-        .list_messages(&session_id)
-        .await?;
+    let messages = service.chat_sessions().list_messages(&session_id).await?;
 
     Ok(messages.into_iter().map(|m| m.into()).collect())
 }
@@ -1289,13 +1236,12 @@ pub async fn get_chat_session_content(
         session_id
     );
 
-    let guard = state.service.read().await;
+    let guard = state.services.read().await;
     let service = guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
     let content = service
-        .database()
         .chat_sessions()
         .get_session_content(&session_id)
         .await?;
@@ -1312,16 +1258,12 @@ pub async fn delete_chat_session(
 ) -> Result<(), CommandError> {
     log::info!("delete_chat_session called with session_id: {}", session_id);
 
-    let guard = state.service.read().await;
+    let guard = state.services.read().await;
     let service = guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    service
-        .database()
-        .chat_sessions()
-        .delete_session(&session_id)
-        .await?;
+    service.chat_sessions().delete_session(&session_id).await?;
 
     Ok(())
 }
@@ -1347,12 +1289,12 @@ pub async fn set_parent(
         parent_id
     );
 
-    let service_guard = state.service.read().await;
+    let service_guard = state.services.read().await;
     let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    service.set_parent(&task_id, &parent_id).await?;
+    service.tasks().set_parent(&task_id, &parent_id).await?;
 
     log::info!("Successfully set parent for task {}", task_id);
     Ok(())
@@ -1369,12 +1311,12 @@ pub async fn remove_parent(
 ) -> Result<(), CommandError> {
     log::info!("remove_parent called with task_id: {}", task_id);
 
-    let service_guard = state.service.read().await;
+    let service_guard = state.services.read().await;
     let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    service.remove_parent(&task_id).await?;
+    service.tasks().remove_parent(&task_id).await?;
 
     log::info!("Successfully removed parent for task {}", task_id);
     Ok(())
@@ -1397,12 +1339,15 @@ pub async fn add_dependency(
         depends_on_id
     );
 
-    let service_guard = state.service.read().await;
+    let service_guard = state.services.read().await;
     let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    service.add_dependency(&task_id, &depends_on_id).await?;
+    service
+        .tasks()
+        .add_dependency(&task_id, &depends_on_id)
+        .await?;
 
     log::info!("Successfully added dependency for task {}", task_id);
     Ok(())
@@ -1424,12 +1369,15 @@ pub async fn remove_dependency(
         depends_on_id
     );
 
-    let service_guard = state.service.read().await;
+    let service_guard = state.services.read().await;
     let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    service.remove_dependency(&task_id, &depends_on_id).await?;
+    service
+        .tasks()
+        .remove_dependency(&task_id, &depends_on_id)
+        .await?;
 
     log::info!("Successfully removed dependency for task {}", task_id);
     Ok(())
@@ -1458,7 +1406,7 @@ pub async fn create_task(
         parent_id
     );
 
-    let service_guard = state.service.read().await;
+    let service_guard = state.services.read().await;
     let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
@@ -1491,7 +1439,7 @@ pub async fn create_task(
         options.parent_id = Some(parent);
     }
 
-    let task_id = service.create_task(options).await?;
+    let task_id = service.tasks().create_task(options).await?;
     log::info!("Successfully created task with ID: {}", task_id);
     Ok(task_id)
 }
@@ -1513,7 +1461,7 @@ pub async fn update_task(
         options
     );
 
-    let service_guard = state.service.read().await;
+    let service_guard = state.services.read().await;
     let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
@@ -1553,10 +1501,7 @@ pub async fn update_task(
         update_opts.revision_feedback = Some(new_feedback);
     }
 
-    update_opts.add_tags = options.add_tags;
-    update_opts.remove_tags = options.remove_tags;
-
-    service.update_task(&task_id, update_opts).await?;
+    service.tasks().update_task(&task_id, update_opts).await?;
     log::info!("Successfully updated task: {}", task_id);
 
     // Emit task changed event so UI listeners can update
@@ -1587,7 +1532,7 @@ pub async fn assign_workflow(
         workflow_id
     );
 
-    let service_guard = state.service.read().await;
+    let service_guard = state.services.read().await;
     let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
@@ -1595,7 +1540,10 @@ pub async fn assign_workflow(
     // Create a Thing reference for the workflow using the From trait
     let workflow_thing = vertebrae_db::Thing::from(("workflow", workflow_id.as_str()));
 
-    service.assign_workflow(&task_id, &workflow_thing).await?;
+    service
+        .tasks()
+        .assign_workflow(&task_id, &workflow_thing)
+        .await?;
     log::info!("Successfully assigned workflow to task: {}", task_id);
     Ok(())
 }
@@ -1619,12 +1567,12 @@ pub async fn delete_task(
         cascade
     );
 
-    let service_guard = state.service.read().await;
+    let service_guard = state.services.read().await;
     let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    service.delete_task(&task_id, cascade).await?;
+    service.tasks().delete_task(&task_id, cascade).await?;
 
     log::info!("Successfully deleted task: {}", task_id);
     Ok(())
@@ -1653,7 +1601,7 @@ pub async fn add_section(
         section_type
     );
 
-    let service_guard = state.service.read().await;
+    let service_guard = state.services.read().await;
     let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
@@ -1677,7 +1625,7 @@ pub async fn add_section(
     };
 
     // Get current task to calculate the order
-    let task = service.get_task(&task_id).await?;
+    let task = service.tasks().get_task(&task_id).await?;
 
     // Count existing sections of the same type to determine the order
     let order = task
@@ -1698,7 +1646,7 @@ pub async fn add_section(
         refs: Vec::new(),
     };
 
-    service.add_section(&task_id, section).await?;
+    service.tasks().add_section(&task_id, section).await?;
 
     log::info!("Successfully added section to task: {}", task_id);
     Ok(())
@@ -1723,7 +1671,7 @@ pub async fn edit_section(
         ordinal
     );
 
-    let service_guard = state.service.read().await;
+    let service_guard = state.services.read().await;
     let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
@@ -1747,6 +1695,7 @@ pub async fn edit_section(
     };
 
     service
+        .tasks()
         .edit_section_by_ordinal(&task_id, parsed_type, ordinal, &new_content)
         .await?;
 
@@ -1771,49 +1720,13 @@ pub async fn mark_section_done(
         ordinal
     );
 
-    let service_guard = state.service.read().await;
+    let service_guard = state.services.read().await;
     let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    // Get the task to find the section and toggle its done status
-    let task = service.get_task(&task_id).await?;
-
-    // Find the section by type and ordinal
-    let section = task
-        .sections
-        .iter()
-        .filter(|s| s.section_type == vertebrae_db::SectionType::Step)
-        .find(|s| s.order == Some(ordinal))
-        .ok_or_else(|| CommandError {
-            message: format!(
-                "Step section with ordinal {} not found in task {}",
-                ordinal, task_id
-            ),
-        })?;
-
-    // Toggle the done status
-    let new_done_status = !section.done.unwrap_or(false);
-
-    // Update sections - find and modify the matching section
-    let mut updated_sections = task.sections.clone();
-    for section in updated_sections.iter_mut() {
-        if section.section_type == vertebrae_db::SectionType::Step && section.order == Some(ordinal)
-        {
-            section.done = Some(new_done_status);
-            section.done_at = if new_done_status {
-                Some(chrono::Utc::now())
-            } else {
-                None
-            };
-        }
-    }
-
-    // Update task with new sections using TaskUpdate
-    #[allow(deprecated)]
-    let db = service.database();
-    let update = vertebrae_db::TaskUpdate::new().with_sections(updated_sections);
-    db.tasks().update(&task_id, &update).await?;
+    // Use service method to toggle the step done status
+    service.tasks().toggle_step_done(&task_id, ordinal).await?;
 
     log::info!(
         "Successfully toggled step section done status for task: {}",
@@ -1841,7 +1754,7 @@ pub async fn remove_section(
         ordinal
     );
 
-    let service_guard = state.service.read().await;
+    let service_guard = state.services.read().await;
     let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
@@ -1865,6 +1778,7 @@ pub async fn remove_section(
     };
 
     service
+        .tasks()
         .remove_section_by_ordinal(&task_id, parsed_type, ordinal)
         .await?;
 
@@ -1892,13 +1806,13 @@ pub async fn add_criterion_ref(
         file_path
     );
 
-    let service_guard = state.service.read().await;
+    let service_guard = state.services.read().await;
     let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
     // Get the task to find the section index (0-based) from ordinal
-    let task = service.get_task(&task_id).await?;
+    let task = service.tasks().get_task(&task_id).await?;
 
     // Find the section index (0-based) by ordinal within testing_criterion sections
     let section_index = task
@@ -1927,6 +1841,7 @@ pub async fn add_criterion_ref(
     };
 
     service
+        .tasks()
         .append_section_ref(&task_id, section_index, &code_ref)
         .await?;
 
@@ -1961,7 +1876,7 @@ pub async fn add_code_ref(
         path
     );
 
-    let service_guard = state.service.read().await;
+    let service_guard = state.services.read().await;
     let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
@@ -1974,146 +1889,123 @@ pub async fn add_code_ref(
         description,
     };
 
-    service.add_code_ref(&task_id, code_ref).await?;
-
-    log::info!("Successfully added code reference to task: {}", task_id);
+    service.tasks().add_code_ref(&task_id, code_ref).await?;
+    log::info!("Successfully added code_ref to task: {}", task_id);
     Ok(())
 }
 
-/// Edit a code reference in a task by its index
+/// Remove code references from a task
 ///
-/// Updates an existing code reference at the specified index.
+/// Deletes one or more code references from the given task.
+///
+/// * `indices` - If provided, only these 0-based indices will be removed. Otherwise all are removed.
 #[tauri::command]
 #[specta::specta]
-#[allow(clippy::too_many_arguments)]
-pub async fn edit_code_ref(
+pub async fn remove_code_refs(
     state: State<'_, AppState>,
     task_id: String,
-    index: u32,
-    path: String,
-    line_start: Option<u32>,
-    line_end: Option<u32>,
-    name: Option<String>,
-    description: Option<String>,
+    indices: Option<Vec<usize>>,
 ) -> Result<(), CommandError> {
-    let index = index as usize;
     log::info!(
-        "edit_code_ref called with task_id: {}, index: {}",
+        "remove_code_refs called with task_id: {}, indices: {:?}",
         task_id,
-        index
+        indices
     );
 
-    let service_guard = state.service.read().await;
+    let service_guard = state.services.read().await;
     let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    // Get the task to modify its code refs
-    let task = service.get_task(&task_id).await?;
+    // Get the task to find the code refs
+    let task = service.tasks().get_task(&task_id).await?;
 
-    if index >= task.code_refs.len() {
-        return Err(CommandError {
-            message: format!(
-                "Code reference index {} out of bounds for task {} (has {} refs)",
-                index,
-                task_id,
-                task.code_refs.len()
-            ),
-        });
+    // If indices are specified, remove only those. Otherwise remove all.
+    let to_remove = indices.inspect(|idx_list| {
+        // Build list of code refs to keep (those not in indices)
+        let mut removed_count = 0;
+
+        for code_ref in task.code_refs.iter().enumerate() {
+            if idx_list.contains(&code_ref.0) {
+                removed_count += 1;
+            }
+        }
+
+        log::info!(
+            "Removing {} code refs from task: {}",
+            removed_count,
+            task_id
+        );
+    });
+
+    service.tasks().remove_code_refs(&task_id, None).await?;
+
+    for code_ref in task.code_refs.iter().enumerate() {
+        if let Some(ref idx_list) = to_remove {
+            if !idx_list.contains(&code_ref.0) {
+                let db_ref = vertebrae_db::CodeRef {
+                    path: code_ref.1.path.clone(),
+                    line_start: code_ref.1.line_start,
+                    line_end: code_ref.1.line_end,
+                    name: code_ref.1.name.clone(),
+                    description: code_ref.1.description.clone(),
+                };
+                service.tasks().add_code_ref(&task_id, db_ref).await?;
+            }
+        }
     }
 
-    // Create the new code ref
-    let new_ref = vertebrae_db::CodeRef {
-        path,
-        line_start,
-        line_end,
-        name,
-        description,
-    };
+    log::info!("Successfully removed code_refs from task: {}", task_id);
+    Ok(())
+}
 
-    // Build the modified code refs list
-    let mut modified_refs: Vec<vertebrae_db::CodeRef> = task
-        .code_refs
-        .iter()
-        .enumerate()
-        .map(|(i, r)| {
-            if i == index {
-                new_ref.clone()
-            } else {
-                r.clone()
-            }
-        })
-        .collect();
+/// Replace all code references for a task
+///
+/// Removes all existing code references and adds the provided ones.
+#[tauri::command]
+#[specta::specta]
+pub async fn replace_code_refs(
+    state: State<'_, AppState>,
+    task_id: String,
+    refs: Vec<crate::types::CodeRef>,
+) -> Result<(), CommandError> {
+    log::info!(
+        "replace_code_refs called with task_id: {}, {} refs",
+        task_id,
+        refs.len()
+    );
+
+    let service_guard = state.services.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    // Get the task to find existing refs
+    let _task = service.tasks().get_task(&task_id).await?;
 
     // Clear all existing refs and re-add them
     // This is a workaround since the service doesn't have a set_code_refs method
-    service.remove_code_refs(&task_id, None).await?;
+    service.tasks().remove_code_refs(&task_id, None).await?;
 
-    for code_ref in modified_refs.drain(..) {
-        service.add_code_ref(&task_id, code_ref).await?;
+    for code_ref in refs {
+        let db_ref = vertebrae_db::CodeRef {
+            path: code_ref.path,
+            line_start: code_ref.line_start,
+            line_end: code_ref.line_end,
+            name: code_ref.name,
+            description: code_ref.description,
+        };
+        service.tasks().add_code_ref(&task_id, db_ref).await?;
     }
 
-    log::info!(
-        "Successfully edited code reference {} in task: {}",
-        index,
-        task_id
-    );
-    Ok(())
-}
-
-/// Remove a code reference from a task by its index
-///
-/// Removes the code reference at the specified index.
-#[tauri::command]
-#[specta::specta]
-pub async fn remove_code_ref(
-    state: State<'_, AppState>,
-    task_id: String,
-    index: u32,
-) -> Result<(), CommandError> {
-    let index = index as usize;
-    log::info!(
-        "remove_code_ref called with task_id: {}, index: {}",
-        task_id,
-        index
-    );
-
-    let service_guard = state.service.read().await;
-    let service = service_guard
-        .as_ref()
-        .ok_or_else(CommandError::no_project_selected)?;
-
-    // Get the task to verify index is valid
-    let task = service.get_task(&task_id).await?;
-
-    if index >= task.code_refs.len() {
-        return Err(CommandError {
-            message: format!(
-                "Code reference index {} out of bounds for task {} (has {} refs)",
-                index,
-                task_id,
-                task.code_refs.len()
-            ),
-        });
-    }
-
-    // Remove the code ref at the specified index
-    service
-        .remove_code_refs(&task_id, Some(vec![index]))
-        .await?;
-
-    log::info!(
-        "Successfully removed code reference {} from task: {}",
-        index,
-        task_id
-    );
+    log::info!("Successfully replaced code refs for task: {}", task_id);
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vertebrae_core::{CreateTaskOptions, DefaultTaskService};
+    use vertebrae_core::{CreateTaskOptions, VertebraeServices};
     use vertebrae_db::{Database, Level};
 
     /// Helper to create an AppState with an in-memory database for testing
@@ -2122,7 +2014,7 @@ mod tests {
             .await
             .expect("Failed to create in-memory database");
         db.init().await.expect("Failed to initialize database");
-        let service = DefaultTaskService::new(db);
+        let services = VertebraeServices::new(db);
 
         // Create a temporary project config for testing
         let temp_dir = std::env::temp_dir().join(format!(
@@ -2137,7 +2029,7 @@ mod tests {
         let project_config = ProjectConfig::with_path(temp_dir.join("projects.json"));
 
         AppState {
-            service: RwLock::new(Some(service)),
+            services: RwLock::new(Some(services)),
             project_config,
         }
     }
@@ -2156,7 +2048,7 @@ mod tests {
         let project_config = ProjectConfig::with_path(temp_dir.join("projects.json"));
 
         AppState {
-            service: RwLock::new(None),
+            services: RwLock::new(None),
             project_config,
         }
     }
@@ -2524,11 +2416,11 @@ mod tests {
 
         // Create a task using the service directly
         {
-            let guard = state.service.read().await;
+            let guard = state.services.read().await;
             let service = guard.as_ref().unwrap();
 
             let options = CreateTaskOptions::new("Test Task").with_level(Level::Task);
-            service.create_task(options).await.unwrap();
+            service.tasks().create_task(options).await.unwrap();
         }
 
         // List all tasks
@@ -2545,15 +2437,19 @@ mod tests {
 
         // Create parent and child tasks
         let (parent_id, child_id) = {
-            let guard = state.service.read().await;
+            let guard = state.services.read().await;
             let service = guard.as_ref().unwrap();
 
             let parent_options = CreateTaskOptions::new("Parent").with_level(Level::Epic);
-            let parent_id = service.create_task(parent_options).await.unwrap();
+            let parent_id = service.tasks().create_task(parent_options).await.unwrap();
 
             let child_options = CreateTaskOptions::new("Child").with_level(Level::Task);
-            let child_id = service.create_task(child_options).await.unwrap();
-            service.set_parent(&child_id, &parent_id).await.unwrap();
+            let child_id = service.tasks().create_task(child_options).await.unwrap();
+            service
+                .tasks()
+                .set_parent(&child_id, &parent_id)
+                .await
+                .unwrap();
 
             (parent_id, child_id)
         };
@@ -2582,19 +2478,27 @@ mod tests {
 
         // Create hierarchy: Epic -> Ticket -> Task
         {
-            let guard = state.service.read().await;
+            let guard = state.services.read().await;
             let service = guard.as_ref().unwrap();
 
             let epic_options = CreateTaskOptions::new("Epic").with_level(Level::Epic);
-            let epic_id = service.create_task(epic_options).await.unwrap();
+            let epic_id = service.tasks().create_task(epic_options).await.unwrap();
 
             let ticket_options = CreateTaskOptions::new("Ticket").with_level(Level::Ticket);
-            let ticket_id = service.create_task(ticket_options).await.unwrap();
-            service.set_parent(&ticket_id, &epic_id).await.unwrap();
+            let ticket_id = service.tasks().create_task(ticket_options).await.unwrap();
+            service
+                .tasks()
+                .set_parent(&ticket_id, &epic_id)
+                .await
+                .unwrap();
 
             let task_options = CreateTaskOptions::new("Task").with_level(Level::Task);
-            let task_id = service.create_task(task_options).await.unwrap();
-            service.set_parent(&task_id, &ticket_id).await.unwrap();
+            let task_id = service.tasks().create_task(task_options).await.unwrap();
+            service
+                .tasks()
+                .set_parent(&task_id, &ticket_id)
+                .await
+                .unwrap();
         }
 
         // Get hierarchy
@@ -2621,14 +2525,15 @@ mod tests {
 
         // Create a task assigned to default workflow
         {
-            let guard = state.service.read().await;
+            let guard = state.services.read().await;
             let service = guard.as_ref().unwrap();
 
             let task_options = CreateTaskOptions::new("Workflow Task").with_level(Level::Task);
-            let task_id = service.create_task(task_options).await.unwrap();
+            let task_id = service.tasks().create_task(task_options).await.unwrap();
 
             // Transition to in_progress to assign workflow
             service
+                .tasks()
                 .transition_to(&task_id, "in_progress")
                 .await
                 .unwrap();
@@ -2651,15 +2556,19 @@ mod tests {
         let state = create_test_app_state().await;
 
         let (parent_id, child_id) = {
-            let guard = state.service.read().await;
+            let guard = state.services.read().await;
             let service = guard.as_ref().unwrap();
 
             let parent_options = CreateTaskOptions::new("Parent").with_level(Level::Epic);
-            let parent_id = service.create_task(parent_options).await.unwrap();
+            let parent_id = service.tasks().create_task(parent_options).await.unwrap();
 
             let child_options = CreateTaskOptions::new("Child").with_level(Level::Task);
-            let child_id = service.create_task(child_options).await.unwrap();
-            service.set_parent(&child_id, &parent_id).await.unwrap();
+            let child_id = service.tasks().create_task(child_options).await.unwrap();
+            service
+                .tasks()
+                .set_parent(&child_id, &parent_id)
+                .await
+                .unwrap();
 
             (parent_id, child_id)
         };
@@ -2680,15 +2589,19 @@ mod tests {
         let state = create_test_app_state().await;
 
         let (_parent_id, child_id) = {
-            let guard = state.service.read().await;
+            let guard = state.services.read().await;
             let service = guard.as_ref().unwrap();
 
             let parent_options = CreateTaskOptions::new("Parent").with_level(Level::Epic);
-            let parent_id = service.create_task(parent_options).await.unwrap();
+            let parent_id = service.tasks().create_task(parent_options).await.unwrap();
 
             let child_options = CreateTaskOptions::new("Child").with_level(Level::Task);
-            let child_id = service.create_task(child_options).await.unwrap();
-            service.set_parent(&child_id, &parent_id).await.unwrap();
+            let child_id = service.tasks().create_task(child_options).await.unwrap();
+            service
+                .tasks()
+                .set_parent(&child_id, &parent_id)
+                .await
+                .unwrap();
 
             (parent_id, child_id)
         };
@@ -2709,15 +2622,16 @@ mod tests {
         let state = create_test_app_state().await;
 
         let (task_a_id, task_b_id) = {
-            let guard = state.service.read().await;
+            let guard = state.services.read().await;
             let service = guard.as_ref().unwrap();
 
             let task_a_options = CreateTaskOptions::new("Task A").with_level(Level::Task);
-            let task_a_id = service.create_task(task_a_options).await.unwrap();
+            let task_a_id = service.tasks().create_task(task_a_options).await.unwrap();
 
             let task_b_options = CreateTaskOptions::new("Task B").with_level(Level::Task);
-            let task_b_id = service.create_task(task_b_options).await.unwrap();
+            let task_b_id = service.tasks().create_task(task_b_options).await.unwrap();
             service
+                .tasks()
                 .add_dependency(&task_b_id, &task_a_id)
                 .await
                 .unwrap();
@@ -2741,15 +2655,16 @@ mod tests {
         let state = create_test_app_state().await;
 
         let (task_a_id, task_b_id) = {
-            let guard = state.service.read().await;
+            let guard = state.services.read().await;
             let service = guard.as_ref().unwrap();
 
             let task_a_options = CreateTaskOptions::new("Task A").with_level(Level::Task);
-            let task_a_id = service.create_task(task_a_options).await.unwrap();
+            let task_a_id = service.tasks().create_task(task_a_options).await.unwrap();
 
             let task_b_options = CreateTaskOptions::new("Task B").with_level(Level::Task);
-            let task_b_id = service.create_task(task_b_options).await.unwrap();
+            let task_b_id = service.tasks().create_task(task_b_options).await.unwrap();
             service
+                .tasks()
                 .add_dependency(&task_b_id, &task_a_id)
                 .await
                 .unwrap();
@@ -2774,15 +2689,16 @@ mod tests {
         let state = create_test_app_state().await;
 
         let (task_a_id, task_b_id) = {
-            let guard = state.service.read().await;
+            let guard = state.services.read().await;
             let service = guard.as_ref().unwrap();
 
             let task_a_options = CreateTaskOptions::new("Task A").with_level(Level::Task);
-            let task_a_id = service.create_task(task_a_options).await.unwrap();
+            let task_a_id = service.tasks().create_task(task_a_options).await.unwrap();
 
             let task_b_options = CreateTaskOptions::new("Task B").with_level(Level::Task);
-            let task_b_id = service.create_task(task_b_options).await.unwrap();
+            let task_b_id = service.tasks().create_task(task_b_options).await.unwrap();
             service
+                .tasks()
                 .add_dependency(&task_b_id, &task_a_id)
                 .await
                 .unwrap();
@@ -2821,10 +2737,10 @@ mod tests {
         let state = create_test_app_state().await;
 
         let task_id = {
-            let guard = state.service.read().await;
+            let guard = state.services.read().await;
             let service = guard.as_ref().unwrap();
             let options = CreateTaskOptions::new("Task with Sections").with_level(Level::Task);
-            service.create_task(options).await.unwrap()
+            service.tasks().create_task(options).await.unwrap()
         };
 
         // Add a goal section
@@ -2854,10 +2770,10 @@ mod tests {
         let state = create_test_app_state().await;
 
         let task_id = {
-            let guard = state.service.read().await;
+            let guard = state.services.read().await;
             let service = guard.as_ref().unwrap();
             let options = CreateTaskOptions::new("Multi-section Task").with_level(Level::Task);
-            let task_id = service.create_task(options).await.unwrap();
+            let task_id = service.tasks().create_task(options).await.unwrap();
 
             // Add multiple sections
             let goal = vertebrae_db::Section {
@@ -2868,7 +2784,7 @@ mod tests {
                 done_at: None,
                 refs: Vec::new(),
             };
-            service.add_section(&task_id, goal).await.unwrap();
+            service.tasks().add_section(&task_id, goal).await.unwrap();
 
             let context = vertebrae_db::Section {
                 section_type: vertebrae_db::SectionType::Context,
@@ -2878,7 +2794,11 @@ mod tests {
                 done_at: None,
                 refs: Vec::new(),
             };
-            service.add_section(&task_id, context).await.unwrap();
+            service
+                .tasks()
+                .add_section(&task_id, context)
+                .await
+                .unwrap();
 
             let constraint = vertebrae_db::Section {
                 section_type: vertebrae_db::SectionType::Constraint,
@@ -2888,7 +2808,11 @@ mod tests {
                 done_at: None,
                 refs: Vec::new(),
             };
-            service.add_section(&task_id, constraint).await.unwrap();
+            service
+                .tasks()
+                .add_section(&task_id, constraint)
+                .await
+                .unwrap();
 
             let step = vertebrae_db::Section {
                 section_type: vertebrae_db::SectionType::Step,
@@ -2898,7 +2822,7 @@ mod tests {
                 done_at: None,
                 refs: Vec::new(),
             };
-            service.add_section(&task_id, step).await.unwrap();
+            service.tasks().add_section(&task_id, step).await.unwrap();
             task_id
         };
 
@@ -2930,10 +2854,10 @@ mod tests {
         let state = create_test_app_state().await;
 
         let task_id = {
-            let guard = state.service.read().await;
+            let guard = state.services.read().await;
             let service = guard.as_ref().unwrap();
             let options = CreateTaskOptions::new("Empty Section Task").with_level(Level::Task);
-            let task_id = service.create_task(options).await.unwrap();
+            let task_id = service.tasks().create_task(options).await.unwrap();
 
             // Add a step section with empty content
             let step = vertebrae_db::Section {
@@ -2944,7 +2868,7 @@ mod tests {
                 done_at: None,
                 refs: Vec::new(),
             };
-            service.add_section(&task_id, step).await.unwrap();
+            service.tasks().add_section(&task_id, step).await.unwrap();
             task_id
         };
 
@@ -2961,10 +2885,10 @@ mod tests {
         let state = create_test_app_state().await;
 
         let task_id = {
-            let guard = state.service.read().await;
+            let guard = state.services.read().await;
             let service = guard.as_ref().unwrap();
             let options = CreateTaskOptions::new("Edit Section Task").with_level(Level::Task);
-            let task_id = service.create_task(options).await.unwrap();
+            let task_id = service.tasks().create_task(options).await.unwrap();
 
             // Add a goal section with order
             let goal = vertebrae_db::Section {
@@ -2975,7 +2899,7 @@ mod tests {
                 done_at: None,
                 refs: Vec::new(),
             };
-            service.add_section(&task_id, goal).await.unwrap();
+            service.tasks().add_section(&task_id, goal).await.unwrap();
             task_id
         };
 
@@ -3002,10 +2926,10 @@ mod tests {
         let state = create_test_app_state().await;
 
         let task_id = {
-            let guard = state.service.read().await;
+            let guard = state.services.read().await;
             let service = guard.as_ref().unwrap();
             let options = CreateTaskOptions::new("Multi-edit Task").with_level(Level::Task);
-            let task_id = service.create_task(options).await.unwrap();
+            let task_id = service.tasks().create_task(options).await.unwrap();
 
             // Add multiple sections with ordering
             let goal = vertebrae_db::Section {
@@ -3016,7 +2940,7 @@ mod tests {
                 done_at: None,
                 refs: Vec::new(),
             };
-            service.add_section(&task_id, goal).await.unwrap();
+            service.tasks().add_section(&task_id, goal).await.unwrap();
 
             let context = vertebrae_db::Section {
                 section_type: vertebrae_db::SectionType::Context,
@@ -3026,7 +2950,11 @@ mod tests {
                 done_at: None,
                 refs: Vec::new(),
             };
-            service.add_section(&task_id, context).await.unwrap();
+            service
+                .tasks()
+                .add_section(&task_id, context)
+                .await
+                .unwrap();
 
             let constraint = vertebrae_db::Section {
                 section_type: vertebrae_db::SectionType::Constraint,
@@ -3036,7 +2964,11 @@ mod tests {
                 done_at: None,
                 refs: Vec::new(),
             };
-            service.add_section(&task_id, constraint).await.unwrap();
+            service
+                .tasks()
+                .add_section(&task_id, constraint)
+                .await
+                .unwrap();
 
             let step = vertebrae_db::Section {
                 section_type: vertebrae_db::SectionType::Step,
@@ -3046,7 +2978,7 @@ mod tests {
                 done_at: None,
                 refs: Vec::new(),
             };
-            service.add_section(&task_id, step).await.unwrap();
+            service.tasks().add_section(&task_id, step).await.unwrap();
             task_id
         };
 
@@ -3077,10 +3009,10 @@ mod tests {
         let state = create_test_app_state().await;
 
         let task_id = {
-            let guard = state.service.read().await;
+            let guard = state.services.read().await;
             let service = guard.as_ref().unwrap();
             let options = CreateTaskOptions::new("Step Task").with_level(Level::Task);
-            let task_id = service.create_task(options).await.unwrap();
+            let task_id = service.tasks().create_task(options).await.unwrap();
 
             // Add a step section
             let step = vertebrae_db::Section {
@@ -3091,7 +3023,7 @@ mod tests {
                 done_at: None,
                 refs: Vec::new(),
             };
-            service.add_section(&task_id, step).await.unwrap();
+            service.tasks().add_section(&task_id, step).await.unwrap();
             task_id
         };
 
@@ -3122,10 +3054,10 @@ mod tests {
         let state = create_test_app_state().await;
 
         let task_id = {
-            let guard = state.service.read().await;
+            let guard = state.services.read().await;
             let service = guard.as_ref().unwrap();
             let options = CreateTaskOptions::new("Remove Section Task").with_level(Level::Task);
-            let task_id = service.create_task(options).await.unwrap();
+            let task_id = service.tasks().create_task(options).await.unwrap();
 
             // Add two goal sections
             for i in 0..2 {
@@ -3137,7 +3069,7 @@ mod tests {
                     done_at: None,
                     refs: Vec::new(),
                 };
-                service.add_section(&task_id, goal).await.unwrap();
+                service.tasks().add_section(&task_id, goal).await.unwrap();
             }
             task_id
         };
@@ -3168,10 +3100,10 @@ mod tests {
         let state = create_test_app_state().await;
 
         let task_id = {
-            let guard = state.service.read().await;
+            let guard = state.services.read().await;
             let service = guard.as_ref().unwrap();
             let options = CreateTaskOptions::new("Testing Criterion Task").with_level(Level::Task);
-            let task_id = service.create_task(options).await.unwrap();
+            let task_id = service.tasks().create_task(options).await.unwrap();
 
             // Add a testing criterion section
             let criterion = vertebrae_db::Section {
@@ -3182,7 +3114,11 @@ mod tests {
                 done_at: None,
                 refs: Vec::new(),
             };
-            service.add_section(&task_id, criterion).await.unwrap();
+            service
+                .tasks()
+                .add_section(&task_id, criterion)
+                .await
+                .unwrap();
             task_id
         };
 
@@ -3217,10 +3153,10 @@ mod tests {
         let state = create_test_app_state().await;
 
         let task_id = {
-            let guard = state.service.read().await;
+            let guard = state.services.read().await;
             let service = guard.as_ref().unwrap();
             let options = CreateTaskOptions::new("Test Ref Task").with_level(Level::Task);
-            let task_id = service.create_task(options).await.unwrap();
+            let task_id = service.tasks().create_task(options).await.unwrap();
 
             // Add a testing criterion section
             let criterion = vertebrae_db::Section {
@@ -3231,7 +3167,11 @@ mod tests {
                 done_at: None,
                 refs: Vec::new(),
             };
-            service.add_section(&task_id, criterion).await.unwrap();
+            service
+                .tasks()
+                .add_section(&task_id, criterion)
+                .await
+                .unwrap();
             task_id
         };
 
@@ -3266,10 +3206,10 @@ mod tests {
         let state = create_test_app_state().await;
 
         let task_id = {
-            let guard = state.service.read().await;
+            let guard = state.services.read().await;
             let service = guard.as_ref().unwrap();
             let options = CreateTaskOptions::new("Test Ref Task").with_level(Level::Task);
-            let task_id = service.create_task(options).await.unwrap();
+            let task_id = service.tasks().create_task(options).await.unwrap();
 
             // Add a testing criterion section
             let criterion = vertebrae_db::Section {
@@ -3280,7 +3220,11 @@ mod tests {
                 done_at: None,
                 refs: Vec::new(),
             };
-            service.add_section(&task_id, criterion).await.unwrap();
+            service
+                .tasks()
+                .add_section(&task_id, criterion)
+                .await
+                .unwrap();
             task_id
         };
 
@@ -3364,10 +3308,10 @@ mod tests {
         let state = create_test_app_state().await;
 
         let task_id = {
-            let guard = state.service.read().await;
+            let guard = state.services.read().await;
             let service = guard.as_ref().unwrap();
             let options = CreateTaskOptions::new("Invalid Type Task").with_level(Level::Task);
-            service.create_task(options).await.unwrap()
+            service.tasks().create_task(options).await.unwrap()
         };
 
         // Try to add section with invalid type

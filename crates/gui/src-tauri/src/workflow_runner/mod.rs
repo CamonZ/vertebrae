@@ -23,8 +23,9 @@ mod orchestrator;
 mod parsing;
 mod step;
 
+use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
-use vertebrae_db::Database;
+use vertebrae_core::{ExecutionService, StepService, TaskService, WorkflowService};
 
 use crate::events::{TaskStepChangedEvent, WorkflowExecutionEvent, WorkflowExecutionEventType};
 
@@ -48,7 +49,10 @@ pub enum WorkflowSupervisorMessage {
 /// Emits events for each stage and persists execution records to the database.
 pub async fn execute_workflow(
     task_id: String,
-    db: Database,
+    tasks: Arc<dyn TaskService>,
+    workflows: Arc<dyn WorkflowService>,
+    executions: Arc<dyn ExecutionService>,
+    steps: Arc<dyn StepService>,
     app_handle: AppHandle,
 ) -> Result<(), String> {
     trace(&task_id, "=== WORKFLOW EXECUTION STARTED ===");
@@ -64,14 +68,10 @@ pub async fn execute_workflow(
 
     // 1. Fetch task and workflow
     trace(&task_id, "Fetching task from database...");
-    let task = match db.tasks().get(&task_id).await {
-        Ok(Some(t)) => {
+    let task = match tasks.get_task(&task_id).await {
+        Ok(t) => {
             trace(&task_id, &format!("Task found: title={:?}", t.title));
             t
-        }
-        Ok(None) => {
-            trace(&task_id, &format!("ERROR: Task {} not found", task_id));
-            return Err(format!("Task {} not found", task_id));
         }
         Err(e) => {
             trace(&task_id, &format!("ERROR: Failed to get task: {}", e));
@@ -95,14 +95,10 @@ pub async fn execute_workflow(
         &task_id,
         &format!("Fetching workflow: {}", workflow_id.id.to_raw()),
     );
-    let _workflow = match db.workflows().get(&workflow_id.id.to_raw()).await {
-        Ok(Some(w)) => {
+    let _workflow = match workflows.get_workflow(&workflow_id.id.to_raw()).await {
+        Ok(w) => {
             trace(&task_id, &format!("Workflow found: name={}", w.name));
             w
-        }
-        Ok(None) => {
-            trace(&task_id, "ERROR: Workflow not found");
-            return Err("Workflow not found".to_string());
         }
         Err(e) => {
             trace(&task_id, &format!("ERROR: Failed to get workflow: {}", e));
@@ -114,7 +110,7 @@ pub async fn execute_workflow(
 
     // Fetch first-class Step entities for this workflow
     trace(&task_id, "Fetching workflow steps...");
-    let steps = match db.steps().list_by_workflow(&workflow_id).await {
+    let steps_list = match steps.list_steps_for_workflow(&workflow_id).await {
         Ok(s) => {
             trace(&task_id, &format!("Found {} steps", s.len()));
             for (i, step) in s.iter().enumerate() {
@@ -142,17 +138,17 @@ pub async fn execute_workflow(
     log::info!(
         "[WorkflowRunner] Workflow started for task: {}, steps: {}",
         task_id,
-        steps.len()
+        steps_list.len()
     );
 
     // 3. Execute each step sequentially with two-phase model
-    for (step_index, step) in steps.iter().enumerate() {
+    for (step_index, step) in steps_list.iter().enumerate() {
         trace(
             &task_id,
             &format!(
                 "=== STARTING STEP {}/{}: {} ===",
                 step_index + 1,
-                steps.len(),
+                steps_list.len(),
                 step.name
             ),
         );
@@ -160,30 +156,18 @@ pub async fn execute_workflow(
         log::info!(
             "[WorkflowRunner] Executing step {} of {}: {}",
             step_index + 1,
-            steps.len(),
+            steps_list.len(),
             step.name
         );
 
         // Update task's current_step_id BEFORE executing the step
         if let Some(ref step_thing) = step.id {
             // Reconnect to database before writing (CLI may have modified it during previous step)
-            let fresh_db = match db.reconnect().await {
-                Ok(d) => d,
-                Err(re) => {
-                    log::warn!("[WorkflowRunner] Failed to reconnect database: {}", re);
-                    db.clone()
-                }
-            };
-
             trace(
                 &task_id,
                 &format!("Updating task current_step_id to: {:?}", step_thing),
             );
-            match fresh_db
-                .tasks()
-                .update_current_step_id(&task_id, step_thing)
-                .await
-            {
+            match tasks.set_current_step(&task_id, step_thing).await {
                 Ok(()) => {
                     trace(&task_id, "current_step_id updated successfully");
                     // Emit event so frontend can update directly without refetching
@@ -212,8 +196,15 @@ pub async fn execute_workflow(
         }
 
         trace(&task_id, "Calling execute_step_two_phase...");
-        match execute_step_two_phase(step.clone(), &task_id, &workflow_id_str, &db, &app_handle)
-            .await
+        match execute_step_two_phase(
+            step.clone(),
+            &task_id,
+            &workflow_id_str,
+            &tasks,
+            &executions,
+            &app_handle,
+        )
+        .await
         {
             Ok(()) => {
                 trace(

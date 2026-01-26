@@ -619,6 +619,16 @@ pub trait TaskService: Send + Sync {
     /// * `step_index` - The 1-based index of the step section to mark as done
     async fn mark_step_done(&self, id: &str, step_index: usize) -> ServiceResult<()>;
 
+    /// Toggle the done status of a step section by ordinal
+    ///
+    /// Finds step sections and toggles the done status of the step at the given ordinal (0-based).
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The task ID
+    /// * `ordinal` - The 0-based ordinal of the step section to toggle
+    async fn toggle_step_done(&self, id: &str, ordinal: u32) -> ServiceResult<()>;
+
     /// Add a code reference to a task
     async fn add_code_ref(&self, id: &str, code_ref: CodeRef) -> ServiceResult<()>;
 
@@ -1702,6 +1712,18 @@ impl TaskService for DefaultTaskService {
 
         // Use repository method which handles finding by ordinal and renumbering
         self.db.tasks().mark_step_done(&id, step_index).await?;
+
+        // Fire mutation callback
+        self.on_mutation(MutationEvent::TaskUpdated { id: id.clone() });
+
+        Ok(())
+    }
+
+    async fn toggle_step_done(&self, id: &str, ordinal: u32) -> ServiceResult<()> {
+        let id = id.to_lowercase();
+
+        // Use repository method which handles finding by ordinal and toggling
+        self.db.tasks().toggle_step_done(&id, ordinal).await?;
 
         // Fire mutation callback
         self.on_mutation(MutationEvent::TaskUpdated { id: id.clone() });

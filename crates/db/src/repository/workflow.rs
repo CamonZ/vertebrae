@@ -705,40 +705,24 @@ impl<'a> WorkflowRepository<'a> {
 mod tests {
     use super::*;
     use crate::Database;
-    use std::env;
 
     /// Helper to create a test database
-    async fn setup_test_db() -> (Database, std::path::PathBuf) {
-        let temp_dir = env::temp_dir().join(format!(
-            "vtb-workflow-repo-test-{}-{:?}-{}",
-            std::process::id(),
-            std::thread::current().id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-
-        let db = Database::connect(&temp_dir).await.unwrap();
+    async fn setup_test_db() -> Database {
+        let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-
-        (db, temp_dir)
+        db
     }
 
     /// Clean up test database
-    fn cleanup(path: &std::path::Path) {
-        let _ = std::fs::remove_dir_all(path);
-    }
+    // No cleanup needed for in-memory database
 
     #[tokio::test]
     async fn test_exists_returns_false_for_nonexistent() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = WorkflowRepository::new(db.client());
 
         let exists = repo.exists("nonexistent").await.unwrap();
         assert!(!exists);
-
-        cleanup(&temp_dir);
     }
 
     /// Helper to create a valid workflow
@@ -748,7 +732,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_and_exists() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = WorkflowRepository::new(db.client());
 
         let workflow = valid_workflow("Test Workflow");
@@ -756,13 +740,11 @@ mod tests {
 
         let exists = repo.exists("test1").await.unwrap();
         assert!(exists);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_create_generates_unique_id() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = WorkflowRepository::new(db.client());
 
         // Create two workflows with different IDs
@@ -781,13 +763,11 @@ mod tests {
         let fetched2 = repo.get("wf2").await.unwrap().unwrap();
         assert_eq!(fetched1.name, "Workflow 1");
         assert_eq!(fetched2.name, "Workflow 2");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_create_with_all_fields() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = WorkflowRepository::new(db.client());
 
         let workflow = Workflow::new("Full Workflow")
@@ -808,13 +788,11 @@ mod tests {
             retrieved.metadata.get("team"),
             Some(&"platform".to_string())
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_existing_workflow() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = WorkflowRepository::new(db.client());
 
         let workflow = valid_workflow("Get Test").with_description("Test description");
@@ -827,37 +805,31 @@ mod tests {
         let retrieved = retrieved.unwrap();
         assert_eq!(retrieved.name, "Get Test");
         assert_eq!(retrieved.description, Some("Test description".to_string()));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_get_nonexistent_workflow() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = WorkflowRepository::new(db.client());
 
         let retrieved = repo.get("nonexistent").await.unwrap();
         assert!(retrieved.is_none());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_contains_default_workflow() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = WorkflowRepository::new(db.client());
 
         // Default workflow is created by db.init()
         let workflows = repo.list().await.unwrap();
         assert_eq!(workflows.len(), 1);
         assert_eq!(workflows[0].name, "Default Workflow");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_multiple() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = WorkflowRepository::new(db.client());
 
         repo.create("wf1", &valid_workflow("Workflow 1"))
@@ -873,13 +845,11 @@ mod tests {
         let workflows = repo.list().await.unwrap();
         // 3 created + 1 default workflow
         assert_eq!(workflows.len(), 4);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_sorted_by_order() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = WorkflowRepository::new(db.client());
 
         // Create workflows with different order values
@@ -905,13 +875,11 @@ mod tests {
         assert_eq!(workflows[2].order, 2);
         assert_eq!(workflows[3].name, "Workflow C");
         assert_eq!(workflows[3].order, 3);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_create_with_order() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = WorkflowRepository::new(db.client());
 
         let workflow = Workflow::new("Ordered Workflow").with_order(5);
@@ -920,13 +888,11 @@ mod tests {
         let retrieved = repo.get("ord1").await.unwrap().unwrap();
         assert_eq!(retrieved.name, "Ordered Workflow");
         assert_eq!(retrieved.order, 5);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_update_order() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = WorkflowRepository::new(db.client());
 
         let workflow = Workflow::new("Order Update").with_order(1);
@@ -937,13 +903,11 @@ mod tests {
 
         let retrieved = repo.get("ordupd").await.unwrap().unwrap();
         assert_eq!(retrieved.order, 10);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_update_name() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = WorkflowRepository::new(db.client());
 
         let workflow = valid_workflow("Original Name");
@@ -954,13 +918,11 @@ mod tests {
 
         let retrieved = repo.get("upd1").await.unwrap().unwrap();
         assert_eq!(retrieved.name, "New Name");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_update_description() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = WorkflowRepository::new(db.client());
 
         let workflow = valid_workflow("Description Test");
@@ -971,13 +933,11 @@ mod tests {
 
         let retrieved = repo.get("upd2").await.unwrap().unwrap();
         assert_eq!(retrieved.description, Some("New description".to_string()));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_update_clear_description() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = WorkflowRepository::new(db.client());
 
         let workflow = valid_workflow("Clear Desc Test").with_description("Original description");
@@ -988,13 +948,11 @@ mod tests {
 
         let retrieved = repo.get("upd3").await.unwrap().unwrap();
         assert!(retrieved.description.is_none());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_update_metadata() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = WorkflowRepository::new(db.client());
 
         let workflow = valid_workflow("Metadata Test").with_metadata("old_key", "old_value");
@@ -1011,13 +969,11 @@ mod tests {
             retrieved.metadata.get("new_key"),
             Some(&"new_value".to_string())
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_update_nonexistent_fails() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = WorkflowRepository::new(db.client());
 
         let updates = WorkflowUpdate::new().with_name("New Name");
@@ -1031,13 +987,11 @@ mod tests {
             }
             e => panic!("Expected NotFound error, got: {:?}", e),
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_update_no_changes() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = WorkflowRepository::new(db.client());
 
         let workflow = valid_workflow("No Change Test");
@@ -1048,13 +1002,11 @@ mod tests {
 
         // Should not error
         repo.update("upd6", &updates).await.unwrap();
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_delete() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = WorkflowRepository::new(db.client());
 
         let workflow = valid_workflow("Delete Test");
@@ -1065,24 +1017,20 @@ mod tests {
         repo.delete("del1").await.unwrap();
 
         assert!(!repo.exists("del1").await.unwrap());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_delete_nonexistent() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = WorkflowRepository::new(db.client());
 
         // Should not error when deleting non-existent workflow
         repo.delete("nonexistent").await.unwrap();
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_export_all() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = WorkflowRepository::new(db.client());
 
         repo.create("wf1", &valid_workflow("Workflow 1"))
@@ -1100,13 +1048,11 @@ mod tests {
         assert!(ids.contains(&"wf1"));
         assert!(ids.contains(&"wf2"));
         assert!(ids.contains(&"default"));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_full_crud_lifecycle() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = WorkflowRepository::new(db.client());
 
         // Create
@@ -1144,8 +1090,6 @@ mod tests {
         let list = repo.list().await.unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].name, "Default Workflow");
-
-        cleanup(&temp_dir);
     }
 
     #[test]
@@ -1183,7 +1127,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_workflow_allowed() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = WorkflowRepository::new(db.client());
 
         let workflow = Workflow::new("Test Workflow");
@@ -1191,8 +1135,6 @@ mod tests {
 
         assert!(result.is_ok());
         assert!(repo.exists("test1").await.unwrap());
-
-        cleanup(&temp_dir);
     }
 
     // ========================================
@@ -1203,7 +1145,7 @@ mod tests {
     async fn test_create_default_workflow_creates_workflow() {
         // setup_test_db() calls db.init() which creates the default workflow,
         // so we verify it exists and has the correct structure
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = WorkflowRepository::new(db.client());
 
         // Default workflow should exist (created by db.init())
@@ -1215,13 +1157,11 @@ mod tests {
         assert!(workflow.description.is_some());
         // Workflow should have initial_step set to the first step
         assert!(workflow.initial_step.is_some());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_create_default_workflow_is_idempotent() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = WorkflowRepository::new(db.client());
 
         // Default workflow already exists from db.init()
@@ -1240,8 +1180,6 @@ mod tests {
             .filter(|w| w.name == "Default Workflow")
             .count();
         assert_eq!(default_count, 1, "Should only have one default workflow");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
@@ -1278,7 +1216,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_migrate_no_tasks_without_workflow() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = WorkflowRepository::new(db.client());
 
         // No tasks exist, migration should report 0 migrated
@@ -1289,8 +1227,6 @@ mod tests {
         assert!(!result.has_migrations());
         assert!(!result.has_skipped());
         assert_eq!(result.total(), 0);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
@@ -1298,7 +1234,7 @@ mod tests {
         use crate::models::{Level, Task};
         use crate::repository::TaskRepository;
 
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let workflow_repo = WorkflowRepository::new(db.client());
         let task_repo = TaskRepository::new(db.client());
 
@@ -1338,8 +1274,6 @@ mod tests {
 
         let t4 = task_repo.get("t4").await.unwrap().unwrap();
         assert!(t4.workflow_id.is_some());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
@@ -1347,7 +1281,7 @@ mod tests {
         use crate::models::{Level, Task};
         use crate::repository::TaskRepository;
 
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let workflow_repo = WorkflowRepository::new(db.client());
         let task_repo = TaskRepository::new(db.client());
 
@@ -1374,8 +1308,6 @@ mod tests {
 
         let t2 = task_repo.get("t2").await.unwrap().unwrap();
         assert!(t2.workflow_id.is_some());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
@@ -1383,7 +1315,7 @@ mod tests {
         use crate::models::{Level, Task};
         use crate::repository::TaskRepository;
 
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let workflow_repo = WorkflowRepository::new(db.client());
         let task_repo = TaskRepository::new(db.client());
 
@@ -1406,8 +1338,6 @@ mod tests {
         // Verify task still has correct workflow
         let t = task_repo.get("test").await.unwrap().unwrap();
         assert!(t.workflow_id.is_some());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
@@ -1415,7 +1345,7 @@ mod tests {
         use crate::models::{Level, Task};
         use crate::repository::TaskRepository;
 
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let workflow_repo = WorkflowRepository::new(db.client());
         let task_repo = TaskRepository::new(db.client());
 
@@ -1432,13 +1362,11 @@ mod tests {
         let result = workflow_repo.migrate_to_default_workflow().await.unwrap();
         assert_eq!(result.migrated, 1);
         assert_eq!(result.skipped, 0);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_dry_run_migration_no_tasks() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let repo = WorkflowRepository::new(db.client());
 
         // No tasks exist, dry run should report 0
@@ -1446,8 +1374,6 @@ mod tests {
         assert_eq!(result.migrated, 0);
         assert_eq!(result.skipped, 0);
         assert!(result.skipped_ids.is_empty());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
@@ -1455,7 +1381,7 @@ mod tests {
         use crate::models::{Level, Task};
         use crate::repository::TaskRepository;
 
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let workflow_repo = WorkflowRepository::new(db.client());
         let task_repo = TaskRepository::new(db.client());
 
@@ -1485,8 +1411,6 @@ mod tests {
         assert!(t2.workflow_id.is_none());
         let t3 = task_repo.get("t3").await.unwrap().unwrap();
         assert!(t3.workflow_id.is_none());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
@@ -1494,7 +1418,7 @@ mod tests {
         use crate::models::{Level, Task};
         use crate::repository::TaskRepository;
 
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let workflow_repo = WorkflowRepository::new(db.client());
         let task_repo = TaskRepository::new(db.client());
 
@@ -1523,8 +1447,6 @@ mod tests {
         // Both tasks should have same workflow_id (None) and current_step_id (None)
         assert_eq!(after.workflow_id, original.workflow_id);
         assert_eq!(after.current_step_id, original.current_step_id);
-
-        cleanup(&temp_dir);
     }
 
     #[test]
@@ -1585,7 +1507,7 @@ mod tests {
     #[tokio::test]
     #[allow(deprecated)]
     async fn test_migrate_embedded_steps_returns_empty() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let workflow_repo = WorkflowRepository::new(db.client());
 
         // Migration is deprecated and returns empty results
@@ -1598,14 +1520,12 @@ mod tests {
         assert_eq!(result.steps_created, 0);
         assert_eq!(result.workflows_skipped, 0);
         assert_eq!(result.tasks_updated, 0);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     #[allow(deprecated)]
     async fn test_dry_run_step_migration_returns_empty() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
         let workflow_repo = WorkflowRepository::new(db.client());
 
         // Dry run is deprecated and returns empty results
@@ -1615,7 +1535,5 @@ mod tests {
         assert_eq!(result.steps_created, 0);
         assert_eq!(result.workflows_skipped, 0);
         assert_eq!(result.tasks_updated, 0);
-
-        cleanup(&temp_dir);
     }
 }

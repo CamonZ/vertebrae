@@ -5,11 +5,13 @@
 //! and generate a structured JSON prompt.
 
 use crate::events::{WorkflowExecutionEvent, WorkflowExecutionEventType};
+use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
-use vertebrae_core::{orchestrator_agent_config, orchestrator_prompt, OrchestratorOutput};
-use vertebrae_db::Database;
+use vertebrae_core::{
+    orchestrator_agent_config, orchestrator_prompt, ExecutionService, OrchestratorOutput,
+};
 
 use super::helpers::find_claude_binary;
 use super::logging::{append_to_workflow_log, trace};
@@ -24,7 +26,7 @@ pub async fn run_orchestrator(
     exec_id: &str,
     task_id: &str,
     workflow_id: &str,
-    db: &Database,
+    executions: &Arc<dyn ExecutionService>,
     app_handle: &AppHandle,
 ) -> Result<OrchestratorOutput, String> {
     trace(
@@ -296,8 +298,7 @@ pub async fn run_orchestrator(
             exec_id
         ),
     );
-    match db
-        .executions()
+    match executions
         .update_execution(
             exec_id,
             Some(output.clone()),

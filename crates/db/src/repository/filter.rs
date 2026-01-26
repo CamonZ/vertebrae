@@ -915,24 +915,12 @@ mod tests {
     use super::*;
     use crate::Database;
     use std::collections::HashSet;
-    use std::env;
 
-    /// Helper to create a test database
-    async fn setup_test_db() -> (Database, std::path::PathBuf) {
-        let temp_dir = env::temp_dir().join(format!(
-            "vtb-filter-test-{}-{:?}-{}",
-            std::process::id(),
-            std::thread::current().id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-
-        let db = Database::connect(&temp_dir).await.unwrap();
+    /// Helper to create a test database (in-memory)
+    async fn setup_test_db() -> Database {
+        let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-
-        (db, temp_dir)
+        db
     }
 
     /// Helper to create a task in the database
@@ -1009,9 +997,7 @@ mod tests {
     }
 
     /// Clean up test database
-    fn cleanup(path: &std::path::Path) {
-        let _ = std::fs::remove_dir_all(path);
-    }
+    // No cleanup needed for in-memory database
 
     // ========================================
     // TaskFilter builder tests
@@ -1269,7 +1255,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_all_tasks_excludes_done_by_default() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Task 1", "task", "in_progress", None, &[]).await;
         create_task(&db, "task2", "Task 2", "task", "in_progress", None, &[]).await;
@@ -1286,13 +1272,11 @@ mod tests {
         assert!(ids.contains("task1"));
         assert!(ids.contains("task2"));
         assert!(!ids.contains("task3"));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_includes_done_with_flag() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Task 1", "task", "in_progress", None, &[]).await;
         create_task(&db, "task2", "Task 2", "task", "done", None, &[]).await;
@@ -1306,13 +1290,11 @@ mod tests {
         let ids: HashSet<_> = result.iter().map(|t| t.id.as_str()).collect();
         assert!(ids.contains("task1"));
         assert!(ids.contains("task2"));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_filter_by_level() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "epic1", "Epic 1", "epic", "in_progress", None, &[]).await;
         create_task(
@@ -1333,13 +1315,11 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].level, Level::Epic);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_filter_by_multiple_levels() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "epic1", "Epic 1", "epic", "in_progress", None, &[]).await;
         create_task(
@@ -1364,13 +1344,11 @@ mod tests {
                 .iter()
                 .all(|t| t.level == Level::Epic || t.level == Level::Ticket)
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_filter_by_status() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Task 1", "task", "in_progress", None, &[]).await;
         create_task(&db, "task2", "Task 2", "task", "backlog", None, &[]).await;
@@ -1382,13 +1360,11 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].status, "backlog");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_filter_by_priority() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(
             &db,
@@ -1418,13 +1394,11 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].priority, Some(Priority::High));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_filter_by_tag() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(
             &db,
@@ -1467,13 +1441,11 @@ mod tests {
                 .iter()
                 .all(|t| t.tags.contains(&"backend".to_string()))
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_root_tasks() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(
             &db,
@@ -1516,13 +1488,11 @@ mod tests {
         assert!(result.iter().any(|t| t.id == "parent1"));
         assert!(result.iter().any(|t| t.id == "orphan1"));
         assert!(!result.iter().any(|t| t.id == "child1"));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_children_of_task() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(
             &db,
@@ -1557,13 +1527,11 @@ mod tests {
         assert_eq!(result.len(), 2);
         assert!(result.iter().any(|t| t.id == "child1"));
         assert!(result.iter().any(|t| t.id == "child2"));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_children_nonexistent_parent() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Task 1", "task", "in_progress", None, &[]).await;
 
@@ -1572,26 +1540,22 @@ mod tests {
         let result = lister.list(&filter).await.unwrap();
 
         assert!(result.is_empty());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_empty_database() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         let lister = TaskLister::new(db.client());
         let filter = TaskFilter::new();
         let result = lister.list(&filter).await.unwrap();
 
         assert!(result.is_empty());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_combined_filters() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(
             &db,
@@ -1644,13 +1608,11 @@ mod tests {
         // Should match task1 only (epic + high priority + backend tag + not done)
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].id, "task1");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_root_with_level_filter() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "epic1", "Epic", "epic", "in_progress", None, &[]).await;
         create_task(&db, "ticket1", "Ticket", "ticket", "in_progress", None, &[]).await;
@@ -1661,13 +1623,11 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].level, Level::Epic);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_children_with_status_filter() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "parent1", "Parent", "epic", "in_progress", None, &[]).await;
         create_task(&db, "child1", "Child 1", "ticket", "in_progress", None, &[]).await;
@@ -1695,13 +1655,11 @@ mod tests {
         let result = lister.list(&filter).await.unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].id, "child2");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_children_with_priority_filter() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "parent1", "Parent", "epic", "in_progress", None, &[]).await;
         create_task(
@@ -1738,13 +1696,11 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].id, "child1");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_children_with_tag_filter() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "parent1", "Parent", "epic", "in_progress", None, &[]).await;
         create_task(
@@ -1777,8 +1733,6 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].id, "child1");
-
-        cleanup(&temp_dir);
     }
 
     // ========================================
@@ -1882,7 +1836,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_with_search_finds_by_title() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(
             &db,
@@ -1921,13 +1875,11 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].id, "task1");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_with_search_finds_by_description() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task_with_description(
             &db,
@@ -1954,13 +1906,11 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].id, "task1");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_with_search_is_case_insensitive() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(
             &db,
@@ -1987,13 +1937,11 @@ mod tests {
         let result2 = lister.list(&filter2).await.unwrap();
         assert_eq!(result2.len(), 1);
         assert_eq!(result2[0].id, "task1");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_with_search_combined_with_level() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "epic1", "Auth epic", "epic", "in_progress", None, &[]).await;
         create_task(&db, "task1", "Auth task", "task", "in_progress", None, &[]).await;
@@ -2006,13 +1954,11 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].id, "epic1");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_with_search_and_root_only() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(
             &db,
@@ -2042,13 +1988,11 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].id, "parent1");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_with_search_and_children_of() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "parent1", "Parent", "epic", "in_progress", None, &[]).await;
         create_task(
@@ -2080,13 +2024,11 @@ mod tests {
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].id, "child1");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_with_search_no_matches() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Task A", "task", "in_progress", None, &[]).await;
         create_task(&db, "task2", "Task B", "task", "in_progress", None, &[]).await;
@@ -2096,13 +2038,11 @@ mod tests {
         let result = lister.list(&filter).await.unwrap();
 
         assert!(result.is_empty());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_with_search_finds_by_task_id() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create tasks with specific IDs
         create_task(&db, "abc123", "Task One", "task", "in_progress", None, &[]).await;
@@ -2133,13 +2073,11 @@ mod tests {
 
         assert_eq!(result2.len(), 1);
         assert_eq!(result2[0].id, "xyz789");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_with_search_by_id_is_case_insensitive() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create task with mixed case ID
         create_task(&db, "AbCdEf", "Task One", "task", "in_progress", None, &[]).await;
@@ -2155,13 +2093,11 @@ mod tests {
         let filter2 = TaskFilter::new().with_search("ABCDEF");
         let result2 = lister.list(&filter2).await.unwrap();
         assert_eq!(result2.len(), 1);
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_with_empty_search_returns_all_tasks() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         create_task(&db, "task1", "Task A", "task", "in_progress", None, &[]).await;
         create_task(&db, "task2", "Task B", "task", "in_progress", None, &[]).await;
@@ -2174,8 +2110,6 @@ mod tests {
         let result = lister.list(&filter).await.unwrap();
 
         assert_eq!(result.len(), 3);
-
-        cleanup(&temp_dir);
     }
 
     // ========================================
@@ -2214,7 +2148,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_standard_query_returns_newest_first() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create tasks with explicit timestamps (oldest first)
         create_task_with_timestamp(
@@ -2254,13 +2188,11 @@ mod tests {
         assert_eq!(result[0].id, "task_newest", "First task should be newest");
         assert_eq!(result[1].id, "task_middle", "Second task should be middle");
         assert_eq!(result[2].id, "task_oldest", "Third task should be oldest");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_root_query_returns_newest_first() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create root tasks (no parent) with explicit timestamps
         create_task_with_timestamp(
@@ -2300,13 +2232,11 @@ mod tests {
         assert_eq!(result[0].id, "root_newest", "First root should be newest");
         assert_eq!(result[1].id, "root_middle", "Second root should be middle");
         assert_eq!(result[2].id, "root_oldest", "Third root should be oldest");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_children_query_returns_newest_first() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create parent task
         create_task_with_timestamp(
@@ -2364,13 +2294,11 @@ mod tests {
             "Second child should be middle"
         );
         assert_eq!(result[2].id, "child_oldest", "Third child should be oldest");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_with_filter_maintains_newest_first_order() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create tasks with different statuses and timestamps
         create_task_with_timestamp(
@@ -2415,8 +2343,6 @@ mod tests {
             result[1].id, "task_old_backlog",
             "Older backlog should be second"
         );
-
-        cleanup(&temp_dir);
     }
 
     // ========================================
@@ -2425,7 +2351,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_with_relations_basic() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create tasks
         create_task(&db, "task1", "Task 1", "task", "in_progress", None, &[]).await;
@@ -2446,13 +2372,11 @@ mod tests {
             assert!(task.depends_on_ids.is_empty());
             assert!(task.dependent_ids.is_empty());
         }
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_with_relations_with_workflow_id_filter() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create tasks
         create_task(&db, "task1", "Task 1", "task", "in_progress", None, &[]).await;
@@ -2478,13 +2402,11 @@ mod tests {
         assert!(ids.contains("task1"));
         assert!(ids.contains("task2"));
         assert!(!ids.contains("task3"));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_with_relations_includes_parent() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create parent and child tasks
         create_task(
@@ -2515,13 +2437,11 @@ mod tests {
         let child = result.iter().find(|t| t.id == "child").unwrap();
         assert_eq!(child.id, "child");
         assert_eq!(child.parent_id, Some("parent".to_string()));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_with_relations_includes_dependencies() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create tasks
         create_task(&db, "task1", "Task 1", "task", "in_progress", None, &[]).await;
@@ -2557,13 +2477,11 @@ mod tests {
         assert_eq!(task3.depends_on_ids.len(), 1);
         assert_eq!(task3.depends_on_ids[0], "task1");
         assert!(task3.dependent_ids.is_empty());
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_with_relations_combined_workflow_and_relationships() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create tasks
         create_task(&db, "parent", "Parent", "epic", "in_progress", None, &[]).await;
@@ -2606,13 +2524,11 @@ mod tests {
         assert_eq!(child2.parent_id, Some("parent".to_string()));
         assert_eq!(child2.depends_on_ids.len(), 1);
         assert_eq!(child2.depends_on_ids[0], "child1");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_all_numeric_task_id_has_no_backticks() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create a task with an all-numeric ID
         // This tests that the ID is returned without backticks, angle brackets, or parentheses
@@ -2640,13 +2556,11 @@ mod tests {
         assert!(!result[0].id.contains(')'));
         assert!(!result[0].id.contains('<'));
         assert!(!result[0].id.contains('>'));
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_all_numeric_id_with_relations() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create tasks with all-numeric IDs
         create_task(
@@ -2686,8 +2600,6 @@ mod tests {
         let child = result.iter().find(|t| t.id == "222222").unwrap();
         assert_eq!(child.id, "222222");
         assert_eq!(child.parent_id, Some("111111".to_string()));
-
-        cleanup(&temp_dir);
     }
 
     /// Helper to create a workflow with steps
@@ -2727,7 +2639,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_with_current_step_filter() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create workflow with steps
         create_workflow_with_steps(&db, "dev_workflow", &["backlog", "in_progress", "done"]).await;
@@ -2792,13 +2704,11 @@ mod tests {
             "Should return exactly 1 task with step 'done'"
         );
         assert_eq!(result[0].id, "task4", "The task should be task4");
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_list_with_workflow_and_step_filter_combined() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create two workflows with same step names
         create_workflow_with_steps(&db, "wfcombined1", &["backlog", "in_progress", "done"]).await;
@@ -2866,13 +2776,11 @@ mod tests {
             result[0].id, "combined3",
             "Should be combined3 (wfcombined2 + backlog)"
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_task_summary_includes_workflow_and_step_names() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create workflow with a named step
         let workflow_name = "My Test Workflow";
@@ -2925,13 +2833,11 @@ mod tests {
             Some(step_name.to_string()),
             "step_name should be populated with the step's name"
         );
-
-        cleanup(&temp_dir);
     }
 
     #[tokio::test]
     async fn test_task_summary_without_workflow_has_none_names() {
-        let (db, temp_dir) = setup_test_db().await;
+        let db = setup_test_db().await;
 
         // Create task in backlog status (no current_step_id set)
         // This represents a task that hasn't been assigned to any workflow or step
@@ -2962,7 +2868,5 @@ mod tests {
             task.step_name, None,
             "step_name should be None for backlog tasks without step assignment"
         );
-
-        cleanup(&temp_dir);
     }
 }

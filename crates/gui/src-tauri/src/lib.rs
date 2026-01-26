@@ -14,7 +14,7 @@ use tokio::sync::RwLock;
 use specta_typescript::Typescript;
 use tauri::Manager;
 use tauri_specta::{collect_commands, collect_events, Builder};
-use vertebrae_core::DefaultTaskService;
+use vertebrae_core::VertebraeServices;
 use vertebrae_db::Database;
 
 use commands::AppState;
@@ -80,8 +80,8 @@ fn create_builder() -> Builder {
             commands::add_criterion_ref,
             // Code reference commands
             commands::add_code_ref,
-            commands::edit_code_ref,
-            commands::remove_code_ref,
+            commands::remove_code_refs,
+            commands::replace_code_refs,
             // Workflow commands
             commands::list_workflows,
             commands::get_workflow,
@@ -175,7 +175,7 @@ pub fn run() {
                                 log::error!("Failed to initialize database: {}", e);
                                 None
                             } else {
-                                Some(DefaultTaskService::new(db))
+                                Some(VertebraeServices::new(db))
                             }
                         }
                         Err(e) => {
@@ -189,9 +189,9 @@ pub fn run() {
                 None
             };
 
-            // Manage application state with optional task service
+            // Manage application state with optional services
             app.manage(AppState {
-                service: RwLock::new(service),
+                services: RwLock::new(service),
                 project_config,
             });
 
