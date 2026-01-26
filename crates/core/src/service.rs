@@ -587,6 +587,16 @@ pub trait TaskService: Send + Sync {
         ordinal: u32,
     ) -> ServiceResult<()>;
 
+    /// Mark a step section as done at a specific index (1-based)
+    ///
+    /// Updates the section's done flag to true and sets done_at to current time.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The task ID
+    /// * `step_index` - The 1-based index of the step section to mark as done
+    async fn mark_step_done(&self, id: &str, step_index: usize) -> ServiceResult<()>;
+
     /// Add a code reference to a task
     async fn add_code_ref(&self, id: &str, code_ref: CodeRef) -> ServiceResult<()>;
 
@@ -1627,6 +1637,19 @@ impl TaskService for DefaultTaskService {
         Ok(())
     }
 
+    async fn mark_step_done(&self, id: &str, step_index: usize) -> ServiceResult<()> {
+        let id = id.to_lowercase();
+
+        // Use repository method which handles finding by ordinal and renumbering
+        self.db.tasks().mark_step_done(&id, step_index).await?;
+
+        // Fire mutation callback
+        self.on_mutation(MutationEvent::TaskUpdated { id: id.clone() });
+
+        Ok(())
+    }
+
+    /// Add a code reference to a task
     async fn add_code_ref(&self, id: &str, code_ref: CodeRef) -> ServiceResult<()> {
         let id = id.to_lowercase();
 
@@ -1645,6 +1668,7 @@ impl TaskService for DefaultTaskService {
         Ok(())
     }
 
+    /// Remove code references from a task
     async fn remove_code_refs(&self, id: &str, indices: Option<Vec<usize>>) -> ServiceResult<()> {
         let id = id.to_lowercase();
 
@@ -1678,6 +1702,10 @@ impl TaskService for DefaultTaskService {
         Ok(())
     }
 
+    /// Atomically append a code reference to a task
+    ///
+    /// Uses database-level append operation for atomic updates without
+    /// read-modify-write race conditions.
     async fn append_ref(&self, id: &str, code_ref: &CodeRef) -> ServiceResult<()> {
         let id = id.to_lowercase();
 
@@ -1692,6 +1720,16 @@ impl TaskService for DefaultTaskService {
         Ok(())
     }
 
+    /// Atomically append a code reference to a section within a task
+    ///
+    /// Uses database-level append operation for atomic updates without
+    /// read-modify-write race conditions.
+    ///
+    /// # Arguments
+    ///
+    /// * `id` - The task ID
+    /// * `section_index` - The 0-based index of the section to add the ref to
+    /// * `code_ref` - The code reference to append
     async fn append_section_ref(
         &self,
         id: &str,
@@ -1714,6 +1752,9 @@ impl TaskService for DefaultTaskService {
         Ok(())
     }
 
+    /// Assign a workflow to a task
+    ///
+    /// Sets the task's workflow_id and initializes current_step to 0.
     async fn assign_workflow(&self, task_id: &str, workflow_id: &Thing) -> ServiceResult<()> {
         let task_id = task_id.to_lowercase();
 
@@ -1743,6 +1784,9 @@ impl TaskService for DefaultTaskService {
         Ok(())
     }
 
+    /// Remove workflow assignment from a task
+    ///
+    /// Clears both workflow_id and current_step_id fields.
     async fn unassign_workflow(&self, task_id: &str) -> ServiceResult<()> {
         let task_id = task_id.to_lowercase();
 
@@ -1759,10 +1803,25 @@ impl TaskService for DefaultTaskService {
         Ok(())
     }
 
+    /// Export all tasks from the database for backup or import operations.
+    ///
+    /// Returns all tasks with their IDs. This is a read-only operation.
+    ///
+    /// # Returns
+    ///
+    /// A vector of (task_id, Task) tuples in deterministic order.
     async fn export_all_tasks(&self) -> ServiceResult<Vec<(String, Task)>> {
         self.db.tasks().export_all().await.map_err(|e| e.into())
     }
 
+    /// Export all child_of relationships (parent-child hierarchy).
+    ///
+    /// Returns tuples of (child_id, parent_id) representing the hierarchy.
+    /// This is a read-only operation.
+    ///
+    /// # Returns
+    ///
+    /// A vector of (child_id, parent_id) tuples.
     async fn export_child_of_relations(&self) -> ServiceResult<Vec<(String, String)>> {
         self.db
             .relationships()
@@ -1771,6 +1830,14 @@ impl TaskService for DefaultTaskService {
             .map_err(|e| e.into())
     }
 
+    /// Export all depends_on relationships (task dependencies).
+    ///
+    /// Returns tuples of (task_id, blocker_id) representing dependencies.
+    /// This is a read-only operation.
+    ///
+    /// # Returns
+    ///
+    /// A vector of (task_id, blocker_id) tuples.
     async fn export_depends_on_relations(&self) -> ServiceResult<Vec<(String, String)>> {
         self.db
             .relationships()

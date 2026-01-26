@@ -1043,6 +1043,71 @@ impl<'a> TaskRepository<'a> {
         );
         Ok(())
     }
+
+    /// Mark a step section as done at a specific 1-based index
+    ///
+    /// Finds step sections and marks the step_index'th one as done.
+    /// Updates done=true and done_at=current_time atomically.
+    pub async fn mark_step_done(&self, id: &str, step_index: usize) -> DbResult<()> {
+        debug!("Marking step {} as done in task {}", step_index, id);
+
+        // First, get the task and its sections
+        let task = self.get(id).await?.ok_or_else(|| DbError::TaskNotFound {
+            task_id: id.to_string(),
+        })?;
+
+        // Find all step sections and sort by order
+        let mut steps: Vec<(usize, &Section)> = task
+            .sections
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.section_type == SectionType::Step)
+            .collect();
+        steps.sort_by_key(|(_, s)| s.order.unwrap_or(u32::MAX));
+
+        // Check if step_index is valid (1-based)
+        if step_index == 0 || step_index > steps.len() {
+            return Err(DbError::ValidationError {
+                message: format!(
+                    "Step {} not found. Task has {} step(s).",
+                    step_index,
+                    steps.len()
+                ),
+            });
+        }
+
+        // Get the actual section index (0-based) from the sorted steps
+        let (original_idx, _) = steps[step_index - 1];
+
+        // Update the section at original_idx to mark it as done
+        let mut new_sections = task.sections.clone();
+        if let Some(section) = new_sections.get_mut(original_idx) {
+            section.done = Some(true);
+            section.done_at = Some(chrono::Utc::now());
+        }
+
+        // Serialize sections to JSON for the query
+        let sections_json =
+            serde_json::to_string(&new_sections).map_err(|e| DbError::InvalidPath {
+                path: std::path::PathBuf::from(id),
+                reason: format!("Failed to serialize sections: {}", e),
+            })?;
+
+        // Update the task with the new sections array
+        let query = format!(
+            "UPDATE task:{} SET sections = {}, updated_at = time::now()",
+            id, sections_json
+        );
+
+        trace!("Query: {}", query);
+        self.client.query(&query).await?;
+
+        debug!(
+            "Successfully marked step {} as done in task {}",
+            step_index, id
+        );
+        Ok(())
+    }
 }
 
 #[cfg(test)]

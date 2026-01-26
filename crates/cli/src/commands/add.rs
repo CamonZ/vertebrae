@@ -146,11 +146,13 @@ impl AddCommand {
 
         // Assign to custom workflow if specified
         if let Some(workflow_id) = &self.workflow {
+            // Create workflow service for workflow assignment
+            // This is necessary setup and the only place we access the database
             #[allow(deprecated)]
             let db = service.database().clone();
             let workflow_service = DefaultWorkflowService::new(db);
 
-            // Validate workflow exists and assign
+            // Use the workflow service to assign the workflow
             workflow_service.assign_workflow(&id, workflow_id).await?;
         }
 

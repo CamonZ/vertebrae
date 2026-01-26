@@ -4,7 +4,7 @@
 //! recursively traversing the dependency graph.
 
 use clap::Args;
-use vertebrae_core::{ServiceError, TaskService};
+use vertebrae_core::{DefaultWorkflowService, ServiceError, TaskService, WorkflowService};
 
 /// Show all tasks blocking a given task
 #[derive(Debug, Args)]
@@ -72,8 +72,15 @@ impl BlockersCommand {
         // Fetch the target task to verify it exists and get its title
         let task = service.get_task(&id).await?;
 
+        // Create workflow service for workflow lookups
+        #[allow(deprecated)]
+        let db = service.database();
+        let workflow_service = DefaultWorkflowService::new(db.clone());
+
         // Build the blocker tree
-        let blockers = self.build_blocker_tree(service, &id, 0).await?;
+        let blockers = self
+            .build_blocker_tree(service, &workflow_service, &id, 0)
+            .await?;
 
         // Count total blockers
         let total_count = count_nodes(&blockers);
@@ -93,6 +100,7 @@ impl BlockersCommand {
     async fn build_blocker_tree(
         &self,
         service: &dyn TaskService,
+        workflow_service: &dyn WorkflowService,
         task_id: &str,
         current_depth: usize,
     ) -> Result<Vec<BlockerNode>, ServiceError> {
@@ -104,7 +112,9 @@ impl BlockersCommand {
         }
 
         // Get direct blockers (tasks that this task depends on)
-        let direct_blockers = self.fetch_direct_blockers(service, task_id).await?;
+        let direct_blockers = self
+            .fetch_direct_blockers(service, workflow_service, task_id)
+            .await?;
 
         // Build nodes for each direct blocker
         let mut nodes = Vec::new();
@@ -112,8 +122,13 @@ impl BlockersCommand {
             let blocker_id = blocker.id.clone();
 
             // Recursively get children (blockers of this blocker)
-            let children =
-                Box::pin(self.build_blocker_tree(service, &blocker_id, current_depth + 1)).await?;
+            let children = Box::pin(self.build_blocker_tree(
+                service,
+                workflow_service,
+                &blocker_id,
+                current_depth + 1,
+            ))
+            .await?;
 
             nodes.push(BlockerNode {
                 id: blocker_id,
@@ -134,6 +149,7 @@ impl BlockersCommand {
     async fn fetch_direct_blockers(
         &self,
         service: &dyn TaskService,
+        workflow_service: &dyn WorkflowService,
         task_id: &str,
     ) -> Result<Vec<vertebrae_db::TaskSummary>, ServiceError> {
         // Get tasks that this task depends on via the depends_on relationship
@@ -145,28 +161,21 @@ impl BlockersCommand {
         for blocker_id in blockers {
             // Get the blocker task summary
             if let Ok(task) = service.get_task(&blocker_id).await {
-                // Get step name and workflow name directly from task's workflow_id and current_step_id
+                // Get step name and workflow name using WorkflowService
                 let (step_name, workflow_name) = if let (Some(step_id), Some(wf_id)) =
                     (&task.current_step_id, &task.workflow_id)
                 {
-                    let step = service
-                        .database()
-                        .steps()
-                        .get(&step_id.id.to_raw())
+                    // Use WorkflowService.get_workflow_info() instead of direct database calls
+                    let workflow_info = workflow_service
+                        .get_workflow_info(wf_id, Some(step_id))
                         .await
-                        .ok()
-                        .flatten();
-                    let workflow = service
-                        .database()
-                        .workflows()
-                        .get(&wf_id.id.to_raw())
-                        .await
-                        .ok()
-                        .flatten();
+                        .ok();
                     (
-                        step.map(|s| s.name)
+                        workflow_info
+                            .as_ref()
+                            .map(|info| info.current_step_name.clone())
                             .unwrap_or_else(|| "backlog".to_string()),
-                        workflow.map(|w| w.name),
+                        workflow_info.map(|info| info.name),
                     )
                 } else {
                     ("backlog".to_string(), None)

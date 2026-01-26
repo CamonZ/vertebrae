@@ -67,7 +67,7 @@ impl StepDoneCommand {
             ));
         }
 
-        // Fetch task via service
+        // Fetch task via service to get the step content before updating
         let task = service.get_task(&id).await?;
 
         let sections = task.sections.clone();
@@ -90,32 +90,12 @@ impl StepDoneCommand {
             )));
         }
 
-        let (original_idx, step) = steps[step_idx];
+        let (_, step) = steps[step_idx];
         let step_content = step.content.clone();
 
-        // Update the step in place by rebuilding sections array
-        let mut updated_sections = sections;
-        if let Some(section) = updated_sections.get_mut(original_idx) {
-            section.done = Some(true);
-            section.done_at = Some(chrono::Utc::now());
-        }
-
-        // Update task with modified sections using database directly since service doesn't have update_sections
-        // This is a limitation of the current service API that should be addressed in the future
-        let db = service.database();
-        db.tasks()
-            .update(
-                &id,
-                &vertebrae_db::TaskUpdate::new().with_sections(updated_sections),
-            )
-            .await
-            .map_err(ServiceError::Database)?;
-
-        // Trigger mutation callback by calling a dummy update through service layer
-        // This is a temporary workaround - ideally the service should have an update_sections method
-        service
-            .update_task(&id, vertebrae_core::UpdateTaskOptions::new())
-            .await?;
+        // Use the new service method to mark step as done
+        // This replaces the direct database access and handles mutation callback
+        service.mark_step_done(&id, self.index).await?;
 
         Ok(StepDoneResult {
             task_id: id,
