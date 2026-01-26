@@ -4,7 +4,8 @@
 //! and steps. Validates transitions against the workflow_transitions edge table.
 
 use clap::Args;
-use vertebrae_core::{ServiceError, TaskService};
+use vertebrae_core::{DefaultWorkflowService, ServiceError, TaskService, WorkflowService};
+use vertebrae_db::Thing;
 
 /// Transition a task to a workflow/step
 #[derive(Debug, Args)]
@@ -160,32 +161,28 @@ impl TransitionToCommand {
         let from_workflow = task.workflow_id.as_ref().map(|t| t.id.to_raw());
         let from_step = task.current_step_id.as_ref().map(|t| t.id.to_raw());
 
-        // Get the database to validate the transition
+        // Create workflow service for workflow operations
         let db = service.database();
+        let workflow_service = DefaultWorkflowService::new(db.clone());
 
-        // Resolve target workflow - try by ID first, then by name
-        let workflow = db.workflows().get(&parsed.workflow).await?.or_else(|| None); // TODO: Add lookup by name
+        // Resolve target workflow - validate it exists
+        let _ = workflow_service.get_workflow(&parsed.workflow).await?;
 
-        let target_workflow_id = if workflow.is_some() {
-            parsed.workflow.clone()
-        } else {
-            // Try to find workflow by name
-            // For now, assume the target is the ID
-            return Err(ServiceError::InvalidInput(format!(
-                "Workflow '{}' not found",
-                parsed.workflow
-            )));
-        };
+        let target_workflow_id = parsed.workflow.clone();
+        let workflow_thing = Thing::from(("workflow", target_workflow_id.as_str()));
 
         // Validate the transition if not skipped
         if !self.skip_validation
             && let Some(current_wf_id) = &from_workflow
         {
             // Check if transition is allowed
-            let allowed = db
-                .workflow_transitions()
-                .exists(current_wf_id, &target_workflow_id)
+            let transitions = workflow_service
+                .get_transitions_from_workflow(current_wf_id)
                 .await?;
+            let target_workflow_thing = Thing::from(("workflow", target_workflow_id.as_str()));
+            let allowed = transitions
+                .iter()
+                .any(|t| t.to_workflow == target_workflow_thing);
 
             if !allowed && current_wf_id != &target_workflow_id {
                 return Err(ServiceError::InvalidInput(format!(
@@ -199,8 +196,7 @@ impl TransitionToCommand {
             if current_wf_id == &target_workflow_id
                 && let Some(target_step_name) = &parsed.step
             {
-                let workflow_thing =
-                    surrealdb::sql::Thing::from(("workflow", target_workflow_id.as_str()));
+                // Query steps for this workflow
                 let steps = db.steps().list_by_workflow(&workflow_thing).await?;
 
                 // Invariant: task always has current_step_id
@@ -216,6 +212,14 @@ impl TransitionToCommand {
 
                 // Find target step
                 let target_step = steps.iter().find(|s| s.name == *target_step_name);
+
+                // Check if target step exists
+                if target_step.is_none() {
+                    return Err(ServiceError::InvalidInput(format!(
+                        "Step '{}' not found in workflow '{}'",
+                        target_step_name, target_workflow_id
+                    )));
+                }
 
                 if let (Some(current), Some(target)) = (current_step, target_step) {
                     // Check if target is in current step's transitions_to
@@ -256,68 +260,37 @@ impl TransitionToCommand {
 
         // Determine target step
         let target_step_name = if let Some(step_name) = &parsed.step {
-            // Find step by name in target workflow
-            let workflow_thing =
-                surrealdb::sql::Thing::from(("workflow", target_workflow_id.as_str()));
-            let steps = db.steps().list_by_workflow(&workflow_thing).await?;
-            let step = steps.iter().find(|s| s.name == *step_name);
-            if step.is_none() {
-                return Err(ServiceError::InvalidInput(format!(
-                    "Step '{}' not found in workflow '{}'",
-                    step_name, target_workflow_id
-                )));
-            }
             Some(step_name.clone())
         } else {
-            // Use initial step of the workflow
-            let workflow = db.workflows().get(&target_workflow_id).await?;
-            if let Some(wf) = workflow {
-                if let Some(initial_step) = &wf.initial_step {
-                    let step = db.steps().get(&initial_step.id.to_raw()).await?;
-                    step.map(|s| s.name)
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
+            // Use initial step of the workflow - query the first step by order
+            let steps = db.steps().list_by_workflow(&workflow_thing).await?;
+            steps.first().map(|s| s.name.clone())
         };
 
         // Perform the transition - assign workflow and set step
-        let workflow_thing = surrealdb::sql::Thing::from(("workflow", target_workflow_id.as_str()));
-        service.assign_workflow(&id, &workflow_thing).await?;
+        let _ = workflow_service
+            .assign_workflow(&id, &target_workflow_id)
+            .await?;
 
         // Set the step if specified
         if let Some(step_name) = &parsed.step {
-            let workflow_thing_for_steps =
-                surrealdb::sql::Thing::from(("workflow", target_workflow_id.as_str()));
-            let steps = db
-                .steps()
-                .list_by_workflow(&workflow_thing_for_steps)
-                .await?;
-            if let Some(step) = steps.iter().find(|s| s.name == *step_name) {
-                // Update current_step_id (reference to step record)
-                if let Some(ref step_id) = step.id {
-                    db.tasks().update_current_step_id(&id, step_id).await?;
-                }
+            let steps = db.steps().list_by_workflow(&workflow_thing).await?;
+            if let Some(step) = steps.iter().find(|s| s.name == *step_name)
+                && let Some(step_id) = &step.id
+            {
+                db.tasks().update_current_step_id(&id, step_id).await?;
             }
         } else if let Some(ref step_name) = target_step_name {
             // If we have a target step from initial step resolution, find and set the step ID
-            let workflow_thing_for_steps =
-                surrealdb::sql::Thing::from(("workflow", target_workflow_id.as_str()));
-            let steps = db
-                .steps()
-                .list_by_workflow(&workflow_thing_for_steps)
-                .await?;
+            let steps = db.steps().list_by_workflow(&workflow_thing).await?;
             if let Some(step) = steps.iter().find(|s| &s.name == step_name)
-                && let Some(ref step_id) = step.id
+                && let Some(step_id) = &step.id
             {
                 db.tasks().update_current_step_id(&id, step_id).await?;
             }
         }
 
         // Get unblocked tasks (for done/terminal steps)
-        // Check if the target step is terminal and compute newly unblocked tasks
         let mut unblocked_tasks = vec![];
         if let Some(step_name) = &target_step_name {
             // Terminal steps: done, rejected
@@ -327,15 +300,13 @@ impl TransitionToCommand {
 
                 for dependent_id in dependents {
                     // Check if this dependent has any remaining incomplete blockers
-                    let blockers = db.graph().get_blockers(&dependent_id, Some(1)).await?;
-                    let has_incomplete_blockers = blockers.iter().any(|blocker| {
-                        // A blocker is incomplete if its status is not done/rejected
-                        blocker.status.as_str() != "done" && blocker.status.as_str() != "rejected"
-                    });
+                    let blockers = service
+                        .get_incomplete_blockers_with_details(&dependent_id)
+                        .await?;
 
-                    if !has_incomplete_blockers {
+                    if blockers.is_empty() {
                         // This task is now unblocked
-                        if let Ok(Some(task)) = db.tasks().get(&dependent_id).await {
+                        if let Ok(task) = service.get_task(&dependent_id).await {
                             unblocked_tasks.push((dependent_id, task.title));
                         }
                     }
