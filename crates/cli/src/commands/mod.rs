@@ -64,7 +64,7 @@ pub use workflow::WorkflowCommand;
 
 use crate::output::{format_task_table, format_task_tree};
 use clap::Subcommand;
-use vertebrae_core::{ServiceError, TaskService};
+use vertebrae_core::{ServiceError, VertebraeServices};
 
 /// Available CLI commands
 #[derive(Debug, Subcommand)]
@@ -152,53 +152,56 @@ impl std::fmt::Display for CommandResult {
 }
 
 impl Command {
-    /// Execute the command with the given task service.
+    /// Execute the command with the given task services.tasks().
     ///
     /// # Arguments
     ///
-    /// * `service` - Reference to the task service
+    /// * `services` - Reference to the task service
     ///
     /// # Errors
     ///
     /// Returns `ServiceError` if the command execution fails.
-    pub async fn execute(&self, service: &dyn TaskService) -> Result<CommandResult, ServiceError> {
+    pub async fn execute(
+        &self,
+        services: &VertebraeServices,
+    ) -> Result<CommandResult, ServiceError> {
         match self {
             Command::Add(cmd) => {
-                let id = cmd.execute(service).await?;
+                let id = cmd.execute(services).await?;
                 Ok(CommandResult::Message(format!("Created task: {}", id)))
             }
             Command::Blockers(cmd) => {
-                let result = cmd.execute(service).await?;
+                let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::CriterionRef(cmd) => {
                 // Service handles notification via callback
-                let result = cmd.execute(service).await?;
+                let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Delete(cmd) => {
-                let message = cmd.execute(service).await?;
+                let message = cmd.execute(services).await?;
                 Ok(CommandResult::Message(message))
             }
             Command::Depend(cmd) => {
                 // Service handles notification via callback
-                let result = cmd.execute(service).await?;
+                let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Execution(cmd) => {
-                let result = cmd.execute(service).await?;
+                let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(result))
             }
             Command::Export(cmd) => {
-                let result = cmd.execute(service).await?;
+                let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Gate(cmd) => {
-                let result = cmd.execute(service).await?;
+                let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(result))
             }
             Command::Import(cmd) => {
-                let result = cmd.execute(service).await?;
+                let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Init(cmd) => {
@@ -209,15 +212,14 @@ impl Command {
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::List(cmd) => {
-                let tasks = cmd.execute(service).await?;
+                let tasks = cmd.execute(services).await?;
                 // Use tree format by default
                 // Use flat format if --flat is specified
                 let output = if cmd.flat {
                     format_task_table(&tasks)
                 } else {
                     // Get all parent-child relationships for tree rendering
-                    let db = service.database();
-                    let parent_relations = db.relationships().export_all_child_of().await?;
+                    let parent_relations = services.tasks().export_child_of_relations().await?;
                     // Build a map from child_id to parent_id
                     let parent_map: std::collections::HashMap<String, String> =
                         parent_relations.into_iter().collect();
@@ -226,77 +228,77 @@ impl Command {
                 Ok(CommandResult::Table(output))
             }
             Command::Path(cmd) => {
-                let result = cmd.execute(service).await?;
+                let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Ready(cmd) => {
-                let result = cmd.execute(service).await?;
+                let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Ref(cmd) => {
                 // Service handles notification via callback
-                let result = cmd.execute(service).await?;
+                let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Refs(cmd) => {
-                let result = cmd.execute(service).await?;
+                let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Review(cmd) => {
-                let result = cmd.execute(service).await?;
+                let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(result))
             }
             Command::Run(cmd) => {
-                cmd.execute(service).await?;
+                cmd.execute(services).await?;
                 Ok(CommandResult::Message(
                     "Workflow execution started".to_string(),
                 ))
             }
             Command::Section(cmd) => {
-                let result = cmd.execute(service).await?;
+                let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Sections(cmd) => {
-                let result = cmd.execute(service).await?;
+                let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Show(cmd) => {
                 // Service handles notification via callback if needed
-                let detail = cmd.execute(service).await?;
+                let detail = cmd.execute(services).await?;
                 Ok(CommandResult::Message(format!("{}", detail)))
             }
             Command::Undepend(cmd) => {
                 // Service handles notification via callback
-                let result = cmd.execute(service).await?;
+                let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Unref(cmd) => {
-                let result = cmd.execute(service).await?;
+                let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Unsection(cmd) => {
                 // Service handles notification via callback
-                let result = cmd.execute(service).await?;
+                let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Step(cmd) => {
-                let result = cmd.execute(service).await?;
+                let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(result))
             }
             Command::StepDone(cmd) => {
-                let result = cmd.execute(service).await?;
+                let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::TransitionTo(cmd) => {
-                let result = cmd.execute(service).await?;
+                let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Update(cmd) => {
-                let id = cmd.execute(service).await?;
+                let id = cmd.execute(services).await?;
                 Ok(CommandResult::Message(format!("Updated task: {}", id)))
             }
             Command::Workflow(cmd) => {
-                let result = cmd.execute(service).await?;
+                let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(result))
             }
         }

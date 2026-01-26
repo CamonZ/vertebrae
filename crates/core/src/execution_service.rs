@@ -4,7 +4,7 @@
 //! defines the interface for all step execution management operations, including CRUD operations
 //! for both step executions and session logs.
 
-use crate::error::ServiceResult;
+use crate::error::{ServiceError, ServiceResult};
 use async_trait::async_trait;
 use std::sync::Arc;
 use vertebrae_db::{Database, SessionLog, StepExecution};
@@ -96,6 +96,24 @@ pub trait ExecutionService: Send + Sync {
         &self,
         task_id: &str,
     ) -> ServiceResult<Option<StepExecution>>;
+
+    /// Update an existing step execution
+    ///
+    /// # Arguments
+    ///
+    /// * `execution_id` - The execution ID to update
+    /// * `output` - Optional output text to set
+    /// * `transition_result` - Optional transition result to set
+    ///
+    /// # Returns
+    ///
+    /// Unit on success.
+    async fn update_execution(
+        &self,
+        execution_id: &str,
+        output: Option<String>,
+        transition_result: Option<String>,
+    ) -> ServiceResult<()>;
 }
 
 /// Default implementation of ExecutionService backed by Database
@@ -198,6 +216,19 @@ impl ExecutionService for DefaultExecutionService {
             .executions()
             .get_latest_execution_for_task(&normalized_id)
             .await?)
+    }
+
+    async fn update_execution(
+        &self,
+        execution_id: &str,
+        output: Option<String>,
+        transition_result: Option<String>,
+    ) -> ServiceResult<()> {
+        self.db
+            .executions()
+            .update_execution(execution_id, output, transition_result)
+            .await
+            .map_err(ServiceError::from)
     }
 }
 

@@ -6,10 +6,8 @@
 use crate::commands::list::TaskSummary;
 use clap::Args;
 use serde::Deserialize;
-use vertebrae_core::{
-    DefaultWorkflowService, ServiceError, TaskService, WorkflowInfo, WorkflowService,
-};
-use vertebrae_db::{CodeRef, Database, DbError, Section, SectionType};
+use vertebrae_core::{ServiceError, VertebraeServices, WorkflowInfo, WorkflowService};
+use vertebrae_db::{CodeRef, Section, SectionType};
 
 /// Show full details of a task
 #[derive(Debug, Args)]
@@ -162,38 +160,30 @@ impl ShowCommand {
     ///
     /// # Arguments
     ///
-    /// * `service` - Reference to the task service
+    /// * `services` - Reference to the vertebrae services
     ///
     /// # Errors
     ///
     /// Returns `ServiceError` if:
     /// - The task with the given ID does not exist
     /// - Database operations fail
-    pub async fn execute(&self, service: &dyn TaskService) -> Result<TaskDetail, ServiceError> {
+    pub async fn execute(&self, services: &VertebraeServices) -> Result<TaskDetail, ServiceError> {
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
-        #[allow(deprecated)]
-        let db = service.database();
 
-        // Fetch the main task
-        let task = self.fetch_task(db, &id).await.map_err(|e| match e {
-            DbError::TaskNotFound { task_id } => ServiceError::task_not_found(&task_id),
-            other => ServiceError::Database(other),
-        })?;
+        // Fetch the main task using service layer
+        let task = self.fetch_task(services, &id).await?;
 
         // Fetch related data in parallel-ish manner
-        let parent = self.fetch_parent(service, &id).await?;
-        let children = self.fetch_children(service, &id).await?;
-        let blocked_by = self.fetch_blocked_by(service, &id).await?;
-        let blocks = self.fetch_blocks(service, &id).await?;
-
-        // Create workflow service for fetching workflow info
-        let workflow_service = DefaultWorkflowService::new(db.clone());
+        let parent = self.fetch_parent(services).await?;
+        let children = self.fetch_children(services).await?;
+        let blocked_by = self.fetch_blocked_by(services).await?;
+        let blocks = self.fetch_blocks(services).await?;
 
         // Fetch workflow info if task is assigned to a workflow
         let workflow = self
             .fetch_workflow_info(
-                &workflow_service,
+                services.workflows(),
                 task.workflow_id.as_ref(),
                 task.current_step_id.as_ref(),
             )
@@ -296,25 +286,23 @@ impl ShowCommand {
         })
     }
 
-    /// Fetch the main task by ID using the repository layer.
-    async fn fetch_task(&self, db: &Database, id: &str) -> Result<TaskRow, DbError> {
-        // Use repository method instead of raw query to ensure consistency
-        let task = db
-            .tasks()
-            .get(id)
-            .await?
-            .ok_or_else(|| DbError::TaskNotFound {
-                task_id: self.id.clone(),
-            })?;
+    /// Fetch the main task by ID using the service layer.
+    async fn fetch_task(
+        &self,
+        services: &VertebraeServices,
+        id: &str,
+    ) -> Result<TaskRow, ServiceError> {
+        // Use service method to get the task
+        let task = services.tasks().get_task(id).await?;
 
-        // Compute derived status from workflow step
-        let derived_status = Self::compute_derived_status_for_task(db, &task).await?;
+        // Compute derived status from workflow step using service
+        let derived_status = services.tasks().get_derived_status(&task).await?;
 
         // Convert Task to TaskRow for display
         Ok(TaskRow {
-            id: task.id.ok_or_else(|| DbError::TaskNotFound {
-                task_id: self.id.clone(),
-            })?,
+            id: task
+                .id
+                .ok_or_else(|| ServiceError::task_not_found(&self.id))?,
             title: task.title,
             description: task.description,
             level: task.level.as_str().to_string(),
@@ -363,24 +351,19 @@ impl ShowCommand {
         })
     }
 
-    /// Fetch the parent task (if any) using the repository layer.
+    /// Fetch the parent task (if any) using the service layer.
     async fn fetch_parent(
         &self,
-        service: &dyn TaskService,
-        id: &str,
+        services: &VertebraeServices,
     ) -> Result<Option<TaskSummary>, ServiceError> {
         // Use service method to get parent ID
-        let parent_id = service.get_parent(id).await?;
+        let parent_id = services.tasks().get_parent(&self.id.to_lowercase()).await?;
 
         if let Some(parent_id) = parent_id {
-            let task = service.get_task(&parent_id).await?;
+            let task = services.tasks().get_task(&parent_id).await?;
 
-            // Compute derived status from workflow info
-            #[allow(deprecated)]
-            let db = service.database();
-            let derived_status = Self::compute_derived_status_for_task(db, &task)
-                .await
-                .map_err(ServiceError::Database)?;
+            // Compute derived status from workflow info using service
+            let derived_status = services.tasks().get_derived_status(&task).await?;
 
             Ok(Some(TaskSummary {
                 id: parent_id,
@@ -396,40 +379,33 @@ impl ShowCommand {
         }
     }
 
-    /// Fetch children tasks using the repository layer.
+    /// Fetch children tasks using the service layer.
     async fn fetch_children(
         &self,
-        service: &dyn TaskService,
-        id: &str,
+        services: &VertebraeServices,
     ) -> Result<Vec<TaskSummary>, ServiceError> {
         // Use service method to get child IDs
-        let child_ids = service.get_children(id).await?;
+        let child_ids = services
+            .tasks()
+            .get_children(&self.id.to_lowercase())
+            .await?;
 
         let mut children = Vec::new();
-        #[allow(deprecated)]
-        let db = service.database();
         for child_id in child_ids {
-            if let Some(task) = db
-                .tasks()
-                .get(&child_id)
-                .await
-                .map_err(ServiceError::Database)?
-            {
-                // Compute derived status from workflow info
-                let derived_status = Self::compute_derived_status_for_task(db, &task)
-                    .await
-                    .map_err(ServiceError::Database)?;
+            let task = services.tasks().get_task(&child_id).await?;
 
-                children.push(TaskSummary {
-                    id: child_id,
-                    title: task.title,
-                    level: task.level.as_str().to_string(),
-                    status: derived_status,
-                    priority: task.priority.map(|p| p.as_str().to_string()),
-                    tags: task.tags,
-                    needs_human_review: task.needs_human_review,
-                });
-            }
+            // Compute derived status from workflow info using service
+            let derived_status = services.tasks().get_derived_status(&task).await?;
+
+            children.push(TaskSummary {
+                id: child_id,
+                title: task.title,
+                level: task.level.as_str().to_string(),
+                status: derived_status,
+                priority: task.priority.map(|p| p.as_str().to_string()),
+                tags: task.tags,
+                needs_human_review: task.needs_human_review,
+            });
         }
 
         Ok(children)
@@ -439,11 +415,13 @@ impl ShowCommand {
     /// Only returns incomplete blockers (status != done).
     async fn fetch_blocked_by(
         &self,
-        service: &dyn TaskService,
-        id: &str,
+        services: &VertebraeServices,
     ) -> Result<Vec<TaskSummary>, ServiceError> {
         // Use the service layer method to get incomplete blockers with details
-        let blockers = service.get_incomplete_blockers_with_details(id).await?;
+        let blockers = services
+            .tasks()
+            .get_incomplete_blockers_with_details(&self.id.to_lowercase())
+            .await?;
 
         Ok(blockers.into_iter().map(TaskSummary::from).collect())
     }
@@ -451,37 +429,30 @@ impl ShowCommand {
     /// Fetch tasks that are blocked by this task.
     async fn fetch_blocks(
         &self,
-        service: &dyn TaskService,
-        id: &str,
+        services: &VertebraeServices,
     ) -> Result<Vec<TaskSummary>, ServiceError> {
         // Use service method to get dependent task IDs (tasks blocked by this one)
-        let dependent_ids = service.get_dependents(id).await?;
+        let dependent_ids = services
+            .tasks()
+            .get_dependents(&self.id.to_lowercase())
+            .await?;
 
         let mut blocks = Vec::new();
-        #[allow(deprecated)]
-        let db = service.database();
         for dependent_id in dependent_ids {
-            if let Some(task) = db
-                .tasks()
-                .get(&dependent_id)
-                .await
-                .map_err(ServiceError::Database)?
-            {
-                // Compute derived status from workflow info
-                let derived_status = Self::compute_derived_status_for_task(db, &task)
-                    .await
-                    .map_err(ServiceError::Database)?;
+            let task = services.tasks().get_task(&dependent_id).await?;
 
-                blocks.push(TaskSummary {
-                    id: dependent_id,
-                    title: task.title,
-                    level: task.level.as_str().to_string(),
-                    status: derived_status,
-                    priority: task.priority.map(|p| p.as_str().to_string()),
-                    tags: task.tags,
-                    needs_human_review: task.needs_human_review,
-                });
-            }
+            // Compute derived status from workflow info using service
+            let derived_status = services.tasks().get_derived_status(&task).await?;
+
+            blocks.push(TaskSummary {
+                id: dependent_id,
+                title: task.title,
+                level: task.level.as_str().to_string(),
+                status: derived_status,
+                priority: task.priority.map(|p| p.as_str().to_string()),
+                tags: task.tags,
+                needs_human_review: task.needs_human_review,
+            });
         }
 
         Ok(blocks)
@@ -504,26 +475,6 @@ impl ShowCommand {
             .get_workflow_info(workflow_id, current_step_id)
             .await?;
         Ok(Some(info))
-    }
-
-    /// Compute derived status for a task from its workflow info.
-    ///
-    /// Returns `workflow_name:step_name` if both are present,
-    /// otherwise falls back to the raw status string.
-    async fn compute_derived_status_for_task(
-        db: &Database,
-        task: &vertebrae_db::Task,
-    ) -> Result<String, DbError> {
-        // Use current_step_id to determine status
-        if let (Some(workflow_id), Some(step_id)) = (&task.workflow_id, &task.current_step_id)
-            && let Some(workflow) = db.workflows().get(&workflow_id.id.to_raw()).await?
-            && let Some(step) = db.steps().get_by_thing(step_id).await?
-        {
-            return Ok(format!("{}:{}", workflow.name, step.name));
-        }
-
-        // Fall back to default if no workflow information
-        Ok("backlog".to_string())
     }
 }
 
@@ -822,27 +773,19 @@ fn format_code_ref_location(code_ref: &CodeRef) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vertebrae_core::DefaultTaskService;
-    use vertebrae_db::{Level, Priority, Task};
+    use vertebrae_core::{CreateTaskOptions, VertebraeServices};
+    use vertebrae_db::{Database, Level, Priority};
 
     /// Helper to create an in-memory test service
-    async fn setup_test_service() -> DefaultTaskService {
+    async fn setup_test_service() -> VertebraeServices {
         let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-        DefaultTaskService::new(db)
+        VertebraeServices::new(db)
     }
 
-    /// Helper to create a task using the service.
-    ///
-    /// The status parameter maps to workflow steps in the Default Workflow
-    /// as created by create_default_workflow():
-    /// - "backlog" -> step 0
-    /// - "in_progress" -> step 1
-    /// - "pending_review" -> step 2
-    /// - "done" -> step 3
-    /// - "rejected" -> step 4
+    /// Helper to create a task via the service layer
     async fn create_task(
-        service: &DefaultTaskService,
+        services: &VertebraeServices,
         id: &str,
         title: &str,
         level: &str,
@@ -850,7 +793,6 @@ mod tests {
         priority: Option<&str>,
         tags: &[&str],
     ) {
-        let db = service.database();
         let level_enum = match level {
             "epic" => Level::Epic,
             "ticket" => Level::Ticket,
@@ -865,44 +807,46 @@ mod tests {
             _ => None,
         });
 
-        // Set up workflow and step
-        let default_workflow_id = surrealdb::sql::Thing::from(("workflow", "default"));
-        let step_id_str = format!("default_{}", status);
-        let step_id = surrealdb::sql::Thing::from(("step", step_id_str.as_str()));
+        let mut options = CreateTaskOptions::new(title)
+            .with_id(id)
+            .with_level(level_enum)
+            .with_status(status);
 
-        let mut task = Task::new(title, level_enum);
-        task.workflow_id = Some(default_workflow_id);
-        task.current_step_id = Some(step_id);
-        task.priority = priority_enum;
-        task.tags = tags.iter().map(|s| s.to_string()).collect();
+        if let Some(p) = priority_enum {
+            options = options.with_priority(p);
+        }
 
-        db.tasks().create(id, &task).await.unwrap();
+        for tag in tags {
+            options = options.with_tag(*tag);
+        }
+
+        services.tasks().create_task(options).await.unwrap();
     }
 
-    /// Helper to create a child_of relationship using the service
-    async fn create_child_of(service: &DefaultTaskService, child_id: &str, parent_id: &str) {
-        let db = service.database();
-        db.relationships()
-            .create_child_of(child_id, parent_id)
+    /// Helper to create a child_of relationship via the service layer
+    async fn create_child_of(services: &VertebraeServices, child_id: &str, parent_id: &str) {
+        services
+            .tasks()
+            .set_parent(child_id, parent_id)
             .await
             .unwrap();
     }
 
-    /// Helper to create a depends_on relationship using the service
-    async fn create_depends_on(service: &DefaultTaskService, task_id: &str, dep_id: &str) {
-        let db = service.database();
-        db.relationships()
-            .create_depends_on(task_id, dep_id)
+    /// Helper to create a depends_on relationship via the service layer
+    async fn create_depends_on(services: &VertebraeServices, task_id: &str, dep_id: &str) {
+        services
+            .tasks()
+            .add_dependency(task_id, dep_id)
             .await
             .unwrap();
     }
 
     #[tokio::test]
     async fn test_show_simple_task() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
         create_task(
-            &service,
+            &services,
             "abc123",
             "Test Task",
             "task",
@@ -916,7 +860,7 @@ mod tests {
             id: "abc123".to_string(),
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok(), "Show failed: {:?}", result.err());
 
         let detail = result.unwrap();
@@ -940,13 +884,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_show_nonexistent_task() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
         let cmd = ShowCommand {
             id: "nonexistent".to_string(),
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         match result {
             Err(ServiceError::TaskNotFound { task_id }) => {
                 assert_eq!(
@@ -962,10 +906,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_show_case_insensitive() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
         create_task(
-            &service,
+            &services,
             "abc123",
             "Test Task",
             "task",
@@ -979,16 +923,16 @@ mod tests {
             id: "ABC123".to_string(),
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok(), "Case-insensitive lookup failed");
     }
 
     #[tokio::test]
     async fn test_show_with_parent() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
         create_task(
-            &service,
+            &services,
             "parent1",
             "Parent Epic",
             "epic",
@@ -998,7 +942,7 @@ mod tests {
         )
         .await;
         create_task(
-            &service,
+            &services,
             "child1",
             "Child Task",
             "task",
@@ -1007,13 +951,13 @@ mod tests {
             &[],
         )
         .await;
-        create_child_of(&service, "child1", "parent1").await;
+        create_child_of(&services, "child1", "parent1").await;
 
         let cmd = ShowCommand {
             id: "child1".to_string(),
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
         let detail = result.unwrap();
@@ -1030,10 +974,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_show_with_children() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
         create_task(
-            &service,
+            &services,
             "parent1",
             "Parent Epic",
             "epic",
@@ -1043,7 +987,7 @@ mod tests {
         )
         .await;
         create_task(
-            &service,
+            &services,
             "child1",
             "Child 1",
             "ticket",
@@ -1053,7 +997,7 @@ mod tests {
         )
         .await;
         create_task(
-            &service,
+            &services,
             "child2",
             "Child 2",
             "ticket",
@@ -1062,14 +1006,14 @@ mod tests {
             &["backend"],
         )
         .await;
-        create_child_of(&service, "child1", "parent1").await;
-        create_child_of(&service, "child2", "parent1").await;
+        create_child_of(&services, "child1", "parent1").await;
+        create_child_of(&services, "child2", "parent1").await;
 
         let cmd = ShowCommand {
             id: "parent1".to_string(),
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
         let detail = result.unwrap();
@@ -1095,11 +1039,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_show_with_dependencies() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
         // Use in_progress status - completed blockers are filtered out
         create_task(
-            &service,
+            &services,
             "dep1",
             "Dependency Task",
             "task",
@@ -1108,14 +1052,23 @@ mod tests {
             &["blocker", "core"],
         )
         .await;
-        create_task(&service, "task1", "Main Task", "task", "backlog", None, &[]).await;
-        create_depends_on(&service, "task1", "dep1").await;
+        create_task(
+            &services,
+            "task1",
+            "Main Task",
+            "task",
+            "backlog",
+            None,
+            &[],
+        )
+        .await;
+        create_depends_on(&services, "task1", "dep1").await;
 
         let cmd = ShowCommand {
             id: "task1".to_string(),
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
         let detail = result.unwrap();
@@ -1133,11 +1086,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_show_filters_completed_blockers() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
         // Completed blocker should not appear in blocked_by
         create_task(
-            &service,
+            &services,
             "done_dep",
             "Done Dependency",
             "task",
@@ -1146,14 +1099,23 @@ mod tests {
             &[],
         )
         .await;
-        create_task(&service, "task1", "Main Task", "task", "backlog", None, &[]).await;
-        create_depends_on(&service, "task1", "done_dep").await;
+        create_task(
+            &services,
+            "task1",
+            "Main Task",
+            "task",
+            "backlog",
+            None,
+            &[],
+        )
+        .await;
+        create_depends_on(&services, "task1", "done_dep").await;
 
         let cmd = ShowCommand {
             id: "task1".to_string(),
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
         let detail = result.unwrap();
@@ -1166,10 +1128,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_show_with_blocks() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
         create_task(
-            &service,
+            &services,
             "blocker",
             "Blocker Task",
             "task",
@@ -1179,7 +1141,7 @@ mod tests {
         )
         .await;
         create_task(
-            &service,
+            &services,
             "dependent",
             "Dependent Task",
             "task",
@@ -1188,13 +1150,13 @@ mod tests {
             &[],
         )
         .await;
-        create_depends_on(&service, "dependent", "blocker").await;
+        create_depends_on(&services, "dependent", "blocker").await;
 
         let cmd = ShowCommand {
             id: "blocker".to_string(),
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
         let detail = result.unwrap();
@@ -1207,11 +1169,11 @@ mod tests {
         // Note: Due to SurrealDB SCHEMAFULL behavior with array<object>,
         // nested object fields are not preserved unless explicitly defined.
         // This test verifies that the show command handles empty sections/refs gracefully.
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
         // Create a task using the service
         create_task(
-            &service,
+            &services,
             "withdata",
             "Task with Data",
             "ticket",
@@ -1225,7 +1187,7 @@ mod tests {
             id: "withdata".to_string(),
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(
             result.is_ok(),
             "Show with empty sections/refs failed: {:?}",
@@ -1339,10 +1301,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_show_with_tags() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
         create_task(
-            &service,
+            &services,
             "tagged",
             "Tagged Task",
             "task",
@@ -1356,7 +1318,7 @@ mod tests {
             id: "tagged".to_string(),
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
         let detail = result.unwrap();
@@ -1837,11 +1799,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_show_derived_status_with_advanced_step() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
         // Create a task (auto-assigned to Default Workflow at step 0 = backlog)
         create_task(
-            &service,
+            &services,
             "advanced_task",
             "Task with Advanced Step",
             "task",
@@ -1851,9 +1813,9 @@ mod tests {
         )
         .await;
 
-        // Create workflow service and advance to step 1 (in_progress)
-        let workflow_service = DefaultWorkflowService::new(service.database().clone());
-        workflow_service
+        // Advance to step 1 (in_progress) using the workflow service
+        services
+            .workflows()
             .advance_step("advanced_task")
             .await
             .unwrap();
@@ -1863,7 +1825,7 @@ mod tests {
             id: "advanced_task".to_string(),
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok(), "Show failed: {:?}", result.err());
 
         let detail = result.unwrap();

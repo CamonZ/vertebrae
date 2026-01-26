@@ -4,7 +4,7 @@
 //! Supports removing by file path or removing all references.
 
 use clap::Args;
-use vertebrae_core::ServiceError;
+use vertebrae_core::{ServiceError, VertebraeServices};
 
 /// Remove code references from a task
 #[derive(Debug, Args)]
@@ -70,22 +70,19 @@ impl UnrefCommand {
     ///
     /// # Arguments
     ///
-    /// * `service` - Reference to the task service
+    /// * `services` - Reference to the services container
     ///
     /// # Errors
     ///
     /// Returns `ServiceError` if:
     /// - The task with the given ID does not exist
     /// - Service operations fail
-    pub async fn execute(
-        &self,
-        service: &dyn vertebrae_core::TaskService,
-    ) -> Result<UnrefResult, ServiceError> {
+    pub async fn execute(&self, services: &VertebraeServices) -> Result<UnrefResult, ServiceError> {
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
 
         // Fetch task to get current refs
-        let task = service.get_task(&id).await?;
+        let task = services.tasks().get_task(&id).await?;
 
         let code_refs = task.code_refs.clone();
         let original_count = code_refs.len();
@@ -93,7 +90,7 @@ impl UnrefCommand {
         if self.all {
             // Remove all references using service layer (which fires MutationCallback)
             if original_count > 0 {
-                service.remove_code_refs(&id, None).await?;
+                services.tasks().remove_code_refs(&id, None).await?;
             }
 
             Ok(UnrefResult {
@@ -115,7 +112,8 @@ impl UnrefCommand {
 
             if removed_count > 0 {
                 // Remove refs by index using service layer (which fires MutationCallback)
-                service
+                services
+                    .tasks()
                     .remove_code_refs(&id, Some(refs_to_remove_indices))
                     .await?;
             }
@@ -127,7 +125,7 @@ impl UnrefCommand {
                 removed_count,
             })
         } else {
-            // Should not reach here due to clap validation
+            // Should not happen due to clap validation, but handle gracefully
             Ok(UnrefResult {
                 id,
                 file: None,

@@ -1,6 +1,6 @@
 use clap::Args;
 use std::time::Duration;
-use vertebrae_core::{ServiceError, TaskService};
+use vertebrae_core::{ServiceError, VertebraeServices};
 
 #[derive(Debug, Args)]
 pub struct RunCommand {
@@ -9,9 +9,9 @@ pub struct RunCommand {
 }
 
 impl RunCommand {
-    pub async fn execute(&self, service: &dyn TaskService) -> Result<(), ServiceError> {
+    pub async fn execute(&self, services: &VertebraeServices) -> Result<(), ServiceError> {
         // Verify task exists and has workflow
-        let task = service.get_task(&self.task_id).await?;
+        let task = services.tasks().get_task(&self.task_id).await?;
 
         if task.workflow_id.is_none() {
             return Err(ServiceError::ValidationFailed {

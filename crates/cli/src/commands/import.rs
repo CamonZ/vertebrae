@@ -10,7 +10,7 @@ use serde::Deserialize;
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
 use surrealdb::sql::Thing;
-use vertebrae_core::{ServiceError, TaskService};
+use vertebrae_core::{ServiceError, VertebraeServices};
 use vertebrae_db::{AgentConfig, CodeRef, Level, Priority, Section, Step, Task, Workflow};
 
 /// Import database from JSONL format
@@ -237,15 +237,19 @@ impl ImportCommand {
     ///
     /// # Arguments
     ///
-    /// * `service` - Reference to the task service
+    /// * `services` - Reference to the vertebrae services
     ///
     /// # Errors
     ///
     /// Returns `ServiceError` if database operations fail or file I/O fails.
-    pub async fn execute(&self, service: &dyn TaskService) -> Result<ImportResult, ServiceError> {
+    #[allow(deprecated)]
+    pub async fn execute(
+        &self,
+        services: &VertebraeServices,
+    ) -> Result<ImportResult, ServiceError> {
         let (records, source) = self.read_records()?;
 
-        let db = service.database();
+        let db = services.tasks().database();
         let mut result = ImportResult {
             workflows_imported: 0,
             workflows_skipped: 0,

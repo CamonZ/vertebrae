@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::path::PathBuf;
 use uuid::Uuid;
-use vertebrae_core::{ServiceError, TaskService};
+use vertebrae_core::{ServiceError, VertebraeServices};
 use vertebrae_db::{AgentConfig, CodeRef, Section};
 
 /// Export database to JSONL format
@@ -267,28 +267,31 @@ impl ExportCommand {
     ///
     /// # Arguments
     ///
-    /// * `service` - Reference to the task service
+    /// * `services` - Reference to the vertebrae services
     ///
     /// # Errors
     ///
     /// Returns `ServiceError` if database queries fail or file I/O fails.
-    pub async fn execute(&self, service: &dyn TaskService) -> Result<ExportResult, ServiceError> {
+    #[allow(deprecated)]
+    pub async fn execute(
+        &self,
+        services: &VertebraeServices,
+    ) -> Result<ExportResult, ServiceError> {
         let mut records: Vec<ExportRecord> = Vec::new();
         let mut mapper = IdMapper::new();
-        let db = service.database();
 
         // ===================================================================
         // Phase 1: Populate ID mappings (must be done before creating records)
         // ===================================================================
 
         // 1a. Map workflow IDs
-        let workflows = db.workflows().export_all().await?;
+        let workflows = services.workflows().export_all_workflows().await?;
         for (old_id, _) in &workflows {
             mapper.workflow(old_id);
         }
 
         // 1b. Map step IDs
-        let steps = db.steps().list().await?;
+        let steps = services.steps().list_all_steps().await?;
         for step in &steps {
             if let Some(thing) = &step.id {
                 mapper.step(&thing.id.to_raw());
@@ -296,15 +299,15 @@ impl ExportCommand {
         }
 
         // 1c. Map workflow transition IDs
-        let transitions = db.workflow_transitions().list_all().await?;
+        let transitions = services.workflows().list_workflow_transitions(None).await?;
         for transition in &transitions {
             if let Some(thing) = &transition.id {
                 mapper.workflow_transition(&thing.id.to_raw());
             }
         }
 
-        // 1d. Map task IDs (using TaskService instead of direct database access)
-        let tasks = service.export_all_tasks().await?;
+        // 1d. Map task IDs (using TaskService)
+        let tasks = services.tasks().export_all_tasks().await?;
         for (old_id, _) in &tasks {
             mapper.task(old_id);
         }
@@ -425,8 +428,8 @@ impl ExportCommand {
             })));
         }
 
-        // 2e. Export child_of relationships (using TaskService instead of direct database access)
-        let child_of_relations = service.export_child_of_relations().await?;
+        // 2e. Export child_of relationships (using TaskService)
+        let child_of_relations = services.tasks().export_child_of_relations().await?;
         let child_of_count = child_of_relations.len();
         for (child_old, parent_old) in child_of_relations {
             let child = mapper.get_task(&child_old).unwrap_or_default();
@@ -434,8 +437,8 @@ impl ExportCommand {
             records.push(ExportRecord::ChildOf { child, parent });
         }
 
-        // 2f. Export depends_on relationships (using TaskService instead of direct database access)
-        let depends_on_relations = service.export_depends_on_relations().await?;
+        // 2f. Export depends_on relationships (using TaskService)
+        let depends_on_relations = services.tasks().export_depends_on_relations().await?;
         let depends_on_count = depends_on_relations.len();
         for (task_old, blocker_old) in depends_on_relations {
             let task = mapper.get_task(&task_old).unwrap_or_default();

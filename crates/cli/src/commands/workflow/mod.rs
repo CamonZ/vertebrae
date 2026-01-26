@@ -31,9 +31,8 @@ pub use types::{StepDisplayInfo, WorkflowDetail, WorkflowSummary, format_timesta
 pub use unassign::WorkflowUnassignCommand;
 pub use update::WorkflowUpdateCommand;
 
-use crate::notification::create_workflow_http_notification_callback;
 use clap::Subcommand;
-use vertebrae_core::{DefaultWorkflowService, ServiceError, TaskService};
+use vertebrae_core::{ServiceError, VertebraeServices};
 
 /// Workflow management commands
 #[derive(Debug, Subcommand)]
@@ -68,29 +67,25 @@ impl WorkflowCommand {
     ///
     /// # Arguments
     ///
-    /// * `service` - Reference to the task service
+    /// * `services` - Reference to the services container
     ///
     /// # Errors
     ///
     /// Returns `ServiceError` if the command execution fails.
-    pub async fn execute(&self, service: &dyn TaskService) -> Result<String, ServiceError> {
-        #[allow(deprecated)]
-        let db = service.database().clone();
-        // Create the workflow service with HTTP notification callback for GUI sync
-        let callback = create_workflow_http_notification_callback();
-        let workflow_service = DefaultWorkflowService::with_callback(db, callback);
+    pub async fn execute(&self, services: &VertebraeServices) -> Result<String, ServiceError> {
+        let workflow_service = services.workflows();
         match self {
-            WorkflowCommand::Add(cmd) => cmd.execute(&workflow_service).await,
-            WorkflowCommand::List(cmd) => cmd.execute(&workflow_service).await,
-            WorkflowCommand::Show(cmd) => cmd.execute(&workflow_service).await,
-            WorkflowCommand::Update(cmd) => cmd.execute(&workflow_service).await,
-            WorkflowCommand::Delete(cmd) => cmd.execute(&workflow_service).await,
-            WorkflowCommand::Assign(cmd) => cmd.execute(&workflow_service).await,
-            WorkflowCommand::Unassign(cmd) => cmd.execute(&workflow_service).await,
-            WorkflowCommand::Advance(cmd) => cmd.execute(&workflow_service).await,
-            WorkflowCommand::Retreat(cmd) => cmd.execute(&workflow_service).await,
-            WorkflowCommand::Reject(cmd) => cmd.execute(&workflow_service).await,
-            WorkflowCommand::Transition(cmd) => cmd.execute(&workflow_service).await,
+            WorkflowCommand::Add(cmd) => cmd.execute(workflow_service).await,
+            WorkflowCommand::List(cmd) => cmd.execute(workflow_service).await,
+            WorkflowCommand::Show(cmd) => cmd.execute(services).await,
+            WorkflowCommand::Update(cmd) => cmd.execute(workflow_service).await,
+            WorkflowCommand::Delete(cmd) => cmd.execute(workflow_service).await,
+            WorkflowCommand::Assign(cmd) => cmd.execute(workflow_service).await,
+            WorkflowCommand::Unassign(cmd) => cmd.execute(workflow_service).await,
+            WorkflowCommand::Advance(cmd) => cmd.execute(workflow_service).await,
+            WorkflowCommand::Retreat(cmd) => cmd.execute(workflow_service).await,
+            WorkflowCommand::Reject(cmd) => cmd.execute(workflow_service).await,
+            WorkflowCommand::Transition(cmd) => cmd.execute(workflow_service).await,
         }
     }
 }

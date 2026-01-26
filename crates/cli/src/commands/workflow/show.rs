@@ -2,7 +2,7 @@
 
 use super::types::{StepDisplayInfo, WorkflowDetail};
 use clap::Args;
-use vertebrae_core::{ServiceError, WorkflowService};
+use vertebrae_core::{ServiceError, VertebraeServices};
 
 /// Show details of a specific workflow
 #[derive(Debug, Args)]
@@ -19,15 +19,14 @@ impl WorkflowShowCommand {
     ///
     /// # Arguments
     ///
-    /// * `service` - Reference to the workflow service
+    /// * `services` - Reference to the services container
     ///
     /// # Errors
     ///
     /// Returns `ServiceError::NotFound` if the workflow doesn't exist.
     /// Returns `ServiceError` if service operations fail.
-    #[allow(deprecated)]
-    pub async fn execute(&self, service: &dyn WorkflowService) -> Result<String, ServiceError> {
-        let workflow = service.get_workflow(&self.id).await?;
+    pub async fn execute(&self, services: &VertebraeServices) -> Result<String, ServiceError> {
+        let workflow = services.workflows().get_workflow(&self.id).await?;
 
         let workflow_id = workflow
             .id
@@ -37,10 +36,9 @@ impl WorkflowShowCommand {
 
         // Get steps from first-class Step entities
         let steps = if let Some(ref workflow_thing) = workflow.id {
-            let first_class_steps = service
-                .database()
+            let first_class_steps = services
                 .steps()
-                .list_by_workflow(workflow_thing)
+                .list_steps_for_workflow(workflow_thing)
                 .await?;
             // Convert to display format
             first_class_steps

@@ -3,7 +3,7 @@
 //! Implements the `vtb list` command to display tasks with filtering options.
 
 use clap::Args;
-use vertebrae_core::{ServiceError, TaskService};
+use vertebrae_core::{ServiceError, VertebraeServices};
 use vertebrae_db::{Level, Priority, TaskFilter};
 
 /// A summary of a task for display in the list
@@ -155,7 +155,7 @@ impl ListCommand {
     /// - Search query is empty
     pub async fn execute(
         &self,
-        service: &dyn TaskService,
+        services: &VertebraeServices,
     ) -> Result<Vec<TaskSummary>, ServiceError> {
         // Validate search query is not empty
         if let Some(ref search) = self.search
@@ -170,7 +170,7 @@ impl ListCommand {
         let filter = self.build_filter();
 
         // Use the service layer to execute the query
-        let results = service.list_tasks(&filter).await?;
+        let results = services.tasks().list_tasks(&filter).await?;
 
         // Convert service TaskSummary to CLI TaskSummary
         Ok(results.into_iter().map(TaskSummary::from).collect())
@@ -370,9 +370,9 @@ mod tests {
             flat: false,
         };
 
-        let service = vertebrae_core::DefaultTaskService::new(db);
+        let services = vertebrae_core::VertebraeServices::new(db);
 
-        let result = cmd.execute(&service).await.unwrap();
+        let result = cmd.execute(&services).await.unwrap();
 
         // Should have 2 tasks (excluding done)
         assert_eq!(result.len(), 2);
@@ -408,9 +408,9 @@ mod tests {
             flat: false,
         };
 
-        let service = vertebrae_core::DefaultTaskService::new(db);
+        let services = vertebrae_core::VertebraeServices::new(db);
 
-        let result = cmd.execute(&service).await.unwrap();
+        let result = cmd.execute(&services).await.unwrap();
 
         // Should have all 2 tasks
         assert_eq!(result.len(), 2);
@@ -456,9 +456,9 @@ mod tests {
             flat: false,
         };
 
-        let service = vertebrae_core::DefaultTaskService::new(db);
+        let services = vertebrae_core::VertebraeServices::new(db);
 
-        let result = cmd.execute(&service).await.unwrap();
+        let result = cmd.execute(&services).await.unwrap();
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].level, "epic");
@@ -495,9 +495,9 @@ mod tests {
             flat: false,
         };
 
-        let service = vertebrae_core::DefaultTaskService::new(db);
+        let services = vertebrae_core::VertebraeServices::new(db);
 
-        let result = cmd.execute(&service).await.unwrap();
+        let result = cmd.execute(&services).await.unwrap();
 
         assert_eq!(result.len(), 2);
         assert!(
@@ -539,9 +539,9 @@ mod tests {
             flat: false,
         };
 
-        let service = vertebrae_core::DefaultTaskService::new(db);
+        let services = vertebrae_core::VertebraeServices::new(db);
 
-        let result = cmd.execute(&service).await.unwrap();
+        let result = cmd.execute(&services).await.unwrap();
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].status, "backlog");
@@ -587,9 +587,9 @@ mod tests {
             flat: false,
         };
 
-        let service = vertebrae_core::DefaultTaskService::new(db);
+        let services = vertebrae_core::VertebraeServices::new(db);
 
-        let result = cmd.execute(&service).await.unwrap();
+        let result = cmd.execute(&services).await.unwrap();
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].priority, Some("high".to_string()));
@@ -644,9 +644,9 @@ mod tests {
             flat: false,
         };
 
-        let service = vertebrae_core::DefaultTaskService::new(db);
+        let services = vertebrae_core::VertebraeServices::new(db);
 
-        let result = cmd.execute(&service).await.unwrap();
+        let result = cmd.execute(&services).await.unwrap();
 
         assert_eq!(result.len(), 2);
         assert!(
@@ -725,9 +725,9 @@ mod tests {
             flat: false,
         };
 
-        let service = vertebrae_core::DefaultTaskService::new(db);
+        let services = vertebrae_core::VertebraeServices::new(db);
 
-        let result = cmd.execute(&service).await.unwrap();
+        let result = cmd.execute(&services).await.unwrap();
 
         // Should have 2 root tasks (parent1 and orphan1, but not child1)
         assert_eq!(result.len(), 2);
@@ -782,9 +782,9 @@ mod tests {
             flat: false,
         };
 
-        let service = vertebrae_core::DefaultTaskService::new(db);
+        let services = vertebrae_core::VertebraeServices::new(db);
 
-        let result = cmd.execute(&service).await.unwrap();
+        let result = cmd.execute(&services).await.unwrap();
 
         // Should have 2 children
         assert_eq!(result.len(), 2);
@@ -812,9 +812,9 @@ mod tests {
             flat: false,
         };
 
-        let service = vertebrae_core::DefaultTaskService::new(db);
+        let services = vertebrae_core::VertebraeServices::new(db);
 
-        let result = cmd.execute(&service).await.unwrap();
+        let result = cmd.execute(&services).await.unwrap();
 
         // Should return empty list
         assert!(result.is_empty());
@@ -838,9 +838,9 @@ mod tests {
             flat: false,
         };
 
-        let service = vertebrae_core::DefaultTaskService::new(db);
+        let services = vertebrae_core::VertebraeServices::new(db);
 
-        let result = cmd.execute(&service).await.unwrap();
+        let result = cmd.execute(&services).await.unwrap();
 
         assert!(result.is_empty());
     }
@@ -904,9 +904,9 @@ mod tests {
             flat: false,
         };
 
-        let service = vertebrae_core::DefaultTaskService::new(db);
+        let services = vertebrae_core::VertebraeServices::new(db);
 
-        let result = cmd.execute(&service).await.unwrap();
+        let result = cmd.execute(&services).await.unwrap();
 
         // Should match task1 only (epic + high priority + backend tag + not done)
         assert_eq!(result.len(), 1);
@@ -934,9 +934,9 @@ mod tests {
             flat: false,
         };
 
-        let service = vertebrae_core::DefaultTaskService::new(db);
+        let services = vertebrae_core::VertebraeServices::new(db);
 
-        let result = cmd.execute(&service).await.unwrap();
+        let result = cmd.execute(&services).await.unwrap();
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].level, "epic");
@@ -1250,9 +1250,9 @@ mod tests {
             flat: false,
         };
 
-        let service = vertebrae_core::DefaultTaskService::new(db);
+        let services = vertebrae_core::VertebraeServices::new(db);
 
-        let result = cmd.execute(&service).await.unwrap();
+        let result = cmd.execute(&services).await.unwrap();
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].id, "task1");
@@ -1296,9 +1296,9 @@ mod tests {
             flat: false,
         };
 
-        let service = vertebrae_core::DefaultTaskService::new(db);
+        let services = vertebrae_core::VertebraeServices::new(db);
 
-        let result = cmd.execute(&service).await.unwrap();
+        let result = cmd.execute(&services).await.unwrap();
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].id, "task1");
@@ -1335,9 +1335,9 @@ mod tests {
             flat: false,
         };
 
-        let service = vertebrae_core::DefaultTaskService::new(db);
+        let services = vertebrae_core::VertebraeServices::new(db);
 
-        let result = cmd.execute(&service).await.unwrap();
+        let result = cmd.execute(&services).await.unwrap();
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].id, "task1");
@@ -1357,7 +1357,7 @@ mod tests {
             flat: false,
         };
 
-        let result2 = cmd2.execute(&service).await.unwrap();
+        let result2 = cmd2.execute(&services).await.unwrap();
 
         assert_eq!(result2.len(), 1);
         assert_eq!(result2[0].id, "task1");
@@ -1384,9 +1384,9 @@ mod tests {
             flat: false,
         };
 
-        let service = vertebrae_core::DefaultTaskService::new(db);
+        let services = vertebrae_core::VertebraeServices::new(db);
 
-        let result = cmd.execute(&service).await.unwrap();
+        let result = cmd.execute(&services).await.unwrap();
 
         assert!(result.is_empty());
     }
@@ -1432,9 +1432,9 @@ mod tests {
             flat: false,
         };
 
-        let service = vertebrae_core::DefaultTaskService::new(db);
+        let services = vertebrae_core::VertebraeServices::new(db);
 
-        let result = cmd.execute(&service).await.unwrap();
+        let result = cmd.execute(&services).await.unwrap();
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].id, "task2");
@@ -1463,9 +1463,9 @@ mod tests {
             flat: false,
         };
 
-        let service = vertebrae_core::DefaultTaskService::new(db);
+        let services = vertebrae_core::VertebraeServices::new(db);
 
-        let result = cmd.execute(&service).await.unwrap();
+        let result = cmd.execute(&services).await.unwrap();
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].id, "epic1");
@@ -1491,9 +1491,9 @@ mod tests {
             flat: false,
         };
 
-        let service = vertebrae_core::DefaultTaskService::new(db);
+        let services = vertebrae_core::VertebraeServices::new(db);
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
 
         assert!(result.is_err());
         match result {
@@ -1524,9 +1524,9 @@ mod tests {
             flat: false,
         };
 
-        let service = vertebrae_core::DefaultTaskService::new(db);
+        let services = vertebrae_core::VertebraeServices::new(db);
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
 
         assert!(result.is_err());
         match result {
@@ -1588,9 +1588,9 @@ mod tests {
             flat: false,
         };
 
-        let service = vertebrae_core::DefaultTaskService::new(db);
+        let services = vertebrae_core::VertebraeServices::new(db);
 
-        let result = cmd.execute(&service).await.unwrap();
+        let result = cmd.execute(&services).await.unwrap();
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].id, "parent1");
@@ -1639,9 +1639,9 @@ mod tests {
             flat: false,
         };
 
-        let service = vertebrae_core::DefaultTaskService::new(db);
+        let services = vertebrae_core::VertebraeServices::new(db);
 
-        let result = cmd.execute(&service).await.unwrap();
+        let result = cmd.execute(&services).await.unwrap();
 
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].id, "child1");
@@ -1668,9 +1668,9 @@ mod tests {
             flat: false,
         };
 
-        let service = vertebrae_core::DefaultTaskService::new(db);
+        let services = vertebrae_core::VertebraeServices::new(db);
 
-        let result = cmd.execute(&service).await.unwrap();
+        let result = cmd.execute(&services).await.unwrap();
 
         // Should return empty (no SQL injection)
         assert!(result.is_empty());
@@ -1716,9 +1716,9 @@ mod tests {
             flat: false,
         };
 
-        let service = vertebrae_core::DefaultTaskService::new(db);
+        let services = vertebrae_core::VertebraeServices::new(db);
 
-        let result = cmd.execute(&service).await.unwrap();
+        let result = cmd.execute(&services).await.unwrap();
 
         // Should find both tasks (one in title, one in description)
         assert_eq!(result.len(), 2);
@@ -1788,9 +1788,9 @@ mod tests {
             flat: false,
         };
 
-        let service = vertebrae_core::DefaultTaskService::new(db);
+        let services = vertebrae_core::VertebraeServices::new(db);
 
-        let result = cmd.execute(&service).await.unwrap();
+        let result = cmd.execute(&services).await.unwrap();
 
         // Should find 3 tasks (task1, task2, task3 - any with backend OR frontend)
         assert_eq!(result.len(), 3);

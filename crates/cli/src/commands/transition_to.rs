@@ -4,7 +4,7 @@
 //! and steps. Validates transitions against the workflow_transitions edge table.
 
 use clap::Args;
-use vertebrae_core::{DefaultWorkflowService, ServiceError, TaskService, WorkflowService};
+use vertebrae_core::{ServiceError, VertebraeServices};
 use vertebrae_db::Thing;
 
 /// Transition a task to a workflow/step
@@ -134,7 +134,7 @@ impl TransitionToCommand {
     ///
     /// # Arguments
     ///
-    /// * `service` - Reference to the task service
+    /// * `services` - Reference to the vertebrae services
     ///
     /// # Errors
     ///
@@ -146,7 +146,7 @@ impl TransitionToCommand {
     #[allow(deprecated)]
     pub async fn execute(
         &self,
-        service: &dyn TaskService,
+        services: &VertebraeServices,
     ) -> Result<TransitionToResult, ServiceError> {
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
@@ -155,15 +155,14 @@ impl TransitionToCommand {
         let parsed = ParsedTarget::parse(&self.target);
 
         // Get the task
-        let task = service.get_task(&id).await?;
+        let task = services.tasks().get_task(&id).await?;
 
         // Get current workflow info
         let from_workflow = task.workflow_id.as_ref().map(|t| t.id.to_raw());
         let from_step = task.current_step_id.as_ref().map(|t| t.id.to_raw());
 
-        // Create workflow service for workflow operations
-        let db = service.database();
-        let workflow_service = DefaultWorkflowService::new(db.clone());
+        // Get workflow service for workflow operations
+        let workflow_service = services.workflows();
 
         // Resolve target workflow - validate it exists
         let _ = workflow_service.get_workflow(&parsed.workflow).await?;
@@ -197,7 +196,10 @@ impl TransitionToCommand {
                 && let Some(target_step_name) = &parsed.step
             {
                 // Query steps for this workflow
-                let steps = db.steps().list_by_workflow(&workflow_thing).await?;
+                let steps = services
+                    .steps()
+                    .list_steps_for_workflow(&workflow_thing)
+                    .await?;
 
                 // Invariant: task always has current_step_id
                 let current_step_id = task.current_step_id.as_ref().ok_or_else(|| {
@@ -263,7 +265,10 @@ impl TransitionToCommand {
             Some(step_name.clone())
         } else {
             // Use initial step of the workflow - query the first step by order
-            let steps = db.steps().list_by_workflow(&workflow_thing).await?;
+            let steps = services
+                .steps()
+                .list_steps_for_workflow(&workflow_thing)
+                .await?;
             steps.first().map(|s| s.name.clone())
         };
 
@@ -274,19 +279,25 @@ impl TransitionToCommand {
 
         // Set the step if specified
         if let Some(step_name) = &parsed.step {
-            let steps = db.steps().list_by_workflow(&workflow_thing).await?;
+            let steps = services
+                .steps()
+                .list_steps_for_workflow(&workflow_thing)
+                .await?;
             if let Some(step) = steps.iter().find(|s| s.name == *step_name)
                 && let Some(step_id) = &step.id
             {
-                db.tasks().update_current_step_id(&id, step_id).await?;
+                services.tasks().set_current_step(&id, step_id).await?;
             }
         } else if let Some(ref step_name) = target_step_name {
             // If we have a target step from initial step resolution, find and set the step ID
-            let steps = db.steps().list_by_workflow(&workflow_thing).await?;
+            let steps = services
+                .steps()
+                .list_steps_for_workflow(&workflow_thing)
+                .await?;
             if let Some(step) = steps.iter().find(|s| &s.name == step_name)
                 && let Some(step_id) = &step.id
             {
-                db.tasks().update_current_step_id(&id, step_id).await?;
+                services.tasks().set_current_step(&id, step_id).await?;
             }
         }
 
@@ -296,17 +307,18 @@ impl TransitionToCommand {
             // Terminal steps: done, rejected
             if step_name == "done" || step_name == "rejected" {
                 // Find tasks that depend on this task
-                let dependents = service.get_dependents(&id).await?;
+                let dependents = services.tasks().get_dependents(&id).await?;
 
                 for dependent_id in dependents {
                     // Check if this dependent has any remaining incomplete blockers
-                    let blockers = service
+                    let blockers = services
+                        .tasks()
                         .get_incomplete_blockers_with_details(&dependent_id)
                         .await?;
 
                     if blockers.is_empty() {
                         // This task is now unblocked
-                        if let Ok(task) = service.get_task(&dependent_id).await {
+                        if let Ok(task) = services.tasks().get_task(&dependent_id).await {
                             unblocked_tasks.push((dependent_id, task.title));
                         }
                     }

@@ -7,7 +7,7 @@
 //! fires properly for GUI cache invalidation.
 
 use clap::Args;
-use vertebrae_core::{ServiceError, TaskService};
+use vertebrae_core::{ServiceError, VertebraeServices};
 
 /// Create a dependency relationship between tasks
 #[derive(Debug, Args)]
@@ -58,7 +58,7 @@ impl DependCommand {
     ///
     /// # Arguments
     ///
-    /// * `service` - Reference to the task service
+    /// * `services` - Reference to the services container
     ///
     /// # Errors
     ///
@@ -67,7 +67,10 @@ impl DependCommand {
     /// - Self-dependency is attempted (task depends on itself)
     /// - Creating the dependency would form a cycle
     /// - Service operations fail
-    pub async fn execute(&self, service: &dyn TaskService) -> Result<DependResult, ServiceError> {
+    pub async fn execute(
+        &self,
+        services: &VertebraeServices,
+    ) -> Result<DependResult, ServiceError> {
         // Normalize IDs to lowercase for case-insensitive lookup
         let task_id = self.id.to_lowercase();
         let blocker_id = self.blocker_id.to_lowercase();
@@ -80,16 +83,16 @@ impl DependCommand {
         }
 
         // Validate both tasks exist using service layer
-        if !service.task_exists(&task_id).await? {
+        if !services.tasks().task_exists(&task_id).await? {
             return Err(ServiceError::task_not_found(&self.id));
         }
 
-        if !service.task_exists(&blocker_id).await? {
+        if !services.tasks().task_exists(&blocker_id).await? {
             return Err(ServiceError::task_not_found(&self.blocker_id));
         }
 
         // Check if dependency already exists (idempotent) using service layer
-        let with_relations = service.get_task_with_relations(&task_id).await?;
+        let with_relations = services.tasks().get_task_with_relations(&task_id).await?;
 
         if with_relations.depends_on_ids.contains(&blocker_id) {
             // Dependency already exists - idempotent behavior
@@ -100,8 +103,12 @@ impl DependCommand {
             });
         }
 
-        // Add the dependency using the service layer (handles cycle detection and mutation callback)
-        service.add_dependency(&task_id, &blocker_id).await?;
+        // Create the dependency using the service layer
+        // This fires MutationCallback for GUI cache invalidation
+        services
+            .tasks()
+            .add_dependency(&task_id, &blocker_id)
+            .await?;
 
         Ok(DependResult {
             task_id,
@@ -114,25 +121,27 @@ impl DependCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vertebrae_core::{CreateTaskOptions, DefaultTaskService, ServiceError};
+    use vertebrae_core::{CreateTaskOptions, ServiceError};
     use vertebrae_db::Database;
 
     /// Helper to create an in-memory test service
-    async fn setup_test_service() -> DefaultTaskService {
+    async fn setup_test_service() -> VertebraeServices {
         let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-        DefaultTaskService::new(db)
+        VertebraeServices::new(db)
     }
 
     #[tokio::test]
     async fn test_create_dependency() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        let task_a = service
+        let task_a = services
+            .tasks()
             .create_task(CreateTaskOptions::new("Task A"))
             .await
             .unwrap();
-        let task_b = service
+        let task_b = services
+            .tasks()
             .create_task(CreateTaskOptions::new("Task B"))
             .await
             .unwrap();
@@ -142,7 +151,7 @@ mod tests {
             blocker_id: task_a.clone(),
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok(), "Depend failed: {:?}", result.err());
 
         let depend_result = result.unwrap();
@@ -151,19 +160,25 @@ mod tests {
         assert!(!depend_result.already_existed);
 
         // Verify the dependency was created
-        let with_relations = service.get_task_with_relations(&task_b).await.unwrap();
+        let with_relations = services
+            .tasks()
+            .get_task_with_relations(&task_b)
+            .await
+            .unwrap();
         assert!(with_relations.depends_on_ids.contains(&task_a));
     }
 
     #[tokio::test]
     async fn test_dependency_idempotent() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        let task_a = service
+        let task_a = services
+            .tasks()
             .create_task(CreateTaskOptions::new("Task A"))
             .await
             .unwrap();
-        let task_b = service
+        let task_b = services
+            .tasks()
             .create_task(CreateTaskOptions::new("Task B"))
             .await
             .unwrap();
@@ -174,21 +189,22 @@ mod tests {
         };
 
         // Create dependency first time
-        let result1 = cmd.execute(&service).await;
+        let result1 = cmd.execute(&services).await;
         assert!(result1.is_ok());
         assert!(!result1.unwrap().already_existed);
 
         // Create dependency second time - should be idempotent
-        let result2 = cmd.execute(&service).await;
+        let result2 = cmd.execute(&services).await;
         assert!(result2.is_ok());
         assert!(result2.unwrap().already_existed);
     }
 
     #[tokio::test]
     async fn test_self_dependency_fails() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        let task_a = service
+        let task_a = services
+            .tasks()
             .create_task(CreateTaskOptions::new("Task A"))
             .await
             .unwrap();
@@ -198,7 +214,7 @@ mod tests {
             blocker_id: task_a.clone(),
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         match result {
             Err(ServiceError::ValidationFailed { message }) => {
                 assert!(
@@ -214,13 +230,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_direct_cycle_detection() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        let task_a = service
+        let task_a = services
+            .tasks()
             .create_task(CreateTaskOptions::new("Task A"))
             .await
             .unwrap();
-        let task_b = service
+        let task_b = services
+            .tasks()
             .create_task(CreateTaskOptions::new("Task B"))
             .await
             .unwrap();
@@ -230,7 +248,7 @@ mod tests {
             id: task_a.clone(),
             blocker_id: task_b.clone(),
         };
-        cmd1.execute(&service).await.unwrap();
+        cmd1.execute(&services).await.unwrap();
 
         // Try to create B depends on A - should fail (cycle)
         let cmd2 = DependCommand {
@@ -238,7 +256,7 @@ mod tests {
             blocker_id: task_a.clone(),
         };
 
-        let result = cmd2.execute(&service).await;
+        let result = cmd2.execute(&services).await;
         match result {
             Err(ServiceError::CyclicDependency) => {
                 // Expected
@@ -250,17 +268,20 @@ mod tests {
 
     #[tokio::test]
     async fn test_transitive_cycle_detection() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        let task_a = service
+        let task_a = services
+            .tasks()
             .create_task(CreateTaskOptions::new("Task A"))
             .await
             .unwrap();
-        let task_b = service
+        let task_b = services
+            .tasks()
             .create_task(CreateTaskOptions::new("Task B"))
             .await
             .unwrap();
-        let task_c = service
+        let task_c = services
+            .tasks()
             .create_task(CreateTaskOptions::new("Task C"))
             .await
             .unwrap();
@@ -270,14 +291,14 @@ mod tests {
             id: task_a.clone(),
             blocker_id: task_b.clone(),
         };
-        cmd1.execute(&service).await.unwrap();
+        cmd1.execute(&services).await.unwrap();
 
         // Create B depends on C
         let cmd2 = DependCommand {
             id: task_b.clone(),
             blocker_id: task_c.clone(),
         };
-        cmd2.execute(&service).await.unwrap();
+        cmd2.execute(&services).await.unwrap();
 
         // Try to create C depends on A - should fail (transitive cycle)
         let cmd3 = DependCommand {
@@ -285,7 +306,7 @@ mod tests {
             blocker_id: task_a.clone(),
         };
 
-        let result = cmd3.execute(&service).await;
+        let result = cmd3.execute(&services).await;
         match result {
             Err(ServiceError::CyclicDependency) => {
                 // Expected
@@ -297,9 +318,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_task_not_found() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        let task_a = service
+        let task_a = services
+            .tasks()
             .create_task(CreateTaskOptions::new("Task A"))
             .await
             .unwrap();
@@ -309,7 +331,7 @@ mod tests {
             blocker_id: "nonexistent".to_string(),
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         match result {
             Err(ServiceError::TaskNotFound { task_id }) => {
                 assert_eq!(
@@ -325,9 +347,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_dependent_task_not_found() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        let task_a = service
+        let task_a = services
+            .tasks()
             .create_task(CreateTaskOptions::new("Task A"))
             .await
             .unwrap();
@@ -337,7 +360,7 @@ mod tests {
             blocker_id: task_a.clone(),
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         match result {
             Err(ServiceError::TaskNotFound { task_id }) => {
                 assert_eq!(
@@ -353,13 +376,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_case_insensitive_ids() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        let task_a = service
+        let task_a = services
+            .tasks()
             .create_task(CreateTaskOptions::new("Task A"))
             .await
             .unwrap();
-        let task_b = service
+        let task_b = services
+            .tasks()
             .create_task(CreateTaskOptions::new("Task B"))
             .await
             .unwrap();
@@ -369,27 +394,34 @@ mod tests {
             blocker_id: task_a.to_uppercase(),
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok(), "Case-insensitive lookup should work");
 
         // Verify the dependency was created
-        let with_relations = service.get_task_with_relations(&task_b).await.unwrap();
+        let with_relations = services
+            .tasks()
+            .get_task_with_relations(&task_b)
+            .await
+            .unwrap();
         assert!(with_relations.depends_on_ids.contains(&task_a));
     }
 
     #[tokio::test]
     async fn test_multiple_dependencies_allowed() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        let task_a = service
+        let task_a = services
+            .tasks()
             .create_task(CreateTaskOptions::new("Task A"))
             .await
             .unwrap();
-        let task_b = service
+        let task_b = services
+            .tasks()
             .create_task(CreateTaskOptions::new("Task B"))
             .await
             .unwrap();
-        let task_c = service
+        let task_c = services
+            .tasks()
             .create_task(CreateTaskOptions::new("Task C"))
             .await
             .unwrap();
@@ -399,39 +431,47 @@ mod tests {
             id: task_c.clone(),
             blocker_id: task_a.clone(),
         };
-        cmd1.execute(&service).await.unwrap();
+        cmd1.execute(&services).await.unwrap();
 
         // C also depends on B
         let cmd2 = DependCommand {
             id: task_c.clone(),
             blocker_id: task_b.clone(),
         };
-        let result = cmd2.execute(&service).await;
+        let result = cmd2.execute(&services).await;
         assert!(result.is_ok());
 
         // Verify both dependencies exist
-        let with_relations = service.get_task_with_relations(&task_c).await.unwrap();
+        let with_relations = services
+            .tasks()
+            .get_task_with_relations(&task_c)
+            .await
+            .unwrap();
         assert!(with_relations.depends_on_ids.contains(&task_a));
         assert!(with_relations.depends_on_ids.contains(&task_b));
     }
 
     #[tokio::test]
     async fn test_diamond_dependency_allowed() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        let task_a = service
+        let task_a = services
+            .tasks()
             .create_task(CreateTaskOptions::new("Task A"))
             .await
             .unwrap();
-        let task_b = service
+        let task_b = services
+            .tasks()
             .create_task(CreateTaskOptions::new("Task B"))
             .await
             .unwrap();
-        let task_c = service
+        let task_c = services
+            .tasks()
             .create_task(CreateTaskOptions::new("Task C"))
             .await
             .unwrap();
-        let task_d = service
+        let task_d = services
+            .tasks()
             .create_task(CreateTaskOptions::new("Task D"))
             .await
             .unwrap();
@@ -441,7 +481,7 @@ mod tests {
             id: task_b.clone(),
             blocker_id: task_a.clone(),
         }
-        .execute(&service)
+        .execute(&services)
         .await
         .unwrap();
 
@@ -450,7 +490,7 @@ mod tests {
             id: task_c.clone(),
             blocker_id: task_a.clone(),
         }
-        .execute(&service)
+        .execute(&services)
         .await
         .unwrap();
 
@@ -459,7 +499,7 @@ mod tests {
             id: task_d.clone(),
             blocker_id: task_b.clone(),
         }
-        .execute(&service)
+        .execute(&services)
         .await
         .unwrap();
 
@@ -468,25 +508,37 @@ mod tests {
             id: task_d.clone(),
             blocker_id: task_c.clone(),
         }
-        .execute(&service)
+        .execute(&services)
         .await;
 
         assert!(result.is_ok(), "Diamond dependency should be allowed");
 
         // Verify all 4 edges exist
-        let b_relations = service.get_task_with_relations(&task_b).await.unwrap();
+        let b_relations = services
+            .tasks()
+            .get_task_with_relations(&task_b)
+            .await
+            .unwrap();
         assert!(
             b_relations.depends_on_ids.contains(&task_a),
             "B -> A edge should exist"
         );
 
-        let c_relations = service.get_task_with_relations(&task_c).await.unwrap();
+        let c_relations = services
+            .tasks()
+            .get_task_with_relations(&task_c)
+            .await
+            .unwrap();
         assert!(
             c_relations.depends_on_ids.contains(&task_a),
             "C -> A edge should exist"
         );
 
-        let d_relations = service.get_task_with_relations(&task_d).await.unwrap();
+        let d_relations = services
+            .tasks()
+            .get_task_with_relations(&task_d)
+            .await
+            .unwrap();
         assert!(
             d_relations.depends_on_ids.contains(&task_b),
             "D -> B edge should exist"
@@ -499,12 +551,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_long_chain_no_cycle() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
         // Create tasks: A, B, C, D, E
         let mut tasks = vec![];
         for name in ['A', 'B', 'C', 'D', 'E'] {
-            let id = service
+            let id = services
+                .tasks()
                 .create_task(CreateTaskOptions::new(format!("Task {}", name)))
                 .await
                 .unwrap();
@@ -532,7 +585,7 @@ mod tests {
                 id: from.clone(),
                 blocker_id: to.clone(),
             }
-            .execute(&service)
+            .execute(&services)
             .await;
             assert!(
                 result.is_ok(),
@@ -547,7 +600,7 @@ mod tests {
             id: task_a.clone(),
             blocker_id: task_e.clone(),
         }
-        .execute(&service)
+        .execute(&services)
         .await;
 
         assert!(result.is_err(), "Should detect cycle in long chain");
@@ -557,32 +610,52 @@ mod tests {
         );
 
         // Verify all chain edges exist
-        let b_relations = service.get_task_with_relations(&task_b).await.unwrap();
+        let b_relations = services
+            .tasks()
+            .get_task_with_relations(&task_b)
+            .await
+            .unwrap();
         assert!(
             b_relations.depends_on_ids.contains(&task_a),
             "B -> A edge should exist"
         );
 
-        let c_relations = service.get_task_with_relations(&task_c).await.unwrap();
+        let c_relations = services
+            .tasks()
+            .get_task_with_relations(&task_c)
+            .await
+            .unwrap();
         assert!(
             c_relations.depends_on_ids.contains(&task_b),
             "C -> B edge should exist"
         );
 
-        let d_relations = service.get_task_with_relations(&task_d).await.unwrap();
+        let d_relations = services
+            .tasks()
+            .get_task_with_relations(&task_d)
+            .await
+            .unwrap();
         assert!(
             d_relations.depends_on_ids.contains(&task_c),
             "D -> C edge should exist"
         );
 
-        let e_relations = service.get_task_with_relations(&task_e).await.unwrap();
+        let e_relations = services
+            .tasks()
+            .get_task_with_relations(&task_e)
+            .await
+            .unwrap();
         assert!(
             e_relations.depends_on_ids.contains(&task_d),
             "E -> D edge should exist"
         );
 
         // Verify the cycle edge was NOT created
-        let a_relations = service.get_task_with_relations(&task_a).await.unwrap();
+        let a_relations = services
+            .tasks()
+            .get_task_with_relations(&task_a)
+            .await
+            .unwrap();
         assert!(
             !a_relations.depends_on_ids.contains(&task_e),
             "A -> E edge should NOT exist (would create cycle)"

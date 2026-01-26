@@ -18,7 +18,7 @@ async fn test_depend_creates_dependency() {
     create_task(ctx.db(), "blocker", "Blocker", "task", "in_progress").await;
 
     let cmd = depend_cmd("task1", "blocker");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     assert!(dependency_exists(ctx.db(), "task1", "blocker").await);
@@ -33,11 +33,11 @@ async fn test_depend_multiple_blockers() {
     create_task(ctx.db(), "blocker2", "Blocker 2", "task", "in_progress").await;
 
     depend_cmd("task1", "blocker1")
-        .execute(&ctx.service)
+        .execute(&ctx.services)
         .await
         .unwrap();
     depend_cmd("task1", "blocker2")
-        .execute(&ctx.service)
+        .execute(&ctx.services)
         .await
         .unwrap();
 
@@ -57,7 +57,7 @@ async fn test_undepend_removes_dependency() {
     assert!(dependency_exists(ctx.db(), "task1", "blocker").await);
 
     let cmd = undepend_cmd("task1", "blocker");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     assert!(!dependency_exists(ctx.db(), "task1", "blocker").await);
@@ -72,7 +72,7 @@ async fn test_undepend_nonexistent_dependency() {
 
     // No dependency exists between them
     let cmd = undepend_cmd("task1", "task2");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     // Should succeed but indicate no dependency existed
     assert!(result.is_ok());
@@ -90,7 +90,7 @@ async fn test_depend_rejects_self_dependency() {
     create_task(ctx.db(), "task1", "Task 1", "task", "in_progress").await;
 
     let cmd = depend_cmd("task1", "task1");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_err());
     let err = result.unwrap_err();
@@ -106,13 +106,13 @@ async fn test_depend_rejects_direct_cycle() {
 
     // Create task1 -> task2
     depend_cmd("task1", "task2")
-        .execute(&ctx.service)
+        .execute(&ctx.services)
         .await
         .unwrap();
 
     // Try to create task2 -> task1 (would create cycle)
     let cmd = depend_cmd("task2", "task1");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_err());
     let err = result.unwrap_err();
@@ -129,17 +129,17 @@ async fn test_depend_rejects_transitive_cycle() {
 
     // Create chain: task1 -> task2 -> task3
     depend_cmd("task1", "task2")
-        .execute(&ctx.service)
+        .execute(&ctx.services)
         .await
         .unwrap();
     depend_cmd("task2", "task3")
-        .execute(&ctx.service)
+        .execute(&ctx.services)
         .await
         .unwrap();
 
     // Try to create task3 -> task1 (would create cycle)
     let cmd = depend_cmd("task3", "task1");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_err());
 }
@@ -160,20 +160,20 @@ async fn test_depend_allows_diamond_dependency() {
     create_task(ctx.db(), "task4", "Task 4", "task", "in_progress").await;
 
     depend_cmd("task1", "task2")
-        .execute(&ctx.service)
+        .execute(&ctx.services)
         .await
         .unwrap();
     depend_cmd("task1", "task3")
-        .execute(&ctx.service)
+        .execute(&ctx.services)
         .await
         .unwrap();
     depend_cmd("task2", "task4")
-        .execute(&ctx.service)
+        .execute(&ctx.services)
         .await
         .unwrap();
 
     // This should be allowed - it's a diamond, not a cycle
-    let result = depend_cmd("task3", "task4").execute(&ctx.service).await;
+    let result = depend_cmd("task3", "task4").execute(&ctx.services).await;
 
     assert!(result.is_ok());
 }
@@ -189,7 +189,7 @@ async fn test_add_with_parent_creates_relationship() {
     create_task(ctx.db(), "parent", "Parent Epic", "epic", "in_progress").await;
 
     let cmd = add_cmd_with_parent("Child Task", "parent");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let task_id = result.unwrap();
@@ -209,7 +209,7 @@ async fn test_reparent_via_update() {
     assert!(!child_of_exists(ctx.db(), "child", "parent2").await);
 
     let cmd = update_cmd_with_parent("child", Some("parent2"));
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     assert!(!child_of_exists(ctx.db(), "child", "parent1").await);
@@ -228,7 +228,7 @@ async fn test_remove_parent_via_update() {
 
     // Pass empty string to remove parent
     let cmd = update_cmd_with_parent("child", Some(""));
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     assert!(!child_of_exists(ctx.db(), "child", "parent").await);
@@ -241,7 +241,7 @@ async fn test_self_parent_rejected() {
     create_task(ctx.db(), "task1", "Task 1", "task", "in_progress").await;
 
     let cmd = update_cmd_with_parent("task1", Some("task1"));
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_err());
     let err = result.unwrap_err();
@@ -262,7 +262,7 @@ async fn test_add_with_multiple_depends_on() {
 
     let mut cmd = add_cmd("Dependent Task");
     cmd.depends_on = vec!["blocker1".to_string(), "blocker2".to_string()];
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let task_id = result.unwrap();
@@ -280,7 +280,7 @@ async fn test_add_with_parent_and_depends_on() {
 
     let mut cmd = add_cmd_with_parent("Child with Dep", "parent");
     cmd.depends_on = vec!["blocker".to_string()];
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let task_id = result.unwrap();
@@ -302,7 +302,7 @@ async fn test_depend_case_insensitive() {
 
     // Use uppercase IDs
     let cmd = depend_cmd("TASK1", "BLOCKER");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     // Should still be stored in lowercase
@@ -318,7 +318,7 @@ async fn test_undepend_case_insensitive() {
     create_depends_on(ctx.db(), "task1", "blocker").await;
 
     let cmd = undepend_cmd("TASK1", "BLOCKER");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     assert!(!dependency_exists(ctx.db(), "task1", "blocker").await);
@@ -334,13 +334,13 @@ async fn test_full_hierarchy_creation() {
 
     // Create epic -> ticket -> task hierarchy
     let epic_cmd = add_cmd_full("Epic", Some(Level::Epic), None, None);
-    let epic_id = epic_cmd.execute(&ctx.service).await.unwrap();
+    let epic_id = epic_cmd.execute(&ctx.services).await.unwrap();
 
     let ticket_cmd = add_cmd_full("Ticket", Some(Level::Ticket), None, Some(&epic_id));
-    let ticket_id = ticket_cmd.execute(&ctx.service).await.unwrap();
+    let ticket_id = ticket_cmd.execute(&ctx.services).await.unwrap();
 
     let task_cmd = add_cmd_full("Task", Some(Level::Task), None, Some(&ticket_id));
-    let task_id = task_cmd.execute(&ctx.service).await.unwrap();
+    let task_id = task_cmd.execute(&ctx.services).await.unwrap();
 
     // Verify hierarchy
     assert!(child_of_exists(ctx.db(), &ticket_id, &epic_id).await);

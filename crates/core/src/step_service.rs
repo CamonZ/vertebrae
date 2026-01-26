@@ -37,8 +37,17 @@ pub trait StepService: Send + Sync {
     /// Get possible transitions from a step
     async fn get_transitions(&self, step_id: &Thing) -> ServiceResult<Vec<Step>>;
 
-    /// Get all final steps for a workflow
+    /// Get the final (terminal) steps for a workflow
+    ///
+    /// Final steps are those with is_final = true.
     async fn get_final_steps(&self, workflow_id: &Thing) -> ServiceResult<Vec<Step>>;
+
+    /// List all steps across all workflows
+    ///
+    /// # Returns
+    ///
+    /// A vector of all steps.
+    async fn list_all_steps(&self) -> ServiceResult<Vec<Step>>;
 }
 
 /// Default implementation of StepService backed by Database
@@ -124,6 +133,10 @@ impl StepService for DefaultStepService {
             .get_final_steps(workflow_id)
             .await
             .map_err(ServiceError::from)
+    }
+
+    async fn list_all_steps(&self) -> ServiceResult<Vec<Step>> {
+        self.steps().list().await.map_err(ServiceError::from)
     }
 }
 

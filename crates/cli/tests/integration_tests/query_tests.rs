@@ -14,7 +14,7 @@ async fn test_list_empty_database() {
     let ctx = TestContext::new().await;
 
     let cmd = list_cmd();
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let tasks = result.unwrap();
@@ -30,7 +30,7 @@ async fn test_list_all_tasks() {
     create_task(ctx.db(), "task3", "Task 3", "task", "in_progress").await;
 
     let cmd = list_cmd();
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let tasks = result.unwrap();
@@ -46,7 +46,7 @@ async fn test_list_with_status_filter() {
     create_task(ctx.db(), "task3", "Task 3", "task", "done").await;
 
     let cmd = list_cmd_with_status(vec!["in_progress"]);
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let tasks = result.unwrap();
@@ -63,7 +63,7 @@ async fn test_list_with_multiple_statuses() {
     create_task(ctx.db(), "task3", "Task 3", "task", "done").await;
 
     let cmd = list_cmd_with_status(vec!["in_progress", "pending_review"]);
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let tasks = result.unwrap();
@@ -79,7 +79,7 @@ async fn test_list_with_level_filter() {
     create_task(ctx.db(), "task1", "Task 1", "task", "in_progress").await;
 
     let cmd = list_cmd_with_level(vec![Level::Epic]);
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let tasks = result.unwrap();
@@ -120,7 +120,7 @@ async fn test_list_with_tag_filter() {
     .await;
 
     let cmd = list_cmd_with_tags(vec!["frontend"]);
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let tasks = result.unwrap();
@@ -142,7 +142,7 @@ async fn test_list_root_only() {
     create_task(ctx.db(), "task2", "Standalone Task", "task", "in_progress").await;
 
     let cmd = list_cmd_root();
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let tasks = result.unwrap();
@@ -162,7 +162,7 @@ async fn test_list_with_parent_filter() {
     create_child_of(ctx.db(), "child2", "parent").await;
 
     let cmd = list_cmd_with_parent("parent");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let tasks = result.unwrap();
@@ -192,7 +192,7 @@ async fn test_list_with_search() {
     .await;
 
     let cmd = list_cmd_with_search("auth");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let tasks = result.unwrap();
@@ -209,7 +209,7 @@ async fn test_list_flat_output() {
     create_child_of(ctx.db(), "ticket", "epic").await;
 
     let cmd = list_cmd_flat();
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     // Flat should still return all tasks, just displayed differently
@@ -227,12 +227,12 @@ async fn test_list_all_flag_includes_done() {
 
     // Default list excludes only "done" status (rejected is included)
     let cmd = list_cmd();
-    let result = cmd.execute(&ctx.service).await.unwrap();
+    let result = cmd.execute(&ctx.services).await.unwrap();
     assert_eq!(result.len(), 2); // todo + rejected
 
     // With --all flag, done is also included
     let cmd = list_cmd_all();
-    let result = cmd.execute(&ctx.service).await.unwrap();
+    let result = cmd.execute(&ctx.services).await.unwrap();
     assert_eq!(result.len(), 3);
 }
 
@@ -255,7 +255,7 @@ async fn test_show_task_details() {
     .await;
 
     let cmd = show_cmd("task1");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let detail = result.unwrap();
@@ -273,16 +273,16 @@ async fn test_show_task_with_sections() {
 
     create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
     section_cmd("task1", vertebrae_db::SectionType::Goal, "The goal")
-        .execute(&ctx.service)
+        .execute(&ctx.services)
         .await
         .unwrap();
     section_cmd("task1", vertebrae_db::SectionType::Step, "Step 1")
-        .execute(&ctx.service)
+        .execute(&ctx.services)
         .await
         .unwrap();
 
     let cmd = show_cmd("task1");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let detail = result.unwrap();
@@ -300,7 +300,7 @@ async fn test_show_task_with_relationships() {
     create_depends_on(ctx.db(), "child", "blocker").await;
 
     let cmd = show_cmd("child");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let detail = result.unwrap();
@@ -316,7 +316,7 @@ async fn test_show_case_insensitive() {
     create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
 
     let cmd = show_cmd("TASK1");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     assert_eq!(result.unwrap().id, "task1");
@@ -333,7 +333,7 @@ async fn test_blockers_no_dependencies() {
     create_task(ctx.db(), "task1", "Task 1", "task", "in_progress").await;
 
     let cmd = blockers_cmd("task1");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let blockers_result = result.unwrap();
@@ -351,7 +351,7 @@ async fn test_blockers_direct_blockers() {
     create_depends_on(ctx.db(), "task1", "blocker2").await;
 
     let cmd = blockers_cmd("task1");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let blockers_result = result.unwrap();
@@ -370,7 +370,7 @@ async fn test_blockers_transitive() {
     create_depends_on(ctx.db(), "blocker1", "blocker2").await;
 
     let cmd = blockers_cmd("task1");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let blockers_result = result.unwrap();
@@ -389,7 +389,7 @@ async fn test_blockers_excludes_done_by_default() {
     create_depends_on(ctx.db(), "task1", "blocker2").await;
 
     let cmd = blockers_cmd("task1");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let blockers_result = result.unwrap();
@@ -408,7 +408,7 @@ async fn test_blockers_with_all_flag() {
     create_depends_on(ctx.db(), "task1", "blocker2").await;
 
     let cmd = blockers_cmd_full("task1", None, true);
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let blockers_result = result.unwrap();
@@ -430,7 +430,7 @@ async fn test_blockers_with_depth_limit() {
     create_depends_on(ctx.db(), "b2", "b3").await;
 
     let cmd = blockers_cmd_full("task1", Some(1), false);
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let blockers_result = result.unwrap();
@@ -450,7 +450,7 @@ async fn test_ready_shows_backlog_tasks() {
     create_task(ctx.db(), "task2", "Task 2", "task", "backlog").await;
 
     let cmd = ready_cmd();
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let ready_result = result.unwrap();
@@ -468,7 +468,7 @@ async fn test_ready_excludes_blocked_tasks() {
     create_depends_on(ctx.db(), "task1", "blocker").await;
 
     let cmd = ready_cmd();
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let ready_result = result.unwrap();
@@ -486,7 +486,7 @@ async fn test_ready_excludes_tasks_with_in_progress_children() {
     create_child_of(ctx.db(), "child", "parent").await;
 
     let cmd = ready_cmd();
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let ready_result = result.unwrap();
@@ -507,7 +507,7 @@ async fn test_path_direct_dependency() {
     create_depends_on(ctx.db(), "task1", "task2").await;
 
     let cmd = path_cmd("task1", "task2");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let path_result = result.unwrap();
@@ -528,7 +528,7 @@ async fn test_path_transitive() {
     create_depends_on(ctx.db(), "task2", "task3").await;
 
     let cmd = path_cmd("task1", "task3");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let path_result = result.unwrap();
@@ -546,7 +546,7 @@ async fn test_path_no_connection() {
     // No dependency between them
 
     let cmd = path_cmd("task1", "task2");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let path_result = result.unwrap();
@@ -560,7 +560,7 @@ async fn test_path_same_task() {
     create_task(ctx.db(), "task1", "Task 1", "task", "in_progress").await;
 
     let cmd = path_cmd("task1", "task1");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let path_result = result.unwrap();
@@ -578,7 +578,7 @@ async fn test_path_case_insensitive() {
     create_depends_on(ctx.db(), "task1", "task2").await;
 
     let cmd = path_cmd("TASK1", "TASK2");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     assert!(result.unwrap().path.is_some());

@@ -3,7 +3,7 @@
 //! Implements the `vtb step` subcommand group for creating and managing steps.
 
 use clap::{Args, Subcommand};
-use vertebrae_core::{DefaultStepService, ServiceError, StepService, TaskService};
+use vertebrae_core::{ServiceError, StepService, VertebraeServices};
 use vertebrae_db::{AgentConfig, Step, StepUpdate, Thing};
 
 /// Step management commands
@@ -26,21 +26,19 @@ impl StepCommand {
     ///
     /// # Arguments
     ///
-    /// * `service` - Reference to the task service
+    /// * `services` - Reference to the services container
     ///
     /// # Errors
     ///
     /// Returns `ServiceError` if the command execution fails.
-    pub async fn execute(&self, service: &dyn TaskService) -> Result<String, ServiceError> {
-        #[allow(deprecated)]
-        let db = service.database().clone();
-        let step_service = DefaultStepService::new(db);
+    pub async fn execute(&self, services: &VertebraeServices) -> Result<String, ServiceError> {
+        let step_service = services.steps();
         match self {
-            StepCommand::Add(cmd) => cmd.execute(&step_service).await,
-            StepCommand::List(cmd) => cmd.execute(&step_service).await,
-            StepCommand::Show(cmd) => cmd.execute(&step_service).await,
-            StepCommand::Update(cmd) => cmd.execute(&step_service).await,
-            StepCommand::Delete(cmd) => cmd.execute(&step_service).await,
+            StepCommand::Add(cmd) => cmd.execute(step_service).await,
+            StepCommand::List(cmd) => cmd.execute(step_service).await,
+            StepCommand::Show(cmd) => cmd.execute(step_service).await,
+            StepCommand::Update(cmd) => cmd.execute(step_service).await,
+            StepCommand::Delete(cmd) => cmd.execute(step_service).await,
         }
     }
 }

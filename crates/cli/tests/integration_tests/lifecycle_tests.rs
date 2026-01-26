@@ -16,7 +16,7 @@ async fn test_add_task_minimal() {
     let ctx = TestContext::new().await;
 
     let cmd = add_cmd("Minimal Task");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let task_id = result.unwrap();
@@ -37,7 +37,7 @@ async fn test_add_task_with_level_epic() {
     let ctx = TestContext::new().await;
 
     let cmd = add_cmd_full("Epic Task", Some(Level::Epic), None, None);
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let task_id = result.unwrap();
@@ -52,7 +52,7 @@ async fn test_add_task_with_level_ticket() {
     let ctx = TestContext::new().await;
 
     let cmd = add_cmd_full("Ticket Task", Some(Level::Ticket), None, None);
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let task_id = result.unwrap();
@@ -72,7 +72,7 @@ async fn test_add_task_with_description() {
         Some("This is the description"),
         None,
     );
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let task_id = result.unwrap();
@@ -90,7 +90,7 @@ async fn test_add_task_with_parent() {
     create_task(ctx.db(), "parent", "Parent Epic", "epic", "in_progress").await;
 
     let cmd = add_cmd_with_parent("Child Task", "parent");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let task_id = result.unwrap();
@@ -108,7 +108,7 @@ async fn test_add_task_with_depends_on() {
 
     let mut cmd = add_cmd("Dependent Task");
     cmd.depends_on = vec!["blocker".to_string()];
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let task_id = result.unwrap();
@@ -123,7 +123,7 @@ async fn test_add_task_with_tags() {
 
     let mut cmd = add_cmd("Tagged Task");
     cmd.tags = vec!["frontend".to_string(), "urgent".to_string()];
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let task_id = result.unwrap();
@@ -139,7 +139,7 @@ async fn test_add_task_with_priority() {
 
     let mut cmd = add_cmd("High Priority Task");
     cmd.priority = Some(Priority::High);
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let task_id = result.unwrap();
@@ -160,7 +160,7 @@ async fn test_transition_backlog_to_todo() {
     create_task(ctx.db(), "task1", "Test Task", "task", "backlog").await;
 
     let cmd = triage_cmd("task1");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     assert_eq!(
@@ -176,7 +176,7 @@ async fn test_transition_todo_to_in_progress() {
     create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
 
     let cmd = start_cmd("task1");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     assert_eq!(
@@ -192,7 +192,7 @@ async fn test_transition_in_progress_to_pending_review() {
     create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
 
     let cmd = submit_cmd("task1");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     assert_eq!(
@@ -208,7 +208,7 @@ async fn test_transition_pending_review_to_done() {
     create_task(ctx.db(), "task1", "Test Task", "task", "pending_review").await;
 
     let cmd = done_cmd("task1");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     assert_eq!(
@@ -224,7 +224,7 @@ async fn test_transition_todo_to_rejected() {
     create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
 
     let cmd = reject_cmd("task1");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     assert_eq!(
@@ -241,7 +241,7 @@ async fn test_transition_in_progress_to_rejected_is_allowed() {
 
     // Direct transition from in_progress to rejected IS allowed in the new schema
     let cmd = reject_cmd("task1");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     // This transition is valid
     assert!(result.is_ok());
@@ -258,7 +258,7 @@ async fn test_transition_with_reason() {
     create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
 
     let cmd = reject_cmd_with_reason("task1", "Duplicate task");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     assert_eq!(
@@ -281,8 +281,8 @@ async fn test_completing_task_unblocks_dependents() {
     create_depends_on(ctx.db(), "dependent", "blocker").await;
 
     // Complete the blocker: in_progress -> pending_review -> done
-    submit_cmd("blocker").execute(&ctx.service).await.unwrap();
-    let result = done_cmd("blocker").execute(&ctx.service).await;
+    submit_cmd("blocker").execute(&ctx.services).await.unwrap();
+    let result = done_cmd("blocker").execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let unblocked = result.unwrap().unblocked_tasks;
@@ -306,7 +306,7 @@ async fn test_force_transition_skips_validation() {
 
     // Normal triage should work (we're using skip_validation in tests by default)
     let cmd = triage_cmd("task1");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
     assert!(result.is_ok());
 }
 
@@ -323,7 +323,7 @@ async fn test_invalid_transition_is_rejected() {
         force: true,
         skip_validation: true,
     };
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     // Invalid workflow should fail
     assert!(result.is_err());
@@ -344,7 +344,7 @@ async fn test_invalid_transition_shows_valid_options_in_hint() {
         force: false,
         skip_validation: false,
     };
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     // Error should indicate step not found
     assert!(result.is_err());
@@ -367,7 +367,7 @@ async fn test_invalid_transition_from_terminal_state_shows_no_valid_options() {
         force: false,
         skip_validation: false,
     };
-    cmd1.execute(&ctx.service).await.unwrap();
+    cmd1.execute(&ctx.services).await.unwrap();
 
     let cmd2 = TransitionToCommand {
         id: "task1".to_string(),
@@ -375,7 +375,7 @@ async fn test_invalid_transition_from_terminal_state_shows_no_valid_options() {
         force: false,
         skip_validation: false,
     };
-    cmd2.execute(&ctx.service).await.unwrap();
+    cmd2.execute(&ctx.services).await.unwrap();
 
     let cmd3 = TransitionToCommand {
         id: "task1".to_string(),
@@ -383,7 +383,7 @@ async fn test_invalid_transition_from_terminal_state_shows_no_valid_options() {
         force: false,
         skip_validation: false,
     };
-    cmd3.execute(&ctx.service).await.unwrap();
+    cmd3.execute(&ctx.services).await.unwrap();
 
     // Verify task is now in done state
     assert_eq!(
@@ -404,7 +404,7 @@ async fn test_delete_task() {
     assert!(task_exists(ctx.db(), "task1").await);
 
     let cmd = delete_cmd("task1", false);
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     assert!(!task_exists(ctx.db(), "task1").await);
@@ -422,7 +422,7 @@ async fn test_delete_task_cascade() {
     create_child_of(ctx.db(), "child2", "parent").await;
 
     let cmd = delete_cmd("parent", true);
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     assert!(!task_exists(ctx.db(), "parent").await);
@@ -440,7 +440,7 @@ async fn test_delete_task_without_cascade_orphans_children() {
     create_child_of(ctx.db(), "child", "parent").await;
 
     let cmd = delete_cmd("parent", false);
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     assert!(!task_exists(ctx.db(), "parent").await);

@@ -2,13 +2,14 @@
 //!
 //! This module provides a single entry point for accessing all service layer components.
 //! The `VertebraeServices` struct bundles all service traits (TaskService, WorkflowService,
-//! ExecutionService) into a unified container for convenient access in both CLI and GUI.
+//! ExecutionService, StepService) into a unified container for convenient access in both CLI and GUI.
 
 use std::sync::Arc;
 use vertebrae_db::Database;
 
 use crate::execution_service::{DefaultExecutionService, ExecutionService};
 use crate::service::{DefaultTaskService, MutationCallback, TaskService};
+use crate::step_service::{DefaultStepService, StepService};
 use crate::workflow_service::{DefaultWorkflowService, WorkflowMutationCallback, WorkflowService};
 
 /// Unified services container bundling all service layer components
@@ -32,6 +33,7 @@ use crate::workflow_service::{DefaultWorkflowService, WorkflowMutationCallback, 
 ///     let tasks = services.tasks();
 ///     let workflows = services.workflows();
 ///     let executions = services.executions();
+///     let steps = services.steps();
 ///
 ///     Ok(())
 /// }
@@ -43,13 +45,15 @@ pub struct VertebraeServices {
     workflows: Arc<dyn WorkflowService>,
     /// Execution service implementation
     executions: Arc<dyn ExecutionService>,
+    /// Step service implementation
+    steps: Arc<dyn StepService>,
 }
 
 impl VertebraeServices {
     /// Create a new VertebraeServices container with all service implementations
     ///
-    /// Instantiates DefaultTaskService, DefaultWorkflowService, and DefaultExecutionService
-    /// using the provided database. No mutation callbacks are installed.
+    /// Instantiates DefaultTaskService, DefaultWorkflowService, DefaultExecutionService,
+    /// and DefaultStepService using the provided database. No mutation callbacks are installed.
     ///
     /// # Arguments
     ///
@@ -62,7 +66,8 @@ impl VertebraeServices {
         Self {
             tasks: Arc::new(DefaultTaskService::new(db.clone())),
             workflows: Arc::new(DefaultWorkflowService::new(db.clone())),
-            executions: Arc::new(DefaultExecutionService::new(db)),
+            executions: Arc::new(DefaultExecutionService::new(db.clone())),
+            steps: Arc::new(DefaultStepService::new(db)),
         }
     }
 
@@ -83,7 +88,8 @@ impl VertebraeServices {
         Self {
             tasks: Arc::new(DefaultTaskService::with_callback(db.clone(), task_callback)),
             workflows: Arc::new(DefaultWorkflowService::new(db.clone())),
-            executions: Arc::new(DefaultExecutionService::new(db)),
+            executions: Arc::new(DefaultExecutionService::new(db.clone())),
+            steps: Arc::new(DefaultStepService::new(db)),
         }
     }
 
@@ -110,7 +116,8 @@ impl VertebraeServices {
                 db.clone(),
                 workflow_callback,
             )),
-            executions: Arc::new(DefaultExecutionService::new(db)),
+            executions: Arc::new(DefaultExecutionService::new(db.clone())),
+            steps: Arc::new(DefaultStepService::new(db)),
         }
     }
 
@@ -138,7 +145,8 @@ impl VertebraeServices {
                 db.clone(),
                 workflow_callback,
             )),
-            executions: Arc::new(DefaultExecutionService::new(db)),
+            executions: Arc::new(DefaultExecutionService::new(db.clone())),
+            steps: Arc::new(DefaultStepService::new(db)),
         }
     }
 
@@ -167,6 +175,15 @@ impl VertebraeServices {
     /// A reference to the ExecutionService trait object
     pub fn executions(&self) -> &dyn ExecutionService {
         self.executions.as_ref()
+    }
+
+    /// Get a reference to the step service
+    ///
+    /// # Returns
+    ///
+    /// A reference to the StepService trait object
+    pub fn steps(&self) -> &dyn StepService {
+        self.steps.as_ref()
     }
 
     /// Get an Arc clone to the task service
@@ -203,6 +220,18 @@ impl VertebraeServices {
     /// An Arc-wrapped reference to the ExecutionService trait object
     pub fn executions_arc(&self) -> Arc<dyn ExecutionService> {
         Arc::clone(&self.executions)
+    }
+
+    /// Get an Arc clone to the step service
+    ///
+    /// Useful when you need to share the service across threads or store it
+    /// in application state.
+    ///
+    /// # Returns
+    ///
+    /// An Arc-wrapped reference to the StepService trait object
+    pub fn steps_arc(&self) -> Arc<dyn StepService> {
+        Arc::clone(&self.steps)
     }
 }
 

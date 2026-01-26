@@ -17,13 +17,12 @@ use vertebrae_cli::commands::{
         WorkflowShowCommand, WorkflowUnassignCommand, WorkflowUpdateCommand,
     },
 };
-use vertebrae_core::{DefaultTaskService, DefaultWorkflowService};
+use vertebrae_core::VertebraeServices;
 use vertebrae_db::{AgentConfig, CodeRef, Database, Level, Priority, Section, SectionType};
 
 /// Test context containing an isolated database, service, and temp directory
 pub struct TestContext {
-    pub service: DefaultTaskService,
-    pub workflow_service: DefaultWorkflowService,
+    pub services: VertebraeServices,
     pub temp_dir: PathBuf,
 }
 
@@ -45,14 +44,9 @@ impl TestContext {
 
         let db = Database::connect(&temp_dir).await.unwrap();
         db.init().await.unwrap();
-        let service = DefaultTaskService::new(db.clone());
-        let workflow_service = DefaultWorkflowService::new(db);
+        let services = VertebraeServices::new(db);
 
-        Self {
-            service,
-            workflow_service,
-            temp_dir,
-        }
+        Self { services, temp_dir }
     }
 
     /// Create a new test context with a specific suffix for debugging.
@@ -70,19 +64,15 @@ impl TestContext {
 
         let db = Database::connect(&temp_dir).await.unwrap();
         db.init().await.unwrap();
-        let service = DefaultTaskService::new(db.clone());
-        let workflow_service = DefaultWorkflowService::new(db);
+        let services = VertebraeServices::new(db);
 
-        Self {
-            service,
-            workflow_service,
-            temp_dir,
-        }
+        Self { services, temp_dir }
     }
 
     /// Get a reference to the database for direct queries in tests
+    #[allow(deprecated)]
     pub fn db(&self) -> &Database {
-        self.service.database()
+        self.services.tasks().database()
     }
 
     /// Clean up the test database directory.

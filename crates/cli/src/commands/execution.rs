@@ -5,7 +5,7 @@
 
 use clap::{Args, Subcommand};
 use surrealdb::sql::Thing;
-use vertebrae_core::{ServiceError, TaskService};
+use vertebrae_core::{ServiceError, VertebraeServices};
 use vertebrae_db::{ExecutionStatus, SessionLog, StepExecution};
 
 /// Execution management commands
@@ -28,18 +28,18 @@ impl ExecutionCommand {
     ///
     /// # Arguments
     ///
-    /// * `service` - Reference to the task service
+    /// * `services` - Reference to the vertebrae services
     ///
     /// # Errors
     ///
     /// Returns `ServiceError` if the command execution fails.
-    pub async fn execute(&self, service: &dyn TaskService) -> Result<String, ServiceError> {
+    pub async fn execute(&self, services: &VertebraeServices) -> Result<String, ServiceError> {
         match self {
-            ExecutionCommand::Create(cmd) => cmd.execute(service).await,
-            ExecutionCommand::List(cmd) => cmd.execute(service).await,
-            ExecutionCommand::Show(cmd) => cmd.execute(service).await,
-            ExecutionCommand::Update(cmd) => cmd.execute(service).await,
-            ExecutionCommand::Log(cmd) => cmd.execute(service).await,
+            ExecutionCommand::Create(cmd) => cmd.execute(services).await,
+            ExecutionCommand::List(cmd) => cmd.execute(services).await,
+            ExecutionCommand::Show(cmd) => cmd.execute(services).await,
+            ExecutionCommand::Update(cmd) => cmd.execute(services).await,
+            ExecutionCommand::Log(cmd) => cmd.execute(services).await,
         }
     }
 }
@@ -68,7 +68,7 @@ impl ExecutionCreateCommand {
     ///
     /// # Arguments
     ///
-    /// * `service` - Reference to the task service
+    /// * `services` - Reference to the vertebrae services
     ///
     /// # Errors
     ///
@@ -77,12 +77,12 @@ impl ExecutionCreateCommand {
     /// - The task has no workflow assigned
     /// - The context or prompt is not valid JSON
     /// - Database operations fail
-    pub async fn execute(&self, service: &dyn TaskService) -> Result<String, ServiceError> {
+    pub async fn execute(&self, services: &VertebraeServices) -> Result<String, ServiceError> {
         // Normalize task ID to lowercase for case-insensitive lookup
         let task_id = self.task_id.to_lowercase();
 
         // Get the task to verify it exists and has a workflow
-        let task = service.get_task(&task_id).await?;
+        let task = services.tasks().get_task(&task_id).await?;
 
         // Verify task has a workflow assigned
         let workflow_id = task.workflow_id.as_ref().ok_or_else(|| {
@@ -99,10 +99,9 @@ impl ExecutionCreateCommand {
                 &task_id[..6.min(task_id.len())]
             ))
         })?;
-        let step = service
-            .database()
+        let step = services
             .steps()
-            .get(&step_id.id.to_raw())
+            .get_step(&step_id.id.to_raw())
             .await?
             .ok_or_else(|| {
                 ServiceError::validation_failed(format!("step '{}' not found", step_id.id.to_raw()))
@@ -136,8 +135,7 @@ impl ExecutionCreateCommand {
         }
 
         // Save to database
-        let db = service.database();
-        let exec_id = db.executions().create_execution(&execution).await?;
+        let exec_id = services.executions().create_execution(execution).await?;
 
         Ok(exec_id)
     }
@@ -166,18 +164,16 @@ impl ExecutionUpdateCommand {
     ///
     /// # Arguments
     ///
-    /// * `service` - Reference to the task service
+    /// * `services` - Reference to the vertebrae services
     ///
     /// # Errors
     ///
     /// Returns `ServiceError` if:
     /// - The execution is not found
     /// - Database operations fail
-    pub async fn execute(&self, service: &dyn TaskService) -> Result<String, ServiceError> {
-        let db = service.database();
-
+    pub async fn execute(&self, services: &VertebraeServices) -> Result<String, ServiceError> {
         // Verify the execution exists
-        let _execution = db
+        let _execution = services
             .executions()
             .get_execution(&self.execution_id)
             .await?
@@ -189,7 +185,8 @@ impl ExecutionUpdateCommand {
             })?;
 
         // Update the execution
-        db.executions()
+        services
+            .executions()
             .update_execution(
                 &self.execution_id,
                 self.output.clone(),
@@ -217,26 +214,28 @@ impl ExecutionListCommand {
     ///
     /// # Arguments
     ///
-    /// * `service` - Reference to the task service
+    /// * `services` - Reference to the vertebrae services
     ///
     /// # Errors
     ///
     /// Returns `ServiceError` if:
     /// - The task is not found
     /// - Database operations fail
-    pub async fn execute(&self, service: &dyn TaskService) -> Result<String, ServiceError> {
+    pub async fn execute(&self, services: &VertebraeServices) -> Result<String, ServiceError> {
         // Normalize task ID to lowercase for case-insensitive lookup
         let task_id = self.task_id.to_lowercase();
 
         // Verify the task exists
-        let task_exists = service.task_exists(&task_id).await?;
+        let task_exists = services.tasks().task_exists(&task_id).await?;
         if !task_exists {
             return Err(ServiceError::task_not_found(&self.task_id));
         }
 
         // Get executions for the task
-        let db = service.database();
-        let executions = db.executions().list_executions_for_task(&task_id).await?;
+        let executions = services
+            .executions()
+            .list_executions_for_task(&task_id)
+            .await?;
 
         if executions.is_empty() {
             return Ok(format!("No executions found for task {}", &task_id[..6]));
@@ -299,17 +298,16 @@ impl ExecutionShowCommand {
     ///
     /// # Arguments
     ///
-    /// * `service` - Reference to the task service
+    /// * `services` - Reference to the vertebrae services
     ///
     /// # Errors
     ///
     /// Returns `ServiceError` if:
     /// - The execution is not found
     /// - Database operations fail
-    pub async fn execute(&self, service: &dyn TaskService) -> Result<String, ServiceError> {
+    pub async fn execute(&self, services: &VertebraeServices) -> Result<String, ServiceError> {
         // Try to get the execution
-        let db = service.database();
-        let execution = db
+        let execution = services
             .executions()
             .get_execution(&self.execution_id)
             .await?
@@ -416,7 +414,10 @@ impl ExecutionShowCommand {
         }
 
         // Get session logs for this execution
-        let logs = db.executions().list_logs_for_execution(&exec_id).await?;
+        let logs = services
+            .executions()
+            .list_logs_for_execution(&exec_id)
+            .await?;
 
         if !logs.is_empty() {
             output.push('\n');
@@ -464,17 +465,16 @@ impl ExecutionLogCommand {
     ///
     /// # Arguments
     ///
-    /// * `service` - Reference to the task service
+    /// * `services` - Reference to the vertebrae services
     ///
     /// # Errors
     ///
     /// Returns `ServiceError` if:
     /// - The execution is not found
     /// - Database operations fail
-    pub async fn execute(&self, service: &dyn TaskService) -> Result<String, ServiceError> {
+    pub async fn execute(&self, services: &VertebraeServices) -> Result<String, ServiceError> {
         // Verify the execution exists
-        let db = service.database();
-        let execution = db
+        let execution = services
             .executions()
             .get_execution(&self.execution_id)
             .await?
@@ -493,7 +493,7 @@ impl ExecutionLogCommand {
             .unwrap_or_else(|| self.execution_id.clone());
         let step_execution_thing = Thing::from(("step_execution", exec_id.as_str()));
         let log = SessionLog::new(step_execution_thing, &self.content);
-        let log_id = db.executions().add_log(&log).await?;
+        let log_id = services.executions().add_log(log).await?;
 
         let content_preview = if self.content.len() > 50 {
             format!("{}...", &self.content[..50])

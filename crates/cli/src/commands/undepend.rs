@@ -4,7 +4,7 @@
 //! Uses the TaskService layer to ensure MutationCallback fires properly for GUI cache invalidation.
 
 use clap::Args;
-use vertebrae_core::{ServiceError, TaskService};
+use vertebrae_core::{ServiceError, VertebraeServices};
 
 /// Remove a dependency relationship between tasks
 #[derive(Debug, Args)]
@@ -55,7 +55,7 @@ impl UndependCommand {
     ///
     /// # Arguments
     ///
-    /// * `service` - Reference to the task service
+    /// * `services` - Reference to the services container
     ///
     /// # Errors
     ///
@@ -64,24 +64,30 @@ impl UndependCommand {
     /// - Service operations fail
     ///
     /// Note: Non-existent dependency is handled gracefully with a warning.
-    pub async fn execute(&self, service: &dyn TaskService) -> Result<UndependResult, ServiceError> {
+    pub async fn execute(
+        &self,
+        services: &VertebraeServices,
+    ) -> Result<UndependResult, ServiceError> {
         // Normalize IDs to lowercase for case-insensitive lookup
         let task_id = self.id.to_lowercase();
         let blocker_id = self.blocker_id.to_lowercase();
 
         // Validate source task exists using service layer
-        if !service.task_exists(&task_id).await? {
+        if !services.tasks().task_exists(&task_id).await? {
             return Err(ServiceError::task_not_found(&self.id));
         }
 
         // Check if dependency exists using service layer
-        let with_relations = service.get_task_with_relations(&task_id).await?;
+        let with_relations = services.tasks().get_task_with_relations(&task_id).await?;
 
         let existed = with_relations.depends_on_ids.contains(&blocker_id);
 
         if existed {
             // Remove the dependency using the service layer (fires mutation callback)
-            service.remove_dependency(&task_id, &blocker_id).await?;
+            services
+                .tasks()
+                .remove_dependency(&task_id, &blocker_id)
+                .await?;
         }
 
         Ok(UndependResult {
@@ -95,34 +101,44 @@ impl UndependCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vertebrae_core::{CreateTaskOptions, DefaultTaskService};
+    use vertebrae_core::{CreateTaskOptions, VertebraeServices};
     use vertebrae_db::Database;
 
     /// Helper to create an in-memory test service
-    async fn setup_test_service() -> DefaultTaskService {
+    async fn setup_test_service() -> VertebraeServices {
         let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-        DefaultTaskService::new(db)
+        VertebraeServices::new(db)
     }
 
     #[tokio::test]
     async fn test_remove_dependency() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        let task_a = service
+        let task_a = services
+            .tasks()
             .create_task(CreateTaskOptions::new("Task A"))
             .await
             .unwrap();
-        let task_b = service
+        let task_b = services
+            .tasks()
             .create_task(CreateTaskOptions::new("Task B"))
             .await
             .unwrap();
 
         // Create dependency first
-        service.add_dependency(&task_b, &task_a).await.unwrap();
+        services
+            .tasks()
+            .add_dependency(&task_b, &task_a)
+            .await
+            .unwrap();
 
         // Verify dependency exists
-        let with_relations = service.get_task_with_relations(&task_b).await.unwrap();
+        let with_relations = services
+            .tasks()
+            .get_task_with_relations(&task_b)
+            .await
+            .unwrap();
         assert!(with_relations.depends_on_ids.contains(&task_a));
 
         // Remove dependency
@@ -131,7 +147,7 @@ mod tests {
             blocker_id: task_a.clone(),
         };
 
-        let result = undepend_cmd.execute(&service).await;
+        let result = undepend_cmd.execute(&services).await;
         assert!(result.is_ok(), "Undepend failed: {:?}", result.err());
 
         let undepend_result = result.unwrap();
@@ -140,19 +156,25 @@ mod tests {
         assert!(undepend_result.existed);
 
         // Verify dependency was removed
-        let with_relations = service.get_task_with_relations(&task_b).await.unwrap();
+        let with_relations = services
+            .tasks()
+            .get_task_with_relations(&task_b)
+            .await
+            .unwrap();
         assert!(!with_relations.depends_on_ids.contains(&task_a));
     }
 
     #[tokio::test]
     async fn test_remove_nonexistent_dependency_warns() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        let task_a = service
+        let task_a = services
+            .tasks()
             .create_task(CreateTaskOptions::new("Task A"))
             .await
             .unwrap();
-        let task_b = service
+        let task_b = services
+            .tasks()
             .create_task(CreateTaskOptions::new("Task B"))
             .await
             .unwrap();
@@ -163,7 +185,7 @@ mod tests {
             blocker_id: task_a.clone(),
         };
 
-        let result = undepend_cmd.execute(&service).await;
+        let result = undepend_cmd.execute(&services).await;
         assert!(
             result.is_ok(),
             "Should not fail for non-existent dependency"
@@ -181,19 +203,25 @@ mod tests {
 
     #[tokio::test]
     async fn test_remove_dependency_idempotent() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        let task_a = service
+        let task_a = services
+            .tasks()
             .create_task(CreateTaskOptions::new("Task A"))
             .await
             .unwrap();
-        let task_b = service
+        let task_b = services
+            .tasks()
             .create_task(CreateTaskOptions::new("Task B"))
             .await
             .unwrap();
 
         // Create dependency
-        service.add_dependency(&task_b, &task_a).await.unwrap();
+        services
+            .tasks()
+            .add_dependency(&task_b, &task_a)
+            .await
+            .unwrap();
 
         let undepend_cmd = UndependCommand {
             id: task_b.clone(),
@@ -201,7 +229,7 @@ mod tests {
         };
 
         // Remove dependency first time
-        let result1 = undepend_cmd.execute(&service).await;
+        let result1 = undepend_cmd.execute(&services).await;
         assert!(result1.is_ok());
         let undepend_result1 = result1.unwrap();
         assert_eq!(undepend_result1.task_id, task_b);
@@ -209,7 +237,7 @@ mod tests {
         assert!(undepend_result1.existed);
 
         // Remove dependency second time - should be idempotent (warn but not fail)
-        let result2 = undepend_cmd.execute(&service).await;
+        let result2 = undepend_cmd.execute(&services).await;
         assert!(result2.is_ok());
         let undepend_result2 = result2.unwrap();
         assert_eq!(undepend_result2.task_id, task_b);
@@ -219,9 +247,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_source_task_must_exist() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        let task_a = service
+        let task_a = services
+            .tasks()
             .create_task(CreateTaskOptions::new("Task A"))
             .await
             .unwrap();
@@ -231,7 +260,7 @@ mod tests {
             blocker_id: task_a.clone(),
         };
 
-        let result = undepend_cmd.execute(&service).await;
+        let result = undepend_cmd.execute(&services).await;
         match result {
             Err(ServiceError::TaskNotFound { task_id }) => {
                 assert_eq!(
@@ -247,9 +276,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_target_task_nonexistence_ok() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        let task_a = service
+        let task_a = services
+            .tasks()
             .create_task(CreateTaskOptions::new("Task A"))
             .await
             .unwrap();
@@ -260,7 +290,7 @@ mod tests {
             blocker_id: "nonexistent".to_string(),
         };
 
-        let result = undepend_cmd.execute(&service).await;
+        let result = undepend_cmd.execute(&services).await;
         assert!(result.is_ok(), "Should not fail when target doesn't exist");
         let undepend_result = result.unwrap();
         assert_eq!(undepend_result.task_id, task_a);
@@ -270,19 +300,25 @@ mod tests {
 
     #[tokio::test]
     async fn test_case_insensitive_ids() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        let task_a = service
+        let task_a = services
+            .tasks()
             .create_task(CreateTaskOptions::new("Task A"))
             .await
             .unwrap();
-        let task_b = service
+        let task_b = services
+            .tasks()
             .create_task(CreateTaskOptions::new("Task B"))
             .await
             .unwrap();
 
         // Create dependency with lowercase
-        service.add_dependency(&task_b, &task_a).await.unwrap();
+        services
+            .tasks()
+            .add_dependency(&task_b, &task_a)
+            .await
+            .unwrap();
 
         // Remove with uppercase
         let undepend_cmd = UndependCommand {
@@ -290,45 +326,64 @@ mod tests {
             blocker_id: task_a.to_uppercase(),
         };
 
-        let result = undepend_cmd.execute(&service).await;
+        let result = undepend_cmd.execute(&services).await;
         assert!(result.is_ok(), "Case-insensitive removal should work");
         assert!(result.unwrap().existed);
 
         // Verify dependency was removed
-        let with_relations = service.get_task_with_relations(&task_b).await.unwrap();
+        let with_relations = services
+            .tasks()
+            .get_task_with_relations(&task_b)
+            .await
+            .unwrap();
         assert!(!with_relations.depends_on_ids.contains(&task_a));
     }
 
     #[tokio::test]
     async fn test_remove_only_specified_dependency() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        let task_a = service
+        let task_a = services
+            .tasks()
             .create_task(CreateTaskOptions::new("Task A"))
             .await
             .unwrap();
-        let task_b = service
+        let task_b = services
+            .tasks()
             .create_task(CreateTaskOptions::new("Task B"))
             .await
             .unwrap();
-        let task_c = service
+        let task_c = services
+            .tasks()
             .create_task(CreateTaskOptions::new("Task C"))
             .await
             .unwrap();
 
         // C depends on both A and B
-        service.add_dependency(&task_c, &task_a).await.unwrap();
-        service.add_dependency(&task_c, &task_b).await.unwrap();
+        services
+            .tasks()
+            .add_dependency(&task_c, &task_a)
+            .await
+            .unwrap();
+        services
+            .tasks()
+            .add_dependency(&task_c, &task_b)
+            .await
+            .unwrap();
 
         // Remove only C -> A dependency
         let undepend_cmd = UndependCommand {
             id: task_c.clone(),
             blocker_id: task_a.clone(),
         };
-        undepend_cmd.execute(&service).await.unwrap();
+        undepend_cmd.execute(&services).await.unwrap();
 
         // Verify only C -> A was removed, C -> B still exists
-        let with_relations = service.get_task_with_relations(&task_c).await.unwrap();
+        let with_relations = services
+            .tasks()
+            .get_task_with_relations(&task_c)
+            .await
+            .unwrap();
         assert!(!with_relations.depends_on_ids.contains(&task_a));
         assert!(with_relations.depends_on_ids.contains(&task_b));
     }

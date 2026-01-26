@@ -7,7 +7,7 @@
 use crate::commands::r#ref::parse_file_ref;
 use clap::Args;
 use std::path::Path;
-use vertebrae_core::{ServiceError, TaskService};
+use vertebrae_core::{ServiceError, VertebraeServices};
 use vertebrae_db::CodeRef;
 
 /// Add a code reference to a testing criterion
@@ -101,7 +101,7 @@ impl CriterionRefCommand {
     /// - Database operations fail
     pub async fn execute(
         &self,
-        service: &dyn TaskService,
+        services: &VertebraeServices,
     ) -> Result<CriterionRefResult, ServiceError> {
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
@@ -117,7 +117,7 @@ impl CriterionRefCommand {
         let parsed = parse_file_ref(&self.file_spec).map_err(ServiceError::validation_failed)?;
 
         // Fetch the task to get sections
-        let task = service.get_task(&id).await?;
+        let task = services.tasks().get_task(&id).await?;
 
         // Filter to only testing_criterion sections and sort by order
         let mut criteria: Vec<(usize, &vertebrae_db::Section)> = task
@@ -158,7 +158,8 @@ impl CriterionRefCommand {
         };
 
         // Use service to append the section ref (handles timestamp and notification)
-        service
+        services
+            .tasks()
             .append_section_ref(&id, original_idx, &code_ref)
             .await?;
 
@@ -178,70 +179,94 @@ impl CriterionRefCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vertebrae_core::{DefaultTaskService, ServiceError};
+    use vertebrae_core::{CreateTaskOptions, ServiceError};
+    use vertebrae_db::{Section, SectionType};
 
     /// Helper to create a test service with an in-memory database
-    async fn setup_test_service() -> DefaultTaskService {
+    async fn setup_test_service() -> VertebraeServices {
         let db = vertebrae_db::Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-        DefaultTaskService::new(db)
+        VertebraeServices::new(db)
     }
 
     /// Helper to create a task with testing criteria
-    async fn create_task_with_criteria(service: &DefaultTaskService, id: &str, criteria: &[&str]) {
-        let db = service.database();
-        let sections: Vec<String> = criteria
-            .iter()
-            .enumerate()
-            .map(|(i, content)| {
-                format!(
-                    r#"{{ type: "testing_criterion", content: "{}", order: {}, refs: [] }}"#,
-                    content,
-                    i + 1
-                )
-            })
-            .collect();
+    async fn create_task_with_criteria(services: &VertebraeServices, id: &str, criteria: &[&str]) {
+        // Create the task first
+        let options = CreateTaskOptions::new("Test Task")
+            .with_id(id)
+            .with_status("in_progress");
+        services.tasks().create_task(options).await.unwrap();
 
-        let query = format!(
-            r#"CREATE task:{} SET
-                title = "Test Task",
-                level = "task",
-                status = "in_progress",
-                sections = [{}]"#,
-            id,
-            sections.join(", ")
-        );
-
-        db.client().query(&query).await.unwrap();
+        // Add testing criterion sections
+        for (i, content) in criteria.iter().enumerate() {
+            let section = Section {
+                section_type: SectionType::TestingCriterion,
+                content: content.to_string(),
+                order: Some((i + 1) as u32),
+                refs: vec![],
+                done: None,
+                done_at: None,
+            };
+            services.tasks().add_section(id, section).await.unwrap();
+        }
     }
 
     /// Helper to create a task with mixed section types
-    async fn create_task_with_mixed_sections(service: &DefaultTaskService, id: &str) {
-        let db = service.database();
-        let query = format!(
-            r#"CREATE task:{} SET
-                title = "Test Task",
-                level = "task",
-                status = "in_progress",
-                sections = [
-                    {{ type: "step", content: "First step", order: 1 }},
-                    {{ type: "testing_criterion", content: "First criterion", order: 1, refs: [] }},
-                    {{ type: "constraint", content: "Some constraint", order: 1 }},
-                    {{ type: "testing_criterion", content: "Second criterion", order: 2, refs: [] }}
-                ]"#,
-            id
-        );
+    async fn create_task_with_mixed_sections(services: &VertebraeServices, id: &str) {
+        // Create the task first
+        let options = CreateTaskOptions::new("Test Task")
+            .with_id(id)
+            .with_status("in_progress");
+        services.tasks().create_task(options).await.unwrap();
 
-        db.client().query(&query).await.unwrap();
+        // Add sections of different types
+        let sections = vec![
+            Section {
+                section_type: SectionType::Step,
+                content: "First step".to_string(),
+                order: Some(1),
+                refs: vec![],
+                done: None,
+                done_at: None,
+            },
+            Section {
+                section_type: SectionType::TestingCriterion,
+                content: "First criterion".to_string(),
+                order: Some(1),
+                refs: vec![],
+                done: None,
+                done_at: None,
+            },
+            Section {
+                section_type: SectionType::Constraint,
+                content: "Some constraint".to_string(),
+                order: Some(1),
+                refs: vec![],
+                done: None,
+                done_at: None,
+            },
+            Section {
+                section_type: SectionType::TestingCriterion,
+                content: "Second criterion".to_string(),
+                order: Some(2),
+                refs: vec![],
+                done: None,
+                done_at: None,
+            },
+        ];
+
+        for section in sections {
+            services.tasks().add_section(id, section).await.unwrap();
+        }
     }
 
     /// Helper to get criterion refs from a task
     async fn get_criterion_refs(
-        service: &DefaultTaskService,
+        services: &VertebraeServices,
         id: &str,
         section_index: usize,
     ) -> Vec<CodeRef> {
-        let task = service.get_task(id).await.unwrap();
+        let task = services.tasks().get_task(id).await.unwrap();
         task.sections
             .get(section_index)
             .map(|s| s.refs.clone())
@@ -250,9 +275,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_criterion_ref_adds_ref_to_correct_criterion() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        create_task_with_criteria(&service, "abc123", &["Criterion 1", "Criterion 2"]).await;
+        create_task_with_criteria(&services, "abc123", &["Criterion 1", "Criterion 2"]).await;
 
         let cmd = CriterionRefCommand {
             id: "abc123".to_string(),
@@ -262,7 +287,7 @@ mod tests {
             description: None,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok(), "criterion-ref failed: {:?}", result.err());
 
         let result = result.unwrap();
@@ -275,7 +300,7 @@ mod tests {
         assert_eq!(result.name, Some("test_auth".to_string()));
 
         // Verify ref was added to the correct section (index 0 in sections array)
-        let refs = get_criterion_refs(&service, "abc123", 0).await;
+        let refs = get_criterion_refs(&services, "abc123", 0).await;
         assert_eq!(refs.len(), 1, "Should have exactly 1 ref");
         assert_eq!(refs[0].path, "tests/auth_test.rs");
         assert_eq!(refs[0].line_start, Some(45));
@@ -285,9 +310,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_criterion_ref_second_criterion() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        create_task_with_criteria(&service, "abc123", &["Criterion 1", "Criterion 2"]).await;
+        create_task_with_criteria(&services, "abc123", &["Criterion 1", "Criterion 2"]).await;
 
         let cmd = CriterionRefCommand {
             id: "abc123".to_string(),
@@ -297,7 +322,7 @@ mod tests {
             description: Some("API validation test".to_string()),
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
         let result = result.unwrap();
@@ -305,7 +330,7 @@ mod tests {
         assert_eq!(result.criterion_content, "Criterion 2");
 
         // Verify ref was added to the second criterion (index 1 in sections array)
-        let refs = get_criterion_refs(&service, "abc123", 1).await;
+        let refs = get_criterion_refs(&services, "abc123", 1).await;
         assert_eq!(refs.len(), 1, "Should have exactly 1 ref");
         assert_eq!(refs[0].path, "tests/api_test.rs");
         assert_eq!(refs[0].line_start, Some(100));
@@ -315,9 +340,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_criterion_ref_with_mixed_sections() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        create_task_with_mixed_sections(&service, "abc123").await;
+        create_task_with_mixed_sections(&services, "abc123").await;
 
         let cmd = CriterionRefCommand {
             id: "abc123".to_string(),
@@ -327,7 +352,7 @@ mod tests {
             description: None,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
         let result = result.unwrap();
@@ -335,16 +360,16 @@ mod tests {
         assert_eq!(result.criterion_content, "Second criterion");
 
         // The second testing_criterion is at index 3 in the sections array
-        let refs = get_criterion_refs(&service, "abc123", 3).await;
+        let refs = get_criterion_refs(&services, "abc123", 3).await;
         assert_eq!(refs.len(), 1, "Should have exactly 1 ref");
         assert_eq!(refs[0].path, "tests/test.rs");
     }
 
     #[tokio::test]
     async fn test_criterion_ref_rejects_out_of_bounds_index() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        create_task_with_criteria(&service, "abc123", &["Criterion 1"]).await;
+        create_task_with_criteria(&services, "abc123", &["Criterion 1"]).await;
 
         let cmd = CriterionRefCommand {
             id: "abc123".to_string(),
@@ -354,7 +379,7 @@ mod tests {
             description: None,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         match result {
             Err(ServiceError::ValidationFailed { message }) => {
                 assert!(
@@ -375,9 +400,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_criterion_ref_rejects_zero_index() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        create_task_with_criteria(&service, "abc123", &["Criterion 1"]).await;
+        create_task_with_criteria(&services, "abc123", &["Criterion 1"]).await;
 
         let cmd = CriterionRefCommand {
             id: "abc123".to_string(),
@@ -387,7 +412,7 @@ mod tests {
             description: None,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         match result {
             Err(ServiceError::ValidationFailed { message }) => {
                 assert!(
@@ -403,7 +428,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_criterion_ref_nonexistent_task() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
         let cmd = CriterionRefCommand {
             id: "nonexistent".to_string(),
@@ -413,7 +438,7 @@ mod tests {
             description: None,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         match result {
             Err(ServiceError::TaskNotFound { task_id }) => {
                 assert_eq!(
@@ -429,9 +454,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_criterion_ref_invalid_file_spec() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        create_task_with_criteria(&service, "abc123", &["Criterion 1"]).await;
+        create_task_with_criteria(&services, "abc123", &["Criterion 1"]).await;
 
         let cmd = CriterionRefCommand {
             id: "abc123".to_string(),
@@ -441,7 +466,7 @@ mod tests {
             description: None,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         match result {
             Err(ServiceError::ValidationFailed { message }) => {
                 assert!(
@@ -457,9 +482,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_criterion_ref_multiple_refs_to_same_criterion() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        create_task_with_criteria(&service, "abc123", &["Criterion 1"]).await;
+        create_task_with_criteria(&services, "abc123", &["Criterion 1"]).await;
 
         // Add first ref
         let cmd1 = CriterionRefCommand {
@@ -469,7 +494,7 @@ mod tests {
             name: Some("first_test".to_string()),
             description: None,
         };
-        cmd1.execute(&service).await.unwrap();
+        cmd1.execute(&services).await.unwrap();
 
         // Add second ref
         let cmd2 = CriterionRefCommand {
@@ -479,10 +504,10 @@ mod tests {
             name: Some("second_test".to_string()),
             description: None,
         };
-        cmd2.execute(&service).await.unwrap();
+        cmd2.execute(&services).await.unwrap();
 
         // Verify both refs were added
-        let refs = get_criterion_refs(&service, "abc123", 0).await;
+        let refs = get_criterion_refs(&services, "abc123", 0).await;
         assert_eq!(refs.len(), 2, "Should have 2 refs");
 
         // Verify specific refs by name
@@ -500,9 +525,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_criterion_ref_case_insensitive_id() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        create_task_with_criteria(&service, "abc123", &["Criterion 1"]).await;
+        create_task_with_criteria(&services, "abc123", &["Criterion 1"]).await;
 
         let cmd = CriterionRefCommand {
             id: "ABC123".to_string(),
@@ -512,15 +537,15 @@ mod tests {
             description: None,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok(), "Case-insensitive lookup should work");
     }
 
     #[tokio::test]
     async fn test_criterion_ref_file_not_found_warning() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        create_task_with_criteria(&service, "abc123", &["Criterion 1"]).await;
+        create_task_with_criteria(&services, "abc123", &["Criterion 1"]).await;
 
         let cmd = CriterionRefCommand {
             id: "abc123".to_string(),
@@ -530,7 +555,7 @@ mod tests {
             description: None,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
         let result = result.unwrap();

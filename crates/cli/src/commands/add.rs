@@ -3,9 +3,7 @@
 //! Implements the `vtb add` command to create new tasks with all supported options.
 
 use clap::Args;
-use vertebrae_core::{
-    CreateTaskOptions, DefaultWorkflowService, ServiceError, TaskService, WorkflowService,
-};
+use vertebrae_core::{CreateTaskOptions, ServiceError, VertebraeServices};
 use vertebrae_db::{Level, Priority};
 
 /// Create a new task
@@ -94,7 +92,7 @@ impl AddCommand {
     /// - Dependency tasks don't exist
     /// - Specified workflow doesn't exist
     /// - Service operations fail
-    pub async fn execute(&self, service: &dyn TaskService) -> Result<String, ServiceError> {
+    pub async fn execute(&self, services: &VertebraeServices) -> Result<String, ServiceError> {
         // Validate title is not empty
         if self.title.trim().is_empty() {
             return Err(ServiceError::ValidationFailed {
@@ -142,18 +140,14 @@ impl AddCommand {
 
         // Create the task using the service layer
         // This will automatically fire MutationCallback events
-        let id = service.create_task(options).await?;
+        let id = services.tasks().create_task(options).await?;
 
         // Assign to custom workflow if specified
         if let Some(workflow_id) = &self.workflow {
-            // Create workflow service for workflow assignment
-            // This is necessary setup and the only place we access the database
-            #[allow(deprecated)]
-            let db = service.database().clone();
-            let workflow_service = DefaultWorkflowService::new(db);
-
-            // Use the workflow service to assign the workflow
-            workflow_service.assign_workflow(&id, workflow_id).await?;
+            services
+                .workflows()
+                .assign_workflow(&id, workflow_id)
+                .await?;
         }
 
         Ok(id)

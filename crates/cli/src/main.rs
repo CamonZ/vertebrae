@@ -5,7 +5,7 @@ use tracing_subscriber::EnvFilter;
 
 use vertebrae_cli::commands::Command;
 use vertebrae_cli::notification::create_http_notification_callback;
-use vertebrae_core::{DefaultTaskService, ServiceError};
+use vertebrae_core::{ServiceError, VertebraeServices};
 use vertebrae_db::Database;
 
 /// Environment variable name for the database path
@@ -102,12 +102,12 @@ async fn run_with_args(args: &Args) -> Result<(), ServiceError> {
     // Create the task service with HTTP notification callback
     // This enables CLI mutations to notify the Tauri GUI for cache invalidation
     let callback = create_http_notification_callback();
-    let service = DefaultTaskService::with_callback(db, callback);
+    let services = VertebraeServices::with_task_callback(db, callback);
 
     // Run the command or show welcome message
     match &args.command {
         Some(cmd) => {
-            let result = cmd.execute(&service).await?;
+            let result = cmd.execute(&services).await?;
             println!("{}", result);
         }
         None => {

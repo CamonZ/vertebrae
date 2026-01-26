@@ -17,7 +17,7 @@ async fn test_section_add_goal() {
     create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
 
     let cmd = section_cmd("task1", SectionType::Goal, "Complete the implementation");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
 
@@ -33,7 +33,7 @@ async fn test_section_add_context() {
     create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
 
     let cmd = section_cmd("task1", SectionType::Context, "Background information");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
 
@@ -49,7 +49,7 @@ async fn test_section_add_current_behavior() {
     create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
 
     let cmd = section_cmd("task1", SectionType::CurrentBehavior, "Currently does X");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
 
@@ -64,7 +64,7 @@ async fn test_section_add_desired_behavior() {
     create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
 
     let cmd = section_cmd("task1", SectionType::DesiredBehavior, "Should do Y");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
 
@@ -80,13 +80,13 @@ async fn test_single_instance_section_replaces_existing() {
 
     // Add first goal
     section_cmd("task1", SectionType::Goal, "First goal")
-        .execute(&ctx.service)
+        .execute(&ctx.services)
         .await
         .unwrap();
 
     // Add second goal (should replace)
     section_cmd("task1", SectionType::Goal, "Second goal")
-        .execute(&ctx.service)
+        .execute(&ctx.services)
         .await
         .unwrap();
 
@@ -106,15 +106,15 @@ async fn test_section_add_multiple_steps() {
     create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
 
     section_cmd("task1", SectionType::Step, "First step")
-        .execute(&ctx.service)
+        .execute(&ctx.services)
         .await
         .unwrap();
     section_cmd("task1", SectionType::Step, "Second step")
-        .execute(&ctx.service)
+        .execute(&ctx.services)
         .await
         .unwrap();
     section_cmd("task1", SectionType::Step, "Third step")
-        .execute(&ctx.service)
+        .execute(&ctx.services)
         .await
         .unwrap();
 
@@ -132,11 +132,11 @@ async fn test_section_add_multiple_testing_criteria() {
     create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
 
     section_cmd("task1", SectionType::TestingCriterion, "Should pass test 1")
-        .execute(&ctx.service)
+        .execute(&ctx.services)
         .await
         .unwrap();
     section_cmd("task1", SectionType::TestingCriterion, "Should pass test 2")
-        .execute(&ctx.service)
+        .execute(&ctx.services)
         .await
         .unwrap();
 
@@ -156,7 +156,7 @@ async fn test_section_add_constraints() {
         SectionType::Constraint,
         "Must be backwards compatible",
     )
-    .execute(&ctx.service)
+    .execute(&ctx.services)
     .await
     .unwrap();
     section_cmd(
@@ -164,7 +164,7 @@ async fn test_section_add_constraints() {
         SectionType::Constraint,
         "Must not break existing tests",
     )
-    .execute(&ctx.service)
+    .execute(&ctx.services)
     .await
     .unwrap();
 
@@ -179,7 +179,7 @@ async fn test_section_add_anti_patterns() {
     create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
 
     section_cmd("task1", SectionType::AntiPattern, "Don't use global state")
-        .execute(&ctx.service)
+        .execute(&ctx.services)
         .await
         .unwrap();
 
@@ -199,7 +199,7 @@ async fn test_section_add_failure_tests() {
         SectionType::FailureTest,
         "Should fail on invalid input",
     )
-    .execute(&ctx.service)
+    .execute(&ctx.services)
     .await
     .unwrap();
 
@@ -218,12 +218,12 @@ async fn test_unsection_remove_single_instance() {
 
     create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
     section_cmd("task1", SectionType::Goal, "The goal")
-        .execute(&ctx.service)
+        .execute(&ctx.services)
         .await
         .unwrap();
 
     let cmd = unsection_cmd_all_of_type("task1", SectionType::Goal);
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let sections = get_task_sections_of_type(ctx.db(), "task1", SectionType::Goal).await;
@@ -236,21 +236,21 @@ async fn test_unsection_remove_by_index() {
 
     create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
     section_cmd("task1", SectionType::Step, "Step 1")
-        .execute(&ctx.service)
+        .execute(&ctx.services)
         .await
         .unwrap();
     section_cmd("task1", SectionType::Step, "Step 2")
-        .execute(&ctx.service)
+        .execute(&ctx.services)
         .await
         .unwrap();
     section_cmd("task1", SectionType::Step, "Step 3")
-        .execute(&ctx.service)
+        .execute(&ctx.services)
         .await
         .unwrap();
 
     // Remove step at index 1 (second step, 0-based)
     let cmd = unsection_cmd("task1", SectionType::Step, 1);
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let steps = get_task_steps(ctx.db(), "task1").await;
@@ -265,21 +265,21 @@ async fn test_unsection_remove_all_of_type() {
 
     create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
     section_cmd("task1", SectionType::Step, "Step 1")
-        .execute(&ctx.service)
+        .execute(&ctx.services)
         .await
         .unwrap();
     section_cmd("task1", SectionType::Step, "Step 2")
-        .execute(&ctx.service)
+        .execute(&ctx.services)
         .await
         .unwrap();
     section_cmd("task1", SectionType::Constraint, "Constraint")
-        .execute(&ctx.service)
+        .execute(&ctx.services)
         .await
         .unwrap();
 
     // Remove all steps
     let cmd = unsection_cmd_all_of_type("task1", SectionType::Step);
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let steps = get_task_steps(ctx.db(), "task1").await;
@@ -295,20 +295,20 @@ async fn test_unsection_remove_all_sections() {
 
     create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
     section_cmd("task1", SectionType::Goal, "Goal")
-        .execute(&ctx.service)
+        .execute(&ctx.services)
         .await
         .unwrap();
     section_cmd("task1", SectionType::Step, "Step")
-        .execute(&ctx.service)
+        .execute(&ctx.services)
         .await
         .unwrap();
     section_cmd("task1", SectionType::Constraint, "Constraint")
-        .execute(&ctx.service)
+        .execute(&ctx.services)
         .await
         .unwrap();
 
     let cmd = unsection_cmd_all("task1");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let all_sections = get_task_sections(ctx.db(), "task1").await;
@@ -325,17 +325,17 @@ async fn test_step_done_marks_step_complete() {
 
     create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
     section_cmd("task1", SectionType::Step, "First step")
-        .execute(&ctx.service)
+        .execute(&ctx.services)
         .await
         .unwrap();
     section_cmd("task1", SectionType::Step, "Second step")
-        .execute(&ctx.service)
+        .execute(&ctx.services)
         .await
         .unwrap();
 
     // Mark first step as done (1-based index)
     let cmd = step_done_cmd("task1", 1);
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let steps = get_task_steps(ctx.db(), "task1").await;
@@ -349,17 +349,17 @@ async fn test_step_done_second_step() {
 
     create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
     section_cmd("task1", SectionType::Step, "First step")
-        .execute(&ctx.service)
+        .execute(&ctx.services)
         .await
         .unwrap();
     section_cmd("task1", SectionType::Step, "Second step")
-        .execute(&ctx.service)
+        .execute(&ctx.services)
         .await
         .unwrap();
 
     // Mark second step as done
     let cmd = step_done_cmd("task1", 2);
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let steps = get_task_steps(ctx.db(), "task1").await;
@@ -373,13 +373,13 @@ async fn test_step_done_invalid_index() {
 
     create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
     section_cmd("task1", SectionType::Step, "Only step")
-        .execute(&ctx.service)
+        .execute(&ctx.services)
         .await
         .unwrap();
 
     // Try to mark step 5 as done when only 1 exists
     let cmd = step_done_cmd("task1", 5);
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_err());
 }
@@ -390,13 +390,13 @@ async fn test_step_done_zero_index_rejected() {
 
     create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
     section_cmd("task1", SectionType::Step, "Step")
-        .execute(&ctx.service)
+        .execute(&ctx.services)
         .await
         .unwrap();
 
     // Index 0 is invalid (1-based)
     let cmd = step_done_cmd("task1", 0);
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_err());
 }
@@ -412,7 +412,7 @@ async fn test_ref_add_simple() {
     create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
 
     let cmd = ref_cmd("task1", "src/main.rs");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let refs = get_task_refs(ctx.db(), "task1").await;
@@ -427,7 +427,7 @@ async fn test_ref_add_with_line_number() {
     create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
 
     let cmd = ref_cmd("task1", "src/lib.rs:L42");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let refs = get_task_refs(ctx.db(), "task1").await;
@@ -443,7 +443,7 @@ async fn test_ref_add_with_line_range() {
     create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
 
     let cmd = ref_cmd("task1", "src/lib.rs:L10-20");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let refs = get_task_refs(ctx.db(), "task1").await;
@@ -465,7 +465,7 @@ async fn test_ref_add_with_name_and_description() {
         Some("process_request"),
         Some("Main entry point"),
     );
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let refs = get_task_refs(ctx.db(), "task1").await;
@@ -481,15 +481,15 @@ async fn test_ref_add_multiple() {
     create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
 
     ref_cmd("task1", "src/main.rs")
-        .execute(&ctx.service)
+        .execute(&ctx.services)
         .await
         .unwrap();
     ref_cmd("task1", "src/lib.rs")
-        .execute(&ctx.service)
+        .execute(&ctx.services)
         .await
         .unwrap();
     ref_cmd("task1", "tests/test.rs")
-        .execute(&ctx.service)
+        .execute(&ctx.services)
         .await
         .unwrap();
 
@@ -507,16 +507,16 @@ async fn test_unref_by_file() {
 
     create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
     ref_cmd("task1", "src/main.rs")
-        .execute(&ctx.service)
+        .execute(&ctx.services)
         .await
         .unwrap();
     ref_cmd("task1", "src/lib.rs")
-        .execute(&ctx.service)
+        .execute(&ctx.services)
         .await
         .unwrap();
 
     let cmd = unref_cmd("task1", "src/main.rs");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let refs = get_task_refs(ctx.db(), "task1").await;
@@ -530,16 +530,16 @@ async fn test_unref_all() {
 
     create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
     ref_cmd("task1", "src/main.rs")
-        .execute(&ctx.service)
+        .execute(&ctx.services)
         .await
         .unwrap();
     ref_cmd("task1", "src/lib.rs")
-        .execute(&ctx.service)
+        .execute(&ctx.services)
         .await
         .unwrap();
 
     let cmd = unref_cmd_all("task1");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let refs = get_task_refs(ctx.db(), "task1").await;
@@ -556,12 +556,12 @@ async fn test_criterion_ref_adds_ref_to_criterion() {
 
     create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
     section_cmd("task1", SectionType::TestingCriterion, "Should pass test")
-        .execute(&ctx.service)
+        .execute(&ctx.services)
         .await
         .unwrap();
 
     let cmd = criterion_ref_cmd("task1", 1, "tests/test_feature.rs:L50");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
 
@@ -584,7 +584,7 @@ async fn test_criterion_ref_with_name() {
         SectionType::TestingCriterion,
         "Should handle edge case",
     )
-    .execute(&ctx.service)
+    .execute(&ctx.services)
     .await
     .unwrap();
 
@@ -595,7 +595,7 @@ async fn test_criterion_ref_with_name() {
         Some("test_edge_case"),
         Some("Tests the edge case"),
     );
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
 }
@@ -606,13 +606,13 @@ async fn test_criterion_ref_invalid_index() {
 
     create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
     section_cmd("task1", SectionType::TestingCriterion, "Only criterion")
-        .execute(&ctx.service)
+        .execute(&ctx.services)
         .await
         .unwrap();
 
     // Try to add ref to criterion 5 when only 1 exists
     let cmd = criterion_ref_cmd("task1", 5, "tests/test.rs");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_err());
 }
@@ -628,7 +628,7 @@ async fn test_section_case_insensitive_id() {
     create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
 
     let cmd = section_cmd("TASK1", SectionType::Goal, "Goal with uppercase ID");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let sections = get_task_sections_of_type(ctx.db(), "task1", SectionType::Goal).await;
@@ -642,7 +642,7 @@ async fn test_ref_case_insensitive_id() {
     create_task(ctx.db(), "task1", "Test Task", "task", "in_progress").await;
 
     let cmd = ref_cmd("TASK1", "src/file.rs");
-    let result = cmd.execute(&ctx.service).await;
+    let result = cmd.execute(&ctx.services).await;
 
     assert!(result.is_ok());
     let refs = get_task_refs(ctx.db(), "task1").await;

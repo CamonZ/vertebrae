@@ -3,7 +3,7 @@
 //! Implements the `vtb step-done` command to mark individual steps within a task as done.
 
 use clap::Args;
-use vertebrae_core::ServiceError;
+use vertebrae_core::{ServiceError, VertebraeServices};
 
 /// Mark a step as done within a task
 #[derive(Debug, Args)]
@@ -45,7 +45,7 @@ impl StepDoneCommand {
     ///
     /// # Arguments
     ///
-    /// * `service` - Reference to the task service
+    /// * `services` - Reference to the vertebrae services
     ///
     /// # Errors
     ///
@@ -55,7 +55,7 @@ impl StepDoneCommand {
     /// - Service operations fail
     pub async fn execute(
         &self,
-        service: &dyn vertebrae_core::TaskService,
+        services: &VertebraeServices,
     ) -> Result<StepDoneResult, ServiceError> {
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
@@ -68,7 +68,7 @@ impl StepDoneCommand {
         }
 
         // Fetch task via service to get the step content before updating
-        let task = service.get_task(&id).await?;
+        let task = services.tasks().get_task(&id).await?;
 
         let sections = task.sections.clone();
 
@@ -95,7 +95,7 @@ impl StepDoneCommand {
 
         // Use the new service method to mark step as done
         // This replaces the direct database access and handles mutation callback
-        service.mark_step_done(&id, self.index).await?;
+        services.tasks().mark_step_done(&id, self.index).await?;
 
         Ok(StepDoneResult {
             task_id: id,

@@ -3,7 +3,7 @@
 //! Implements the `vtb review` command to toggle the needs_human_review flag on tasks.
 
 use clap::Args;
-use vertebrae_core::ServiceError;
+use vertebrae_core::{ServiceError, VertebraeServices};
 
 /// Toggle the needs_human_review flag on a task
 #[derive(Debug, Args)]
@@ -25,22 +25,19 @@ impl ReviewCommand {
     ///
     /// # Arguments
     ///
-    /// * `service` - Reference to the task service
+    /// * `services` - Reference to the services container
     ///
     /// # Errors
     ///
     /// Returns `ServiceError` if:
     /// - The task with the given ID does not exist
     /// - Service operations fail
-    pub async fn execute(
-        &self,
-        service: &dyn vertebrae_core::TaskService,
-    ) -> Result<String, ServiceError> {
+    pub async fn execute(&self, services: &VertebraeServices) -> Result<String, ServiceError> {
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
 
         // Fetch current flag value
-        let current = self.get_current_flag(service, &id).await?;
+        let current = self.get_current_flag(services, &id).await?;
 
         // Determine new value
         let new_value = match self.set {
@@ -49,7 +46,7 @@ impl ReviewCommand {
         };
 
         // Update the flag using service layer (which fires MutationCallback)
-        self.update_flag(service, &id, new_value).await?;
+        self.update_flag(services, &id, new_value).await?;
 
         let action = if new_value {
             "marked as needing review"
@@ -63,22 +60,22 @@ impl ReviewCommand {
     /// Get the current needs_human_review flag value.
     async fn get_current_flag(
         &self,
-        service: &dyn vertebrae_core::TaskService,
+        services: &VertebraeServices,
         id: &str,
     ) -> Result<bool, ServiceError> {
-        let task = service.get_task(id).await?;
+        let task = services.tasks().get_task(id).await?;
         Ok(task.needs_human_review.unwrap_or(false))
     }
 
     /// Update the needs_human_review flag using service layer.
     async fn update_flag(
         &self,
-        service: &dyn vertebrae_core::TaskService,
+        services: &VertebraeServices,
         id: &str,
         value: bool,
     ) -> Result<(), ServiceError> {
         let options = vertebrae_core::UpdateTaskOptions::new().with_needs_human_review(value);
-        service.update_task(id, options).await?;
+        services.tasks().update_task(id, options).await?;
         Ok(())
     }
 }

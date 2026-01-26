@@ -3,7 +3,9 @@
 //! These tests verify the full command execution flow with an in-memory database.
 
 use super::*;
-use vertebrae_core::{Database, DefaultWorkflowService, ServiceError, WorkflowService};
+use vertebrae_core::{
+    Database, DefaultWorkflowService, ServiceError, VertebraeServices, WorkflowService,
+};
 use vertebrae_db::{AgentConfig, Level, Task};
 
 // ========================================
@@ -20,6 +22,11 @@ async fn setup_test_db() -> Database {
 /// Helper to create a workflow service from a database
 fn create_service(db: &Database) -> DefaultWorkflowService {
     DefaultWorkflowService::new(db.clone())
+}
+
+/// Helper to create VertebraeServices from a database
+fn create_services(db: Database) -> VertebraeServices {
+    VertebraeServices::new(db)
 }
 
 /// Extract the workflow ID from "Created workflow: {id}" message
@@ -300,14 +307,14 @@ async fn test_list_workflows_shows_default_workflow() {
 #[tokio::test]
 async fn test_list_workflows_shows_all_with_step_counts() {
     let db = setup_test_db().await;
-    let service = create_service(&db);
+    let services = create_service(&db);
 
     // Create workflow with 1 step
-    let id1 = create_test_workflow(&service, "Workflow A", vec![("step1", "agent1")]).await;
+    let id1 = create_test_workflow(&services, "Workflow A", vec![("step1", "agent1")]).await;
 
     // Create workflow with 3 steps
     let id2 = create_test_workflow(
-        &service,
+        &services,
         "Workflow B",
         vec![
             ("review", "reviewer"),
@@ -318,7 +325,7 @@ async fn test_list_workflows_shows_all_with_step_counts() {
     .await;
 
     let cmd = WorkflowListCommand {};
-    let result = cmd.execute(&service).await.unwrap();
+    let result = cmd.execute(&services).await.unwrap();
 
     assert!(result.contains(&id1), "Should contain first workflow ID");
     assert!(result.contains("Workflow A"), "Should contain Workflow A");
@@ -336,10 +343,11 @@ async fn test_list_workflows_shows_all_with_step_counts() {
 #[tokio::test]
 async fn test_show_workflow_displays_details() {
     let db = setup_test_db().await;
-    let service = create_service(&db);
+    let workflow_service = create_service(&db);
+    let services = create_services(db.clone());
 
     let id = create_test_workflow(
-        &service,
+        &workflow_service,
         "Multi-step Workflow",
         vec![
             ("review", "code-reviewer"),
@@ -350,7 +358,7 @@ async fn test_show_workflow_displays_details() {
     .await;
 
     let show_cmd = WorkflowShowCommand { id: id.clone() };
-    let result = show_cmd.execute(&service).await.unwrap();
+    let result = show_cmd.execute(&services).await.unwrap();
 
     // Verify header
     assert!(
@@ -377,12 +385,13 @@ async fn test_show_workflow_displays_details() {
 #[tokio::test]
 async fn test_show_workflow_not_found() {
     let db = setup_test_db().await;
+    let services = create_services(db);
 
     let cmd = WorkflowShowCommand {
         id: "nonexistent".to_string(),
     };
 
-    let result = cmd.execute(&create_service(&db)).await;
+    let result = cmd.execute(&services).await;
     assert!(result.is_err(), "Should return error for nonexistent ID");
 
     match result {
@@ -396,15 +405,21 @@ async fn test_show_workflow_not_found() {
 #[tokio::test]
 async fn test_show_workflow_case_insensitive() {
     let db = setup_test_db().await;
-    let service = create_service(&db);
+    let workflow_service = create_service(&db);
+    let services = create_services(db.clone());
 
-    let id = create_test_workflow(&service, "Case Test Workflow", vec![("step1", "agent1")]).await;
+    let id = create_test_workflow(
+        &workflow_service,
+        "Case Test Workflow",
+        vec![("step1", "agent1")],
+    )
+    .await;
 
     // Try with uppercase ID
     let show_cmd = WorkflowShowCommand {
         id: id.to_uppercase(),
     };
-    let result = show_cmd.execute(&service).await;
+    let result = show_cmd.execute(&services).await;
 
     assert!(
         result.is_ok(),
@@ -423,9 +438,9 @@ async fn test_show_workflow_case_insensitive() {
 #[tokio::test]
 async fn test_update_workflow_name() {
     let db = setup_test_db().await;
-    let service = create_service(&db);
+    let services = create_service(&db);
 
-    let id = create_test_workflow(&service, "Original Name", vec![("step1", "agent1")]).await;
+    let id = create_test_workflow(&services, "Original Name", vec![("step1", "agent1")]).await;
 
     let update_cmd = WorkflowUpdateCommand {
         id: id.clone(),
@@ -435,7 +450,7 @@ async fn test_update_workflow_name() {
         auto_advance: false,
         no_auto_advance: false,
     };
-    let result = update_cmd.execute(&service).await.unwrap();
+    let result = update_cmd.execute(&services).await.unwrap();
     assert_eq!(result, format!("Updated workflow: {}", id));
 
     // Verify the update
@@ -446,9 +461,9 @@ async fn test_update_workflow_name() {
 #[tokio::test]
 async fn test_update_workflow_description() {
     let db = setup_test_db().await;
-    let service = create_service(&db);
+    let services = create_service(&db);
 
-    let id = create_test_workflow(&service, "Test Workflow", vec![("step1", "agent1")]).await;
+    let id = create_test_workflow(&services, "Test Workflow", vec![("step1", "agent1")]).await;
 
     let update_cmd = WorkflowUpdateCommand {
         id: id.clone(),
@@ -458,7 +473,7 @@ async fn test_update_workflow_description() {
         auto_advance: false,
         no_auto_advance: false,
     };
-    let result = update_cmd.execute(&service).await.unwrap();
+    let result = update_cmd.execute(&services).await.unwrap();
     assert_eq!(result, format!("Updated workflow: {}", id));
 
     let workflow = db.workflows().get(&id).await.unwrap().unwrap();
@@ -491,9 +506,9 @@ async fn test_update_workflow_not_found() {
 #[tokio::test]
 async fn test_update_workflow_no_updates_fails() {
     let db = setup_test_db().await;
-    let service = create_service(&db);
+    let services = create_service(&db);
 
-    let id = create_test_workflow(&service, "Test Workflow", vec![("step1", "agent1")]).await;
+    let id = create_test_workflow(&services, "Test Workflow", vec![("step1", "agent1")]).await;
 
     let update_cmd = WorkflowUpdateCommand {
         id: id.clone(),
@@ -504,7 +519,7 @@ async fn test_update_workflow_no_updates_fails() {
         no_auto_advance: false,
     };
 
-    let result = update_cmd.execute(&service).await;
+    let result = update_cmd.execute(&services).await;
     assert!(result.is_err());
     match result.unwrap_err() {
         ServiceError::ValidationFailed { message } => {
@@ -525,16 +540,16 @@ async fn test_update_workflow_no_updates_fails() {
 #[tokio::test]
 async fn test_delete_workflow_success() {
     let db = setup_test_db().await;
-    let service = create_service(&db);
+    let services = create_service(&db);
 
-    let id = create_test_workflow(&service, "To Be Deleted", vec![("step1", "agent1")]).await;
+    let id = create_test_workflow(&services, "To Be Deleted", vec![("step1", "agent1")]).await;
 
     // Verify it exists
     assert!(db.workflows().exists(&id).await.unwrap());
 
     // Delete it
     let delete_cmd = WorkflowDeleteCommand { id: id.clone() };
-    let result = delete_cmd.execute(&service).await.unwrap();
+    let result = delete_cmd.execute(&services).await.unwrap();
     assert_eq!(result, format!("Deleted workflow: {}", id));
 
     // Verify it's gone
@@ -566,10 +581,10 @@ async fn test_delete_workflow_not_found() {
 #[tokio::test]
 async fn test_assign_workflow_success() {
     let db = setup_test_db().await;
-    let service = create_service(&db);
+    let services = create_service(&db);
 
     let workflow_id = create_test_workflow(
-        &service,
+        &services,
         "Test Workflow",
         vec![("review", "reviewer"), ("test", "tester")],
     )
@@ -583,7 +598,7 @@ async fn test_assign_workflow_success() {
         task_id: "abc123".to_string(),
         workflow_id: workflow_id.clone(),
     };
-    let result = assign_cmd.execute(&service).await.unwrap();
+    let result = assign_cmd.execute(&services).await.unwrap();
 
     assert!(
         result.contains("Assigned task abc123 to workflow"),
@@ -608,16 +623,16 @@ async fn test_assign_workflow_success() {
 #[tokio::test]
 async fn test_assign_workflow_task_not_found() {
     let db = setup_test_db().await;
-    let service = create_service(&db);
+    let services = create_service(&db);
 
     let workflow_id =
-        create_test_workflow(&service, "Test Workflow", vec![("step1", "agent1")]).await;
+        create_test_workflow(&services, "Test Workflow", vec![("step1", "agent1")]).await;
 
     let assign_cmd = WorkflowAssignCommand {
         task_id: "nonexistent".to_string(),
         workflow_id: workflow_id.clone(),
     };
-    let result = assign_cmd.execute(&service).await;
+    let result = assign_cmd.execute(&services).await;
 
     assert!(result.is_err());
     match result.unwrap_err() {
@@ -631,7 +646,7 @@ async fn test_assign_workflow_task_not_found() {
 #[tokio::test]
 async fn test_assign_workflow_workflow_not_found() {
     let db = setup_test_db().await;
-    let service = create_service(&db);
+    let services = create_service(&db);
 
     create_test_task(&db, "abc123", "Test Task").await;
 
@@ -639,7 +654,7 @@ async fn test_assign_workflow_workflow_not_found() {
         task_id: "abc123".to_string(),
         workflow_id: "nonexistent".to_string(),
     };
-    let result = assign_cmd.execute(&service).await;
+    let result = assign_cmd.execute(&services).await;
 
     assert!(result.is_err());
     match result.unwrap_err() {
@@ -657,10 +672,10 @@ async fn test_assign_workflow_workflow_not_found() {
 #[tokio::test]
 async fn test_unassign_workflow_success() {
     let db = setup_test_db().await;
-    let service = create_service(&db);
+    let services = create_service(&db);
 
     let workflow_id =
-        create_test_workflow(&service, "Test Workflow", vec![("step1", "agent1")]).await;
+        create_test_workflow(&services, "Test Workflow", vec![("step1", "agent1")]).await;
 
     create_test_task(&db, "abc123", "Test Task").await;
 
@@ -669,7 +684,7 @@ async fn test_unassign_workflow_success() {
         task_id: "abc123".to_string(),
         workflow_id: workflow_id.clone(),
     };
-    assign_cmd.execute(&service).await.unwrap();
+    assign_cmd.execute(&services).await.unwrap();
 
     // Verify assigned
     let task = db.tasks().get("abc123").await.unwrap().unwrap();
@@ -679,7 +694,7 @@ async fn test_unassign_workflow_success() {
     let unassign_cmd = WorkflowUnassignCommand {
         task_id: "abc123".to_string(),
     };
-    let result = unassign_cmd.execute(&service).await.unwrap();
+    let result = unassign_cmd.execute(&services).await.unwrap();
     assert_eq!(result, "Unassigned workflow from task abc123");
 
     // Verify unassigned
@@ -713,10 +728,10 @@ async fn test_unassign_workflow_task_not_found() {
 #[tokio::test]
 async fn test_advance_workflow_success() {
     let db = setup_test_db().await;
-    let service = create_service(&db);
+    let services = create_service(&db);
 
     let workflow_id = create_test_workflow(
-        &service,
+        &services,
         "Test Workflow",
         vec![
             ("review", "reviewer"),
@@ -733,13 +748,13 @@ async fn test_advance_workflow_success() {
         task_id: "abc123".to_string(),
         workflow_id: workflow_id.clone(),
     };
-    assign_cmd.execute(&service).await.unwrap();
+    assign_cmd.execute(&services).await.unwrap();
 
     // Advance to step 1
     let advance_cmd = WorkflowAdvanceCommand {
         task_id: "abc123".to_string(),
     };
-    let result = advance_cmd.execute(&service).await.unwrap();
+    let result = advance_cmd.execute(&services).await.unwrap();
 
     assert!(
         result.contains("Advanced task abc123 to step 2/3"),
@@ -774,14 +789,14 @@ async fn test_advance_workflow_task_not_found() {
 #[tokio::test]
 async fn test_advance_workflow_not_assigned() {
     let db = setup_test_db().await;
-    let service = create_service(&db);
+    let services = create_service(&db);
 
     create_test_task(&db, "abc123", "Test Task").await;
 
     let advance_cmd = WorkflowAdvanceCommand {
         task_id: "abc123".to_string(),
     };
-    let result = advance_cmd.execute(&service).await;
+    let result = advance_cmd.execute(&services).await;
 
     assert!(result.is_err());
     match result.unwrap_err() {
@@ -803,10 +818,10 @@ async fn test_advance_workflow_not_assigned() {
 #[tokio::test]
 async fn test_retreat_workflow_success() {
     let db = setup_test_db().await;
-    let service = create_service(&db);
+    let services = create_service(&db);
 
     let workflow_id = create_test_workflow(
-        &service,
+        &services,
         "Test Workflow",
         vec![
             ("review", "reviewer"),
@@ -823,18 +838,18 @@ async fn test_retreat_workflow_success() {
         task_id: "abc123".to_string(),
         workflow_id: workflow_id.clone(),
     };
-    assign_cmd.execute(&service).await.unwrap();
+    assign_cmd.execute(&services).await.unwrap();
 
     let advance_cmd = WorkflowAdvanceCommand {
         task_id: "abc123".to_string(),
     };
-    advance_cmd.execute(&service).await.unwrap();
+    advance_cmd.execute(&services).await.unwrap();
 
     // Now retreat
     let retreat_cmd = WorkflowRetreatCommand {
         task_id: "abc123".to_string(),
     };
-    let result = retreat_cmd.execute(&service).await.unwrap();
+    let result = retreat_cmd.execute(&services).await.unwrap();
 
     assert!(
         result.contains("Retreated task abc123 to step 1/3"),
@@ -851,10 +866,10 @@ async fn test_retreat_workflow_success() {
 #[tokio::test]
 async fn test_retreat_workflow_at_first_step_fails() {
     let db = setup_test_db().await;
-    let service = create_service(&db);
+    let services = create_service(&db);
 
     let workflow_id =
-        create_test_workflow(&service, "Test Workflow", vec![("step1", "agent1")]).await;
+        create_test_workflow(&services, "Test Workflow", vec![("step1", "agent1")]).await;
 
     create_test_task(&db, "abc123", "Test Task").await;
 
@@ -863,13 +878,13 @@ async fn test_retreat_workflow_at_first_step_fails() {
         task_id: "abc123".to_string(),
         workflow_id: workflow_id.clone(),
     };
-    assign_cmd.execute(&service).await.unwrap();
+    assign_cmd.execute(&services).await.unwrap();
 
     // Try to retreat
     let retreat_cmd = WorkflowRetreatCommand {
         task_id: "abc123".to_string(),
     };
-    let result = retreat_cmd.execute(&service).await;
+    let result = retreat_cmd.execute(&services).await;
 
     assert!(result.is_err());
     match result.unwrap_err() {
@@ -891,10 +906,10 @@ async fn test_retreat_workflow_at_first_step_fails() {
 #[tokio::test]
 async fn test_reject_workflow_success() {
     let db = setup_test_db().await;
-    let service = create_service(&db);
+    let services = create_service(&db);
 
     let workflow_id =
-        create_test_workflow(&service, "Test Workflow", vec![("step1", "agent1")]).await;
+        create_test_workflow(&services, "Test Workflow", vec![("step1", "agent1")]).await;
 
     create_test_task(&db, "abc123", "Test Task").await;
 
@@ -903,13 +918,13 @@ async fn test_reject_workflow_success() {
         task_id: "abc123".to_string(),
         workflow_id: workflow_id.clone(),
     };
-    assign_cmd.execute(&service).await.unwrap();
+    assign_cmd.execute(&services).await.unwrap();
 
     // Reject
     let reject_cmd = WorkflowRejectCommand {
         task_id: "abc123".to_string(),
     };
-    let result = reject_cmd.execute(&service).await.unwrap();
+    let result = reject_cmd.execute(&services).await.unwrap();
 
     assert!(
         result.contains("Rejected task abc123 from workflow"),
@@ -925,14 +940,14 @@ async fn test_reject_workflow_success() {
 #[tokio::test]
 async fn test_reject_workflow_not_assigned() {
     let db = setup_test_db().await;
-    let service = create_service(&db);
+    let services = create_service(&db);
 
     create_test_task(&db, "abc123", "Test Task").await;
 
     let reject_cmd = WorkflowRejectCommand {
         task_id: "abc123".to_string(),
     };
-    let result = reject_cmd.execute(&service).await;
+    let result = reject_cmd.execute(&services).await;
 
     assert!(result.is_err());
     match result.unwrap_err() {
@@ -1031,11 +1046,11 @@ fn test_format_timestamp() {
 #[tokio::test]
 async fn test_transition_add_success() {
     let db = setup_test_db().await;
-    let service = create_service(&db);
+    let services = create_service(&db);
 
     // Create two workflows
-    let from_id = create_test_workflow(&service, "From Workflow", vec![("step1", "agent1")]).await;
-    let to_id = create_test_workflow(&service, "To Workflow", vec![("step1", "agent1")]).await;
+    let from_id = create_test_workflow(&services, "From Workflow", vec![("step1", "agent1")]).await;
+    let to_id = create_test_workflow(&services, "To Workflow", vec![("step1", "agent1")]).await;
 
     // Create transition
     let cmd = transition::TransitionAddCommand {
@@ -1044,7 +1059,7 @@ async fn test_transition_add_success() {
         label: "approve".to_string(),
         target_step: None,
     };
-    let result = cmd.execute(&service).await.unwrap();
+    let result = cmd.execute(&services).await.unwrap();
 
     assert!(
         result.contains("Created transition 'approve'"),
@@ -1066,9 +1081,9 @@ async fn test_transition_add_success() {
 #[tokio::test]
 async fn test_transition_add_workflow_not_found() {
     let db = setup_test_db().await;
-    let service = create_service(&db);
+    let services = create_service(&db);
 
-    let from_id = create_test_workflow(&service, "From Workflow", vec![("step1", "agent1")]).await;
+    let from_id = create_test_workflow(&services, "From Workflow", vec![("step1", "agent1")]).await;
 
     let cmd = transition::TransitionAddCommand {
         from_workflow_id: from_id.clone(),
@@ -1076,7 +1091,7 @@ async fn test_transition_add_workflow_not_found() {
         label: "approve".to_string(),
         target_step: None,
     };
-    let result = cmd.execute(&service).await;
+    let result = cmd.execute(&services).await;
 
     assert!(result.is_err());
     match result.unwrap_err() {
@@ -1090,10 +1105,10 @@ async fn test_transition_add_workflow_not_found() {
 #[tokio::test]
 async fn test_transition_add_already_exists() {
     let db = setup_test_db().await;
-    let service = create_service(&db);
+    let services = create_service(&db);
 
-    let from_id = create_test_workflow(&service, "From Workflow", vec![("step1", "agent1")]).await;
-    let to_id = create_test_workflow(&service, "To Workflow", vec![("step1", "agent1")]).await;
+    let from_id = create_test_workflow(&services, "From Workflow", vec![("step1", "agent1")]).await;
+    let to_id = create_test_workflow(&services, "To Workflow", vec![("step1", "agent1")]).await;
 
     // Create first transition
     let cmd = transition::TransitionAddCommand {
@@ -1102,7 +1117,7 @@ async fn test_transition_add_already_exists() {
         label: "approve".to_string(),
         target_step: None,
     };
-    cmd.execute(&service).await.unwrap();
+    cmd.execute(&services).await.unwrap();
 
     // Try to create duplicate
     let cmd2 = transition::TransitionAddCommand {
@@ -1111,7 +1126,7 @@ async fn test_transition_add_already_exists() {
         label: "approve again".to_string(),
         target_step: None,
     };
-    let result = cmd2.execute(&service).await;
+    let result = cmd2.execute(&services).await;
 
     assert!(result.is_err());
     match result.unwrap_err() {
@@ -1133,11 +1148,11 @@ async fn test_transition_add_already_exists() {
 #[tokio::test]
 async fn test_transition_list_with_default() {
     let db = setup_test_db().await;
-    let service = create_service(&db);
+    let services = create_service(&db);
 
     // db.init() creates a default transition for the default workflow
     let cmd = transition::TransitionListCommand { workflow_id: None };
-    let result = cmd.execute(&service).await.unwrap();
+    let result = cmd.execute(&services).await.unwrap();
 
     // Should have at least the default transition
     assert!(
@@ -1150,11 +1165,11 @@ async fn test_transition_list_with_default() {
 #[tokio::test]
 async fn test_transition_list_shows_all() {
     let db = setup_test_db().await;
-    let service = create_service(&db);
+    let services = create_service(&db);
 
-    let wf1 = create_test_workflow(&service, "Workflow 1", vec![("step1", "agent1")]).await;
-    let wf2 = create_test_workflow(&service, "Workflow 2", vec![("step1", "agent1")]).await;
-    let wf3 = create_test_workflow(&service, "Workflow 3", vec![("step1", "agent1")]).await;
+    let wf1 = create_test_workflow(&services, "Workflow 1", vec![("step1", "agent1")]).await;
+    let wf2 = create_test_workflow(&services, "Workflow 2", vec![("step1", "agent1")]).await;
+    let wf3 = create_test_workflow(&services, "Workflow 3", vec![("step1", "agent1")]).await;
 
     // Create transitions
     let cmd1 = transition::TransitionAddCommand {
@@ -1163,7 +1178,7 @@ async fn test_transition_list_shows_all() {
         label: "approve".to_string(),
         target_step: None,
     };
-    cmd1.execute(&service).await.unwrap();
+    cmd1.execute(&services).await.unwrap();
 
     let cmd2 = transition::TransitionAddCommand {
         from_workflow_id: wf2.clone(),
@@ -1171,11 +1186,11 @@ async fn test_transition_list_shows_all() {
         label: "escalate".to_string(),
         target_step: None,
     };
-    cmd2.execute(&service).await.unwrap();
+    cmd2.execute(&services).await.unwrap();
 
     // List all
     let list_cmd = transition::TransitionListCommand { workflow_id: None };
-    let result = list_cmd.execute(&service).await.unwrap();
+    let result = list_cmd.execute(&services).await.unwrap();
 
     assert!(result.contains(&wf1), "Should contain wf1: {}", result);
     assert!(result.contains(&wf2), "Should contain wf2: {}", result);
@@ -1195,11 +1210,11 @@ async fn test_transition_list_shows_all() {
 #[tokio::test]
 async fn test_transition_list_filtered_by_workflow() {
     let db = setup_test_db().await;
-    let service = create_service(&db);
+    let services = create_service(&db);
 
-    let wf1 = create_test_workflow(&service, "Workflow 1", vec![("step1", "agent1")]).await;
-    let wf2 = create_test_workflow(&service, "Workflow 2", vec![("step1", "agent1")]).await;
-    let wf3 = create_test_workflow(&service, "Workflow 3", vec![("step1", "agent1")]).await;
+    let wf1 = create_test_workflow(&services, "Workflow 1", vec![("step1", "agent1")]).await;
+    let wf2 = create_test_workflow(&services, "Workflow 2", vec![("step1", "agent1")]).await;
+    let wf3 = create_test_workflow(&services, "Workflow 3", vec![("step1", "agent1")]).await;
 
     // Create transition from wf1 to wf2
     let cmd1 = transition::TransitionAddCommand {
@@ -1208,7 +1223,7 @@ async fn test_transition_list_filtered_by_workflow() {
         label: "approve".to_string(),
         target_step: None,
     };
-    cmd1.execute(&service).await.unwrap();
+    cmd1.execute(&services).await.unwrap();
 
     // Create transition from wf2 to wf3
     let cmd2 = transition::TransitionAddCommand {
@@ -1217,13 +1232,13 @@ async fn test_transition_list_filtered_by_workflow() {
         label: "escalate".to_string(),
         target_step: None,
     };
-    cmd2.execute(&service).await.unwrap();
+    cmd2.execute(&services).await.unwrap();
 
     // List only transitions from wf1
     let list_cmd = transition::TransitionListCommand {
         workflow_id: Some(wf1.clone()),
     };
-    let result = list_cmd.execute(&service).await.unwrap();
+    let result = list_cmd.execute(&services).await.unwrap();
 
     assert!(
         result.contains("[approve]"),
@@ -1244,10 +1259,10 @@ async fn test_transition_list_filtered_by_workflow() {
 #[tokio::test]
 async fn test_transition_delete_success() {
     let db = setup_test_db().await;
-    let service = create_service(&db);
+    let services = create_service(&db);
 
-    let wf1 = create_test_workflow(&service, "Workflow 1", vec![("step1", "agent1")]).await;
-    let wf2 = create_test_workflow(&service, "Workflow 2", vec![("step1", "agent1")]).await;
+    let wf1 = create_test_workflow(&services, "Workflow 1", vec![("step1", "agent1")]).await;
+    let wf2 = create_test_workflow(&services, "Workflow 2", vec![("step1", "agent1")]).await;
 
     // Create transition
     let add_cmd = transition::TransitionAddCommand {
@@ -1256,11 +1271,11 @@ async fn test_transition_delete_success() {
         label: "approve".to_string(),
         target_step: None,
     };
-    add_cmd.execute(&service).await.unwrap();
+    add_cmd.execute(&services).await.unwrap();
 
     // Verify it exists
     let list_cmd = transition::TransitionListCommand { workflow_id: None };
-    let before = list_cmd.execute(&service).await.unwrap();
+    let before = list_cmd.execute(&services).await.unwrap();
     assert!(
         before.contains("[approve]"),
         "Should have transition before delete"
@@ -1271,7 +1286,7 @@ async fn test_transition_delete_success() {
         from_workflow_id: wf1.clone(),
         to_workflow_id: wf2.clone(),
     };
-    let result = delete_cmd.execute(&service).await.unwrap();
+    let result = delete_cmd.execute(&services).await.unwrap();
 
     assert!(
         result.contains("Deleted transition"),
@@ -1280,7 +1295,7 @@ async fn test_transition_delete_success() {
     );
 
     // Verify it's gone (default transition may still exist)
-    let after = list_cmd.execute(&service).await.unwrap();
+    let after = list_cmd.execute(&services).await.unwrap();
     assert!(
         !after.contains("[approve]"),
         "Should not have the deleted transition: {}",
@@ -1291,17 +1306,17 @@ async fn test_transition_delete_success() {
 #[tokio::test]
 async fn test_transition_delete_not_found() {
     let db = setup_test_db().await;
-    let service = create_service(&db);
+    let services = create_service(&db);
 
-    let wf1 = create_test_workflow(&service, "Workflow 1", vec![("step1", "agent1")]).await;
-    let wf2 = create_test_workflow(&service, "Workflow 2", vec![("step1", "agent1")]).await;
+    let wf1 = create_test_workflow(&services, "Workflow 1", vec![("step1", "agent1")]).await;
+    let wf2 = create_test_workflow(&services, "Workflow 2", vec![("step1", "agent1")]).await;
 
     // Try to delete non-existent transition
     let delete_cmd = transition::TransitionDeleteCommand {
         from_workflow_id: wf1.clone(),
         to_workflow_id: wf2.clone(),
     };
-    let result = delete_cmd.execute(&service).await;
+    let result = delete_cmd.execute(&services).await;
 
     assert!(result.is_err());
     match result.unwrap_err() {

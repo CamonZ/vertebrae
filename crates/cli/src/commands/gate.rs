@@ -3,7 +3,7 @@
 //! Implements the `vtb gate` subcommand group for creating and managing validation gates.
 
 use clap::{Args, Subcommand, ValueEnum};
-use vertebrae_core::{ServiceError, TaskService};
+use vertebrae_core::{ServiceError, VertebraeServices};
 use vertebrae_db::{
     AgentConfig, Thing, ValidationGate, ValidationGateType, ValidationGateUpdate,
     ValidationMechanism,
@@ -29,14 +29,14 @@ impl GateCommand {
     ///
     /// # Arguments
     ///
-    /// * `service` - Reference to the task service
+    /// * `services` - Reference to the vertebrae services
     ///
     /// # Errors
     ///
     /// Returns `ServiceError` if the command execution fails.
     #[allow(deprecated)]
-    pub async fn execute(&self, service: &dyn TaskService) -> Result<String, ServiceError> {
-        let db = service.database().clone();
+    pub async fn execute(&self, services: &VertebraeServices) -> Result<String, ServiceError> {
+        let db = services.tasks().database().clone();
         let repo = db.validation_gates();
         match self {
             GateCommand::Create(cmd) => cmd.execute(&repo).await,

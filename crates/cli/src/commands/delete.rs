@@ -5,7 +5,7 @@
 
 use clap::Args;
 use std::io::{self, Write};
-use vertebrae_core::ServiceError;
+use vertebrae_core::{ServiceError, VertebraeServices};
 
 /// Delete a task with optional cascade behavior
 #[derive(Debug, Args)]
@@ -49,15 +49,12 @@ impl DeleteCommand {
     /// Returns `ServiceError` if:
     /// - The task with the given ID does not exist
     /// - Service operations fail
-    pub async fn execute(
-        &self,
-        service: &dyn vertebrae_core::TaskService,
-    ) -> Result<String, ServiceError> {
+    pub async fn execute(&self, services: &VertebraeServices) -> Result<String, ServiceError> {
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
 
         // Get task with all its relationships
-        let task_with_relations = service.get_task_with_relations(&id).await?;
+        let task_with_relations = services.tasks().get_task_with_relations(&id).await?;
         let task_title = &task_with_relations.task.title;
         let children_count = task_with_relations.children_ids.len();
         let blocks_count = task_with_relations.dependent_ids.len();
@@ -98,13 +95,13 @@ impl DeleteCommand {
 
         // Count descendants for message (if cascading)
         let deleted_count = if cascade {
-            self.count_descendants(service, &id).await? + 1
+            self.count_descendants(services, &id).await? + 1
         } else {
             1
         };
 
         // Perform the deletion via service
-        service.delete_task(&id, cascade).await?;
+        services.tasks().delete_task(&id, cascade).await?;
 
         if deleted_count == 1 {
             Ok(format!("Deleted task: {}", id))
@@ -119,14 +116,14 @@ impl DeleteCommand {
     /// Count all descendants of a task recursively.
     async fn count_descendants(
         &self,
-        service: &dyn vertebrae_core::TaskService,
+        services: &VertebraeServices,
         id: &str,
     ) -> Result<usize, ServiceError> {
-        let relations = service.get_task_with_relations(id).await?;
+        let relations = services.tasks().get_task_with_relations(id).await?;
         let mut count = relations.children_ids.len();
 
         for child_id in &relations.children_ids {
-            count += Box::pin(self.count_descendants(service, child_id)).await?;
+            count += Box::pin(self.count_descendants(services, child_id)).await?;
         }
 
         Ok(count)

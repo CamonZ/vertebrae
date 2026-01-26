@@ -6,7 +6,7 @@
 
 use clap::Args;
 use serde::Deserialize;
-use vertebrae_core::{ServiceError, TaskService};
+use vertebrae_core::{ServiceError, VertebraeServices};
 use vertebrae_db::SectionType;
 
 /// Remove sections from a task
@@ -153,7 +153,7 @@ impl UnsectionCommand {
     /// - Database operations fail
     pub async fn execute(
         &self,
-        service: &dyn TaskService,
+        services: &VertebraeServices,
     ) -> Result<UnsectionResult, ServiceError> {
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
@@ -163,7 +163,7 @@ impl UnsectionCommand {
 
         // We need to fetch task sections to determine what to remove
         // Get the service's database connection to verify task exists
-        let db_result = service.get_task(&id).await?;
+        let db_result = services.tasks().get_task(&id).await?;
 
         // Convert task to sections for analysis
         let existing_sections: Vec<SectionRow> = db_result
@@ -185,26 +185,26 @@ impl UnsectionCommand {
         let removed_count = match (&self.section_type, self.index, self.all) {
             // --all without type: remove all sections
             (None, None, true) => {
-                self.remove_all_sections(service, &id, &task.sections)
+                self.remove_all_sections(services, &id, &task.sections)
                     .await?
             }
 
             // type + --all: remove all sections of that type
             (Some(section_type), None, true) => {
-                self.remove_all_of_type(service, &id, section_type, &task.sections)
+                self.remove_all_of_type(services, &id, section_type, &task.sections)
                     .await?
             }
 
             // type + --index: remove specific section at ordinal
             (Some(section_type), Some(index), false) => {
-                self.remove_at_index(service, &id, section_type, index, &task.sections)
+                self.remove_at_index(services, &id, section_type, index, &task.sections)
                     .await?
             }
 
             // type only (no --index, no --all): for single-instance, remove it; for multi-instance, error
             (Some(section_type), None, false) => {
                 if is_single_instance_type(section_type) {
-                    self.remove_single_instance(service, &id, section_type, &task.sections)
+                    self.remove_single_instance(services, &id, section_type, &task.sections)
                         .await?
                 } else {
                     return Err(ServiceError::validation_failed(format!(
@@ -247,7 +247,7 @@ impl UnsectionCommand {
     /// Remove all sections from the task
     async fn remove_all_sections(
         &self,
-        service: &dyn TaskService,
+        services: &VertebraeServices,
         id: &str,
         existing_sections: &[SectionRow],
     ) -> Result<usize, ServiceError> {
@@ -272,7 +272,10 @@ impl UnsectionCommand {
 
         // Remove all sections of each type
         for section_type in types_to_remove {
-            service.remove_sections(id, section_type, None).await?;
+            services
+                .tasks()
+                .remove_sections(id, section_type, None)
+                .await?;
         }
 
         Ok(count)
@@ -281,7 +284,7 @@ impl UnsectionCommand {
     /// Remove all sections of a specific type
     async fn remove_all_of_type(
         &self,
-        service: &dyn TaskService,
+        services: &VertebraeServices,
         id: &str,
         section_type: &SectionType,
         existing_sections: &[SectionRow],
@@ -299,7 +302,8 @@ impl UnsectionCommand {
         }
 
         // Use service layer to remove all sections of this type
-        service
+        services
+            .tasks()
             .remove_sections(id, section_type.clone(), None)
             .await?;
 
@@ -309,7 +313,7 @@ impl UnsectionCommand {
     /// Remove a specific section at the given ordinal
     async fn remove_at_index(
         &self,
-        service: &dyn TaskService,
+        services: &VertebraeServices,
         id: &str,
         section_type: &SectionType,
         index: u32,
@@ -334,7 +338,8 @@ impl UnsectionCommand {
         }
 
         // Use service method which handles finding by ordinal and renumbering
-        service
+        services
+            .tasks()
             .remove_section_by_ordinal(id, section_type.clone(), index)
             .await?;
 
@@ -344,7 +349,7 @@ impl UnsectionCommand {
     /// Remove a single-instance section
     async fn remove_single_instance(
         &self,
-        service: &dyn TaskService,
+        services: &VertebraeServices,
         id: &str,
         section_type: &SectionType,
         existing_sections: &[SectionRow],
@@ -364,7 +369,8 @@ impl UnsectionCommand {
         }
 
         // Use service layer to remove all sections of this type
-        service
+        services
+            .tasks()
             .remove_sections(id, section_type.clone(), None)
             .await?;
 
@@ -375,25 +381,25 @@ impl UnsectionCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vertebrae_core::{CreateTaskOptions, DefaultTaskService};
+    use vertebrae_core::{CreateTaskOptions, VertebraeServices};
     use vertebrae_db::{Database, Section};
 
     /// Helper to create an in-memory test service
-    async fn setup_test_service() -> DefaultTaskService {
+    async fn setup_test_service() -> VertebraeServices {
         let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-        DefaultTaskService::new(db)
+        VertebraeServices::new(db)
     }
 
     /// Helper to create a task with the service
-    async fn create_task(service: &DefaultTaskService, title: &str) -> String {
+    async fn create_task(services: &VertebraeServices, title: &str) -> String {
         let options = CreateTaskOptions::new(title);
-        service.create_task(options).await.unwrap()
+        services.tasks().create_task(options).await.unwrap()
     }
 
     /// Helper to add a section to a task
     async fn add_section(
-        service: &DefaultTaskService,
+        services: &VertebraeServices,
         id: &str,
         section_type: SectionType,
         content: &str,
@@ -404,21 +410,21 @@ mod tests {
         } else {
             Section::new(section_type, content.to_string())
         };
-        service.add_section(id, section).await.unwrap();
+        services.tasks().add_section(id, section).await.unwrap();
     }
 
     /// Helper to get sections from a task
-    async fn get_sections(service: &DefaultTaskService, id: &str) -> Vec<Section> {
-        let task = service.get_task(id).await.unwrap();
+    async fn get_sections(services: &VertebraeServices, id: &str) -> Vec<Section> {
+        let task = services.tasks().get_task(id).await.unwrap();
         task.sections
     }
 
     /// Helper to get updated_at timestamp
     async fn get_updated_at(
-        service: &DefaultTaskService,
+        services: &VertebraeServices,
         id: &str,
     ) -> chrono::DateTime<chrono::Utc> {
-        let task = service.get_task(id).await.unwrap();
+        let task = services.tasks().get_task(id).await.unwrap();
         task.updated_at.unwrap()
     }
 
@@ -492,10 +498,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_remove_goal_section() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        let task_id = create_task(&service, "Test Task").await;
-        add_section(&service, &task_id, SectionType::Goal, "The goal", None).await;
+        let task_id = create_task(&services, "Test Task").await;
+        add_section(&services, &task_id, SectionType::Goal, "The goal", None).await;
 
         let cmd = UnsectionCommand {
             id: task_id.clone(),
@@ -504,7 +510,7 @@ mod tests {
             all: false,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok(), "Unsection failed: {:?}", result.err());
 
         let unsection_result = result.unwrap();
@@ -512,18 +518,18 @@ mod tests {
         assert_eq!(unsection_result.section_type, Some(SectionType::Goal));
 
         // Verify section was removed
-        let sections = get_sections(&service, &task_id).await;
+        let sections = get_sections(&services, &task_id).await;
         assert!(sections.is_empty());
     }
 
     #[tokio::test]
     async fn test_remove_step_at_index() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        let task_id = create_task(&service, "Test Task").await;
-        add_section(&service, &task_id, SectionType::Step, "Step 0", Some(1)).await;
-        add_section(&service, &task_id, SectionType::Step, "Step 1", Some(2)).await;
-        add_section(&service, &task_id, SectionType::Step, "Step 2", Some(3)).await;
+        let task_id = create_task(&services, "Test Task").await;
+        add_section(&services, &task_id, SectionType::Step, "Step 0", Some(1)).await;
+        add_section(&services, &task_id, SectionType::Step, "Step 1", Some(2)).await;
+        add_section(&services, &task_id, SectionType::Step, "Step 2", Some(3)).await;
 
         let cmd = UnsectionCommand {
             id: task_id.clone(),
@@ -532,11 +538,11 @@ mod tests {
             all: false,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok(), "Unsection failed: {:?}", result.err());
 
         // Verify remaining steps are renumbered
-        let sections = get_sections(&service, &task_id).await;
+        let sections = get_sections(&services, &task_id).await;
         assert_eq!(sections.len(), 2);
 
         // Find steps and verify renumbering
@@ -554,12 +560,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_remove_all_of_type() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        let task_id = create_task(&service, "Test Task").await;
-        add_section(&service, &task_id, SectionType::Step, "Step 0", Some(1)).await;
-        add_section(&service, &task_id, SectionType::Step, "Step 1", Some(2)).await;
-        add_section(&service, &task_id, SectionType::Goal, "The goal", None).await;
+        let task_id = create_task(&services, "Test Task").await;
+        add_section(&services, &task_id, SectionType::Step, "Step 0", Some(1)).await;
+        add_section(&services, &task_id, SectionType::Step, "Step 1", Some(2)).await;
+        add_section(&services, &task_id, SectionType::Goal, "The goal", None).await;
 
         let cmd = UnsectionCommand {
             id: task_id.clone(),
@@ -568,27 +574,27 @@ mod tests {
             all: true,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
         let unsection_result = result.unwrap();
         assert_eq!(unsection_result.removed_count, 2);
 
         // Verify only goal remains
-        let sections = get_sections(&service, &task_id).await;
+        let sections = get_sections(&services, &task_id).await;
         assert_eq!(sections.len(), 1);
         assert_eq!(sections[0].section_type, SectionType::Goal);
     }
 
     #[tokio::test]
     async fn test_remove_all_sections() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        let task_id = create_task(&service, "Test Task").await;
-        add_section(&service, &task_id, SectionType::Goal, "The goal", None).await;
-        add_section(&service, &task_id, SectionType::Step, "Step 0", Some(1)).await;
+        let task_id = create_task(&services, "Test Task").await;
+        add_section(&services, &task_id, SectionType::Goal, "The goal", None).await;
+        add_section(&services, &task_id, SectionType::Step, "Step 0", Some(1)).await;
         add_section(
-            &service,
+            &services,
             &task_id,
             SectionType::AntiPattern,
             "Don't do this",
@@ -603,22 +609,22 @@ mod tests {
             all: true,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
         let unsection_result = result.unwrap();
         assert_eq!(unsection_result.removed_count, 3);
 
         // Verify all sections are removed
-        let sections = get_sections(&service, &task_id).await;
+        let sections = get_sections(&services, &task_id).await;
         assert!(sections.is_empty());
     }
 
     #[tokio::test]
     async fn test_remove_nonexistent_section_fails() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        let task_id = create_task(&service, "Test Task").await;
+        let task_id = create_task(&services, "Test Task").await;
 
         let cmd = UnsectionCommand {
             id: task_id.clone(),
@@ -627,7 +633,7 @@ mod tests {
             all: false,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         match result {
             Err(ServiceError::ValidationFailed { message }) => {
                 assert!(
@@ -643,10 +649,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_remove_at_nonexistent_index_fails() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        let task_id = create_task(&service, "Test Task").await;
-        add_section(&service, &task_id, SectionType::Step, "Step 0", Some(1)).await;
+        let task_id = create_task(&services, "Test Task").await;
+        add_section(&services, &task_id, SectionType::Step, "Step 0", Some(1)).await;
 
         let cmd = UnsectionCommand {
             id: task_id.clone(),
@@ -655,7 +661,7 @@ mod tests {
             all: false,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         match result {
             Err(ServiceError::ValidationFailed { message }) => {
                 assert!(
@@ -671,7 +677,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_remove_nonexistent_task_fails() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
         let cmd = UnsectionCommand {
             id: "nonexistent".to_string(),
@@ -680,7 +686,7 @@ mod tests {
             all: false,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         match result {
             Err(ServiceError::TaskNotFound { task_id }) => {
                 assert_eq!(
@@ -696,10 +702,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_multi_instance_without_index_or_all_fails() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        let task_id = create_task(&service, "Test Task").await;
-        add_section(&service, &task_id, SectionType::Step, "Step 0", Some(1)).await;
+        let task_id = create_task(&services, "Test Task").await;
+        add_section(&services, &task_id, SectionType::Step, "Step 0", Some(1)).await;
 
         let cmd = UnsectionCommand {
             id: task_id.clone(),
@@ -708,7 +714,7 @@ mod tests {
             all: false,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         match result {
             Err(ServiceError::ValidationFailed { message }) => {
                 assert!(
@@ -729,12 +735,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_updates_timestamp() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        let task_id = create_task(&service, "Test Task").await;
-        add_section(&service, &task_id, SectionType::Goal, "The goal", None).await;
+        let task_id = create_task(&services, "Test Task").await;
+        add_section(&services, &task_id, SectionType::Goal, "The goal", None).await;
 
-        let initial_ts = get_updated_at(&service, &task_id).await;
+        let initial_ts = get_updated_at(&services, &task_id).await;
 
         // Wait a tiny bit to ensure time passes
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -746,11 +752,11 @@ mod tests {
             all: false,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
         // Verify timestamp was updated
-        let new_ts = get_updated_at(&service, &task_id).await;
+        let new_ts = get_updated_at(&services, &task_id).await;
         assert!(
             new_ts > initial_ts,
             "updated_at should be refreshed: {:?} > {:?}",
@@ -761,10 +767,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_case_insensitive_id() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        let task_id = create_task(&service, "Test Task").await;
-        add_section(&service, &task_id, SectionType::Goal, "The goal", None).await;
+        let task_id = create_task(&services, "Test Task").await;
+        add_section(&services, &task_id, SectionType::Goal, "The goal", None).await;
 
         let cmd = UnsectionCommand {
             id: task_id.to_uppercase(),
@@ -773,25 +779,25 @@ mod tests {
             all: false,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok(), "Case-insensitive lookup should work");
     }
 
     #[tokio::test]
     async fn test_preserves_other_sections_when_removing() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        let task_id = create_task(&service, "Test Task").await;
-        add_section(&service, &task_id, SectionType::Goal, "The goal", None).await;
+        let task_id = create_task(&services, "Test Task").await;
+        add_section(&services, &task_id, SectionType::Goal, "The goal", None).await;
         add_section(
-            &service,
+            &services,
             &task_id,
             SectionType::Context,
             "The context",
             None,
         )
         .await;
-        add_section(&service, &task_id, SectionType::Step, "Step 0", Some(1)).await;
+        add_section(&services, &task_id, SectionType::Step, "Step 0", Some(1)).await;
 
         let cmd = UnsectionCommand {
             id: task_id.clone(),
@@ -800,11 +806,11 @@ mod tests {
             all: false,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
         // Verify other sections remain
-        let sections = get_sections(&service, &task_id).await;
+        let sections = get_sections(&services, &task_id).await;
         assert_eq!(sections.len(), 2);
 
         let context = sections
@@ -820,10 +826,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_remove_all_of_type_returns_zero_when_none_exist() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        let task_id = create_task(&service, "Test Task").await;
-        add_section(&service, &task_id, SectionType::Goal, "The goal", None).await;
+        let task_id = create_task(&services, "Test Task").await;
+        add_section(&services, &task_id, SectionType::Goal, "The goal", None).await;
 
         let cmd = UnsectionCommand {
             id: task_id.clone(),
@@ -832,7 +838,7 @@ mod tests {
             all: true,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
         let unsection_result = result.unwrap();
@@ -841,9 +847,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_no_type_without_all_flag_fails() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        let task_id = create_task(&service, "Test Task").await;
+        let task_id = create_task(&services, "Test Task").await;
 
         let cmd = UnsectionCommand {
             id: task_id.clone(),
@@ -852,7 +858,7 @@ mod tests {
             all: false,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         match result {
             Err(ServiceError::ValidationFailed { message }) => {
                 assert!(
@@ -868,9 +874,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_index_without_type_fails() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        let task_id = create_task(&service, "Test Task").await;
+        let task_id = create_task(&services, "Test Task").await;
 
         let cmd = UnsectionCommand {
             id: task_id.clone(),
@@ -879,7 +885,7 @@ mod tests {
             all: false,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         match result {
             Err(ServiceError::ValidationFailed { message }) => {
                 assert!(

@@ -4,7 +4,7 @@
 //! sorted by file path and then line number.
 
 use clap::Args;
-use vertebrae_core::{ServiceError, TaskService};
+use vertebrae_core::{ServiceError, VertebraeServices};
 use vertebrae_db::CodeRef;
 
 /// List all code references for a task
@@ -122,19 +122,20 @@ impl RefsCommand {
     ///
     /// # Arguments
     ///
-    /// * `service` - Reference to the task service
+    /// * `services` - Reference to the services container
     ///
     /// # Errors
     ///
     /// Returns `ServiceError` if:
     /// - The task with the given ID does not exist
     /// - Service operations fail
-    pub async fn execute(&self, service: &dyn TaskService) -> Result<RefsResult, ServiceError> {
+    pub async fn execute(&self, services: &VertebraeServices) -> Result<RefsResult, ServiceError> {
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
 
         // Fetch task using service
-        let task = service
+        let task = services
+            .tasks()
             .get_task(&id)
             .await
             .map_err(|_e| ServiceError::task_not_found(&self.id))?;
@@ -166,29 +167,33 @@ impl RefsCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vertebrae_core::{CreateTaskOptions, DefaultTaskService};
+    use vertebrae_core::{CreateTaskOptions, VertebraeServices};
     use vertebrae_db::Database;
 
     /// Helper to create a test service with in-memory database
-    async fn setup_test_service() -> DefaultTaskService {
+    async fn setup_test_service() -> VertebraeServices {
         let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-        DefaultTaskService::new(db)
+        VertebraeServices::new(db)
     }
 
     /// Helper to create a task with the service
     async fn create_task_with_ref(
-        service: &DefaultTaskService,
+        services: &VertebraeServices,
         _id: &str,
         title: &str,
         code_ref: Option<CodeRef>,
     ) -> String {
         let options = CreateTaskOptions::new(title);
-        let created_id = service.create_task(options).await.unwrap();
+        let created_id = services.tasks().create_task(options).await.unwrap();
 
         // If a code ref was provided, add it
         if let Some(ref_to_add) = code_ref {
-            service.append_ref(&created_id, &ref_to_add).await.unwrap();
+            services
+                .tasks()
+                .append_ref(&created_id, &ref_to_add)
+                .await
+                .unwrap();
         }
 
         created_id
@@ -211,26 +216,29 @@ mod tests {
 
     #[tokio::test]
     async fn test_refs_all() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        let task_id = create_task_with_ref(&service, "task1", "Implement auth", None).await;
+        let task_id = create_task_with_ref(&services, "task1", "Implement auth", None).await;
 
         // Add code references
-        service
+        services
+            .tasks()
             .append_ref(
                 &task_id,
                 &CodeRef::file("config/auth.exs").with_name("config"),
             )
             .await
             .unwrap();
-        service
+        services
+            .tasks()
             .append_ref(
                 &task_id,
                 &CodeRef::range("src/lib/auth.ex", 45, 67).with_name("hash_password"),
             )
             .await
             .unwrap();
-        service
+        services
+            .tasks()
             .append_ref(
                 &task_id,
                 &CodeRef::line("src/lib/auth.ex", 120)
@@ -244,7 +252,7 @@ mod tests {
             id: task_id.clone(),
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok(), "Refs command failed: {:?}", result.err());
 
         let refs_result = result.unwrap();
@@ -261,23 +269,26 @@ mod tests {
 
     #[tokio::test]
     async fn test_refs_sorted_by_file_then_line() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        let task_id = create_task_with_ref(&service, "task1", "Test Task", None).await;
+        let task_id = create_task_with_ref(&services, "task1", "Test Task", None).await;
 
         // Add in reverse order to test sorting
-        service
+        services
+            .tasks()
             .append_ref(&task_id, &CodeRef::line("src/b.ex", 10))
             .await
             .unwrap();
-        service
+        services
+            .tasks()
             .append_ref(
                 &task_id,
                 &CodeRef::range("src/a.ex", 50, 60).with_name("function"),
             )
             .await
             .unwrap();
-        service
+        services
+            .tasks()
             .append_ref(
                 &task_id,
                 &CodeRef::line("src/a.ex", 20).with_name("Important"),
@@ -289,7 +300,7 @@ mod tests {
             id: task_id.clone(),
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
         let refs_result = result.unwrap();
@@ -305,15 +316,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_refs_empty() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        let task_id = create_task_with_ref(&service, "task1", "Empty Task", None).await;
+        let task_id = create_task_with_ref(&services, "task1", "Empty Task", None).await;
 
         let cmd = RefsCommand {
             id: task_id.clone(),
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
         let refs_result = result.unwrap();
@@ -326,13 +337,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_refs_nonexistent_task() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
         let cmd = RefsCommand {
             id: "nonexistent".to_string(),
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         match result {
             Err(ServiceError::TaskNotFound { task_id }) => {
                 assert_eq!(
@@ -348,10 +359,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_refs_case_insensitive_id() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        let task_id = create_task_with_ref(&service, "task1", "Test Task", None).await;
-        service
+        let task_id = create_task_with_ref(&services, "task1", "Test Task", None).await;
+        services
+            .tasks()
             .append_ref(&task_id, &CodeRef::file("src/main.rs"))
             .await
             .unwrap();
@@ -360,7 +372,7 @@ mod tests {
             id: task_id.to_uppercase(),
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok(), "Case-insensitive lookup should work");
 
         let refs_result = result.unwrap();
@@ -439,10 +451,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_refs_preserves_all_fields() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        let task_id = create_task_with_ref(&service, "task1", "Test Task", None).await;
-        service
+        let task_id = create_task_with_ref(&services, "task1", "Test Task", None).await;
+        services
+            .tasks()
             .append_ref(
                 &task_id,
                 &CodeRef::range("src/main.rs", 10, 20)
@@ -456,7 +469,7 @@ mod tests {
             id: task_id.clone(),
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
         let refs_result = result.unwrap();
@@ -472,10 +485,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_refs_file_only() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        let task_id = create_task_with_ref(&service, "task1", "Test Task", None).await;
-        service
+        let task_id = create_task_with_ref(&services, "task1", "Test Task", None).await;
+        services
+            .tasks()
             .append_ref(&task_id, &CodeRef::file("README.md"))
             .await
             .unwrap();
@@ -484,7 +498,7 @@ mod tests {
             id: task_id.clone(),
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
         let refs_result = result.unwrap();

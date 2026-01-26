@@ -4,11 +4,8 @@
 //! Shows highest-level unblocked items prioritized by hierarchy (epic > ticket > task).
 
 use clap::Args;
-use vertebrae_core::{ServiceError, TaskService};
+use vertebrae_core::{ServiceError, VertebraeServices};
 use vertebrae_db::TaskSummary;
-
-#[cfg(test)]
-use {vertebrae_core::DefaultTaskService, vertebrae_db::Level};
 
 /// Show highest-level actionable items
 #[derive(Debug, Args)]
@@ -48,16 +45,14 @@ impl ReadyCommand {
     ///
     /// # Arguments
     ///
-    /// * `service` - Reference to the task service
+    /// * `services` - Reference to the services container
     ///
     /// # Errors
     ///
     /// Returns `ServiceError` if database operations fail.
-    pub async fn execute(&self, service: &dyn TaskService) -> Result<ReadyResult, ServiceError> {
-        let db = service.database();
-
+    pub async fn execute(&self, services: &VertebraeServices) -> Result<ReadyResult, ServiceError> {
         // Get ready items for backlog status (ready to start work)
-        let backlog_ready = db.list_ready_items("backlog").await?;
+        let backlog_ready = services.tasks().list_ready("backlog").await?;
 
         Ok(ReadyResult { backlog_ready })
     }
@@ -66,25 +61,24 @@ impl ReadyCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vertebrae_db::{Database, Task};
+    use vertebrae_core::CreateTaskOptions;
+    use vertebrae_db::{Database, Level};
 
     /// Helper to create an in-memory test service
-    async fn setup_test_service() -> DefaultTaskService {
+    async fn setup_test_service() -> VertebraeServices {
         let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-        DefaultTaskService::new(db)
+        VertebraeServices::new(db)
     }
 
-    /// Helper to create a task in the database
-    /// Status is derived from current_step_id - uses the default workflow steps
+    /// Helper to create a task via the service layer
     async fn create_task(
-        service: &DefaultTaskService,
+        services: &VertebraeServices,
         id: &str,
         title: &str,
         level: &str,
         status: &str,
     ) {
-        let db = service.database();
         let level = match level {
             "epic" => Level::Epic,
             "ticket" => Level::Ticket,
@@ -92,63 +86,32 @@ mod tests {
             _ => Level::Task,
         };
 
-        // All tasks use the default workflow. Status is derived from current_step_id.
-        let workflow_id = Some(surrealdb::sql::Thing::from(("workflow", "default")));
+        let options = CreateTaskOptions::new(title)
+            .with_id(id)
+            .with_level(level)
+            .with_status(status);
 
-        // Set up workflow step - use step IDs for all statuses
-        let current_step_id = match status {
-            "backlog" => Some(surrealdb::sql::Thing::from(("step", "default_backlog"))),
-            "in_progress" => Some(surrealdb::sql::Thing::from(("step", "default_in_progress"))),
-            "pending_review" => Some(surrealdb::sql::Thing::from((
-                "step",
-                "default_pending_review",
-            ))),
-            "done" => Some(surrealdb::sql::Thing::from(("step", "default_done"))),
-            "rejected" => Some(surrealdb::sql::Thing::from(("step", "default_rejected"))),
-            _ => Some(surrealdb::sql::Thing::from(("step", "default_backlog"))),
-        };
-
-        let task = Task {
-            id: None,
-            title: title.to_string(),
-            description: None,
-            level,
-            priority: None,
-            tags: vec![],
-            sections: vec![],
-            code_refs: vec![],
-            created_at: None,
-            updated_at: None,
-            started_at: None,
-            completed_at: None,
-            needs_human_review: None,
-            revision_feedback: None,
-            rejection_reason: None,
-            workflow_id,
-            current_step_id,
-        };
-
-        db.tasks().create(id, &task).await.unwrap();
+        services.tasks().create_task(options).await.unwrap();
     }
 
     /// Helper to create a child_of relationship (child -> parent)
-    async fn create_child_of(service: &DefaultTaskService, child_id: &str, parent_id: &str) {
-        let db = service.database();
-        db.relationships()
-            .create_child_of(child_id, parent_id)
+    async fn create_child_of(services: &VertebraeServices, child_id: &str, parent_id: &str) {
+        services
+            .tasks()
+            .set_parent(child_id, parent_id)
             .await
             .unwrap();
     }
 
     /// Helper to create a depends_on relationship (dependent -> dependency)
     async fn create_depends_on(
-        service: &DefaultTaskService,
+        services: &VertebraeServices,
         dependent_id: &str,
         dependency_id: &str,
     ) {
-        let db = service.database();
-        db.relationships()
-            .create_depends_on(dependent_id, dependency_id)
+        services
+            .tasks()
+            .add_dependency(dependent_id, dependency_id)
             .await
             .unwrap();
     }
@@ -218,22 +181,22 @@ mod tests {
 
     #[tokio::test]
     async fn test_ready_empty_database() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
         let cmd = ReadyCommand {};
-        let result = cmd.execute(&service).await.unwrap();
+        let result = cmd.execute(&services).await.unwrap();
 
         assert!(result.backlog_ready.is_empty());
     }
 
     #[tokio::test]
     async fn test_ready_single_backlog_task() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        create_task(&service, "task1", "Backlog Task", "task", "backlog").await;
+        create_task(&services, "task1", "Backlog Task", "task", "backlog").await;
 
         let cmd = ReadyCommand {};
-        let result = cmd.execute(&service).await.unwrap();
+        let result = cmd.execute(&services).await.unwrap();
 
         assert!(result.backlog_ready.len() == 1);
         assert_eq!(result.backlog_ready[0].id, "task1");
@@ -241,39 +204,46 @@ mod tests {
 
     #[tokio::test]
     async fn test_ready_excludes_in_progress() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        create_task(&service, "task1", "In Progress Task", "task", "in_progress").await;
+        create_task(
+            &services,
+            "task1",
+            "In Progress Task",
+            "task",
+            "in_progress",
+        )
+        .await;
 
         let cmd = ReadyCommand {};
-        let result = cmd.execute(&service).await.unwrap();
+        let result = cmd.execute(&services).await.unwrap();
 
         assert!(result.backlog_ready.is_empty());
     }
 
     #[tokio::test]
     async fn test_ready_excludes_done() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
-        create_task(&service, "task1", "Done Task", "task", "done").await;
+        create_task(&services, "task1", "Done Task", "task", "done").await;
 
         let cmd = ReadyCommand {};
-        let result = cmd.execute(&service).await.unwrap();
+        let result = cmd.execute(&services).await.unwrap();
 
         assert!(result.backlog_ready.is_empty());
     }
 
     #[tokio::test]
     async fn test_ready_shows_parent_not_child_when_no_work_started() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
         // Create epic with backlog child - should show epic only
-        create_task(&service, "epic1", "Epic", "epic", "backlog").await;
-        create_task(&service, "ticket1", "Ticket", "ticket", "backlog").await;
-        create_child_of(&service, "ticket1", "epic1").await;
+        create_task(&services, "epic1", "Epic", "epic", "backlog").await;
+        create_task(&services, "ticket1", "Ticket", "ticket", "backlog").await;
+        create_child_of(&services, "ticket1", "epic1").await;
 
         let cmd = ReadyCommand {};
-        let result = cmd.execute(&service).await.unwrap();
+        let result = cmd.execute(&services).await.unwrap();
 
         // Should show only epic1, not ticket1
         assert_eq!(result.backlog_ready.len(), 1);
@@ -282,15 +252,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_ready_excludes_parent_when_child_work_started() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
         // Create epic in backlog with in_progress child - epic should not show
-        create_task(&service, "epic1", "Epic", "epic", "backlog").await;
-        create_task(&service, "ticket1", "Ticket", "ticket", "in_progress").await;
-        create_child_of(&service, "ticket1", "epic1").await;
+        create_task(&services, "epic1", "Epic", "epic", "backlog").await;
+        create_task(&services, "ticket1", "Ticket", "ticket", "in_progress").await;
+        create_child_of(&services, "ticket1", "epic1").await;
 
         let cmd = ReadyCommand {};
-        let result = cmd.execute(&service).await.unwrap();
+        let result = cmd.execute(&services).await.unwrap();
 
         // Epic should be excluded because work has started on a child
         assert!(result.backlog_ready.is_empty());
@@ -298,15 +268,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_ready_excludes_blocked_tasks() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
         // Create blocker (backlog) and blocked task (backlog)
-        create_task(&service, "blocker", "Blocker", "task", "backlog").await;
-        create_task(&service, "blocked", "Blocked", "task", "backlog").await;
-        create_depends_on(&service, "blocked", "blocker").await;
+        create_task(&services, "blocker", "Blocker", "task", "backlog").await;
+        create_task(&services, "blocked", "Blocked", "task", "backlog").await;
+        create_depends_on(&services, "blocked", "blocker").await;
 
         let cmd = ReadyCommand {};
-        let result = cmd.execute(&service).await.unwrap();
+        let result = cmd.execute(&services).await.unwrap();
 
         // Should show only blocker (blocked is blocked by an incomplete task)
         assert_eq!(result.backlog_ready.len(), 1);
@@ -315,15 +285,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_ready_includes_unblocked_tasks() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
         // Create blocker (done) and blocked task (backlog)
-        create_task(&service, "blocker", "Blocker", "task", "done").await;
-        create_task(&service, "blocked", "Blocked", "task", "backlog").await;
-        create_depends_on(&service, "blocked", "blocker").await;
+        create_task(&services, "blocker", "Blocker", "task", "done").await;
+        create_task(&services, "blocked", "Blocked", "task", "backlog").await;
+        create_depends_on(&services, "blocked", "blocker").await;
 
         let cmd = ReadyCommand {};
-        let result = cmd.execute(&service).await.unwrap();
+        let result = cmd.execute(&services).await.unwrap();
 
         // Should show blocked task (blocker is done)
         assert_eq!(result.backlog_ready.len(), 1);
@@ -332,15 +302,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_ready_prioritizes_epic_over_ticket_over_task() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
         // Create independent tasks at all levels - all backlog
-        create_task(&service, "task1", "Task", "task", "backlog").await;
-        create_task(&service, "ticket1", "Ticket", "ticket", "backlog").await;
-        create_task(&service, "epic1", "Epic", "epic", "backlog").await;
+        create_task(&services, "task1", "Task", "task", "backlog").await;
+        create_task(&services, "ticket1", "Ticket", "ticket", "backlog").await;
+        create_task(&services, "epic1", "Epic", "epic", "backlog").await;
 
         let cmd = ReadyCommand {};
-        let result = cmd.execute(&service).await.unwrap();
+        let result = cmd.execute(&services).await.unwrap();
 
         // Should show all three since they're independent
         assert_eq!(result.backlog_ready.len(), 3);
@@ -354,17 +324,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_ready_deep_hierarchy() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
         // Create epic -> ticket -> task hierarchy, all backlog
-        create_task(&service, "epic1", "Epic", "epic", "backlog").await;
-        create_task(&service, "ticket1", "Ticket", "ticket", "backlog").await;
-        create_task(&service, "task1", "Task", "task", "backlog").await;
-        create_child_of(&service, "ticket1", "epic1").await;
-        create_child_of(&service, "task1", "ticket1").await;
+        create_task(&services, "epic1", "Epic", "epic", "backlog").await;
+        create_task(&services, "ticket1", "Ticket", "ticket", "backlog").await;
+        create_task(&services, "task1", "Task", "task", "backlog").await;
+        create_child_of(&services, "ticket1", "epic1").await;
+        create_child_of(&services, "task1", "ticket1").await;
 
         let cmd = ReadyCommand {};
-        let result = cmd.execute(&service).await.unwrap();
+        let result = cmd.execute(&services).await.unwrap();
 
         // Should show only epic1 (highest level entry point)
         assert_eq!(result.backlog_ready.len(), 1);
@@ -373,18 +343,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_ready_work_started_deep_in_hierarchy() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
         // Create epic -> ticket -> task hierarchy
         // task is in_progress, so epic should be excluded
-        create_task(&service, "epic1", "Epic", "epic", "backlog").await;
-        create_task(&service, "ticket1", "Ticket", "ticket", "backlog").await;
-        create_task(&service, "task1", "Task", "task", "in_progress").await;
-        create_child_of(&service, "ticket1", "epic1").await;
-        create_child_of(&service, "task1", "ticket1").await;
+        create_task(&services, "epic1", "Epic", "epic", "backlog").await;
+        create_task(&services, "ticket1", "Ticket", "ticket", "backlog").await;
+        create_task(&services, "task1", "Task", "task", "in_progress").await;
+        create_child_of(&services, "ticket1", "epic1").await;
+        create_child_of(&services, "task1", "ticket1").await;
 
         let cmd = ReadyCommand {};
-        let result = cmd.execute(&service).await.unwrap();
+        let result = cmd.execute(&services).await.unwrap();
 
         // Should show nothing (work started deep in hierarchy)
         assert!(result.backlog_ready.is_empty());
@@ -392,20 +362,20 @@ mod tests {
 
     #[tokio::test]
     async fn test_ready_child_shows_when_parent_has_work_elsewhere() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
         // Create epic with two tickets:
         // - ticket1: in_progress (work started)
         // - ticket2: backlog (ready to start)
         // ticket2 should show (it's an entry point, not under the in_progress one)
-        create_task(&service, "epic1", "Epic", "epic", "backlog").await;
-        create_task(&service, "ticket1", "Ticket 1", "ticket", "in_progress").await;
-        create_task(&service, "ticket2", "Ticket 2", "ticket", "backlog").await;
-        create_child_of(&service, "ticket1", "epic1").await;
-        create_child_of(&service, "ticket2", "epic1").await;
+        create_task(&services, "epic1", "Epic", "epic", "backlog").await;
+        create_task(&services, "ticket1", "Ticket 1", "ticket", "in_progress").await;
+        create_task(&services, "ticket2", "Ticket 2", "ticket", "backlog").await;
+        create_child_of(&services, "ticket1", "epic1").await;
+        create_child_of(&services, "ticket2", "epic1").await;
 
         let cmd = ReadyCommand {};
-        let result = cmd.execute(&service).await.unwrap();
+        let result = cmd.execute(&services).await.unwrap();
 
         // Epic has work started (ticket1 is in_progress), so it shouldn't show
         // But ticket2 should show (it's the entry point for its subtree)

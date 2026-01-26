@@ -4,11 +4,11 @@
 //! title, description, priority, tags, parent relationship, and sections.
 
 use clap::Args;
-use vertebrae_core::{ServiceError, TaskService, UpdateTaskOptions};
+use vertebrae_core::{ServiceError, UpdateTaskOptions, VertebraeServices};
 use vertebrae_db::{Priority, SectionType};
 
 #[cfg(test)]
-use {serde::Deserialize, vertebrae_db::Database};
+use vertebrae_db::Database;
 
 /// Update an existing task
 #[derive(Debug, Args)]
@@ -95,7 +95,7 @@ impl UpdateCommand {
     ///
     /// # Arguments
     ///
-    /// * `service` - Reference to the task service
+    /// * `services` - Reference to the task service
     ///
     /// # Errors
     ///
@@ -104,12 +104,12 @@ impl UpdateCommand {
     /// - The parent task doesn't exist (if specified)
     /// - Attempting to set self as parent
     /// - Service operations fail
-    pub async fn execute(&self, service: &dyn TaskService) -> Result<String, ServiceError> {
+    pub async fn execute(&self, services: &VertebraeServices) -> Result<String, ServiceError> {
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
 
         // Verify task exists
-        if !service.task_exists(&id).await? {
+        if !services.tasks().task_exists(&id).await? {
             return Err(ServiceError::task_not_found(&id));
         }
 
@@ -132,7 +132,7 @@ impl UpdateCommand {
             }
 
             // Check parent exists
-            if !service.task_exists(&parent_id_lower).await? {
+            if !services.tasks().task_exists(&parent_id_lower).await? {
                 return Err(ServiceError::parent_not_found(&parent_id_lower));
             }
         }
@@ -176,7 +176,7 @@ impl UpdateCommand {
         }
 
         // Apply all field/tag/parent updates via service layer
-        service.update_task(&id, options).await?;
+        services.tasks().update_task(&id, options).await?;
 
         // Handle section edits via service layer
         if let Some(args) = &self.edit_section {
@@ -197,7 +197,8 @@ impl UpdateCommand {
             })?;
 
             let new_content = &args[2];
-            service
+            services
+                .tasks()
                 .edit_section_by_ordinal(&id, section_type, ordinal, new_content)
                 .await?;
         }
@@ -220,7 +221,8 @@ impl UpdateCommand {
                 ))
             })?;
 
-            service
+            services
+                .tasks()
                 .remove_section_by_ordinal(&id, section_type, ordinal)
                 .await?;
         }
@@ -245,18 +247,19 @@ impl UpdateCommand {
 mod tests {
     use super::*;
     use serial_test::serial;
-    use vertebrae_core::DefaultTaskService;
+    use vertebrae_core::{CreateTaskOptions, VertebraeServices};
+    use vertebrae_db::{Level, Priority};
 
     /// Helper to create an in-memory test database wrapped in a service
-    async fn setup_test_db() -> DefaultTaskService {
+    async fn setup_test_db() -> VertebraeServices {
         let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-        DefaultTaskService::new(db)
+        VertebraeServices::new(db)
     }
 
-    /// Helper to create a task in the database
+    /// Helper to create a task via the service layer
     async fn create_task(
-        db: &Database,
+        services: &VertebraeServices,
         id: &str,
         title: &str,
         level: &str,
@@ -264,8 +267,6 @@ mod tests {
         priority: Option<&str>,
         tags: &[&str],
     ) {
-        use vertebrae_db::{Level, Task};
-
         let level_enum = match level {
             "epic" => Level::Epic,
             "ticket" => Level::Ticket,
@@ -273,66 +274,50 @@ mod tests {
         };
 
         let priority_enum = priority.and_then(|p| match p {
-            "low" => Some(vertebrae_db::Priority::Low),
-            "medium" => Some(vertebrae_db::Priority::Medium),
-            "high" => Some(vertebrae_db::Priority::High),
-            "critical" => Some(vertebrae_db::Priority::Critical),
+            "low" => Some(Priority::Low),
+            "medium" => Some(Priority::Medium),
+            "high" => Some(Priority::High),
+            "critical" => Some(Priority::Critical),
             _ => None,
         });
 
-        // Set up workflow step if status is not "backlog"
-        let current_step_id = if status != "backlog" {
-            let step_id_str = format!("default_{}", status);
-            Some(surrealdb::sql::Thing::from(("step", step_id_str.as_str())))
-        } else {
-            None
-        };
+        let mut options = CreateTaskOptions::new(title)
+            .with_id(id)
+            .with_level(level_enum)
+            .with_status(status);
 
-        let task = Task {
-            title: title.to_string(),
-            description: None,
-            level: level_enum,
-            priority: priority_enum,
-            tags: tags.iter().map(|t| t.to_string()).collect(),
-            sections: vec![],
-            code_refs: vec![],
-            needs_human_review: None,
-            revision_feedback: None,
-            rejection_reason: None,
-            created_at: None,
-            updated_at: None,
-            started_at: None,
-            completed_at: None,
-            id: None,
-            workflow_id: None,
-            current_step_id,
-        };
+        if let Some(p) = priority_enum {
+            options = options.with_priority(p);
+        }
 
-        db.tasks().create(id, &task).await.unwrap();
+        for tag in tags {
+            options = options.with_tag(*tag);
+        }
+
+        services.tasks().create_task(options).await.unwrap();
     }
 
     /// Helper to create a child_of relationship
-    async fn create_child_of(db: &Database, child_id: &str, parent_id: &str) {
-        db.relationships()
-            .create_child_of(child_id, parent_id)
+    async fn create_child_of(services: &VertebraeServices, child_id: &str, parent_id: &str) {
+        services
+            .tasks()
+            .set_parent(child_id, parent_id)
             .await
             .unwrap();
     }
 
     /// Struct for querying task fields
-    #[derive(Debug, Deserialize)]
+    #[derive(Debug)]
     struct TaskFields {
         title: String,
         priority: Option<String>,
-        #[serde(default)]
         tags: Vec<String>,
-        #[serde(default)]
         updated_at: Option<chrono::DateTime<chrono::Utc>>,
     }
 
     /// Helper to get a task's fields
-    async fn get_task(db: &Database, id: &str) -> Option<TaskFields> {
-        let task = db.tasks().get(id).await.ok()??;
+    async fn get_task(services: &VertebraeServices, id: &str) -> Option<TaskFields> {
+        let task = services.tasks().get_task(id).await.ok()?;
         Some(TaskFields {
             title: task.title,
             priority: task.priority.map(|p| p.to_string()),
@@ -342,8 +327,8 @@ mod tests {
     }
 
     /// Helper to get parent ID for a task
-    async fn get_parent_id(db: &Database, id: &str) -> Option<String> {
-        db.relationships().get_parent(id).await.ok()?
+    async fn get_parent_id(services: &VertebraeServices, id: &str) -> Option<String> {
+        services.tasks().get_parent(id).await.ok()?
     }
 
     #[test]
@@ -518,7 +503,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_nonexistent_task() {
-        let service = setup_test_db().await;
+        let services = setup_test_db().await;
 
         let cmd = UpdateCommand {
             id: "nonexistent".to_string(),
@@ -532,7 +517,7 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         match result {
             Err(ServiceError::TaskNotFound { task_id }) => {
                 assert!(
@@ -548,10 +533,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_title() {
-        let service = setup_test_db().await;
+        let services = setup_test_db().await;
 
         create_task(
-            service.database(),
+            &services,
             "abc123",
             "Original title",
             "task",
@@ -573,11 +558,11 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
         // Verify title was changed
-        let task = get_task(service.database(), "abc123")
+        let task = get_task(&services, "abc123")
             .await
             .expect("Task should exist");
         assert_eq!(task.title, "New title");
@@ -589,10 +574,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_priority() {
-        let service = setup_test_db().await;
+        let services = setup_test_db().await;
 
         create_task(
-            service.database(),
+            &services,
             "abc123",
             "Test task",
             "task",
@@ -614,11 +599,11 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
         // Verify priority was changed
-        let task = get_task(service.database(), "abc123")
+        let task = get_task(&services, "abc123")
             .await
             .expect("Task should exist");
         assert_eq!(task.priority, Some("high".to_string()));
@@ -630,10 +615,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_add_tag() {
-        let service = setup_test_db().await;
+        let services = setup_test_db().await;
 
         create_task(
-            service.database(),
+            &services,
             "abc123",
             "Test task",
             "task",
@@ -655,20 +640,20 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
-        let task = get_task(service.database(), "abc123").await.unwrap();
+        let task = get_task(&services, "abc123").await.unwrap();
         assert!(task.tags.contains(&"initial".to_string()));
         assert!(task.tags.contains(&"urgent".to_string()));
     }
 
     #[tokio::test]
     async fn test_update_remove_tag() {
-        let service = setup_test_db().await;
+        let services = setup_test_db().await;
 
         create_task(
-            service.database(),
+            &services,
             "abc123",
             "Test task",
             "task",
@@ -690,20 +675,20 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
-        let task = get_task(service.database(), "abc123").await.unwrap();
+        let task = get_task(&services, "abc123").await.unwrap();
         assert!(task.tags.contains(&"initial".to_string()));
         assert!(!task.tags.contains(&"toremove".to_string()));
     }
 
     #[tokio::test]
     async fn test_update_add_duplicate_tag() {
-        let service = setup_test_db().await;
+        let services = setup_test_db().await;
 
         create_task(
-            service.database(),
+            &services,
             "abc123",
             "Test task",
             "task",
@@ -725,10 +710,10 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
-        let task = get_task(service.database(), "abc123").await.unwrap();
+        let task = get_task(&services, "abc123").await.unwrap();
         // Should only have one instance of the tag
         assert_eq!(task.tags.len(), 1);
         assert_eq!(task.tags[0], "existing");
@@ -736,10 +721,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_set_parent() {
-        let service = setup_test_db().await;
+        let services = setup_test_db().await;
 
         create_task(
-            service.database(),
+            &services,
             "parent1",
             "Parent task",
             "epic",
@@ -749,7 +734,7 @@ mod tests {
         )
         .await;
         create_task(
-            service.database(),
+            &services,
             "child1",
             "Child task",
             "task",
@@ -771,19 +756,19 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
-        let parent_id = get_parent_id(service.database(), "child1").await;
+        let parent_id = get_parent_id(&services, "child1").await;
         assert_eq!(parent_id, Some("parent1".to_string()));
     }
 
     #[tokio::test]
     async fn test_update_change_parent() {
-        let service = setup_test_db().await;
+        let services = setup_test_db().await;
 
         create_task(
-            service.database(),
+            &services,
             "parent1",
             "Parent 1",
             "epic",
@@ -793,7 +778,7 @@ mod tests {
         )
         .await;
         create_task(
-            service.database(),
+            &services,
             "parent2",
             "Parent 2",
             "epic",
@@ -803,7 +788,7 @@ mod tests {
         )
         .await;
         create_task(
-            service.database(),
+            &services,
             "child1",
             "Child task",
             "task",
@@ -812,7 +797,7 @@ mod tests {
             &[],
         )
         .await;
-        create_child_of(service.database(), "child1", "parent1").await;
+        create_child_of(&services, "child1", "parent1").await;
 
         let cmd = UpdateCommand {
             id: "child1".to_string(),
@@ -826,19 +811,19 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
-        let parent_id = get_parent_id(service.database(), "child1").await;
+        let parent_id = get_parent_id(&services, "child1").await;
         assert_eq!(parent_id, Some("parent2".to_string()));
     }
 
     #[tokio::test]
     async fn test_update_remove_parent() {
-        let service = setup_test_db().await;
+        let services = setup_test_db().await;
 
         create_task(
-            service.database(),
+            &services,
             "parent1",
             "Parent task",
             "epic",
@@ -848,7 +833,7 @@ mod tests {
         )
         .await;
         create_task(
-            service.database(),
+            &services,
             "child1",
             "Child task",
             "task",
@@ -857,10 +842,10 @@ mod tests {
             &[],
         )
         .await;
-        create_child_of(service.database(), "child1", "parent1").await;
+        create_child_of(&services, "child1", "parent1").await;
 
         // Verify parent exists before
-        let parent_id = get_parent_id(service.database(), "child1").await;
+        let parent_id = get_parent_id(&services, "child1").await;
         assert_eq!(parent_id, Some("parent1".to_string()));
 
         let cmd = UpdateCommand {
@@ -875,20 +860,20 @@ mod tests {
             remove_section: None, // Empty string removes parent
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
-        let parent_id = get_parent_id(service.database(), "child1").await;
+        let parent_id = get_parent_id(&services, "child1").await;
         assert!(parent_id.is_none());
     }
 
     #[tokio::test]
     #[serial]
     async fn test_update_self_parent_fails() {
-        let service = setup_test_db().await;
+        let services = setup_test_db().await;
 
         create_task(
-            service.database(),
+            &services,
             "abc123",
             "Test task",
             "task",
@@ -910,7 +895,7 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         match result {
             Err(ServiceError::ValidationFailed { message }) => {
                 assert!(
@@ -926,10 +911,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_nonexistent_parent_fails() {
-        let service = setup_test_db().await;
+        let services = setup_test_db().await;
 
         create_task(
-            service.database(),
+            &services,
             "abc123",
             "Test task",
             "task",
@@ -951,7 +936,7 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         match result {
             Err(ServiceError::ParentNotFound { parent_id }) => {
                 assert!(
@@ -967,10 +952,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_timestamp_updated() {
-        let service = setup_test_db().await;
+        let services = setup_test_db().await;
 
         create_task(
-            service.database(),
+            &services,
             "abc123",
             "Test task",
             "task",
@@ -992,19 +977,19 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
-        let task = get_task(service.database(), "abc123").await.unwrap();
+        let task = get_task(&services, "abc123").await.unwrap();
         assert!(task.updated_at.is_some());
     }
 
     #[tokio::test]
     async fn test_update_case_insensitive_id() {
-        let service = setup_test_db().await;
+        let services = setup_test_db().await;
 
         create_task(
-            service.database(),
+            &services,
             "abc123",
             "Test task",
             "task",
@@ -1026,19 +1011,19 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
-        let task = get_task(service.database(), "abc123").await.unwrap();
+        let task = get_task(&services, "abc123").await.unwrap();
         assert_eq!(task.title, "New title");
     }
 
     #[tokio::test]
     async fn test_update_no_changes() {
-        let service = setup_test_db().await;
+        let services = setup_test_db().await;
 
         create_task(
-            service.database(),
+            &services,
             "abc123",
             "Test task",
             "task",
@@ -1060,17 +1045,17 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "abc123");
     }
 
     #[tokio::test]
     async fn test_update_multiple_fields() {
-        let service = setup_test_db().await;
+        let services = setup_test_db().await;
 
         create_task(
-            service.database(),
+            &services,
             "abc123",
             "Original",
             "task",
@@ -1092,10 +1077,10 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
-        let task = get_task(service.database(), "abc123").await.unwrap();
+        let task = get_task(&services, "abc123").await.unwrap();
         assert_eq!(task.title, "Updated");
         assert_eq!(task.priority, Some("critical".to_string()));
         assert!(task.tags.contains(&"new".to_string()));
@@ -1104,53 +1089,41 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_preserves_other_fields() {
-        use vertebrae_db::{CodeRef, Level, Section, SectionType, Task};
+        use vertebrae_db::{CodeRef, Level, Section, SectionType};
 
-        let service = setup_test_db().await;
+        let services = setup_test_db().await;
 
-        // Create task with specific values - set up workflow step for in_progress status
-        // Must set both workflow_id and current_step_id for the step to be stored
-        let workflow_id = surrealdb::sql::Thing::from(("workflow", "default"));
-        let step_id = surrealdb::sql::Thing::from(("step", "default_in_progress"));
+        // Create task via service with level, priority, tags
+        create_task(
+            &services,
+            "abc123",
+            "Original",
+            "ticket",
+            "in_progress",
+            Some("high"),
+            &["backend", "api"],
+        )
+        .await;
 
-        let task = Task {
-            title: "Original".to_string(),
-            description: None,
-            level: Level::Ticket,
-            priority: Some(vertebrae_db::Priority::High),
-            tags: vec!["backend".to_string(), "api".to_string()],
-            sections: vec![Section {
-                section_type: SectionType::Goal,
-                content: "Important goal".to_string(),
-                order: None,
-                done: None,
-                done_at: None,
-                refs: vec![],
-            }],
-            code_refs: vec![CodeRef {
-                path: "src/main.rs".to_string(),
-                name: None,
-                description: None,
-                line_start: Some(10),
-                line_end: None,
-            }],
-            needs_human_review: None,
-            revision_feedback: None,
-            rejection_reason: None,
-            created_at: None,
-            updated_at: None,
-            started_at: None,
-            completed_at: None,
-            id: None,
-            workflow_id: Some(workflow_id),
-            current_step_id: Some(step_id),
-        };
-        service
-            .database()
+        // Add section and code ref via service
+        let section = Section::new(SectionType::Goal, "Important goal".to_string());
+        services
             .tasks()
-            .create("abc123", &task)
+            .add_section("abc123", section)
             .await
             .unwrap();
+
+        let code_ref = CodeRef::line("src/main.rs".to_string(), 10);
+        services
+            .tasks()
+            .add_code_ref("abc123", code_ref)
+            .await
+            .unwrap();
+
+        // Get task before update to capture its workflow assignment
+        let task_before = services.tasks().get_task("abc123").await.unwrap();
+        let original_workflow_id = task_before.workflow_id.clone();
+        let original_step_id = task_before.current_step_id.clone();
 
         // Only update title
         let cmd = UpdateCommand {
@@ -1165,24 +1138,19 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
         // Verify other fields preserved
-        let task = service
-            .database()
-            .tasks()
-            .get("abc123")
-            .await
-            .unwrap()
-            .unwrap();
+        let task = services.tasks().get_task("abc123").await.unwrap();
 
         assert_eq!(task.title, "Updated title");
         assert_eq!(task.level, Level::Ticket);
-        // Status is now derived from current_step_id
-        assert!(task.current_step_id.is_some());
+        // Verify workflow assignment is preserved
+        assert_eq!(task.workflow_id, original_workflow_id);
+        assert_eq!(task.current_step_id, original_step_id);
         assert_eq!(task.priority, Some(vertebrae_db::Priority::High));
-        // Verify tags and other fields are preserved
+        // Verify tags are preserved
         assert_eq!(task.tags, vec!["backend", "api"]);
     }
 
@@ -1214,10 +1182,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_parent_case_insensitive() {
-        let service = setup_test_db().await;
+        let services = setup_test_db().await;
 
         create_task(
-            service.database(),
+            &services,
             "parent1",
             "Parent task",
             "epic",
@@ -1227,7 +1195,7 @@ mod tests {
         )
         .await;
         create_task(
-            service.database(),
+            &services,
             "child1",
             "Child task",
             "task",
@@ -1249,10 +1217,10 @@ mod tests {
             remove_section: None, // Uppercase parent
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
-        let parent_id = get_parent_id(service.database(), "child1").await;
+        let parent_id = get_parent_id(&services, "child1").await;
         assert_eq!(parent_id, Some("parent1".to_string()));
     }
 
@@ -1260,10 +1228,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_description() {
-        let service = setup_test_db().await;
+        let services = setup_test_db().await;
 
         create_task(
-            service.database(),
+            &services,
             "abc123",
             "Test task",
             "task",
@@ -1285,52 +1253,30 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
         // Verify description was set
-        let task = service
-            .database()
-            .tasks()
-            .get("abc123")
-            .await
-            .unwrap()
-            .unwrap();
+        let task = services.tasks().get_task("abc123").await.unwrap();
         assert_eq!(task.description, Some("New description".to_string()));
     }
 
     #[tokio::test]
     async fn test_update_clear_description() {
-        use vertebrae_db::{Level, Task};
+        let services = setup_test_db().await;
 
-        let service = setup_test_db().await;
+        // Create task with description via service
+        let options = CreateTaskOptions::new("Test task")
+            .with_id("abc123")
+            .with_description("Original description");
+        services.tasks().create_task(options).await.unwrap();
 
-        // Create task with description
-        let task = Task {
-            title: "Test task".to_string(),
-            description: Some("Original description".to_string()),
-            level: Level::Task,
-            priority: None,
-            tags: vec![],
-            sections: vec![],
-            code_refs: vec![],
-            needs_human_review: None,
-            revision_feedback: None,
-            rejection_reason: None,
-            created_at: None,
-            updated_at: None,
-            started_at: None,
-            completed_at: None,
-            id: None,
-            workflow_id: None,
-            current_step_id: None,
-        };
-        service
-            .database()
-            .tasks()
-            .create("abc123", &task)
-            .await
-            .unwrap();
+        // Verify description was set
+        let task_before = services.tasks().get_task("abc123").await.unwrap();
+        assert_eq!(
+            task_before.description,
+            Some("Original description".to_string())
+        );
 
         let cmd = UpdateCommand {
             id: "abc123".to_string(),
@@ -1344,17 +1290,11 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
         // Verify description was cleared
-        let task = service
-            .database()
-            .tasks()
-            .get("abc123")
-            .await
-            .unwrap()
-            .unwrap();
+        let task = services.tasks().get_task("abc123").await.unwrap();
         assert!(task.description.is_none());
     }
 
@@ -1362,48 +1302,40 @@ mod tests {
 
     /// Helper to add a section to a task
     async fn add_section(
-        db: &Database,
+        services: &VertebraeServices,
         id: &str,
         section_type: &str,
         content: &str,
         order: Option<u32>,
     ) {
-        use vertebrae_db::{Section, TaskUpdate};
+        use vertebrae_db::Section;
 
-        // Get current task and sections
-        let task = db.tasks().get(id).await.unwrap().unwrap();
-        let mut sections = task.sections;
-
-        // Parse section type
+        // Parse section type and add section via service
         if let Ok(section_enum) = parse_section_type(section_type) {
-            // Add new section
-            sections.push(Section {
+            let section = Section {
                 section_type: section_enum,
                 content: content.to_string(),
                 order,
                 done: None,
                 done_at: None,
                 refs: vec![],
-            });
-
-            // Update task with new sections
-            let update = TaskUpdate::new().with_sections(sections);
-            db.tasks().update(id, &update).await.unwrap();
+            };
+            services.tasks().add_section(id, section).await.unwrap();
         }
     }
 
     /// Helper to get sections from a task
-    async fn get_sections(db: &Database, id: &str) -> Vec<vertebrae_db::Section> {
-        let task = db.tasks().get(id).await.unwrap().unwrap();
+    async fn get_sections(services: &VertebraeServices, id: &str) -> Vec<vertebrae_db::Section> {
+        let task = services.tasks().get_task(id).await.unwrap();
         task.sections
     }
 
     #[tokio::test]
     async fn test_update_remove_section() {
-        let service = setup_test_db().await;
+        let services = setup_test_db().await;
 
         create_task(
-            service.database(),
+            &services,
             "abc123",
             "Test task",
             "task",
@@ -1412,9 +1344,9 @@ mod tests {
             &[],
         )
         .await;
-        add_section(service.database(), "abc123", "step", "Step 0", Some(1)).await;
-        add_section(service.database(), "abc123", "step", "Step 1", Some(2)).await;
-        add_section(service.database(), "abc123", "step", "Step 2", Some(3)).await;
+        add_section(&services, "abc123", "step", "Step 0", Some(1)).await;
+        add_section(&services, "abc123", "step", "Step 1", Some(2)).await;
+        add_section(&services, "abc123", "step", "Step 2", Some(3)).await;
 
         let cmd = UpdateCommand {
             id: "abc123".to_string(),
@@ -1428,11 +1360,11 @@ mod tests {
             remove_section: Some(vec!["step".to_string(), "1".to_string()]),
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok(), "Remove section failed: {:?}", result.err());
 
         // Verify section was removed and others renumbered
-        let sections = get_sections(service.database(), "abc123").await;
+        let sections = get_sections(&services, "abc123").await;
         assert_eq!(sections.len(), 2);
 
         // Find steps and verify renumbering
@@ -1453,10 +1385,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_edit_section() {
-        let service = setup_test_db().await;
+        let services = setup_test_db().await;
 
         create_task(
-            service.database(),
+            &services,
             "abc123",
             "Test task",
             "task",
@@ -1465,14 +1397,7 @@ mod tests {
             &[],
         )
         .await;
-        add_section(
-            service.database(),
-            "abc123",
-            "step",
-            "Original step",
-            Some(0),
-        )
-        .await;
+        add_section(&services, "abc123", "step", "Original step", Some(0)).await;
 
         let cmd = UpdateCommand {
             id: "abc123".to_string(),
@@ -1490,21 +1415,21 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok(), "Edit section failed: {:?}", result.err());
 
         // Verify section was updated
-        let sections = get_sections(service.database(), "abc123").await;
+        let sections = get_sections(&services, "abc123").await;
         assert_eq!(sections.len(), 1);
         assert_eq!(sections[0].content, "Updated step content");
     }
 
     #[tokio::test]
     async fn test_update_remove_nonexistent_section_fails() {
-        let service = setup_test_db().await;
+        let services = setup_test_db().await;
 
         create_task(
-            service.database(),
+            &services,
             "abc123",
             "Test task",
             "task",
@@ -1526,7 +1451,7 @@ mod tests {
             remove_section: Some(vec!["step".to_string(), "99".to_string()]),
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         match result {
             Err(ServiceError::Database(db_error)) => {
                 // Database error contains the validation message from the repository
@@ -1615,13 +1540,16 @@ mod tests {
                 assert_eq!(id, "abc123");
                 call_count_clone.fetch_add(1, Ordering::Relaxed);
             }
-            _ => panic!("Expected TaskUpdated event"),
+            MutationEvent::TaskCreated { .. } => {
+                // Ignore TaskCreated events from create_task
+            }
+            _ => panic!("Expected TaskUpdated or TaskCreated event"),
         });
-        let service = DefaultTaskService::with_callback(db, callback);
+        let services = VertebraeServices::with_task_callback(db, callback);
 
         // Create a task
         create_task(
-            service.database(),
+            &services,
             "abc123",
             "Original title",
             "task",
@@ -1644,7 +1572,7 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
         // Verify callback was called
@@ -1668,12 +1596,15 @@ mod tests {
                 assert_eq!(id, "abc123");
                 call_count_clone.fetch_add(1, Ordering::Relaxed);
             }
-            _ => panic!("Expected TaskUpdated event"),
+            MutationEvent::TaskCreated { .. } => {
+                // Ignore TaskCreated events from create_task
+            }
+            _ => panic!("Expected TaskUpdated or TaskCreated event"),
         });
-        let service = DefaultTaskService::with_callback(db, callback);
+        let services = VertebraeServices::with_task_callback(db, callback);
 
         create_task(
-            service.database(),
+            &services,
             "abc123",
             "Original",
             "task",
@@ -1696,7 +1627,7 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
         // Even with multiple changes, callback should fire once
@@ -1724,10 +1655,10 @@ mod tests {
                 _ => {} // Ignore other events
             }
         });
-        let service = DefaultTaskService::with_callback(db, callback);
+        let services = VertebraeServices::with_task_callback(db, callback);
 
         create_task(
-            service.database(),
+            &services,
             "parent1",
             "Parent",
             "epic",
@@ -1737,7 +1668,7 @@ mod tests {
         )
         .await;
         create_task(
-            service.database(),
+            &services,
             "child1",
             "Child",
             "task",
@@ -1759,7 +1690,7 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
         // Callback should be fired for the parent update
@@ -1771,10 +1702,10 @@ mod tests {
     /// Test updating a section to empty content
     #[tokio::test]
     async fn test_update_section_to_empty_content() {
-        let service = setup_test_db().await;
+        let services = setup_test_db().await;
 
         create_task(
-            service.database(),
+            &services,
             "abc123",
             "Test task",
             "task",
@@ -1783,14 +1714,7 @@ mod tests {
             &[],
         )
         .await;
-        add_section(
-            service.database(),
-            "abc123",
-            "step",
-            "Original content",
-            Some(0),
-        )
-        .await;
+        add_section(&services, "abc123", "step", "Original content", Some(0)).await;
 
         let cmd = UpdateCommand {
             id: "abc123".to_string(),
@@ -1804,10 +1728,10 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
-        let sections = get_sections(service.database(), "abc123").await;
+        let sections = get_sections(&services, "abc123").await;
         assert_eq!(sections.len(), 1);
         assert_eq!(sections[0].content, ""); // Empty content is allowed
     }
@@ -1815,10 +1739,10 @@ mod tests {
     /// Test updating section with special characters
     #[tokio::test]
     async fn test_update_section_with_special_chars() {
-        let service = setup_test_db().await;
+        let services = setup_test_db().await;
 
         create_task(
-            service.database(),
+            &services,
             "abc123",
             "Test task",
             "task",
@@ -1827,7 +1751,7 @@ mod tests {
             &[],
         )
         .await;
-        add_section(service.database(), "abc123", "step", "Original", Some(0)).await;
+        add_section(&services, "abc123", "step", "Original", Some(0)).await;
 
         let special_content = "Step with @#$%^&*() <html> and 'quotes' and \"double\"";
         let cmd = UpdateCommand {
@@ -1846,20 +1770,20 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
-        let sections = get_sections(service.database(), "abc123").await;
+        let sections = get_sections(&services, "abc123").await;
         assert_eq!(sections[0].content, special_content);
     }
 
     /// Test that removing all tags leaves task with no tags
     #[tokio::test]
     async fn test_update_remove_all_tags() {
-        let service = setup_test_db().await;
+        let services = setup_test_db().await;
 
         create_task(
-            service.database(),
+            &services,
             "abc123",
             "Test task",
             "task",
@@ -1881,20 +1805,20 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
-        let task = get_task(service.database(), "abc123").await.unwrap();
+        let task = get_task(&services, "abc123").await.unwrap();
         assert!(task.tags.is_empty());
     }
 
     /// Test updating with invalid ordinal format for section
     #[tokio::test]
     async fn test_update_section_invalid_ordinal_format() {
-        let service = setup_test_db().await;
+        let services = setup_test_db().await;
 
         create_task(
-            service.database(),
+            &services,
             "abc123",
             "Test task",
             "task",
@@ -1920,7 +1844,7 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         match result {
             Err(ServiceError::ValidationFailed { message }) => {
                 assert!(
@@ -1936,10 +1860,10 @@ mod tests {
     /// Test updating with wrong number of section arguments
     #[tokio::test]
     async fn test_update_edit_section_wrong_arg_count() {
-        let service = setup_test_db().await;
+        let services = setup_test_db().await;
 
         create_task(
-            service.database(),
+            &services,
             "abc123",
             "Test task",
             "task",
@@ -1962,7 +1886,7 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         match result {
             Err(ServiceError::ValidationFailed { message }) => {
                 assert!(
@@ -1978,10 +1902,10 @@ mod tests {
     /// Test updating with wrong number of section removal arguments
     #[tokio::test]
     async fn test_update_remove_section_wrong_arg_count() {
-        let service = setup_test_db().await;
+        let services = setup_test_db().await;
 
         create_task(
-            service.database(),
+            &services,
             "abc123",
             "Test task",
             "task",
@@ -2004,7 +1928,7 @@ mod tests {
             remove_section: Some(vec!["step".to_string()]),
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         match result {
             Err(ServiceError::ValidationFailed { message }) => {
                 assert!(
@@ -2020,10 +1944,10 @@ mod tests {
     /// Test that adding and removing the same tag - remove is processed after add
     #[tokio::test]
     async fn test_update_add_and_remove_same_tag() {
-        let service = setup_test_db().await;
+        let services = setup_test_db().await;
 
         create_task(
-            service.database(),
+            &services,
             "abc123",
             "Test task",
             "task",
@@ -2045,10 +1969,10 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
-        let task = get_task(service.database(), "abc123").await.unwrap();
+        let task = get_task(&services, "abc123").await.unwrap();
         // The service layer processes add_tags and remove_tags, and remove is likely processed
         // in a way where the duplicate add doesn't affect the final state
         assert!(task.tags.contains(&"existing".to_string()));
@@ -2057,10 +1981,10 @@ mod tests {
     /// Test that edit section with negative ordinal is validated
     #[tokio::test]
     async fn test_update_section_negative_ordinal() {
-        let service = setup_test_db().await;
+        let services = setup_test_db().await;
 
         create_task(
-            service.database(),
+            &services,
             "abc123",
             "Test task",
             "task",
@@ -2069,7 +1993,7 @@ mod tests {
             &[],
         )
         .await;
-        add_section(service.database(), "abc123", "step", "Step 0", Some(0)).await;
+        add_section(&services, "abc123", "step", "Step 0", Some(0)).await;
 
         let cmd = UpdateCommand {
             id: "abc123".to_string(),
@@ -2087,7 +2011,7 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         // Negative ordinals should fail
         assert!(result.is_err());
     }
@@ -2095,10 +2019,10 @@ mod tests {
     /// Test updating task with very long title
     #[tokio::test]
     async fn test_update_very_long_title() {
-        let service = setup_test_db().await;
+        let services = setup_test_db().await;
 
         create_task(
-            service.database(),
+            &services,
             "abc123",
             "Original",
             "task",
@@ -2121,20 +2045,20 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
-        let task = get_task(service.database(), "abc123").await.unwrap();
+        let task = get_task(&services, "abc123").await.unwrap();
         assert_eq!(task.title, long_title);
     }
 
     /// Test that clearing description preserves other fields
     #[tokio::test]
     async fn test_update_clear_description_preserves_fields() {
-        let service = setup_test_db().await;
+        let services = setup_test_db().await;
 
         create_task(
-            service.database(),
+            &services,
             "abc123",
             "Test task",
             "ticket",
@@ -2156,16 +2080,10 @@ mod tests {
             remove_section: None,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
-        let updated_task = service
-            .database()
-            .tasks()
-            .get("abc123")
-            .await
-            .unwrap()
-            .unwrap();
+        let updated_task = services.tasks().get_task("abc123").await.unwrap();
 
         // Description should be cleared
         assert!(updated_task.description.is_none());

@@ -6,7 +6,7 @@
 //! section types.
 
 use clap::Args;
-use vertebrae_core::ServiceError;
+use vertebrae_core::{ServiceError, VertebraeServices};
 use vertebrae_db::{Section, SectionType};
 
 /// Add a typed content section to a task
@@ -104,7 +104,7 @@ impl SectionCommand {
     /// - Service operations fail
     pub async fn execute(
         &self,
-        service: &dyn vertebrae_core::TaskService,
+        services: &VertebraeServices,
     ) -> Result<SectionResult, ServiceError> {
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
@@ -117,7 +117,7 @@ impl SectionCommand {
         }
 
         // Fetch the task first to count existing sections of this type
-        let task = service.get_task(&id).await?;
+        let task = services.tasks().get_task(&id).await?;
 
         // Handle single-instance vs multi-instance section types
         let (ordinal, replaced) = if is_single_instance_type(&self.section_type) {
@@ -128,7 +128,8 @@ impl SectionCommand {
                 .any(|s| s.section_type == self.section_type);
             if existing {
                 // Remove existing section first
-                service
+                services
+                    .tasks()
                     .remove_sections(&id, self.section_type.clone(), None)
                     .await?;
             }
@@ -154,7 +155,7 @@ impl SectionCommand {
         };
 
         // Add the section using service layer (which fires MutationCallback)
-        service.add_section(&id, section).await?;
+        services.tasks().add_section(&id, section).await?;
 
         Ok(SectionResult {
             id,

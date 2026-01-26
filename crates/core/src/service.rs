@@ -59,6 +59,8 @@ pub struct CreateTaskOptions {
     pub depends_on: Vec<String>,
     /// Whether task needs human review
     pub needs_review: bool,
+    /// Optional custom ID (for testing) - if not provided, ID is auto-generated
+    pub id: Option<String>,
 }
 
 impl CreateTaskOptions {
@@ -115,6 +117,12 @@ impl CreateTaskOptions {
     /// Set the needs review flag
     pub fn with_needs_review(mut self, needs_review: bool) -> Self {
         self.needs_review = needs_review;
+        self
+    }
+
+    /// Set a custom ID (primarily for testing)
+    pub fn with_id(mut self, id: impl Into<String>) -> Self {
+        self.id = Some(id.into());
         self
     }
 }
@@ -394,8 +402,22 @@ pub trait TaskService: Send + Sync {
     /// Get a task with all its relationships
     async fn get_task_with_relations(&self, id: &str) -> ServiceResult<TaskWithRelations>;
 
+    /// Get the derived status string for a task
+    ///
+    /// Computes the status string based on workflow assignment:
+    /// - If task has workflow and current step: returns "workflow_name:step_name"
+    /// - Otherwise: returns "backlog"
+    ///
+    /// This is a read-only query operation.
+    async fn get_derived_status(&self, task: &Task) -> ServiceResult<String>;
+
     /// Update a task
     async fn update_task(&self, id: &str, options: UpdateTaskOptions) -> ServiceResult<()>;
+
+    /// Set the current workflow step for a task
+    ///
+    /// This updates the task's `current_step_id` field to the specified step.
+    async fn set_current_step(&self, task_id: &str, step_id: &Thing) -> ServiceResult<()>;
 
     /// Delete a task
     ///
@@ -846,8 +868,11 @@ impl TaskService for DefaultTaskService {
             }
         }
 
-        // Generate unique ID
-        let id = self.generate_unique_id(&options.title).await?;
+        // Use provided ID or generate unique one
+        let id = match options.id {
+            Some(custom_id) => custom_id.to_lowercase(),
+            None => self.generate_unique_id(&options.title).await?,
+        };
 
         // Build task
         let level = options.level.unwrap_or(Level::Task);
@@ -980,6 +1005,19 @@ impl TaskService for DefaultTaskService {
         })
     }
 
+    async fn get_derived_status(&self, task: &Task) -> ServiceResult<String> {
+        // Use current_step_id to determine status
+        if let (Some(workflow_id), Some(step_id)) = (&task.workflow_id, &task.current_step_id)
+            && let Some(workflow) = self.db.workflows().get(&workflow_id.id.to_raw()).await?
+            && let Some(step) = self.db.steps().get_by_thing(step_id).await?
+        {
+            return Ok(format!("{}:{}", workflow.name, step.name));
+        }
+
+        // Fall back to default if no workflow information
+        Ok("backlog".to_string())
+    }
+
     async fn update_task(&self, id: &str, options: UpdateTaskOptions) -> ServiceResult<()> {
         let id = id.to_lowercase();
 
@@ -1017,6 +1055,28 @@ impl TaskService for DefaultTaskService {
 
         // Fire mutation callback
         self.on_mutation(MutationEvent::TaskUpdated { id: id.clone() });
+
+        Ok(())
+    }
+
+    async fn set_current_step(&self, task_id: &str, step_id: &Thing) -> ServiceResult<()> {
+        let task_id = task_id.to_lowercase();
+
+        // Verify task exists
+        if !self.db.tasks().exists(&task_id).await? {
+            return Err(ServiceError::task_not_found(&task_id));
+        }
+
+        // Update the current step
+        self.db
+            .tasks()
+            .update_current_step_id(&task_id, step_id)
+            .await?;
+
+        // Fire mutation callback
+        self.on_mutation(MutationEvent::TaskUpdated {
+            id: task_id.clone(),
+        });
 
         Ok(())
     }

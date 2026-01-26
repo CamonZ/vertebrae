@@ -4,7 +4,7 @@
 //! optionally filtered by type and grouped by positive/negative space.
 
 use clap::Args;
-use vertebrae_core::{ServiceError, TaskService};
+use vertebrae_core::{ServiceError, VertebraeServices};
 use vertebrae_db::{Section, SectionType};
 
 /// List all sections for a task
@@ -221,12 +221,16 @@ impl SectionsCommand {
     /// Returns `ServiceError` if:
     /// - The task with the given ID does not exist
     /// - Service operations fail
-    pub async fn execute(&self, service: &dyn TaskService) -> Result<SectionsResult, ServiceError> {
+    pub async fn execute(
+        &self,
+        services: &VertebraeServices,
+    ) -> Result<SectionsResult, ServiceError> {
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
 
         // Fetch task using service
-        let task = service
+        let task = services
+            .tasks()
             .get_task(&id)
             .await
             .map_err(|_e| ServiceError::task_not_found(&self.id))?;
@@ -297,26 +301,26 @@ fn type_sort_order(section_type: &SectionType) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vertebrae_core::{CreateTaskOptions, DefaultTaskService};
+    use vertebrae_core::{CreateTaskOptions, VertebraeServices};
     use vertebrae_db::Database;
 
     /// Helper to create a test service with in-memory database
-    async fn setup_test_service() -> DefaultTaskService {
+    async fn setup_test_service() -> VertebraeServices {
         let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-        DefaultTaskService::new(db)
+        VertebraeServices::new(db)
     }
 
     /// Helper to create a task with the service
     async fn create_task_with_section(
-        service: &DefaultTaskService,
+        services: &VertebraeServices,
         title: &str,
         section_type: SectionType,
         content: &str,
         order: Option<u32>,
     ) -> String {
         let options = CreateTaskOptions::new(title);
-        let created_id = service.create_task(options).await.unwrap();
+        let created_id = services.tasks().create_task(options).await.unwrap();
 
         // Create section and append it
         let mut section = if let Some(ord) = order {
@@ -325,7 +329,11 @@ mod tests {
             Section::new(section_type, content.to_string())
         };
         section.refs = vec![];
-        service.add_section(&created_id, section).await.unwrap();
+        services
+            .tasks()
+            .add_section(&created_id, section)
+            .await
+            .unwrap();
 
         created_id
     }
@@ -423,26 +431,29 @@ mod tests {
 
     #[tokio::test]
     async fn test_sections_all() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
         let task_id =
-            create_task_with_section(&service, "Test Task", SectionType::Goal, "The goal", None)
+            create_task_with_section(&services, "Test Task", SectionType::Goal, "The goal", None)
                 .await;
-        service
+        services
+            .tasks()
             .add_section(
                 &task_id,
                 Section::with_order(SectionType::Step, "Step 1".to_string(), 0),
             )
             .await
             .unwrap();
-        service
+        services
+            .tasks()
             .add_section(
                 &task_id,
                 Section::with_order(SectionType::Step, "Step 2".to_string(), 1),
             )
             .await
             .unwrap();
-        service
+        services
+            .tasks()
             .add_section(
                 &task_id,
                 Section::with_order(SectionType::AntiPattern, "Don't do this".to_string(), 0),
@@ -455,7 +466,7 @@ mod tests {
             section_type: None,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(
             result.is_ok(),
             "Sections command failed: {:?}",
@@ -481,26 +492,29 @@ mod tests {
 
     #[tokio::test]
     async fn test_sections_filter_by_type() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
         let task_id =
-            create_task_with_section(&service, "Test Task", SectionType::Goal, "The goal", None)
+            create_task_with_section(&services, "Test Task", SectionType::Goal, "The goal", None)
                 .await;
-        service
+        services
+            .tasks()
             .add_section(
                 &task_id,
                 Section::with_order(SectionType::Step, "Step 1".to_string(), 0),
             )
             .await
             .unwrap();
-        service
+        services
+            .tasks()
             .add_section(
                 &task_id,
                 Section::with_order(SectionType::Step, "Step 2".to_string(), 1),
             )
             .await
             .unwrap();
-        service
+        services
+            .tasks()
             .add_section(
                 &task_id,
                 Section::with_order(SectionType::AntiPattern, "Don't do this".to_string(), 0),
@@ -513,7 +527,7 @@ mod tests {
             section_type: Some(SectionType::Step),
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
         let sections_result = result.unwrap();
@@ -542,19 +556,21 @@ mod tests {
 
     #[tokio::test]
     async fn test_sections_filter_anti_pattern() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
         let task_id =
-            create_task_with_section(&service, "Test Task", SectionType::Goal, "The goal", None)
+            create_task_with_section(&services, "Test Task", SectionType::Goal, "The goal", None)
                 .await;
-        service
+        services
+            .tasks()
             .add_section(
                 &task_id,
                 Section::with_order(SectionType::AntiPattern, "Don't do this".to_string(), 0),
             )
             .await
             .unwrap();
-        service
+        services
+            .tasks()
             .add_section(
                 &task_id,
                 Section::with_order(SectionType::AntiPattern, "Avoid that".to_string(), 1),
@@ -567,7 +583,7 @@ mod tests {
             section_type: Some(SectionType::AntiPattern),
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
         let sections_result = result.unwrap();
@@ -598,17 +614,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_sections_empty() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
         let options = CreateTaskOptions::new("Test Task");
-        let task_id = service.create_task(options).await.unwrap();
+        let task_id = services.tasks().create_task(options).await.unwrap();
 
         let cmd = SectionsCommand {
             id: task_id.clone(),
             section_type: None,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
         let sections_result = result.unwrap();
@@ -621,10 +637,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_sections_filter_no_matches() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
         let task_id =
-            create_task_with_section(&service, "Test Task", SectionType::Goal, "The goal", None)
+            create_task_with_section(&services, "Test Task", SectionType::Goal, "The goal", None)
                 .await;
 
         let cmd = SectionsCommand {
@@ -632,7 +648,7 @@ mod tests {
             section_type: Some(SectionType::AntiPattern),
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
         let sections_result = result.unwrap();
@@ -645,14 +661,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_sections_nonexistent_task() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
         let cmd = SectionsCommand {
             id: "nonexistent".to_string(),
             section_type: None,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         match result {
             Err(ServiceError::TaskNotFound { task_id }) => {
                 assert_eq!(
@@ -668,10 +684,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_sections_case_insensitive_id() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
         let task_id =
-            create_task_with_section(&service, "Test Task", SectionType::Goal, "The goal", None)
+            create_task_with_section(&services, "Test Task", SectionType::Goal, "The goal", None)
                 .await;
 
         let cmd = SectionsCommand {
@@ -679,7 +695,7 @@ mod tests {
             section_type: None,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok(), "Case-insensitive lookup should work");
 
         let sections_result = result.unwrap();
@@ -688,27 +704,30 @@ mod tests {
 
     #[tokio::test]
     async fn test_sections_ordered_by_ordinal() {
-        let service = setup_test_service().await;
+        let services = setup_test_service().await;
 
         let options = CreateTaskOptions::new("Test Task");
-        let task_id = service.create_task(options).await.unwrap();
+        let task_id = services.tasks().create_task(options).await.unwrap();
 
         // Add in reverse order
-        service
+        services
+            .tasks()
             .add_section(
                 &task_id,
                 Section::with_order(SectionType::Step, "Step 3".to_string(), 2),
             )
             .await
             .unwrap();
-        service
+        services
+            .tasks()
             .add_section(
                 &task_id,
                 Section::with_order(SectionType::Step, "Step 1".to_string(), 0),
             )
             .await
             .unwrap();
-        service
+        services
+            .tasks()
             .add_section(
                 &task_id,
                 Section::with_order(SectionType::Step, "Step 2".to_string(), 1),
@@ -721,7 +740,7 @@ mod tests {
             section_type: None,
         };
 
-        let result = cmd.execute(&service).await;
+        let result = cmd.execute(&services).await;
         assert!(result.is_ok());
 
         let sections_result = result.unwrap();
