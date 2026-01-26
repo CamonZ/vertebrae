@@ -684,6 +684,51 @@ impl<'a> TaskRepository<'a> {
     /// # Errors
     ///
     /// Returns `DbError::Query` if the database operation fails.
+    /// Assign a workflow to a task, setting both workflow_id and current_step_id atomically.
+    ///
+    /// Uses SurrealDB's merge API to ensure the record links are created correctly.
+    /// This is the preferred method over separate assign + update_current_step_id calls
+    /// as it creates proper record links that can be dereferenced in queries.
+    pub async fn assign_workflow_with_step(
+        &self,
+        task_id: &str,
+        workflow_id: &surrealdb::sql::Thing,
+        step_id: &surrealdb::sql::Thing,
+    ) -> DbResult<()> {
+        debug!(
+            "Assigning task {} to workflow {} at step {}",
+            task_id,
+            workflow_id.id.to_raw(),
+            step_id.id.to_raw()
+        );
+
+        #[derive(serde::Serialize)]
+        struct WorkflowAssignment {
+            workflow_id: surrealdb::sql::Thing,
+            current_step_id: surrealdb::sql::Thing,
+        }
+
+        let update = WorkflowAssignment {
+            workflow_id: workflow_id.clone(),
+            current_step_id: step_id.clone(),
+        };
+
+        // Use merge to create proper record links
+        let _: Option<Task> = self
+            .client
+            .update(("task", task_id))
+            .merge(update)
+            .await
+            .map_err(|e| {
+                debug!("Workflow assignment failed: {:?}", e);
+                DbError::Query(Box::new(e))
+            })?;
+
+        debug!("Successfully assigned workflow to task {}", task_id);
+        Ok(())
+    }
+
+    /// Legacy method for backward compatibility - only sets workflow_id
     pub async fn assign_workflow(
         &self,
         task_id: &str,
@@ -694,8 +739,6 @@ impl<'a> TaskRepository<'a> {
             task_id,
             workflow_id.id.to_raw()
         );
-        // Use parameter binding for the workflow_id to ensure proper serialization
-        // Note: current_step_id should be set separately via update_current_step_id after assignment
         let query = format!(
             "UPDATE task:{} SET workflow_id = $workflow_id, updated_at = time::now()",
             task_id
@@ -744,15 +787,25 @@ impl<'a> TaskRepository<'a> {
         task_id: &str,
         step_id: &surrealdb::sql::Thing,
     ) -> DbResult<()> {
-        debug!("Updating task {} to step_id {:?}", task_id, step_id);
-        let query = format!(
-            "UPDATE task:{} SET current_step_id = $step_id, updated_at = time::now()",
-            task_id
+        debug!(
+            "Updating task {} to step_id: tb={}, id={}",
+            task_id,
+            step_id.tb,
+            step_id.id.to_raw()
         );
-        self.client
-            .query(&query)
-            .bind(("step_id", step_id.clone()))
-            .await?;
+
+        // Use type::thing() function to explicitly create a record link
+        // Direct syntax like step:id doesn't always create proper record links
+        let query = format!(
+            "UPDATE task:{} SET current_step_id = type::thing('{}', '{}'), updated_at = time::now()",
+            task_id,
+            step_id.tb,
+            step_id.id.to_raw()
+        );
+        trace!("Update step query: {}", query);
+        self.client.query(&query).await?;
+
+        debug!("Successfully updated current_step_id for task {}", task_id);
         Ok(())
     }
 
@@ -1581,11 +1634,11 @@ mod tests {
             .await
             .unwrap();
 
-        // Verify the task was updated
+        // Verify by fetching from database to ensure persistence
         let retrieved = repo.get("step1").await.unwrap().unwrap();
         assert!(
             retrieved.current_step_id.is_some(),
-            "Task should have current_step_id"
+            "Task should have current_step_id after update"
         );
         let current_step = retrieved.current_step_id.unwrap();
         assert_eq!(current_step.tb, "step", "Step table should be 'step'");

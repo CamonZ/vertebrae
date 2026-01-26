@@ -969,9 +969,9 @@ impl TaskService for DefaultTaskService {
                 .iter()
                 .find(|s| s.name.to_lowercase() == target_status)
             {
-                // Update current_step_id if the step has an ID
+                // Update current_step_id - step must have an ID
                 if let Some(ref step_id) = step.id {
-                    self.db.tasks().update_current_step_id(&id, step_id).await?;
+                    let _ = self.db.tasks().update_current_step_id(&id, step_id).await?;
                 }
             }
         }
@@ -1088,7 +1088,8 @@ impl TaskService for DefaultTaskService {
         }
 
         // Update the current step
-        self.db
+        let _ = self
+            .db
             .tasks()
             .update_current_step_id(&task_id, step_id)
             .await?;
@@ -1459,7 +1460,7 @@ impl TaskService for DefaultTaskService {
 
         // Update current_step_id if the step has an ID
         if let Some(ref step_id) = target_step.id {
-            self.db.tasks().update_current_step_id(&id, step_id).await?;
+            let _ = self.db.tasks().update_current_step_id(&id, step_id).await?;
         }
 
         // Apply any other updates (timestamps)
@@ -1927,7 +1928,8 @@ impl TaskService for DefaultTaskService {
         // Set current_step_id to the first step of the workflow (order 0)
         let steps = self.db.steps().list_by_workflow(workflow_id).await?;
         if let Some(first_step) = steps.into_iter().find(|s| s.order == 0).and_then(|s| s.id) {
-            self.db
+            let _ = self
+                .db
                 .tasks()
                 .update_current_step_id(&task_id, &first_step)
                 .await?;

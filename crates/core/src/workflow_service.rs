@@ -775,19 +775,17 @@ impl WorkflowService for DefaultWorkflowService {
             .ok_or_else(|| ServiceError::validation_failed("Workflow has no steps"))?;
         let first_step_name = first_step.name.clone();
 
-        // Assign workflow to task
+        // Get first step ID - required for proper workflow assignment
+        let step_id = first_step.id.as_ref().ok_or_else(|| {
+            ServiceError::validation_failed("First step has no ID - database integrity issue")
+        })?;
+
+        // Assign workflow and step atomically using merge API
+        // This ensures proper record links that can be dereferenced in queries
         self.db
             .tasks()
-            .assign_workflow(&task_id, &workflow_thing)
+            .assign_workflow_with_step(&task_id, &workflow_thing, step_id)
             .await?;
-
-        // Set current_step_id to first step
-        if let Some(ref step_id) = first_step.id {
-            self.db
-                .tasks()
-                .update_current_step_id(&task_id, step_id)
-                .await?;
-        }
 
         // Fire mutation callback
         self.on_mutation(WorkflowMutationEvent::TaskAssignedToWorkflow {
@@ -881,12 +879,13 @@ impl WorkflowService for DefaultWorkflowService {
         let step_name = next_step.name.clone();
 
         // Update current_step_id to next step
-        if let Some(ref step_id) = next_step.id {
-            self.db
-                .tasks()
-                .update_current_step_id(&task_id, step_id)
-                .await?;
-        }
+        let step_id = next_step.id.as_ref().ok_or_else(|| {
+            ServiceError::validation_failed("Next step has no ID - database integrity issue")
+        })?;
+        self.db
+            .tasks()
+            .update_current_step_id(&task_id, step_id)
+            .await?;
 
         // Fire mutation callback
         self.on_mutation(WorkflowMutationEvent::TaskStepAdvanced {
@@ -969,12 +968,13 @@ impl WorkflowService for DefaultWorkflowService {
         let step_name = prev_step.name.clone();
 
         // Update current_step_id to previous step
-        if let Some(ref step_id) = prev_step.id {
-            self.db
-                .tasks()
-                .update_current_step_id(&task_id, step_id)
-                .await?;
-        }
+        let step_id = prev_step.id.as_ref().ok_or_else(|| {
+            ServiceError::validation_failed("Previous step has no ID - database integrity issue")
+        })?;
+        self.db
+            .tasks()
+            .update_current_step_id(&task_id, step_id)
+            .await?;
 
         // Fire mutation callback
         self.on_mutation(WorkflowMutationEvent::TaskStepRetreated {
