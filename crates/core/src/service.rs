@@ -434,6 +434,16 @@ pub trait TaskService: Send + Sync {
     /// List tasks with optional filters
     async fn list_tasks(&self, filter: &TaskFilter) -> ServiceResult<Vec<TaskSummary>>;
 
+    /// List tasks with their relationships (optimized single query)
+    ///
+    /// This is significantly more efficient than calling `get_task_with_relations`
+    /// for each task individually, as it fetches all tasks and their relationships
+    /// in a single database query.
+    async fn list_tasks_with_relations(
+        &self,
+        filter: &TaskFilter,
+    ) -> ServiceResult<Vec<TaskWithRelations>>;
+
     /// Get tasks ready for work at a given status
     async fn list_ready(&self, status: &str) -> ServiceResult<Vec<TaskSummary>>;
 
@@ -1130,6 +1140,69 @@ impl TaskService for DefaultTaskService {
 
     async fn list_tasks(&self, filter: &TaskFilter) -> ServiceResult<Vec<TaskSummary>> {
         Ok(self.db.list_tasks().list(filter).await?)
+    }
+
+    async fn list_tasks_with_relations(
+        &self,
+        filter: &TaskFilter,
+    ) -> ServiceResult<Vec<TaskWithRelations>> {
+        // Use the optimized single-query method from the DB layer
+        let tasks_data = self.db.list_tasks().list_with_relations(filter).await?;
+
+        // Convert TaskWithRelationsData to TaskWithRelations
+        let results: Vec<TaskWithRelations> = tasks_data
+            .into_iter()
+            .map(|data| {
+                // Reconstruct sections from JSON
+                let sections: Vec<Section> = data
+                    .sections
+                    .iter()
+                    .filter_map(|v| serde_json::from_value(v.clone()).ok())
+                    .collect();
+
+                // Reconstruct code refs from JSON
+                let code_refs: Vec<CodeRef> = data
+                    .refs
+                    .iter()
+                    .filter_map(|v| serde_json::from_value(v.clone()).ok())
+                    .collect();
+
+                // Construct the Task object
+                let task = Task {
+                    id: Some(Thing::from(("task".to_string(), data.id.clone()))),
+                    title: data.title,
+                    description: data.description,
+                    level: data.level,
+                    priority: data.priority,
+                    tags: data.tags,
+                    created_at: Some(data.created_at),
+                    updated_at: None,
+                    started_at: None,
+                    completed_at: None,
+                    sections,
+                    code_refs,
+                    needs_human_review: data.needs_human_review,
+                    revision_feedback: None,
+                    rejection_reason: None,
+                    workflow_id: data
+                        .workflow_id
+                        .map(|id| Thing::from(("workflow".to_string(), id))),
+                    current_step_id: data
+                        .current_step_id
+                        .map(|id| Thing::from(("step".to_string(), id))),
+                };
+
+                TaskWithRelations {
+                    task,
+                    parent_id: data.parent_id,
+                    children_ids: data.children_ids,
+                    depends_on_ids: data.depends_on_ids,
+                    dependent_ids: data.dependent_ids,
+                }
+            })
+            .collect();
+
+        Ok(results)
     }
 
     async fn list_ready(&self, status: &str) -> ServiceResult<Vec<TaskSummary>> {

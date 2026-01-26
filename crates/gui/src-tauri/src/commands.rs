@@ -514,20 +514,12 @@ pub async fn get_workflow_with_task_details(
         .map(|t| t.id.to_raw())
         .unwrap_or_default();
 
-    // Query tasks with filter for the workflow
+    // Query tasks with filter for the workflow using optimized single-query method
     let query_start = std::time::Instant::now();
     let filter = vertebrae_db::TaskFilter::new()
         .include_done()
         .with_workflow_id(workflow_id_str.clone());
-    let task_summaries = service.tasks().list_tasks(&filter).await?;
-
-    let mut tasks_with_relations = Vec::new();
-    for summary in task_summaries {
-        if let Ok(task_with_relations) = service.tasks().get_task_with_relations(&summary.id).await
-        {
-            tasks_with_relations.push(task_with_relations);
-        }
-    }
+    let tasks_with_relations = service.tasks().list_tasks_with_relations(&filter).await?;
     log::info!(
         "[get_workflow_with_task_details] Fetched {} tasks with relations in {}ms",
         tasks_with_relations.len(),
