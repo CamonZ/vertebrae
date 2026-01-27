@@ -760,6 +760,10 @@ impl<'a> GraphQueries<'a> {
             needs_human_review: Option<bool>,
             created_at: surrealdb::sql::Datetime,
             #[serde(default)]
+            workflow_id: Option<surrealdb::sql::Thing>,
+            #[serde(default)]
+            current_step_id: Option<surrealdb::sql::Thing>,
+            #[serde(default)]
             workflow_name: Option<String>,
             #[serde(default)]
             step_name: Option<String>,
@@ -774,7 +778,7 @@ impl<'a> GraphQueries<'a> {
             "IF current_step_id != NONE THEN current_step_id.name ELSE \"backlog\" END";
 
         let query = format!(
-            r#"SELECT id, title, level, {} AS status, priority, tags, needs_human_review, created_at, workflow_id.name AS workflow_name, {} AS step_name FROM task
+            r#"SELECT id, title, level, {} AS status, priority, tags, needs_human_review, created_at, workflow_id, current_step_id, workflow_id.name AS workflow_name, {} AS step_name FROM task
                WHERE <-depends_on<-task CONTAINS task:{}
                AND (current_step_id IS NONE OR current_step_id.name != "done")"#,
             status_expr, step_name_expr, task_id
@@ -794,6 +798,8 @@ impl<'a> GraphQueries<'a> {
                 tags: row.tags,
                 needs_human_review: row.needs_human_review,
                 created_at: row.created_at.0,
+                workflow_id: row.workflow_id.map(|t| t.id.to_raw()),
+                current_step_id: row.current_step_id.map(|t| t.id.to_raw()),
                 workflow_name: row.workflow_name,
                 step_name: row.step_name,
             })
@@ -1782,9 +1788,18 @@ mod tests {
         assert_eq!(incomplete.len(), 2);
 
         let incomplete_ids: HashSet<_> = incomplete.iter().map(|c| c.id.as_str()).collect();
-        assert!(incomplete_ids.contains("child2"));
-        assert!(incomplete_ids.contains("child3"));
-        assert!(!incomplete_ids.contains("child1"));
+        assert!(
+            incomplete_ids.contains("child2"),
+            "child2 should be incomplete"
+        );
+        assert!(
+            incomplete_ids.contains("child3"),
+            "child3 should be incomplete"
+        );
+        assert!(
+            !incomplete_ids.contains("child1"),
+            "child1 should not be in incomplete list"
+        );
     }
 
     #[tokio::test]
@@ -2093,8 +2108,8 @@ mod tests {
 
         // Epic has 3 descendants: ticket1 (done), task1 (done), task2 (todo)
         let progress = graph.get_progress("epic1").await.unwrap();
-        assert_eq!(progress.total_count, 3);
         assert_eq!(progress.done_count, 2);
+        assert_eq!(progress.total_count, 3);
         assert_eq!(progress.percentage, 67);
     }
 

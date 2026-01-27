@@ -240,6 +240,8 @@ pub struct WorkflowInfo {
     pub id: String,
     /// Workflow name
     pub name: String,
+    /// Current step ID
+    pub current_step_id: Option<String>,
     /// Name of the current step
     pub current_step_name: String,
     /// Current step index
@@ -1053,6 +1055,7 @@ impl WorkflowService for DefaultWorkflowService {
                 return Ok(WorkflowInfo {
                     id,
                     name: "Deleted Workflow".to_string(),
+                    current_step_id: current_step_id.map(|s| s.id.to_raw()),
                     current_step_name: "Unknown".to_string(),
                     current_step_index: 0,
                     total_steps: 0,
@@ -1069,6 +1072,7 @@ impl WorkflowService for DefaultWorkflowService {
             return Ok(WorkflowInfo {
                 id,
                 name: workflow.name,
+                current_step_id: current_step_id.map(|s| s.id.to_raw()),
                 current_step_name: "Unknown".to_string(),
                 current_step_index: 0,
                 total_steps: 0,
@@ -1077,16 +1081,16 @@ impl WorkflowService for DefaultWorkflowService {
             });
         }
 
-        let current_step_index = if let Some(current_step_id) = current_step_id {
+        let (current_step_index, step_id_str) = if let Some(current_step_id) = current_step_id {
             let current_step_id_str = current_step_id.id.to_raw();
             if let Some(current_step) = self.db.steps().get(&current_step_id_str).await? {
                 let order = current_step.order as usize;
-                order.min(step_names.len() - 1)
+                (order.min(step_names.len() - 1), Some(current_step_id_str))
             } else {
-                0
+                (0, Some(current_step_id_str))
             }
         } else {
-            0
+            (0, None)
         };
 
         let current_step_name = step_names[current_step_index].clone();
@@ -1106,6 +1110,7 @@ impl WorkflowService for DefaultWorkflowService {
         Ok(WorkflowInfo {
             id,
             name: workflow.name,
+            current_step_id: step_id_str,
             current_step_name,
             current_step_index,
             total_steps,

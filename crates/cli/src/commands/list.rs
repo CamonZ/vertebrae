@@ -100,17 +100,26 @@ fn parse_priority(s: &str) -> Result<Priority, String> {
     }
 }
 
-/// Compute the derived status from workflow and step names
+/// Compute the derived status from workflow and step names with IDs
 ///
-/// Returns `workflow_name:step_name` if both are present,
+/// Returns `workflow_name:step_name (workflow:id, step:id)` if all are present,
 /// otherwise falls back to the raw status string.
 fn compute_derived_status(
     status: &str,
     workflow_name: Option<&str>,
     step_name: Option<&str>,
+    workflow_id: Option<&str>,
+    step_id: Option<&str>,
 ) -> String {
     match (workflow_name, step_name) {
-        (Some(wf), Some(step)) => format!("{}:{}", wf, step),
+        (Some(wf), Some(step)) => {
+            let ids_suffix = match (workflow_id, step_id) {
+                (Some(wf_id), Some(s_id)) => format!(" (workflow:{}, step:{})", wf_id, s_id),
+                (Some(wf_id), None) => format!(" (workflow:{})", wf_id),
+                _ => String::new(),
+            };
+            format!("{}:{}{}", wf, step, ids_suffix)
+        }
         _ => status.to_string(),
     }
 }
@@ -122,6 +131,8 @@ impl From<vertebrae_db::TaskSummary> for TaskSummary {
             &summary.status,
             summary.workflow_name.as_deref(),
             summary.step_name.as_deref(),
+            summary.workflow_id.as_deref(),
+            summary.current_step_id.as_deref(),
         );
 
         TaskSummary {
@@ -1034,6 +1045,8 @@ mod tests {
             tags: vec!["test".to_string()],
             needs_human_review: Some(true),
             created_at: chrono::Utc::now(),
+            workflow_id: None,
+            current_step_id: None,
             workflow_name: None,
             step_name: None,
         };
@@ -1052,7 +1065,7 @@ mod tests {
 
     #[test]
     fn test_task_summary_from_db_task_summary_with_workflow() {
-        // Test conversion with workflow info - should compute derived status
+        // Test conversion with workflow info - should compute derived status with IDs
         let db_summary = vertebrae_db::TaskSummary {
             id: "abc123".to_string(),
             title: "Test Task".to_string(),
@@ -1062,6 +1075,8 @@ mod tests {
             tags: vec!["test".to_string()],
             needs_human_review: Some(true),
             created_at: chrono::Utc::now(),
+            workflow_id: Some("wf123".to_string()),
+            current_step_id: Some("wf123_active".to_string()),
             workflow_name: Some("Default Workflow".to_string()),
             step_name: Some("active".to_string()),
         };
@@ -1071,8 +1086,11 @@ mod tests {
         assert_eq!(summary.id, "abc123");
         assert_eq!(summary.title, "Test Task");
         assert_eq!(summary.level, "ticket");
-        // With workflow/step, derived status is "workflow_name:step_name"
-        assert_eq!(summary.status, "Default Workflow:active");
+        // With workflow/step, derived status is "workflow_name:step_name (workflow:id, step:id)"
+        assert_eq!(
+            summary.status,
+            "Default Workflow:active (workflow:wf123, step:wf123_active)"
+        );
         assert_eq!(summary.priority, Some("medium".to_string()));
         assert_eq!(summary.tags, vec!["test".to_string()]);
         assert_eq!(summary.needs_human_review, Some(true));

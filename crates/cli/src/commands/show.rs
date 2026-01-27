@@ -257,7 +257,11 @@ impl ShowCommand {
 
         // Compute the derived status from workflow info
         let derived_status = if let Some(ref wf) = workflow {
-            format!("{}:{}", wf.name, wf.current_step_name)
+            let ids_suffix = match &wf.current_step_id {
+                Some(step_id) => format!(" (workflow:{}, step:{})", wf.id, step_id),
+                None => format!(" (workflow:{})", wf.id),
+            };
+            format!("{}:{}{}", wf.name, wf.current_step_name, ids_suffix)
         } else {
             task.status.clone()
         };
@@ -868,8 +872,17 @@ mod tests {
         assert_eq!(detail.id, "abc123");
         assert_eq!(detail.title, "Test Task");
         assert_eq!(detail.level, "task");
-        // Status is derived from workflow:step (task created with in_progress status)
-        assert_eq!(detail.status, "Default Workflow:in_progress");
+        // Status is derived from workflow:step with IDs
+        assert!(
+            detail.status.starts_with("Default Workflow:in_progress"),
+            "Status should start with 'Default Workflow:in_progress', got: {}",
+            detail.status
+        );
+        assert!(
+            detail.status.contains("(workflow:") && detail.status.contains(", step:"),
+            "Status should contain workflow and step IDs, got: {}",
+            detail.status
+        );
         assert_eq!(detail.priority, Some("high".to_string()));
         assert!(detail.tags.is_empty(), "Tags should be empty");
 
@@ -966,8 +979,12 @@ mod tests {
         assert_eq!(parent.id, "parent1");
         assert_eq!(parent.title, "Parent Epic");
         assert_eq!(parent.level, "epic");
-        // Status is derived from workflow:step
-        assert_eq!(parent.status, "Default Workflow:in_progress");
+        // Status is derived from workflow:step with IDs
+        assert!(
+            parent.status.starts_with("Default Workflow:in_progress"),
+            "Parent status should start with 'Default Workflow:in_progress', got: {}",
+            parent.status
+        );
         assert_eq!(parent.priority, Some("high".to_string()));
         assert_eq!(parent.tags, vec!["backend", "core"]);
     }
@@ -1023,16 +1040,24 @@ mod tests {
         let child1 = detail.children.iter().find(|c| c.id == "child1").unwrap();
         assert_eq!(child1.title, "Child 1");
         assert_eq!(child1.level, "ticket");
-        // Status is derived from workflow:step
-        assert_eq!(child1.status, "Default Workflow:in_progress");
+        // Status is derived from workflow:step with IDs
+        assert!(
+            child1.status.starts_with("Default Workflow:in_progress"),
+            "Child1 status should start with 'Default Workflow:in_progress', got: {}",
+            child1.status
+        );
         assert_eq!(child1.priority, Some("high".to_string()));
         assert_eq!(child1.tags, vec!["frontend"]);
 
         let child2 = detail.children.iter().find(|c| c.id == "child2").unwrap();
         assert_eq!(child2.title, "Child 2");
         assert_eq!(child2.level, "ticket");
-        // Status is derived from workflow:step
-        assert_eq!(child2.status, "Default Workflow:backlog");
+        // Status is derived from workflow:step with IDs
+        assert!(
+            child2.status.starts_with("Default Workflow:backlog"),
+            "Child2 status should start with 'Default Workflow:backlog', got: {}",
+            child2.status
+        );
         assert_eq!(child2.priority, Some("medium".to_string()));
         assert_eq!(child2.tags, vec!["backend"]);
     }
@@ -1078,8 +1103,12 @@ mod tests {
         assert_eq!(dep.id, "dep1");
         assert_eq!(dep.title, "Dependency Task");
         assert_eq!(dep.level, "task");
-        // Status is derived from workflow:step
-        assert_eq!(dep.status, "Default Workflow:in_progress");
+        // Status is derived from workflow:step with IDs
+        assert!(
+            dep.status.starts_with("Default Workflow:in_progress"),
+            "Dependency status should start with 'Default Workflow:in_progress', got: {}",
+            dep.status
+        );
         assert_eq!(dep.priority, Some("critical".to_string()));
         assert_eq!(dep.tags, vec!["blocker", "core"]);
     }
@@ -1616,6 +1645,7 @@ mod tests {
             workflow: Some(WorkflowInfo {
                 id: "wf123".to_string(),
                 name: "Code Review".to_string(),
+                current_step_id: Some("wf123_review".to_string()),
                 current_step_name: "Review".to_string(),
                 current_step_index: 1,
                 total_steps: 3,
@@ -1658,6 +1688,7 @@ mod tests {
             workflow: Some(WorkflowInfo {
                 id: "wf123".to_string(),
                 name: "Simple Workflow".to_string(),
+                current_step_id: Some("wf123_first".to_string()),
                 current_step_name: "First Step".to_string(),
                 current_step_index: 0,
                 total_steps: 2,
@@ -1684,6 +1715,7 @@ mod tests {
         let info = WorkflowInfo {
             id: "wf123".to_string(),
             name: "Test Workflow".to_string(),
+            current_step_id: Some("wf123_step_one".to_string()),
             current_step_name: "Step One".to_string(),
             current_step_index: 0,
             total_steps: 2,
@@ -1829,10 +1861,16 @@ mod tests {
         assert!(result.is_ok(), "Show failed: {:?}", result.err());
 
         let detail = result.unwrap();
-        // Step 1 in the Default Workflow is "in_progress"
-        assert_eq!(
-            detail.status, "Default Workflow:in_progress",
-            "Derived status should reflect workflow:step after advancing"
+        // Step 1 in the Default Workflow is "in_progress", with workflow and step IDs
+        assert!(
+            detail.status.starts_with("Default Workflow:in_progress"),
+            "Derived status should start with 'Default Workflow:in_progress' after advancing, got: {}",
+            detail.status
+        );
+        assert!(
+            detail.status.contains("(workflow:") && detail.status.contains(", step:"),
+            "Derived status should contain workflow and step IDs, got: {}",
+            detail.status
         );
     }
 }

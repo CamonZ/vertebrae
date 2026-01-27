@@ -28,6 +28,10 @@ pub struct TaskSummary {
     pub needs_human_review: Option<bool>,
     /// When the task was created
     pub created_at: chrono::DateTime<chrono::Utc>,
+    /// Workflow ID (if task is assigned to a workflow)
+    pub workflow_id: Option<String>,
+    /// Current step ID (if task has a current step in workflow)
+    pub current_step_id: Option<String>,
     /// Workflow name (if task is assigned to a workflow)
     pub workflow_name: Option<String>,
     /// Current step name (if task has a current step in workflow)
@@ -86,6 +90,12 @@ struct TaskRow {
     needs_human_review: Option<bool>,
     /// Created timestamp - used by SQL ORDER BY for sorting and display
     created_at: surrealdb::sql::Datetime,
+    /// Workflow ID (raw ID for display)
+    #[serde(default)]
+    workflow_id: Option<surrealdb::sql::Thing>,
+    /// Current step ID (raw ID for display)
+    #[serde(default)]
+    current_step_id: Option<surrealdb::sql::Thing>,
     /// Workflow name (fetched via workflow_id.name)
     #[serde(default)]
     workflow_name: Option<String>,
@@ -112,6 +122,8 @@ impl TaskRow {
             tags: self.tags,
             needs_human_review: self.needs_human_review,
             created_at: self.created_at.0,
+            workflow_id: self.workflow_id.map(|t| t.id.to_raw()),
+            current_step_id: self.current_step_id.map(|t| t.id.to_raw()),
             workflow_name: self.workflow_name,
             step_name: self.step_name,
         }
@@ -454,12 +466,12 @@ impl<'a> TaskLister<'a> {
         let step_name_expr = "IF current_step_id != NONE THEN current_step_id.name ELSE IF workflow_id != NONE AND current_step != NONE THEN workflow_id.steps[current_step].name END";
         let query = if conditions.is_empty() {
             format!(
-                "SELECT id, title, level, priority, tags, needs_human_review, created_at, workflow_id.name AS workflow_name, {} AS step_name FROM task ORDER BY created_at DESC",
+                "SELECT id, title, level, priority, tags, needs_human_review, created_at, workflow_id, current_step_id, workflow_id.name AS workflow_name, {} AS step_name FROM task ORDER BY created_at DESC",
                 step_name_expr
             )
         } else {
             format!(
-                "SELECT id, title, level, priority, tags, needs_human_review, created_at, workflow_id.name AS workflow_name, {} AS step_name FROM task WHERE {} ORDER BY created_at DESC",
+                "SELECT id, title, level, priority, tags, needs_human_review, created_at, workflow_id, current_step_id, workflow_id.name AS workflow_name, {} AS step_name FROM task WHERE {} ORDER BY created_at DESC",
                 step_name_expr,
                 conditions.join(" AND ")
             )
@@ -489,7 +501,7 @@ impl<'a> TaskLister<'a> {
         // otherwise fall back to extracting from workflow_id.steps[current_step].name for legacy tasks
         let step_name_expr = "IF current_step_id != NONE THEN current_step_id.name ELSE IF workflow_id != NONE AND current_step != NONE THEN workflow_id.steps[current_step].name END";
         let query = format!(
-            "SELECT id, title, level, priority, tags, needs_human_review, created_at, workflow_id.name AS workflow_name, {} AS step_name FROM task WHERE {} ORDER BY created_at DESC",
+            "SELECT id, title, level, priority, tags, needs_human_review, created_at, workflow_id, current_step_id, workflow_id.name AS workflow_name, {} AS step_name FROM task WHERE {} ORDER BY created_at DESC",
             step_name_expr,
             conditions.join(" AND ")
         );
@@ -514,7 +526,7 @@ impl<'a> TaskLister<'a> {
         // otherwise fall back to extracting from workflow_id.steps[current_step].name for legacy tasks
         let step_name_expr = "IF current_step_id != NONE THEN current_step_id.name ELSE IF workflow_id != NONE AND current_step != NONE THEN workflow_id.steps[current_step].name END";
         let query = format!(
-            "SELECT id, title, level, priority, tags, needs_human_review, created_at, workflow_id.name AS workflow_name, {} AS step_name FROM task WHERE {} ORDER BY created_at DESC",
+            "SELECT id, title, level, priority, tags, needs_human_review, created_at, workflow_id, current_step_id, workflow_id.name AS workflow_name, {} AS step_name FROM task WHERE {} ORDER BY created_at DESC",
             step_name_expr,
             conditions.join(" AND ")
         );
@@ -849,6 +861,8 @@ impl<'a> TaskLister<'a> {
                 // list_ready doesn't fetch workflow info - would require additional queries
                 workflow_name: None,
                 step_name: None,
+                workflow_id: None,
+                current_step_id: None,
             })
             .collect();
 
@@ -1160,6 +1174,8 @@ mod tests {
             created_at: chrono::Utc::now(),
             workflow_name: Some("Default Workflow".to_string()),
             step_name: Some("in_progress".to_string()),
+            workflow_id: None,
+            current_step_id: None,
         };
 
         let cloned = summary.clone();
@@ -1179,6 +1195,8 @@ mod tests {
             created_at: chrono::Utc::now(),
             workflow_name: None,
             step_name: None,
+            workflow_id: None,
+            current_step_id: None,
         };
 
         let debug_str = format!("{:?}", summary);
@@ -1201,6 +1219,8 @@ mod tests {
             created_at: now,
             workflow_name: None,
             step_name: None,
+            workflow_id: None,
+            current_step_id: None,
         };
 
         let summary2 = TaskSummary {
@@ -1214,6 +1234,8 @@ mod tests {
             created_at: now,
             workflow_name: None,
             step_name: None,
+            workflow_id: None,
+            current_step_id: None,
         };
 
         assert_eq!(summary1, summary2);
