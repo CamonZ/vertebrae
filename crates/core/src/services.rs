@@ -9,6 +9,7 @@ use vertebrae_db::Database;
 
 use crate::chat_session_service::{ChatSessionService, DefaultChatSessionService};
 use crate::execution_service::{DefaultExecutionService, ExecutionService};
+use crate::gate_service::{DefaultGateService, GateService};
 use crate::service::{DefaultTaskService, MutationCallback, TaskService};
 use crate::step_service::{DefaultStepService, StepService};
 use crate::workflow_service::{DefaultWorkflowService, WorkflowMutationCallback, WorkflowService};
@@ -51,6 +52,8 @@ pub struct VertebraeServices {
     steps: Arc<dyn StepService>,
     /// Chat session service implementation
     chat_sessions: Arc<dyn ChatSessionService>,
+    /// Gate service implementation
+    gates: Arc<dyn GateService>,
 }
 
 impl VertebraeServices {
@@ -72,7 +75,8 @@ impl VertebraeServices {
             workflows: Arc::new(DefaultWorkflowService::new(db.clone())),
             executions: Arc::new(DefaultExecutionService::new(db.clone())),
             steps: Arc::new(DefaultStepService::new(db.clone())),
-            chat_sessions: Arc::new(DefaultChatSessionService::new(db)),
+            chat_sessions: Arc::new(DefaultChatSessionService::new(db.clone())),
+            gates: Arc::new(DefaultGateService::new(db)),
         }
     }
 
@@ -95,7 +99,8 @@ impl VertebraeServices {
             workflows: Arc::new(DefaultWorkflowService::new(db.clone())),
             executions: Arc::new(DefaultExecutionService::new(db.clone())),
             steps: Arc::new(DefaultStepService::new(db.clone())),
-            chat_sessions: Arc::new(DefaultChatSessionService::new(db)),
+            chat_sessions: Arc::new(DefaultChatSessionService::new(db.clone())),
+            gates: Arc::new(DefaultGateService::new(db)),
         }
     }
 
@@ -124,7 +129,8 @@ impl VertebraeServices {
             )),
             executions: Arc::new(DefaultExecutionService::new(db.clone())),
             steps: Arc::new(DefaultStepService::new(db.clone())),
-            chat_sessions: Arc::new(DefaultChatSessionService::new(db)),
+            chat_sessions: Arc::new(DefaultChatSessionService::new(db.clone())),
+            gates: Arc::new(DefaultGateService::new(db)),
         }
     }
 
@@ -154,7 +160,8 @@ impl VertebraeServices {
             )),
             executions: Arc::new(DefaultExecutionService::new(db.clone())),
             steps: Arc::new(DefaultStepService::new(db.clone())),
-            chat_sessions: Arc::new(DefaultChatSessionService::new(db)),
+            chat_sessions: Arc::new(DefaultChatSessionService::new(db.clone())),
+            gates: Arc::new(DefaultGateService::new(db)),
         }
     }
 
@@ -201,6 +208,15 @@ impl VertebraeServices {
     /// A reference to the ChatSessionService trait object
     pub fn chat_sessions(&self) -> &dyn ChatSessionService {
         self.chat_sessions.as_ref()
+    }
+
+    /// Get a reference to the gate service
+    ///
+    /// # Returns
+    ///
+    /// A reference to the GateService trait object
+    pub fn gates(&self) -> &dyn GateService {
+        self.gates.as_ref()
     }
 
     /// Get an Arc clone to the task service
@@ -262,6 +278,18 @@ impl VertebraeServices {
     pub fn chat_sessions_arc(&self) -> Arc<dyn ChatSessionService> {
         Arc::clone(&self.chat_sessions)
     }
+
+    /// Get an Arc clone to the gate service
+    ///
+    /// Useful when you need to share the service across threads or store it
+    /// in application state.
+    ///
+    /// # Returns
+    ///
+    /// An Arc-wrapped reference to the GateService trait object
+    pub fn gates_arc(&self) -> Arc<dyn GateService> {
+        Arc::clone(&self.gates)
+    }
 }
 
 #[cfg(test)]
@@ -282,6 +310,7 @@ mod tests {
         let _ = services.executions();
         let _ = services.steps();
         let _ = services.chat_sessions();
+        let _ = services.gates();
     }
 
     #[tokio::test]
@@ -297,6 +326,7 @@ mod tests {
         let executions_arc = services.executions_arc();
         let steps_arc = services.steps_arc();
         let chat_sessions_arc = services.chat_sessions_arc();
+        let gates_arc = services.gates_arc();
 
         // Verify they're the same instances
         assert!(Arc::ptr_eq(&services.tasks_arc(), &tasks_arc));
@@ -307,6 +337,7 @@ mod tests {
             &services.chat_sessions_arc(),
             &chat_sessions_arc
         ));
+        assert!(Arc::ptr_eq(&services.gates_arc(), &gates_arc));
     }
 
     #[tokio::test]

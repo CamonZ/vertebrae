@@ -34,16 +34,14 @@ impl GateCommand {
     /// # Errors
     ///
     /// Returns `ServiceError` if the command execution fails.
-    #[allow(deprecated)]
     pub async fn execute(&self, services: &VertebraeServices) -> Result<String, ServiceError> {
-        let db = services.tasks().database().clone();
-        let repo = db.validation_gates();
+        let gate_service = services.gates();
         match self {
-            GateCommand::Create(cmd) => cmd.execute(&repo).await,
-            GateCommand::List(cmd) => cmd.execute(&repo).await,
-            GateCommand::Show(cmd) => cmd.execute(&repo).await,
-            GateCommand::Update(cmd) => cmd.execute(&repo).await,
-            GateCommand::Delete(cmd) => cmd.execute(&repo).await,
+            GateCommand::Create(cmd) => cmd.execute(gate_service).await,
+            GateCommand::List(cmd) => cmd.execute(gate_service).await,
+            GateCommand::Show(cmd) => cmd.execute(gate_service).await,
+            GateCommand::Update(cmd) => cmd.execute(gate_service).await,
+            GateCommand::Delete(cmd) => cmd.execute(gate_service).await,
         }
     }
 }
@@ -150,10 +148,9 @@ pub struct GateCreateCommand {
 
 impl GateCreateCommand {
     /// Execute the create gate command.
-    #[allow(deprecated)]
     pub async fn execute(
         &self,
-        repo: &vertebrae_db::ValidationGateRepository<'_>,
+        gate_service: &dyn vertebrae_core::GateService,
     ) -> Result<String, ServiceError> {
         // Build the gate based on type
         let mut gate = match self.gate_type {
@@ -205,23 +202,15 @@ impl GateCreateCommand {
         }
 
         // Create the gate
-        let created = if let Some(id) = &self.id {
-            repo.create_with_id(&id.to_lowercase(), &gate)
-                .await
-                .map_err(|e| ServiceError::validation_failed(e.to_string()))?
+        let created_id = if let Some(id) = &self.id {
+            gate_service
+                .create_gate_with_id(&id.to_lowercase(), &gate)
+                .await?
         } else {
-            repo.create(&gate)
-                .await
-                .map_err(|e| ServiceError::validation_failed(e.to_string()))?
+            gate_service.create_gate(&gate).await?
         };
 
-        let gate_id = created
-            .id
-            .as_ref()
-            .map(|t| t.id.to_string())
-            .unwrap_or_else(|| "unknown".to_string());
-
-        Ok(format!("Created validation gate: {}", gate_id))
+        Ok(format!("Created validation gate: {}", created_id))
     }
 }
 
@@ -235,19 +224,14 @@ pub struct GateListCommand {
 
 impl GateListCommand {
     /// Execute the list gates command.
-    #[allow(deprecated)]
     pub async fn execute(
         &self,
-        repo: &vertebrae_db::ValidationGateRepository<'_>,
+        gate_service: &dyn vertebrae_core::GateService,
     ) -> Result<String, ServiceError> {
         let gates = if let Some(gate_type) = self.gate_type {
-            repo.list_by_type(gate_type.into())
-                .await
-                .map_err(|e| ServiceError::validation_failed(e.to_string()))?
+            gate_service.list_gates_by_type(gate_type.into()).await?
         } else {
-            repo.list()
-                .await
-                .map_err(|e| ServiceError::validation_failed(e.to_string()))?
+            gate_service.list_gates().await?
         };
 
         if gates.is_empty() {
@@ -285,15 +269,11 @@ pub struct GateShowCommand {
 
 impl GateShowCommand {
     /// Execute the show gate command.
-    #[allow(deprecated)]
     pub async fn execute(
         &self,
-        repo: &vertebrae_db::ValidationGateRepository<'_>,
+        gate_service: &dyn vertebrae_core::GateService,
     ) -> Result<String, ServiceError> {
-        let gate = repo
-            .get(&self.id.to_lowercase())
-            .await
-            .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
+        let gate = gate_service.get_gate(&self.id).await?;
 
         match gate {
             Some(g) => {
@@ -412,16 +392,12 @@ pub struct GateUpdateCommand {
 
 impl GateUpdateCommand {
     /// Execute the update gate command.
-    #[allow(deprecated)]
     pub async fn execute(
         &self,
-        repo: &vertebrae_db::ValidationGateRepository<'_>,
+        gate_service: &dyn vertebrae_core::GateService,
     ) -> Result<String, ServiceError> {
         // Check if gate exists
-        let existing = repo
-            .get(&self.id.to_lowercase())
-            .await
-            .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
+        let existing = gate_service.get_gate(&self.id).await?;
 
         if existing.is_none() {
             return Err(ServiceError::validation_failed(format!(
@@ -461,9 +437,7 @@ impl GateUpdateCommand {
             updates = updates.with_pass_threshold(threshold);
         }
 
-        repo.update(&self.id.to_lowercase(), &updates)
-            .await
-            .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
+        gate_service.update_gate(&self.id, &updates).await?;
 
         Ok(format!("Updated gate: {}", self.id))
     }
@@ -483,16 +457,12 @@ pub struct GateDeleteCommand {
 
 impl GateDeleteCommand {
     /// Execute the delete gate command.
-    #[allow(deprecated)]
     pub async fn execute(
         &self,
-        repo: &vertebrae_db::ValidationGateRepository<'_>,
+        gate_service: &dyn vertebrae_core::GateService,
     ) -> Result<String, ServiceError> {
         // Check if gate exists
-        let existing = repo
-            .get(&self.id.to_lowercase())
-            .await
-            .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
+        let existing = gate_service.get_gate(&self.id).await?;
 
         if existing.is_none() {
             return Err(ServiceError::validation_failed(format!(
@@ -502,9 +472,7 @@ impl GateDeleteCommand {
         }
 
         // Delete the gate
-        repo.delete(&self.id.to_lowercase())
-            .await
-            .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
+        gate_service.delete_gate(&self.id).await?;
 
         Ok(format!("Deleted gate: {}", self.id))
     }
