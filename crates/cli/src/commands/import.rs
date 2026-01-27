@@ -242,14 +242,12 @@ impl ImportCommand {
     /// # Errors
     ///
     /// Returns `ServiceError` if database operations fail or file I/O fails.
-    #[allow(deprecated)]
     pub async fn execute(
         &self,
         services: &VertebraeServices,
     ) -> Result<ImportResult, ServiceError> {
         let (records, source) = self.read_records()?;
 
-        let db = services.tasks().database();
         let mut result = ImportResult {
             workflows_imported: 0,
             workflows_skipped: 0,
@@ -267,12 +265,12 @@ impl ImportCommand {
         // Pass 1: Import workflows
         for record in &records {
             if let ImportRecord::Workflow(workflow) = record {
-                if db.workflows().exists(&workflow.id).await? {
+                if services.workflows().workflow_exists(&workflow.id).await? {
                     if self.skip_existing {
                         result.workflows_skipped += 1;
                         continue;
                     }
-                    db.workflows().delete(&workflow.id).await?;
+                    services.workflows().delete_workflow(&workflow.id).await?;
                 }
 
                 let db_workflow = Workflow {
@@ -287,7 +285,10 @@ impl ImportCommand {
                     created_at: parse_datetime(&workflow.created_at),
                     updated_at: parse_datetime(&workflow.updated_at),
                 };
-                db.workflows().create(&workflow.id, &db_workflow).await?;
+                services
+                    .workflows()
+                    .create_workflow_raw(&workflow.id, &db_workflow)
+                    .await?;
                 result.workflows_imported += 1;
             }
         }
@@ -295,12 +296,12 @@ impl ImportCommand {
         // Pass 2: Import steps
         for record in &records {
             if let ImportRecord::Step(step) = record {
-                if db.steps().exists(&step.id).await? {
+                if services.steps().step_exists(&step.id).await? {
                     if self.skip_existing {
                         result.steps_skipped += 1;
                         continue;
                     }
-                    db.steps().delete(&step.id).await?;
+                    services.steps().delete_step(&step.id).await?;
                 }
 
                 let db_step = Step {
@@ -321,7 +322,10 @@ impl ImportCommand {
                     created_at: parse_datetime(&step.created_at),
                     updated_at: parse_datetime(&step.updated_at),
                 };
-                db.steps().create_with_id(&step.id, &db_step).await?;
+                services
+                    .steps()
+                    .create_step_with_id(&step.id, &db_step)
+                    .await?;
                 result.steps_imported += 1;
             }
         }
@@ -331,15 +335,11 @@ impl ImportCommand {
             if let ImportRecord::Workflow(workflow) = record
                 && let Some(ref initial_step_id) = workflow.initial_step_id
             {
-                let updates = vertebrae_db::WorkflowUpdate {
-                    name: None,
-                    description: None,
-                    metadata: None,
-                    initial_step: Some(make_thing("step", initial_step_id)),
-                    auto_advance: None,
-                    order: None,
-                };
-                db.workflows().update(&workflow.id, &updates).await?;
+                let step_thing = make_thing("step", initial_step_id);
+                services
+                    .workflows()
+                    .update_workflow_initial_step(&workflow.id, &step_thing)
+                    .await?;
             }
         }
 
@@ -347,22 +347,30 @@ impl ImportCommand {
         for record in &records {
             if let ImportRecord::WorkflowTransition(transition) = record {
                 // Check if transition already exists between these workflows
-                if db
-                    .workflow_transitions()
-                    .exists(&transition.from_workflow_id, &transition.to_workflow_id)
+                if services
+                    .workflows()
+                    .workflow_transition_exists(
+                        &transition.from_workflow_id,
+                        &transition.to_workflow_id,
+                    )
                     .await?
                 {
                     if self.skip_existing {
                         result.transitions_skipped += 1;
                         continue;
                     }
-                    db.workflow_transitions()
-                        .delete(&transition.from_workflow_id, &transition.to_workflow_id)
+                    services
+                        .workflows()
+                        .delete_workflow_transition(
+                            &transition.from_workflow_id,
+                            &transition.to_workflow_id,
+                        )
                         .await?;
                 }
 
-                db.workflow_transitions()
-                    .create(
+                services
+                    .workflows()
+                    .create_workflow_transition(
                         &transition.from_workflow_id,
                         &transition.to_workflow_id,
                         &transition.label,
@@ -376,12 +384,12 @@ impl ImportCommand {
         // Pass 4: Import tasks
         for record in &records {
             if let ImportRecord::Task(task) = record {
-                if db.tasks().exists(&task.id).await? {
+                if services.tasks().task_exists(&task.id).await? {
                     if self.skip_existing {
                         result.tasks_skipped += 1;
                         continue;
                     }
-                    db.tasks().delete(&task.id).await?;
+                    services.tasks().delete_task(&task.id, false).await?;
                 }
 
                 let db_task = Task {
@@ -409,7 +417,7 @@ impl ImportCommand {
                     started_at: parse_datetime(&task.started_at),
                     completed_at: parse_datetime(&task.completed_at),
                 };
-                db.tasks().create(&task.id, &db_task).await?;
+                services.tasks().create_task_raw(&task.id, &db_task).await?;
                 result.tasks_imported += 1;
             }
         }
@@ -418,11 +426,11 @@ impl ImportCommand {
         for record in &records {
             match record {
                 ImportRecord::ChildOf { child, parent } => {
-                    db.relationships().create_child_of(child, parent).await?;
+                    services.tasks().set_parent(child, parent).await?;
                     result.child_of_relations += 1;
                 }
                 ImportRecord::DependsOn { task, blocker } => {
-                    db.relationships().create_depends_on(task, blocker).await?;
+                    services.tasks().add_dependency(task, blocker).await?;
                     result.depends_on_relations += 1;
                 }
                 _ => {

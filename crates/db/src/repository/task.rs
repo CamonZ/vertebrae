@@ -302,18 +302,44 @@ impl<'a> TaskRepository<'a> {
             None => ("", None, None),
         };
 
+        // Build timestamp clauses for import support
+        let created_at_clause = if task.created_at.is_some() {
+            ", created_at = $created_at"
+        } else {
+            ""
+        };
+        let updated_at_clause = if task.updated_at.is_some() {
+            ", updated_at = $updated_at"
+        } else {
+            ""
+        };
+        let started_at_clause = if task.started_at.is_some() {
+            ", started_at = $started_at"
+        } else {
+            ""
+        };
+        let completed_at_clause = if task.completed_at.is_some() {
+            ", completed_at = $completed_at"
+        } else {
+            ""
+        };
+
         let query = format!(
             r#"CREATE task:{} SET
                 title = $title,
                 level = "{}",
                 priority = {},
-                tags = {}{}{}"#,
+                tags = {}{}{}{}{}{}{}"#,
             id,
             task.level.as_str(),
             priority_str,
             tags_str,
             description_clause,
-            workflow_clause
+            workflow_clause,
+            created_at_clause,
+            updated_at_clause,
+            started_at_clause,
+            completed_at_clause
         );
 
         let mut query_builder = self.client.query(&query).bind(("title", title));
@@ -325,6 +351,18 @@ impl<'a> TaskRepository<'a> {
             if let Some(step_id) = current_step_id {
                 query_builder = query_builder.bind(("current_step_id", step_id));
             }
+        }
+        if let Some(created_at) = task.created_at {
+            query_builder = query_builder.bind(("created_at", created_at));
+        }
+        if let Some(updated_at) = task.updated_at {
+            query_builder = query_builder.bind(("updated_at", updated_at));
+        }
+        if let Some(started_at) = task.started_at {
+            query_builder = query_builder.bind(("started_at", started_at));
+        }
+        if let Some(completed_at) = task.completed_at {
+            query_builder = query_builder.bind(("completed_at", completed_at));
         }
         query_builder.await?;
         Ok(())
@@ -2113,7 +2151,7 @@ mod tests {
             refs = []"#;
         db.client().query(query).await.unwrap();
 
-        // Try to remove a step that doesn't exist
+        // Try to remove step that doesn't exist
         let result = repo.remove_section("remsec4", SectionType::Step, 1).await;
 
         assert!(result.is_err());

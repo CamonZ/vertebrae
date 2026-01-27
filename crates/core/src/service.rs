@@ -714,6 +714,7 @@ pub trait TaskService: Send + Sync {
     ///
     /// A vector of (task_id, blocker_id) tuples.
     async fn export_depends_on_relations(&self) -> ServiceResult<Vec<(String, String)>>;
+    async fn create_task_raw(&self, id: &str, task: &Task) -> ServiceResult<String>;
 }
 
 /// Default implementation of TaskService backed by Database
@@ -2001,6 +2002,12 @@ impl TaskService for DefaultTaskService {
             .export_all_depends_on()
             .await
             .map_err(|e| e.into())
+    }
+    async fn create_task_raw(&self, id: &str, task: &Task) -> ServiceResult<String> {
+        let id = id.to_lowercase();
+        self.db.tasks().create(&id, task).await?;
+        self.on_mutation(MutationEvent::TaskCreated { id: id.clone() });
+        Ok(id)
     }
 }
 

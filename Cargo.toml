@@ -1,3 +1,26 @@
 [workspace]
 members = ["crates/db", "crates/core", "crates/cli", "crates/gui/src-tauri"]
 resolver = "2"
+
+# Development profile - optimize for fast compilation
+[profile.dev]
+opt-level = 0
+debug = "line-tables-only"      # Minimal debug info, faster linking
+split-debuginfo = "unpacked"    # Faster debug builds on macOS
+
+# Don't optimize dependencies in dev mode
+[profile.dev.package."*"]
+opt-level = 0
+
+# Test profile - slightly optimized for faster test execution
+[profile.test]
+opt-level = 1
+debug = "line-tables-only"
+
+# Release profile - optimize for performance and size
+[profile.release]
+opt-level = 3
+lto = "thin"                    # Good balance of speed and link time
+codegen-units = 16
+strip = true
+panic = "abort"

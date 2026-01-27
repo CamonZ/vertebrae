@@ -474,6 +474,8 @@ pub trait WorkflowService: Send + Sync {
     /// # Returns
     ///
     /// A vector of (workflow_id, Workflow) tuples in deterministic order.
+    async fn create_workflow_raw(&self, id: &str, workflow: &Workflow) -> ServiceResult<String>;
+    async fn update_workflow_initial_step(&self, id: &str, step_id: &Thing) -> ServiceResult<()>;
     async fn export_all_workflows(&self) -> ServiceResult<Vec<(String, Workflow)>>;
 }
 
@@ -1289,6 +1291,18 @@ impl WorkflowService for DefaultWorkflowService {
             .exists(&from_id, &to_id)
             .await?;
         Ok(exists)
+    }
+    async fn create_workflow_raw(&self, id: &str, workflow: &Workflow) -> ServiceResult<String> {
+        let id = id.to_lowercase();
+        self.db.workflows().create(&id, workflow).await?;
+        Ok(id)
+    }
+
+    async fn update_workflow_initial_step(&self, id: &str, step_id: &Thing) -> ServiceResult<()> {
+        let id = id.to_lowercase();
+        let update = vertebrae_db::WorkflowUpdate::new().with_initial_step(step_id.clone());
+        self.db.workflows().update(&id, &update).await?;
+        Ok(())
     }
 
     async fn export_all_workflows(&self) -> ServiceResult<Vec<(String, Workflow)>> {

@@ -19,6 +19,9 @@ pub trait StepService: Send + Sync {
     /// Get a step by ID
     async fn get_step(&self, id: &str) -> ServiceResult<Option<Step>>;
 
+    /// Check if a step exists by ID
+    async fn step_exists(&self, id: &str) -> ServiceResult<bool>;
+
     /// Get a step by Thing reference
     async fn get_step_by_thing(&self, thing: &Thing) -> ServiceResult<Option<Step>>;
 
@@ -87,6 +90,10 @@ impl StepService for DefaultStepService {
 
     async fn get_step(&self, id: &str) -> ServiceResult<Option<Step>> {
         self.steps().get(id).await.map_err(ServiceError::from)
+    }
+
+    async fn step_exists(&self, id: &str) -> ServiceResult<bool> {
+        self.steps().exists(id).await.map_err(ServiceError::from)
     }
 
     async fn get_step_by_thing(&self, thing: &Thing) -> ServiceResult<Option<Step>> {
