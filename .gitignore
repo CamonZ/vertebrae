@@ -25,3 +25,4 @@ Thumbs.db
 /crates/gui/coverage
 /vtb-export-*
 /.claude/settings.json
+/.env

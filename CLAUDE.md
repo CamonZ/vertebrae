@@ -354,7 +354,6 @@ vertebrae/
 │       │   └── src/
 │       │       ├── commands.rs     # Tauri command handlers
 │       │       ├── events.rs       # Event definitions
-│       │       ├── live_queries.rs # SurrealDB LIVE streaming
 │       │       └── notification_server.rs # HTTP bridge for CLI
 │       ├── package.json        # Frontend dependencies
 │       └── vite.config.ts      # Build configuration
@@ -418,7 +417,6 @@ flowchart TB
 
     SDB --> Tasks & Workflows & ChildOf & DependsOn & Executions
 
-    GUI -.->|"LIVE queries"| SDB
     CLI -.->|"HTTP notify<br/>port 17273"| GUI
 ```
 
@@ -482,10 +480,9 @@ The service layer (`crates/core`) provides business logic via trait-based abstra
 
 ### GUI Architecture
 
-The GUI uses a **dual real-time architecture** for synchronization:
+The GUI uses an **HTTP notification architecture** for CLI-to-GUI synchronization:
 
-1. **LIVE Queries (SurrealDB)** - Direct database streaming for changes made within GUI
-2. **HTTP Notification Server (port 17273)** - Receives POST from CLI mutations, emits Tauri events
+- **HTTP Notification Server (port 17273)** - Receives POST from CLI mutations, emits Tauri events
 
 **Frontend stack:**
 - React 19 with React Router 7
@@ -496,7 +493,6 @@ The GUI uses a **dual real-time architecture** for synchronization:
 
 **Backend (Tauri):**
 - Commands delegate to `vertebrae-core` services
-- LIVE query registry for real-time updates
 - Event emission for `TaskChangedEvent` and `WorkflowChangedEvent`
 
 **Data flow:**
@@ -504,7 +500,7 @@ The GUI uses a **dual real-time architecture** for synchronization:
 CLI mutation → HTTP POST to :17273 → Tauri notification_server
             → Emit TaskChangedEvent → React hooks → Refetch data
 
-GUI mutation → Service layer → Database → LIVE query
+GUI mutation → Service layer → Database
             → Tauri event → React hooks → Update state
 ```
 
