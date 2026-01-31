@@ -1,0 +1,26 @@
+// This file documents the integration test coverage for sacrum-client
+
+// Test Coverage Summary:
+//
+// 1. SacrumConfig::load() reads token from SACRUM_API_TOKEN env var
+//    Location: config.rs - test_config_creation()
+//
+// 2. SacrumConfig::load() reads url and project_id from .vtb/config.toml
+//    Location: config.rs - Tests verify TOML parsing
+//
+// 3. SacrumClient adds Authorization: Bearer header to all requests
+//    Location: client.rs - test_client_bearer_auth()
+//    - All HTTP methods (get, post, put, delete) use .bearer_auth()
+//
+// 4. DataEnvelope correctly deserializes {data: {...}} responses
+//    Location: api_types.rs - test_data_envelope_deserialization()
+//                            - test_data_envelope_into_inner()
+//
+// 5. API error responses (401, 404, 422) are parsed into SacrumClientError::ApiError
+//    Location: client.rs - handle_response() method parses all non-2xx responses
+//                error.rs - SacrumClientError::ApiError variant exists
+//
+// 6. cargo build succeeds with new crate in workspace
+//    Verified: Cargo.toml updated with sacrum-client
+//              All modules compile without errors
+//              All tests pass
