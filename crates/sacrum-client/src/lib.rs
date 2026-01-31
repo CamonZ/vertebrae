@@ -45,6 +45,10 @@ pub mod api_types;
 pub mod client;
 pub mod config;
 pub mod error;
+pub mod execution_service;
+pub mod step_service;
+pub mod task_service;
+pub mod workflow_service;
 
 pub use api_types::{
     CreateProjectRequest, DataEnvelope, ErrorResponse, ProjectListResponse, ProjectResponse,
@@ -53,3 +57,7 @@ pub use api_types::{
 pub use client::SacrumClient;
 pub use config::SacrumConfig;
 pub use error::{SacrumClientError, SacrumClientResult};
+pub use execution_service::SacrumExecutionService;
+pub use step_service::SacrumStepService;
+pub use task_service::SacrumTaskService;
+pub use workflow_service::SacrumWorkflowService;

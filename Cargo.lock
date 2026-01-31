@@ -7698,6 +7698,8 @@ dependencies = [
 name = "vertebrae-sacrum-client"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "chrono",
  "reqwest 0.11.27",
  "serde",
  "serde_json",
@@ -7707,6 +7709,7 @@ dependencies = [
  "tracing",
  "uuid",
  "vertebrae-core",
+ "vertebrae-db",
  "wiremock",
 ]
 
