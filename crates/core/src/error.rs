@@ -56,8 +56,22 @@ pub enum ServiceError {
     InvalidInput(String),
 
     /// Database error from the underlying storage layer
+    /// NOTE: Kept for backward compatibility during migration to Sacrum backend.
+    /// Will be removed when crates/db is deleted.
     #[error(transparent)]
     Database(#[from] DbError),
+
+    /// API error from the Sacrum backend
+    #[error("API error (HTTP {status}): {message}")]
+    ApiError { status: u16, message: String },
+
+    /// Network connectivity error
+    #[error("Network error: {0}")]
+    NetworkError(String),
+
+    /// Configuration error
+    #[error("Configuration error: {0}")]
+    ConfigError(String),
 }
 
 impl ServiceError {
@@ -118,6 +132,24 @@ impl ServiceError {
         }
     }
 
+    /// Create an API error from Sacrum backend
+    pub fn api_error(status: u16, message: impl Into<String>) -> Self {
+        ServiceError::ApiError {
+            status,
+            message: message.into(),
+        }
+    }
+
+    /// Create a network error
+    pub fn network_error(message: impl Into<String>) -> Self {
+        ServiceError::NetworkError(message.into())
+    }
+
+    /// Create a configuration error
+    pub fn config_error(message: impl Into<String>) -> Self {
+        ServiceError::ConfigError(message.into())
+    }
+
     /// Get a user-friendly hint for how to resolve this error.
     ///
     /// Returns `None` if no specific guidance is available.
@@ -154,6 +186,21 @@ impl ServiceError {
             ServiceError::Database(db_err) => db_err.hint().map(String::from),
             ServiceError::ValidationFailed { .. } => None,
             ServiceError::InvalidInput(_) => None,
+            ServiceError::ApiError { status, .. } => {
+                match *status {
+                    401 => Some("Hint: Check SACRUM_API_TOKEN environment variable and ensure it's valid".to_string()),
+                    404 => Some("Hint: Resource not found on server. Verify the request is correct".to_string()),
+                    422 => Some("Hint: Invalid request data. Check the parameters and try again".to_string()),
+                    500 => Some("Hint: Server error. Try again later or contact the server administrator".to_string()),
+                    _ => Some(format!("Hint: HTTP {} error. Check the API response for details", status)),
+                }
+            }
+            ServiceError::NetworkError(_) => {
+                Some("Hint: Check your network connection and ensure the server is reachable".to_string())
+            }
+            ServiceError::ConfigError(_) => {
+                Some("Hint: Check your configuration settings and environment variables".to_string())
+            }
         }
     }
 }
@@ -304,5 +351,93 @@ mod tests {
         let hint = service_err.hint();
         assert!(hint.is_some());
         assert!(hint.unwrap().contains("vtb list"));
+    }
+
+    #[test]
+    fn test_api_error_401_unauthorized() {
+        let err = ServiceError::api_error(401, "Unauthorized");
+        assert!(matches!(err, ServiceError::ApiError { status: 401, .. }));
+        assert!(err.to_string().contains("401"));
+        assert!(err.to_string().contains("Unauthorized"));
+        let hint = err.hint();
+        assert!(hint.is_some());
+        assert!(hint.unwrap().contains("SACRUM_API_TOKEN"));
+    }
+
+    #[test]
+    fn test_api_error_404_not_found() {
+        let err = ServiceError::api_error(404, "Not found");
+        assert!(matches!(err, ServiceError::ApiError { status: 404, .. }));
+        let hint = err.hint();
+        assert!(hint.is_some());
+        assert!(hint.unwrap().contains("Resource not found"));
+    }
+
+    #[test]
+    fn test_api_error_422_unprocessable() {
+        let err = ServiceError::api_error(422, "Invalid input");
+        assert!(matches!(err, ServiceError::ApiError { status: 422, .. }));
+        let hint = err.hint();
+        assert!(hint.is_some());
+        assert!(hint.unwrap().contains("Invalid request data"));
+    }
+
+    #[test]
+    fn test_api_error_500_server_error() {
+        let err = ServiceError::api_error(500, "Internal server error");
+        assert!(matches!(err, ServiceError::ApiError { status: 500, .. }));
+        let hint = err.hint();
+        assert!(hint.is_some());
+        assert!(hint.unwrap().contains("Server error"));
+    }
+
+    #[test]
+    fn test_api_error_generic_status() {
+        let err = ServiceError::api_error(429, "Too many requests");
+        assert!(matches!(err, ServiceError::ApiError { status: 429, .. }));
+        let hint = err.hint();
+        assert!(hint.is_some());
+        assert!(hint.unwrap().contains("429"));
+    }
+
+    #[test]
+    fn test_network_error() {
+        let err = ServiceError::network_error("Connection timeout");
+        assert!(matches!(err, ServiceError::NetworkError(_)));
+        assert!(err.to_string().contains("Connection timeout"));
+        let hint = err.hint();
+        assert!(hint.is_some());
+        assert!(hint.unwrap().contains("network connection"));
+    }
+
+    #[test]
+    fn test_config_error() {
+        let err = ServiceError::config_error("Missing environment variable");
+        assert!(matches!(err, ServiceError::ConfigError(_)));
+        assert!(err.to_string().contains("Missing environment variable"));
+        let hint = err.hint();
+        assert!(hint.is_some());
+        assert!(hint.unwrap().contains("configuration"));
+    }
+
+    #[test]
+    fn test_api_error_display_format() {
+        let err = ServiceError::api_error(400, "Bad Request");
+        let display = err.to_string();
+        assert!(display.contains("API error"));
+        assert!(display.contains("400"));
+        assert!(display.contains("Bad Request"));
+    }
+
+    #[test]
+    fn test_network_error_display_format() {
+        let err = ServiceError::network_error("DNS resolution failed");
+        assert!(err.to_string().contains("DNS resolution failed"));
+    }
+
+    #[test]
+    fn test_config_error_display_format() {
+        let err = ServiceError::config_error("Invalid configuration file");
+        assert!(err.to_string().contains("Invalid configuration file"));
     }
 }
