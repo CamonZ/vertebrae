@@ -5,7 +5,7 @@ use vertebrae_core::{ServiceError, VertebraeServices};
 #[derive(Debug, Args)]
 pub struct RunCommand {
     /// Task ID to run workflow for
-    task_id: String,
+    pub task_id: String,
 }
 
 impl RunCommand {

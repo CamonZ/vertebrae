@@ -9,6 +9,9 @@ pub mod types;
 pub mod websocket_client;
 pub mod workflow_runner;
 
+#[cfg(test)]
+pub mod mock;
+
 use std::sync::Arc;
 use tokio::sync::RwLock;
 

@@ -4,34 +4,29 @@
 //! Spawns Haiku agent with read-only vtb commands to analyze task context
 //! and generate a structured JSON prompt.
 
-use crate::events::{WorkflowExecutionEvent, WorkflowExecutionEventType};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter};
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::Command;
-use vertebrae_core::{
-    orchestrator_agent_config, orchestrator_prompt, ExecutionService, OrchestratorOutput,
-};
+use vertebrae_core::{ExecutionService, OrchestratorOutput};
 
-use super::helpers::find_claude_binary;
-use super::logging::{append_to_workflow_log, trace};
+use super::args::build_orchestrator_args;
+use super::command_runner::CommandRunner;
+use super::logging::trace;
 use super::parsing::parse_orchestrator_output;
 
-/// Run orchestrator agent to generate execution prompt
+/// Orchestrator logic that accepts a `CommandRunner`.
 ///
-/// Spawns Haiku agent with read-only vtb commands to analyze task context
-/// and generate a structured JSON prompt. Does not manage execution status.
-pub async fn run_orchestrator(
+/// Builds CLI args, runs the process, parses JSON output, and updates the
+/// execution record. Event emission is handled by the caller (step.rs).
+pub(crate) async fn run_orchestrator_with(
+    runner: &dyn CommandRunner,
     step: &vertebrae_core::Step,
     exec_id: &str,
     task_id: &str,
-    workflow_id: &str,
+    _workflow_id: &str,
     executions: &Arc<dyn ExecutionService>,
-    app_handle: &AppHandle,
 ) -> Result<OrchestratorOutput, String> {
     trace(
         task_id,
-        &format!("[exec_id={}] >>> run_orchestrator ENTERED", exec_id),
+        &format!("[exec_id={}] >>> run_orchestrator_with ENTERED", exec_id),
     );
 
     log::info!(
@@ -39,324 +34,201 @@ pub async fn run_orchestrator(
         step.name
     );
 
-    // 1. Emit orchestrator started event
-    let _ = app_handle.emit(
-        "workflow-execution-event",
-        &WorkflowExecutionEvent {
-            task_id: task_id.to_string(),
-            workflow_id: workflow_id.to_string(),
-            event_type: WorkflowExecutionEventType::OrchestratorStarted {
-                execution_id: exec_id.to_string(),
-                step_name: step.name.clone(),
-            },
-        },
-    );
+    // Build args
+    let (claude_path, args) = build_orchestrator_args(step, task_id)?;
 
-    // 2. Find Claude binary
-    trace(
-        task_id,
-        &format!("[exec_id={}] Finding Claude binary...", exec_id),
-    );
-    let claude_path = match find_claude_binary() {
-        Ok(path) => {
-            trace(
-                task_id,
-                &format!("[exec_id={}] Claude binary found: {:?}", exec_id, path),
-            );
-            path
-        }
-        Err(e) => {
-            trace(
-                task_id,
-                &format!(
-                    "[exec_id={}] ERROR: Failed to find Claude binary: {}",
-                    exec_id, e
-                ),
-            );
-            return Err(e);
-        }
-    };
-    log::info!("[WorkflowRunner] Found Claude binary at: {:?}", claude_path);
-
-    // 3. Build orchestrator command with Haiku config
-    let orchestrator_config = orchestrator_agent_config();
-    let mut cmd = Command::new(&claude_path);
-
-    // Collect args for logging
-    let mut all_args: Vec<String> = Vec::new();
-
-    // Add --dangerously-skip-permissions for autonomous operation
-    all_args.push("--dangerously-skip-permissions".to_string());
-    cmd.arg("--dangerously-skip-permissions");
-
-    // Add orchestrator agent config args (model, json-schema)
-    for arg in orchestrator_config.to_cli_args() {
-        all_args.push(arg.clone());
-        cmd.arg(arg);
-    }
-
-    // Build the orchestrator prompt with task and step context
-    let step_id = step.id.as_deref().unwrap_or_default();
-    let prompt = orchestrator_prompt(task_id, step_id);
-
-    // Log the orchestrator prompt for debugging
-    log::info!("[WorkflowRunner] Phase 1 orchestrator prompt:\n{}", prompt);
-
-    // Add prompt with -p flag
-    all_args.push("-p".to_string());
-    all_args.push(prompt.clone());
-    cmd.arg("-p");
-    cmd.arg(&prompt);
-
-    // Add output format for streaming JSON
-    all_args.push("--output-format".to_string());
-    all_args.push("stream-json".to_string());
-    cmd.arg("--output-format");
-    cmd.arg("stream-json");
-
-    // Log the full CLI command
     log::info!(
         "[WorkflowRunner] Claude CLI command: {:?} {}",
         claude_path,
-        all_args
-            .iter()
+        args.iter()
             .map(|a| format!("{:?}", a))
             .collect::<Vec<_>>()
             .join(" ")
     );
 
-    // Set up pipes
-    cmd.stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-
-    // 4. Spawn and stream output in real-time
-    trace(
-        task_id,
-        &format!("[exec_id={}] Spawning orchestrator process...", exec_id),
-    );
-    let mut child = match cmd.spawn() {
-        Ok(c) => {
-            trace(
-                task_id,
-                &format!(
-                    "[exec_id={}] Orchestrator process spawned successfully",
-                    exec_id
-                ),
-            );
-            c
-        }
-        Err(e) => {
-            let err = format!("Failed to spawn orchestrator: {}", e);
-            trace(task_id, &format!("[exec_id={}] ERROR: {}", exec_id, err));
-            return Err(err);
-        }
-    };
-
-    let stdout = match child.stdout.take() {
-        Some(s) => s,
-        None => {
-            let err = "Failed to get stdout".to_string();
-            trace(task_id, &format!("[exec_id={}] ERROR: {}", exec_id, err));
-            return Err(err);
-        }
-    };
-
-    let mut reader = BufReader::new(stdout);
-    let mut output = String::new();
-    let mut line = String::new();
-
-    trace(
-        task_id,
-        &format!(
-            "[exec_id={}] Reading orchestrator output (streaming)...",
-            exec_id
-        ),
-    );
-    log::info!("[WorkflowRunner] Reading orchestrator output (streaming)");
-
-    loop {
-        match reader.read_line(&mut line).await {
-            Ok(0) => break, // EOF
-            Ok(_) => {
-                output.push_str(&line);
-                // Stream each line to the log file in real-time
-                let _ = append_to_workflow_log(task_id, "ORCHESTRATOR", line.trim());
-                line.clear();
-            }
-            Err(e) => {
-                let err = format!("Failed to read line: {}", e);
-                trace(task_id, &format!("[exec_id={}] ERROR: {}", exec_id, err));
-                return Err(err);
-            }
-        }
-    }
+    // Run the process
+    let process_output = runner.run(&claude_path, &args).await?;
 
     trace(
         task_id,
         &format!(
             "[exec_id={}] Orchestrator output complete ({} bytes)",
             exec_id,
-            output.len()
+            process_output.stdout.len()
         ),
     );
 
-    // Log raw output from orchestrator
     log::info!(
-        "[WorkflowRunner] Orchestrator raw stdout ({} bytes):\n{}",
-        output.len(),
-        output
+        "[WorkflowRunner] Orchestrator raw stdout ({} bytes)",
+        process_output.stdout.len()
     );
 
-    // 5. Wait for completion
-    trace(
-        task_id,
-        &format!(
-            "[exec_id={}] Waiting for orchestrator process to exit...",
-            exec_id
-        ),
-    );
-    let status = match child.wait().await {
-        Ok(s) => {
-            trace(
-                task_id,
-                &format!(
-                    "[exec_id={}] Orchestrator process exited with status: {:?}",
-                    exec_id, s
-                ),
-            );
-            s
-        }
-        Err(e) => {
-            let err = format!("Failed to wait: {}", e);
-            trace(task_id, &format!("[exec_id={}] ERROR: {}", exec_id, err));
-            return Err(err);
-        }
-    };
-
-    if !status.success() {
+    if !process_output.success {
         let error = format!(
             "Orchestrator exited with code: {}",
-            status.code().unwrap_or(-1)
+            process_output.exit_code.unwrap_or(-1)
         );
         trace(task_id, &format!("[exec_id={}] ERROR: {}", exec_id, error));
         log::error!("[WorkflowRunner] {}", error);
-
-        // Emit orchestrator failed event for visibility (status update handled by caller)
-        let _ = app_handle.emit(
-            "workflow-execution-event",
-            &WorkflowExecutionEvent {
-                task_id: task_id.to_string(),
-                workflow_id: workflow_id.to_string(),
-                event_type: WorkflowExecutionEventType::OrchestratorFailed {
-                    execution_id: exec_id.to_string(),
-                    error: error.clone(),
-                },
-            },
-        );
-
-        trace(
-            task_id,
-            &format!(
-                "[exec_id={}] <<< run_orchestrator RETURNING Err (non-zero exit)",
-                exec_id
-            ),
-        );
         return Err(error);
     }
 
     log::info!("[WorkflowRunner] Orchestrator completed successfully");
 
-    // 7. Parse the orchestrator output JSON
-    trace(
-        task_id,
-        &format!("[exec_id={}] Parsing orchestrator output JSON...", exec_id),
-    );
-    let orchestrator_output = match parse_orchestrator_output(&output) {
-        Ok(output) => {
-            trace(
-                task_id,
-                &format!("[exec_id={}] JSON parsing successful", exec_id),
-            );
-            output
-        }
-        Err(e) => {
-            trace(
-                task_id,
-                &format!("[exec_id={}] ERROR: JSON parsing failed: {}", exec_id, e),
-            );
-            log::error!("[WorkflowRunner] JSON parsing failed: {}", e);
-            return Err(e);
-        }
-    };
+    // Parse the orchestrator output JSON
+    let orchestrator_output = parse_orchestrator_output(&process_output.stdout)?;
 
-    // 8. Update execution record with raw orchestrator output and the generated prompt
+    // Update execution record with raw output and the generated prompt
     let execution_prompt = orchestrator_output.to_execution_prompt();
-    trace(
-        task_id,
-        &format!(
-            "[exec_id={}] Updating execution record with orchestrator output...",
-            exec_id
-        ),
-    );
-    match executions
-        .update_execution(
-            exec_id,
-            Some(output.clone()),
-            Some(execution_prompt.clone()),
-        )
+    executions
+        .update_execution(exec_id, Some(process_output.stdout), Some(execution_prompt))
         .await
-    {
-        Ok(()) => {
-            trace(
-                task_id,
-                &format!(
-                    "[exec_id={}] Execution record updated successfully",
-                    exec_id
-                ),
-            );
-        }
-        Err(e) => {
-            let err = format!("Failed to update execution: {}", e);
-            trace(task_id, &format!("[exec_id={}] ERROR: {}", exec_id, err));
-            return Err(err);
-        }
-    }
-
-    // 9. Emit orchestrator completed event
-    let _ = app_handle.emit(
-        "workflow-execution-event",
-        &WorkflowExecutionEvent {
-            task_id: task_id.to_string(),
-            workflow_id: workflow_id.to_string(),
-            event_type: WorkflowExecutionEventType::OrchestratorCompleted {
-                execution_id: exec_id.to_string(),
-            },
-        },
-    );
+        .map_err(|e| format!("Failed to update execution: {}", e))?;
 
     log::info!(
         "[WorkflowRunner] Phase 1 complete, orchestrator result: {} chars",
         orchestrator_output.result.len()
     );
 
-    // Log full orchestrator output for debugging
-    log::info!(
-        "[WorkflowRunner] Orchestrator output:\n\
-         ├── Result: {} chars\n\
-         ├── Goal: {:?}\n\
-         ├── Steps: {:?}\n\
-         ├── Constraints: {:?}\n\
-         └── Success Criteria: {:?}",
-        orchestrator_output.result.len(),
-        orchestrator_output.goal,
-        orchestrator_output.steps,
-        orchestrator_output.constraints,
-        orchestrator_output.success_criteria
-    );
-
     trace(
         task_id,
-        &format!("[exec_id={}] <<< run_orchestrator RETURNING Ok", exec_id),
+        &format!(
+            "[exec_id={}] <<< run_orchestrator_with RETURNING Ok",
+            exec_id
+        ),
     );
     Ok(orchestrator_output)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mock::mock_services;
+    use crate::workflow_runner::command_runner::{MockCommandRunner, ProcessOutput};
+    use vertebrae_core::{ExecutionStatus, OrchestratorOutput, Step, StepExecution};
+
+    async fn setup_execution(executions: &Arc<dyn ExecutionService>) -> String {
+        let exec = StepExecution {
+            id: None,
+            task_id: "task1".to_string(),
+            workflow_id: "wf1".to_string(),
+            step_name: "test-step".to_string(),
+            started_at: chrono::Utc::now(),
+            completed_at: None,
+            status: ExecutionStatus::InProgress,
+            context: None,
+            prompt: None,
+            output: None,
+            transition_result: None,
+            model_used: Some("haiku".to_string()),
+            session_id: None,
+            token_usage: None,
+            cost_usd: None,
+            duration_ms: None,
+        };
+        executions.create_execution(exec).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn success_valid_jsonl_produces_correct_output() {
+        let services = mock_services();
+        let executions = services.executions_arc();
+        let exec_id = setup_execution(&executions).await;
+
+        let orchestrator_json = OrchestratorOutput::new("Execute the plan")
+            .with_goal("Complete task")
+            .to_json()
+            .unwrap();
+        let stdout = format!(
+            "{{\"type\":\"init\",\"session_id\":\"abc\"}}\n{{\"type\":\"result\",\"structured_output\":{}}}\n",
+            orchestrator_json
+        );
+
+        let runner = MockCommandRunner::new(vec![Ok(ProcessOutput {
+            stdout,
+            success: true,
+            exit_code: Some(0),
+        })]);
+
+        let step = Step::new("test-step", "wf1");
+        let result =
+            run_orchestrator_with(&runner, &step, &exec_id, "task1", "wf1", &executions).await;
+
+        assert!(result.is_ok());
+        let output = result.unwrap();
+        assert_eq!(output.result, "Execute the plan");
+        assert_eq!(output.goal, Some("Complete task".to_string()));
+
+        // Verify execution record was updated
+        let exec = executions.get_execution(&exec_id).await.unwrap().unwrap();
+        assert!(exec.output.is_some());
+        assert!(exec.transition_result.is_some()); // stores the execution prompt
+    }
+
+    #[tokio::test]
+    async fn failure_non_zero_exit_propagates_error() {
+        let services = mock_services();
+        let executions = services.executions_arc();
+        let exec_id = setup_execution(&executions).await;
+
+        let runner = MockCommandRunner::new(vec![Ok(ProcessOutput {
+            stdout: "some output".to_string(),
+            success: false,
+            exit_code: Some(1),
+        })]);
+
+        let step = Step::new("test-step", "wf1");
+        let result =
+            run_orchestrator_with(&runner, &step, &exec_id, "task1", "wf1", &executions).await;
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("exited with code: 1"));
+    }
+
+    #[tokio::test]
+    async fn failure_invalid_json_produces_parse_error() {
+        let services = mock_services();
+        let executions = services.executions_arc();
+        let exec_id = setup_execution(&executions).await;
+
+        let runner = MockCommandRunner::new(vec![Ok(ProcessOutput {
+            stdout: "not valid json at all\n".to_string(),
+            success: true,
+            exit_code: Some(0),
+        })]);
+
+        let step = Step::new("test-step", "wf1");
+        let result =
+            run_orchestrator_with(&runner, &step, &exec_id, "task1", "wf1", &executions).await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn execution_record_updated_with_raw_output_and_prompt() {
+        let services = mock_services();
+        let executions = services.executions_arc();
+        let exec_id = setup_execution(&executions).await;
+
+        let orchestrator_json = OrchestratorOutput::new("the prompt").to_json().unwrap();
+        let stdout = format!(
+            "{{\"type\":\"result\",\"structured_output\":{}}}\n",
+            orchestrator_json
+        );
+
+        let runner = MockCommandRunner::new(vec![Ok(ProcessOutput {
+            stdout: stdout.clone(),
+            success: true,
+            exit_code: Some(0),
+        })]);
+
+        let step = Step::new("test-step", "wf1");
+        run_orchestrator_with(&runner, &step, &exec_id, "task1", "wf1", &executions)
+            .await
+            .unwrap();
+
+        let exec = executions.get_execution(&exec_id).await.unwrap().unwrap();
+        assert_eq!(exec.output, Some(stdout));
+        assert_eq!(exec.transition_result, Some("the prompt".to_string()));
+    }
 }

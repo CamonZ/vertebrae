@@ -16,6 +16,8 @@
 //! tail -f ~/.vertebrae/workflow-logs/{task_id}.log
 //! ```
 
+mod args;
+mod command_runner;
 mod executor;
 mod helpers;
 mod logging;

@@ -54,10 +54,6 @@ impl SacrumWorkflowService {
 
 #[async_trait]
 impl WorkflowService for SacrumWorkflowService {
-    fn database(&self) -> &vertebrae_db::Database {
-        unimplemented!("SacrumWorkflowService does not provide direct database access")
-    }
-
     async fn create_workflow(&self, options: CreateWorkflowOptions) -> ServiceResult<String> {
         if options.name.trim().is_empty() {
             return Err(ServiceError::validation_failed("Name cannot be empty"));
@@ -308,7 +304,7 @@ impl WorkflowService for SacrumWorkflowService {
     async fn update_workflow_initial_step(
         &self,
         _id: &str,
-        _step_id: &vertebrae_db::Thing,
+        _step_id: &vertebrae_core::models::Thing,
     ) -> ServiceResult<()> {
         Ok(())
     }

@@ -35,7 +35,8 @@ slug = "0.1"
 
 [dev-dependencies]
 serial_test = "3"
-vertebrae-core = { path = "../core", features = ["test-utils"] }
+async-trait = "0.1"
+vertebrae-core = { path = "../core" }
 
 [[test]]
 name = "integration_tests"

@@ -4,7 +4,6 @@
 //! database errors and adding service-specific error variants.
 
 use thiserror::Error;
-use vertebrae_db::DbError;
 
 /// Service layer result type
 pub type ServiceResult<T> = Result<T, ServiceError>;
@@ -55,12 +54,6 @@ pub enum ServiceError {
     #[error("Invalid input: {0}")]
     InvalidInput(String),
 
-    /// Database error from the underlying storage layer
-    /// NOTE: Kept for backward compatibility during migration to Sacrum backend.
-    /// Will be removed when crates/db is deleted.
-    #[error(transparent)]
-    Database(#[from] DbError),
-
     /// API error from the Sacrum backend
     #[error("API error (HTTP {status}): {message}")]
     ApiError { status: u16, message: String },
@@ -75,132 +68,144 @@ pub enum ServiceError {
 }
 
 impl ServiceError {
-    /// Create a task not found error
-    pub fn task_not_found(task_id: impl Into<String>) -> Self {
-        ServiceError::TaskNotFound {
-            task_id: task_id.into(),
+    /// Create a TaskNotFound error
+    pub fn task_not_found(task_id: &str) -> Self {
+        Self::TaskNotFound {
+            task_id: task_id.to_string(),
         }
     }
 
-    /// Create a workflow not found error
-    pub fn workflow_not_found(workflow_id: impl Into<String>) -> Self {
-        ServiceError::WorkflowNotFound {
-            workflow_id: workflow_id.into(),
+    /// Create a WorkflowNotFound error
+    pub fn workflow_not_found(workflow_id: &str) -> Self {
+        Self::WorkflowNotFound {
+            workflow_id: workflow_id.to_string(),
         }
     }
 
-    /// Create an invalid transition error with valid transitions
-    pub fn invalid_transition_with_valid(
-        from: impl Into<String>,
-        to: impl Into<String>,
-        valid_transitions: Vec<String>,
-    ) -> Self {
-        ServiceError::InvalidTransition {
-            from: from.into(),
-            to: to.into(),
+    /// Create an InvalidTransition error
+    pub fn invalid_transition(from: &str, to: &str, valid_transitions: Vec<String>) -> Self {
+        Self::InvalidTransition {
+            from: from.to_string(),
+            to: to.to_string(),
             valid_transitions,
         }
     }
 
-    /// Create an invalid transition error (without valid transitions)
-    pub fn invalid_transition(from: impl Into<String>, to: impl Into<String>) -> Self {
-        ServiceError::InvalidTransition {
-            from: from.into(),
-            to: to.into(),
-            valid_transitions: Vec::new(),
+    /// Create a TaskBlocked error
+    pub fn task_blocked(task_id: &str) -> Self {
+        Self::TaskBlocked {
+            task_id: task_id.to_string(),
         }
     }
 
-    /// Create a validation failed error
+    /// Create a ValidationFailed error
     pub fn validation_failed(message: impl Into<String>) -> Self {
-        ServiceError::ValidationFailed {
+        Self::ValidationFailed {
             message: message.into(),
         }
     }
 
-    /// Create a parent not found error
-    pub fn parent_not_found(parent_id: impl Into<String>) -> Self {
-        ServiceError::ParentNotFound {
-            parent_id: parent_id.into(),
+    /// Create a ParentNotFound error
+    pub fn parent_not_found(parent_id: &str) -> Self {
+        Self::ParentNotFound {
+            parent_id: parent_id.to_string(),
         }
     }
 
-    /// Create a dependency not found error
-    pub fn dependency_not_found(dependency_id: impl Into<String>) -> Self {
-        ServiceError::DependencyNotFound {
-            dependency_id: dependency_id.into(),
+    /// Create a DependencyNotFound error
+    pub fn dependency_not_found(dependency_id: &str) -> Self {
+        Self::DependencyNotFound {
+            dependency_id: dependency_id.to_string(),
         }
     }
 
-    /// Create an API error from Sacrum backend
+    /// Create an InvalidInput error
+    pub fn invalid_input(message: impl Into<String>) -> Self {
+        Self::InvalidInput(message.into())
+    }
+
+    /// Create an ApiError
     pub fn api_error(status: u16, message: impl Into<String>) -> Self {
-        ServiceError::ApiError {
+        Self::ApiError {
             status,
             message: message.into(),
         }
     }
 
-    /// Create a network error
+    /// Create a NetworkError
     pub fn network_error(message: impl Into<String>) -> Self {
-        ServiceError::NetworkError(message.into())
+        Self::NetworkError(message.into())
     }
 
-    /// Create a configuration error
+    /// Create a ConfigError
     pub fn config_error(message: impl Into<String>) -> Self {
-        ServiceError::ConfigError(message.into())
+        Self::ConfigError(message.into())
     }
 
-    /// Get a user-friendly hint for how to resolve this error.
+    /// Create an InvalidTransition error with valid transitions
+    pub fn invalid_transition_with_valid(
+        from: &str,
+        to: &str,
+        valid_transitions: Vec<String>,
+    ) -> Self {
+        Self::InvalidTransition {
+            from: from.to_string(),
+            to: to.to_string(),
+            valid_transitions,
+        }
+    }
+
+    /// Get a user-friendly hint message for this error
     ///
-    /// Returns `None` if no specific guidance is available.
+    /// Returns an optional string with actionable advice for the user.
     pub fn hint(&self) -> Option<String> {
         match self {
-            ServiceError::TaskNotFound { .. } => {
-                Some("Hint: Check the task ID with 'vtb list' or use a prefix of the full ID".to_string())
-            }
-            ServiceError::WorkflowNotFound { .. } => {
-                Some("Hint: List available workflows with 'vtb workflow list'".to_string())
-            }
-            ServiceError::InvalidTransition { valid_transitions, .. } => {
+            ServiceError::TaskNotFound { task_id } => Some(format!(
+                "hint: Task '{}' does not exist. Use 'vtb list' to see available tasks.",
+                task_id
+            )),
+            ServiceError::WorkflowNotFound { workflow_id } => Some(format!(
+                "hint: Workflow '{}' does not exist. Use 'vtb workflow list' to see available workflows.",
+                workflow_id
+            )),
+            ServiceError::InvalidTransition {
+                from,
+                valid_transitions,
+                ..
+            } => {
                 if valid_transitions.is_empty() {
-                    Some("Hint: Check 'vtb list' for current status".to_string())
+                    Some(format!(
+                        "hint: No transitions available from '{}'. Check 'vtb list' for current status.",
+                        from
+                    ))
                 } else {
                     Some(format!(
-                        "Hint: Valid transitions from current status: {}",
+                        "hint: Valid transitions from current status: {}",
                         valid_transitions.join(", ")
                     ))
                 }
             }
-            ServiceError::TaskBlocked { .. } => Some(
-                "Hint: Complete or remove blocking dependencies first. Use 'vtb blockers <id>' to see what's blocking".to_string(),
-            ),
-            ServiceError::ParentNotFound { .. } => {
-                Some("Hint: Check the parent task ID with 'vtb list'".to_string())
-            }
-            ServiceError::DependencyNotFound { .. } => {
-                Some("Hint: Check the dependency task ID with 'vtb list'".to_string())
-            }
+            ServiceError::TaskBlocked { task_id } => Some(format!(
+                "hint: Use 'vtb blockers {}' to see what's blocking this task.",
+                task_id
+            )),
             ServiceError::CyclicDependency => {
-                Some("Hint: A task cannot depend on itself or create a circular dependency chain".to_string())
+                Some("hint: This would create a circular dependency chain.".to_string())
             }
-            ServiceError::Database(db_err) => db_err.hint().map(String::from),
-            ServiceError::ValidationFailed { .. } => None,
-            ServiceError::InvalidInput(_) => None,
-            ServiceError::ApiError { status, .. } => {
-                match *status {
-                    401 => Some("Hint: Check SACRUM_API_TOKEN environment variable and ensure it's valid".to_string()),
-                    404 => Some("Hint: Resource not found on server. Verify the request is correct".to_string()),
-                    422 => Some("Hint: Invalid request data. Check the parameters and try again".to_string()),
-                    500 => Some("Hint: Server error. Try again later or contact the server administrator".to_string()),
-                    _ => Some(format!("Hint: HTTP {} error. Check the API response for details", status)),
-                }
-            }
+            ServiceError::ApiError { status, .. } => match *status {
+                401 => Some("hint: Check your SACRUM_API_TOKEN environment variable.".to_string()),
+                404 => Some("hint: Resource not found on the server.".to_string()),
+                422 => Some("hint: Invalid request data sent to the server.".to_string()),
+                500..=599 => Some("hint: Server error. Try again later.".to_string()),
+                _ => Some(format!("hint: HTTP {} error from the API.", status)),
+            },
             ServiceError::NetworkError(_) => {
-                Some("Hint: Check your network connection and ensure the server is reachable".to_string())
+                Some("hint: Check your network connection and try again.".to_string())
             }
             ServiceError::ConfigError(_) => {
-                Some("Hint: Check your configuration settings and environment variables".to_string())
+                Some("hint: Check your configuration settings.".to_string())
             }
+            _ => None,
         }
     }
 }
@@ -225,7 +230,7 @@ mod tests {
 
     #[test]
     fn test_invalid_transition_error() {
-        let err = ServiceError::invalid_transition("backlog", "done");
+        let err = ServiceError::invalid_transition("backlog", "done", vec![]);
         assert!(matches!(err, ServiceError::InvalidTransition { .. }));
         let msg = err.to_string();
         assert!(msg.contains("backlog"));
@@ -269,12 +274,10 @@ mod tests {
     }
 
     #[test]
-    fn test_database_error_conversion() {
-        let db_err = DbError::TaskNotFound {
-            task_id: "test".to_string(),
-        };
-        let service_err: ServiceError = db_err.into();
-        assert!(matches!(service_err, ServiceError::Database(_)));
+    fn test_invalid_input_error() {
+        let err = ServiceError::invalid_input("Bad data");
+        assert!(matches!(err, ServiceError::InvalidInput(_)));
+        assert!(err.to_string().contains("Bad data"));
     }
 
     #[test]
@@ -312,10 +315,10 @@ mod tests {
     #[test]
     fn test_hint_invalid_transition_terminal_state() {
         // Test with empty valid transitions (terminal state)
-        let err = ServiceError::invalid_transition("done", "backlog");
+        let err = ServiceError::invalid_transition("done", "backlog", vec![]);
         let hint = err.hint();
         assert!(hint.is_some());
-        assert!(hint.unwrap().contains("Check 'vtb list'"));
+        assert!(hint.unwrap().contains("vtb list"));
     }
 
     #[test]
@@ -343,14 +346,10 @@ mod tests {
     }
 
     #[test]
-    fn test_hint_database_error_delegates_to_db_error() {
-        let db_err = DbError::TaskNotFound {
-            task_id: "test".to_string(),
-        };
-        let service_err: ServiceError = db_err.into();
-        let hint = service_err.hint();
-        assert!(hint.is_some());
-        assert!(hint.unwrap().contains("vtb list"));
+    fn test_hint_parent_not_found() {
+        let err = ServiceError::parent_not_found("parent123");
+        // ParentNotFound doesn't have a specific hint
+        assert!(err.hint().is_none());
     }
 
     #[test]

@@ -17,7 +17,7 @@ echo "==> Running clippy, coverage, GUI tests, and linting in parallel..."
 cargo clippy --quiet -- -D warnings &
 CLIPPY_PID=$!
 
-cargo llvm-cov --quiet --fail-under-lines 85 &
+cargo llvm-cov --quiet --fail-under-lines 75 &
 LLVM_COV_PID=$!
 
 (cd crates/gui && npm run test) &

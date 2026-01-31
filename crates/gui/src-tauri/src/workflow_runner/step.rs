@@ -5,7 +5,7 @@
 
 use chrono::Utc;
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Runtime};
 use vertebrae_core::{ExecutionService, ExecutionStatus, StepExecution, TaskService};
 
 use crate::events::{
@@ -13,10 +13,11 @@ use crate::events::{
     WorkflowExecutionEvent, WorkflowExecutionEventType,
 };
 
-use super::executor::run_execution;
+use super::command_runner::{CommandRunner, TokioCommandRunner};
+use super::executor::run_execution_with;
 use super::helpers::{reconnect_or_fallback, update_execution_status};
 use super::logging::trace;
-use super::orchestrator::run_orchestrator;
+use super::orchestrator::run_orchestrator_with;
 
 const MAX_RETRIES: u32 = 3;
 
@@ -33,6 +34,33 @@ pub async fn execute_step_two_phase(
     tasks: &Arc<dyn TaskService>,
     executions: &Arc<dyn ExecutionService>,
     app_handle: &AppHandle,
+) -> Result<(), String> {
+    let runner = TokioCommandRunner::with_log_context(task_id, "ORCHESTRATOR");
+
+    execute_step_two_phase_with(
+        &runner,
+        step,
+        task_id,
+        workflow_id,
+        tasks,
+        executions,
+        app_handle,
+    )
+    .await
+}
+
+/// Inner two-phase step execution that accepts a `CommandRunner`.
+///
+/// Event emission uses AppHandle but the core retry/orchestrate/execute logic
+/// is testable via MockCommandRunner.
+pub(crate) async fn execute_step_two_phase_with<R: Runtime>(
+    runner: &dyn CommandRunner,
+    step: vertebrae_core::Step,
+    task_id: &str,
+    workflow_id: &str,
+    tasks: &Arc<dyn TaskService>,
+    executions: &Arc<dyn ExecutionService>,
+    app_handle: &AppHandle<R>,
 ) -> Result<(), String> {
     trace(
         task_id,
@@ -98,13 +126,13 @@ pub async fn execute_step_two_phase(
             task_id,
             &format!("[exec_id={}] Starting PHASE 1: run_orchestrator", exec_id),
         );
-        let orchestrator_output = match run_orchestrator(
+        let orchestrator_output = match run_orchestrator_with(
+            runner,
             &step,
             &exec_id,
             task_id,
             workflow_id,
             executions,
-            app_handle,
         )
         .await
         {
@@ -173,14 +201,14 @@ pub async fn execute_step_two_phase(
             task_id,
             &format!("[exec_id={}] Starting PHASE 2: run_execution", exec_id),
         );
-        match run_execution(
+        match run_execution_with(
+            runner,
             &step,
             &exec_id,
             task_id,
             workflow_id,
             &orchestrator_output,
             executions,
-            app_handle,
         )
         .await
         {
@@ -297,13 +325,13 @@ pub async fn execute_step_two_phase(
 }
 
 /// Create a new execution record and emit creation event
-async fn create_execution_record(
+async fn create_execution_record<R: Runtime>(
     step: &vertebrae_core::Step,
     task_id: &str,
     workflow_id: &str,
     tasks: &Arc<dyn TaskService>,
     executions: &Arc<dyn ExecutionService>,
-    app_handle: &AppHandle,
+    app_handle: &AppHandle<R>,
 ) -> Result<String, String> {
     // Reconnect to database before creating execution (CLI may have modified it)
     let _fresh_db = reconnect_or_fallback(tasks, task_id, "new").await;
@@ -357,5 +385,178 @@ async fn create_execution_record(
             log::error!("[WorkflowRunner] {}", err);
             Err(err)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mock::mock_services;
+    use crate::workflow_runner::command_runner::{MockCommandRunner, ProcessOutput};
+    use vertebrae_core::{OrchestratorOutput, Step};
+
+    fn build_test_app() -> tauri::App<tauri::test::MockRuntime> {
+        tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap()
+    }
+
+    fn make_orchestrator_stdout() -> String {
+        let orchestrator_json = OrchestratorOutput::new("Execute the plan")
+            .with_goal("Complete task")
+            .to_json()
+            .unwrap();
+        format!(
+            "{{\"type\":\"result\",\"structured_output\":{}}}\n",
+            orchestrator_json
+        )
+    }
+
+    fn success_output(stdout: &str) -> Result<ProcessOutput, String> {
+        Ok(ProcessOutput {
+            stdout: stdout.to_string(),
+            success: true,
+            exit_code: Some(0),
+        })
+    }
+
+    fn failure_output(stdout: &str) -> Result<ProcessOutput, String> {
+        Ok(ProcessOutput {
+            stdout: stdout.to_string(),
+            success: false,
+            exit_code: Some(1),
+        })
+    }
+
+    #[tokio::test]
+    async fn success_on_first_attempt() {
+        tokio::time::pause();
+
+        let services = mock_services();
+        let tasks = services.tasks_arc();
+        let executions = services.executions_arc();
+
+        let app = build_test_app();
+        let handle = app.handle();
+
+        // Orchestrator succeeds, then executor succeeds
+        let runner = MockCommandRunner::new(vec![
+            success_output(&make_orchestrator_stdout()),
+            success_output("executor output\n"),
+        ]);
+
+        let step = Step::new("test-step", "wf1");
+        let result =
+            execute_step_two_phase_with(&runner, step, "task1", "wf1", &tasks, &executions, handle)
+                .await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn retry_orchestrator_fails_twice_succeeds_third() {
+        tokio::time::pause();
+
+        let services = mock_services();
+        let tasks = services.tasks_arc();
+        let executions = services.executions_arc();
+
+        let app = build_test_app();
+        let handle = app.handle();
+
+        // Orchestrator fails twice (non-zero exit), then succeeds, then executor succeeds
+        let runner = MockCommandRunner::new(vec![
+            failure_output("error1"),
+            failure_output("error2"),
+            success_output(&make_orchestrator_stdout()),
+            success_output("executor output\n"),
+        ]);
+
+        let step = Step::new("test-step", "wf1");
+        let result =
+            execute_step_two_phase_with(&runner, step, "task1", "wf1", &tasks, &executions, handle)
+                .await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn retry_executor_fails_once_succeeds_second() {
+        tokio::time::pause();
+
+        let services = mock_services();
+        let tasks = services.tasks_arc();
+        let executions = services.executions_arc();
+
+        let app = build_test_app();
+        let handle = app.handle();
+
+        // Attempt 1: orchestrator succeeds, executor fails
+        // Attempt 2: orchestrator succeeds, executor succeeds
+        let runner = MockCommandRunner::new(vec![
+            success_output(&make_orchestrator_stdout()),
+            failure_output("exec error"),
+            success_output(&make_orchestrator_stdout()),
+            success_output("executor output\n"),
+        ]);
+
+        let step = Step::new("test-step", "wf1");
+        let result =
+            execute_step_two_phase_with(&runner, step, "task1", "wf1", &tasks, &executions, handle)
+                .await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn all_retries_exhausted_returns_error() {
+        tokio::time::pause();
+
+        let services = mock_services();
+        let tasks = services.tasks_arc();
+        let executions = services.executions_arc();
+
+        let app = build_test_app();
+        let handle = app.handle();
+
+        // All 3 orchestrator attempts fail
+        let runner = MockCommandRunner::new(vec![
+            failure_output("error1"),
+            failure_output("error2"),
+            failure_output("error3"),
+        ]);
+
+        let step = Step::new("test-step", "wf1");
+        let result =
+            execute_step_two_phase_with(&runner, step, "task1", "wf1", &tasks, &executions, handle)
+                .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("failed after 3 attempts"));
+    }
+
+    #[tokio::test]
+    async fn execution_record_created_correctly() {
+        let services = mock_services();
+        let tasks = services.tasks_arc();
+        let executions = services.executions_arc();
+
+        let app = build_test_app();
+        let handle = app.handle();
+
+        let step = Step::new("test-step", "wf1");
+        let result =
+            create_execution_record(&step, "task1", "wf1", &tasks, &executions, handle).await;
+
+        assert!(result.is_ok());
+        let exec_id = result.unwrap();
+
+        // Verify the execution was created
+        let exec = executions.get_execution(&exec_id).await.unwrap().unwrap();
+        assert_eq!(exec.task_id, "task1");
+        assert_eq!(exec.workflow_id, "wf1");
+        assert_eq!(exec.step_name, "test-step");
+        assert_eq!(exec.status, ExecutionStatus::InProgress);
     }
 }

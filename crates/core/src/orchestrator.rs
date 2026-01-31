@@ -24,8 +24,8 @@
 //! - Uses Haiku model for fast, cost-effective prompt generation
 //! - Uses --dangerously-skip-permissions for autonomous operation
 
+use crate::models::AgentConfig;
 use serde::{Deserialize, Serialize};
-use vertebrae_db::AgentConfig;
 
 /// Model to use for orchestrator agent (Haiku for fast/cheap generation)
 pub const ORCHESTRATOR_MODEL: &str = "haiku";

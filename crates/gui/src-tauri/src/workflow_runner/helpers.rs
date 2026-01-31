@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use crate::events::{StepExecutionChangeType, StepExecutionChangedEvent, StepExecutionStatus};
 use chrono::Utc;
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Runtime};
 use vertebrae_core::{ExecutionService, ExecutionStatus, TaskService};
 
 /// Find the Claude Code CLI binary
@@ -52,9 +52,9 @@ pub async fn reconnect_or_fallback(
 }
 
 /// Update execution status and emit change event
-pub async fn update_execution_status(
+pub async fn update_execution_status<R: Runtime>(
     executions: &Arc<dyn ExecutionService>,
-    app_handle: &AppHandle,
+    app_handle: &AppHandle<R>,
     exec_id: &str,
     task_id: &str,
     workflow_id: &str,
@@ -190,5 +190,119 @@ mod tests {
         if let Some(v) = original {
             std::env::set_var("CLAUDE_CODE_PATH", v);
         }
+    }
+
+    fn build_test_app() -> tauri::App<tauri::test::MockRuntime> {
+        tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn update_execution_status_completed_emits_event() {
+        let services = crate::mock::mock_services();
+        let executions = services.executions_arc();
+
+        // Create an execution record first
+        let exec = vertebrae_core::StepExecution {
+            id: None,
+            task_id: "task1".to_string(),
+            workflow_id: "wf1".to_string(),
+            step_name: "test-step".to_string(),
+            started_at: chrono::Utc::now(),
+            completed_at: None,
+            status: ExecutionStatus::InProgress,
+            context: None,
+            prompt: None,
+            output: None,
+            transition_result: None,
+            model_used: Some("haiku".to_string()),
+            session_id: None,
+            token_usage: None,
+            cost_usd: None,
+            duration_ms: None,
+        };
+        let exec_id = executions.create_execution(exec).await.unwrap();
+
+        let app = build_test_app();
+        let handle = app.handle();
+
+        let result = update_execution_status(
+            &executions,
+            handle,
+            &exec_id,
+            "task1",
+            "wf1",
+            "test-step",
+            ExecutionStatus::Completed,
+        )
+        .await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn update_execution_status_failed_emits_event() {
+        let services = crate::mock::mock_services();
+        let executions = services.executions_arc();
+
+        let exec = vertebrae_core::StepExecution {
+            id: None,
+            task_id: "task1".to_string(),
+            workflow_id: "wf1".to_string(),
+            step_name: "test-step".to_string(),
+            started_at: chrono::Utc::now(),
+            completed_at: None,
+            status: ExecutionStatus::InProgress,
+            context: None,
+            prompt: None,
+            output: None,
+            transition_result: None,
+            model_used: Some("haiku".to_string()),
+            session_id: None,
+            token_usage: None,
+            cost_usd: None,
+            duration_ms: None,
+        };
+        let exec_id = executions.create_execution(exec).await.unwrap();
+
+        let app = build_test_app();
+        let handle = app.handle();
+
+        let result = update_execution_status(
+            &executions,
+            handle,
+            &exec_id,
+            "task1",
+            "wf1",
+            "test-step",
+            ExecutionStatus::Failed,
+        )
+        .await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn update_execution_status_nonexistent_propagates_error() {
+        let services = crate::mock::mock_services();
+        let executions = services.executions_arc();
+
+        let app = build_test_app();
+        let handle = app.handle();
+
+        let result = update_execution_status(
+            &executions,
+            handle,
+            "nonexistent-id",
+            "task1",
+            "wf1",
+            "test-step",
+            ExecutionStatus::Completed,
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Failed to update status"));
     }
 }

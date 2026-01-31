@@ -8,12 +8,12 @@ use async_trait::async_trait;
 use serde_json::json;
 use vertebrae_core::error::{ServiceError, ServiceResult};
 use vertebrae_core::models::Task;
+use vertebrae_core::models::{
+    BlockerNode, CodeRef, Level, Section, SectionType, TaskFilter, TaskSummary,
+};
 use vertebrae_core::service::{
     CreateTaskOptions, TaskService, TaskTreeNode, TaskWithRelations, TransitionResult,
     TreeFilterOptions, UpdateTaskOptions,
-};
-use vertebrae_db::{
-    BlockerNode, CodeRef, Database, Level, Section, SectionType, TaskFilter, TaskSummary,
 };
 
 use crate::api_types::TaskResponse;
@@ -56,10 +56,6 @@ impl SacrumTaskService {
 
 #[async_trait]
 impl TaskService for SacrumTaskService {
-    fn database(&self) -> &Database {
-        unimplemented!("SacrumTaskService does not provide direct database access")
-    }
-
     async fn create_task(&self, options: CreateTaskOptions) -> ServiceResult<String> {
         if options.title.trim().is_empty() {
             return Err(ServiceError::validation_failed("Title cannot be empty"));

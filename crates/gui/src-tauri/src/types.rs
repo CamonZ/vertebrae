@@ -652,3 +652,662 @@ impl From<vertebrae_core::SessionLog> for SessionLog {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ─── TaskLevel Conversion Tests ─────────────────────────────────
+
+    #[test]
+    fn task_level_from_core_epic() {
+        let core_level = vertebrae_core::Level::Epic;
+        let gui_level = TaskLevel::from(core_level);
+        assert_eq!(gui_level, TaskLevel::Epic);
+    }
+
+    #[test]
+    fn task_level_from_core_ticket() {
+        let core_level = vertebrae_core::Level::Ticket;
+        let gui_level = TaskLevel::from(core_level);
+        assert_eq!(gui_level, TaskLevel::Ticket);
+    }
+
+    #[test]
+    fn task_level_from_core_task() {
+        let core_level = vertebrae_core::Level::Task;
+        let gui_level = TaskLevel::from(core_level);
+        assert_eq!(gui_level, TaskLevel::Task);
+    }
+
+    // ─── TaskPriority Conversion Tests ──────────────────────────────
+
+    #[test]
+    fn task_priority_from_core_low() {
+        let core_priority = vertebrae_core::Priority::Low;
+        let gui_priority = TaskPriority::from(core_priority);
+        assert_eq!(gui_priority, TaskPriority::Low);
+    }
+
+    #[test]
+    fn task_priority_from_core_medium() {
+        let core_priority = vertebrae_core::Priority::Medium;
+        let gui_priority = TaskPriority::from(core_priority);
+        assert_eq!(gui_priority, TaskPriority::Medium);
+    }
+
+    #[test]
+    fn task_priority_from_core_high() {
+        let core_priority = vertebrae_core::Priority::High;
+        let gui_priority = TaskPriority::from(core_priority);
+        assert_eq!(gui_priority, TaskPriority::High);
+    }
+
+    #[test]
+    fn task_priority_from_core_critical() {
+        let core_priority = vertebrae_core::Priority::Critical;
+        let gui_priority = TaskPriority::from(core_priority);
+        assert_eq!(gui_priority, TaskPriority::Critical);
+    }
+
+    #[test]
+    fn task_priority_to_core_low() {
+        let gui_priority = TaskPriority::Low;
+        let core_priority = vertebrae_core::Priority::from(gui_priority);
+        assert_eq!(core_priority, vertebrae_core::Priority::Low);
+    }
+
+    #[test]
+    fn task_priority_to_core_medium() {
+        let gui_priority = TaskPriority::Medium;
+        let core_priority = vertebrae_core::Priority::from(gui_priority);
+        assert_eq!(core_priority, vertebrae_core::Priority::Medium);
+    }
+
+    #[test]
+    fn task_priority_to_core_high() {
+        let gui_priority = TaskPriority::High;
+        let core_priority = vertebrae_core::Priority::from(gui_priority);
+        assert_eq!(core_priority, vertebrae_core::Priority::High);
+    }
+
+    #[test]
+    fn task_priority_to_core_critical() {
+        let gui_priority = TaskPriority::Critical;
+        let core_priority = vertebrae_core::Priority::from(gui_priority);
+        assert_eq!(core_priority, vertebrae_core::Priority::Critical);
+    }
+
+    #[test]
+    fn task_priority_round_trip() {
+        let original = vertebrae_core::Priority::High;
+        let gui = TaskPriority::from(original.clone());
+        let back = vertebrae_core::Priority::from(gui);
+        assert_eq!(original, back);
+    }
+
+    // ─── SectionType Conversion Tests ───────────────────────────────
+
+    #[test]
+    fn section_type_from_core_goal() {
+        let core = vertebrae_core::SectionType::Goal;
+        let gui = SectionType::from(core);
+        assert_eq!(gui, SectionType::Goal);
+    }
+
+    #[test]
+    fn section_type_from_core_all_variants() {
+        assert_eq!(
+            SectionType::from(vertebrae_core::SectionType::Context),
+            SectionType::Context
+        );
+        assert_eq!(
+            SectionType::from(vertebrae_core::SectionType::CurrentBehavior),
+            SectionType::CurrentBehavior
+        );
+        assert_eq!(
+            SectionType::from(vertebrae_core::SectionType::DesiredBehavior),
+            SectionType::DesiredBehavior
+        );
+        assert_eq!(
+            SectionType::from(vertebrae_core::SectionType::Step),
+            SectionType::Step
+        );
+        assert_eq!(
+            SectionType::from(vertebrae_core::SectionType::TestingCriterion),
+            SectionType::TestingCriterion
+        );
+        assert_eq!(
+            SectionType::from(vertebrae_core::SectionType::AntiPattern),
+            SectionType::AntiPattern
+        );
+        assert_eq!(
+            SectionType::from(vertebrae_core::SectionType::FailureTest),
+            SectionType::FailureTest
+        );
+        assert_eq!(
+            SectionType::from(vertebrae_core::SectionType::Constraint),
+            SectionType::Constraint
+        );
+    }
+
+    // ─── CodeRef Conversion Tests ───────────────────────────────────
+
+    #[test]
+    fn code_ref_from_core_basic() {
+        let core = vertebrae_core::CodeRef::file("src/main.rs");
+        let gui = CodeRef::from(core);
+        assert_eq!(gui.path, "src/main.rs");
+        assert_eq!(gui.line_start, None);
+        assert_eq!(gui.line_end, None);
+        assert_eq!(gui.name, None);
+        assert_eq!(gui.description, None);
+    }
+
+    #[test]
+    fn code_ref_from_core_with_line() {
+        let core = vertebrae_core::CodeRef::line("src/main.rs", 42);
+        let gui = CodeRef::from(core);
+        assert_eq!(gui.path, "src/main.rs");
+        assert_eq!(gui.line_start, Some(42));
+        assert_eq!(gui.line_end, None);
+    }
+
+    #[test]
+    fn code_ref_from_core_with_range() {
+        let core = vertebrae_core::CodeRef::range("src/main.rs", 10, 20);
+        let gui = CodeRef::from(core);
+        assert_eq!(gui.path, "src/main.rs");
+        assert_eq!(gui.line_start, Some(10));
+        assert_eq!(gui.line_end, Some(20));
+    }
+
+    #[test]
+    fn code_ref_from_core_with_metadata() {
+        let core = vertebrae_core::CodeRef::file("src/main.rs")
+            .with_name("main_fn")
+            .with_description("Entry point");
+        let gui = CodeRef::from(core);
+        assert_eq!(gui.path, "src/main.rs");
+        assert_eq!(gui.name, Some("main_fn".to_string()));
+        assert_eq!(gui.description, Some("Entry point".to_string()));
+    }
+
+    // ─── Section Conversion Tests ────────────────────────────────────
+
+    #[test]
+    fn section_from_core_basic() {
+        let core = vertebrae_core::Section::new(vertebrae_core::SectionType::Goal, "Goal content");
+        let gui = Section::from(core);
+        assert_eq!(gui.section_type, SectionType::Goal);
+        assert_eq!(gui.content, "Goal content");
+        assert_eq!(gui.order, None);
+        assert_eq!(gui.done, None);
+        assert_eq!(gui.done_at, None);
+        assert!(gui.refs.is_empty());
+    }
+
+    #[test]
+    fn section_from_core_with_order() {
+        let core =
+            vertebrae_core::Section::with_order(vertebrae_core::SectionType::Step, "Do this", 5);
+        let gui = Section::from(core);
+        assert_eq!(gui.section_type, SectionType::Step);
+        assert_eq!(gui.order, Some(5));
+    }
+
+    #[test]
+    fn section_from_core_with_done() {
+        let core =
+            vertebrae_core::Section::new(vertebrae_core::SectionType::Goal, "Goal").with_done(true);
+        let gui = Section::from(core);
+        assert_eq!(gui.done, Some(true));
+        assert!(gui.done_at.is_some());
+    }
+
+    #[test]
+    fn section_from_core_with_refs() {
+        let ref1 = vertebrae_core::CodeRef::file("test.rs");
+        let ref2 = vertebrae_core::CodeRef::file("test2.rs");
+        let core = vertebrae_core::Section::new(vertebrae_core::SectionType::Goal, "Goal")
+            .with_refs(vec![ref1, ref2]);
+        let gui = Section::from(core);
+        assert_eq!(gui.refs.len(), 2);
+    }
+
+    // ─── TaskSummary Conversion Tests ────────────────────────────────
+
+    #[test]
+    fn task_summary_from_core() {
+        let now = chrono::Utc::now();
+        let core = vertebrae_core::TaskSummary {
+            id: "task1".to_string(),
+            title: "My Task".to_string(),
+            level: vertebrae_core::Level::Ticket,
+            status: "in_progress".to_string(),
+            priority: Some(vertebrae_core::Priority::High),
+            tags: vec!["rust".to_string(), "cli".to_string()],
+            needs_human_review: Some(true),
+            created_at: now,
+            workflow_id: Some("wf1".to_string()),
+            current_step_id: Some("step1".to_string()),
+            workflow_name: Some("Review".to_string()),
+            step_name: Some("Code Review".to_string()),
+        };
+        let gui = TaskSummary::from(core);
+        assert_eq!(gui.id, "task1");
+        assert_eq!(gui.title, "My Task");
+        assert_eq!(gui.level, TaskLevel::Ticket);
+        assert_eq!(gui.status, "in_progress");
+        assert_eq!(gui.priority, Some(TaskPriority::High));
+        assert_eq!(gui.tags, vec!["rust", "cli"]);
+        assert_eq!(gui.needs_human_review, Some(true));
+        assert_eq!(gui.workflow_name, Some("Review".to_string()));
+        assert_eq!(gui.step_name, Some("Code Review".to_string()));
+        assert!(!gui.created_at.is_empty());
+    }
+
+    #[test]
+    fn task_summary_from_core_rfc3339_format() {
+        let now = chrono::Utc::now();
+        let core = vertebrae_core::TaskSummary {
+            id: "t".to_string(),
+            title: "T".to_string(),
+            level: vertebrae_core::Level::Task,
+            status: "todo".to_string(),
+            priority: None,
+            tags: vec![],
+            needs_human_review: None,
+            created_at: now,
+            workflow_id: None,
+            current_step_id: None,
+            workflow_name: None,
+            step_name: None,
+        };
+        let gui = TaskSummary::from(core);
+        chrono::DateTime::parse_from_rfc3339(&gui.created_at)
+            .expect("created_at should be valid RFC3339");
+    }
+
+    // ─── Task Conversion Tests ──────────────────────────────────────
+
+    #[test]
+    fn task_from_core_minimal() {
+        let core = vertebrae_core::Task::new("Task", vertebrae_core::Level::Task);
+        let gui = Task::from(core);
+        assert_eq!(gui.title, "Task");
+        assert_eq!(gui.level, TaskLevel::Task);
+        assert_eq!(gui.status, "backlog");
+        assert_eq!(gui.priority, None);
+        assert!(gui.description.is_none());
+        assert!(gui.tags.is_empty());
+        assert!(gui.sections.is_empty());
+        assert!(gui.code_refs.is_empty());
+    }
+
+    #[test]
+    fn task_from_core_full() {
+        let core = vertebrae_core::Task::new("Task", vertebrae_core::Level::Epic)
+            .with_description("Task description")
+            .with_priority(vertebrae_core::Priority::Critical)
+            .with_tag("urgent");
+        let gui = Task::from(core);
+        assert_eq!(gui.title, "Task");
+        assert_eq!(gui.level, TaskLevel::Epic);
+        assert_eq!(gui.description, Some("Task description".to_string()));
+        assert_eq!(gui.priority, Some(TaskPriority::Critical));
+        assert_eq!(gui.tags, vec!["urgent"]);
+    }
+
+    #[test]
+    fn task_from_core_with_sections_and_refs() {
+        let section = vertebrae_core::Section::new(vertebrae_core::SectionType::Goal, "Goal");
+        let code_ref = vertebrae_core::CodeRef::file("src/main.rs");
+        let core = vertebrae_core::Task::new("Task", vertebrae_core::Level::Task)
+            .with_section(section)
+            .with_code_ref(code_ref);
+        let gui = Task::from(core);
+        assert_eq!(gui.sections.len(), 1);
+        assert_eq!(gui.code_refs.len(), 1);
+    }
+
+    #[test]
+    fn task_from_core_with_timestamps() {
+        use chrono::prelude::*;
+        let mut core = vertebrae_core::Task::new("Task", vertebrae_core::Level::Task);
+        let now = Utc::now();
+        core.created_at = Some(now);
+        core.updated_at = Some(now);
+        core.started_at = Some(now);
+        core.completed_at = Some(now);
+
+        let gui = Task::from(core);
+        assert!(gui.created_at.is_some());
+        assert!(gui.updated_at.is_some());
+        assert!(gui.started_at.is_some());
+        assert!(gui.completed_at.is_some());
+    }
+
+    // ─── TaskFilterOptions Conversion Tests ─────────────────────────
+
+    #[test]
+    fn task_filter_from_gui_empty() {
+        let gui_filter = TaskFilterOptions::default();
+        let core_filter = vertebrae_core::TaskFilter::from(gui_filter);
+        assert!(core_filter.levels.is_empty());
+        assert!(core_filter.statuses.is_empty());
+        assert!(!core_filter.root_only);
+    }
+
+    #[test]
+    fn task_filter_from_gui_with_levels() {
+        let gui_filter = TaskFilterOptions {
+            levels: Some(vec![TaskLevel::Epic, TaskLevel::Task]),
+            ..Default::default()
+        };
+        let core_filter = vertebrae_core::TaskFilter::from(gui_filter);
+        assert_eq!(core_filter.levels.len(), 2);
+        assert!(core_filter.levels.contains(&vertebrae_core::Level::Epic));
+        assert!(core_filter.levels.contains(&vertebrae_core::Level::Task));
+    }
+
+    #[test]
+    fn task_filter_from_gui_with_statuses() {
+        let gui_filter = TaskFilterOptions {
+            statuses: Some(vec!["in_progress".to_string(), "done".to_string()]),
+            ..Default::default()
+        };
+        let core_filter = vertebrae_core::TaskFilter::from(gui_filter);
+        assert_eq!(core_filter.statuses, vec!["in_progress", "done"]);
+    }
+
+    #[test]
+    fn task_filter_from_gui_with_tags() {
+        let gui_filter = TaskFilterOptions {
+            tags: Some(vec!["rust".to_string(), "cli".to_string()]),
+            ..Default::default()
+        };
+        let core_filter = vertebrae_core::TaskFilter::from(gui_filter);
+        assert_eq!(core_filter.tags, vec!["rust", "cli"]);
+    }
+
+    #[test]
+    fn task_filter_from_gui_root_only() {
+        let gui_filter = TaskFilterOptions {
+            root_only: Some(true),
+            ..Default::default()
+        };
+        let core_filter = vertebrae_core::TaskFilter::from(gui_filter);
+        assert!(core_filter.root_only);
+    }
+
+    #[test]
+    fn task_filter_from_gui_children_of() {
+        let gui_filter = TaskFilterOptions {
+            children_of: Some("parent123".to_string()),
+            ..Default::default()
+        };
+        let core_filter = vertebrae_core::TaskFilter::from(gui_filter);
+        assert_eq!(core_filter.children_of, Some("parent123".to_string()));
+    }
+
+    #[test]
+    fn task_filter_from_gui_include_done() {
+        let gui_filter = TaskFilterOptions {
+            include_done: Some(true),
+            ..Default::default()
+        };
+        let core_filter = vertebrae_core::TaskFilter::from(gui_filter);
+        assert!(core_filter.include_done);
+    }
+
+    #[test]
+    fn task_filter_from_gui_with_search() {
+        let gui_filter = TaskFilterOptions {
+            search: Some("authentication".to_string()),
+            ..Default::default()
+        };
+        let core_filter = vertebrae_core::TaskFilter::from(gui_filter);
+        assert_eq!(core_filter.search, Some("authentication".to_string()));
+    }
+
+    #[test]
+    fn task_filter_from_gui_with_workflow_id() {
+        let gui_filter = TaskFilterOptions {
+            workflow_id: Some("wf123".to_string()),
+            ..Default::default()
+        };
+        let core_filter = vertebrae_core::TaskFilter::from(gui_filter);
+        assert_eq!(core_filter.workflow_id, Some("wf123".to_string()));
+    }
+
+    #[test]
+    fn task_filter_from_gui_complex() {
+        let gui_filter = TaskFilterOptions {
+            levels: Some(vec![TaskLevel::Epic]),
+            statuses: Some(vec!["in_progress".to_string()]),
+            tags: Some(vec!["urgent".to_string()]),
+            root_only: Some(true),
+            include_done: Some(false),
+            search: Some("auth".to_string()),
+            children_of: None,
+            workflow_id: Some("wf1".to_string()),
+        };
+        let core_filter = vertebrae_core::TaskFilter::from(gui_filter);
+        assert_eq!(core_filter.levels.len(), 1);
+        assert_eq!(core_filter.statuses.len(), 1);
+        assert_eq!(core_filter.tags.len(), 1);
+        assert!(core_filter.root_only);
+        assert!(!core_filter.include_done);
+        assert_eq!(core_filter.search, Some("auth".to_string()));
+        assert_eq!(core_filter.workflow_id, Some("wf1".to_string()));
+    }
+
+    // ─── PermissionMode Conversion Tests ────────────────────────────
+
+    #[test]
+    fn permission_mode_from_core_accept_edits() {
+        let core = vertebrae_core::PermissionMode::AcceptEdits;
+        let gui = PermissionMode::from(core);
+        assert_eq!(gui, PermissionMode::AcceptEdits);
+    }
+
+    #[test]
+    fn permission_mode_from_core_all_variants() {
+        assert_eq!(
+            PermissionMode::from(vertebrae_core::PermissionMode::BypassPermissions),
+            PermissionMode::BypassPermissions
+        );
+        assert_eq!(
+            PermissionMode::from(vertebrae_core::PermissionMode::Default),
+            PermissionMode::Default
+        );
+        assert_eq!(
+            PermissionMode::from(vertebrae_core::PermissionMode::Delegate),
+            PermissionMode::Delegate
+        );
+        assert_eq!(
+            PermissionMode::from(vertebrae_core::PermissionMode::DontAsk),
+            PermissionMode::DontAsk
+        );
+        assert_eq!(
+            PermissionMode::from(vertebrae_core::PermissionMode::Plan),
+            PermissionMode::Plan
+        );
+    }
+
+    // ─── AgentConfig Conversion Tests ────────────────────────────────
+
+    #[test]
+    fn agent_config_from_core_empty() {
+        let core = vertebrae_core::AgentConfig::new();
+        let gui = AgentConfig::from(core);
+        assert_eq!(gui.model, None);
+        assert_eq!(gui.fallback_model, None);
+        assert_eq!(gui.system_prompt, None);
+        assert!(gui.tools.is_empty());
+        assert!(gui.allowed_tools.is_empty());
+        assert!(gui.disallowed_tools.is_empty());
+        assert_eq!(gui.permission_mode, None);
+        assert_eq!(gui.max_budget_usd, None);
+    }
+
+    #[test]
+    fn agent_config_from_core_with_model() {
+        let core = vertebrae_core::AgentConfig::new().with_model("claude-opus");
+        let gui = AgentConfig::from(core);
+        assert_eq!(gui.model, Some("claude-opus".to_string()));
+    }
+
+    #[test]
+    fn agent_config_from_core_with_tools() {
+        let core = vertebrae_core::AgentConfig::new()
+            .with_tools(vec!["read".to_string(), "write".to_string()]);
+        let gui = AgentConfig::from(core);
+        assert_eq!(gui.tools, vec!["read", "write"]);
+    }
+
+    #[test]
+    fn agent_config_from_core_with_permission_mode() {
+        let core = vertebrae_core::AgentConfig::new()
+            .with_permission_mode(vertebrae_core::PermissionMode::Plan);
+        let gui = AgentConfig::from(core);
+        assert_eq!(gui.permission_mode, Some(PermissionMode::Plan));
+    }
+
+    #[test]
+    fn agent_config_from_core_with_json_value() {
+        let core = vertebrae_core::AgentConfig::new()
+            .with_json_schema(serde_json::json!({"type": "object"}));
+        let gui = AgentConfig::from(core);
+        assert!(gui.json_schema.is_some());
+    }
+
+    // ─── Step Conversion Tests ──────────────────────────────────────
+
+    #[test]
+    fn step_from_core_basic() {
+        let core = vertebrae_core::Step::new("review", "wf1");
+        let gui = Step::from(core);
+        assert_eq!(gui.name, "review");
+        assert_eq!(gui.workflow_id, "wf1");
+        assert_eq!(gui.goal, None);
+        assert!(gui.agents.is_empty());
+        assert!(gui.skills.is_empty());
+        assert!(!gui.is_final);
+        assert!(gui.transitions_to.is_empty());
+        assert_eq!(gui.order, 0);
+    }
+
+    #[test]
+    fn step_from_core_with_config() {
+        let core = vertebrae_core::Step::new("review", "wf1")
+            .with_goal("Review code")
+            .with_agent("claude")
+            .with_skill("code-review")
+            .with_is_final(true)
+            .with_order(5);
+        let gui = Step::from(core);
+        assert_eq!(gui.name, "review");
+        assert_eq!(gui.goal, Some("Review code".to_string()));
+        assert_eq!(gui.agents, vec!["claude"]);
+        assert_eq!(gui.skills, vec!["code-review"]);
+        assert!(gui.is_final);
+        assert_eq!(gui.order, 5);
+    }
+
+    // ─── Workflow Conversion Tests ──────────────────────────────────
+
+    #[test]
+    fn workflow_from_core_basic() {
+        let core = vertebrae_core::Workflow::new("Review");
+        let gui = Workflow::from(core);
+        assert_eq!(gui.name, "Review");
+        assert_eq!(gui.description, None);
+        assert_eq!(gui.initial_step, None);
+        assert!(gui.metadata.is_empty());
+    }
+
+    #[test]
+    fn workflow_from_core_with_metadata() {
+        let core = vertebrae_core::Workflow::new("Dev")
+            .with_description("Development workflow")
+            .with_metadata("env", "staging")
+            .with_initial_step("step1");
+        let gui = Workflow::from(core);
+        assert_eq!(gui.name, "Dev");
+        assert_eq!(gui.description, Some("Development workflow".to_string()));
+        assert_eq!(gui.initial_step, Some("step1".to_string()));
+        assert_eq!(gui.metadata.get("env").unwrap(), "staging");
+    }
+
+    // ─── ExecutionStatus Conversion Tests ────────────────────────────
+
+    #[test]
+    fn execution_status_from_core_in_progress() {
+        let core = vertebrae_core::ExecutionStatus::InProgress;
+        let gui = ExecutionStatus::from(core);
+        assert_eq!(gui, ExecutionStatus::InProgress);
+    }
+
+    #[test]
+    fn execution_status_from_core_all() {
+        assert_eq!(
+            ExecutionStatus::from(vertebrae_core::ExecutionStatus::Completed),
+            ExecutionStatus::Completed
+        );
+        assert_eq!(
+            ExecutionStatus::from(vertebrae_core::ExecutionStatus::Failed),
+            ExecutionStatus::Failed
+        );
+    }
+
+    // ─── StepExecution Conversion Tests ─────────────────────────────
+
+    #[test]
+    fn step_execution_from_core() {
+        let core = vertebrae_core::StepExecution::new("task1", "wf1", "review");
+        let gui = StepExecution::from(core);
+        assert_eq!(gui.task_id, "task1");
+        assert_eq!(gui.workflow_id, "wf1");
+        assert_eq!(gui.step_name, "review");
+        assert_eq!(gui.status, ExecutionStatus::InProgress);
+        assert_eq!(gui.completed_at, None);
+    }
+
+    #[test]
+    fn step_execution_from_core_with_completion() {
+        let mut core = vertebrae_core::StepExecution::new("task1", "wf1", "review");
+        core.complete();
+        let gui = StepExecution::from(core);
+        assert_eq!(gui.status, ExecutionStatus::Completed);
+        assert!(gui.completed_at.is_some());
+    }
+
+    #[test]
+    fn step_execution_from_core_rfc3339_format() {
+        let core = vertebrae_core::StepExecution::new("t", "w", "s");
+        let gui = StepExecution::from(core);
+        chrono::DateTime::parse_from_rfc3339(&gui.started_at)
+            .expect("started_at should be valid RFC3339");
+    }
+
+    // ─── SessionLog Conversion Tests ────────────────────────────────
+
+    #[test]
+    fn session_log_from_core() {
+        let core = vertebrae_core::SessionLog::new("exec1", "log content");
+        let gui = SessionLog::from(core);
+        assert_eq!(gui.step_execution_id, "exec1");
+        assert_eq!(gui.content, "log content");
+        assert!(!gui.created_at.is_empty());
+    }
+
+    #[test]
+    fn session_log_from_core_rfc3339_format() {
+        let core = vertebrae_core::SessionLog::new("e1", "content");
+        let gui = SessionLog::from(core);
+        chrono::DateTime::parse_from_rfc3339(&gui.created_at)
+            .expect("created_at should be valid RFC3339");
+    }
+}

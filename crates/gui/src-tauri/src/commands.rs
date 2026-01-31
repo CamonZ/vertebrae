@@ -754,8 +754,52 @@ pub async fn update_step(
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
+    update_step_inner(
+        service,
+        &step_id,
+        name,
+        goal,
+        agents,
+        skills,
+        order,
+        is_final,
+        transitions_to,
+    )
+    .await?;
+
+    // Get the step to find its workflow_id
+    if let Some(step) = service.steps().get_step(&step_id).await? {
+        // Emit step changed event for detail panel listeners
+        if let Some(id) = step.id {
+            let _ = app_handle.emit(
+                "step-changed-event",
+                crate::events::StepChangedEvent {
+                    step_id: id.clone(),
+                    workflow_id: step.workflow_id.clone(),
+                    change_type: crate::events::StepChangeType::Updated,
+                },
+            );
+        }
+    }
+
+    Ok(())
+}
+
+/// Inner logic for update_step, separated for testability.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn update_step_inner(
+    service: &VertebraeServices,
+    step_id: &str,
+    name: Option<String>,
+    goal: Option<String>,
+    agents: Option<Vec<String>>,
+    skills: Option<Vec<String>>,
+    order: Option<i32>,
+    is_final: Option<bool>,
+    transitions_to: Option<Vec<String>>,
+) -> Result<(), CommandError> {
     // Verify step exists
-    let existing = service.steps().get_step(&step_id).await?;
+    let existing = service.steps().get_step(step_id).await?;
     if existing.is_none() {
         return Err(CommandError {
             message: format!("Step not found: {}", step_id),
@@ -794,32 +838,9 @@ pub async fn update_step(
         update = update.with_transitions_to(transition_ids);
     }
 
-    match service.steps().update_step(&step_id, &update).await {
-        Ok(_) => {
-            log::info!("update_step succeeded for step: {}", step_id);
-
-            // Get the step to find its workflow_id
-            if let Some(step) = service.steps().get_step(&step_id).await? {
-                // Emit step changed event for detail panel listeners
-                if let Some(id) = step.id {
-                    let _ = app_handle.emit(
-                        "step-changed-event",
-                        crate::events::StepChangedEvent {
-                            step_id: id.clone(),
-                            workflow_id: step.workflow_id.clone(),
-                            change_type: crate::events::StepChangeType::Updated,
-                        },
-                    );
-                }
-            }
-
-            Ok(())
-        }
-        Err(e) => {
-            log::error!("update_step error: {:?}", e);
-            Err(e.into())
-        }
-    }
+    service.steps().update_step(step_id, &update).await?;
+    log::info!("update_step succeeded for step: {}", step_id);
+    Ok(())
 }
 
 /// Delete a step
@@ -838,8 +859,29 @@ pub async fn delete_step(
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
+    let workflow_id = delete_step_inner(service, &step_id).await?;
+
+    // Emit step changed event for detail panel listeners
+    let _ = app_handle.emit(
+        "step-changed-event",
+        crate::events::StepChangedEvent {
+            step_id: step_id.clone(),
+            workflow_id,
+            change_type: crate::events::StepChangeType::Deleted,
+        },
+    );
+
+    Ok(())
+}
+
+/// Inner logic for delete_step, separated for testability.
+/// Returns the workflow_id of the deleted step.
+pub(crate) async fn delete_step_inner(
+    service: &VertebraeServices,
+    step_id: &str,
+) -> Result<String, CommandError> {
     // Verify step exists and capture workflow_id before deletion
-    let existing = service.steps().get_step(&step_id).await?;
+    let existing = service.steps().get_step(step_id).await?;
     if existing.is_none() {
         return Err(CommandError {
             message: format!("Step not found: {}", step_id),
@@ -847,27 +889,9 @@ pub async fn delete_step(
     }
     let workflow_id = existing.unwrap().workflow_id.clone();
 
-    match service.steps().delete_step(&step_id).await {
-        Ok(_) => {
-            log::info!("delete_step succeeded for step: {}", step_id);
-
-            // Emit step changed event for detail panel listeners
-            let _ = app_handle.emit(
-                "step-changed-event",
-                crate::events::StepChangedEvent {
-                    step_id: step_id.clone(),
-                    workflow_id,
-                    change_type: crate::events::StepChangeType::Deleted,
-                },
-            );
-
-            Ok(())
-        }
-        Err(e) => {
-            log::error!("delete_step error: {:?}", e);
-            Err(e.into())
-        }
-    }
+    service.steps().delete_step(step_id).await?;
+    log::info!("delete_step succeeded for step: {}", step_id);
+    Ok(workflow_id)
 }
 
 // ============================================================================
@@ -1210,6 +1234,26 @@ pub async fn update_task(
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
+    update_task_inner(service, &task_id, options).await?;
+
+    // Emit task changed event so UI listeners can update
+    let _ = app_handle.emit(
+        "task-changed-event",
+        crate::events::TaskChangedEvent {
+            task_id: task_id.clone(),
+            change_type: crate::events::TaskChangeType::Updated,
+        },
+    );
+
+    Ok(())
+}
+
+/// Inner logic for update_task, separated for testability.
+pub(crate) async fn update_task_inner(
+    service: &VertebraeServices,
+    task_id: &str,
+    options: crate::types::UpdateTaskOptions,
+) -> Result<(), CommandError> {
     // Build update options
     let mut update_opts = vertebrae_core::UpdateTaskOptions::new();
 
@@ -1241,18 +1285,8 @@ pub async fn update_task(
         update_opts.needs_human_review = Some(review_flag);
     }
 
-    service.tasks().update_task(&task_id, update_opts).await?;
+    service.tasks().update_task(task_id, update_opts).await?;
     log::info!("Successfully updated task: {}", task_id);
-
-    // Emit task changed event so UI listeners can update
-    let _ = app_handle.emit(
-        "task-changed-event",
-        crate::events::TaskChangedEvent {
-            task_id: task_id.clone(),
-            change_type: crate::events::TaskChangeType::Updated,
-        },
-    );
-
     Ok(())
 }
 
@@ -1743,1186 +1777,1247 @@ pub async fn replace_code_refs(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vertebrae_core::{CreateTaskOptions, VertebraeServices};
-    use vertebrae_db::{Database, Level};
+    use crate::mock::mock_services;
+    use crate::project_config::ProjectConfig;
+    use tauri::Manager;
 
-    /// Helper to create an AppState with an in-memory database for testing
-    async fn create_test_app_state() -> AppState {
-        let db = Database::connect_mem()
+    /// Helper: build a mock Tauri app with services loaded.
+    fn build_app_with_services() -> tauri::App<tauri::test::MockRuntime> {
+        let services = mock_services();
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let project_config = ProjectConfig::with_path(tmp.path().to_path_buf());
+
+        tauri::test::mock_builder()
+            .manage(AppState {
+                services: RwLock::new(Some(services)),
+                project_config,
+            })
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap()
+    }
+
+    /// Helper: build a mock Tauri app with NO project selected (services = None).
+    fn build_app_without_services() -> tauri::App<tauri::test::MockRuntime> {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let project_config = ProjectConfig::with_path(tmp.path().to_path_buf());
+
+        tauri::test::mock_builder()
+            .manage(AppState {
+                services: RwLock::new(None),
+                project_config,
+            })
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .unwrap()
+    }
+
+    // ========================================================================
+    // No-project-selected error tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn list_tasks_no_project_returns_error() {
+        let app = build_app_without_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let result = list_tasks(state, None).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("No project selected"));
+    }
+
+    #[tokio::test]
+    async fn get_task_no_project_returns_error() {
+        let app = build_app_without_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let result = get_task(state, "id".to_string()).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn get_task_hierarchy_no_project_returns_error() {
+        let app = build_app_without_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let result = get_task_hierarchy(state, None, None).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn list_workflows_no_project_returns_error() {
+        let app = build_app_without_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let result = list_workflows(state).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn create_task_no_project_returns_error() {
+        let app = build_app_without_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let result = create_task(state, "Test".to_string(), None, None, None).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn has_project_selected_false_when_no_services() {
+        let app = build_app_without_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let result = has_project_selected(state).await.unwrap();
+        assert!(!result);
+    }
+
+    #[tokio::test]
+    async fn has_project_selected_true_when_services() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let result = has_project_selected(state).await.unwrap();
+        assert!(result);
+    }
+
+    // ========================================================================
+    // Project management tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn get_projects_returns_empty_initially() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let projects = get_projects(state).await.unwrap();
+        assert!(projects.is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_current_project_returns_none_initially() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let current = get_current_project(state).await.unwrap();
+        assert!(current.is_none());
+    }
+
+    // ========================================================================
+    // Task CRUD tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn create_task_returns_id() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let id = create_task(state, "My Task".to_string(), None, None, None)
             .await
-            .expect("Failed to create in-memory database");
-        db.init().await.expect("Failed to initialize database");
-        let services = VertebraeServices::new(db);
-
-        // Create a temporary project config for testing
-        let temp_dir = std::env::temp_dir().join(format!(
-            "vtb-gui-cmd-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&temp_dir).ok();
-        let project_config = ProjectConfig::with_path(temp_dir.join("projects.json"));
-
-        AppState {
-            services: RwLock::new(Some(services)),
-            project_config,
-        }
-    }
-
-    /// Helper to create an AppState without a connected project
-    async fn create_disconnected_app_state() -> AppState {
-        let temp_dir = std::env::temp_dir().join(format!(
-            "vtb-gui-cmd-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&temp_dir).ok();
-        let project_config = ProjectConfig::with_path(temp_dir.join("projects.json"));
-
-        AppState {
-            services: RwLock::new(None),
-            project_config,
-        }
-    }
-
-    /// Helper to get a State wrapper for testing
-    /// Tauri's State is just a wrapper around &T, so we simulate it with Arc
-    fn mock_state<T>(state: &T) -> State<'_, T>
-    where
-        T: Send + Sync + 'static,
-    {
-        // SAFETY: State is just a newtype wrapper around &T
-        // This is a test-only helper to avoid needing full Tauri runtime
-        unsafe { std::mem::transmute(state) }
-    }
-
-    // ========================================================================
-    // Project Management Tests
-    // ========================================================================
-
-    #[tokio::test]
-    async fn test_get_projects_returns_empty_list_initially() {
-        let state = create_test_app_state().await;
-        let result = get_projects(mock_state(&state)).await;
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_empty());
+            .unwrap();
+        assert!(!id.is_empty());
     }
 
     #[tokio::test]
-    async fn test_get_current_project_returns_none_initially() {
-        let state = create_test_app_state().await;
-        let result = get_current_project(mock_state(&state)).await;
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_none());
+    async fn create_task_with_description_and_level() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let id = create_task(
+            state,
+            "Epic Task".to_string(),
+            Some("Description".to_string()),
+            Some("epic".to_string()),
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(!id.is_empty());
     }
 
     #[tokio::test]
-    async fn test_has_project_selected_true_when_connected() {
-        let state = create_test_app_state().await;
-        let result = has_project_selected(mock_state(&state)).await;
-        assert!(result.is_ok());
-        assert!(result.unwrap());
-    }
-
-    #[tokio::test]
-    async fn test_has_project_selected_false_when_disconnected() {
-        let state = create_disconnected_app_state().await;
-        let result = has_project_selected(mock_state(&state)).await;
-        assert!(result.is_ok());
-        assert!(!result.unwrap());
-    }
-
-    // ========================================================================
-    // Task Command Tests
-    // ========================================================================
-
-    #[tokio::test]
-    async fn test_list_tasks_returns_empty_list_initially() {
-        let state = create_test_app_state().await;
-        let result = list_tasks(mock_state(&state), None).await;
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_list_tasks_fails_without_project() {
-        let state = create_disconnected_app_state().await;
-        let result = list_tasks(mock_state(&state), None).await;
+    async fn create_task_invalid_level_returns_error() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let result = create_task(
+            state,
+            "Bad".to_string(),
+            None,
+            Some("invalid_level".to_string()),
+            None,
+        )
+        .await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().message.contains("No project selected"));
+        assert!(result.unwrap_err().message.contains("Invalid level"));
     }
 
     #[tokio::test]
-    async fn test_get_task_fails_for_nonexistent_task() {
-        let state = create_test_app_state().await;
-        let result = get_task(mock_state(&state), "nonexistent".to_string()).await;
+    async fn create_task_with_parent() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let parent_id = create_task(state.clone(), "Parent".to_string(), None, None, None)
+            .await
+            .unwrap();
+        let child_id = create_task(
+            state,
+            "Child".to_string(),
+            None,
+            None,
+            Some(parent_id.clone()),
+        )
+        .await
+        .unwrap();
+        assert!(!child_id.is_empty());
+    }
+
+    #[tokio::test]
+    async fn create_task_with_nonexistent_parent_returns_error() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let result = create_task(
+            state,
+            "Orphan".to_string(),
+            None,
+            None,
+            Some("nonexistent".to_string()),
+        )
+        .await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
-    async fn test_get_task_hierarchy_returns_empty_initially() {
-        let state = create_test_app_state().await;
-        let result = get_task_hierarchy(mock_state(&state), None, None).await;
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_empty());
+    async fn get_task_returns_task_details() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let id = create_task(
+            state.clone(),
+            "Detail Task".to_string(),
+            Some("desc".to_string()),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        let task = get_task(state, id.clone()).await.unwrap();
+        assert_eq!(task.task.title, "Detail Task");
+        assert_eq!(task.task.id, Some(id));
     }
 
     #[tokio::test]
-    async fn test_list_tasks_with_filter() {
-        let state = create_test_app_state().await;
-        let filter = TaskFilterOptions {
-            statuses: Some(vec!["backlog".to_string()]),
-            levels: None,
-            tags: None,
-            root_only: Some(true),
-            children_of: None,
-            include_done: None,
-            search: None,
-            workflow_id: None,
+    async fn get_task_nonexistent_returns_error() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let result = get_task(state, "nonexistent".to_string()).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn list_tasks_returns_created_tasks() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        create_task(state.clone(), "Task 1".to_string(), None, None, None)
+            .await
+            .unwrap();
+        create_task(state.clone(), "Task 2".to_string(), None, None, None)
+            .await
+            .unwrap();
+        let tasks = list_tasks(state, None).await.unwrap();
+        assert_eq!(tasks.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn list_tasks_with_filter() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        create_task(
+            state.clone(),
+            "An Epic".to_string(),
+            None,
+            Some("epic".to_string()),
+            None,
+        )
+        .await
+        .unwrap();
+        create_task(
+            state.clone(),
+            "A Task".to_string(),
+            None,
+            Some("task".to_string()),
+            None,
+        )
+        .await
+        .unwrap();
+        let filter = crate::types::TaskFilterOptions {
+            levels: Some(vec![crate::types::TaskLevel::Epic]),
+            ..Default::default()
         };
-        let result = list_tasks(mock_state(&state), Some(filter)).await;
-        assert!(result.is_ok());
-    }
-
-    // ========================================================================
-    // Workflow Command Tests
-    // ========================================================================
-
-    #[tokio::test]
-    async fn test_list_workflows_returns_default_workflow() {
-        let state = create_test_app_state().await;
-        let result = list_workflows(mock_state(&state)).await;
-        assert!(result.is_ok());
-        let workflows = result.unwrap();
-        // Database init creates a default workflow
-        assert!(!workflows.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_list_workflows_fails_without_project() {
-        let state = create_disconnected_app_state().await;
-        let result = list_workflows(mock_state(&state)).await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().message.contains("No project selected"));
-    }
-
-    #[tokio::test]
-    async fn test_get_workflow_returns_default() {
-        let state = create_test_app_state().await;
-        let result = get_workflow(mock_state(&state), "default".to_string()).await;
-        assert!(result.is_ok());
-        let workflow = result.unwrap();
-        assert_eq!(workflow.name, "Default Workflow");
-    }
-
-    #[tokio::test]
-    async fn test_get_workflow_fails_for_nonexistent() {
-        let state = create_test_app_state().await;
-        let result = get_workflow(mock_state(&state), "nonexistent".to_string()).await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn test_get_workflow_with_tasks_empty() {
-        let state = create_test_app_state().await;
-        let result = get_workflow_with_tasks(mock_state(&state), "default".to_string()).await;
-        assert!(result.is_ok());
-        let wf_with_tasks = result.unwrap();
-        assert_eq!(wf_with_tasks.workflow.name, "Default Workflow");
-        assert!(wf_with_tasks.tasks.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_get_workflow_with_task_details_empty() {
-        let state = create_test_app_state().await;
-        let result =
-            get_workflow_with_task_details(mock_state(&state), "default".to_string()).await;
-        assert!(result.is_ok());
-        let wf_with_tasks = result.unwrap();
-        assert_eq!(wf_with_tasks.workflow.name, "Default Workflow");
-        assert!(wf_with_tasks.tasks.is_empty());
-    }
-
-    // ========================================================================
-    // Step Command Tests
-    // ========================================================================
-
-    #[tokio::test]
-    async fn test_list_steps_for_default_workflow() {
-        let state = create_test_app_state().await;
-        let result = list_steps_for_workflow(mock_state(&state), "default".to_string()).await;
-        assert!(result.is_ok());
-        let steps = result.unwrap();
-        // Default workflow should have steps (backlog, implementation, review, done)
-        assert!(!steps.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_list_steps_fails_without_project() {
-        let state = create_disconnected_app_state().await;
-        let result = list_steps_for_workflow(mock_state(&state), "default".to_string()).await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn test_get_step_returns_none_for_nonexistent() {
-        let state = create_test_app_state().await;
-        let result = get_step(mock_state(&state), "nonexistent".to_string()).await;
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_none());
-    }
-
-    // ========================================================================
-    // Execution Command Tests
-    // ========================================================================
-
-    #[tokio::test]
-    async fn test_get_task_executions_empty_for_nonexistent() {
-        let state = create_test_app_state().await;
-        let result = get_task_executions(mock_state(&state), "nonexistent".to_string()).await;
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_get_task_executions_fails_without_project() {
-        let state = create_disconnected_app_state().await;
-        let result = get_task_executions(mock_state(&state), "task1".to_string()).await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().message.contains("No project selected"));
-    }
-
-    #[tokio::test]
-    async fn test_get_execution_logs_empty_for_nonexistent() {
-        let state = create_test_app_state().await;
-        let result = get_execution_logs(mock_state(&state), "nonexistent".to_string()).await;
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_empty());
-    }
-
-    // ========================================================================
-    // Integration Tests with Task Creation
-    // ========================================================================
-
-    #[tokio::test]
-    async fn test_tasks_with_workflow_filter() {
-        let state = create_test_app_state().await;
-
-        // Create a task using the service directly
-        {
-            let guard = state.services.read().await;
-            let service = guard.as_ref().unwrap();
-
-            let options = CreateTaskOptions::new("Test Task").with_level(Level::Task);
-            service.tasks().create_task(options).await.unwrap();
-        }
-
-        // List all tasks
-        let result = list_tasks(mock_state(&state), None).await;
-        assert!(result.is_ok());
-        let tasks = result.unwrap();
+        let tasks = list_tasks(state, Some(filter)).await.unwrap();
         assert_eq!(tasks.len(), 1);
-        assert_eq!(tasks[0].title, "Test Task");
+        assert_eq!(tasks[0].title, "An Epic");
     }
 
     #[tokio::test]
-    async fn test_get_task_with_relations() {
-        let state = create_test_app_state().await;
+    async fn delete_task_removes_task() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let id = create_task(state.clone(), "Doomed".to_string(), None, None, None)
+            .await
+            .unwrap();
+        delete_task(state.clone(), id.clone(), false).await.unwrap();
+        let result = get_task(state, id).await;
+        assert!(result.is_err());
+    }
 
-        // Create parent and child tasks
-        let (parent_id, child_id) = {
-            let guard = state.services.read().await;
-            let service = guard.as_ref().unwrap();
+    #[tokio::test]
+    async fn delete_task_cascade() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let parent_id = create_task(state.clone(), "Parent".to_string(), None, None, None)
+            .await
+            .unwrap();
+        let _child_id = create_task(
+            state.clone(),
+            "Child".to_string(),
+            None,
+            None,
+            Some(parent_id.clone()),
+        )
+        .await
+        .unwrap();
+        delete_task(state.clone(), parent_id, true).await.unwrap();
+        let tasks = list_tasks(state, None).await.unwrap();
+        assert!(tasks.is_empty());
+    }
 
-            let parent_options = CreateTaskOptions::new("Parent").with_level(Level::Epic);
-            let parent_id = service.tasks().create_task(parent_options).await.unwrap();
+    #[tokio::test]
+    async fn delete_nonexistent_task_returns_error() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let result = delete_task(state, "nonexistent".to_string(), false).await;
+        assert!(result.is_err());
+    }
 
-            let child_options = CreateTaskOptions::new("Child").with_level(Level::Task);
-            let child_id = service.tasks().create_task(child_options).await.unwrap();
-            service
-                .tasks()
-                .set_parent(&child_id, &parent_id)
-                .await
-                .unwrap();
+    // ========================================================================
+    // update_task_inner tests
+    // ========================================================================
 
-            (parent_id, child_id)
+    #[tokio::test]
+    async fn update_task_inner_changes_title() {
+        let services = mock_services();
+        let id = services
+            .tasks()
+            .create_task(vertebrae_core::CreateTaskOptions::new(
+                "Original".to_string(),
+            ))
+            .await
+            .unwrap();
+
+        let opts = crate::types::UpdateTaskOptions {
+            title: Some("Updated".to_string()),
+            ..Default::default()
         };
+        update_task_inner(&services, &id, opts).await.unwrap();
 
-        // Get parent with relations
-        let result = get_task(mock_state(&state), parent_id.clone()).await;
-        assert!(result.is_ok());
-        let parent_with_relations = result.unwrap();
-        assert_eq!(parent_with_relations.task.title, "Parent");
-        assert!(parent_with_relations.parent_id.is_none());
-        assert_eq!(parent_with_relations.children_ids.len(), 1);
-        assert!(parent_with_relations.children_ids.contains(&child_id));
-
-        // Get child with relations
-        let result2 = get_task(mock_state(&state), child_id.clone()).await;
-        assert!(result2.is_ok());
-        let child_with_relations = result2.unwrap();
-        assert_eq!(child_with_relations.task.title, "Child");
-        assert_eq!(child_with_relations.parent_id, Some(parent_id));
-        assert!(child_with_relations.children_ids.is_empty());
+        let task = services.tasks().get_task(&id).await.unwrap();
+        assert_eq!(task.title, "Updated");
     }
 
     #[tokio::test]
-    async fn test_task_hierarchy() {
-        let state = create_test_app_state().await;
+    async fn update_task_inner_changes_priority() {
+        let services = mock_services();
+        let id = services
+            .tasks()
+            .create_task(vertebrae_core::CreateTaskOptions::new("Task".to_string()))
+            .await
+            .unwrap();
 
-        // Create hierarchy: Epic -> Ticket -> Task
+        let opts = crate::types::UpdateTaskOptions {
+            priority: Some(Some("high".to_string())),
+            ..Default::default()
+        };
+        update_task_inner(&services, &id, opts).await.unwrap();
+
+        let task = services.tasks().get_task(&id).await.unwrap();
+        assert_eq!(task.priority, Some(vertebrae_core::Priority::High));
+    }
+
+    #[tokio::test]
+    async fn update_task_inner_clears_priority() {
+        let services = mock_services();
+        let id = services
+            .tasks()
+            .create_task(vertebrae_core::CreateTaskOptions::new("Task".to_string()))
+            .await
+            .unwrap();
+
+        let opts = crate::types::UpdateTaskOptions {
+            priority: Some(None),
+            ..Default::default()
+        };
+        update_task_inner(&services, &id, opts).await.unwrap();
+
+        let task = services.tasks().get_task(&id).await.unwrap();
+        assert_eq!(task.priority, None);
+    }
+
+    #[tokio::test]
+    async fn update_task_inner_sets_needs_human_review() {
+        let services = mock_services();
+        let id = services
+            .tasks()
+            .create_task(vertebrae_core::CreateTaskOptions::new("Task".to_string()))
+            .await
+            .unwrap();
+
+        let opts = crate::types::UpdateTaskOptions {
+            needs_human_review: Some(true),
+            ..Default::default()
+        };
+        update_task_inner(&services, &id, opts).await.unwrap();
+
+        let task = services.tasks().get_task(&id).await.unwrap();
+        assert_eq!(task.needs_human_review, Some(true));
+    }
+
+    #[tokio::test]
+    async fn update_task_inner_nonexistent_returns_error() {
+        let services = mock_services();
+        let opts = crate::types::UpdateTaskOptions {
+            title: Some("New".to_string()),
+            ..Default::default()
+        };
+        let result = update_task_inner(&services, "nonexistent", opts).await;
+        assert!(result.is_err());
+    }
+
+    // ========================================================================
+    // Task hierarchy tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn get_task_hierarchy_returns_tree() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let parent_id = create_task(
+            state.clone(),
+            "Root".to_string(),
+            None,
+            Some("epic".to_string()),
+            None,
+        )
+        .await
+        .unwrap();
+        create_task(
+            state.clone(),
+            "Child".to_string(),
+            None,
+            None,
+            Some(parent_id.clone()),
+        )
+        .await
+        .unwrap();
+        let tree = get_task_hierarchy(state, None, None).await.unwrap();
+        // Should have the root node
+        assert!(!tree.is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_task_hierarchy_with_root_id() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let root_id = create_task(state.clone(), "Root".to_string(), None, None, None)
+            .await
+            .unwrap();
+        create_task(
+            state.clone(),
+            "Child".to_string(),
+            None,
+            None,
+            Some(root_id.clone()),
+        )
+        .await
+        .unwrap();
+        let tree = get_task_hierarchy(state, Some(root_id.clone()), None)
+            .await
+            .unwrap();
+        assert_eq!(tree.len(), 1);
+        assert_eq!(tree[0].task.id, root_id);
+    }
+
+    #[tokio::test]
+    async fn get_task_hierarchy_nonexistent_root_returns_error() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let result = get_task_hierarchy(state, Some("nonexistent".to_string()), None).await;
+        assert!(result.is_err());
+    }
+
+    // ========================================================================
+    // Relationship tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn set_parent_and_get_relations() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let parent_id = create_task(state.clone(), "Parent".to_string(), None, None, None)
+            .await
+            .unwrap();
+        let child_id = create_task(state.clone(), "Child".to_string(), None, None, None)
+            .await
+            .unwrap();
+
+        set_parent(state.clone(), child_id.clone(), parent_id.clone())
+            .await
+            .unwrap();
+
+        let child = get_task(state, child_id).await.unwrap();
+        assert_eq!(child.parent_id, Some(parent_id));
+    }
+
+    #[tokio::test]
+    async fn remove_parent_clears_relation() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let parent_id = create_task(state.clone(), "Parent".to_string(), None, None, None)
+            .await
+            .unwrap();
+        let child_id = create_task(state.clone(), "Child".to_string(), None, None, None)
+            .await
+            .unwrap();
+        set_parent(state.clone(), child_id.clone(), parent_id)
+            .await
+            .unwrap();
+        remove_parent(state.clone(), child_id.clone())
+            .await
+            .unwrap();
+
+        let child = get_task(state, child_id).await.unwrap();
+        assert_eq!(child.parent_id, None);
+    }
+
+    #[tokio::test]
+    async fn add_and_remove_dependency() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let task_a = create_task(state.clone(), "A".to_string(), None, None, None)
+            .await
+            .unwrap();
+        let task_b = create_task(state.clone(), "B".to_string(), None, None, None)
+            .await
+            .unwrap();
+
+        add_dependency(state.clone(), task_a.clone(), task_b.clone())
+            .await
+            .unwrap();
+        let task = get_task(state.clone(), task_a.clone()).await.unwrap();
+        assert!(task.depends_on_ids.contains(&task_b));
+
+        remove_dependency(state.clone(), task_a.clone(), task_b.clone())
+            .await
+            .unwrap();
+        let task = get_task(state, task_a).await.unwrap();
+        assert!(!task.depends_on_ids.contains(&task_b));
+    }
+
+    #[tokio::test]
+    async fn set_parent_nonexistent_returns_error() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let task_id = create_task(state.clone(), "Task".to_string(), None, None, None)
+            .await
+            .unwrap();
+        let result = set_parent(state, task_id, "nonexistent".to_string()).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn add_dependency_nonexistent_returns_error() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let task_id = create_task(state.clone(), "Task".to_string(), None, None, None)
+            .await
+            .unwrap();
+        let result = add_dependency(state, task_id, "nonexistent".to_string()).await;
+        assert!(result.is_err());
+    }
+
+    // ========================================================================
+    // Workflow tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn list_workflows_empty() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let workflows = list_workflows(state).await.unwrap();
+        assert!(workflows.is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_workflow_nonexistent_returns_error() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let result = get_workflow(state, "nonexistent".to_string()).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn list_workflow_transitions_empty() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let transitions = list_workflow_transitions(state).await.unwrap();
+        assert!(transitions.is_empty());
+    }
+
+    #[tokio::test]
+    async fn assign_workflow_to_task() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+
+        // Create a workflow via the service directly
         {
             let guard = state.services.read().await;
-            let service = guard.as_ref().unwrap();
-
-            let epic_options = CreateTaskOptions::new("Epic").with_level(Level::Epic);
-            let epic_id = service.tasks().create_task(epic_options).await.unwrap();
-
-            let ticket_options = CreateTaskOptions::new("Ticket").with_level(Level::Ticket);
-            let ticket_id = service.tasks().create_task(ticket_options).await.unwrap();
-            service
-                .tasks()
-                .set_parent(&ticket_id, &epic_id)
-                .await
-                .unwrap();
-
-            let task_options = CreateTaskOptions::new("Task").with_level(Level::Task);
-            let task_id = service.tasks().create_task(task_options).await.unwrap();
-            service
-                .tasks()
-                .set_parent(&task_id, &ticket_id)
+            let svc = guard.as_ref().unwrap();
+            svc.workflows()
+                .create_workflow(vertebrae_core::CreateWorkflowOptions {
+                    name: "Test WF".to_string(),
+                    description: None,
+                    steps: vec![],
+                    auto_advance: false,
+                    order: 0,
+                })
                 .await
                 .unwrap();
         }
 
-        // Get hierarchy
-        let result = get_task_hierarchy(mock_state(&state), None, None).await;
-        assert!(result.is_ok());
-        let hierarchy = result.unwrap();
+        let task_id = create_task(state.clone(), "Task".to_string(), None, None, None)
+            .await
+            .unwrap();
 
-        // Should have one root (Epic)
-        assert_eq!(hierarchy.len(), 1);
-        assert_eq!(hierarchy[0].task.title, "Epic");
+        let workflows = list_workflows(state.clone()).await.unwrap();
+        assert_eq!(workflows.len(), 1);
+        let wf_id = workflows[0].id.clone().unwrap();
 
-        // Epic should have one child (Ticket)
-        assert_eq!(hierarchy[0].children.len(), 1);
-        assert_eq!(hierarchy[0].children[0].task.title, "Ticket");
-
-        // Ticket should have one child (Task)
-        assert_eq!(hierarchy[0].children[0].children.len(), 1);
-        assert_eq!(hierarchy[0].children[0].children[0].task.title, "Task");
+        assign_workflow(state, task_id.clone(), wf_id)
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
-    async fn test_workflow_with_tasks_integration() {
-        let state = create_test_app_state().await;
+    async fn get_workflow_with_tasks_returns_workflow() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
 
-        // Create a task assigned to default workflow
-        {
+        let wf_id = {
             let guard = state.services.read().await;
-            let service = guard.as_ref().unwrap();
-
-            let task_options = CreateTaskOptions::new("Workflow Task").with_level(Level::Task);
-            let task_id = service.tasks().create_task(task_options).await.unwrap();
-
-            // Transition to in_progress to assign workflow
-            service
-                .tasks()
-                .transition_to(&task_id, "in_progress")
+            let svc = guard.as_ref().unwrap();
+            svc.workflows()
+                .create_workflow(vertebrae_core::CreateWorkflowOptions {
+                    name: "WF".to_string(),
+                    description: None,
+                    steps: vec![],
+                    auto_advance: false,
+                    order: 0,
+                })
                 .await
-                .unwrap();
-        }
+                .unwrap()
+        };
 
-        // Get workflow with tasks
-        let result = get_workflow_with_tasks(mock_state(&state), "default".to_string()).await;
-        assert!(result.is_ok());
-        let wf_with_tasks = result.unwrap();
-        assert_eq!(wf_with_tasks.tasks.len(), 1);
-        assert_eq!(wf_with_tasks.tasks[0].title, "Workflow Task");
+        let result = get_workflow_with_tasks(state, wf_id).await.unwrap();
+        assert!(result.tasks.is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_workflow_with_task_details_returns_details() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+
+        let wf_id = {
+            let guard = state.services.read().await;
+            let svc = guard.as_ref().unwrap();
+            svc.workflows()
+                .create_workflow(vertebrae_core::CreateWorkflowOptions {
+                    name: "Detail WF".to_string(),
+                    description: None,
+                    steps: vec![],
+                    auto_advance: false,
+                    order: 0,
+                })
+                .await
+                .unwrap()
+        };
+
+        let result = get_workflow_with_task_details(state, wf_id).await.unwrap();
+        assert!(result.tasks.is_empty());
     }
 
     // ========================================================================
-    // Task Relationship Mutation Tests
+    // Execution tests
     // ========================================================================
 
     #[tokio::test]
-    async fn test_set_parent_creates_relationship() {
-        let state = create_test_app_state().await;
-
-        let (parent_id, child_id) = {
-            let guard = state.services.read().await;
-            let service = guard.as_ref().unwrap();
-
-            let parent_options = CreateTaskOptions::new("Parent").with_level(Level::Epic);
-            let parent_id = service.tasks().create_task(parent_options).await.unwrap();
-
-            let child_options = CreateTaskOptions::new("Child").with_level(Level::Task);
-            let child_id = service.tasks().create_task(child_options).await.unwrap();
-            service
-                .tasks()
-                .set_parent(&child_id, &parent_id)
-                .await
-                .unwrap();
-
-            (parent_id, child_id)
-        };
-
-        // Set parent via command
-        let result = set_parent(mock_state(&state), child_id.clone(), parent_id.clone()).await;
-        assert!(result.is_ok());
-
-        // Verify relationship was created
-        let child_result = get_task(mock_state(&state), child_id.clone()).await;
-        assert!(child_result.is_ok());
-        let child_with_relations = child_result.unwrap();
-        assert_eq!(child_with_relations.parent_id, Some(parent_id));
+    async fn get_task_executions_empty() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let executions = get_task_executions(state, "some-task".to_string())
+            .await
+            .unwrap();
+        assert!(executions.is_empty());
     }
 
     #[tokio::test]
-    async fn test_remove_parent_deletes_relationship() {
-        let state = create_test_app_state().await;
-
-        let (_parent_id, child_id) = {
-            let guard = state.services.read().await;
-            let service = guard.as_ref().unwrap();
-
-            let parent_options = CreateTaskOptions::new("Parent").with_level(Level::Epic);
-            let parent_id = service.tasks().create_task(parent_options).await.unwrap();
-
-            let child_options = CreateTaskOptions::new("Child").with_level(Level::Task);
-            let child_id = service.tasks().create_task(child_options).await.unwrap();
-            service
-                .tasks()
-                .set_parent(&child_id, &parent_id)
-                .await
-                .unwrap();
-
-            (parent_id, child_id)
-        };
-
-        // Remove parent via command
-        let result = remove_parent(mock_state(&state), child_id.clone()).await;
-        assert!(result.is_ok());
-
-        // Verify relationship was removed
-        let child_result = get_task(mock_state(&state), child_id.clone()).await;
-        assert!(child_result.is_ok());
-        let child_with_relations = child_result.unwrap();
-        assert!(child_with_relations.parent_id.is_none());
+    async fn get_execution_logs_empty() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let logs = get_execution_logs(state, "some-exec".to_string())
+            .await
+            .unwrap();
+        assert!(logs.is_empty());
     }
 
     #[tokio::test]
-    async fn test_add_dependency_creates_relationship() {
-        let state = create_test_app_state().await;
-
-        let (task_a_id, task_b_id) = {
-            let guard = state.services.read().await;
-            let service = guard.as_ref().unwrap();
-
-            let task_a_options = CreateTaskOptions::new("Task A").with_level(Level::Task);
-            let task_a_id = service.tasks().create_task(task_a_options).await.unwrap();
-
-            let task_b_options = CreateTaskOptions::new("Task B").with_level(Level::Task);
-            let task_b_id = service.tasks().create_task(task_b_options).await.unwrap();
-            service
-                .tasks()
-                .add_dependency(&task_b_id, &task_a_id)
-                .await
-                .unwrap();
-
-            (task_a_id, task_b_id)
-        };
-
-        // Add dependency via command (B depends on A)
-        let result = add_dependency(mock_state(&state), task_b_id.clone(), task_a_id.clone()).await;
-        assert!(result.is_ok());
-
-        // Verify dependency was created
-        let task_b_result = get_task(mock_state(&state), task_b_id.clone()).await;
-        assert!(task_b_result.is_ok());
-        let task_b_with_relations = task_b_result.unwrap();
-        assert!(task_b_with_relations.depends_on_ids.contains(&task_a_id));
-    }
-
-    #[tokio::test]
-    async fn test_remove_dependency_deletes_relationship() {
-        let state = create_test_app_state().await;
-
-        let (task_a_id, task_b_id) = {
-            let guard = state.services.read().await;
-            let service = guard.as_ref().unwrap();
-
-            let task_a_options = CreateTaskOptions::new("Task A").with_level(Level::Task);
-            let task_a_id = service.tasks().create_task(task_a_options).await.unwrap();
-
-            let task_b_options = CreateTaskOptions::new("Task B").with_level(Level::Task);
-            let task_b_id = service.tasks().create_task(task_b_options).await.unwrap();
-            service
-                .tasks()
-                .add_dependency(&task_b_id, &task_a_id)
-                .await
-                .unwrap();
-
-            (task_a_id, task_b_id)
-        };
-
-        // Remove dependency via command
-        let result =
-            remove_dependency(mock_state(&state), task_b_id.clone(), task_a_id.clone()).await;
-        assert!(result.is_ok());
-
-        // Verify dependency was removed
-        let task_b_result = get_task(mock_state(&state), task_b_id.clone()).await;
-        assert!(task_b_result.is_ok());
-        let task_b_with_relations = task_b_result.unwrap();
-        assert!(!task_b_with_relations.depends_on_ids.contains(&task_a_id));
-    }
-
-    #[tokio::test]
-    async fn test_add_dependency_prevents_cycles() {
-        let state = create_test_app_state().await;
-
-        let (task_a_id, task_b_id) = {
-            let guard = state.services.read().await;
-            let service = guard.as_ref().unwrap();
-
-            let task_a_options = CreateTaskOptions::new("Task A").with_level(Level::Task);
-            let task_a_id = service.tasks().create_task(task_a_options).await.unwrap();
-
-            let task_b_options = CreateTaskOptions::new("Task B").with_level(Level::Task);
-            let task_b_id = service.tasks().create_task(task_b_options).await.unwrap();
-            service
-                .tasks()
-                .add_dependency(&task_b_id, &task_a_id)
-                .await
-                .unwrap();
-
-            (task_a_id, task_b_id)
-        };
-
-        // Try to add reverse dependency (A depends on B) - should fail
-        let result = add_dependency(mock_state(&state), task_a_id.clone(), task_b_id.clone()).await;
+    async fn get_task_executions_no_project() {
+        let app = build_app_without_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let result = get_task_executions(state, "task".to_string()).await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
-    async fn test_set_parent_fails_without_project() {
-        let state = create_disconnected_app_state().await;
-        let result = set_parent(mock_state(&state), "task1".to_string(), "task2".to_string()).await;
+    async fn get_execution_logs_no_project() {
+        let app = build_app_without_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let result = get_execution_logs(state, "exec".to_string()).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().message.contains("No project selected"));
-    }
-
-    #[tokio::test]
-    async fn test_add_dependency_fails_without_project() {
-        let state = create_disconnected_app_state().await;
-        let result =
-            add_dependency(mock_state(&state), "task1".to_string(), "task2".to_string()).await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().message.contains("No project selected"));
     }
 
     // ========================================================================
-    // Section Mutation Command Tests
+    // Step tests (first-class workflow steps)
     // ========================================================================
 
     #[tokio::test]
-    async fn test_add_section_to_task() {
-        let state = create_test_app_state().await;
-
-        let task_id = {
-            let guard = state.services.read().await;
-            let service = guard.as_ref().unwrap();
-            let options = CreateTaskOptions::new("Task with Sections").with_level(Level::Task);
-            service.tasks().create_task(options).await.unwrap()
-        };
-
-        // Add a goal section
-        let result = add_section(
-            mock_state(&state),
-            task_id.clone(),
-            "goal".to_string(),
-            Some("This is the goal".to_string()),
-        )
-        .await;
-        assert!(result.is_ok());
-
-        // Verify section was added
-        let task_result = get_task(mock_state(&state), task_id.clone()).await;
-        assert!(task_result.is_ok());
-        let task = task_result.unwrap();
-        assert_eq!(task.task.sections.len(), 1);
-        assert_eq!(
-            task.task.sections[0].section_type,
-            crate::types::SectionType::Goal
-        );
-        assert_eq!(task.task.sections[0].content, "This is the goal");
+    async fn list_steps_for_workflow_empty() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let steps = list_steps_for_workflow(state, "wf-id".to_string())
+            .await
+            .unwrap();
+        assert!(steps.is_empty());
     }
 
     #[tokio::test]
-    async fn test_add_multiple_sections_different_types() {
-        let state = create_test_app_state().await;
-
-        let task_id = {
-            let guard = state.services.read().await;
-            let service = guard.as_ref().unwrap();
-            let options = CreateTaskOptions::new("Multi-section Task").with_level(Level::Task);
-            let task_id = service.tasks().create_task(options).await.unwrap();
-
-            // Add multiple sections
-            let goal = vertebrae_db::Section {
-                section_type: vertebrae_db::SectionType::Goal,
-                content: "Goal 1".to_string(),
-                order: None,
-                done: None,
-                done_at: None,
-                refs: Vec::new(),
-            };
-            service.tasks().add_section(&task_id, goal).await.unwrap();
-
-            let context = vertebrae_db::Section {
-                section_type: vertebrae_db::SectionType::Context,
-                content: "Context 1".to_string(),
-                order: None,
-                done: None,
-                done_at: None,
-                refs: Vec::new(),
-            };
-            service
-                .tasks()
-                .add_section(&task_id, context)
-                .await
-                .unwrap();
-
-            let constraint = vertebrae_db::Section {
-                section_type: vertebrae_db::SectionType::Constraint,
-                content: "Constraint 1".to_string(),
-                order: None,
-                done: None,
-                done_at: None,
-                refs: Vec::new(),
-            };
-            service
-                .tasks()
-                .add_section(&task_id, constraint)
-                .await
-                .unwrap();
-
-            let step = vertebrae_db::Section {
-                section_type: vertebrae_db::SectionType::Step,
-                content: "Step 1".to_string(),
-                order: None,
-                done: None,
-                done_at: None,
-                refs: Vec::new(),
-            };
-            service.tasks().add_section(&task_id, step).await.unwrap();
-            task_id
-        };
-
-        // Verify all sections were added
-        let task_result = get_task(mock_state(&state), task_id.clone()).await;
-        assert!(task_result.is_ok());
-        let task = task_result.unwrap();
-        assert_eq!(task.task.sections.len(), 4);
-        assert_eq!(
-            task.task.sections[0].section_type,
-            crate::types::SectionType::Goal
-        );
-        assert_eq!(
-            task.task.sections[1].section_type,
-            crate::types::SectionType::Context
-        );
-        assert_eq!(
-            task.task.sections[2].section_type,
-            crate::types::SectionType::Constraint
-        );
-        assert_eq!(
-            task.task.sections[3].section_type,
-            crate::types::SectionType::Step
-        );
-    }
-
-    #[tokio::test]
-    async fn test_add_section_with_empty_content() {
-        let state = create_test_app_state().await;
-
-        let task_id = {
-            let guard = state.services.read().await;
-            let service = guard.as_ref().unwrap();
-            let options = CreateTaskOptions::new("Empty Section Task").with_level(Level::Task);
-            let task_id = service.tasks().create_task(options).await.unwrap();
-
-            // Add a step section with empty content
-            let step = vertebrae_db::Section {
-                section_type: vertebrae_db::SectionType::Step,
-                content: "".to_string(),
-                order: Some(0),
-                done: None,
-                done_at: None,
-                refs: Vec::new(),
-            };
-            service.tasks().add_section(&task_id, step).await.unwrap();
-            task_id
-        };
-
-        // Verify section was added with empty content
-        let task_result = get_task(mock_state(&state), task_id.clone()).await;
-        assert!(task_result.is_ok());
-        let task = task_result.unwrap();
-        assert_eq!(task.task.sections.len(), 1);
-        assert_eq!(task.task.sections[0].content, "");
-    }
-
-    #[tokio::test]
-    async fn test_edit_section_content() {
-        let state = create_test_app_state().await;
-
-        let task_id = {
-            let guard = state.services.read().await;
-            let service = guard.as_ref().unwrap();
-            let options = CreateTaskOptions::new("Edit Section Task").with_level(Level::Task);
-            let task_id = service.tasks().create_task(options).await.unwrap();
-
-            // Add a goal section with order
-            let goal = vertebrae_db::Section {
-                section_type: vertebrae_db::SectionType::Goal,
-                content: "Original goal".to_string(),
-                order: Some(0),
-                done: None,
-                done_at: None,
-                refs: Vec::new(),
-            };
-            service.tasks().add_section(&task_id, goal).await.unwrap();
-            task_id
-        };
-
-        // Edit the section
-        let result = edit_section(
-            mock_state(&state),
-            task_id.clone(),
-            "goal".to_string(),
+    async fn create_and_get_step() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let step = create_step(
+            state.clone(),
+            "wf-1".to_string(),
+            "Review".to_string(),
+            Some("Review the code".to_string()),
+            vec!["sonnet".to_string()],
+            vec![],
             0,
-            "Updated goal".to_string(),
+            false,
+            vec![],
         )
-        .await;
-        assert!(result.is_ok());
+        .await
+        .unwrap();
+        assert_eq!(step.name, "Review");
+        assert!(step.id.is_some());
 
-        // Verify section was updated
-        let task_result = get_task(mock_state(&state), task_id.clone()).await;
-        assert!(task_result.is_ok());
-        let task = task_result.unwrap();
-        assert_eq!(task.task.sections[0].content, "Updated goal");
+        let fetched = get_step(state, step.id.clone().unwrap()).await.unwrap();
+        assert!(fetched.is_some());
+        assert_eq!(fetched.unwrap().name, "Review");
     }
 
     #[tokio::test]
-    async fn test_edit_section_preserves_other_sections() {
-        let state = create_test_app_state().await;
-
-        let task_id = {
-            let guard = state.services.read().await;
-            let service = guard.as_ref().unwrap();
-            let options = CreateTaskOptions::new("Multi-edit Task").with_level(Level::Task);
-            let task_id = service.tasks().create_task(options).await.unwrap();
-
-            // Add multiple sections with ordering
-            let goal = vertebrae_db::Section {
-                section_type: vertebrae_db::SectionType::Goal,
-                content: "Goal 1".to_string(),
-                order: Some(0),
-                done: None,
-                done_at: None,
-                refs: Vec::new(),
-            };
-            service.tasks().add_section(&task_id, goal).await.unwrap();
-
-            let context = vertebrae_db::Section {
-                section_type: vertebrae_db::SectionType::Context,
-                content: "Context 1".to_string(),
-                order: Some(0),
-                done: None,
-                done_at: None,
-                refs: Vec::new(),
-            };
-            service
-                .tasks()
-                .add_section(&task_id, context)
-                .await
-                .unwrap();
-
-            let constraint = vertebrae_db::Section {
-                section_type: vertebrae_db::SectionType::Constraint,
-                content: "Constraint 1".to_string(),
-                order: Some(0),
-                done: None,
-                done_at: None,
-                refs: Vec::new(),
-            };
-            service
-                .tasks()
-                .add_section(&task_id, constraint)
-                .await
-                .unwrap();
-
-            let step = vertebrae_db::Section {
-                section_type: vertebrae_db::SectionType::Step,
-                content: "Step 1".to_string(),
-                order: Some(0),
-                done: None,
-                done_at: None,
-                refs: Vec::new(),
-            };
-            service.tasks().add_section(&task_id, step).await.unwrap();
-            task_id
-        };
-
-        // Edit the first section
-        let result = edit_section(
-            mock_state(&state),
-            task_id.clone(),
-            "goal".to_string(),
-            0,
-            "Updated goal".to_string(),
-        )
-        .await;
-        assert!(result.is_ok());
-
-        // Verify other sections unchanged
-        let task_result = get_task(mock_state(&state), task_id.clone()).await;
-        assert!(task_result.is_ok());
-        let task = task_result.unwrap();
-        assert_eq!(task.task.sections.len(), 4);
-        assert_eq!(task.task.sections[0].content, "Updated goal");
-        assert_eq!(task.task.sections[1].content, "Context 1");
-        assert_eq!(task.task.sections[2].content, "Constraint 1");
-        assert_eq!(task.task.sections[3].content, "Step 1");
+    async fn get_step_nonexistent_returns_none() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let step = get_step(state, "nonexistent".to_string()).await.unwrap();
+        assert!(step.is_none());
     }
 
     #[tokio::test]
-    async fn test_mark_section_done_toggles_status() {
-        let state = create_test_app_state().await;
-
-        let task_id = {
-            let guard = state.services.read().await;
-            let service = guard.as_ref().unwrap();
-            let options = CreateTaskOptions::new("Step Task").with_level(Level::Task);
-            let task_id = service.tasks().create_task(options).await.unwrap();
-
-            // Add a step section
-            let step = vertebrae_db::Section {
-                section_type: vertebrae_db::SectionType::Step,
-                content: "Implementation step".to_string(),
-                order: Some(0),
-                done: Some(false),
-                done_at: None,
-                refs: Vec::new(),
-            };
-            service.tasks().add_section(&task_id, step).await.unwrap();
-            task_id
-        };
-
-        // Mark section as done
-        let result = mark_section_done(mock_state(&state), task_id.clone(), 0).await;
-        assert!(result.is_ok());
-
-        // Verify section is marked done
-        let task_result = get_task(mock_state(&state), task_id.clone()).await;
-        assert!(task_result.is_ok());
-        let task = task_result.unwrap();
-        assert_eq!(task.task.sections[0].done, Some(true));
-        assert!(task.task.sections[0].done_at.is_some());
-
-        // Toggle back to not done
-        let result = mark_section_done(mock_state(&state), task_id.clone(), 0).await;
-        assert!(result.is_ok());
-
-        // Verify section is marked not done
-        let task_result = get_task(mock_state(&state), task_id).await;
-        assert!(task_result.is_ok());
-        let task = task_result.unwrap();
-        assert_eq!(task.task.sections[0].done, Some(false));
-    }
-
-    #[tokio::test]
-    async fn test_remove_section() {
-        let state = create_test_app_state().await;
-
-        let task_id = {
-            let guard = state.services.read().await;
-            let service = guard.as_ref().unwrap();
-            let options = CreateTaskOptions::new("Remove Section Task").with_level(Level::Task);
-            let task_id = service.tasks().create_task(options).await.unwrap();
-
-            // Add two goal sections
-            for i in 0..2 {
-                let goal = vertebrae_db::Section {
-                    section_type: vertebrae_db::SectionType::Goal,
-                    content: format!("Goal {}", i),
-                    order: Some(i as u32),
-                    done: None,
-                    done_at: None,
-                    refs: Vec::new(),
-                };
-                service.tasks().add_section(&task_id, goal).await.unwrap();
-            }
-            task_id
-        };
-
-        // Verify initial state
-        {
-            let task_result = get_task(mock_state(&state), task_id.clone()).await;
-            assert!(task_result.is_ok());
-            let task = task_result.unwrap();
-            assert_eq!(task.task.sections.len(), 2);
-        }
-
-        // Remove the first section
-        let result =
-            remove_section(mock_state(&state), task_id.clone(), "goal".to_string(), 0).await;
-        assert!(result.is_ok());
-
-        // Verify section was removed
-        let task_result = get_task(mock_state(&state), task_id).await;
-        assert!(task_result.is_ok());
-        let task = task_result.unwrap();
-        assert_eq!(task.task.sections.len(), 1);
-        assert_eq!(task.task.sections[0].content, "Goal 1");
-    }
-
-    #[tokio::test]
-    async fn test_add_criterion_ref() {
-        let state = create_test_app_state().await;
-
-        let task_id = {
-            let guard = state.services.read().await;
-            let service = guard.as_ref().unwrap();
-            let options = CreateTaskOptions::new("Testing Criterion Task").with_level(Level::Task);
-            let task_id = service.tasks().create_task(options).await.unwrap();
-
-            // Add a testing criterion section
-            let criterion = vertebrae_db::Section {
-                section_type: vertebrae_db::SectionType::TestingCriterion,
-                content: "Test the feature".to_string(),
-                order: Some(0),
-                done: None,
-                done_at: None,
-                refs: Vec::new(),
-            };
-            service
-                .tasks()
-                .add_section(&task_id, criterion)
-                .await
-                .unwrap();
-            task_id
-        };
-
-        // Add a code reference to the testing criterion
-        let result = add_criterion_ref(
-            mock_state(&state),
-            task_id.clone(),
-            0,
-            "src/feature.rs".to_string(),
-            Some(42),
-            Some("feature_test".to_string()),
-        )
-        .await;
-        assert!(result.is_ok());
-
-        // Verify reference was added
-        let task_result = get_task(mock_state(&state), task_id).await;
-        assert!(task_result.is_ok());
-        let task = task_result.unwrap();
-        assert_eq!(task.task.sections.len(), 1);
-        assert_eq!(task.task.sections[0].refs.len(), 1);
-        assert_eq!(task.task.sections[0].refs[0].path, "src/feature.rs");
-        assert_eq!(task.task.sections[0].refs[0].line_start, Some(42));
-        assert_eq!(
-            task.task.sections[0].refs[0].name,
-            Some("feature_test".to_string())
-        );
-    }
-
-    #[tokio::test]
-    async fn test_add_criterion_ref_without_line_number() {
-        let state = create_test_app_state().await;
-
-        let task_id = {
-            let guard = state.services.read().await;
-            let service = guard.as_ref().unwrap();
-            let options = CreateTaskOptions::new("Test Ref Task").with_level(Level::Task);
-            let task_id = service.tasks().create_task(options).await.unwrap();
-
-            // Add a testing criterion section
-            let criterion = vertebrae_db::Section {
-                section_type: vertebrae_db::SectionType::TestingCriterion,
-                content: "Test the feature".to_string(),
-                order: Some(0),
-                done: None,
-                done_at: None,
-                refs: Vec::new(),
-            };
-            service
-                .tasks()
-                .add_section(&task_id, criterion)
-                .await
-                .unwrap();
-            task_id
-        };
-
-        // Add a code reference to the testing criterion
-        let result = add_criterion_ref(
-            mock_state(&state),
-            task_id.clone(),
-            0,
-            "src/feature.rs".to_string(),
+    async fn list_steps_for_workflow_returns_created_steps() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        create_step(
+            state.clone(),
+            "wf-x".to_string(),
+            "Step1".to_string(),
             None,
-            Some("feature_test".to_string()),
+            vec![],
+            vec![],
+            0,
+            false,
+            vec![],
         )
-        .await;
-        assert!(result.is_ok());
-
-        // Verify reference was added
-        let task_result = get_task(mock_state(&state), task_id).await;
-        assert!(task_result.is_ok());
-        let task = task_result.unwrap();
-        assert_eq!(task.task.sections.len(), 1);
-        assert_eq!(task.task.sections[0].refs.len(), 1);
-        assert_eq!(task.task.sections[0].refs[0].path, "src/feature.rs");
-        assert_eq!(task.task.sections[0].refs[0].line_start, None);
-        assert_eq!(
-            task.task.sections[0].refs[0].name,
-            Some("feature_test".to_string())
-        );
+        .await
+        .unwrap();
+        create_step(
+            state.clone(),
+            "wf-x".to_string(),
+            "Step2".to_string(),
+            None,
+            vec![],
+            vec![],
+            1,
+            true,
+            vec![],
+        )
+        .await
+        .unwrap();
+        let steps = list_steps_for_workflow(state, "wf-x".to_string())
+            .await
+            .unwrap();
+        assert_eq!(steps.len(), 2);
     }
 
+    // ========================================================================
+    // update_step_inner / delete_step_inner tests
+    // ========================================================================
+
     #[tokio::test]
-    async fn test_add_criterion_ref_without_name() {
-        let state = create_test_app_state().await;
+    async fn update_step_inner_succeeds() {
+        let services = mock_services();
+        let step = vertebrae_core::Step::new("Original", "wf-1".to_string());
+        let created = services.steps().create_step(&step).await.unwrap();
+        let step_id = created.id.unwrap();
 
-        let task_id = {
-            let guard = state.services.read().await;
-            let service = guard.as_ref().unwrap();
-            let options = CreateTaskOptions::new("Test Ref Task").with_level(Level::Task);
-            let task_id = service.tasks().create_task(options).await.unwrap();
-
-            // Add a testing criterion section
-            let criterion = vertebrae_db::Section {
-                section_type: vertebrae_db::SectionType::TestingCriterion,
-                content: "Test the feature".to_string(),
-                order: Some(0),
-                done: None,
-                done_at: None,
-                refs: Vec::new(),
-            };
-            service
-                .tasks()
-                .add_section(&task_id, criterion)
-                .await
-                .unwrap();
-            task_id
-        };
-
-        // Add a code reference to the testing criterion
-        let result = add_criterion_ref(
-            mock_state(&state),
-            task_id.clone(),
-            0,
-            "src/feature.rs".to_string(),
-            Some(42),
+        update_step_inner(
+            &services,
+            &step_id,
+            Some("Updated".to_string()),
+            Some("New goal".to_string()),
+            None,
+            None,
+            None,
+            None,
             None,
         )
-        .await;
-        assert!(result.is_ok());
-
-        // Verify reference was added
-        let task_result = get_task(mock_state(&state), task_id).await;
-        assert!(task_result.is_ok());
-        let task = task_result.unwrap();
-        assert_eq!(task.task.sections.len(), 1);
-        assert_eq!(task.task.sections[0].refs.len(), 1);
-        assert_eq!(task.task.sections[0].refs[0].path, "src/feature.rs");
-        assert_eq!(task.task.sections[0].refs[0].line_start, Some(42));
-        assert_eq!(task.task.sections[0].refs[0].name, None);
+        .await
+        .unwrap();
     }
 
     #[tokio::test]
-    async fn test_section_commands_fail_without_project() {
-        let state = create_disconnected_app_state().await;
-
-        let result = add_section(
-            mock_state(&state),
-            "task1".to_string(),
-            "goal".to_string(),
+    async fn update_step_inner_nonexistent_returns_error() {
+        let services = mock_services();
+        let result = update_step_inner(
+            &services,
+            "nonexistent",
+            Some("Name".to_string()),
             None,
-        )
-        .await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().message.contains("No project selected"));
-
-        let result = edit_section(
-            mock_state(&state),
-            "task1".to_string(),
-            "goal".to_string(),
-            0,
-            "content".to_string(),
-        )
-        .await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().message.contains("No project selected"));
-
-        let result = mark_section_done(mock_state(&state), "task1".to_string(), 0).await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().message.contains("No project selected"));
-
-        let result = remove_section(
-            mock_state(&state),
-            "task1".to_string(),
-            "goal".to_string(),
-            0,
-        )
-        .await;
-        assert!(result.is_err());
-        assert!(result.unwrap_err().message.contains("No project selected"));
-
-        let result = add_criterion_ref(
-            mock_state(&state),
-            "task1".to_string(),
-            0,
-            "file.rs".to_string(),
+            None,
+            None,
+            None,
             None,
             None,
         )
         .await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().message.contains("No project selected"));
+        assert!(result.unwrap_err().message.contains("Step not found"));
     }
 
     #[tokio::test]
-    async fn test_add_section_invalid_type() {
-        let state = create_test_app_state().await;
+    async fn delete_step_inner_succeeds() {
+        let services = mock_services();
+        let step = vertebrae_core::Step::new("Doomed", "wf-1".to_string());
+        let created = services.steps().create_step(&step).await.unwrap();
+        let step_id = created.id.unwrap();
 
-        let task_id = {
-            let guard = state.services.read().await;
-            let service = guard.as_ref().unwrap();
-            let options = CreateTaskOptions::new("Invalid Type Task").with_level(Level::Task);
-            service.tasks().create_task(options).await.unwrap()
-        };
+        let wf_id = delete_step_inner(&services, &step_id).await.unwrap();
+        assert_eq!(wf_id, "wf-1");
 
-        // Try to add section with invalid type
-        let result = add_section(
-            mock_state(&state),
-            task_id,
-            "invalid_type".to_string(),
-            None,
+        let fetched = services.steps().get_step(&step_id).await.unwrap();
+        assert!(fetched.is_none());
+    }
+
+    #[tokio::test]
+    async fn delete_step_inner_nonexistent_returns_error() {
+        let services = mock_services();
+        let result = delete_step_inner(&services, "nonexistent").await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("Step not found"));
+    }
+
+    // ========================================================================
+    // Section tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn add_section_to_task() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let id = create_task(state.clone(), "Task".to_string(), None, None, None)
+            .await
+            .unwrap();
+
+        add_section(
+            state.clone(),
+            id.clone(),
+            "step".to_string(),
+            Some("Do the thing".to_string()),
         )
-        .await;
+        .await
+        .unwrap();
+
+        let task = get_task(state, id).await.unwrap();
+        assert_eq!(task.task.sections.len(), 1);
+        assert_eq!(task.task.sections[0].content, "Do the thing");
+    }
+
+    #[tokio::test]
+    async fn add_section_invalid_type_returns_error() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let id = create_task(state.clone(), "Task".to_string(), None, None, None)
+            .await
+            .unwrap();
+        let result = add_section(state, id, "bad_type".to_string(), None).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().message.contains("Invalid section type"));
+    }
+
+    #[tokio::test]
+    async fn add_section_all_valid_types() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let id = create_task(state.clone(), "Task".to_string(), None, None, None)
+            .await
+            .unwrap();
+
+        let types = vec![
+            "goal",
+            "context",
+            "current_behavior",
+            "desired_behavior",
+            "step",
+            "testing_criterion",
+            "anti_pattern",
+            "failure_test",
+            "constraint",
+        ];
+        for section_type in types {
+            add_section(
+                state.clone(),
+                id.clone(),
+                section_type.to_string(),
+                Some("content".to_string()),
+            )
+            .await
+            .unwrap();
+        }
+
+        let task = get_task(state, id).await.unwrap();
+        assert_eq!(task.task.sections.len(), 9);
+    }
+
+    #[tokio::test]
+    async fn edit_section_changes_content() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let id = create_task(state.clone(), "Task".to_string(), None, None, None)
+            .await
+            .unwrap();
+
+        add_section(
+            state.clone(),
+            id.clone(),
+            "step".to_string(),
+            Some("Original".to_string()),
+        )
+        .await
+        .unwrap();
+
+        edit_section(
+            state.clone(),
+            id.clone(),
+            "step".to_string(),
+            0,
+            "Updated content".to_string(),
+        )
+        .await
+        .unwrap();
+
+        let task = get_task(state, id).await.unwrap();
+        assert_eq!(task.task.sections[0].content, "Updated content");
+    }
+
+    #[tokio::test]
+    async fn edit_section_invalid_type_returns_error() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let id = create_task(state.clone(), "Task".to_string(), None, None, None)
+            .await
+            .unwrap();
+        let result = edit_section(state, id, "bad_type".to_string(), 0, "x".to_string()).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn remove_section_removes_it() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let id = create_task(state.clone(), "Task".to_string(), None, None, None)
+            .await
+            .unwrap();
+
+        add_section(
+            state.clone(),
+            id.clone(),
+            "step".to_string(),
+            Some("Step 1".to_string()),
+        )
+        .await
+        .unwrap();
+
+        remove_section(state.clone(), id.clone(), "step".to_string(), 0)
+            .await
+            .unwrap();
+
+        let task = get_task(state, id).await.unwrap();
+        assert!(task.task.sections.is_empty());
+    }
+
+    #[tokio::test]
+    async fn remove_section_invalid_type_returns_error() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let id = create_task(state.clone(), "Task".to_string(), None, None, None)
+            .await
+            .unwrap();
+        let result = remove_section(state, id, "bad_type".to_string(), 0).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn mark_section_done_toggles_step() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let id = create_task(state.clone(), "Task".to_string(), None, None, None)
+            .await
+            .unwrap();
+
+        add_section(
+            state.clone(),
+            id.clone(),
+            "step".to_string(),
+            Some("Do it".to_string()),
+        )
+        .await
+        .unwrap();
+
+        mark_section_done(state.clone(), id.clone(), 0)
+            .await
+            .unwrap();
+
+        let task = get_task(state, id).await.unwrap();
+        assert_eq!(task.task.sections[0].done, Some(true));
+    }
+
+    // ========================================================================
+    // Code reference tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn add_and_replace_code_refs() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let id = create_task(state.clone(), "Task".to_string(), None, None, None)
+            .await
+            .unwrap();
+
+        add_code_ref(
+            state.clone(),
+            id.clone(),
+            "src/main.rs".to_string(),
+            Some(42),
+            None,
+            Some("main fn".to_string()),
+            None,
+        )
+        .await
+        .unwrap();
+
+        let task = get_task(state.clone(), id.clone()).await.unwrap();
+        assert_eq!(task.task.code_refs.len(), 1);
+        assert_eq!(task.task.code_refs[0].path, "src/main.rs");
+
+        // Replace with new refs
+        let new_refs = vec![crate::types::CodeRef {
+            path: "src/lib.rs".to_string(),
+            line_start: Some(10),
+            line_end: Some(20),
+            name: Some("lib".to_string()),
+            description: None,
+        }];
+        replace_code_refs(state.clone(), id.clone(), new_refs)
+            .await
+            .unwrap();
+
+        let task = get_task(state, id).await.unwrap();
+        assert_eq!(task.task.code_refs.len(), 1);
+        assert_eq!(task.task.code_refs[0].path, "src/lib.rs");
+    }
+
+    #[tokio::test]
+    async fn remove_code_refs_all() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let id = create_task(state.clone(), "Task".to_string(), None, None, None)
+            .await
+            .unwrap();
+
+        add_code_ref(
+            state.clone(),
+            id.clone(),
+            "a.rs".to_string(),
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        add_code_ref(
+            state.clone(),
+            id.clone(),
+            "b.rs".to_string(),
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+        remove_code_refs(state.clone(), id.clone(), None)
+            .await
+            .unwrap();
+
+        let task = get_task(state, id).await.unwrap();
+        assert!(task.task.code_refs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn add_criterion_ref_to_testing_criterion() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let id = create_task(state.clone(), "Task".to_string(), None, None, None)
+            .await
+            .unwrap();
+
+        // Add a testing criterion section
+        add_section(
+            state.clone(),
+            id.clone(),
+            "testing_criterion".to_string(),
+            Some("It should work".to_string()),
+        )
+        .await
+        .unwrap();
+
+        // Add a code ref to the criterion
+        add_criterion_ref(
+            state.clone(),
+            id.clone(),
+            0,
+            "tests/test.rs".to_string(),
+            Some(10),
+            Some("test_fn".to_string()),
+        )
+        .await
+        .unwrap();
+
+        let task = get_task(state, id).await.unwrap();
+        assert_eq!(task.task.sections[0].refs.len(), 1);
+        assert_eq!(task.task.sections[0].refs[0].path, "tests/test.rs");
+    }
+
+    #[tokio::test]
+    async fn add_criterion_ref_nonexistent_section_returns_error() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let id = create_task(state.clone(), "Task".to_string(), None, None, None)
+            .await
+            .unwrap();
+        let result = add_criterion_ref(state, id, 0, "test.rs".to_string(), None, None).await;
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .message
+            .contains("Testing criterion section"));
+    }
+
+    // ========================================================================
+    // CommandError tests
+    // ========================================================================
+
+    #[test]
+    fn command_error_from_service_error() {
+        let err = vertebrae_core::ServiceError::task_not_found("abc");
+        let cmd_err: CommandError = err.into();
+        assert!(cmd_err.message.contains("abc"));
+    }
+
+    #[test]
+    fn command_error_helpers() {
+        let err = CommandError::task_not_found("t1");
+        assert!(err.message.contains("t1"));
+
+        let err = CommandError::workflow_not_found("w1");
+        assert!(err.message.contains("w1"));
+
+        let err = CommandError::no_project_selected();
+        assert!(err.message.contains("No project selected"));
+    }
+
+    // ========================================================================
+    // convert_tree_node helper test
+    // ========================================================================
+
+    #[test]
+    fn convert_tree_node_sorts_children_by_created_at() {
+        use chrono::{Duration, Utc};
+
+        let now = Utc::now();
+        let node = vertebrae_core::TaskTreeNode {
+            id: "root".to_string(),
+            title: "Root".to_string(),
+            level: vertebrae_core::Level::Epic,
+            status: "backlog".to_string(),
+            priority: None,
+            tags: vec![],
+            needs_human_review: None,
+            created_at: now,
+            workflow_name: None,
+            step_name: None,
+            has_blockers: false,
+            blocker_count: 0,
+            children: vec![
+                vertebrae_core::TaskTreeNode {
+                    id: "old".to_string(),
+                    title: "Old".to_string(),
+                    level: vertebrae_core::Level::Task,
+                    status: "backlog".to_string(),
+                    priority: None,
+                    tags: vec![],
+                    needs_human_review: None,
+                    created_at: now - Duration::hours(2),
+                    workflow_name: None,
+                    step_name: None,
+                    has_blockers: false,
+                    blocker_count: 0,
+                    children: vec![],
+                },
+                vertebrae_core::TaskTreeNode {
+                    id: "new".to_string(),
+                    title: "New".to_string(),
+                    level: vertebrae_core::Level::Task,
+                    status: "backlog".to_string(),
+                    priority: None,
+                    tags: vec![],
+                    needs_human_review: None,
+                    created_at: now,
+                    workflow_name: None,
+                    step_name: None,
+                    has_blockers: false,
+                    blocker_count: 0,
+                    children: vec![],
+                },
+            ],
+        };
+
+        let converted = convert_tree_node(&node);
+        assert_eq!(converted.children[0].task.id, "new");
+        assert_eq!(converted.children[1].task.id, "old");
     }
 }

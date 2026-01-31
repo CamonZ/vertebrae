@@ -424,3 +424,415 @@ pub enum PtyError {
     #[error("Failed to resize PTY: {0}")]
     ResizeFailed(String),
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ============================================================================
+    // Initialization and Creation Tests
+    // ============================================================================
+
+    #[test]
+    fn test_pty_manager_new() {
+        let manager = PtyManager::new();
+        // Should be created without panicking
+        assert_eq!(manager.sessions.blocking_read().len(), 0);
+    }
+
+    #[test]
+    fn test_pty_manager_default() {
+        let manager = PtyManager::default();
+        // Should be created without panicking
+        assert_eq!(manager.sessions.blocking_read().len(), 0);
+    }
+
+    // ============================================================================
+    // PtyOutputEvent Tests
+    // ============================================================================
+
+    #[test]
+    fn test_pty_output_event_creation() {
+        let event = PtyOutputEvent {
+            session_id: "test-session-123".to_string(),
+            data: "aGVsbG8gd29ybGQ=".to_string(), // base64 encoded "hello world"
+        };
+
+        assert_eq!(event.session_id, "test-session-123");
+        assert_eq!(event.data, "aGVsbG8gd29ybGQ=");
+    }
+
+    #[test]
+    fn test_pty_output_event_serialization() {
+        let event = PtyOutputEvent {
+            session_id: "session-456".to_string(),
+            data: "dGVzdCBkYXRh".to_string(), // "test data"
+        };
+
+        let json = serde_json::to_string(&event).expect("Should serialize");
+        assert!(json.contains("session-456"));
+        assert!(json.contains("dGVzdCBkYXRh"));
+
+        let parsed: PtyOutputEvent = serde_json::from_str(&json).expect("Should deserialize");
+        assert_eq!(parsed.session_id, "session-456");
+        assert_eq!(parsed.data, "dGVzdCBkYXRh");
+    }
+
+    #[test]
+    fn test_pty_output_event_with_empty_data() {
+        let event = PtyOutputEvent {
+            session_id: "empty-session".to_string(),
+            data: String::new(),
+        };
+
+        assert_eq!(event.session_id, "empty-session");
+        assert_eq!(event.data, "");
+    }
+
+    #[test]
+    fn test_pty_output_event_with_large_base64_data() {
+        // Large base64 string (512 bytes)
+        let large_data = "a".repeat(512);
+        let event = PtyOutputEvent {
+            session_id: "large-session".to_string(),
+            data: large_data.clone(),
+        };
+
+        assert_eq!(event.data.len(), 512);
+        assert_eq!(event.data, large_data);
+    }
+
+    // ============================================================================
+    // PtyExitEvent Tests
+    // ============================================================================
+
+    #[test]
+    fn test_pty_exit_event_success() {
+        let event = PtyExitEvent {
+            session_id: "success-session".to_string(),
+            exit_code: Some(0),
+            error: None,
+        };
+
+        assert_eq!(event.session_id, "success-session");
+        assert_eq!(event.exit_code, Some(0));
+        assert_eq!(event.error, None);
+    }
+
+    #[test]
+    fn test_pty_exit_event_failure() {
+        let event = PtyExitEvent {
+            session_id: "failed-session".to_string(),
+            exit_code: Some(1),
+            error: Some("Process crashed".to_string()),
+        };
+
+        assert_eq!(event.session_id, "failed-session");
+        assert_eq!(event.exit_code, Some(1));
+        assert_eq!(event.error, Some("Process crashed".to_string()));
+    }
+
+    #[test]
+    fn test_pty_exit_event_no_exit_code() {
+        let event = PtyExitEvent {
+            session_id: "no-code-session".to_string(),
+            exit_code: None,
+            error: Some("Unknown error".to_string()),
+        };
+
+        assert_eq!(event.session_id, "no-code-session");
+        assert_eq!(event.exit_code, None);
+        assert_eq!(event.error, Some("Unknown error".to_string()));
+    }
+
+    #[test]
+    fn test_pty_exit_event_serialization() {
+        let event = PtyExitEvent {
+            session_id: "test-serialize".to_string(),
+            exit_code: Some(42),
+            error: Some("Test error".to_string()),
+        };
+
+        let json = serde_json::to_string(&event).expect("Should serialize");
+        assert!(json.contains("test-serialize"));
+        assert!(json.contains("42"));
+        assert!(json.contains("Test error"));
+
+        let parsed: PtyExitEvent = serde_json::from_str(&json).expect("Should deserialize");
+        assert_eq!(parsed.session_id, "test-serialize");
+        assert_eq!(parsed.exit_code, Some(42));
+        assert_eq!(parsed.error, Some("Test error".to_string()));
+    }
+
+    // ============================================================================
+    // PtyError Tests
+    // ============================================================================
+
+    #[test]
+    fn test_pty_error_spawn_failed() {
+        let error = PtyError::SpawnFailed("PTY creation failed".to_string());
+        let message = error.to_string();
+        assert_eq!(message, "Failed to spawn PTY: PTY creation failed");
+    }
+
+    #[test]
+    fn test_pty_error_session_not_found() {
+        let error = PtyError::SessionNotFound("session-xyz".to_string());
+        let message = error.to_string();
+        assert_eq!(message, "Session not found: session-xyz");
+    }
+
+    #[test]
+    fn test_pty_error_write_failed() {
+        let error = PtyError::WriteFailed("I/O error".to_string());
+        let message = error.to_string();
+        assert_eq!(message, "Failed to write to PTY: I/O error");
+    }
+
+    #[test]
+    fn test_pty_error_resize_failed() {
+        let error = PtyError::ResizeFailed("Resize not supported".to_string());
+        let message = error.to_string();
+        assert_eq!(message, "Failed to resize PTY: Resize not supported");
+    }
+
+    #[test]
+    fn test_pty_error_serialization() {
+        let error = PtyError::SessionNotFound("missing-session".to_string());
+        let json = serde_json::to_string(&error).expect("Should serialize");
+        assert!(json.contains("missing-session"));
+
+        let parsed: PtyError = serde_json::from_str(&json).expect("Should deserialize");
+        match parsed {
+            PtyError::SessionNotFound(id) => assert_eq!(id, "missing-session"),
+            _ => panic!("Expected SessionNotFound error"),
+        }
+    }
+
+    // ============================================================================
+    // Session Tracking Tests (async)
+    // ============================================================================
+
+    #[tokio::test]
+    async fn test_has_session_empty() {
+        let manager = PtyManager::new();
+        assert!(!manager.has_session("non-existent").await);
+    }
+
+    #[tokio::test]
+    async fn test_has_session_not_found() {
+        let manager = PtyManager::new();
+        assert!(!manager.has_session("fake-session-id").await);
+    }
+
+    #[tokio::test]
+    async fn test_write_to_pty_session_not_found() {
+        let manager = PtyManager::new();
+        let result = manager.write_to_pty("non-existent", b"test").await;
+
+        assert!(result.is_err());
+        match result {
+            Err(PtyError::SessionNotFound(id)) => assert_eq!(id, "non-existent"),
+            _ => panic!("Expected SessionNotFound error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_resize_pty_session_not_found() {
+        let manager = PtyManager::new();
+        let result = manager.resize_pty("non-existent", 80, 24).await;
+
+        assert!(result.is_err());
+        match result {
+            Err(PtyError::SessionNotFound(id)) => assert_eq!(id, "non-existent"),
+            _ => panic!("Expected SessionNotFound error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_close_session_not_found() {
+        let manager = PtyManager::new();
+        let result = manager.close_session("non-existent").await;
+
+        assert!(result.is_err());
+        match result {
+            Err(PtyError::SessionNotFound(id)) => assert_eq!(id, "non-existent"),
+            _ => panic!("Expected SessionNotFound error"),
+        }
+    }
+
+    // ============================================================================
+    // Data Validation Tests
+    // ============================================================================
+
+    #[test]
+    fn test_pty_output_event_unicode_session_id() {
+        let event = PtyOutputEvent {
+            session_id: "session-🚀-emoji".to_string(),
+            data: "dGVzdA==".to_string(),
+        };
+
+        assert_eq!(event.session_id, "session-🚀-emoji");
+        let json = serde_json::to_string(&event).expect("Should serialize unicode");
+        let parsed: PtyOutputEvent =
+            serde_json::from_str(&json).expect("Should deserialize unicode");
+        assert_eq!(parsed.session_id, "session-🚀-emoji");
+    }
+
+    #[test]
+    fn test_pty_exit_event_unicode_error_message() {
+        let event = PtyExitEvent {
+            session_id: "test".to_string(),
+            exit_code: Some(1),
+            error: Some("Error: 文字列 テスト".to_string()),
+        };
+
+        let json = serde_json::to_string(&event).expect("Should serialize unicode error");
+        let parsed: PtyExitEvent =
+            serde_json::from_str(&json).expect("Should deserialize unicode error");
+        assert_eq!(parsed.error, Some("Error: 文字列 テスト".to_string()));
+    }
+
+    #[test]
+    fn test_pty_output_event_special_characters_in_session_id() {
+        let special_id = "session-!@#$%^&*()_+-=[]{}|:;<>?,./".to_string();
+        let event = PtyOutputEvent {
+            session_id: special_id.clone(),
+            data: "dGVzdA==".to_string(),
+        };
+
+        assert_eq!(event.session_id, special_id);
+    }
+
+    #[test]
+    fn test_pty_error_with_very_long_message() {
+        let long_message = "x".repeat(1024);
+        let error = PtyError::WriteFailed(long_message.clone());
+        let message = error.to_string();
+        assert!(message.contains(&long_message));
+        assert_eq!(message.len(), 1024 + "Failed to write to PTY: ".len());
+    }
+
+    // ============================================================================
+    // Edge Cases
+    // ============================================================================
+
+    #[test]
+    fn test_pty_exit_event_zero_exit_code() {
+        // Zero exit code typically means success
+        let event = PtyExitEvent {
+            session_id: "success".to_string(),
+            exit_code: Some(0),
+            error: None,
+        };
+
+        assert_eq!(event.exit_code, Some(0));
+        assert_eq!(event.error, None);
+    }
+
+    #[test]
+    fn test_pty_exit_event_negative_exit_code() {
+        // Negative exit codes can result from signal termination
+        let event = PtyExitEvent {
+            session_id: "killed".to_string(),
+            exit_code: Some(-15),
+            error: None,
+        };
+
+        assert_eq!(event.exit_code, Some(-15));
+    }
+
+    #[test]
+    fn test_pty_exit_event_high_exit_code() {
+        // Some processes use high exit codes
+        let event = PtyExitEvent {
+            session_id: "high-exit".to_string(),
+            exit_code: Some(255),
+            error: None,
+        };
+
+        assert_eq!(event.exit_code, Some(255));
+    }
+
+    #[tokio::test]
+    async fn test_multiple_sessions_do_not_interfere() {
+        let manager = PtyManager::new();
+
+        // Check that operations on one session don't affect another
+        assert!(!manager.has_session("session-1").await);
+        assert!(!manager.has_session("session-2").await);
+
+        // Attempting to operate on session-1 should fail
+        let result = manager.write_to_pty("session-1", b"test").await;
+        assert!(result.is_err());
+
+        // session-2 should still not exist
+        assert!(!manager.has_session("session-2").await);
+    }
+
+    #[test]
+    fn test_pty_output_event_with_multiline_base64() {
+        let multiline_data = "SGVsbG8gV29ybGQhCkFsdG8gTXVuZG8h".to_string();
+        let event = PtyOutputEvent {
+            session_id: "multiline".to_string(),
+            data: multiline_data.clone(),
+        };
+
+        assert_eq!(event.data, multiline_data);
+    }
+
+    #[test]
+    fn test_pty_exit_event_both_code_and_error() {
+        // Event can have both an exit code and an error message
+        let event = PtyExitEvent {
+            session_id: "both".to_string(),
+            exit_code: Some(127),
+            error: Some("Command not found".to_string()),
+        };
+
+        assert_eq!(event.exit_code, Some(127));
+        assert_eq!(event.error, Some("Command not found".to_string()));
+    }
+
+    #[test]
+    fn test_pty_error_debug_format() {
+        let error = PtyError::SessionNotFound("debug-test".to_string());
+        let debug = format!("{:?}", error);
+        assert!(debug.contains("SessionNotFound"));
+        assert!(debug.contains("debug-test"));
+    }
+
+    #[test]
+    fn test_pty_error_clone() {
+        let error1 = PtyError::WriteFailed("original".to_string());
+        let error2 = error1.clone();
+
+        match (error1, error2) {
+            (PtyError::WriteFailed(msg1), PtyError::WriteFailed(msg2)) => {
+                assert_eq!(msg1, "original");
+                assert_eq!(msg2, "original");
+            }
+            _ => panic!("Expected WriteFailed variants"),
+        }
+    }
+
+    #[test]
+    fn test_session_id_uniqueness_check() {
+        // Session IDs should be treated as distinct strings
+        let session_a = "session-a".to_string();
+        let session_b = "session-b".to_string();
+
+        let event_a = PtyOutputEvent {
+            session_id: session_a.clone(),
+            data: "data-a".to_string(),
+        };
+
+        let event_b = PtyOutputEvent {
+            session_id: session_b.clone(),
+            data: "data-b".to_string(),
+        };
+
+        assert_ne!(event_a.session_id, event_b.session_id);
+        assert_ne!(event_a.data, event_b.data);
+    }
+}

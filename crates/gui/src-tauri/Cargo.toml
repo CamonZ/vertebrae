@@ -44,12 +44,14 @@ tokio = { version = "1", features = ["full"] }
 futures = "0.3"
 
 # Workspace dependencies
-vertebrae-db = { path = "../../db", features = ["test-utils"] }
 vertebrae-core = { path = "../../core" }
 vertebrae-sacrum-client = { path = "../../sacrum-client" }
 
 # Actor framework for workflow execution
 ractor = "0.12"
+
+# Async trait support for testing
+async-trait = "0.1"
 
 # Date/time handling
 chrono = { version = "0.4", features = ["serde"] }
@@ -65,3 +67,8 @@ tungstenite = "0.24"
 tokio-tungstenite = "0.24"
 url = "2.5"
 uuid = { version = "1.0", features = ["v4", "serde"] }
+
+[dev-dependencies]
+tauri = { version = "2.9.5", features = ["test"] }
+tokio = { version = "1", features = ["test-util"] }
+tempfile = "3"

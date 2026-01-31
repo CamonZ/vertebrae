@@ -1,18 +1,761 @@
 //! Domain models for Vertebrae
 //!
-//! These are database-agnostic domain models with String IDs.
-//! Types that don't depend on database-specific types (like `Thing`)
-//! are re-exported directly from `vertebrae_db`.
+//! These are the canonical domain models for the Vertebrae task management system.
+//! All IDs are plain strings rather than database-specific record types.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-// Re-export types that are already DB-agnostic (no Thing fields)
-pub use vertebrae_db::models::TokenUsage;
-pub use vertebrae_db::{
-    AgentConfig, BlockerNode, CodeRef, ExecutionStatus, Level, PermissionMode, Priority, Section,
-    SectionType, TaskFilter, TaskSummary,
-};
+/// Default workflow ID for new tasks
+pub const DEFAULT_WORKFLOW_ID: &str = "default";
+
+// ─── Core Enums ────────────────────────────────────────────────────────────
+
+/// Task hierarchy level
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Level {
+    Epic,
+    Ticket,
+    Task,
+}
+
+impl Level {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Level::Epic => "epic",
+            Level::Ticket => "ticket",
+            Level::Task => "task",
+        }
+    }
+}
+
+impl std::fmt::Display for Level {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+/// Task priority level
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Priority {
+    Low,
+    Medium,
+    High,
+    Critical,
+}
+
+impl Priority {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Priority::Low => "low",
+            Priority::Medium => "medium",
+            Priority::High => "high",
+            Priority::Critical => "critical",
+        }
+    }
+}
+
+impl std::fmt::Display for Priority {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+/// Section type for task documentation
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SectionType {
+    Goal,
+    Context,
+    CurrentBehavior,
+    DesiredBehavior,
+    Step,
+    TestingCriterion,
+    AntiPattern,
+    FailureTest,
+    Constraint,
+}
+
+impl SectionType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SectionType::Goal => "goal",
+            SectionType::Context => "context",
+            SectionType::CurrentBehavior => "current_behavior",
+            SectionType::DesiredBehavior => "desired_behavior",
+            SectionType::Step => "step",
+            SectionType::TestingCriterion => "testing_criterion",
+            SectionType::AntiPattern => "anti_pattern",
+            SectionType::FailureTest => "failure_test",
+            SectionType::Constraint => "constraint",
+        }
+    }
+}
+
+impl std::fmt::Display for SectionType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+/// Execution status for a workflow step
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionStatus {
+    InProgress,
+    Completed,
+    Failed,
+}
+
+impl ExecutionStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ExecutionStatus::InProgress => "in_progress",
+            ExecutionStatus::Completed => "completed",
+            ExecutionStatus::Failed => "failed",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "in_progress" => Some(ExecutionStatus::InProgress),
+            "completed" => Some(ExecutionStatus::Completed),
+            "failed" => Some(ExecutionStatus::Failed),
+            _ => None,
+        }
+    }
+
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, ExecutionStatus::Completed | ExecutionStatus::Failed)
+    }
+}
+
+impl std::fmt::Display for ExecutionStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+/// Permission mode for Claude CLI execution
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PermissionMode {
+    AcceptEdits,
+    BypassPermissions,
+    Default,
+    Delegate,
+    DontAsk,
+    Plan,
+}
+
+impl PermissionMode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            PermissionMode::AcceptEdits => "acceptEdits",
+            PermissionMode::BypassPermissions => "bypassPermissions",
+            PermissionMode::Default => "default",
+            PermissionMode::Delegate => "delegate",
+            PermissionMode::DontAsk => "dontAsk",
+            PermissionMode::Plan => "plan",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "acceptEdits" => Some(PermissionMode::AcceptEdits),
+            "bypassPermissions" => Some(PermissionMode::BypassPermissions),
+            "default" => Some(PermissionMode::Default),
+            "delegate" => Some(PermissionMode::Delegate),
+            "dontAsk" => Some(PermissionMode::DontAsk),
+            "plan" => Some(PermissionMode::Plan),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for PermissionMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+// ─── Core Structs ──────────────────────────────────────────────────────────
+
+/// A section of content within a task
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Section {
+    #[serde(rename = "type")]
+    pub section_type: SectionType,
+    pub content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub order: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub done: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub done_at: Option<DateTime<Utc>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub refs: Vec<CodeRef>,
+}
+
+impl Section {
+    pub fn new(section_type: SectionType, content: impl Into<String>) -> Self {
+        Self {
+            section_type,
+            content: content.into(),
+            order: None,
+            done: None,
+            done_at: None,
+            refs: Vec::new(),
+        }
+    }
+
+    pub fn with_order(section_type: SectionType, content: impl Into<String>, order: u32) -> Self {
+        Self {
+            section_type,
+            content: content.into(),
+            order: Some(order),
+            done: None,
+            done_at: None,
+            refs: Vec::new(),
+        }
+    }
+
+    pub fn with_done(mut self, done: bool) -> Self {
+        self.done = Some(done);
+        if done {
+            self.done_at = Some(Utc::now());
+        } else {
+            self.done_at = None;
+        }
+        self
+    }
+
+    pub fn mark_done(&mut self) {
+        self.done = Some(true);
+        self.done_at = Some(Utc::now());
+    }
+
+    pub fn with_ref(mut self, code_ref: CodeRef) -> Self {
+        self.refs.push(code_ref);
+        self
+    }
+
+    pub fn with_refs(mut self, code_refs: impl IntoIterator<Item = CodeRef>) -> Self {
+        self.refs.extend(code_refs);
+        self
+    }
+}
+
+impl PartialEq for Section {
+    fn eq(&self, other: &Self) -> bool {
+        self.section_type == other.section_type
+            && self.content == other.content
+            && self.order == other.order
+            && self.done == other.done
+            && self.refs == other.refs
+    }
+}
+
+impl Eq for Section {}
+
+/// A code reference attached to a task
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CodeRef {
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line_start: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line_end: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+impl CodeRef {
+    pub fn file(path: impl Into<String>) -> Self {
+        Self {
+            path: path.into(),
+            line_start: None,
+            line_end: None,
+            name: None,
+            description: None,
+        }
+    }
+
+    pub fn line(path: impl Into<String>, line: u32) -> Self {
+        Self {
+            path: path.into(),
+            line_start: Some(line),
+            line_end: None,
+            name: None,
+            description: None,
+        }
+    }
+
+    pub fn range(path: impl Into<String>, start: u32, end: u32) -> Self {
+        Self {
+            path: path.into(),
+            line_start: Some(start),
+            line_end: Some(end),
+            name: None,
+            description: None,
+        }
+    }
+
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
+        self
+    }
+
+    pub fn with_description(mut self, description: impl Into<String>) -> Self {
+        self.description = Some(description.into());
+        self
+    }
+}
+
+/// Token usage statistics from Claude execution
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TokenUsage {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_read_input_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_creation_input_tokens: Option<u64>,
+}
+
+impl TokenUsage {
+    pub fn new(input_tokens: u64, output_tokens: u64) -> Self {
+        Self {
+            input_tokens,
+            output_tokens,
+            cache_read_input_tokens: None,
+            cache_creation_input_tokens: None,
+        }
+    }
+
+    pub fn with_cache_read(mut self, tokens: u64) -> Self {
+        self.cache_read_input_tokens = Some(tokens);
+        self
+    }
+
+    pub fn with_cache_creation(mut self, tokens: u64) -> Self {
+        self.cache_creation_input_tokens = Some(tokens);
+        self
+    }
+
+    pub fn total(&self) -> u64 {
+        self.input_tokens + self.output_tokens
+    }
+}
+
+/// Blocker node in dependency tree
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlockerNode {
+    pub id: String,
+    pub title: String,
+    pub level: String,
+    pub status: String,
+    pub children: Vec<BlockerNode>,
+}
+
+/// Task summary for listings
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskSummary {
+    pub id: String,
+    pub title: String,
+    pub level: Level,
+    pub status: String,
+    pub priority: Option<Priority>,
+    pub tags: Vec<String>,
+    pub needs_human_review: Option<bool>,
+    pub created_at: DateTime<Utc>,
+    pub workflow_id: Option<String>,
+    pub current_step_id: Option<String>,
+    pub workflow_name: Option<String>,
+    pub step_name: Option<String>,
+}
+
+/// Task filter for queries
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TaskFilter {
+    pub levels: Vec<Level>,
+    pub statuses: Vec<String>,
+    pub priorities: Vec<Priority>,
+    pub tags: Vec<String>,
+    pub root_only: bool,
+    pub children_of: Option<String>,
+    pub include_done: bool,
+    pub search: Option<String>,
+    pub workflow_id: Option<String>,
+    pub current_step: Option<String>,
+}
+
+impl TaskFilter {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_level(mut self, level: Level) -> Self {
+        self.levels.push(level);
+        self
+    }
+
+    pub fn with_levels(mut self, levels: impl IntoIterator<Item = Level>) -> Self {
+        self.levels.extend(levels);
+        self
+    }
+
+    pub fn with_status(mut self, status: impl Into<String>) -> Self {
+        self.statuses.push(status.into());
+        self
+    }
+
+    pub fn with_statuses(mut self, statuses: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.statuses.extend(statuses.into_iter().map(|s| s.into()));
+        self
+    }
+
+    pub fn with_priority(mut self, priority: Priority) -> Self {
+        self.priorities.push(priority);
+        self
+    }
+
+    pub fn with_priorities(mut self, priorities: impl IntoIterator<Item = Priority>) -> Self {
+        self.priorities.extend(priorities);
+        self
+    }
+
+    pub fn with_tag(mut self, tag: impl Into<String>) -> Self {
+        self.tags.push(tag.into());
+        self
+    }
+
+    pub fn with_tags(mut self, tags: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.tags.extend(tags.into_iter().map(|t| t.into()));
+        self
+    }
+
+    pub fn root_only(mut self) -> Self {
+        self.root_only = true;
+        self
+    }
+
+    pub fn children_of(mut self, parent_id: impl Into<String>) -> Self {
+        self.children_of = Some(parent_id.into());
+        self
+    }
+
+    pub fn include_done(mut self) -> Self {
+        self.include_done = true;
+        self
+    }
+
+    pub fn with_search(mut self, search: impl Into<String>) -> Self {
+        self.search = Some(search.into());
+        self
+    }
+
+    pub fn with_workflow_id(mut self, workflow_id: impl Into<String>) -> Self {
+        self.workflow_id = Some(workflow_id.into());
+        self
+    }
+
+    pub fn with_current_step(mut self, step_name: impl Into<String>) -> Self {
+        self.current_step = Some(step_name.into());
+        self
+    }
+}
+
+/// Configuration for a Claude agent execution
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AgentConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fallback_model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_prompt: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub append_system_prompt: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agents: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tools: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_tools: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub disallowed_tools: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub permission_mode: Option<PermissionMode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_budget_usd: Option<f64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mcp_config: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub plugin_dirs: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub json_schema: Option<serde_json::Value>,
+}
+
+impl AgentConfig {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_model(mut self, model: impl Into<String>) -> Self {
+        self.model = Some(model.into());
+        self
+    }
+
+    pub fn with_fallback_model(mut self, model: impl Into<String>) -> Self {
+        self.fallback_model = Some(model.into());
+        self
+    }
+
+    pub fn with_system_prompt(mut self, prompt: impl Into<String>) -> Self {
+        self.system_prompt = Some(prompt.into());
+        self
+    }
+
+    pub fn with_append_system_prompt(mut self, prompt: impl Into<String>) -> Self {
+        self.append_system_prompt = Some(prompt.into());
+        self
+    }
+
+    pub fn with_agents(mut self, agents: serde_json::Value) -> Self {
+        self.agents = Some(agents);
+        self
+    }
+
+    pub fn with_tools(mut self, tools: Vec<String>) -> Self {
+        self.tools = tools;
+        self
+    }
+
+    pub fn with_allowed_tools(mut self, tools: Vec<String>) -> Self {
+        self.allowed_tools = tools;
+        self
+    }
+
+    pub fn with_disallowed_tools(mut self, tools: Vec<String>) -> Self {
+        self.disallowed_tools = tools;
+        self
+    }
+
+    pub fn with_permission_mode(mut self, mode: PermissionMode) -> Self {
+        self.permission_mode = Some(mode);
+        self
+    }
+
+    pub fn with_max_budget_usd(mut self, budget: f64) -> Self {
+        self.max_budget_usd = Some(budget);
+        self
+    }
+
+    pub fn with_mcp_config(mut self, configs: Vec<String>) -> Self {
+        self.mcp_config = configs;
+        self
+    }
+
+    pub fn with_plugin_dirs(mut self, dirs: Vec<String>) -> Self {
+        self.plugin_dirs = dirs;
+        self
+    }
+
+    pub fn with_json_schema(mut self, schema: serde_json::Value) -> Self {
+        self.json_schema = Some(schema);
+        self
+    }
+
+    pub fn to_cli_args(&self) -> Vec<String> {
+        let mut args = Vec::new();
+
+        if let Some(ref model) = self.model {
+            args.push("--model".to_string());
+            args.push(model.clone());
+        }
+        if let Some(ref model) = self.fallback_model {
+            args.push("--fallbackModel".to_string());
+            args.push(model.clone());
+        }
+        if let Some(ref prompt) = self.system_prompt {
+            args.push("--systemPrompt".to_string());
+            args.push(prompt.clone());
+        }
+        if let Some(ref prompt) = self.append_system_prompt {
+            args.push("--appendSystemPrompt".to_string());
+            args.push(prompt.clone());
+        }
+        if let Some(ref agents) = self.agents {
+            args.push("--agents".to_string());
+            args.push(agents.to_string());
+        }
+        if !self.tools.is_empty() {
+            args.push("--tools".to_string());
+            args.extend(self.tools.iter().cloned());
+        }
+        if !self.allowed_tools.is_empty() {
+            args.push("--allowedTools".to_string());
+            args.extend(self.allowed_tools.iter().cloned());
+        }
+        if !self.disallowed_tools.is_empty() {
+            args.push("--disallowedTools".to_string());
+            args.extend(self.disallowed_tools.iter().cloned());
+        }
+        if let Some(ref mode) = self.permission_mode {
+            args.push("--permissionMode".to_string());
+            args.push(mode.as_str().to_string());
+        }
+        if let Some(budget) = self.max_budget_usd {
+            args.push("--maxBudgetUsd".to_string());
+            args.push(format_float(budget));
+        }
+        for config in &self.mcp_config {
+            args.push("--mcpConfig".to_string());
+            args.push(config.clone());
+        }
+        for dir in &self.plugin_dirs {
+            args.push("--pluginDir".to_string());
+            args.push(dir.clone());
+        }
+        if let Some(ref schema) = self.json_schema {
+            args.push("--json-schema".to_string());
+            args.push(schema.to_string());
+        }
+
+        args
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.model.is_none()
+            && self.fallback_model.is_none()
+            && self.system_prompt.is_none()
+            && self.append_system_prompt.is_none()
+            && self.agents.is_none()
+            && self.tools.is_empty()
+            && self.allowed_tools.is_empty()
+            && self.disallowed_tools.is_empty()
+            && self.permission_mode.is_none()
+            && self.max_budget_usd.is_none()
+            && self.mcp_config.is_empty()
+            && self.plugin_dirs.is_empty()
+            && self.json_schema.is_none()
+    }
+
+    pub fn merge(mut self, other: AgentConfig) -> Self {
+        if other.model.is_some() {
+            self.model = other.model;
+        }
+        if other.fallback_model.is_some() {
+            self.fallback_model = other.fallback_model;
+        }
+        if other.system_prompt.is_some() {
+            self.system_prompt = other.system_prompt;
+        }
+        if other.append_system_prompt.is_some() {
+            self.append_system_prompt = other.append_system_prompt;
+        }
+        if other.agents.is_some() {
+            self.agents = other.agents;
+        }
+        if !other.tools.is_empty() {
+            self.tools = other.tools;
+        }
+        if !other.allowed_tools.is_empty() {
+            self.allowed_tools = other.allowed_tools;
+        }
+        if !other.disallowed_tools.is_empty() {
+            self.disallowed_tools = other.disallowed_tools;
+        }
+        if other.permission_mode.is_some() {
+            self.permission_mode = other.permission_mode;
+        }
+        if other.max_budget_usd.is_some() {
+            self.max_budget_usd = other.max_budget_usd;
+        }
+        if !other.mcp_config.is_empty() {
+            self.mcp_config = other.mcp_config;
+        }
+        if !other.plugin_dirs.is_empty() {
+            self.plugin_dirs = other.plugin_dirs;
+        }
+        if other.json_schema.is_some() {
+            self.json_schema = other.json_schema;
+        }
+        self
+    }
+}
+
+impl PartialEq for AgentConfig {
+    fn eq(&self, other: &Self) -> bool {
+        self.model == other.model
+            && self.fallback_model == other.fallback_model
+            && self.system_prompt == other.system_prompt
+            && self.append_system_prompt == other.append_system_prompt
+            && self.agents == other.agents
+            && self.tools == other.tools
+            && self.allowed_tools == other.allowed_tools
+            && self.disallowed_tools == other.disallowed_tools
+            && self.permission_mode == other.permission_mode
+            && float_option_eq(self.max_budget_usd, other.max_budget_usd)
+            && self.mcp_config == other.mcp_config
+            && self.plugin_dirs == other.plugin_dirs
+            && self.json_schema == other.json_schema
+    }
+}
+
+impl Eq for AgentConfig {}
+
+fn float_option_eq(a: Option<f64>, b: Option<f64>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(x), Some(y)) => x.total_cmp(&y) == std::cmp::Ordering::Equal,
+        _ => false,
+    }
+}
+
+fn format_float(value: f64) -> String {
+    if value.fract() == 0.0 {
+        format!("{:.0}", value)
+    } else {
+        let s = format!("{}", value);
+        s.trim_end_matches('0').trim_end_matches('.').to_string()
+    }
+}
+
+/// Database Thing type placeholder (for compatibility during migration)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct Thing {
+    pub tb: String,
+    pub id: String,
+}
+
+impl Thing {
+    pub fn to_raw(&self) -> String {
+        self.id.clone()
+    }
+}
+
+impl<T: Into<String>, U: Into<String>> From<(T, U)> for Thing {
+    fn from((tb, id): (T, U)) -> Self {
+        Self {
+            tb: tb.into(),
+            id: id.into(),
+        }
+    }
+}
+
+impl std::fmt::Display for Thing {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.tb, self.id)
+    }
+}
+
+// ─── Domain Models ─────────────────────────────────────────────────────────
 
 /// A task in the Vertebrae task management system (domain model)
 ///
@@ -190,40 +933,6 @@ impl PartialEq for Task {
 
 impl Eq for Task {}
 
-/// Helper to extract string ID from a Thing
-fn thing_to_id(thing: &surrealdb::sql::Thing) -> String {
-    thing.id.to_raw()
-}
-
-/// Helper to extract optional string ID from an optional Thing
-fn option_thing_to_id(thing: &Option<surrealdb::sql::Thing>) -> Option<String> {
-    thing.as_ref().map(|t| t.id.to_raw())
-}
-
-impl From<vertebrae_db::Task> for Task {
-    fn from(db: vertebrae_db::Task) -> Self {
-        Self {
-            id: db.id.as_ref().map(thing_to_id),
-            title: db.title,
-            description: db.description,
-            level: db.level,
-            priority: db.priority,
-            tags: db.tags,
-            created_at: db.created_at,
-            updated_at: db.updated_at,
-            started_at: db.started_at,
-            completed_at: db.completed_at,
-            sections: db.sections,
-            code_refs: db.code_refs,
-            needs_human_review: db.needs_human_review,
-            revision_feedback: db.revision_feedback,
-            rejection_reason: db.rejection_reason,
-            workflow_id: option_thing_to_id(&db.workflow_id),
-            current_step_id: option_thing_to_id(&db.current_step_id),
-        }
-    }
-}
-
 /// A workflow step entity (domain model)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Step {
@@ -362,52 +1071,6 @@ impl PartialEq for Step {
 
 impl Eq for Step {}
 
-impl From<vertebrae_db::Step> for Step {
-    fn from(db: vertebrae_db::Step) -> Self {
-        Self {
-            id: db.id.as_ref().map(thing_to_id),
-            name: db.name,
-            workflow_id: thing_to_id(&db.workflow_id),
-            goal: db.goal,
-            agents: db.agents,
-            skills: db.skills,
-            agent_config: db.agent_config,
-            is_final: db.is_final,
-            transitions_to: db.transitions_to.iter().map(thing_to_id).collect(),
-            order: db.order,
-            created_at: db.created_at,
-            updated_at: db.updated_at,
-        }
-    }
-}
-
-impl Step {
-    /// Convert domain Step to database Step
-    pub fn to_db(&self) -> vertebrae_db::Step {
-        vertebrae_db::Step {
-            id: self
-                .id
-                .as_ref()
-                .map(|id| surrealdb::sql::Thing::from(("step", id.as_str()))),
-            name: self.name.clone(),
-            workflow_id: surrealdb::sql::Thing::from(("workflow", self.workflow_id.as_str())),
-            goal: self.goal.clone(),
-            agents: self.agents.clone(),
-            skills: self.skills.clone(),
-            agent_config: self.agent_config.clone(),
-            is_final: self.is_final,
-            transitions_to: self
-                .transitions_to
-                .iter()
-                .map(|id| surrealdb::sql::Thing::from(("step", id.as_str())))
-                .collect(),
-            order: self.order,
-            created_at: self.created_at,
-            updated_at: self.updated_at,
-        }
-    }
-}
-
 /// A workflow definition (domain model)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Workflow {
@@ -505,22 +1168,6 @@ impl PartialEq for Workflow {
 }
 
 impl Eq for Workflow {}
-
-impl From<vertebrae_db::Workflow> for Workflow {
-    fn from(db: vertebrae_db::Workflow) -> Self {
-        Self {
-            id: db.id.as_ref().map(thing_to_id),
-            name: db.name,
-            description: db.description,
-            initial_step: db.initial_step.as_ref().map(thing_to_id),
-            metadata: db.metadata,
-            auto_advance: db.auto_advance,
-            order: db.order,
-            created_at: db.created_at,
-            updated_at: db.updated_at,
-        }
-    }
-}
 
 /// A record of a workflow step execution (domain model)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -718,56 +1365,6 @@ impl PartialEq for StepExecution {
 
 impl Eq for StepExecution {}
 
-impl From<vertebrae_db::StepExecution> for StepExecution {
-    fn from(db: vertebrae_db::StepExecution) -> Self {
-        Self {
-            id: db.id.as_ref().map(thing_to_id),
-            task_id: thing_to_id(&db.task_id),
-            workflow_id: thing_to_id(&db.workflow_id),
-            step_name: db.step_name,
-            started_at: db.started_at,
-            completed_at: db.completed_at,
-            status: db.status,
-            context: db.context,
-            prompt: db.prompt,
-            output: db.output,
-            transition_result: db.transition_result,
-            model_used: db.model_used,
-            session_id: db.session_id,
-            token_usage: db.token_usage,
-            cost_usd: db.cost_usd,
-            duration_ms: db.duration_ms,
-        }
-    }
-}
-
-impl StepExecution {
-    /// Convert domain StepExecution to database StepExecution
-    pub fn to_db(&self) -> vertebrae_db::StepExecution {
-        vertebrae_db::StepExecution {
-            id: self
-                .id
-                .as_ref()
-                .map(|id| surrealdb::sql::Thing::from(("step_execution", id.as_str()))),
-            task_id: surrealdb::sql::Thing::from(("task", self.task_id.as_str())),
-            workflow_id: surrealdb::sql::Thing::from(("workflow", self.workflow_id.as_str())),
-            step_name: self.step_name.clone(),
-            started_at: self.started_at,
-            completed_at: self.completed_at,
-            status: self.status.clone(),
-            context: self.context.clone(),
-            prompt: self.prompt.clone(),
-            output: self.output.clone(),
-            transition_result: self.transition_result.clone(),
-            model_used: self.model_used.clone(),
-            session_id: self.session_id.clone(),
-            token_usage: self.token_usage.clone(),
-            cost_usd: self.cost_usd,
-            duration_ms: self.duration_ms,
-        }
-    }
-}
-
 /// A session log entry (domain model)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionLog {
@@ -810,35 +1407,6 @@ impl PartialEq for SessionLog {
 }
 
 impl Eq for SessionLog {}
-
-impl From<vertebrae_db::SessionLog> for SessionLog {
-    fn from(db: vertebrae_db::SessionLog) -> Self {
-        Self {
-            id: db.id.as_ref().map(thing_to_id),
-            step_execution_id: thing_to_id(&db.step_execution_id),
-            content: db.content,
-            created_at: db.created_at,
-        }
-    }
-}
-
-impl SessionLog {
-    /// Convert domain SessionLog to database SessionLog
-    pub fn to_db(&self) -> vertebrae_db::SessionLog {
-        vertebrae_db::SessionLog {
-            id: self
-                .id
-                .as_ref()
-                .map(|id| surrealdb::sql::Thing::from(("session_log", id.as_str()))),
-            step_execution_id: surrealdb::sql::Thing::from((
-                "step_execution",
-                self.step_execution_id.as_str(),
-            )),
-            content: self.content.clone(),
-            created_at: self.created_at,
-        }
-    }
-}
 
 /// A workflow transition edge (domain model)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -886,19 +1454,6 @@ impl WorkflowTransition {
     pub fn with_target_step(mut self, step: impl Into<String>) -> Self {
         self.target_step = Some(step.into());
         self
-    }
-}
-
-impl From<vertebrae_db::WorkflowTransition> for WorkflowTransition {
-    fn from(db: vertebrae_db::WorkflowTransition) -> Self {
-        Self {
-            id: db.id.as_ref().map(thing_to_id),
-            from_workflow: thing_to_id(&db.from_workflow),
-            to_workflow: thing_to_id(&db.to_workflow),
-            label: db.label,
-            target_step: db.target_step.as_ref().map(thing_to_id),
-            created_at: db.created_at,
-        }
     }
 }
 
@@ -1010,27 +1565,6 @@ impl StepUpdate {
     pub fn with_order(mut self, order: i32) -> Self {
         self.order = Some(order);
         self
-    }
-}
-
-impl StepUpdate {
-    /// Convert domain StepUpdate to database StepUpdate
-    pub fn to_db(&self) -> vertebrae_db::StepUpdate {
-        vertebrae_db::StepUpdate {
-            name: self.name.clone(),
-            goal: self.goal.clone(),
-            agents: self.agents.clone(),
-            skills: self.skills.clone(),
-            agent_config: self.agent_config.clone(),
-            is_final: self.is_final,
-            transitions_to: self.transitions_to.as_ref().map(|trans| {
-                trans
-                    .iter()
-                    .map(|id| surrealdb::sql::Thing::from(("step", id.as_str())))
-                    .collect()
-            }),
-            order: self.order,
-        }
     }
 }
 
@@ -1321,5 +1855,636 @@ mod tests {
         assert_eq!(u.is_final, Some(true));
         assert_eq!(u.transitions_to.as_ref().unwrap(), &vec!["s2".to_string()]);
         assert_eq!(u.order, Some(3));
+    }
+
+    // ─── Level Enum Tests ───────────────────────────────────────────
+
+    #[test]
+    fn level_as_str() {
+        assert_eq!(Level::Epic.as_str(), "epic");
+        assert_eq!(Level::Ticket.as_str(), "ticket");
+        assert_eq!(Level::Task.as_str(), "task");
+    }
+
+    #[test]
+    fn level_display() {
+        assert_eq!(Level::Epic.to_string(), "epic");
+        assert_eq!(Level::Ticket.to_string(), "ticket");
+        assert_eq!(Level::Task.to_string(), "task");
+    }
+
+    // ─── Priority Enum Tests ────────────────────────────────────────
+
+    #[test]
+    fn priority_as_str() {
+        assert_eq!(Priority::Low.as_str(), "low");
+        assert_eq!(Priority::Medium.as_str(), "medium");
+        assert_eq!(Priority::High.as_str(), "high");
+        assert_eq!(Priority::Critical.as_str(), "critical");
+    }
+
+    #[test]
+    fn priority_display() {
+        assert_eq!(Priority::Low.to_string(), "low");
+        assert_eq!(Priority::Medium.to_string(), "medium");
+        assert_eq!(Priority::High.to_string(), "high");
+        assert_eq!(Priority::Critical.to_string(), "critical");
+    }
+
+    // ─── SectionType Enum Tests ─────────────────────────────────────
+
+    #[test]
+    fn section_type_as_str() {
+        assert_eq!(SectionType::Goal.as_str(), "goal");
+        assert_eq!(SectionType::Context.as_str(), "context");
+        assert_eq!(SectionType::CurrentBehavior.as_str(), "current_behavior");
+        assert_eq!(SectionType::DesiredBehavior.as_str(), "desired_behavior");
+        assert_eq!(SectionType::Step.as_str(), "step");
+        assert_eq!(SectionType::TestingCriterion.as_str(), "testing_criterion");
+        assert_eq!(SectionType::AntiPattern.as_str(), "anti_pattern");
+        assert_eq!(SectionType::FailureTest.as_str(), "failure_test");
+        assert_eq!(SectionType::Constraint.as_str(), "constraint");
+    }
+
+    #[test]
+    fn section_type_display() {
+        assert_eq!(SectionType::Goal.to_string(), "goal");
+        assert_eq!(SectionType::Context.to_string(), "context");
+        assert_eq!(SectionType::CurrentBehavior.to_string(), "current_behavior");
+        assert_eq!(SectionType::DesiredBehavior.to_string(), "desired_behavior");
+        assert_eq!(SectionType::Step.to_string(), "step");
+        assert_eq!(
+            SectionType::TestingCriterion.to_string(),
+            "testing_criterion"
+        );
+        assert_eq!(SectionType::AntiPattern.to_string(), "anti_pattern");
+        assert_eq!(SectionType::FailureTest.to_string(), "failure_test");
+        assert_eq!(SectionType::Constraint.to_string(), "constraint");
+    }
+
+    // ─── ExecutionStatus Enum Tests ─────────────────────────────────
+
+    #[test]
+    fn execution_status_as_str() {
+        assert_eq!(ExecutionStatus::InProgress.as_str(), "in_progress");
+        assert_eq!(ExecutionStatus::Completed.as_str(), "completed");
+        assert_eq!(ExecutionStatus::Failed.as_str(), "failed");
+    }
+
+    #[test]
+    fn execution_status_display() {
+        assert_eq!(ExecutionStatus::InProgress.to_string(), "in_progress");
+        assert_eq!(ExecutionStatus::Completed.to_string(), "completed");
+        assert_eq!(ExecutionStatus::Failed.to_string(), "failed");
+    }
+
+    #[test]
+    fn execution_status_parse() {
+        assert_eq!(
+            ExecutionStatus::parse("in_progress"),
+            Some(ExecutionStatus::InProgress)
+        );
+        assert_eq!(
+            ExecutionStatus::parse("completed"),
+            Some(ExecutionStatus::Completed)
+        );
+        assert_eq!(
+            ExecutionStatus::parse("failed"),
+            Some(ExecutionStatus::Failed)
+        );
+        assert_eq!(ExecutionStatus::parse("invalid"), None);
+        assert_eq!(ExecutionStatus::parse(""), None);
+    }
+
+    #[test]
+    fn execution_status_is_terminal() {
+        assert!(!ExecutionStatus::InProgress.is_terminal());
+        assert!(ExecutionStatus::Completed.is_terminal());
+        assert!(ExecutionStatus::Failed.is_terminal());
+    }
+
+    // ─── PermissionMode Enum Tests ──────────────────────────────────
+
+    #[test]
+    fn permission_mode_as_str() {
+        assert_eq!(PermissionMode::AcceptEdits.as_str(), "acceptEdits");
+        assert_eq!(
+            PermissionMode::BypassPermissions.as_str(),
+            "bypassPermissions"
+        );
+        assert_eq!(PermissionMode::Default.as_str(), "default");
+        assert_eq!(PermissionMode::Delegate.as_str(), "delegate");
+        assert_eq!(PermissionMode::DontAsk.as_str(), "dontAsk");
+        assert_eq!(PermissionMode::Plan.as_str(), "plan");
+    }
+
+    #[test]
+    fn permission_mode_display() {
+        assert_eq!(PermissionMode::AcceptEdits.to_string(), "acceptEdits");
+        assert_eq!(
+            PermissionMode::BypassPermissions.to_string(),
+            "bypassPermissions"
+        );
+        assert_eq!(PermissionMode::Default.to_string(), "default");
+        assert_eq!(PermissionMode::Delegate.to_string(), "delegate");
+        assert_eq!(PermissionMode::DontAsk.to_string(), "dontAsk");
+        assert_eq!(PermissionMode::Plan.to_string(), "plan");
+    }
+
+    #[test]
+    fn permission_mode_parse() {
+        assert_eq!(
+            PermissionMode::parse("acceptEdits"),
+            Some(PermissionMode::AcceptEdits)
+        );
+        assert_eq!(
+            PermissionMode::parse("bypassPermissions"),
+            Some(PermissionMode::BypassPermissions)
+        );
+        assert_eq!(
+            PermissionMode::parse("default"),
+            Some(PermissionMode::Default)
+        );
+        assert_eq!(
+            PermissionMode::parse("delegate"),
+            Some(PermissionMode::Delegate)
+        );
+        assert_eq!(
+            PermissionMode::parse("dontAsk"),
+            Some(PermissionMode::DontAsk)
+        );
+        assert_eq!(PermissionMode::parse("plan"), Some(PermissionMode::Plan));
+        assert_eq!(PermissionMode::parse("invalid"), None);
+        assert_eq!(PermissionMode::parse(""), None);
+    }
+
+    // ─── Section Builder Tests ──────────────────────────────────────
+
+    #[test]
+    fn section_new() {
+        let section = Section::new(SectionType::Goal, "Goal content");
+        assert_eq!(section.section_type, SectionType::Goal);
+        assert_eq!(section.content, "Goal content");
+        assert!(section.order.is_none());
+        assert!(section.done.is_none());
+        assert!(section.done_at.is_none());
+        assert!(section.refs.is_empty());
+    }
+
+    #[test]
+    fn section_with_order() {
+        let section = Section::with_order(SectionType::Step, "Step", 5);
+        assert_eq!(section.section_type, SectionType::Step);
+        assert_eq!(section.content, "Step");
+        assert_eq!(section.order, Some(5));
+        assert!(section.done.is_none());
+    }
+
+    #[test]
+    fn section_with_done() {
+        let section = Section::new(SectionType::Goal, "Goal").with_done(true);
+        assert_eq!(section.done, Some(true));
+        assert!(section.done_at.is_some());
+
+        let section2 = Section::new(SectionType::Goal, "Goal").with_done(false);
+        assert_eq!(section2.done, Some(false));
+        assert!(section2.done_at.is_none());
+    }
+
+    #[test]
+    fn section_mark_done() {
+        let mut section = Section::new(SectionType::Goal, "Goal");
+        assert!(section.done_at.is_none());
+        section.mark_done();
+        assert_eq!(section.done, Some(true));
+        assert!(section.done_at.is_some());
+    }
+
+    #[test]
+    fn section_with_ref() {
+        let code_ref = CodeRef::file("test.rs");
+        let section = Section::new(SectionType::Goal, "Goal").with_ref(code_ref.clone());
+        assert_eq!(section.refs.len(), 1);
+        assert_eq!(section.refs[0], code_ref);
+    }
+
+    #[test]
+    fn section_with_refs() {
+        let ref1 = CodeRef::file("test1.rs");
+        let ref2 = CodeRef::file("test2.rs");
+        let section =
+            Section::new(SectionType::Goal, "Goal").with_refs(vec![ref1.clone(), ref2.clone()]);
+        assert_eq!(section.refs.len(), 2);
+        assert_eq!(section.refs[0], ref1);
+        assert_eq!(section.refs[1], ref2);
+    }
+
+    // ─── CodeRef Builder Tests ──────────────────────────────────────
+
+    #[test]
+    fn code_ref_file() {
+        let code_ref = CodeRef::file("src/main.rs");
+        assert_eq!(code_ref.path, "src/main.rs");
+        assert!(code_ref.line_start.is_none());
+        assert!(code_ref.line_end.is_none());
+        assert!(code_ref.name.is_none());
+        assert!(code_ref.description.is_none());
+    }
+
+    #[test]
+    fn code_ref_line() {
+        let code_ref = CodeRef::line("src/main.rs", 42);
+        assert_eq!(code_ref.path, "src/main.rs");
+        assert_eq!(code_ref.line_start, Some(42));
+        assert!(code_ref.line_end.is_none());
+        assert!(code_ref.name.is_none());
+    }
+
+    #[test]
+    fn code_ref_range() {
+        let code_ref = CodeRef::range("src/main.rs", 10, 20);
+        assert_eq!(code_ref.path, "src/main.rs");
+        assert_eq!(code_ref.line_start, Some(10));
+        assert_eq!(code_ref.line_end, Some(20));
+        assert!(code_ref.name.is_none());
+    }
+
+    #[test]
+    fn code_ref_with_name() {
+        let code_ref = CodeRef::file("src/main.rs").with_name("main_function");
+        assert_eq!(code_ref.name, Some("main_function".to_string()));
+    }
+
+    #[test]
+    fn code_ref_with_description() {
+        let code_ref = CodeRef::file("src/main.rs").with_description("Entry point");
+        assert_eq!(code_ref.description, Some("Entry point".to_string()));
+    }
+
+    #[test]
+    fn code_ref_full_chain() {
+        let code_ref = CodeRef::range("src/main.rs", 10, 20)
+            .with_name("foo")
+            .with_description("The foo function");
+        assert_eq!(code_ref.path, "src/main.rs");
+        assert_eq!(code_ref.line_start, Some(10));
+        assert_eq!(code_ref.line_end, Some(20));
+        assert_eq!(code_ref.name, Some("foo".to_string()));
+        assert_eq!(code_ref.description, Some("The foo function".to_string()));
+    }
+
+    // ─── TokenUsage Tests ───────────────────────────────────────────
+
+    #[test]
+    fn token_usage_new() {
+        let usage = TokenUsage::new(100, 50);
+        assert_eq!(usage.input_tokens, 100);
+        assert_eq!(usage.output_tokens, 50);
+        assert!(usage.cache_read_input_tokens.is_none());
+        assert!(usage.cache_creation_input_tokens.is_none());
+    }
+
+    #[test]
+    fn token_usage_with_cache_read() {
+        let usage = TokenUsage::new(100, 50).with_cache_read(20);
+        assert_eq!(usage.cache_read_input_tokens, Some(20));
+    }
+
+    #[test]
+    fn token_usage_with_cache_creation() {
+        let usage = TokenUsage::new(100, 50).with_cache_creation(30);
+        assert_eq!(usage.cache_creation_input_tokens, Some(30));
+    }
+
+    #[test]
+    fn token_usage_total() {
+        let usage = TokenUsage::new(100, 50);
+        assert_eq!(usage.total(), 150);
+
+        let usage2 = TokenUsage::new(1000, 2000);
+        assert_eq!(usage2.total(), 3000);
+    }
+
+    // ─── Thing Tests ────────────────────────────────────────────────
+
+    #[test]
+    fn thing_from_tuple() {
+        let thing = Thing::from(("tasks", "123"));
+        assert_eq!(thing.tb, "tasks");
+        assert_eq!(thing.id, "123");
+    }
+
+    #[test]
+    fn thing_to_raw() {
+        let thing = Thing {
+            tb: "tasks".to_string(),
+            id: "xyz".to_string(),
+        };
+        assert_eq!(thing.to_raw(), "xyz");
+    }
+
+    #[test]
+    fn thing_display() {
+        let thing = Thing {
+            tb: "tasks".to_string(),
+            id: "123".to_string(),
+        };
+        assert_eq!(thing.to_string(), "tasks:123");
+    }
+
+    // ─── TaskFilter Tests ───────────────────────────────────────────
+
+    #[test]
+    fn task_filter_new() {
+        let filter = TaskFilter::new();
+        assert!(filter.levels.is_empty());
+        assert!(filter.statuses.is_empty());
+        assert!(filter.priorities.is_empty());
+        assert!(filter.tags.is_empty());
+        assert!(!filter.root_only);
+        assert!(filter.children_of.is_none());
+        assert!(!filter.include_done);
+        assert!(filter.search.is_none());
+        assert!(filter.workflow_id.is_none());
+        assert!(filter.current_step.is_none());
+    }
+
+    #[test]
+    fn task_filter_with_level() {
+        let filter = TaskFilter::new().with_level(Level::Epic);
+        assert_eq!(filter.levels, vec![Level::Epic]);
+    }
+
+    #[test]
+    fn task_filter_with_levels() {
+        let filter = TaskFilter::new().with_levels(vec![Level::Epic, Level::Ticket]);
+        assert_eq!(filter.levels, vec![Level::Epic, Level::Ticket]);
+    }
+
+    #[test]
+    fn task_filter_with_status() {
+        let filter = TaskFilter::new().with_status("in_progress");
+        assert_eq!(filter.statuses, vec!["in_progress"]);
+    }
+
+    #[test]
+    fn task_filter_with_statuses() {
+        let filter = TaskFilter::new().with_statuses(vec!["in_progress", "done"]);
+        assert_eq!(filter.statuses, vec!["in_progress", "done"]);
+    }
+
+    #[test]
+    fn task_filter_with_priority() {
+        let filter = TaskFilter::new().with_priority(Priority::High);
+        assert_eq!(filter.priorities, vec![Priority::High]);
+    }
+
+    #[test]
+    fn task_filter_with_priorities() {
+        let filter = TaskFilter::new().with_priorities(vec![Priority::High, Priority::Critical]);
+        assert_eq!(filter.priorities, vec![Priority::High, Priority::Critical]);
+    }
+
+    #[test]
+    fn task_filter_with_tag() {
+        let filter = TaskFilter::new().with_tag("rust");
+        assert_eq!(filter.tags, vec!["rust"]);
+    }
+
+    #[test]
+    fn task_filter_with_tags() {
+        let filter = TaskFilter::new().with_tags(vec!["rust", "cli"]);
+        assert_eq!(filter.tags, vec!["rust", "cli"]);
+    }
+
+    #[test]
+    fn task_filter_root_only() {
+        let filter = TaskFilter::new().root_only();
+        assert!(filter.root_only);
+    }
+
+    #[test]
+    fn task_filter_children_of() {
+        let filter = TaskFilter::new().children_of("parent123");
+        assert_eq!(filter.children_of, Some("parent123".to_string()));
+    }
+
+    #[test]
+    fn task_filter_include_done() {
+        let filter = TaskFilter::new().include_done();
+        assert!(filter.include_done);
+    }
+
+    #[test]
+    fn task_filter_with_search() {
+        let filter = TaskFilter::new().with_search("authentication");
+        assert_eq!(filter.search, Some("authentication".to_string()));
+    }
+
+    #[test]
+    fn task_filter_with_workflow_id() {
+        let filter = TaskFilter::new().with_workflow_id("wf123");
+        assert_eq!(filter.workflow_id, Some("wf123".to_string()));
+    }
+
+    #[test]
+    fn task_filter_with_current_step() {
+        let filter = TaskFilter::new().with_current_step("review");
+        assert_eq!(filter.current_step, Some("review".to_string()));
+    }
+
+    #[test]
+    fn task_filter_chain_multiple() {
+        let filter = TaskFilter::new()
+            .root_only()
+            .with_level(Level::Epic)
+            .with_priority(Priority::High)
+            .with_search("test")
+            .include_done();
+        assert!(filter.root_only);
+        assert_eq!(filter.levels, vec![Level::Epic]);
+        assert_eq!(filter.priorities, vec![Priority::High]);
+        assert_eq!(filter.search, Some("test".to_string()));
+        assert!(filter.include_done);
+    }
+
+    // ─── AgentConfig Tests ──────────────────────────────────────────
+
+    #[test]
+    fn agent_config_new() {
+        let config = AgentConfig::new();
+        assert!(config.is_empty());
+    }
+
+    #[test]
+    fn agent_config_with_model() {
+        let config = AgentConfig::new().with_model("claude-opus");
+        assert_eq!(config.model, Some("claude-opus".to_string()));
+        assert!(!config.is_empty());
+    }
+
+    #[test]
+    fn agent_config_with_fallback_model() {
+        let config = AgentConfig::new().with_fallback_model("claude-sonnet");
+        assert_eq!(config.fallback_model, Some("claude-sonnet".to_string()));
+    }
+
+    #[test]
+    fn agent_config_with_system_prompt() {
+        let config = AgentConfig::new().with_system_prompt("Be helpful");
+        assert_eq!(config.system_prompt, Some("Be helpful".to_string()));
+    }
+
+    #[test]
+    fn agent_config_with_append_system_prompt() {
+        let config = AgentConfig::new().with_append_system_prompt("Also be concise");
+        assert_eq!(
+            config.append_system_prompt,
+            Some("Also be concise".to_string())
+        );
+    }
+
+    #[test]
+    fn agent_config_with_tools() {
+        let tools = vec!["read".to_string(), "write".to_string()];
+        let config = AgentConfig::new().with_tools(tools.clone());
+        assert_eq!(config.tools, tools);
+    }
+
+    #[test]
+    fn agent_config_with_allowed_tools() {
+        let tools = vec!["bash".to_string()];
+        let config = AgentConfig::new().with_allowed_tools(tools.clone());
+        assert_eq!(config.allowed_tools, tools);
+    }
+
+    #[test]
+    fn agent_config_with_disallowed_tools() {
+        let tools = vec!["rm".to_string()];
+        let config = AgentConfig::new().with_disallowed_tools(tools.clone());
+        assert_eq!(config.disallowed_tools, tools);
+    }
+
+    #[test]
+    fn agent_config_with_permission_mode() {
+        let config = AgentConfig::new().with_permission_mode(PermissionMode::Plan);
+        assert_eq!(config.permission_mode, Some(PermissionMode::Plan));
+    }
+
+    #[test]
+    fn agent_config_with_max_budget_usd() {
+        let config = AgentConfig::new().with_max_budget_usd(10.5);
+        assert_eq!(config.max_budget_usd, Some(10.5));
+    }
+
+    #[test]
+    fn agent_config_with_mcp_config() {
+        let configs = vec!["config1".to_string()];
+        let config = AgentConfig::new().with_mcp_config(configs.clone());
+        assert_eq!(config.mcp_config, configs);
+    }
+
+    #[test]
+    fn agent_config_with_plugin_dirs() {
+        let dirs = vec!["plugins/".to_string()];
+        let config = AgentConfig::new().with_plugin_dirs(dirs.clone());
+        assert_eq!(config.plugin_dirs, dirs);
+    }
+
+    #[test]
+    fn agent_config_with_json_schema() {
+        let schema = serde_json::json!({"type": "object"});
+        let config = AgentConfig::new().with_json_schema(schema.clone());
+        assert_eq!(config.json_schema, Some(schema));
+    }
+
+    #[test]
+    fn agent_config_is_empty() {
+        let config = AgentConfig::new();
+        assert!(config.is_empty());
+
+        let config2 = AgentConfig::new().with_model("claude");
+        assert!(!config2.is_empty());
+    }
+
+    #[test]
+    fn agent_config_to_cli_args() {
+        let config = AgentConfig::new()
+            .with_model("claude-opus")
+            .with_fallback_model("claude-sonnet")
+            .with_system_prompt("Be helpful")
+            .with_tools(vec!["bash".to_string()])
+            .with_permission_mode(PermissionMode::Plan)
+            .with_max_budget_usd(5.5);
+
+        let args = config.to_cli_args();
+        assert!(args.contains(&"--model".to_string()));
+        assert!(args.contains(&"claude-opus".to_string()));
+        assert!(args.contains(&"--fallbackModel".to_string()));
+        assert!(args.contains(&"claude-sonnet".to_string()));
+        assert!(args.contains(&"--systemPrompt".to_string()));
+        assert!(args.contains(&"Be helpful".to_string()));
+        assert!(args.contains(&"--tools".to_string()));
+        assert!(args.contains(&"bash".to_string()));
+        assert!(args.contains(&"--permissionMode".to_string()));
+        assert!(args.contains(&"plan".to_string()));
+        assert!(args.contains(&"--maxBudgetUsd".to_string()));
+    }
+
+    #[test]
+    fn agent_config_merge() {
+        let config1 = AgentConfig::new()
+            .with_model("claude-opus")
+            .with_system_prompt("Original");
+        let config2 = AgentConfig::new()
+            .with_model("claude-sonnet")
+            .with_fallback_model("claude-haiku")
+            .with_permission_mode(PermissionMode::Delegate);
+
+        let merged = config1.merge(config2);
+        assert_eq!(merged.model, Some("claude-sonnet".to_string()));
+        assert_eq!(merged.system_prompt, Some("Original".to_string()));
+        assert_eq!(merged.fallback_model, Some("claude-haiku".to_string()));
+        assert_eq!(merged.permission_mode, Some(PermissionMode::Delegate));
+    }
+
+    #[test]
+    fn agent_config_equality() {
+        let config1 = AgentConfig::new()
+            .with_model("claude")
+            .with_max_budget_usd(10.5);
+        let config2 = AgentConfig::new()
+            .with_model("claude")
+            .with_max_budget_usd(10.5);
+        assert_eq!(config1, config2);
+
+        let config3 = AgentConfig::new()
+            .with_model("claude")
+            .with_max_budget_usd(20.0);
+        assert_ne!(config1, config3);
+    }
+
+    #[test]
+    fn format_float_whole() {
+        let formatted = format_float(5.0);
+        assert_eq!(formatted, "5");
+    }
+
+    #[test]
+    fn format_float_with_decimals() {
+        let formatted = format_float(5.5);
+        assert_eq!(formatted, "5.5");
+
+        let formatted2 = format_float(5.55);
+        assert_eq!(formatted2, "5.55");
+    }
+
+    #[test]
+    fn format_float_trailing_zeros() {
+        let formatted = format_float(5.500);
+        assert_eq!(formatted, "5.5");
+
+        let formatted2 = format_float(5.10);
+        assert_eq!(formatted2, "5.1");
     }
 }

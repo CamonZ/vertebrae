@@ -1,22 +1,22 @@
 //! End-to-end integration tests for the Vertebrae CLI
 //!
-//! These tests require the `db-tests` feature flag as they use direct database access.
-//! Since the CLI migrated to Sacrum HTTP backend, these are disabled by default.
-//!
-//! Run with: `cargo test -p vertebrae-cli --features db-tests`
+//! Integration tests using mock implementations of service traits, providing
+//! basic coverage without requiring a live Sacrum backend.
 
-#[cfg(feature = "db-tests")]
-mod common;
-
-#[cfg(feature = "db-tests")]
-mod error_tests;
-#[cfg(feature = "db-tests")]
-mod lifecycle_tests;
-#[cfg(feature = "db-tests")]
-mod query_tests;
-#[cfg(feature = "db-tests")]
-mod relationship_tests;
-#[cfg(feature = "db-tests")]
-mod section_tests;
-#[cfg(feature = "db-tests")]
-mod workflow_tests;
+mod basic_tests;
+mod criterion_ref_tests;
+mod delete_tests;
+mod execution_tests;
+mod mock;
+mod ready_tests;
+mod refs_tests;
+mod review_tests;
+mod run_tests;
+mod sections_tests;
+mod show_tests;
+mod step_done_tests;
+mod step_tests;
+mod unref_tests;
+mod unsection_tests;
+mod update_tests;
+mod workflow_cmd_tests;
