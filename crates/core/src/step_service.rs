@@ -4,8 +4,9 @@
 //! repository layer for use by CLI and GUI.
 
 use crate::error::{ServiceError, ServiceResult};
+use crate::models::{Step, StepUpdate};
 use async_trait::async_trait;
-use vertebrae_db::{Database, Step, StepRepository, StepUpdate, Thing};
+use vertebrae_db::{Database, StepRepository, Thing};
 
 /// Trait defining step management operations
 #[async_trait]
@@ -22,11 +23,11 @@ pub trait StepService: Send + Sync {
     /// Check if a step exists by ID
     async fn step_exists(&self, id: &str) -> ServiceResult<bool>;
 
-    /// Get a step by Thing reference
-    async fn get_step_by_thing(&self, thing: &Thing) -> ServiceResult<Option<Step>>;
+    /// Get a step by ID
+    async fn get_step_by_id(&self, id: &str) -> ServiceResult<Option<Step>>;
 
     /// List all steps for a workflow
-    async fn list_steps_for_workflow(&self, workflow_id: &Thing) -> ServiceResult<Vec<Step>>;
+    async fn list_steps_for_workflow(&self, workflow_id: &str) -> ServiceResult<Vec<Step>>;
 
     /// Update a step
     async fn update_step(&self, id: &str, updates: &StepUpdate) -> ServiceResult<()>;
@@ -35,15 +36,15 @@ pub trait StepService: Send + Sync {
     async fn delete_step(&self, id: &str) -> ServiceResult<()>;
 
     /// Get the initial step for a workflow
-    async fn get_initial_step(&self, workflow_id: &Thing) -> ServiceResult<Option<Step>>;
+    async fn get_initial_step(&self, workflow_id: &str) -> ServiceResult<Option<Step>>;
 
     /// Get possible transitions from a step
-    async fn get_transitions(&self, step_id: &Thing) -> ServiceResult<Vec<Step>>;
+    async fn get_transitions(&self, step_id: &str) -> ServiceResult<Vec<Step>>;
 
     /// Get the final (terminal) steps for a workflow
     ///
     /// Final steps are those with is_final = true.
-    async fn get_final_steps(&self, workflow_id: &Thing) -> ServiceResult<Vec<Step>>;
+    async fn get_final_steps(&self, workflow_id: &str) -> ServiceResult<Vec<Step>>;
 
     /// List all steps across all workflows
     ///
@@ -78,41 +79,41 @@ impl DefaultStepService {
 #[async_trait]
 impl StepService for DefaultStepService {
     async fn create_step(&self, step: &Step) -> ServiceResult<Step> {
-        self.steps().create(step).await.map_err(ServiceError::from)
+        let db_step = step.to_db();
+        let created = self.steps().create(&db_step).await?;
+        Ok(created.into())
     }
 
     async fn create_step_with_id(&self, id: &str, step: &Step) -> ServiceResult<Step> {
-        self.steps()
-            .create_with_id(id, step)
-            .await
-            .map_err(ServiceError::from)
+        let db_step = step.to_db();
+        let created = self.steps().create_with_id(id, &db_step).await?;
+        Ok(created.into())
     }
 
     async fn get_step(&self, id: &str) -> ServiceResult<Option<Step>> {
-        self.steps().get(id).await.map_err(ServiceError::from)
+        let result = self.steps().get(id).await?;
+        Ok(result.map(|db_step| db_step.into()))
     }
 
     async fn step_exists(&self, id: &str) -> ServiceResult<bool> {
         self.steps().exists(id).await.map_err(ServiceError::from)
     }
 
-    async fn get_step_by_thing(&self, thing: &Thing) -> ServiceResult<Option<Step>> {
-        self.steps()
-            .get_by_thing(thing)
-            .await
-            .map_err(ServiceError::from)
+    async fn get_step_by_id(&self, id: &str) -> ServiceResult<Option<Step>> {
+        let result = self.steps().get(id).await?;
+        Ok(result.map(|db_step| db_step.into()))
     }
 
-    async fn list_steps_for_workflow(&self, workflow_id: &Thing) -> ServiceResult<Vec<Step>> {
-        self.steps()
-            .list_by_workflow(workflow_id)
-            .await
-            .map_err(ServiceError::from)
+    async fn list_steps_for_workflow(&self, workflow_id: &str) -> ServiceResult<Vec<Step>> {
+        let thing = Thing::from(("workflow", workflow_id));
+        let results = self.steps().list_by_workflow(&thing).await?;
+        Ok(results.into_iter().map(|db_step| db_step.into()).collect())
     }
 
     async fn update_step(&self, id: &str, updates: &StepUpdate) -> ServiceResult<()> {
+        let db_update = updates.to_db();
         self.steps()
-            .update(id, updates)
+            .update(id, &db_update)
             .await
             .map_err(ServiceError::from)
     }
@@ -121,29 +122,27 @@ impl StepService for DefaultStepService {
         self.steps().delete(id).await.map_err(ServiceError::from)
     }
 
-    async fn get_initial_step(&self, workflow_id: &Thing) -> ServiceResult<Option<Step>> {
-        self.steps()
-            .get_initial_step(workflow_id)
-            .await
-            .map_err(ServiceError::from)
+    async fn get_initial_step(&self, workflow_id: &str) -> ServiceResult<Option<Step>> {
+        let thing = Thing::from(("workflow", workflow_id));
+        let result = self.steps().get_initial_step(&thing).await?;
+        Ok(result.map(|db_step| db_step.into()))
     }
 
-    async fn get_transitions(&self, step_id: &Thing) -> ServiceResult<Vec<Step>> {
-        self.steps()
-            .get_transitions(step_id)
-            .await
-            .map_err(ServiceError::from)
+    async fn get_transitions(&self, step_id: &str) -> ServiceResult<Vec<Step>> {
+        let thing = Thing::from(("step", step_id));
+        let results = self.steps().get_transitions(&thing).await?;
+        Ok(results.into_iter().map(|db_step| db_step.into()).collect())
     }
 
-    async fn get_final_steps(&self, workflow_id: &Thing) -> ServiceResult<Vec<Step>> {
-        self.steps()
-            .get_final_steps(workflow_id)
-            .await
-            .map_err(ServiceError::from)
+    async fn get_final_steps(&self, workflow_id: &str) -> ServiceResult<Vec<Step>> {
+        let thing = Thing::from(("workflow", workflow_id));
+        let results = self.steps().get_final_steps(&thing).await?;
+        Ok(results.into_iter().map(|db_step| db_step.into()).collect())
     }
 
     async fn list_all_steps(&self) -> ServiceResult<Vec<Step>> {
-        self.steps().list().await.map_err(ServiceError::from)
+        let results = self.steps().list().await?;
+        Ok(results.into_iter().map(|db_step| db_step.into()).collect())
     }
 }
 
@@ -174,10 +173,7 @@ mod tests {
             .await
             .unwrap();
 
-        let workflow_id = Thing::from(("workflow", "test_wf"));
-        let step = Step::new("Review", workflow_id.clone())
-            .with_order(0)
-            .with_is_final(false);
+        let step = Step::new("Review", "test_wf").with_order(0);
 
         let created = service.create_step_with_id("review", &step).await.unwrap();
         assert_eq!(created.name, "Review");
@@ -199,18 +195,16 @@ mod tests {
             .await
             .unwrap();
 
-        let workflow_id = Thing::from(("workflow", "list_wf"));
-
         // Create multiple steps
-        let step1 = Step::new("Step 1", workflow_id.clone()).with_order(0);
-        let step2 = Step::new("Step 2", workflow_id.clone()).with_order(1);
-        let step3 = Step::new("Step 3", workflow_id.clone()).with_order(2);
+        let step1 = Step::new("Step 1", "list_wf").with_order(0);
+        let step2 = Step::new("Step 2", "list_wf").with_order(1);
+        let step3 = Step::new("Step 3", "list_wf").with_order(2);
 
         service.create_step(&step1).await.unwrap();
         service.create_step(&step2).await.unwrap();
         service.create_step(&step3).await.unwrap();
 
-        let steps = service.list_steps_for_workflow(&workflow_id).await.unwrap();
+        let steps = service.list_steps_for_workflow("list_wf").await.unwrap();
         assert_eq!(steps.len(), 3);
         assert_eq!(steps[0].name, "Step 1");
         assert_eq!(steps[1].name, "Step 2");
@@ -229,8 +223,7 @@ mod tests {
             .await
             .unwrap();
 
-        let workflow_id = Thing::from(("workflow", "update_wf"));
-        let step = Step::new("Original", workflow_id).with_order(0);
+        let step = Step::new("Original", "update_wf").with_order(0);
         service
             .create_step_with_id("update_step", &step)
             .await
@@ -257,8 +250,7 @@ mod tests {
             .await
             .unwrap();
 
-        let workflow_id = Thing::from(("workflow", "delete_wf"));
-        let step = Step::new("To Delete", workflow_id).with_order(0);
+        let step = Step::new("To Delete", "delete_wf").with_order(0);
         service
             .create_step_with_id("delete_me", &step)
             .await
@@ -281,16 +273,14 @@ mod tests {
             .await
             .unwrap();
 
-        let workflow_id = Thing::from(("workflow", "initial_wf"));
-
         // Create steps with different orders
-        let step0 = Step::new("Initial", workflow_id.clone()).with_order(0);
-        let step1 = Step::new("Second", workflow_id.clone()).with_order(1);
+        let step0 = Step::new("Initial", "initial_wf").with_order(0);
+        let step1 = Step::new("Second", "initial_wf").with_order(1);
 
         service.create_step(&step0).await.unwrap();
         service.create_step(&step1).await.unwrap();
 
-        let initial = service.get_initial_step(&workflow_id).await.unwrap();
+        let initial = service.get_initial_step("initial_wf").await.unwrap();
         assert!(initial.is_some());
         assert_eq!(initial.unwrap().name, "Initial");
     }
@@ -307,16 +297,12 @@ mod tests {
             .await
             .unwrap();
 
-        let workflow_id = Thing::from(("workflow", "final_wf"));
-
         // Create steps with different is_final values
-        let step1 = Step::new("Not Final", workflow_id.clone())
-            .with_order(0)
-            .with_is_final(false);
-        let step2 = Step::new("Final 1", workflow_id.clone())
+        let step1 = Step::new("Not Final", "final_wf").with_order(0);
+        let step2 = Step::new("Final 1", "final_wf")
             .with_order(1)
             .with_is_final(true);
-        let step3 = Step::new("Final 2", workflow_id.clone())
+        let step3 = Step::new("Final 2", "final_wf")
             .with_order(2)
             .with_is_final(true);
 
@@ -324,7 +310,7 @@ mod tests {
         service.create_step(&step2).await.unwrap();
         service.create_step(&step3).await.unwrap();
 
-        let final_steps = service.get_final_steps(&workflow_id).await.unwrap();
+        let final_steps = service.get_final_steps("final_wf").await.unwrap();
         assert_eq!(final_steps.len(), 2);
         assert!(final_steps.iter().all(|s| s.is_final));
     }

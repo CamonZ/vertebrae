@@ -260,6 +260,31 @@ impl From<vertebrae_db::Task> for Task {
     }
 }
 
+impl From<vertebrae_core::Task> for Task {
+    fn from(task: vertebrae_core::Task) -> Self {
+        Task {
+            id: task.id,
+            title: task.title,
+            description: task.description,
+            level: task.level.into(),
+            status: "backlog".to_string(),
+            priority: task.priority.map(Into::into),
+            tags: task.tags,
+            created_at: task.created_at.map(|dt| dt.to_rfc3339()),
+            updated_at: task.updated_at.map(|dt| dt.to_rfc3339()),
+            started_at: task.started_at.map(|dt| dt.to_rfc3339()),
+            completed_at: task.completed_at.map(|dt| dt.to_rfc3339()),
+            sections: task.sections.into_iter().map(Into::into).collect(),
+            code_refs: task.code_refs.into_iter().map(Into::into).collect(),
+            needs_human_review: task.needs_human_review,
+            revision_feedback: task.revision_feedback,
+            rejection_reason: task.rejection_reason,
+            workflow_id: task.workflow_id,
+            current_step_id: task.current_step_id,
+        }
+    }
+}
+
 /// Task with its relations (parent, children, dependencies)
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct TaskWithRelations {
@@ -506,6 +531,25 @@ impl From<vertebrae_db::Step> for Step {
     }
 }
 
+impl From<vertebrae_core::Step> for Step {
+    fn from(step: vertebrae_core::Step) -> Self {
+        Step {
+            id: step.id,
+            name: step.name,
+            workflow_id: step.workflow_id,
+            goal: step.goal,
+            agents: step.agents,
+            skills: step.skills,
+            agent_config: step.agent_config.into(),
+            is_final: step.is_final,
+            transitions_to: step.transitions_to,
+            order: step.order,
+            created_at: step.created_at.map(|dt| dt.to_rfc3339()),
+            updated_at: step.updated_at.map(|dt| dt.to_rfc3339()),
+        }
+    }
+}
+
 /// Workflow - mirrors db::Workflow
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct Workflow {
@@ -532,6 +576,20 @@ impl From<vertebrae_db::Workflow> for Workflow {
             name: workflow.name,
             description: workflow.description,
             initial_step: workflow.initial_step.map(|t| t.id.to_raw()),
+            metadata: workflow.metadata,
+            created_at: workflow.created_at.map(|dt| dt.to_rfc3339()),
+            updated_at: workflow.updated_at.map(|dt| dt.to_rfc3339()),
+        }
+    }
+}
+
+impl From<vertebrae_core::Workflow> for Workflow {
+    fn from(workflow: vertebrae_core::Workflow) -> Self {
+        Workflow {
+            id: workflow.id,
+            name: workflow.name,
+            description: workflow.description,
+            initial_step: workflow.initial_step,
             metadata: workflow.metadata,
             created_at: workflow.created_at.map(|dt| dt.to_rfc3339()),
             updated_at: workflow.updated_at.map(|dt| dt.to_rfc3339()),
@@ -632,6 +690,20 @@ impl From<vertebrae_db::StepExecution> for StepExecution {
     }
 }
 
+impl From<vertebrae_core::StepExecution> for StepExecution {
+    fn from(exec: vertebrae_core::StepExecution) -> Self {
+        StepExecution {
+            id: exec.id,
+            task_id: exec.task_id,
+            workflow_id: exec.workflow_id,
+            step_name: exec.step_name,
+            started_at: exec.started_at.to_rfc3339(),
+            completed_at: exec.completed_at.map(|dt| dt.to_rfc3339()),
+            status: exec.status.into(),
+        }
+    }
+}
+
 /// Session log entry - mirrors db::SessionLog
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct SessionLog {
@@ -650,6 +722,17 @@ impl From<vertebrae_db::SessionLog> for SessionLog {
         SessionLog {
             id: log.id.map(|t| t.id.to_raw()),
             step_execution_id: log.step_execution_id.id.to_raw(),
+            content: log.content,
+            created_at: log.created_at.to_rfc3339(),
+        }
+    }
+}
+
+impl From<vertebrae_core::SessionLog> for SessionLog {
+    fn from(log: vertebrae_core::SessionLog) -> Self {
+        SessionLog {
+            id: log.id,
+            step_execution_id: log.step_execution_id,
             content: log.content,
             created_at: log.created_at.to_rfc3339(),
         }
@@ -683,6 +766,18 @@ impl From<vertebrae_db::ChatSession> for ChatSession {
     }
 }
 
+impl From<vertebrae_core::ChatSession> for ChatSession {
+    fn from(session: vertebrae_core::ChatSession) -> Self {
+        ChatSession {
+            id: session.id,
+            title: session.title,
+            working_dir: session.working_dir,
+            started_at: session.started_at.to_rfc3339(),
+            ended_at: session.ended_at.map(|dt| dt.to_rfc3339()),
+        }
+    }
+}
+
 /// Chat message - mirrors db::ChatMessage
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct ChatMessage {
@@ -701,6 +796,17 @@ impl From<vertebrae_db::ChatMessage> for ChatMessage {
         ChatMessage {
             id: msg.id.map(|t| t.id.to_raw()),
             session_id: msg.session_id.id.to_raw(),
+            content: msg.content,
+            created_at: msg.created_at.to_rfc3339(),
+        }
+    }
+}
+
+impl From<vertebrae_core::ChatMessage> for ChatMessage {
+    fn from(msg: vertebrae_core::ChatMessage) -> Self {
+        ChatMessage {
+            id: msg.id,
+            session_id: msg.session_id,
             content: msg.content,
             created_at: msg.created_at.to_rfc3339(),
         }

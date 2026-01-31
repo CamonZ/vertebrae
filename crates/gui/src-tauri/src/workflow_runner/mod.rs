@@ -91,11 +91,8 @@ pub async fn execute_workflow(
     };
 
     // Fetch workflow to validate it exists
-    trace(
-        &task_id,
-        &format!("Fetching workflow: {}", workflow_id.id.to_raw()),
-    );
-    let _workflow = match workflows.get_workflow(&workflow_id.id.to_raw()).await {
+    trace(&task_id, &format!("Fetching workflow: {}", workflow_id));
+    let _workflow = match workflows.get_workflow(&workflow_id).await {
         Ok(w) => {
             trace(&task_id, &format!("Workflow found: name={}", w.name));
             w
@@ -106,7 +103,7 @@ pub async fn execute_workflow(
         }
     };
 
-    let workflow_id_str = workflow_id.id.to_raw();
+    let workflow_id_str = workflow_id.clone();
 
     // Fetch first-class Step entities for this workflow
     trace(&task_id, "Fetching workflow steps...");
@@ -161,13 +158,13 @@ pub async fn execute_workflow(
         );
 
         // Update task's current_step_id BEFORE executing the step
-        if let Some(ref step_thing) = step.id {
+        if let Some(ref step_id_str) = step.id {
             // Reconnect to database before writing (CLI may have modified it during previous step)
             trace(
                 &task_id,
-                &format!("Updating task current_step_id to: {:?}", step_thing),
+                &format!("Updating task current_step_id to: {:?}", step_id_str),
             );
-            match tasks.set_current_step(&task_id, step_thing).await {
+            match tasks.set_current_step(&task_id, step_id_str).await {
                 Ok(()) => {
                     trace(&task_id, "current_step_id updated successfully");
                     // Emit event so frontend can update directly without refetching
@@ -175,7 +172,7 @@ pub async fn execute_workflow(
                         "task-step-changed-event",
                         TaskStepChangedEvent {
                             task_id: task_id.clone(),
-                            step_id: step_thing.to_string(),
+                            step_id: step_id_str.clone(),
                             step_name: step.name.clone(),
                         },
                     );

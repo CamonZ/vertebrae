@@ -5,17 +5,24 @@
 //! to share the same business logic.
 
 use crate::error::{ServiceError, ServiceResult};
+use crate::models::Task;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use vertebrae_db;
 use vertebrae_db::{
-    BlockerNode, CodeRef, Database, Level, Priority, Section, Task, TaskFilter, TaskSummary,
-    TaskUpdate, Thing,
+    BlockerNode, CodeRef, Database, Level, Priority, Section, TaskFilter, TaskSummary,
+    TaskUpdate as DbTaskUpdate, Thing,
 };
 
 // Re-export commonly used types
 pub use vertebrae_db::{Level as TaskLevel, Priority as TaskPriority};
+
+/// Helper to convert Thing to string ID
+fn thing_to_id(thing: &Thing) -> String {
+    thing.id.to_raw()
+}
 
 /// Event representing a task mutation for cache invalidation
 #[derive(Debug, Clone)]
@@ -223,7 +230,6 @@ impl UpdateTaskOptions {
             || self.priority.is_some()
             || !self.add_tags.is_empty()
             || !self.remove_tags.is_empty()
-            || self.parent_id.is_some()
             || self.needs_human_review.is_some()
     }
 }
@@ -417,7 +423,7 @@ pub trait TaskService: Send + Sync {
     /// Set the current workflow step for a task
     ///
     /// This updates the task's `current_step_id` field to the specified step.
-    async fn set_current_step(&self, task_id: &str, step_id: &Thing) -> ServiceResult<()>;
+    async fn set_current_step(&self, task_id: &str, step_id: &str) -> ServiceResult<()>;
 
     /// Delete a task
     ///
@@ -675,7 +681,7 @@ pub trait TaskService: Send + Sync {
     /// Assign a workflow to a task
     ///
     /// Sets the task's workflow_id and initializes current_step to 0.
-    async fn assign_workflow(&self, task_id: &str, workflow_id: &Thing) -> ServiceResult<()>;
+    async fn assign_workflow(&self, task_id: &str, workflow_id: &str) -> ServiceResult<()>;
 
     /// Remove workflow assignment from a task
     ///
@@ -766,8 +772,8 @@ impl DefaultTaskService {
     }
 
     /// Build a TaskUpdate from UpdateTaskOptions
-    fn build_task_update(&self, options: &UpdateTaskOptions) -> TaskUpdate {
-        let mut update = TaskUpdate::new();
+    fn build_task_update(&self, options: &UpdateTaskOptions) -> DbTaskUpdate {
+        let mut update = DbTaskUpdate::default();
 
         if let Some(title) = &options.title {
             update = update.with_title(title);
@@ -902,22 +908,23 @@ impl TaskService for DefaultTaskService {
             .clone()
             .unwrap_or_else(|| "backlog".to_string());
 
-        let mut task = Task::new(options.title, level);
+        // Create a db task for persistence
+        let mut db_task = vertebrae_db::Task::new(&options.title, level);
 
         if let Some(desc) = options.description {
-            task = task.with_description(desc);
+            db_task = db_task.with_description(desc);
         }
 
         if let Some(priority) = options.priority {
-            task = task.with_priority(priority);
+            db_task = db_task.with_priority(priority);
         }
 
         if !options.tags.is_empty() {
-            task = task.with_tags(options.tags);
+            db_task = db_task.with_tags(options.tags);
         }
 
         if options.needs_review {
-            task = task.with_needs_human_review(true);
+            db_task = db_task.with_needs_human_review(true);
         }
 
         // Find the root workflow (no incoming transitions) and its initial step
@@ -949,17 +956,17 @@ impl TaskService for DefaultTaskService {
                 .ok_or_else(|| {
                     ServiceError::InvalidInput(format!(
                         "Workflow '{}' has no steps",
-                        workflow_id.id.to_raw()
+                        thing_to_id(&workflow_id)
                     ))
                 })?
         };
 
-        // Set workflow and initial step on task
-        task.workflow_id = Some(workflow_id.clone());
-        task.current_step_id = Some(initial_step_id.clone());
+        // Set workflow and initial step on db task (Thing types)
+        db_task.workflow_id = Some(workflow_id.clone());
+        db_task.current_step_id = Some(initial_step_id.clone());
 
         // Create in database with workflow and step already set
-        self.db.tasks().create(&id, &task).await?;
+        self.db.tasks().create(&id, &db_task).await?;
 
         // If a different status was specified, transition to that step
         if target_status != "backlog" {
@@ -1006,6 +1013,7 @@ impl TaskService for DefaultTaskService {
             .get(&id)
             .await?
             .ok_or_else(|| ServiceError::task_not_found(&id))
+            .map(|db_task| db_task.into())
     }
 
     async fn get_task_with_relations(&self, id: &str) -> ServiceResult<TaskWithRelations> {
@@ -1029,8 +1037,8 @@ impl TaskService for DefaultTaskService {
     async fn get_derived_status(&self, task: &Task) -> ServiceResult<String> {
         // Use current_step_id to determine status
         if let (Some(workflow_id), Some(step_id)) = (&task.workflow_id, &task.current_step_id)
-            && let Some(workflow) = self.db.workflows().get(&workflow_id.id.to_raw()).await?
-            && let Some(step) = self.db.steps().get_by_thing(step_id).await?
+            && let Some(workflow) = self.db.workflows().get(workflow_id).await?
+            && let Some(step) = self.db.steps().get(step_id).await?
         {
             return Ok(format!("{}:{}", workflow.name, step.name));
         }
@@ -1080,7 +1088,7 @@ impl TaskService for DefaultTaskService {
         Ok(())
     }
 
-    async fn set_current_step(&self, task_id: &str, step_id: &Thing) -> ServiceResult<()> {
+    async fn set_current_step(&self, task_id: &str, step_id: &str) -> ServiceResult<()> {
         let task_id = task_id.to_lowercase();
 
         // Verify task exists
@@ -1088,11 +1096,14 @@ impl TaskService for DefaultTaskService {
             return Err(ServiceError::task_not_found(&task_id));
         }
 
+        // Convert string ID to Thing for db call
+        let step_thing = Thing::from(("step", step_id));
+
         // Update the current step
         let _ = self
             .db
             .tasks()
-            .update_current_step_id(&task_id, step_id)
+            .update_current_step_id(&task_id, &step_thing)
             .await?;
 
         // Fire mutation callback
@@ -1171,7 +1182,7 @@ impl TaskService for DefaultTaskService {
 
                 // Construct the Task object
                 let task = Task {
-                    id: Some(Thing::from(("task".to_string(), data.id.clone()))),
+                    id: Some(data.id.clone()),
                     title: data.title,
                     description: data.description,
                     level: data.level,
@@ -1186,12 +1197,8 @@ impl TaskService for DefaultTaskService {
                     needs_human_review: data.needs_human_review,
                     revision_feedback: None,
                     rejection_reason: None,
-                    workflow_id: data
-                        .workflow_id
-                        .map(|id| Thing::from(("workflow".to_string(), id))),
-                    current_step_id: data
-                        .current_step_id
-                        .map(|id| Thing::from(("step".to_string(), id))),
+                    workflow_id: data.workflow_id,
+                    current_step_id: data.current_step_id,
                 };
 
                 TaskWithRelations {
@@ -1382,19 +1389,26 @@ impl TaskService for DefaultTaskService {
         let task = self.get_task(&id).await?;
 
         // Invariant: task always has workflow_id and current_step_id
-        let workflow_thing = task.workflow_id.clone().ok_or_else(|| {
+        let workflow_id_str = task.workflow_id.clone().ok_or_else(|| {
             ServiceError::InvalidInput(format!(
                 "Task {} is missing workflow_id (invariant violation)",
                 id
             ))
         })?;
-        let current_step_id = task.current_step_id.as_ref().ok_or_else(|| {
-            ServiceError::InvalidInput(format!(
-                "Task {} is missing current_step_id (invariant violation)",
-                id
-            ))
-        })?;
-        let workflow_id = workflow_thing.id.to_raw();
+        let current_step_id_str = task
+            .current_step_id
+            .as_ref()
+            .ok_or_else(|| {
+                ServiceError::InvalidInput(format!(
+                    "Task {} is missing current_step_id (invariant violation)",
+                    id
+                ))
+            })?
+            .clone();
+
+        // Convert to Things for db calls
+        let workflow_thing = Thing::from(("workflow", workflow_id_str.as_str()));
+        let current_step_thing = Thing::from(("step", current_step_id_str.as_str()));
 
         // Get workflow steps to validate the transition
         let steps = self.db.steps().list_by_workflow(&workflow_thing).await?;
@@ -1402,11 +1416,11 @@ impl TaskService for DefaultTaskService {
         // Find the current step by ID
         let current_step = steps
             .iter()
-            .find(|s| s.id.as_ref() == Some(current_step_id))
+            .find(|s| s.id.as_ref() == Some(&current_step_thing))
             .ok_or_else(|| {
                 ServiceError::InvalidInput(format!(
                     "Current step not found: {}",
-                    current_step_id.id.to_raw()
+                    current_step_id_str
                 ))
             })?;
         let from_status = current_step.name.clone();
@@ -1420,7 +1434,7 @@ impl TaskService for DefaultTaskService {
             ServiceError::InvalidInput(format!(
                 "Unknown step '{}' in workflow '{}'. Valid steps: {}",
                 target,
-                workflow_id,
+                workflow_id_str,
                 valid_steps.join(", ")
             ))
         })?;
@@ -1451,7 +1465,7 @@ impl TaskService for DefaultTaskService {
         }
 
         // Build update - status is now derived from workflow step
-        let mut update = TaskUpdate::new();
+        let mut update = DbTaskUpdate::default();
 
         // Set timestamps based on transition (using step name conventions)
         if target == "in_progress" {
@@ -1674,7 +1688,7 @@ impl TaskService for DefaultTaskService {
         sections.push(section);
 
         // Update task
-        let update = TaskUpdate::new().with_sections(sections);
+        let update = DbTaskUpdate::default().with_sections(sections);
         self.db.tasks().update(&id, &update).await?;
 
         // Fire mutation callback
@@ -1714,7 +1728,7 @@ impl TaskService for DefaultTaskService {
             }
         }
 
-        let update = TaskUpdate::new().with_sections(sections);
+        let update = DbTaskUpdate::default().with_sections(sections);
         self.db.tasks().update(&id, &update).await?;
 
         // Fire mutation callback
@@ -1753,7 +1767,7 @@ impl TaskService for DefaultTaskService {
         edited_section.content = new_content.to_string();
 
         // Update task with new sections
-        let update = TaskUpdate::new().with_sections(new_sections);
+        let update = DbTaskUpdate::default().with_sections(new_sections);
         self.db.tasks().update(&id, &update).await?;
 
         // Fire mutation callback
@@ -1818,7 +1832,7 @@ impl TaskService for DefaultTaskService {
         code_refs.push(code_ref);
 
         // Update task
-        let update = TaskUpdate::new().with_refs(code_refs);
+        let update = DbTaskUpdate::default().with_refs(code_refs);
         self.db.tasks().update(&id, &update).await?;
 
         self.on_mutation(MutationEvent::TaskUpdated { id: id.clone() });
@@ -1852,7 +1866,7 @@ impl TaskService for DefaultTaskService {
             }
         }
 
-        let update = TaskUpdate::new().with_refs(code_refs);
+        let update = DbTaskUpdate::default().with_refs(code_refs);
         self.db.tasks().update(&id, &update).await?;
 
         self.on_mutation(MutationEvent::TaskUpdated { id: id.clone() });
@@ -1909,10 +1923,14 @@ impl TaskService for DefaultTaskService {
         Ok(())
     }
 
-    /// Assign a workflow to a task
+    /// Export all tasks from the database for backup or import operations.
     ///
-    /// Sets the task's workflow_id and initializes current_step to 0.
-    async fn assign_workflow(&self, task_id: &str, workflow_id: &Thing) -> ServiceResult<()> {
+    /// Returns all tasks with their IDs. This is a read-only operation.
+    ///
+    /// # Returns
+    ///
+    /// A vector of (task_id, Task) tuples in deterministic order.
+    async fn assign_workflow(&self, task_id: &str, workflow_id: &str) -> ServiceResult<()> {
         let task_id = task_id.to_lowercase();
 
         // Verify task exists
@@ -1920,14 +1938,17 @@ impl TaskService for DefaultTaskService {
             return Err(ServiceError::task_not_found(&task_id));
         }
 
+        // Convert workflow_id string to Thing for db calls
+        let workflow_thing = Thing::from(("workflow", workflow_id));
+
         // Assign the workflow
         self.db
             .tasks()
-            .assign_workflow(&task_id, workflow_id)
+            .assign_workflow(&task_id, &workflow_thing)
             .await?;
 
         // Set current_step_id to the first step of the workflow (order 0)
-        let steps = self.db.steps().list_by_workflow(workflow_id).await?;
+        let steps = self.db.steps().list_by_workflow(&workflow_thing).await?;
         if let Some(first_step) = steps.into_iter().find(|s| s.order == 0).and_then(|s| s.id) {
             let _ = self
                 .db
@@ -1942,9 +1963,6 @@ impl TaskService for DefaultTaskService {
         Ok(())
     }
 
-    /// Remove workflow assignment from a task
-    ///
-    /// Clears both workflow_id and current_step_id fields.
     async fn unassign_workflow(&self, task_id: &str) -> ServiceResult<()> {
         let task_id = task_id.to_lowercase();
 
@@ -1961,30 +1979,25 @@ impl TaskService for DefaultTaskService {
         Ok(())
     }
 
-    /// Export all tasks from the database for backup or import operations.
-    ///
-    /// Returns all tasks with their IDs. This is a read-only operation.
-    ///
-    /// # Returns
-    ///
-    /// A vector of (task_id, Task) tuples in deterministic order.
-    async fn export_all_tasks(&self) -> ServiceResult<Vec<(String, Task)>> {
-        self.db.tasks().export_all().await.map_err(|e| e.into())
-    }
-
-    /// Export all child_of relationships (parent-child hierarchy).
-    ///
-    /// Returns tuples of (child_id, parent_id) representing the hierarchy.
-    /// This is a read-only operation.
-    ///
-    /// # Returns
-    ///
-    /// A vector of (child_id, parent_id) tuples.
     async fn export_child_of_relations(&self) -> ServiceResult<Vec<(String, String)>> {
         self.db
             .relationships()
             .export_all_child_of()
             .await
+            .map_err(|e| e.into())
+    }
+
+    async fn export_all_tasks(&self) -> ServiceResult<Vec<(String, Task)>> {
+        self.db
+            .tasks()
+            .export_all()
+            .await
+            .map(|tasks| {
+                tasks
+                    .into_iter()
+                    .map(|(id, db_task)| (id, db_task.into()))
+                    .collect()
+            })
             .map_err(|e| e.into())
     }
 
@@ -2005,7 +2018,32 @@ impl TaskService for DefaultTaskService {
     }
     async fn create_task_raw(&self, id: &str, task: &Task) -> ServiceResult<String> {
         let id = id.to_lowercase();
-        self.db.tasks().create(&id, task).await?;
+
+        // Convert domain Task to db Task
+        let mut db_task = vertebrae_db::Task::new(&task.title, task.level.clone());
+        db_task.id = task.id.clone().map(|id| Thing::from(("task", id.as_str())));
+        db_task.description = task.description.clone();
+        db_task.priority = task.priority.clone();
+        db_task.tags = task.tags.clone();
+        db_task.created_at = task.created_at;
+        db_task.updated_at = task.updated_at;
+        db_task.started_at = task.started_at;
+        db_task.completed_at = task.completed_at;
+        db_task.sections = task.sections.clone();
+        db_task.code_refs = task.code_refs.clone();
+        db_task.needs_human_review = task.needs_human_review;
+        db_task.revision_feedback = task.revision_feedback.clone();
+        db_task.rejection_reason = task.rejection_reason.clone();
+        db_task.workflow_id = task
+            .workflow_id
+            .clone()
+            .map(|id| Thing::from(("workflow", id.as_str())));
+        db_task.current_step_id = task
+            .current_step_id
+            .clone()
+            .map(|id| Thing::from(("step", id.as_str())));
+
+        self.db.tasks().create(&id, &db_task).await?;
         self.on_mutation(MutationEvent::TaskCreated { id: id.clone() });
         Ok(id)
     }
@@ -2859,25 +2897,25 @@ mod tests {
             .unwrap();
 
         // Create workflow IDs (simulating workflow records)
-        let workflow1_id = Thing::from(("workflow", "workflow1"));
-        let workflow2_id = Thing::from(("workflow", "workflow2"));
+        let workflow1_id = "workflow1";
+        let workflow2_id = "workflow2";
 
         // Assign tasks to workflows
         service
-            .assign_workflow(&w1_task1, &workflow1_id)
+            .assign_workflow(&w1_task1, workflow1_id)
             .await
             .unwrap();
         service
-            .assign_workflow(&w1_task2, &workflow1_id)
+            .assign_workflow(&w1_task2, workflow1_id)
             .await
             .unwrap();
         service
-            .assign_workflow(&w2_task1, &workflow2_id)
+            .assign_workflow(&w2_task1, workflow2_id)
             .await
             .unwrap();
 
         // Test 1: Filter by workflow1 - should only return tasks for workflow1
-        let filter = TaskFilter::new().with_workflow_id("workflow1");
+        let filter = TaskFilter::new().with_workflow_id(workflow1_id);
         let options = TreeFilterOptions::new(filter);
         let tree = service.get_task_tree(&options).await.unwrap();
 
@@ -2896,7 +2934,7 @@ mod tests {
         );
 
         // Test 2: Filter by workflow2 - should only return tasks for workflow2
-        let filter = TaskFilter::new().with_workflow_id("workflow2");
+        let filter = TaskFilter::new().with_workflow_id(workflow2_id);
         let options = TreeFilterOptions::new(filter);
         let tree = service.get_task_tree(&options).await.unwrap();
 
@@ -2927,15 +2965,16 @@ mod tests {
     async fn test_get_task_tree_workflow_filter_with_hierarchy() {
         let service = setup_test_service().await;
 
-        // Create a hierarchy: epic -> ticket -> task, all in workflow1
+        // Create a hierarchy: epic -> ticket -> task
+        // Only assign ticket and task to workflow, NOT epic
         let epic_id = service
-            .create_task(CreateTaskOptions::new("Epic in WF1").with_level(Level::Epic))
+            .create_task(CreateTaskOptions::new("Epic NOT in WF").with_level(Level::Epic))
             .await
             .unwrap();
 
         let ticket_id = service
             .create_task(
-                CreateTaskOptions::new("Ticket in WF1")
+                CreateTaskOptions::new("Ticket in WF")
                     .with_level(Level::Ticket)
                     .with_parent(&epic_id),
             )
@@ -2943,52 +2982,32 @@ mod tests {
             .unwrap();
 
         let task_id = service
-            .create_task(CreateTaskOptions::new("Task in WF1").with_parent(&ticket_id))
+            .create_task(CreateTaskOptions::new("Task in WF").with_parent(&ticket_id))
             .await
             .unwrap();
 
-        // Create another epic NOT in any workflow
-        let _other_epic = service
-            .create_task(CreateTaskOptions::new("Epic without workflow").with_level(Level::Epic))
+        // Assign only ticket and task to workflow, leaving epic unassigned
+        let workflow_id = "partial_wf";
+        service
+            .assign_workflow(&ticket_id, workflow_id)
+            .await
+            .unwrap();
+        service
+            .assign_workflow(&task_id, workflow_id)
             .await
             .unwrap();
 
-        // Assign only the first hierarchy to workflow1
-        let workflow1_id = Thing::from(("workflow", "workflow1"));
-        service
-            .assign_workflow(&epic_id, &workflow1_id)
-            .await
-            .unwrap();
-        service
-            .assign_workflow(&ticket_id, &workflow1_id)
-            .await
-            .unwrap();
-        service
-            .assign_workflow(&task_id, &workflow1_id)
-            .await
-            .unwrap();
-
-        // Filter by workflow - epic should NOT appear (not assigned)
-        let filter = TaskFilter::new().with_workflow_id("workflow1");
+        // Filter by workflow - should only have ticket and task
+        let filter = TaskFilter::new().with_workflow_id(workflow_id);
         let options = TreeFilterOptions::new(filter).with_preserve_ancestors(false);
         let tree = service.get_task_tree(&options).await.unwrap();
 
-        // Should have only the epic from workflow1 at root (epic IS assigned)
-        assert_eq!(tree.len(), 1, "Should return 1 root for workflow1");
-        assert_eq!(tree[0].id, epic_id);
-        assert_eq!(tree[0].title, "Epic in WF1");
-
-        // Verify the other epic is not included
-        assert!(
-            !tree.iter().any(|n| n.id == _other_epic),
-            "Should not include epic without workflow"
-        );
-
-        // Verify hierarchy is preserved within workflow
+        // Should only have ticket and task (epic not in workflow)
+        // Ticket becomes root since its parent (epic) is not in the result
+        assert_eq!(tree.len(), 1, "Should return 1 root (ticket)");
+        assert_eq!(tree[0].id, ticket_id);
         assert_eq!(tree[0].children.len(), 1);
-        assert_eq!(tree[0].children[0].id, ticket_id);
-        assert_eq!(tree[0].children[0].children.len(), 1);
-        assert_eq!(tree[0].children[0].children[0].id, task_id);
+        assert_eq!(tree[0].children[0].id, task_id);
     }
 
     #[tokio::test]
@@ -3017,18 +3036,18 @@ mod tests {
             .unwrap();
 
         // Assign only ticket and task to workflow, leaving epic unassigned
-        let workflow_id = Thing::from(("workflow", "partial_wf"));
+        let workflow_id = "partial_wf";
         service
-            .assign_workflow(&ticket_id, &workflow_id)
+            .assign_workflow(&ticket_id, workflow_id)
             .await
             .unwrap();
         service
-            .assign_workflow(&task_id, &workflow_id)
+            .assign_workflow(&task_id, workflow_id)
             .await
             .unwrap();
 
         // Filter by workflow - should only have ticket and task
-        let filter = TaskFilter::new().with_workflow_id("partial_wf");
+        let filter = TaskFilter::new().with_workflow_id(workflow_id);
         let options = TreeFilterOptions::new(filter).with_preserve_ancestors(false);
         let tree = service.get_task_tree(&options).await.unwrap();
 

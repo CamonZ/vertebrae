@@ -7409,6 +7409,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "surrealdb",
  "thiserror 2.0.17",
  "tokio",
  "vertebrae-db",

@@ -5,7 +5,6 @@
 
 use clap::Args;
 use vertebrae_core::{ServiceError, VertebraeServices};
-use vertebrae_db::Thing;
 
 /// Transition a task to a workflow/step
 #[derive(Debug, Args)]
@@ -158,8 +157,8 @@ impl TransitionToCommand {
         let task = services.tasks().get_task(&id).await?;
 
         // Get current workflow info
-        let from_workflow = task.workflow_id.as_ref().map(|t| t.id.to_raw());
-        let from_step = task.current_step_id.as_ref().map(|t| t.id.to_raw());
+        let from_workflow = task.workflow_id.clone();
+        let from_step = task.current_step_id.clone();
 
         // Get workflow service for workflow operations
         let workflow_service = services.workflows();
@@ -168,7 +167,6 @@ impl TransitionToCommand {
         let _ = workflow_service.get_workflow(&parsed.workflow).await?;
 
         let target_workflow_id = parsed.workflow.clone();
-        let workflow_thing = Thing::from(("workflow", target_workflow_id.as_str()));
 
         // Validate the transition if not skipped
         if !self.skip_validation
@@ -178,12 +176,11 @@ impl TransitionToCommand {
             let transitions = workflow_service
                 .get_transitions_from_workflow(current_wf_id)
                 .await?;
-            let target_workflow_thing = Thing::from(("workflow", target_workflow_id.as_str()));
             let allowed = transitions
                 .iter()
-                .any(|t| t.to_workflow == target_workflow_thing);
+                .any(|t| t.to_workflow == target_workflow_id);
 
-            if !allowed && current_wf_id != &target_workflow_id {
+            if current_wf_id != &target_workflow_id && !allowed {
                 return Err(ServiceError::InvalidInput(format!(
                     "Transition from workflow '{}' to '{}' is not allowed. \
                      Use --skip-validation to bypass this check.",
@@ -198,7 +195,7 @@ impl TransitionToCommand {
                 // Query steps for this workflow
                 let steps = services
                     .steps()
-                    .list_steps_for_workflow(&workflow_thing)
+                    .list_steps_for_workflow(current_wf_id.as_str())
                     .await?;
 
                 // Invariant: task always has current_step_id
@@ -227,7 +224,10 @@ impl TransitionToCommand {
                     // Check if target is in current step's transitions_to
                     let target_id = target.id.as_ref();
                     let is_valid_transition = target_id.is_some()
-                        && current.transitions_to.iter().any(|t| Some(t) == target_id);
+                        && current
+                            .transitions_to
+                            .iter()
+                            .any(|t| Some(t.as_str()) == target_id.map(|s| s.as_str()));
 
                     // Also allow transitioning to the same step
                     let is_same_step = current.name == target.name;
@@ -267,7 +267,7 @@ impl TransitionToCommand {
             // Use initial step of the workflow - query the first step by order
             let steps = services
                 .steps()
-                .list_steps_for_workflow(&workflow_thing)
+                .list_steps_for_workflow(&target_workflow_id)
                 .await?;
             steps.first().map(|s| s.name.clone())
         };
@@ -281,7 +281,7 @@ impl TransitionToCommand {
         if let Some(step_name) = &parsed.step {
             let steps = services
                 .steps()
-                .list_steps_for_workflow(&workflow_thing)
+                .list_steps_for_workflow(&target_workflow_id)
                 .await?;
             if let Some(step) = steps.iter().find(|s| s.name == *step_name)
                 && let Some(step_id) = &step.id
@@ -292,7 +292,7 @@ impl TransitionToCommand {
             // If we have a target step from initial step resolution, find and set the step ID
             let steps = services
                 .steps()
-                .list_steps_for_workflow(&workflow_thing)
+                .list_steps_for_workflow(&target_workflow_id)
                 .await?;
             if let Some(step) = steps.iter().find(|s| &s.name == step_name)
                 && let Some(step_id) = &step.id

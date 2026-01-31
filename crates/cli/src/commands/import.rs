@@ -11,7 +11,10 @@ use std::io::BufRead;
 use std::path::{Path, PathBuf};
 use surrealdb::sql::Thing;
 use vertebrae_core::{ServiceError, VertebraeServices};
-use vertebrae_db::{AgentConfig, CodeRef, Level, Priority, Section, Step, Task, Workflow};
+use vertebrae_db::{
+    AgentConfig, CodeRef, Level, Priority, Section, Step as DbStep, Task as DbTask,
+    Workflow as DbWorkflow,
+};
 
 /// Import database from JSONL format
 #[derive(Debug, Args)]
@@ -273,7 +276,7 @@ impl ImportCommand {
                     services.workflows().delete_workflow(&workflow.id).await?;
                 }
 
-                let db_workflow = Workflow {
+                let db_workflow = DbWorkflow {
                     id: None,
                     name: workflow.name.clone(),
                     description: workflow.description.clone(),
@@ -287,7 +290,7 @@ impl ImportCommand {
                 };
                 services
                     .workflows()
-                    .create_workflow_raw(&workflow.id, &db_workflow)
+                    .create_workflow_raw(&workflow.id, &db_workflow.into())
                     .await?;
                 result.workflows_imported += 1;
             }
@@ -304,7 +307,7 @@ impl ImportCommand {
                     services.steps().delete_step(&step.id).await?;
                 }
 
-                let db_step = Step {
+                let db_step = DbStep {
                     id: None,
                     name: step.name.clone(),
                     workflow_id: make_thing("workflow", &step.workflow_id),
@@ -324,7 +327,7 @@ impl ImportCommand {
                 };
                 services
                     .steps()
-                    .create_step_with_id(&step.id, &db_step)
+                    .create_step_with_id(&step.id, &db_step.into())
                     .await?;
                 result.steps_imported += 1;
             }
@@ -392,7 +395,7 @@ impl ImportCommand {
                     services.tasks().delete_task(&task.id, false).await?;
                 }
 
-                let db_task = Task {
+                let db_task = DbTask {
                     id: None,
                     title: task.title.clone(),
                     description: task.description.clone(),
@@ -417,7 +420,10 @@ impl ImportCommand {
                     started_at: parse_datetime(&task.started_at),
                     completed_at: parse_datetime(&task.completed_at),
                 };
-                services.tasks().create_task_raw(&task.id, &db_task).await?;
+                services
+                    .tasks()
+                    .create_task_raw(&task.id, &db_task.into())
+                    .await?;
                 result.tasks_imported += 1;
             }
         }

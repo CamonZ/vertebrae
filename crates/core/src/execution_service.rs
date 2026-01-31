@@ -5,9 +5,10 @@
 //! for both step executions and session logs.
 
 use crate::error::{ServiceError, ServiceResult};
+use crate::models::{SessionLog, StepExecution};
 use async_trait::async_trait;
 use std::sync::Arc;
-use vertebrae_db::{Database, SessionLog, StepExecution};
+use vertebrae_db::Database;
 
 /// Event representing an execution mutation for cache invalidation
 #[derive(Debug, Clone)]
@@ -156,10 +157,11 @@ impl DefaultExecutionService {
 #[async_trait]
 impl ExecutionService for DefaultExecutionService {
     async fn create_execution(&self, execution: StepExecution) -> ServiceResult<String> {
-        let id = self.db.executions().create_execution(&execution).await?;
+        let db_execution = execution.to_db();
+        let id = self.db.executions().create_execution(&db_execution).await?;
 
         if let Some(callback) = &self.mutation_callback {
-            let task_id = execution.task_id.id.to_raw();
+            let task_id = execution.task_id.clone();
             callback(ExecutionMutationEvent::ExecutionCreated {
                 id: id.clone(),
                 task_id,
@@ -171,23 +173,26 @@ impl ExecutionService for DefaultExecutionService {
 
     async fn get_execution(&self, id: &str) -> ServiceResult<Option<StepExecution>> {
         let normalized_id = Self::normalize_id(id);
-        Ok(self.db.executions().get_execution(&normalized_id).await?)
+        let result = self.db.executions().get_execution(&normalized_id).await?;
+        Ok(result.map(|db_exec| db_exec.into()))
     }
 
     async fn list_executions_for_task(&self, task_id: &str) -> ServiceResult<Vec<StepExecution>> {
         let normalized_id = Self::normalize_id(task_id);
-        Ok(self
+        let results = self
             .db
             .executions()
             .list_executions_for_task(&normalized_id)
-            .await?)
+            .await?;
+        Ok(results.into_iter().map(|db_exec| db_exec.into()).collect())
     }
 
     async fn add_log(&self, log: SessionLog) -> ServiceResult<String> {
-        let id = self.db.executions().add_log(&log).await?;
+        let db_log = log.to_db();
+        let id = self.db.executions().add_log(&db_log).await?;
 
         if let Some(callback) = &self.mutation_callback {
-            let execution_id = log.step_execution_id.id.to_raw();
+            let execution_id = log.step_execution_id.clone();
             callback(ExecutionMutationEvent::LogAdded {
                 id: id.clone(),
                 execution_id,
@@ -199,11 +204,12 @@ impl ExecutionService for DefaultExecutionService {
 
     async fn list_logs_for_execution(&self, execution_id: &str) -> ServiceResult<Vec<SessionLog>> {
         let normalized_id = Self::normalize_id(execution_id);
-        Ok(self
+        let results = self
             .db
             .executions()
             .list_logs_for_execution(&normalized_id)
-            .await?)
+            .await?;
+        Ok(results.into_iter().map(|db_log| db_log.into()).collect())
     }
 
     async fn get_latest_execution_for_task(
@@ -211,11 +217,12 @@ impl ExecutionService for DefaultExecutionService {
         task_id: &str,
     ) -> ServiceResult<Option<StepExecution>> {
         let normalized_id = Self::normalize_id(task_id);
-        Ok(self
+        let result = self
             .db
             .executions()
             .get_latest_execution_for_task(&normalized_id)
-            .await?)
+            .await?;
+        Ok(result.map(|db_exec| db_exec.into()))
     }
 
     async fn update_execution(
@@ -235,7 +242,6 @@ impl ExecutionService for DefaultExecutionService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vertebrae_db::Thing;
 
     /// Create an initialized execution service for testing
     async fn setup_test_service() -> DefaultExecutionService {
@@ -265,10 +271,7 @@ mod tests {
     async fn test_create_execution() {
         let service = setup_test_service().await;
 
-        let task_id = Thing::from(("task", "test_task"));
-        let workflow_id = Thing::from(("workflow", "test_workflow"));
-
-        let execution = StepExecution::new(task_id, workflow_id, "backlog");
+        let execution = StepExecution::new("test_task", "test_workflow", "backlog");
         let id = service.create_execution(execution).await.unwrap();
 
         assert!(!id.is_empty());
@@ -278,10 +281,7 @@ mod tests {
     async fn test_get_execution() {
         let service = setup_test_service().await;
 
-        let task_id = Thing::from(("task", "test_task"));
-        let workflow_id = Thing::from(("workflow", "test_workflow"));
-
-        let execution = StepExecution::new(task_id, workflow_id, "backlog");
+        let execution = StepExecution::new("test_task", "test_workflow", "backlog");
         let id = service.create_execution(execution).await.unwrap();
 
         let retrieved = service.get_execution(&id).await.unwrap();
@@ -300,10 +300,7 @@ mod tests {
     async fn test_list_executions_for_task() {
         let service = setup_test_service().await;
 
-        let task_id = Thing::from(("task", "test_task"));
-        let workflow_id = Thing::from(("workflow", "test_workflow"));
-
-        let execution = StepExecution::new(task_id, workflow_id, "backlog");
+        let execution = StepExecution::new("test_task", "test_workflow", "backlog");
         service.create_execution(execution).await.unwrap();
 
         let executions = service.list_executions_for_task("test_task").await.unwrap();
@@ -322,16 +319,10 @@ mod tests {
     async fn test_add_log() {
         let service = setup_test_service().await;
 
-        let task_id = Thing::from(("task", "test_task"));
-        let workflow_id = Thing::from(("workflow", "test_workflow"));
-
-        let execution = StepExecution::new(task_id, workflow_id, "backlog");
+        let execution = StepExecution::new("test_task", "test_workflow", "backlog");
         let exec_id = service.create_execution(execution).await.unwrap();
 
-        let log = SessionLog::new(
-            Thing::from(("step_execution", exec_id.as_str())),
-            "Test log content",
-        );
+        let log = SessionLog::new(&exec_id, "Test log content");
         let log_id = service.add_log(log).await.unwrap();
 
         assert!(!log_id.is_empty());
@@ -341,16 +332,10 @@ mod tests {
     async fn test_list_logs_for_execution() {
         let service = setup_test_service().await;
 
-        let task_id = Thing::from(("task", "test_task"));
-        let workflow_id = Thing::from(("workflow", "test_workflow"));
-
-        let execution = StepExecution::new(task_id, workflow_id, "backlog");
+        let execution = StepExecution::new("test_task", "test_workflow", "backlog");
         let exec_id = service.create_execution(execution).await.unwrap();
 
-        let log = SessionLog::new(
-            Thing::from(("step_execution", exec_id.as_str())),
-            "Test log content",
-        );
+        let log = SessionLog::new(&exec_id, "Test log content");
         service.add_log(log).await.unwrap();
 
         let logs = service.list_logs_for_execution(&exec_id).await.unwrap();
@@ -361,10 +346,7 @@ mod tests {
     async fn test_list_logs_for_execution_empty() {
         let service = setup_test_service().await;
 
-        let task_id = Thing::from(("task", "test_task"));
-        let workflow_id = Thing::from(("workflow", "test_workflow"));
-
-        let execution = StepExecution::new(task_id, workflow_id, "backlog");
+        let execution = StepExecution::new("test_task", "test_workflow", "backlog");
         let exec_id = service.create_execution(execution).await.unwrap();
 
         let logs = service.list_logs_for_execution(&exec_id).await.unwrap();
@@ -375,13 +357,10 @@ mod tests {
     async fn test_get_latest_execution_for_task() {
         let service = setup_test_service().await;
 
-        let task_id = Thing::from(("task", "test_task"));
-        let workflow_id = Thing::from(("workflow", "test_workflow"));
-
-        let execution = StepExecution::new(task_id.clone(), workflow_id.clone(), "backlog");
+        let execution = StepExecution::new("test_task", "test_workflow", "backlog");
         service.create_execution(execution).await.unwrap();
 
-        let execution2 = StepExecution::new(task_id.clone(), workflow_id, "in_progress");
+        let execution2 = StepExecution::new("test_task", "test_workflow", "in_progress");
         let second_id = service.create_execution(execution2).await.unwrap();
 
         let latest = service
@@ -389,7 +368,7 @@ mod tests {
             .await
             .unwrap();
         assert!(latest.is_some());
-        assert_eq!(latest.unwrap().id.unwrap().id.to_raw(), second_id);
+        assert_eq!(latest.unwrap().id, Some(second_id));
     }
 
     #[tokio::test]
@@ -405,7 +384,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_mutation_callback_create_execution() {
-        use std::sync::Arc as StdArc;
         use std::sync::atomic::{AtomicUsize, Ordering};
 
         let db = Database::connect_mem().await.unwrap();
@@ -426,7 +404,7 @@ mod tests {
             .await
             .unwrap();
 
-        let call_count = StdArc::new(AtomicUsize::new(0));
+        let call_count = Arc::new(AtomicUsize::new(0));
         let call_count_clone = call_count.clone();
 
         let callback = Arc::new(move |_event: ExecutionMutationEvent| {
@@ -435,10 +413,7 @@ mod tests {
 
         let service = DefaultExecutionService::with_callback(db, callback);
 
-        let task_id = Thing::from(("task", "test_task"));
-        let workflow_id = Thing::from(("workflow", "test_workflow"));
-
-        let execution = StepExecution::new(task_id, workflow_id, "backlog");
+        let execution = StepExecution::new("test_task", "test_workflow", "backlog");
         service.create_execution(execution).await.unwrap();
 
         assert_eq!(call_count.load(Ordering::SeqCst), 1);
@@ -446,7 +421,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_mutation_callback_add_log() {
-        use std::sync::Arc as StdArc;
         use std::sync::atomic::{AtomicUsize, Ordering};
 
         let db = Database::connect_mem().await.unwrap();
@@ -467,7 +441,7 @@ mod tests {
             .await
             .unwrap();
 
-        let call_count = StdArc::new(AtomicUsize::new(0));
+        let call_count = Arc::new(AtomicUsize::new(0));
         let call_count_clone = call_count.clone();
 
         let callback = Arc::new(move |_event: ExecutionMutationEvent| {
@@ -476,16 +450,10 @@ mod tests {
 
         let service = DefaultExecutionService::with_callback(db, callback);
 
-        let task_id = Thing::from(("task", "test_task"));
-        let workflow_id = Thing::from(("workflow", "test_workflow"));
-
-        let execution = StepExecution::new(task_id, workflow_id, "backlog");
+        let execution = StepExecution::new("test_task", "test_workflow", "backlog");
         let exec_id = service.create_execution(execution).await.unwrap();
 
-        let log = SessionLog::new(
-            Thing::from(("step_execution", exec_id.as_str())),
-            "Test log content",
-        );
+        let log = SessionLog::new(&exec_id, "Test log content");
         service.add_log(log).await.unwrap();
 
         assert_eq!(call_count.load(Ordering::SeqCst), 2);

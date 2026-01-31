@@ -6,8 +6,7 @@
 use chrono::Utc;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
-use vertebrae_core::{ExecutionService, TaskService};
-use vertebrae_db::{ExecutionStatus, StepExecution, Thing};
+use vertebrae_core::{ExecutionService, ExecutionStatus, StepExecution, TaskService};
 
 use crate::events::{
     StepExecutionChangeType, StepExecutionChangedEvent, StepExecutionStatus,
@@ -28,7 +27,7 @@ const MAX_RETRIES: u32 = 3;
 ///
 /// Retries up to MAX_RETRIES times on failure.
 pub async fn execute_step_two_phase(
-    step: vertebrae_db::Step,
+    step: vertebrae_core::Step,
     task_id: &str,
     workflow_id: &str,
     tasks: &Arc<dyn TaskService>,
@@ -299,7 +298,7 @@ pub async fn execute_step_two_phase(
 
 /// Create a new execution record and emit creation event
 async fn create_execution_record(
-    step: &vertebrae_db::Step,
+    step: &vertebrae_core::Step,
     task_id: &str,
     workflow_id: &str,
     tasks: &Arc<dyn TaskService>,
@@ -315,8 +314,8 @@ async fn create_execution_record(
     );
     let execution = StepExecution {
         id: None,
-        task_id: Thing::from(("task".to_string(), task_id.to_string())),
-        workflow_id: Thing::from(("workflow".to_string(), workflow_id.to_string())),
+        task_id: task_id.to_string(),
+        workflow_id: workflow_id.to_string(),
         step_name: step.name.clone(),
         started_at: Utc::now(),
         completed_at: None,

@@ -9,8 +9,8 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
-use vertebrae_core::{ExecutionService, OrchestratorOutput};
-use vertebrae_db::{PermissionMode, SessionLog, Thing};
+use vertebrae_core::{ExecutionService, OrchestratorOutput, SessionLog};
+use vertebrae_db::PermissionMode;
 
 use crate::events::{WorkflowExecutionEvent, WorkflowExecutionEventType};
 
@@ -25,7 +25,7 @@ use super::logging::{append_to_workflow_log, trace};
 /// The executor is blocked from running vtb workflow transition commands - the workflow
 /// runner controls all step transitions.
 pub async fn run_execution(
-    step: &vertebrae_db::Step,
+    step: &vertebrae_core::Step,
     exec_id: &str,
     task_id: &str,
     workflow_id: &str,
@@ -221,10 +221,7 @@ You MUST follow these requirements exactly. Use the specified commands - do NOT 
                     for output_line in &output_batch {
                         let log_entry = SessionLog {
                             id: None,
-                            step_execution_id: Thing::from((
-                                "step_execution".to_string(),
-                                exec_id.to_string(),
-                            )),
+                            step_execution_id: exec_id.to_string(),
                             content: output_line.clone(),
                             created_at: Utc::now(),
                         };
@@ -275,7 +272,7 @@ You MUST follow these requirements exactly. Use the specified commands - do NOT 
         for output_line in output_batch {
             let log_entry = SessionLog {
                 id: None,
-                step_execution_id: Thing::from(("step_execution".to_string(), exec_id.to_string())),
+                step_execution_id: exec_id.to_string(),
                 content: output_line,
                 created_at: Utc::now(),
             };

@@ -5,7 +5,6 @@
 
 use crate::commands::list::TaskSummary;
 use clap::Args;
-use serde::Deserialize;
 use vertebrae_core::{ServiceError, VertebraeServices, WorkflowInfo, WorkflowService};
 use vertebrae_db::{CodeRef, Section, SectionType};
 
@@ -62,86 +61,63 @@ pub struct TaskDetail {
     pub blocks: Vec<TaskSummary>,
 }
 
-/// Result from querying a task - handles SurrealDB Thing id format
-#[derive(Debug, Deserialize)]
+/// Result from querying a task - handles display format
+#[derive(Debug)]
 struct TaskRow {
-    id: surrealdb::sql::Thing,
+    id: String,
     title: String,
-    #[serde(default)]
     description: Option<String>,
     level: String,
     status: String,
     priority: Option<String>,
-    #[serde(default)]
     tags: Vec<String>,
-    #[serde(default)]
-    created_at: Option<surrealdb::sql::Datetime>,
-    #[serde(default)]
-    updated_at: Option<surrealdb::sql::Datetime>,
-    #[serde(default)]
-    completed_at: Option<surrealdb::sql::Datetime>,
-    #[serde(default)]
+    created_at: Option<chrono::DateTime<chrono::Utc>>,
+    updated_at: Option<chrono::DateTime<chrono::Utc>>,
+    completed_at: Option<chrono::DateTime<chrono::Utc>>,
     needs_human_review: Option<bool>,
-    #[serde(default)]
     revision_feedback: Option<String>,
-    #[serde(default)]
     rejection_reason: Option<String>,
-    #[serde(default)]
-    workflow_id: Option<surrealdb::sql::Thing>,
-    #[serde(default)]
-    current_step_id: Option<surrealdb::sql::Thing>,
-    #[serde(default)]
+    workflow_id: Option<String>,
+    current_step_id: Option<String>,
     sections: Vec<SectionRow>,
-    #[serde(default, rename = "refs")]
     code_refs: Vec<CodeRefRow>,
 }
 
 /// Section row from database
-#[derive(Debug, Deserialize)]
+#[derive(Debug)]
 struct SectionRow {
-    #[serde(rename = "type", default)]
     section_type: Option<String>,
-    #[serde(default)]
     content: Option<String>,
-    #[serde(default)]
     order: Option<u32>,
-    #[serde(default)]
     refs: Vec<CodeRefRow>,
 }
 
 /// Code reference row from database
-#[derive(Debug, Deserialize)]
+#[derive(Debug)]
 struct CodeRefRow {
-    #[serde(default)]
     path: Option<String>,
-    #[serde(default)]
     line_start: Option<u32>,
-    #[serde(default)]
     line_end: Option<u32>,
-    #[serde(default)]
     name: Option<String>,
-    #[serde(default)]
     description: Option<String>,
 }
 
 /// Related task row from graph queries
-#[derive(Debug, Deserialize)]
+#[derive(Debug)]
 struct RelatedTaskRow {
-    id: surrealdb::sql::Thing,
+    id: String,
     title: String,
     level: String,
     status: String,
     priority: Option<String>,
-    #[serde(default)]
     tags: Vec<String>,
-    #[serde(default)]
     needs_human_review: Option<bool>,
 }
 
 impl From<RelatedTaskRow> for TaskSummary {
     fn from(row: RelatedTaskRow) -> Self {
         TaskSummary {
-            id: row.id.id.to_raw(),
+            id: row.id,
             title: row.title,
             level: row.level,
             status: row.status,
@@ -184,8 +160,8 @@ impl ShowCommand {
         let workflow = self
             .fetch_workflow_info(
                 services.workflows(),
-                task.workflow_id.as_ref(),
-                task.current_step_id.as_ref(),
+                task.workflow_id.as_deref(),
+                task.current_step_id.as_deref(),
             )
             .await?;
 
@@ -267,7 +243,7 @@ impl ShowCommand {
         };
 
         Ok(TaskDetail {
-            id: task.id.id.to_raw(),
+            id: task.id,
             title: task.title,
             description: task.description,
             level: task.level.as_str().to_string(),
@@ -313,9 +289,9 @@ impl ShowCommand {
             status: derived_status,
             priority: task.priority.map(|p| p.as_str().to_string()),
             tags: task.tags,
-            created_at: task.created_at.map(surrealdb::sql::Datetime::from),
-            updated_at: task.updated_at.map(surrealdb::sql::Datetime::from),
-            completed_at: task.completed_at.map(surrealdb::sql::Datetime::from),
+            created_at: task.created_at,
+            updated_at: task.updated_at,
+            completed_at: task.completed_at,
             needs_human_review: task.needs_human_review,
             revision_feedback: task.revision_feedback,
             rejection_reason: task.rejection_reason,
@@ -466,8 +442,8 @@ impl ShowCommand {
     async fn fetch_workflow_info(
         &self,
         service: &dyn WorkflowService,
-        workflow_id: Option<&surrealdb::sql::Thing>,
-        current_step_id: Option<&surrealdb::sql::Thing>,
+        workflow_id: Option<&str>,
+        current_step_id: Option<&str>,
     ) -> Result<Option<WorkflowInfo>, ServiceError> {
         let workflow_id = match workflow_id {
             Some(wf_id) => wf_id,

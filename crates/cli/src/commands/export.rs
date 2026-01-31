@@ -293,16 +293,16 @@ impl ExportCommand {
         // 1b. Map step IDs
         let steps = services.steps().list_all_steps().await?;
         for step in &steps {
-            if let Some(thing) = &step.id {
-                mapper.step(&thing.id.to_raw());
+            if let Some(ref id) = step.id {
+                mapper.step(id);
             }
         }
 
         // 1c. Map workflow transition IDs
         let transitions = services.workflows().list_workflow_transitions(None).await?;
         for transition in &transitions {
-            if let Some(thing) = &transition.id {
-                mapper.workflow_transition(&thing.id.to_raw());
+            if let Some(id) = &transition.id {
+                mapper.workflow_transition(id);
             }
         }
 
@@ -320,9 +320,7 @@ impl ExportCommand {
         let workflow_count = workflows.len();
         for (old_id, workflow) in workflows {
             let new_id = mapper.get_workflow(&old_id).unwrap_or_default();
-            let initial_step_id = workflow
-                .initial_step
-                .and_then(|t| mapper.get_step(&t.id.to_raw()));
+            let initial_step_id = workflow.initial_step.and_then(|id| mapper.get_step(&id));
 
             records.push(ExportRecord::Workflow(ExportedWorkflow {
                 id: new_id,
@@ -339,15 +337,13 @@ impl ExportCommand {
         // 2b. Export steps
         let step_count = steps.len();
         for step in steps {
-            let old_id = step.id.as_ref().map(|t| t.id.to_raw()).unwrap_or_default();
-            let new_id = mapper.get_step(&old_id).unwrap_or_default();
-            let workflow_id = mapper
-                .get_workflow(&step.workflow_id.id.to_raw())
-                .unwrap_or_default();
+            let old_id = step.id.as_deref().unwrap_or_default();
+            let new_id = mapper.get_step(old_id).unwrap_or_default();
+            let workflow_id = mapper.get_workflow(&step.workflow_id).unwrap_or_default();
             let transitions_to: Vec<String> = step
                 .transitions_to
                 .iter()
-                .filter_map(|t| mapper.get_step(&t.id.to_raw()))
+                .filter_map(|t| mapper.get_step(t))
                 .collect();
 
             records.push(ExportRecord::Step(Box::new(ExportedStep {
@@ -369,21 +365,15 @@ impl ExportCommand {
         // 2c. Export workflow transitions
         let transition_count = transitions.len();
         for transition in transitions {
-            let old_id = transition
-                .id
-                .as_ref()
-                .map(|t| t.id.to_raw())
-                .unwrap_or_default();
+            let old_id = transition.id.clone().unwrap_or_default();
             let new_id = mapper.get_workflow_transition(&old_id).unwrap_or_default();
             let from_workflow_id = mapper
-                .get_workflow(&transition.from_workflow.id.to_raw())
+                .get_workflow(&transition.from_workflow)
                 .unwrap_or_default();
             let to_workflow_id = mapper
-                .get_workflow(&transition.to_workflow.id.to_raw())
+                .get_workflow(&transition.to_workflow)
                 .unwrap_or_default();
-            let target_step_id = transition
-                .target_step
-                .and_then(|t| mapper.get_step(&t.id.to_raw()));
+            let target_step_id = transition.target_step.and_then(|id| mapper.get_step(&id));
 
             records.push(ExportRecord::WorkflowTransition(
                 ExportedWorkflowTransition {
@@ -400,12 +390,8 @@ impl ExportCommand {
         let task_count = tasks.len();
         for (old_id, task) in tasks {
             let new_id = mapper.get_task(&old_id).unwrap_or_default();
-            let workflow_id = task
-                .workflow_id
-                .and_then(|t| mapper.get_workflow(&t.id.to_raw()));
-            let current_step_id = task
-                .current_step_id
-                .and_then(|t| mapper.get_step(&t.id.to_raw()));
+            let workflow_id = task.workflow_id.and_then(|id| mapper.get_workflow(&id));
+            let current_step_id = task.current_step_id.and_then(|id| mapper.get_step(&id));
 
             records.push(ExportRecord::Task(Box::new(ExportedTask {
                 id: new_id,

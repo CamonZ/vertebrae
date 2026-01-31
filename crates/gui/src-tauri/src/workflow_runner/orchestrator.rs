@@ -22,7 +22,7 @@ use super::parsing::parse_orchestrator_output;
 /// Spawns Haiku agent with read-only vtb commands to analyze task context
 /// and generate a structured JSON prompt. Does not manage execution status.
 pub async fn run_orchestrator(
-    step: &vertebrae_db::Step,
+    step: &vertebrae_core::Step,
     exec_id: &str,
     task_id: &str,
     workflow_id: &str,
@@ -96,8 +96,8 @@ pub async fn run_orchestrator(
     }
 
     // Build the orchestrator prompt with task and step context
-    let step_id = step.id.as_ref().map(|t| t.id.to_raw()).unwrap_or_default();
-    let prompt = orchestrator_prompt(task_id, &step_id);
+    let step_id = step.id.as_deref().unwrap_or_default();
+    let prompt = orchestrator_prompt(task_id, step_id);
 
     // Log the orchestrator prompt for debugging
     log::info!("[WorkflowRunner] Phase 1 orchestrator prompt:\n{}", prompt);

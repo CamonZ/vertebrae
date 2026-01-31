@@ -399,22 +399,22 @@ pub async fn list_workflow_transitions(
     let result: Vec<crate::types::WorkflowTransition> = transitions
         .into_iter()
         .map(|t| {
-            let from_id = t.from_workflow.id.to_raw();
-            let to_id = t.to_workflow.id.to_raw();
+            let from_id = &t.from_workflow;
+            let to_id = &t.to_workflow;
             crate::types::WorkflowTransition {
-                id: t.id.map(|thing| thing.id.to_raw()),
+                id: t.id,
                 from_workflow_id: from_id.clone(),
                 from_workflow_name: workflow_names
-                    .get(&from_id)
+                    .get(from_id)
                     .cloned()
                     .unwrap_or_else(|| from_id.clone()),
                 to_workflow_id: to_id.clone(),
                 to_workflow_name: workflow_names
-                    .get(&to_id)
+                    .get(to_id)
                     .cloned()
                     .unwrap_or_else(|| to_id.clone()),
                 label: t.label,
-                target_step_id: t.target_step.map(|s| s.id.to_raw()),
+                target_step_id: t.target_step,
             }
         })
         .collect();
@@ -450,19 +450,15 @@ pub async fn get_workflow_with_tasks(
     let all_tasks = service.tasks().list_tasks(&filter).await?;
 
     // Filter tasks that have this workflow_id
-    // Tasks store workflow_id as Thing, so we need to match the id portion
-    let workflow_id_str = workflow
-        .id
-        .as_ref()
-        .map(|t| t.id.to_raw())
-        .unwrap_or_default();
+    // Tasks now have workflow_id as Option<String> from the service
+    let workflow_id_str = workflow.id.clone().unwrap_or_default();
 
     // We need to get full tasks to check workflow_id since TaskSummary doesn't include it
     let mut tasks = Vec::new();
     for summary in all_tasks {
         if let Ok(task) = service.tasks().get_task(&summary.id).await {
-            if let Some(ref wf_id) = task.workflow_id {
-                if wf_id.id.to_raw() == workflow_id_str {
+            if let Some(wf_id) = &task.workflow_id {
+                if wf_id == &workflow_id_str {
                     tasks.push(summary.into());
                 }
             }
@@ -508,11 +504,7 @@ pub async fn get_workflow_with_task_details(
     );
 
     // Get the workflow_id string for filtering
-    let workflow_id_str = workflow
-        .id
-        .as_ref()
-        .map(|t| t.id.to_raw())
-        .unwrap_or_default();
+    let workflow_id_str = workflow.id.clone().unwrap_or_default();
 
     // Query tasks with filter for the workflow using optimized single-query method
     let query_start = std::time::Instant::now();
@@ -648,13 +640,7 @@ pub async fn list_steps_for_workflow(
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    let workflow_thing = surrealdb::sql::Thing::from(("workflow", workflow_id.as_str()));
-
-    match service
-        .steps()
-        .list_steps_for_workflow(&workflow_thing)
-        .await
-    {
+    match service.steps().list_steps_for_workflow(&workflow_id).await {
         Ok(steps) => {
             log::info!("list_steps_for_workflow returned {} steps", steps.len());
             Ok(steps.into_iter().map(Into::into).collect())
@@ -721,16 +707,11 @@ pub async fn create_step(
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    let workflow_thing = surrealdb::sql::Thing::from(("workflow", workflow_id.as_str()));
-
     // Build transitions_to list
-    let transitions: Vec<surrealdb::sql::Thing> = transitions_to
-        .iter()
-        .map(|id| surrealdb::sql::Thing::from(("step", id.as_str())))
-        .collect();
+    let transitions: Vec<String> = transitions_to.iter().map(|id| id.to_lowercase()).collect();
 
     // Build the step
-    let mut step = vertebrae_db::Step::new(&name, workflow_thing)
+    let mut step = vertebrae_core::Step::new(&name, workflow_id)
         .with_agents(agents)
         .with_skills(skills)
         .with_order(order)
@@ -796,7 +777,7 @@ pub async fn update_step(
     }
 
     // Build the update
-    let mut update = vertebrae_db::StepUpdate::new();
+    let mut update = vertebrae_core::StepUpdate::new();
 
     if let Some(name) = name {
         update = update.with_name(&name);
@@ -823,11 +804,8 @@ pub async fn update_step(
     }
 
     if let Some(transitions) = transitions_to {
-        let transition_things: Vec<surrealdb::sql::Thing> = transitions
-            .iter()
-            .map(|id| surrealdb::sql::Thing::from(("step", id.as_str())))
-            .collect();
-        update = update.with_transitions_to(transition_things);
+        let transition_ids: Vec<String> = transitions.iter().map(|id| id.to_lowercase()).collect();
+        update = update.with_transitions_to(transition_ids);
     }
 
     match service.steps().update_step(&step_id, &update).await {
@@ -841,8 +819,8 @@ pub async fn update_step(
                     let _ = app_handle.emit(
                         "step-changed-event",
                         crate::events::StepChangedEvent {
-                            step_id: id.id.to_raw(),
-                            workflow_id: step.workflow_id.id.to_raw(),
+                            step_id: id.clone(),
+                            workflow_id: step.workflow_id.clone(),
                             change_type: crate::events::StepChangeType::Updated,
                         },
                     );
@@ -881,7 +859,7 @@ pub async fn delete_step(
             message: format!("Step not found: {}", step_id),
         });
     }
-    let workflow_id = existing.unwrap().workflow_id.id.to_raw();
+    let workflow_id = existing.unwrap().workflow_id.clone();
 
     match service.steps().delete_step(&step_id).await {
         Ok(_) => {
@@ -1070,7 +1048,10 @@ pub async fn create_chat_session(
         .ok_or_else(CommandError::no_project_selected)?;
 
     let db_session = vertebrae_db::ChatSession::new(working_dir);
-    let created_id = service.chat_sessions().create_session(db_session).await?;
+    let created_id = service
+        .chat_sessions()
+        .create_session(db_session.into())
+        .await?;
 
     // Fetch the created session to return it
     let session = service
@@ -1192,7 +1173,7 @@ pub async fn add_chat_message(
 
     let session_thing = surrealdb::sql::Thing::from(("chat_session", session_id.as_str()));
     let message = vertebrae_db::ChatMessage::new(session_thing, content);
-    let id = service.chat_sessions().add_message(message).await?;
+    let id = service.chat_sessions().add_message(message.into()).await?;
 
     Ok(id)
 }
@@ -1529,12 +1510,10 @@ pub async fn assign_workflow(
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    // Create a Thing reference for the workflow using the From trait
-    let workflow_thing = vertebrae_db::Thing::from(("workflow", workflow_id.as_str()));
-
+    // Assign the workflow to the task
     service
         .tasks()
-        .assign_workflow(&task_id, &workflow_thing)
+        .assign_workflow(&task_id, &workflow_id)
         .await?;
     log::info!("Successfully assigned workflow to task: {}", task_id);
     Ok(())

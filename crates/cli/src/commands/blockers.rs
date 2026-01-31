@@ -155,7 +155,7 @@ impl BlockersCommand {
                     // Use WorkflowService.get_workflow_info() instead of direct database calls
                     let workflow_info = services
                         .workflows()
-                        .get_workflow_info(wf_id, Some(step_id))
+                        .get_workflow_info(wf_id, Some(step_id.as_str()))
                         .await
                         .ok();
                     (
@@ -183,8 +183,8 @@ impl BlockersCommand {
                     tags: task.tags,
                     needs_human_review: task.needs_human_review,
                     created_at: task.created_at.unwrap_or_else(chrono::Utc::now),
-                    workflow_id: task.workflow_id.as_ref().map(|t| t.id.to_raw()),
-                    current_step_id: task.current_step_id.as_ref().map(|t| t.id.to_raw()),
+                    workflow_id: task.workflow_id,
+                    current_step_id: task.current_step_id,
                     workflow_name,
                     step_name: Some(step_name),
                 });

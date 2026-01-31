@@ -49,7 +49,7 @@ impl TransitionAddCommand {
 
         let target_step_info = transition
             .target_step
-            .map(|s| format!(" at step {}", s.id.to_raw()))
+            .map(|s| format!(" at step {}", s))
             .unwrap_or_default();
 
         Ok(format!(

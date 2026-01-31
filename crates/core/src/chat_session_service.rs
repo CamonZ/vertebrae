@@ -5,9 +5,10 @@
 //! for chat sessions and their messages.
 
 use crate::error::{ServiceError, ServiceResult};
+use crate::models::{ChatMessage, ChatSession};
 use async_trait::async_trait;
 use std::sync::Arc;
-use vertebrae_db::{ChatMessage, ChatSession, Database};
+use vertebrae_db::Database;
 
 /// Event representing a chat session mutation for cache invalidation
 #[derive(Debug, Clone)]
@@ -167,7 +168,8 @@ impl DefaultChatSessionService {
 #[async_trait]
 impl ChatSessionService for DefaultChatSessionService {
     async fn create_session(&self, session: ChatSession) -> ServiceResult<String> {
-        let created = self.db.chat_sessions().create_session(&session).await?;
+        let db_session = session.to_db();
+        let created = self.db.chat_sessions().create_session(&db_session).await?;
 
         let id = created
             .id_string()
@@ -181,19 +183,16 @@ impl ChatSessionService for DefaultChatSessionService {
     }
 
     async fn get_session(&self, id: &str) -> ServiceResult<Option<ChatSession>> {
-        self.db
-            .chat_sessions()
-            .get_session(id)
-            .await
-            .map_err(Into::into)
+        let result = self.db.chat_sessions().get_session(id).await?;
+        Ok(result.map(|db_session| db_session.into()))
     }
 
     async fn list_sessions(&self, limit: Option<usize>) -> ServiceResult<Vec<ChatSession>> {
-        self.db
-            .chat_sessions()
-            .list_sessions(limit)
-            .await
-            .map_err(Into::into)
+        let results = self.db.chat_sessions().list_sessions(limit).await?;
+        Ok(results
+            .into_iter()
+            .map(|db_session| db_session.into())
+            .collect())
     }
 
     async fn end_session(&self, id: &str) -> ServiceResult<()> {
@@ -218,9 +217,10 @@ impl ChatSessionService for DefaultChatSessionService {
     }
 
     async fn add_message(&self, message: ChatMessage) -> ServiceResult<String> {
-        let session_id_str = message.session_id.id.to_raw().to_string();
+        let session_id_str = message.session_id.clone();
+        let db_message = message.to_db();
 
-        let msg_id = self.db.chat_sessions().add_message(&message).await?;
+        let msg_id = self.db.chat_sessions().add_message(&db_message).await?;
 
         if let Some(ref callback) = self.mutation_callback {
             callback(ChatSessionMutationEvent::MessageAdded {
@@ -233,11 +233,8 @@ impl ChatSessionService for DefaultChatSessionService {
     }
 
     async fn list_messages(&self, session_id: &str) -> ServiceResult<Vec<ChatMessage>> {
-        self.db
-            .chat_sessions()
-            .list_messages(session_id)
-            .await
-            .map_err(Into::into)
+        let results = self.db.chat_sessions().list_messages(session_id).await?;
+        Ok(results.into_iter().map(|db_msg| db_msg.into()).collect())
     }
 
     async fn get_session_content(&self, session_id: &str) -> ServiceResult<String> {
@@ -387,12 +384,10 @@ mod tests {
         let session = ChatSession::new(None);
 
         let id = service.create_session(session).await.unwrap();
-        let session_obj = service.get_session(&id).await.unwrap().unwrap();
-        let session_thing = session_obj.id.unwrap();
 
         // Add messages
         for i in 0..3 {
-            let message = ChatMessage::new(session_thing.clone(), format!("Message {}", i));
+            let message = ChatMessage::new(&id, format!("Message {}", i));
             service.add_message(message).await.unwrap();
         }
 
@@ -409,11 +404,9 @@ mod tests {
         let session = ChatSession::new(None);
 
         let id = service.create_session(session).await.unwrap();
-        let session_obj = service.get_session(&id).await.unwrap().unwrap();
-        let session_thing = session_obj.id.unwrap();
 
         for content in ["Hello", " ", "World"] {
-            let message = ChatMessage::new(session_thing.clone(), content);
+            let message = ChatMessage::new(&id, content);
             service.add_message(message).await.unwrap();
         }
 

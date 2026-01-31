@@ -45,6 +45,7 @@ pub mod error;
 pub mod execution_service;
 pub mod gate_service;
 pub mod id_generator;
+pub mod models;
 pub mod orchestrator;
 pub mod service;
 pub mod services;
@@ -78,8 +79,13 @@ pub use workflow_service::{
     WorkflowMutationEvent, WorkflowService, WorkflowStepInput, WorkflowSummary,
 };
 
-// Re-export commonly used types from vertebrae-db
-pub use vertebrae_db::{
-    BlockerNode, CodeRef, Database, Level, Priority, Section, SectionType, Step, StepUpdate, Task,
-    TaskFilter, TaskSummary, TaskUpdate, Workflow, WorkflowTransition,
+// Re-export domain models for convenience
+pub use models::{
+    AgentConfig, BlockerNode, ChatMessage, ChatSession, CodeRef, ExecutionStatus, Level,
+    PermissionMode, Priority, Section, SectionType, SessionLog, Step, StepExecution, StepUpdate,
+    Task, TaskFilter, TaskSummary, TaskUpdate, TokenUsage, ValidationGate, ValidationGateType,
+    ValidationGateUpdate, ValidationMechanism, ValidationResult, Workflow, WorkflowTransition,
 };
+
+// Re-export Database for convenience
+pub use vertebrae_db::Database;

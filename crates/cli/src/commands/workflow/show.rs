@@ -31,14 +31,14 @@ impl WorkflowShowCommand {
         let workflow_id = workflow
             .id
             .as_ref()
-            .map(|t| t.id.to_raw())
+            .cloned()
             .unwrap_or_else(|| self.id.clone());
 
         // Get steps from first-class Step entities
-        let steps = if let Some(ref workflow_thing) = workflow.id {
+        let steps = if let Some(ref workflow_id_str) = workflow.id {
             let first_class_steps = services
                 .steps()
-                .list_steps_for_workflow(workflow_thing)
+                .list_steps_for_workflow(workflow_id_str.as_str())
                 .await?;
             // Convert to display format
             first_class_steps

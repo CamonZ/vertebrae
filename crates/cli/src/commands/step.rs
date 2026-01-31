@@ -3,8 +3,7 @@
 //! Implements the `vtb step` subcommand group for creating and managing steps.
 
 use clap::{Args, Subcommand};
-use vertebrae_core::{ServiceError, StepService, VertebraeServices};
-use vertebrae_db::{AgentConfig, Step, StepUpdate, Thing};
+use vertebrae_core::{AgentConfig, ServiceError, Step, StepService, StepUpdate, VertebraeServices};
 
 /// Step management commands
 #[derive(Debug, Subcommand)]
@@ -103,8 +102,8 @@ impl StepAddCommand {
     /// - The workflow doesn't exist
     /// - Service operations fail
     pub async fn execute(&self, service: &dyn StepService) -> Result<String, ServiceError> {
-        // Build the workflow Thing reference
-        let workflow_id = Thing::from(("workflow", self.workflow.to_lowercase().as_str()));
+        // Build the workflow ID string
+        let workflow_id = self.workflow.to_lowercase();
 
         // Build agent config (legacy support)
         let mut agent_config = AgentConfig::new();
@@ -112,11 +111,11 @@ impl StepAddCommand {
             agent_config = agent_config.with_model(model);
         }
 
-        // Build transitions_to list
-        let transitions_to: Vec<Thing> = self
+        // Build transitions_to list (string IDs)
+        let transitions_to: Vec<String> = self
             .transitions_to
             .iter()
-            .map(|id| Thing::from(("step", id.to_lowercase().as_str())))
+            .map(|id| id.to_lowercase())
             .collect();
 
         // Build the step
@@ -140,7 +139,7 @@ impl StepAddCommand {
             step = step.with_skills(self.skill.clone());
         }
 
-        // Add transitions one at a time
+        // Add transitions
         for transition in transitions_to {
             step = step.with_transition(transition);
         }
@@ -157,7 +156,7 @@ impl StepAddCommand {
         let step_id = created
             .id
             .as_ref()
-            .map(|t| t.id.to_string())
+            .map(|t| t.to_string())
             .unwrap_or_else(|| "unknown".to_string());
 
         Ok(format!("Created step: {}", step_id))
@@ -185,7 +184,7 @@ impl StepListCommand {
     ///
     /// Returns `ServiceError` if service operations fail.
     pub async fn execute(&self, service: &dyn StepService) -> Result<String, ServiceError> {
-        let workflow_id = Thing::from(("workflow", self.workflow.to_lowercase().as_str()));
+        let workflow_id = self.workflow.to_lowercase();
         let steps = service.list_steps_for_workflow(&workflow_id).await?;
 
         if steps.is_empty() {
@@ -197,7 +196,7 @@ impl StepListCommand {
             .map(|s| {
                 let id =
                     s.id.as_ref()
-                        .map(|t| t.id.to_string())
+                        .map(|t| t.to_string())
                         .unwrap_or_else(|| "?".to_string());
                 let model = s.agent_config.model.as_deref().unwrap_or("default");
                 let final_marker = if s.is_final { " [FINAL]" } else { "" };
@@ -248,9 +247,9 @@ impl StepShowCommand {
             Some(s) => {
                 let id =
                     s.id.as_ref()
-                        .map(|t| t.id.to_string())
+                        .map(|t| t.to_string())
                         .unwrap_or_else(|| "?".to_string());
-                let workflow_id = s.workflow_id.id.to_string();
+                let workflow_id = s.workflow_id.to_string();
                 let model = s.agent_config.model.as_deref().unwrap_or("default");
 
                 let goal = s.goal.as_deref().unwrap_or("(none)");
@@ -272,7 +271,7 @@ impl StepShowCommand {
                 } else {
                     s.transitions_to
                         .iter()
-                        .map(|t| t.id.to_string())
+                        .map(|t| t.to_string())
                         .collect::<Vec<_>>()
                         .join(", ")
                 };
@@ -435,10 +434,10 @@ impl StepUpdateCommand {
         if self.clear_transitions {
             updates = updates.with_transitions_to(vec![]);
         } else if !self.transitions_to.is_empty() {
-            let transitions: Vec<Thing> = self
+            let transitions: Vec<String> = self
                 .transitions_to
                 .iter()
-                .map(|id| Thing::from(("step", id.to_lowercase().as_str())))
+                .map(|id| id.to_lowercase())
                 .collect();
             updates = updates.with_transitions_to(transitions);
         }

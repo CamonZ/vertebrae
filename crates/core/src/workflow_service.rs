@@ -5,9 +5,11 @@
 //! task-workflow assignments, and workflow transitions.
 
 use crate::error::{ServiceError, ServiceResult};
+use crate::models::{Workflow, WorkflowTransition};
 use async_trait::async_trait;
 use std::sync::Arc;
-use vertebrae_db::{Database, Thing, Workflow, WorkflowTransition};
+use vertebrae_db;
+use vertebrae_db::{Database, Thing};
 
 /// Event representing a workflow mutation for cache invalidation
 #[derive(Debug, Clone)]
@@ -388,8 +390,8 @@ pub trait WorkflowService: Send + Sync {
     /// Handles deleted workflows by returning placeholder information.
     async fn get_workflow_info(
         &self,
-        workflow_id: &Thing,
-        current_step_id: Option<&Thing>,
+        workflow_id: &str,
+        current_step_id: Option<&str>,
     ) -> ServiceResult<WorkflowInfo>;
 
     /// Migrate tasks to the default workflow
@@ -531,8 +533,9 @@ impl DefaultWorkflowService {
     ///
     /// Fetches first-class Step entities from the database.
     async fn get_workflow_steps(&self, workflow: &Workflow) -> ServiceResult<Vec<String>> {
-        if let Some(ref workflow_thing) = workflow.id {
-            let steps = self.db.steps().list_by_workflow(workflow_thing).await?;
+        if let Some(ref workflow_id) = workflow.id {
+            let workflow_thing = Thing::from(("workflow", workflow_id.as_str()));
+            let steps = self.db.steps().list_by_workflow(&workflow_thing).await?;
             return Ok(steps.iter().map(|s| s.name.clone()).collect());
         }
 
@@ -584,8 +587,22 @@ impl WorkflowService for DefaultWorkflowService {
             workflow = workflow.with_description(desc);
         }
 
+        // Convert to db Workflow for persistence
+        let mut db_workflow = vertebrae_db::Workflow::new(&options.name)
+            .with_auto_advance(options.auto_advance)
+            .with_order(options.order);
+
+        if let Some(desc) = &workflow.description {
+            db_workflow = db_workflow.with_description(desc);
+        }
+
+        if let Some(gate_id) = &workflow.validation_gate_id {
+            db_workflow = db_workflow
+                .with_validation_gate(Thing::from(("validation_gate", gate_id.as_str())));
+        }
+
         // Create workflow in database first (needed for step references)
-        self.db.workflows().create(&id, &workflow).await?;
+        self.db.workflows().create(&id, &db_workflow).await?;
 
         // Create first-class Step entities
         let workflow_thing = vertebrae_db::Thing::from(("workflow", id.as_str()));
@@ -643,6 +660,7 @@ impl WorkflowService for DefaultWorkflowService {
             .get(&id)
             .await?
             .ok_or_else(|| ServiceError::workflow_not_found(&id))
+            .map(|db_workflow| db_workflow.into())
     }
 
     async fn list_workflows(&self) -> ServiceResult<Vec<WorkflowSummary>> {
@@ -1044,20 +1062,20 @@ impl WorkflowService for DefaultWorkflowService {
 
     async fn get_workflow_info(
         &self,
-        workflow_id: &Thing,
-        current_step_id: Option<&Thing>,
+        workflow_id: &str,
+        current_step_id: Option<&str>,
     ) -> ServiceResult<WorkflowInfo> {
-        let id = workflow_id.id.to_raw();
+        let id = workflow_id.to_lowercase();
 
         // Try to get the workflow
-        let workflow = match self.db.workflows().get(&id).await? {
-            Some(w) => w,
+        let workflow: Workflow = match self.db.workflows().get(&id).await? {
+            Some(w) => w.into(),
             None => {
                 // Workflow was deleted, return placeholder
                 return Ok(WorkflowInfo {
                     id,
                     name: "Deleted Workflow".to_string(),
-                    current_step_id: current_step_id.map(|s| s.id.to_raw()),
+                    current_step_id: current_step_id.map(|s| s.to_lowercase()),
                     current_step_name: "Unknown".to_string(),
                     current_step_index: 0,
                     total_steps: 0,
@@ -1074,7 +1092,7 @@ impl WorkflowService for DefaultWorkflowService {
             return Ok(WorkflowInfo {
                 id,
                 name: workflow.name,
-                current_step_id: current_step_id.map(|s| s.id.to_raw()),
+                current_step_id: current_step_id.map(|s| s.to_lowercase()),
                 current_step_name: "Unknown".to_string(),
                 current_step_index: 0,
                 total_steps: 0,
@@ -1083,42 +1101,65 @@ impl WorkflowService for DefaultWorkflowService {
             });
         }
 
-        let (current_step_index, step_id_str) = if let Some(current_step_id) = current_step_id {
-            let current_step_id_str = current_step_id.id.to_raw();
+        if let Some(current_step_id) = current_step_id {
+            let current_step_id_str = current_step_id.to_lowercase();
             if let Some(current_step) = self.db.steps().get(&current_step_id_str).await? {
                 let order = current_step.order as usize;
-                (order.min(step_names.len() - 1), Some(current_step_id_str))
+                let current_step_index = order.min(step_names.len() - 1);
+                let step_id_str = Some(current_step_id_str);
+
+                let current_step_name = step_names[current_step_index].clone();
+
+                let prev_step_name = if current_step_index > 0 {
+                    Some(step_names[current_step_index - 1].clone())
+                } else {
+                    None
+                };
+
+                let next_step_name = if current_step_index < step_names.len() - 1 {
+                    Some(step_names[current_step_index + 1].clone())
+                } else {
+                    None
+                };
+
+                Ok(WorkflowInfo {
+                    id,
+                    name: workflow.name,
+                    current_step_id: step_id_str,
+                    current_step_name,
+                    current_step_index,
+                    total_steps,
+                    prev_step_name,
+                    next_step_name,
+                })
             } else {
-                (0, Some(current_step_id_str))
+                Ok(WorkflowInfo {
+                    id,
+                    name: workflow.name,
+                    current_step_id: Some(current_step_id_str),
+                    current_step_name: "Unknown".to_string(),
+                    current_step_index: 0,
+                    total_steps: 0,
+                    prev_step_name: None,
+                    next_step_name: None,
+                })
             }
         } else {
-            (0, None)
-        };
-
-        let current_step_name = step_names[current_step_index].clone();
-
-        let prev_step_name = if current_step_index > 0 {
-            Some(step_names[current_step_index - 1].clone())
-        } else {
-            None
-        };
-
-        let next_step_name = if current_step_index < step_names.len() - 1 {
-            Some(step_names[current_step_index + 1].clone())
-        } else {
-            None
-        };
-
-        Ok(WorkflowInfo {
-            id,
-            name: workflow.name,
-            current_step_id: step_id_str,
-            current_step_name,
-            current_step_index,
-            total_steps,
-            prev_step_name,
-            next_step_name,
-        })
+            Ok(WorkflowInfo {
+                id,
+                name: workflow.name,
+                current_step_id: None,
+                current_step_name: step_names[0].clone(),
+                current_step_index: 0,
+                total_steps,
+                prev_step_name: None,
+                next_step_name: if total_steps > 1 {
+                    Some(step_names[1].clone())
+                } else {
+                    None
+                },
+            })
+        }
     }
 
     async fn migrate_to_default_workflow(&self, dry_run: bool) -> ServiceResult<MigrationResult> {
@@ -1202,7 +1243,7 @@ impl WorkflowService for DefaultWorkflowService {
             id: from_id.clone(),
         });
 
-        Ok(transition)
+        Ok(transition.into())
     }
 
     async fn list_workflow_transitions(
@@ -1219,7 +1260,7 @@ impl WorkflowService for DefaultWorkflowService {
             }
             None => self.db.workflow_transitions().list_all().await?,
         };
-        Ok(transitions)
+        Ok(transitions.into_iter().map(|t| t.into()).collect())
     }
 
     async fn get_transitions_from_workflow(
@@ -1232,7 +1273,7 @@ impl WorkflowService for DefaultWorkflowService {
             .workflow_transitions()
             .get_from_workflow(&id)
             .await?;
-        Ok(transitions)
+        Ok(transitions.into_iter().map(|t| t.into()).collect())
     }
 
     async fn get_transitions_to_workflow(
@@ -1241,7 +1282,7 @@ impl WorkflowService for DefaultWorkflowService {
     ) -> ServiceResult<Vec<WorkflowTransition>> {
         let id = workflow_id.to_lowercase();
         let transitions = self.db.workflow_transitions().get_to_workflow(&id).await?;
-        Ok(transitions)
+        Ok(transitions.into_iter().map(|t| t.into()).collect())
     }
 
     async fn delete_workflow_transition(
@@ -1294,7 +1335,20 @@ impl WorkflowService for DefaultWorkflowService {
     }
     async fn create_workflow_raw(&self, id: &str, workflow: &Workflow) -> ServiceResult<String> {
         let id = id.to_lowercase();
-        self.db.workflows().create(&id, workflow).await?;
+
+        // Convert domain Workflow to db Workflow
+        let mut db_workflow = vertebrae_db::Workflow::new(&workflow.name)
+            .with_auto_advance(workflow.auto_advance)
+            .with_order(workflow.order);
+        if let Some(desc) = &workflow.description {
+            db_workflow = db_workflow.with_description(desc);
+        }
+        if let Some(gate_id) = &workflow.validation_gate_id {
+            db_workflow = db_workflow
+                .with_validation_gate(Thing::from(("validation_gate", gate_id.as_str())));
+        }
+
+        self.db.workflows().create(&id, &db_workflow).await?;
         Ok(id)
     }
 
@@ -1310,7 +1364,7 @@ impl WorkflowService for DefaultWorkflowService {
         let mut exported = Vec::new();
         for workflow in workflows {
             if let Some(id) = workflow.id.as_ref().map(|thing| thing.id.to_raw()) {
-                exported.push((id, workflow));
+                exported.push((id, workflow.into()));
             }
         }
         Ok(exported)

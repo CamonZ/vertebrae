@@ -5,8 +5,9 @@
 //! to share the same business logic.
 
 use crate::error::{ServiceError, ServiceResult};
+use crate::models::{ValidationGate, ValidationGateUpdate};
 use async_trait::async_trait;
-use vertebrae_db::{Database, Thing, ValidationGate, ValidationGateType, ValidationGateUpdate};
+use vertebrae_db::{Database, Thing};
 
 /// Service trait for validation gate operations
 ///
@@ -101,7 +102,7 @@ pub trait GateService: Send + Sync {
     /// Returns `ServiceError` if the database query fails
     async fn list_gates_by_type(
         &self,
-        gate_type: ValidationGateType,
+        gate_type: vertebrae_db::ValidationGateType,
     ) -> ServiceResult<Vec<ValidationGate>>;
 
     /// Update a validation gate.
@@ -131,7 +132,7 @@ pub trait GateService: Send + Sync {
     ///
     /// # Arguments
     ///
-    /// * `gate_id` - The parent gate's Thing reference
+    /// * `gate_id` - The parent gate's ID
     ///
     /// # Returns
     ///
@@ -159,7 +160,8 @@ impl DefaultGateService {
 impl GateService for DefaultGateService {
     async fn create_gate(&self, gate: &ValidationGate) -> ServiceResult<String> {
         let repo = self.db.validation_gates();
-        let created = repo.create(gate).await?;
+        let db_gate = gate.to_db();
+        let created = repo.create(&db_gate).await?;
 
         created
             .id
@@ -172,8 +174,9 @@ impl GateService for DefaultGateService {
     async fn create_gate_with_id(&self, id: &str, gate: &ValidationGate) -> ServiceResult<String> {
         let repo = self.db.validation_gates();
         let id_lower = id.to_lowercase();
+        let db_gate = gate.to_db();
 
-        let created = repo.create_with_id(&id_lower, gate).await?;
+        let created = repo.create_with_id(&id_lower, &db_gate).await?;
 
         created
             .id
@@ -187,7 +190,8 @@ impl GateService for DefaultGateService {
         let repo = self.db.validation_gates();
         let id_lower = id.to_lowercase();
 
-        repo.get(&id_lower).await.map_err(ServiceError::from)
+        let result = repo.get(&id_lower).await?;
+        Ok(result.map(|db_gate| db_gate.into()))
     }
 
     async fn gate_exists(&self, id: &str) -> ServiceResult<bool> {
@@ -200,25 +204,26 @@ impl GateService for DefaultGateService {
     async fn list_gates(&self) -> ServiceResult<Vec<ValidationGate>> {
         let repo = self.db.validation_gates();
 
-        repo.list().await.map_err(ServiceError::from)
+        let results = repo.list().await?;
+        Ok(results.into_iter().map(|db_gate| db_gate.into()).collect())
     }
 
     async fn list_gates_by_type(
         &self,
-        gate_type: ValidationGateType,
+        gate_type: vertebrae_db::ValidationGateType,
     ) -> ServiceResult<Vec<ValidationGate>> {
         let repo = self.db.validation_gates();
 
-        repo.list_by_type(gate_type)
-            .await
-            .map_err(ServiceError::from)
+        let results = repo.list_by_type(gate_type).await?;
+        Ok(results.into_iter().map(|db_gate| db_gate.into()).collect())
     }
 
     async fn update_gate(&self, id: &str, updates: &ValidationGateUpdate) -> ServiceResult<()> {
         let repo = self.db.validation_gates();
         let id_lower = id.to_lowercase();
+        let db_update = updates.to_db();
 
-        repo.update(&id_lower, updates)
+        repo.update(&id_lower, &db_update)
             .await
             .map_err(ServiceError::from)
     }
@@ -236,9 +241,8 @@ impl GateService for DefaultGateService {
         // Parse the gate_id as a Thing reference
         let thing = Thing::from(("validation_gate", gate_id.to_lowercase().as_str()));
 
-        repo.get_child_gates(&thing)
-            .await
-            .map_err(ServiceError::from)
+        let results = repo.get_child_gates(&thing).await?;
+        Ok(results.into_iter().map(|db_gate| db_gate.into()).collect())
     }
 }
 

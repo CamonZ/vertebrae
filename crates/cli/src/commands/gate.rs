@@ -3,11 +3,10 @@
 //! Implements the `vtb gate` subcommand group for creating and managing validation gates.
 
 use clap::{Args, Subcommand, ValueEnum};
-use vertebrae_core::{ServiceError, VertebraeServices};
-use vertebrae_db::{
-    AgentConfig, Thing, ValidationGate, ValidationGateType, ValidationGateUpdate,
-    ValidationMechanism,
+use vertebrae_core::{
+    AgentConfig, ValidationGate, ValidationGateType, ValidationGateUpdate, ValidationMechanism,
 };
+use vertebrae_core::{ServiceError, VertebraeServices};
 
 /// Gate management commands
 #[derive(Debug, Subcommand)]
@@ -185,9 +184,7 @@ impl GateCreateCommand {
                 }
                 let mut gate = ValidationGate::composite(&self.name, mech.into());
                 for child_id in &self.children {
-                    let child_thing =
-                        Thing::from(("validation_gate", child_id.to_lowercase().as_str()));
-                    gate = gate.with_child_gate(child_thing);
+                    gate = gate.with_child_gate(child_id.to_lowercase());
                 }
                 if let Some(threshold) = self.threshold {
                     gate = gate.with_pass_threshold(threshold);
@@ -241,10 +238,7 @@ impl GateListCommand {
         let output = gates
             .iter()
             .map(|g| {
-                let id =
-                    g.id.as_ref()
-                        .map(|t| t.id.to_string())
-                        .unwrap_or_else(|| "?".to_string());
+                let id = g.id.as_deref().unwrap_or("?");
                 let desc = g
                     .description
                     .as_deref()
@@ -277,10 +271,7 @@ impl GateShowCommand {
 
         match gate {
             Some(g) => {
-                let id =
-                    g.id.as_ref()
-                        .map(|t| t.id.to_string())
-                        .unwrap_or_else(|| "?".to_string());
+                let id = g.id.as_deref().unwrap_or("?");
 
                 let mut details = vec![
                     format!("Gate: {} - {}", id, g.name),
@@ -318,7 +309,7 @@ impl GateShowCommand {
                         }
                         if !g.child_gates.is_empty() {
                             let children: Vec<String> =
-                                g.child_gates.iter().map(|t| t.id.to_string()).collect();
+                                g.child_gates.iter().map(|t| t.to_string()).collect();
                             details.push(format!("Child Gates:   {}", children.join(", ")));
                         }
                         if let Some(threshold) = g.pass_threshold {

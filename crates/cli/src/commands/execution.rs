@@ -4,9 +4,8 @@
 //! and updating step executions and their associated session logs.
 
 use clap::{Args, Subcommand};
-use surrealdb::sql::Thing;
+use vertebrae_core::{ExecutionStatus, SessionLog, StepExecution};
 use vertebrae_core::{ServiceError, VertebraeServices};
-use vertebrae_db::{ExecutionStatus, SessionLog, StepExecution};
 
 /// Execution management commands
 #[derive(Debug, Subcommand)]
@@ -101,10 +100,10 @@ impl ExecutionCreateCommand {
         })?;
         let step = services
             .steps()
-            .get_step(&step_id.id.to_raw())
+            .get_step(step_id.as_str())
             .await?
             .ok_or_else(|| {
-                ServiceError::validation_failed(format!("step '{}' not found", step_id.id.to_raw()))
+                ServiceError::validation_failed(format!("step '{}' not found", step_id))
             })?;
         let step_name = step.name;
 
@@ -123,8 +122,7 @@ impl ExecutionCreateCommand {
         }
 
         // Create the step execution
-        let task_thing = Thing::from(("task", task_id.as_str()));
-        let mut execution = StepExecution::new(task_thing, workflow_id.clone(), &step_name);
+        let mut execution = StepExecution::new(task_id.clone(), workflow_id.clone(), &step_name);
 
         if let Some(ref context) = self.context {
             execution = execution.with_context(context);
@@ -253,7 +251,7 @@ impl ExecutionListCommand {
             let exec_id = execution
                 .id
                 .as_ref()
-                .map(|t| t.id.to_raw())
+                .cloned()
                 .unwrap_or_else(|| "?".to_string());
             let short_id = if exec_id.len() > 6 {
                 &exec_id[..6]
@@ -321,11 +319,11 @@ impl ExecutionShowCommand {
         let exec_id = execution
             .id
             .as_ref()
-            .map(|t| t.id.to_raw())
+            .cloned()
             .unwrap_or_else(|| "?".to_string());
 
-        let task_id = execution.task_id.id.to_raw();
-        let workflow_id = execution.workflow_id.id.to_raw();
+        let task_id = execution.task_id.clone();
+        let workflow_id = execution.workflow_id.clone();
 
         let status_str = match execution.status {
             ExecutionStatus::InProgress => "IN_PROGRESS",
@@ -427,11 +425,7 @@ impl ExecutionShowCommand {
 
             for (i, log) in logs.iter().enumerate() {
                 let created = log.created_at.format("%Y-%m-%d %H:%M:%S");
-                let log_id = log
-                    .id
-                    .as_ref()
-                    .map(|t| t.id.to_raw())
-                    .unwrap_or_else(|| "?".to_string());
+                let log_id = log.id.as_ref().cloned().unwrap_or_else(|| "?".to_string());
                 output.push_str(&format!("\n[{}] Log {} ({})\n", i + 1, created, log_id));
                 output.push_str(&"-".repeat(20));
                 output.push('\n');
@@ -489,10 +483,9 @@ impl ExecutionLogCommand {
         let exec_id = execution
             .id
             .as_ref()
-            .map(|t| t.id.to_raw())
+            .cloned()
             .unwrap_or_else(|| self.execution_id.clone());
-        let step_execution_thing = Thing::from(("step_execution", exec_id.as_str()));
-        let log = SessionLog::new(step_execution_thing, &self.content);
+        let log = SessionLog::new(exec_id, &self.content);
         let log_id = services.executions().add_log(log).await?;
 
         let content_preview = if self.content.len() > 50 {

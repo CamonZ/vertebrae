@@ -40,12 +40,12 @@ impl TransitionListCommand {
         let output = transitions
             .iter()
             .map(|t| {
-                let from_id = t.from_workflow.id.to_raw();
-                let to_id = t.to_workflow.id.to_raw();
+                let from_id = &t.from_workflow;
+                let to_id = &t.to_workflow;
                 let target_step = t
                     .target_step
                     .as_ref()
-                    .map(|s| format!(" -> step:{}", s.id.to_raw()))
+                    .map(|s| format!(" -> step:{}", s))
                     .unwrap_or_default();
 
                 format!("{} -> {} [{}]{}", from_id, to_id, t.label, target_step)
