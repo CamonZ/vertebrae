@@ -4,7 +4,6 @@ use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
 
 use vertebrae_cli::commands::Command;
-use vertebrae_cli::notification::create_http_notification_callback;
 use vertebrae_core::ServiceError;
 use vertebrae_sacrum_client::SacrumConfig;
 
@@ -67,14 +66,9 @@ async fn run_with_args(args: &Args) -> Result<(), ServiceError> {
     let client = vertebrae_sacrum_client::SacrumClient::new(config);
     let client_arc = Arc::new(client);
 
-    // Create the task service with HTTP notification callback
-    // This enables CLI mutations to notify the Tauri GUI for cache invalidation
-    let callback = create_http_notification_callback();
-    let services = vertebrae_cli::sacrum::from_sacrum_with_callbacks(
-        client_arc,
-        callback,
-        Arc::new(|_event| { /* No-op for workflow callbacks */ }),
-    );
+    // Create services using Sacrum backend
+    // Sacrum automatically broadcasts all mutations to connected clients
+    let services = vertebrae_cli::sacrum::from_sacrum(client_arc);
 
     // Run the command or show welcome message
     match &args.command {
@@ -94,8 +88,6 @@ async fn run_with_args(args: &Args) -> Result<(), ServiceError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serial_test::serial;
-    use std::env;
 
     #[test]
     fn test_args_parsing() {

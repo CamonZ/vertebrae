@@ -6,6 +6,7 @@ pub mod project_config;
 pub mod pty_manager;
 pub mod sacrum;
 pub mod types;
+pub mod websocket_client;
 pub mod workflow_runner;
 
 use std::sync::Arc;
@@ -172,6 +173,21 @@ pub fn run() {
             // Initialize PTY manager for terminal sessions
             app.manage(PtyManager::new());
             log::info!("[STARTUP] PTY manager initialized");
+
+            // Start WebSocket connection to Sacrum for real-time updates
+            if let Ok(config) = SacrumConfig::load() {
+                log::info!("[STARTUP] Starting WebSocket connection to Sacrum");
+                let socket = websocket_client::SacrumSocket::new(
+                    config.base_url.clone(),
+                    config.api_token.clone(),
+                    config.project_id.clone(),
+                );
+                socket.connect(app.handle());
+                // Keep socket alive by storing it in app state
+                app.manage(socket);
+            } else {
+                log::warn!("[STARTUP] Failed to load Sacrum config, WebSocket connection skipped");
+            }
 
             Ok(())
         })

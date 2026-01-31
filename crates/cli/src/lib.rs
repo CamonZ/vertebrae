@@ -5,7 +5,6 @@
 
 pub mod commands;
 pub mod error;
-pub mod notification;
 pub mod output;
 pub mod sacrum;
 
