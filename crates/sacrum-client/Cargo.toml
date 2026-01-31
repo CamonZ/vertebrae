@@ -18,3 +18,5 @@ vertebrae-core = { path = "../core" }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
+wiremock = "0.6"
+uuid = { version = "1", features = ["v4", "serde"] }
