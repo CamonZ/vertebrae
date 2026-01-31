@@ -596,11 +596,6 @@ impl WorkflowService for DefaultWorkflowService {
             db_workflow = db_workflow.with_description(desc);
         }
 
-        if let Some(gate_id) = &workflow.validation_gate_id {
-            db_workflow = db_workflow
-                .with_validation_gate(Thing::from(("validation_gate", gate_id.as_str())));
-        }
-
         // Create workflow in database first (needed for step references)
         self.db.workflows().create(&id, &db_workflow).await?;
 
@@ -1343,11 +1338,6 @@ impl WorkflowService for DefaultWorkflowService {
         if let Some(desc) = &workflow.description {
             db_workflow = db_workflow.with_description(desc);
         }
-        if let Some(gate_id) = &workflow.validation_gate_id {
-            db_workflow = db_workflow
-                .with_validation_gate(Thing::from(("validation_gate", gate_id.as_str())));
-        }
-
         self.db.workflows().create(&id, &db_workflow).await?;
         Ok(id)
     }

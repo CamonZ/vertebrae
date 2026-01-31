@@ -7,9 +7,7 @@
 use std::sync::Arc;
 use vertebrae_db::Database;
 
-use crate::chat_session_service::{ChatSessionService, DefaultChatSessionService};
 use crate::execution_service::{DefaultExecutionService, ExecutionService};
-use crate::gate_service::{DefaultGateService, GateService};
 use crate::service::{DefaultTaskService, MutationCallback, TaskService};
 use crate::step_service::{DefaultStepService, StepService};
 use crate::workflow_service::{DefaultWorkflowService, WorkflowMutationCallback, WorkflowService};
@@ -36,7 +34,6 @@ use crate::workflow_service::{DefaultWorkflowService, WorkflowMutationCallback, 
 ///     let workflows = services.workflows();
 ///     let executions = services.executions();
 ///     let steps = services.steps();
-///     let chat_sessions = services.chat_sessions();
 ///
 ///     Ok(())
 /// }
@@ -50,10 +47,6 @@ pub struct VertebraeServices {
     executions: Arc<dyn ExecutionService>,
     /// Step service implementation
     steps: Arc<dyn StepService>,
-    /// Chat session service implementation
-    chat_sessions: Arc<dyn ChatSessionService>,
-    /// Gate service implementation
-    gates: Arc<dyn GateService>,
 }
 
 impl VertebraeServices {
@@ -74,9 +67,7 @@ impl VertebraeServices {
             tasks: Arc::new(DefaultTaskService::new(db.clone())),
             workflows: Arc::new(DefaultWorkflowService::new(db.clone())),
             executions: Arc::new(DefaultExecutionService::new(db.clone())),
-            steps: Arc::new(DefaultStepService::new(db.clone())),
-            chat_sessions: Arc::new(DefaultChatSessionService::new(db.clone())),
-            gates: Arc::new(DefaultGateService::new(db)),
+            steps: Arc::new(DefaultStepService::new(db)),
         }
     }
 
@@ -98,9 +89,7 @@ impl VertebraeServices {
             tasks: Arc::new(DefaultTaskService::with_callback(db.clone(), task_callback)),
             workflows: Arc::new(DefaultWorkflowService::new(db.clone())),
             executions: Arc::new(DefaultExecutionService::new(db.clone())),
-            steps: Arc::new(DefaultStepService::new(db.clone())),
-            chat_sessions: Arc::new(DefaultChatSessionService::new(db.clone())),
-            gates: Arc::new(DefaultGateService::new(db)),
+            steps: Arc::new(DefaultStepService::new(db)),
         }
     }
 
@@ -128,9 +117,7 @@ impl VertebraeServices {
                 workflow_callback,
             )),
             executions: Arc::new(DefaultExecutionService::new(db.clone())),
-            steps: Arc::new(DefaultStepService::new(db.clone())),
-            chat_sessions: Arc::new(DefaultChatSessionService::new(db.clone())),
-            gates: Arc::new(DefaultGateService::new(db)),
+            steps: Arc::new(DefaultStepService::new(db)),
         }
     }
 
@@ -159,136 +146,48 @@ impl VertebraeServices {
                 workflow_callback,
             )),
             executions: Arc::new(DefaultExecutionService::new(db.clone())),
-            steps: Arc::new(DefaultStepService::new(db.clone())),
-            chat_sessions: Arc::new(DefaultChatSessionService::new(db.clone())),
-            gates: Arc::new(DefaultGateService::new(db)),
+            steps: Arc::new(DefaultStepService::new(db)),
         }
     }
 
     /// Get a reference to the task service
-    ///
-    /// # Returns
-    ///
-    /// A reference to the TaskService trait object
     pub fn tasks(&self) -> &dyn TaskService {
         self.tasks.as_ref()
     }
 
     /// Get a reference to the workflow service
-    ///
-    /// # Returns
-    ///
-    /// A reference to the WorkflowService trait object
     pub fn workflows(&self) -> &dyn WorkflowService {
         self.workflows.as_ref()
     }
 
     /// Get a reference to the execution service
-    ///
-    /// # Returns
-    ///
-    /// A reference to the ExecutionService trait object
     pub fn executions(&self) -> &dyn ExecutionService {
         self.executions.as_ref()
     }
 
     /// Get a reference to the step service
-    ///
-    /// # Returns
-    ///
-    /// A reference to the StepService trait object
     pub fn steps(&self) -> &dyn StepService {
         self.steps.as_ref()
     }
 
-    /// Get a reference to the chat session service
-    ///
-    /// # Returns
-    ///
-    /// A reference to the ChatSessionService trait object
-    pub fn chat_sessions(&self) -> &dyn ChatSessionService {
-        self.chat_sessions.as_ref()
-    }
-
-    /// Get a reference to the gate service
-    ///
-    /// # Returns
-    ///
-    /// A reference to the GateService trait object
-    pub fn gates(&self) -> &dyn GateService {
-        self.gates.as_ref()
-    }
-
     /// Get an Arc clone to the task service
-    ///
-    /// Useful when you need to share the service across threads or store it
-    /// in application state.
-    ///
-    /// # Returns
-    ///
-    /// An Arc-wrapped reference to the TaskService trait object
     pub fn tasks_arc(&self) -> Arc<dyn TaskService> {
         Arc::clone(&self.tasks)
     }
 
     /// Get an Arc clone to the workflow service
-    ///
-    /// Useful when you need to share the service across threads or store it
-    /// in application state.
-    ///
-    /// # Returns
-    ///
-    /// An Arc-wrapped reference to the WorkflowService trait object
     pub fn workflows_arc(&self) -> Arc<dyn WorkflowService> {
         Arc::clone(&self.workflows)
     }
 
     /// Get an Arc clone to the execution service
-    ///
-    /// Useful when you need to share the service across threads or store it
-    /// in application state.
-    ///
-    /// # Returns
-    ///
-    /// An Arc-wrapped reference to the ExecutionService trait object
     pub fn executions_arc(&self) -> Arc<dyn ExecutionService> {
         Arc::clone(&self.executions)
     }
 
     /// Get an Arc clone to the step service
-    ///
-    /// Useful when you need to share the service across threads or store it
-    /// in application state.
-    ///
-    /// # Returns
-    ///
-    /// An Arc-wrapped reference to the StepService trait object
     pub fn steps_arc(&self) -> Arc<dyn StepService> {
         Arc::clone(&self.steps)
-    }
-
-    /// Get an Arc clone to the chat session service
-    ///
-    /// Useful when you need to share the service across threads or store it
-    /// in application state.
-    ///
-    /// # Returns
-    ///
-    /// An Arc-wrapped reference to the ChatSessionService trait object
-    pub fn chat_sessions_arc(&self) -> Arc<dyn ChatSessionService> {
-        Arc::clone(&self.chat_sessions)
-    }
-
-    /// Get an Arc clone to the gate service
-    ///
-    /// Useful when you need to share the service across threads or store it
-    /// in application state.
-    ///
-    /// # Returns
-    ///
-    /// An Arc-wrapped reference to the GateService trait object
-    pub fn gates_arc(&self) -> Arc<dyn GateService> {
-        Arc::clone(&self.gates)
     }
 }
 
@@ -309,8 +208,6 @@ mod tests {
         let _ = services.workflows();
         let _ = services.executions();
         let _ = services.steps();
-        let _ = services.chat_sessions();
-        let _ = services.gates();
     }
 
     #[tokio::test]
@@ -325,19 +222,12 @@ mod tests {
         let workflows_arc = services.workflows_arc();
         let executions_arc = services.executions_arc();
         let steps_arc = services.steps_arc();
-        let chat_sessions_arc = services.chat_sessions_arc();
-        let gates_arc = services.gates_arc();
 
         // Verify they're the same instances
         assert!(Arc::ptr_eq(&services.tasks_arc(), &tasks_arc));
         assert!(Arc::ptr_eq(&services.workflows_arc(), &workflows_arc));
         assert!(Arc::ptr_eq(&services.executions_arc(), &executions_arc));
         assert!(Arc::ptr_eq(&services.steps_arc(), &steps_arc));
-        assert!(Arc::ptr_eq(
-            &services.chat_sessions_arc(),
-            &chat_sessions_arc
-        ));
-        assert!(Arc::ptr_eq(&services.gates_arc(), &gates_arc));
     }
 
     #[tokio::test]

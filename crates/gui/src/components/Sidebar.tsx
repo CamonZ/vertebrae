@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { commands } from "../bindings";
-import { useChatStore, useUIStore } from "../stores";
+import { useUIStore } from "../stores";
 
 interface NavItemProps {
   to: string;
@@ -50,7 +50,6 @@ function NavItem({ to, icon, label }: NavItemProps) {
 function ChatToggleButton() {
   const toggleChatPanel = useUIStore((s) => s.toggleChatPanel);
   const chatPanelOpen = useUIStore((s) => s.chatPanelOpen);
-  const isChatActive = useChatStore((s) => s.sessionState === "running");
 
   return (
     <li>
@@ -85,13 +84,6 @@ function ChatToggleButton() {
               d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
             />
           </svg>
-          {/* Active session indicator (pulsing dot) */}
-          {isChatActive && (
-            <span className="absolute -right-0.5 -top-0.5 flex h-2.5 w-2.5">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-75" />
-              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-success" />
-            </span>
-          )}
         </span>
       </button>
     </li>

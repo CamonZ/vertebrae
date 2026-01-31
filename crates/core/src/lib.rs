@@ -40,10 +40,8 @@
 //! }
 //! ```
 
-pub mod chat_session_service;
 pub mod error;
 pub mod execution_service;
-pub mod gate_service;
 pub mod id_generator;
 pub mod models;
 pub mod orchestrator;
@@ -53,15 +51,10 @@ pub mod step_service;
 pub mod workflow_service;
 
 // Re-export main types for convenience
-pub use chat_session_service::{
-    ChatSessionMutationCallback, ChatSessionMutationEvent, ChatSessionService,
-    DefaultChatSessionService,
-};
 pub use error::{ServiceError, ServiceResult};
 pub use execution_service::{
     DefaultExecutionService, ExecutionMutationCallback, ExecutionMutationEvent, ExecutionService,
 };
-pub use gate_service::{DefaultGateService, GateService};
 pub use orchestrator::{
     ORCHESTRATOR_AGENT_PATH, ORCHESTRATOR_MODEL, ORCHESTRATOR_PROMPT_TEMPLATE, OrchestratorOutput,
     orchestrator_agent_config, orchestrator_output_schema, orchestrator_prompt,
@@ -81,10 +74,9 @@ pub use workflow_service::{
 
 // Re-export domain models for convenience
 pub use models::{
-    AgentConfig, BlockerNode, ChatMessage, ChatSession, CodeRef, ExecutionStatus, Level,
-    PermissionMode, Priority, Section, SectionType, SessionLog, Step, StepExecution, StepUpdate,
-    Task, TaskFilter, TaskSummary, TaskUpdate, TokenUsage, ValidationGate, ValidationGateType,
-    ValidationGateUpdate, ValidationMechanism, ValidationResult, Workflow, WorkflowTransition,
+    AgentConfig, BlockerNode, CodeRef, ExecutionStatus, Level, PermissionMode, Priority, Section,
+    SectionType, SessionLog, Step, StepExecution, StepUpdate, Task, TaskFilter, TaskSummary,
+    TaskUpdate, TokenUsage, Workflow, WorkflowTransition,
 };
 
 // Re-export Database for convenience

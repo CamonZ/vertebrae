@@ -11,8 +11,7 @@ use serde::{Deserialize, Serialize};
 pub use vertebrae_db::models::TokenUsage;
 pub use vertebrae_db::{
     AgentConfig, BlockerNode, CodeRef, ExecutionStatus, Level, PermissionMode, Priority, Section,
-    SectionType, TaskFilter, TaskSummary, ValidationGateType, ValidationMechanism,
-    ValidationResult,
+    SectionType, TaskFilter, TaskSummary,
 };
 
 /// A task in the Vertebrae task management system (domain model)
@@ -431,10 +430,6 @@ pub struct Workflow {
     #[serde(default)]
     pub metadata: std::collections::HashMap<String, String>,
 
-    /// Validation gate ID
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub validation_gate_id: Option<String>,
-
     /// Auto-advance on completion
     #[serde(default)]
     pub auto_advance: bool,
@@ -461,7 +456,6 @@ impl Workflow {
             description: None,
             initial_step: None,
             metadata: std::collections::HashMap::new(),
-            validation_gate_id: None,
             auto_advance: false,
             order: 0,
             created_at: None,
@@ -498,12 +492,6 @@ impl Workflow {
         self.initial_step = Some(step_id.into());
         self
     }
-
-    /// Set the validation gate
-    pub fn with_validation_gate(mut self, gate_id: impl Into<String>) -> Self {
-        self.validation_gate_id = Some(gate_id.into());
-        self
-    }
 }
 
 impl PartialEq for Workflow {
@@ -512,7 +500,6 @@ impl PartialEq for Workflow {
             && self.description == other.description
             && self.initial_step == other.initial_step
             && self.metadata == other.metadata
-            && self.validation_gate_id == other.validation_gate_id
             && self.auto_advance == other.auto_advance
     }
 }
@@ -527,7 +514,6 @@ impl From<vertebrae_db::Workflow> for Workflow {
             description: db.description,
             initial_step: db.initial_step.as_ref().map(thing_to_id),
             metadata: db.metadata,
-            validation_gate_id: db.validation_gate_id.as_ref().map(thing_to_id),
             auto_advance: db.auto_advance,
             order: db.order,
             created_at: db.created_at,
@@ -854,416 +840,7 @@ impl SessionLog {
     }
 }
 
-/// A chat session (domain model)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChatSession {
-    /// Unique identifier
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub id: Option<String>,
-
-    /// Optional title
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
-
-    /// Working directory
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub working_dir: Option<String>,
-
-    /// When started
-    pub started_at: DateTime<Utc>,
-
-    /// When ended
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ended_at: Option<DateTime<Utc>>,
-}
-
-impl ChatSession {
-    /// Create a new chat session
-    pub fn new(working_dir: Option<String>) -> Self {
-        Self {
-            id: None,
-            title: None,
-            working_dir,
-            started_at: Utc::now(),
-            ended_at: None,
-        }
-    }
-
-    /// Set a title
-    pub fn with_title(mut self, title: impl Into<String>) -> Self {
-        self.title = Some(title.into());
-        self
-    }
-
-    /// Get the session ID as a string if it exists
-    pub fn id_string(&self) -> Option<String> {
-        self.id.clone()
-    }
-}
-
-impl PartialEq for ChatSession {
-    fn eq(&self, other: &Self) -> bool {
-        self.title == other.title
-            && self.working_dir == other.working_dir
-            && self.started_at == other.started_at
-            && self.ended_at == other.ended_at
-    }
-}
-
-impl Eq for ChatSession {}
-
-impl From<vertebrae_db::ChatSession> for ChatSession {
-    fn from(db: vertebrae_db::ChatSession) -> Self {
-        Self {
-            id: db.id.as_ref().map(thing_to_id),
-            title: db.title,
-            working_dir: db.working_dir,
-            started_at: db.started_at,
-            ended_at: db.ended_at,
-        }
-    }
-}
-
-impl ChatSession {
-    /// Convert domain ChatSession to database ChatSession
-    pub fn to_db(&self) -> vertebrae_db::ChatSession {
-        vertebrae_db::ChatSession {
-            id: self
-                .id
-                .as_ref()
-                .map(|id| surrealdb::sql::Thing::from(("chat_session", id.as_str()))),
-            title: self.title.clone(),
-            working_dir: self.working_dir.clone(),
-            started_at: self.started_at,
-            ended_at: self.ended_at,
-        }
-    }
-}
-
-/// A chat message (domain model)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChatMessage {
-    /// Unique identifier
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub id: Option<String>,
-
-    /// Chat session ID
-    pub session_id: String,
-
-    /// Raw terminal content
-    pub content: String,
-
-    /// When created
-    pub created_at: DateTime<Utc>,
-}
-
-impl ChatMessage {
-    /// Create a new chat message
-    pub fn new(session_id: impl Into<String>, content: impl Into<String>) -> Self {
-        Self {
-            id: None,
-            session_id: session_id.into(),
-            content: content.into(),
-            created_at: Utc::now(),
-        }
-    }
-}
-
-impl PartialEq for ChatMessage {
-    fn eq(&self, other: &Self) -> bool {
-        self.session_id == other.session_id && self.content == other.content
-    }
-}
-
-impl Eq for ChatMessage {}
-
-impl From<vertebrae_db::ChatMessage> for ChatMessage {
-    fn from(db: vertebrae_db::ChatMessage) -> Self {
-        Self {
-            id: db.id.as_ref().map(thing_to_id),
-            session_id: thing_to_id(&db.session_id),
-            content: db.content,
-            created_at: db.created_at,
-        }
-    }
-}
-
-impl ChatMessage {
-    /// Convert domain ChatMessage to database ChatMessage
-    pub fn to_db(&self) -> vertebrae_db::ChatMessage {
-        vertebrae_db::ChatMessage {
-            id: self
-                .id
-                .as_ref()
-                .map(|id| surrealdb::sql::Thing::from(("chat_message", id.as_str()))),
-            session_id: surrealdb::sql::Thing::from(("chat_session", self.session_id.as_str())),
-            content: self.content.clone(),
-            created_at: self.created_at,
-        }
-    }
-}
-
-/// A validation gate (domain model)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ValidationGate {
-    /// Unique identifier
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub id: Option<String>,
-
-    /// Name
-    pub name: String,
-
-    /// Description
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-
-    /// Gate type
-    pub gate_type: ValidationGateType,
-
-    /// Mechanism for composite gates
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub mechanism: Option<ValidationMechanism>,
-
-    /// Child gate IDs for composite gates
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub child_gates: Vec<String>,
-
-    /// Pass threshold for weighted mechanism
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub pass_threshold: Option<f64>,
-
-    /// Command for CommandExecution gates
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub command: Option<String>,
-
-    /// Timeout in seconds for CommandExecution gates
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub timeout_seconds: Option<u32>,
-
-    /// Agent config for AgentClassification gates
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub agent_config: Option<AgentConfig>,
-
-    /// Classification prompt for AgentClassification gates
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub classification_prompt: Option<String>,
-
-    /// Creation timestamp
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub created_at: Option<DateTime<Utc>>,
-
-    /// Last update timestamp
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub updated_at: Option<DateTime<Utc>>,
-}
-
-impl ValidationGate {
-    /// Create a new validation gate
-    pub fn new(name: impl Into<String>, gate_type: ValidationGateType) -> Self {
-        Self {
-            id: None,
-            name: name.into(),
-            description: None,
-            gate_type,
-            mechanism: None,
-            child_gates: Vec::new(),
-            pass_threshold: None,
-            command: None,
-            timeout_seconds: None,
-            agent_config: None,
-            classification_prompt: None,
-            created_at: None,
-            updated_at: None,
-        }
-    }
-
-    /// Create a command execution gate
-    pub fn command_execution(name: impl Into<String>, command: impl Into<String>) -> Self {
-        Self {
-            command: Some(command.into()),
-            timeout_seconds: Some(30),
-            ..Self::new(name, ValidationGateType::CommandExecution)
-        }
-    }
-
-    /// Create a manual approval gate
-    pub fn manual_approval(name: impl Into<String>) -> Self {
-        Self::new(name, ValidationGateType::ManualApproval)
-    }
-
-    /// Create an agent classification gate
-    pub fn agent_classification(
-        name: impl Into<String>,
-        prompt: impl Into<String>,
-        config: AgentConfig,
-    ) -> Self {
-        Self {
-            agent_config: Some(config),
-            classification_prompt: Some(prompt.into()),
-            ..Self::new(name, ValidationGateType::AgentClassification)
-        }
-    }
-
-    /// Create a composite gate
-    pub fn composite(name: impl Into<String>, mechanism: ValidationMechanism) -> Self {
-        Self {
-            mechanism: Some(mechanism),
-            ..Self::new(name, ValidationGateType::Composite)
-        }
-    }
-
-    /// Set description
-    pub fn with_description(mut self, description: impl Into<String>) -> Self {
-        self.description = Some(description.into());
-        self
-    }
-
-    /// Add a child gate
-    pub fn with_child_gate(mut self, gate_id: impl Into<String>) -> Self {
-        self.child_gates.push(gate_id.into());
-        self
-    }
-
-    /// Set pass threshold
-    pub fn with_pass_threshold(mut self, threshold: f64) -> Self {
-        self.pass_threshold = Some(threshold);
-        self
-    }
-
-    /// Set command
-    pub fn with_command(mut self, command: impl Into<String>) -> Self {
-        self.command = Some(command.into());
-        self
-    }
-
-    /// Set timeout
-    pub fn with_timeout_seconds(mut self, seconds: u32) -> Self {
-        self.timeout_seconds = Some(seconds);
-        self
-    }
-
-    /// Set agent config
-    pub fn with_agent_config(mut self, config: AgentConfig) -> Self {
-        self.agent_config = Some(config);
-        self
-    }
-
-    /// Set classification prompt
-    pub fn with_classification_prompt(mut self, prompt: impl Into<String>) -> Self {
-        self.classification_prompt = Some(prompt.into());
-        self
-    }
-
-    /// Validate configuration
-    pub fn validate(&self) -> Result<(), String> {
-        match self.gate_type {
-            ValidationGateType::CommandExecution => {
-                if self.command.is_none() {
-                    return Err("CommandExecution gate requires a command".to_string());
-                }
-            }
-            ValidationGateType::AgentClassification => {
-                if self.classification_prompt.is_none() {
-                    return Err(
-                        "AgentClassification gate requires a classification_prompt".to_string()
-                    );
-                }
-                if self.agent_config.is_none() {
-                    return Err("AgentClassification gate requires an agent_config".to_string());
-                }
-            }
-            ValidationGateType::Composite => {
-                if self.mechanism.is_none() {
-                    return Err("Composite gate requires a mechanism".to_string());
-                }
-                if self.child_gates.is_empty() {
-                    return Err("Composite gate requires at least one child gate".to_string());
-                }
-                if let Some(ValidationMechanism::Weighted) = self.mechanism {
-                    if self.pass_threshold.is_none() {
-                        return Err(
-                            "Composite gate with Weighted mechanism requires a pass_threshold"
-                                .to_string(),
-                        );
-                    }
-                    if let Some(threshold) = self.pass_threshold
-                        && !(0.0..=1.0).contains(&threshold)
-                    {
-                        return Err("pass_threshold must be between 0.0 and 1.0".to_string());
-                    }
-                }
-            }
-            ValidationGateType::ManualApproval => {}
-        }
-        Ok(())
-    }
-}
-
-impl PartialEq for ValidationGate {
-    fn eq(&self, other: &Self) -> bool {
-        self.name == other.name
-            && self.description == other.description
-            && self.gate_type == other.gate_type
-            && self.mechanism == other.mechanism
-            && self.child_gates == other.child_gates
-            && self.command == other.command
-            && self.timeout_seconds == other.timeout_seconds
-            && self.agent_config == other.agent_config
-            && self.classification_prompt == other.classification_prompt
-    }
-}
-
-impl Eq for ValidationGate {}
-
-impl From<vertebrae_db::ValidationGate> for ValidationGate {
-    fn from(db: vertebrae_db::ValidationGate) -> Self {
-        Self {
-            id: db.id.as_ref().map(thing_to_id),
-            name: db.name,
-            description: db.description,
-            gate_type: db.gate_type,
-            mechanism: db.mechanism,
-            child_gates: db.child_gates.iter().map(thing_to_id).collect(),
-            pass_threshold: db.pass_threshold,
-            command: db.command,
-            timeout_seconds: db.timeout_seconds,
-            agent_config: db.agent_config,
-            classification_prompt: db.classification_prompt,
-            created_at: db.created_at,
-            updated_at: db.updated_at,
-        }
-    }
-}
-
-impl ValidationGate {
-    /// Convert domain ValidationGate to database ValidationGate
-    pub fn to_db(&self) -> vertebrae_db::ValidationGate {
-        vertebrae_db::ValidationGate {
-            id: self
-                .id
-                .as_ref()
-                .map(|id| surrealdb::sql::Thing::from(("validation_gate", id.as_str()))),
-            name: self.name.clone(),
-            description: self.description.clone(),
-            gate_type: self.gate_type.clone(),
-            mechanism: self.mechanism.clone(),
-            child_gates: self
-                .child_gates
-                .iter()
-                .map(|id| surrealdb::sql::Thing::from(("validation_gate", id.as_str())))
-                .collect(),
-            pass_threshold: self.pass_threshold,
-            command: self.command.clone(),
-            timeout_seconds: self.timeout_seconds,
-            agent_config: self.agent_config.clone(),
-            classification_prompt: self.classification_prompt.clone(),
-            created_at: self.created_at,
-            updated_at: self.updated_at,
-        }
-    }
-}
-
-/// Workflow transition edge (domain model)
+/// A workflow transition edge (domain model)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WorkflowTransition {
     /// Unique identifier
@@ -1457,112 +1034,6 @@ impl StepUpdate {
     }
 }
 
-/// Update options for a validation gate (domain model, no Thing fields)
-#[derive(Debug, Default)]
-pub struct ValidationGateUpdate {
-    /// New name
-    pub name: Option<String>,
-    /// New description
-    pub description: Option<String>,
-    /// New mechanism
-    pub mechanism: Option<ValidationMechanism>,
-    /// New child gate IDs (string IDs)
-    pub child_gates: Option<Vec<String>>,
-    /// New pass threshold
-    pub pass_threshold: Option<f64>,
-    /// New command
-    pub command: Option<String>,
-    /// New timeout
-    pub timeout_seconds: Option<u32>,
-    /// New agent config
-    pub agent_config: Option<serde_json::Value>,
-    /// New classification prompt
-    pub classification_prompt: Option<String>,
-}
-
-impl ValidationGateUpdate {
-    /// Create a new empty update
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Set a new name
-    pub fn with_name(mut self, name: impl Into<String>) -> Self {
-        self.name = Some(name.into());
-        self
-    }
-
-    /// Set a new description
-    pub fn with_description(mut self, description: impl Into<String>) -> Self {
-        self.description = Some(description.into());
-        self
-    }
-
-    /// Set a new mechanism
-    pub fn with_mechanism(mut self, mechanism: ValidationMechanism) -> Self {
-        self.mechanism = Some(mechanism);
-        self
-    }
-
-    /// Set child gate IDs
-    pub fn with_child_gates(mut self, gates: Vec<String>) -> Self {
-        self.child_gates = Some(gates);
-        self
-    }
-
-    /// Set pass threshold
-    pub fn with_pass_threshold(mut self, threshold: f64) -> Self {
-        self.pass_threshold = Some(threshold);
-        self
-    }
-
-    /// Set command
-    pub fn with_command(mut self, command: impl Into<String>) -> Self {
-        self.command = Some(command.into());
-        self
-    }
-
-    /// Set timeout
-    pub fn with_timeout_seconds(mut self, seconds: u32) -> Self {
-        self.timeout_seconds = Some(seconds);
-        self
-    }
-
-    /// Set agent config
-    pub fn with_agent_config(mut self, config: serde_json::Value) -> Self {
-        self.agent_config = Some(config);
-        self
-    }
-
-    /// Set classification prompt
-    pub fn with_classification_prompt(mut self, prompt: impl Into<String>) -> Self {
-        self.classification_prompt = Some(prompt.into());
-        self
-    }
-}
-
-impl ValidationGateUpdate {
-    /// Convert domain ValidationGateUpdate to database ValidationGateUpdate
-    pub fn to_db(&self) -> vertebrae_db::ValidationGateUpdate {
-        vertebrae_db::ValidationGateUpdate {
-            name: self.name.clone(),
-            description: self.description.clone(),
-            mechanism: self.mechanism.clone(),
-            child_gates: self.child_gates.as_ref().map(|gates| {
-                gates
-                    .iter()
-                    .map(|id| surrealdb::sql::Thing::from(("validation_gate", id.as_str())))
-                    .collect()
-            }),
-            pass_threshold: self.pass_threshold,
-            command: self.command.clone(),
-            timeout_seconds: self.timeout_seconds,
-            agent_config: self.agent_config.clone(),
-            classification_prompt: self.classification_prompt.clone(),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1697,8 +1168,7 @@ mod tests {
             .with_auto_advance(true)
             .with_order(2)
             .with_metadata("key", "value")
-            .with_initial_step("step1")
-            .with_validation_gate("gate1");
+            .with_initial_step("step1");
 
         assert_eq!(wf.name, "Dev");
         assert_eq!(wf.description.as_deref(), Some("Development workflow"));
@@ -1706,7 +1176,6 @@ mod tests {
         assert_eq!(wf.order, 2);
         assert_eq!(wf.metadata.get("key").unwrap(), "value");
         assert_eq!(wf.initial_step.as_deref(), Some("step1"));
-        assert_eq!(wf.validation_gate_id.as_deref(), Some("gate1"));
     }
 
     #[test]
@@ -1819,159 +1288,6 @@ mod tests {
         assert_ne!(a, c);
     }
 
-    // ─── ChatSession ────────────────────────────────────────────────
-
-    #[test]
-    fn chat_session_new_and_builders() {
-        let cs = ChatSession::new(Some("/tmp".into())).with_title("My Session");
-        assert_eq!(cs.title.as_deref(), Some("My Session"));
-        assert_eq!(cs.working_dir.as_deref(), Some("/tmp"));
-        assert!(cs.id.is_none());
-        assert!(cs.id_string().is_none());
-    }
-
-    #[test]
-    fn chat_session_partial_eq() {
-        let a = ChatSession::new(Some("/a".into()));
-        let b = ChatSession::new(Some("/b".into()));
-        assert_ne!(a, b);
-    }
-
-    // ─── ChatMessage ────────────────────────────────────────────────
-
-    #[test]
-    fn chat_message_new() {
-        let msg = ChatMessage::new("s1", "hello");
-        assert_eq!(msg.session_id, "s1");
-        assert_eq!(msg.content, "hello");
-    }
-
-    #[test]
-    fn chat_message_partial_eq() {
-        let a = ChatMessage::new("s1", "hi");
-        let b = ChatMessage::new("s1", "hi");
-        assert_eq!(a, b);
-        let c = ChatMessage::new("s2", "hi");
-        assert_ne!(a, c);
-    }
-
-    // ─── ValidationGate ─────────────────────────────────────────────
-
-    #[test]
-    fn validation_gate_constructors() {
-        let manual = ValidationGate::manual_approval("Gate A");
-        assert_eq!(manual.gate_type, ValidationGateType::ManualApproval);
-
-        let cmd = ValidationGate::command_execution("Gate B", "cargo test");
-        assert_eq!(cmd.gate_type, ValidationGateType::CommandExecution);
-        assert_eq!(cmd.command.as_deref(), Some("cargo test"));
-        assert_eq!(cmd.timeout_seconds, Some(30));
-
-        let agent =
-            ValidationGate::agent_classification("Gate C", "Classify this", AgentConfig::default());
-        assert_eq!(agent.gate_type, ValidationGateType::AgentClassification);
-        assert_eq!(
-            agent.classification_prompt.as_deref(),
-            Some("Classify this")
-        );
-        assert!(agent.agent_config.is_some());
-
-        let composite = ValidationGate::composite("Gate D", ValidationMechanism::AllMustPass);
-        assert_eq!(composite.gate_type, ValidationGateType::Composite);
-        assert_eq!(composite.mechanism, Some(ValidationMechanism::AllMustPass));
-    }
-
-    #[test]
-    fn validation_gate_builders() {
-        let gate = ValidationGate::new("G", ValidationGateType::ManualApproval)
-            .with_description("desc")
-            .with_child_gate("c1")
-            .with_pass_threshold(0.75)
-            .with_command("cmd")
-            .with_timeout_seconds(60)
-            .with_agent_config(AgentConfig::default())
-            .with_classification_prompt("prompt");
-
-        assert_eq!(gate.description.as_deref(), Some("desc"));
-        assert_eq!(gate.child_gates, vec!["c1"]);
-        assert_eq!(gate.pass_threshold, Some(0.75));
-        assert_eq!(gate.command.as_deref(), Some("cmd"));
-        assert_eq!(gate.timeout_seconds, Some(60));
-        assert!(gate.agent_config.is_some());
-        assert_eq!(gate.classification_prompt.as_deref(), Some("prompt"));
-    }
-
-    #[test]
-    fn validation_gate_validate_manual_ok() {
-        let gate = ValidationGate::manual_approval("G");
-        assert!(gate.validate().is_ok());
-    }
-
-    #[test]
-    fn validation_gate_validate_command_missing() {
-        let gate = ValidationGate::new("G", ValidationGateType::CommandExecution);
-        assert!(gate.validate().is_err());
-    }
-
-    #[test]
-    fn validation_gate_validate_agent_missing_prompt() {
-        let gate = ValidationGate::new("G", ValidationGateType::AgentClassification)
-            .with_agent_config(AgentConfig::default());
-        assert!(gate.validate().is_err());
-    }
-
-    #[test]
-    fn validation_gate_validate_agent_missing_config() {
-        let gate = ValidationGate::new("G", ValidationGateType::AgentClassification)
-            .with_classification_prompt("p");
-        assert!(gate.validate().is_err());
-    }
-
-    #[test]
-    fn validation_gate_validate_composite_missing_mechanism() {
-        let mut gate = ValidationGate::new("G", ValidationGateType::Composite);
-        gate.child_gates = vec!["c1".into()];
-        assert!(gate.validate().is_err());
-    }
-
-    #[test]
-    fn validation_gate_validate_composite_missing_children() {
-        let gate = ValidationGate::composite("G", ValidationMechanism::AllMustPass);
-        assert!(gate.validate().is_err());
-    }
-
-    #[test]
-    fn validation_gate_validate_composite_weighted_missing_threshold() {
-        let gate =
-            ValidationGate::composite("G", ValidationMechanism::Weighted).with_child_gate("c1");
-        assert!(gate.validate().is_err());
-    }
-
-    #[test]
-    fn validation_gate_validate_composite_weighted_bad_threshold() {
-        let gate = ValidationGate::composite("G", ValidationMechanism::Weighted)
-            .with_child_gate("c1")
-            .with_pass_threshold(1.5);
-        assert!(gate.validate().is_err());
-    }
-
-    #[test]
-    fn validation_gate_validate_composite_weighted_ok() {
-        let gate = ValidationGate::composite("G", ValidationMechanism::Weighted)
-            .with_child_gate("c1")
-            .with_pass_threshold(0.8);
-        assert!(gate.validate().is_ok());
-    }
-
-    #[test]
-    fn validation_gate_partial_eq() {
-        let a = ValidationGate::manual_approval("A");
-        let b = ValidationGate::manual_approval("A");
-        assert_eq!(a, b);
-        let c = ValidationGate::manual_approval("B");
-        assert_ne!(a, c);
-    }
-
     // ─── WorkflowTransition ─────────────────────────────────────────
 
     #[test]
@@ -2005,31 +1321,5 @@ mod tests {
         assert_eq!(u.is_final, Some(true));
         assert_eq!(u.transitions_to.as_ref().unwrap(), &vec!["s2".to_string()]);
         assert_eq!(u.order, Some(3));
-    }
-
-    // ─── ValidationGateUpdate ───────────────────────────────────────
-
-    #[test]
-    fn validation_gate_update_builders() {
-        let u = ValidationGateUpdate::new()
-            .with_name("n")
-            .with_description("d")
-            .with_mechanism(ValidationMechanism::AllMustPass)
-            .with_child_gates(vec!["c1".into()])
-            .with_pass_threshold(0.9)
-            .with_command("cmd")
-            .with_timeout_seconds(30)
-            .with_agent_config(serde_json::json!({}))
-            .with_classification_prompt("p");
-
-        assert_eq!(u.name.as_deref(), Some("n"));
-        assert_eq!(u.description.as_deref(), Some("d"));
-        assert_eq!(u.mechanism, Some(ValidationMechanism::AllMustPass));
-        assert_eq!(u.child_gates.as_ref().unwrap(), &vec!["c1".to_string()]);
-        assert_eq!(u.pass_threshold, Some(0.9));
-        assert_eq!(u.command.as_deref(), Some("cmd"));
-        assert_eq!(u.timeout_seconds, Some(30));
-        assert!(u.agent_config.is_some());
-        assert_eq!(u.classification_prompt.as_deref(), Some("p"));
     }
 }

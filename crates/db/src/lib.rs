@@ -11,17 +11,15 @@ pub mod schema;
 pub use error::{DbError, DbResult, IncompleteChildInfo};
 #[allow(unused_imports)]
 pub use models::{
-    AgentConfig, ChatMessage, ChatSession, CodeRef, ExecutionStatus, Level, PermissionMode,
-    Priority, Section, SectionType, SessionLog, Step, StepExecution, Task, ValidationGate,
-    ValidationGateType, ValidationMechanism, ValidationResult, Workflow, WorkflowTransition,
+    AgentConfig, CodeRef, ExecutionStatus, Level, PermissionMode, Priority, Section, SectionType,
+    SessionLog, Step, StepExecution, Task, Workflow, WorkflowTransition,
 };
 pub use repository::{
-    BlockerNode, ChatSessionRepository, DEFAULT_WORKFLOW_ID, GraphQueries, MigrationResult,
-    Progress, RelationshipRepository, SectionRule, StepExecutionRepository, StepRepository,
-    StepUpdate, TaskFilter, TaskLister, TaskRepository, TaskSummary, TaskUpdate,
-    TaskWithRelationsData, TriageValidationConfig, TriageValidationResult, TriageValidator,
-    ValidationGateRepository, ValidationGateUpdate, ValidationIssue, ValidationSeverity,
-    WorkflowRepository, WorkflowTransitionRepository, WorkflowUpdate,
+    BlockerNode, DEFAULT_WORKFLOW_ID, GraphQueries, MigrationResult, Progress,
+    RelationshipRepository, SectionRule, StepExecutionRepository, StepRepository, StepUpdate,
+    TaskFilter, TaskLister, TaskRepository, TaskSummary, TaskUpdate, TaskWithRelationsData,
+    TriageValidationConfig, TriageValidationResult, TriageValidator, ValidationIssue,
+    ValidationSeverity, WorkflowRepository, WorkflowTransitionRepository, WorkflowUpdate,
 };
 
 use std::path::{Path, PathBuf};
@@ -161,16 +159,6 @@ impl Database {
     /// Get a step repository for CRUD operations on first-class workflow steps.
     pub fn steps(&self) -> StepRepository<'_> {
         StepRepository::new(&self.client)
-    }
-
-    /// Get a chat session repository for managing PTY chat sessions.
-    pub fn chat_sessions(&self) -> ChatSessionRepository<'_> {
-        ChatSessionRepository::new(&self.client)
-    }
-
-    /// Get a validation gate repository for CRUD operations on validation gates.
-    pub fn validation_gates(&self) -> ValidationGateRepository<'_> {
-        ValidationGateRepository::new(&self.client)
     }
 
     /// Get a workflow transition repository for managing workflow-to-workflow transitions.

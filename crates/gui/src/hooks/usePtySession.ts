@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { commands, events, type PtyOutputEvent, type PtyExitEvent } from "../bindings";
 import type { TerminalDimensions } from "../components/Terminal/Terminal";
-import { useChatStore } from "../stores";
 
 /**
  * Session state for PTY session management
@@ -33,9 +32,6 @@ export function usePtySession(options: PtySessionOptions = {}) {
   const [state, setState] = useState<PtySessionState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [exitCode, setExitCode] = useState<number | null>(null);
-
-  // Sync state to global chat store for sidebar indicator
-  const setGlobalSessionState = useChatStore((s) => s.setSessionState);
 
   // Store callbacks in refs to avoid re-subscribing on every render
   const onOutputRef = useRef(onOutput);
@@ -211,11 +207,6 @@ export function usePtySession(options: PtySessionOptions = {}) {
       exitUnlisten?.();
     };
   }, []);
-
-  // Sync state to global chat store for sidebar indicator
-  useEffect(() => {
-    setGlobalSessionState(state);
-  }, [state, setGlobalSessionState]);
 
   // Cleanup session on unmount
   useEffect(() => {

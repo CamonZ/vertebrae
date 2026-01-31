@@ -104,16 +104,6 @@ fn create_builder() -> Builder {
             commands::write_pty,
             commands::resize_pty,
             commands::close_pty_session,
-            // Chat session commands
-            commands::create_chat_session,
-            commands::get_chat_session,
-            commands::list_chat_sessions,
-            commands::end_chat_session,
-            commands::update_chat_session_title,
-            commands::add_chat_message,
-            commands::get_chat_messages,
-            commands::get_chat_session_content,
-            commands::delete_chat_session,
         ])
         .events(collect_events![
             TaskChangedEvent,

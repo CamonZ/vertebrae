@@ -10,6 +10,3 @@ export type { UIStore } from "./uiStore";
 
 export { useToastStore } from "./toastStore";
 export type { ToastStore } from "./toastStore";
-
-export { useChatStore } from "./chatStore";
-export type { ChatStore, PtySessionState } from "./chatStore";

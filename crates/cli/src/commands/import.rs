@@ -282,7 +282,7 @@ impl ImportCommand {
                     description: workflow.description.clone(),
                     initial_step: None, // Set after steps are imported
                     metadata: std::collections::HashMap::new(),
-                    validation_gate_id: None,
+
                     auto_advance: workflow.auto_advance,
                     order: workflow.order,
                     created_at: parse_datetime(&workflow.created_at),
