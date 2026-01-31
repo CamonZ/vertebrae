@@ -46,6 +46,7 @@ futures = "0.3"
 # Workspace dependencies
 vertebrae-core = { path = "../../core" }
 vertebrae-sacrum-client = { path = "../../sacrum-client" }
+slug = "0.1"
 
 # Actor framework for workflow execution
 ractor = "0.12"

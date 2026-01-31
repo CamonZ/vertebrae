@@ -92,13 +92,20 @@ impl ProjectConfig {
     pub fn get_projects(&self) -> Vec<SavedProject> {
         let config = self.load();
 
+        // Load the vertebrae config file once for all projects
+        let vtb_config = vertebrae_sacrum_client::load_config_file().ok();
+
         config
             .projects
             .into_iter()
             .map(|entry| {
                 let path = PathBuf::from(&entry.path);
                 let exists = path.exists();
-                let has_config = exists && path.join(".vtb/config.toml").exists();
+                let has_config = exists
+                    && vtb_config.as_ref().is_some_and(|cfg| {
+                        crate::slug_from_path(&entry.path)
+                            .is_some_and(|slug| cfg.projects.contains_key(&slug))
+                    });
 
                 SavedProject {
                     name: entry.name,
@@ -135,7 +142,11 @@ impl ProjectConfig {
 
         self.save(&config)?;
 
-        let has_config = path_buf.join(".vtb/config.toml").exists();
+        let has_config = vertebrae_sacrum_client::load_config_file()
+            .ok()
+            .is_some_and(|cfg| {
+                crate::slug_from_path(&path).is_some_and(|slug| cfg.projects.contains_key(&slug))
+            });
 
         Ok(SavedProject {
             name,

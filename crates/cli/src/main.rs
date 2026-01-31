@@ -57,8 +57,20 @@ async fn run_app() -> Result<(), ServiceError> {
 
 /// Run the application with the given arguments
 async fn run_with_args(args: &Args) -> Result<(), ServiceError> {
-    // Load Sacrum configuration from .vtb/config.toml and environment variables
-    let config = SacrumConfig::load().map_err(|e| {
+    if let Some(Command::Init(cmd)) = &args.command {
+        let result = cmd
+            .execute()
+            .await
+            .map_err(|e| ServiceError::config_error(e.to_string()))?;
+        println!("{}", result);
+        return Ok(());
+    }
+
+    // Derive project slug from git root folder name
+    let slug = derive_project_slug()?;
+
+    // Load Sacrum configuration from ~/.config/vertebrae/config.toml
+    let config = SacrumConfig::load(&slug).map_err(|e| {
         ServiceError::config_error(format!("Failed to load Sacrum configuration: {}", e))
     })?;
 
@@ -83,6 +95,39 @@ async fn run_with_args(args: &Args) -> Result<(), ServiceError> {
     }
 
     Ok(())
+}
+
+/// Derive project slug from the current git repository's root folder name.
+fn derive_project_slug() -> Result<String, ServiceError> {
+    let output = std::process::Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .map_err(|e| ServiceError::config_error(format!("Failed to run git command: {}", e)))?;
+
+    if !output.status.success() {
+        return Err(ServiceError::config_error(
+            "Not in a git repository. Run vtb from within a git repo.".to_string(),
+        ));
+    }
+
+    let path_str = String::from_utf8(output.stdout)
+        .map_err(|e| ServiceError::config_error(format!("Invalid UTF-8 from git: {}", e)))?;
+
+    let path = std::path::Path::new(path_str.trim());
+    let folder_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| ServiceError::config_error("Failed to extract folder name".to_string()))?;
+
+    let slug = slug::slugify(folder_name);
+    if slug.is_empty() {
+        return Err(ServiceError::config_error(format!(
+            "Could not create valid slug from folder name: {}",
+            folder_name
+        )));
+    }
+
+    Ok(slug)
 }
 
 #[cfg(test)]

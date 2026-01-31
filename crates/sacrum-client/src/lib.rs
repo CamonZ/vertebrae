@@ -8,20 +8,22 @@
 //! It handles:
 //! - Bearer token authentication
 //! - Automatic response envelope unwrapping
-//! - Configuration management from .vtb/config.toml and environment variables
+//! - Configuration management from ~/.config/vertebrae/config.toml and environment variables
 //! - Serialization/deserialization of API types
 //!
 //! # Configuration
 //!
 //! Configuration is loaded from:
 //! 1. `SACRUM_API_TOKEN` environment variable (required for API token)
-//! 2. `.vtb/config.toml` for base URL and project ID
+//! 2. `~/.config/vertebrae/config.toml` for base URL and project settings
 //!
-//! Example .vtb/config.toml:
+//! Example ~/.config/vertebrae/config.toml:
 //! ```toml
 //! [sacrum]
 //! url = "http://localhost:4000"
-//! project_id = "my-project"
+//!
+//! [projects.my-project]
+//! project_id = "uuid-here"
 //! ```
 //!
 //! # Example Usage
@@ -31,7 +33,7 @@
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let config = SacrumConfig::load()?;
+//!     let config = SacrumConfig::load("my-project")?;
 //!     let client = SacrumClient::new(config);
 //!
 //!     // Make API calls
@@ -55,7 +57,10 @@ pub use api_types::{
     StepResponse, TaskListResponse, TaskResponse, WorkflowResponse,
 };
 pub use client::SacrumClient;
-pub use config::SacrumConfig;
+pub use config::{
+    GlobalSacrumSection, ProjectSection, SacrumConfig, VertebraeConfigFile, config_path,
+    load_config_file, save_config_file,
+};
 pub use error::{SacrumClientError, SacrumClientResult};
 pub use execution_service::SacrumExecutionService;
 pub use step_service::SacrumStepService;

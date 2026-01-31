@@ -120,6 +120,15 @@ fn create_builder() -> Builder {
         ])
 }
 
+/// Derive a project slug from a filesystem path by slugifying the last component.
+fn slug_from_path(path: &str) -> Option<String> {
+    std::path::Path::new(path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(slug::slugify)
+        .filter(|s| !s.is_empty())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = create_builder();
@@ -146,18 +155,28 @@ pub fn run() {
 
             // Check if there's a current project set
             let current_project = project_config.get_current_project();
-            let service = if let Some(_project_path) = current_project {
+            let service = if let Some(project_path) = current_project {
                 log::info!("Attempting to connect to Sacrum backend");
 
                 tauri::async_runtime::block_on(async {
-                    match SacrumConfig::load() {
-                        Ok(config) => {
-                            let client = SacrumClient::new(config);
-                            let client_arc = Arc::new(client);
-                            Some(crate::sacrum::from_sacrum(client_arc))
-                        }
-                        Err(e) => {
-                            log::error!("Failed to load Sacrum configuration: {}", e);
+                    let slug = slug_from_path(&project_path);
+                    match slug {
+                        Some(slug) => match SacrumConfig::load(&slug) {
+                            Ok(config) => {
+                                let client = SacrumClient::new(config);
+                                let client_arc = Arc::new(client);
+                                Some(crate::sacrum::from_sacrum(client_arc))
+                            }
+                            Err(e) => {
+                                log::error!("Failed to load Sacrum configuration: {}", e);
+                                None
+                            }
+                        },
+                        None => {
+                            log::error!(
+                                "Failed to derive slug from project path: {}",
+                                project_path
+                            );
                             None
                         }
                     }
@@ -178,18 +197,29 @@ pub fn run() {
             log::info!("[STARTUP] PTY manager initialized");
 
             // Start WebSocket connection to Sacrum for real-time updates
-            if let Ok(config) = SacrumConfig::load() {
-                log::info!("[STARTUP] Starting WebSocket connection to Sacrum");
-                let socket = websocket_client::SacrumSocket::new(
-                    config.base_url.clone(),
-                    config.api_token.clone(),
-                    config.project_id.clone(),
-                );
-                socket.connect(app.handle());
-                // Keep socket alive by storing it in app state
-                app.manage(socket);
+            let ws_slug = app
+                .state::<AppState>()
+                .project_config
+                .get_current_project()
+                .and_then(|p| slug_from_path(&p));
+            if let Some(slug) = ws_slug {
+                if let Ok(config) = SacrumConfig::load(&slug) {
+                    log::info!("[STARTUP] Starting WebSocket connection to Sacrum");
+                    let socket = websocket_client::SacrumSocket::new(
+                        config.base_url.clone(),
+                        config.api_token.clone(),
+                        config.project_id.clone(),
+                    );
+                    socket.connect(app.handle());
+                    // Keep socket alive by storing it in app state
+                    app.manage(socket);
+                } else {
+                    log::warn!(
+                        "[STARTUP] Failed to load Sacrum config, WebSocket connection skipped"
+                    );
+                }
             } else {
-                log::warn!("[STARTUP] Failed to load Sacrum config, WebSocket connection skipped");
+                log::warn!("[STARTUP] No project slug available, WebSocket connection skipped");
             }
 
             Ok(())

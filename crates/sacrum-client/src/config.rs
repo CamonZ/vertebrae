@@ -1,13 +1,14 @@
 //! Configuration for Sacrum client
 //!
-//! Loads configuration from .vtb/config.toml and environment variables.
+//! Loads configuration from ~/.config/vertebrae/config.toml and environment variables.
 //! Configuration resolution order:
 //! - SACRUM_API_TOKEN environment variable for API token
-//! - .vtb/config.toml for base URL and project ID
+//! - ~/.config/vertebrae/config.toml for base URL and project settings
 //! - Default base URL: http://localhost:4000
 
 use crate::error::{SacrumClientError, SacrumClientResult};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 /// Configuration for Sacrum client
@@ -21,27 +22,51 @@ pub struct SacrumConfig {
     pub project_id: String,
 }
 
-/// TOML configuration file structure
-#[derive(Debug, Deserialize)]
-pub struct TomlConfig {
-    sacrum: TomlSacrumSection,
+/// Top-level config file structure for ~/.config/vertebrae/config.toml
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct VertebraeConfigFile {
+    /// Global sacrum defaults
+    #[serde(default)]
+    pub sacrum: GlobalSacrumSection,
+    /// Per-project configuration keyed by slug
+    #[serde(default)]
+    pub projects: BTreeMap<String, ProjectSection>,
 }
 
-/// Sacrum section in TOML config
-#[derive(Debug, Deserialize)]
-pub struct TomlSacrumSection {
-    pub url: Option<String>,
+/// Global sacrum defaults
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GlobalSacrumSection {
+    /// Default Sacrum API URL
+    #[serde(default = "default_url")]
+    pub url: String,
+}
+
+impl Default for GlobalSacrumSection {
+    fn default() -> Self {
+        Self { url: default_url() }
+    }
+}
+
+fn default_url() -> String {
+    "http://localhost:4000".to_string()
+}
+
+/// Per-project configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectSection {
+    /// Sacrum project ID (UUID)
     pub project_id: String,
+    /// Optional per-project URL override
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
 }
 
 impl SacrumConfig {
-    /// Load configuration from .vtb/config.toml and environment variables
+    /// Load configuration for a project identified by slug.
     ///
-    /// # Resolution order
-    /// - API token: SACRUM_API_TOKEN environment variable (required)
-    /// - Base URL: .vtb/config.toml sacrum.url or default to http://localhost:4000
-    /// - Project ID: .vtb/config.toml sacrum.project_id (required)
-    pub fn load() -> SacrumClientResult<Self> {
+    /// Reads ~/.config/vertebrae/config.toml, looks up the project by slug,
+    /// and loads the API token from SACRUM_API_TOKEN env var.
+    pub fn load(slug: &str) -> SacrumClientResult<Self> {
         // Load API token from environment
         let api_token = std::env::var("SACRUM_API_TOKEN").map_err(|_| {
             SacrumClientError::ConfigError(
@@ -49,29 +74,27 @@ impl SacrumConfig {
             )
         })?;
 
-        // Load config from .vtb/config.toml
-        let config_path = PathBuf::from(".vtb/config.toml");
-        let config_content = std::fs::read_to_string(&config_path).map_err(|e| {
+        let config_file = load_config_file()?;
+
+        let project = config_file.projects.get(slug).ok_or_else(|| {
             SacrumClientError::ConfigError(format!(
-                "Failed to read config file at {}: {}",
-                config_path.display(),
-                e
+                "No project '{}' found in config file at {}",
+                slug,
+                config_path()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|| "unknown".to_string())
             ))
         })?;
 
-        let toml_config: TomlConfig = toml::from_str(&config_content).map_err(|e| {
-            SacrumClientError::ConfigError(format!("Failed to parse config file: {}", e))
-        })?;
-
-        let base_url = toml_config
-            .sacrum
+        let base_url = project
             .url
-            .unwrap_or_else(|| "http://localhost:4000".to_string());
+            .clone()
+            .unwrap_or_else(|| config_file.sacrum.url.clone());
 
         Ok(SacrumConfig {
             base_url,
             api_token,
-            project_id: toml_config.sacrum.project_id,
+            project_id: project.project_id.clone(),
         })
     }
 
@@ -83,6 +106,67 @@ impl SacrumConfig {
             project_id,
         }
     }
+}
+
+/// Returns the path to ~/.config/vertebrae/config.toml
+pub fn config_path() -> Option<PathBuf> {
+    dirs::config_dir().map(|d| d.join("vertebrae").join("config.toml"))
+}
+
+/// Load and parse the config file. Returns Default if file is missing.
+pub fn load_config_file() -> SacrumClientResult<VertebraeConfigFile> {
+    let path = config_path().ok_or_else(|| {
+        SacrumClientError::ConfigError("Could not determine config directory".to_string())
+    })?;
+
+    if !path.exists() {
+        return Ok(VertebraeConfigFile::default());
+    }
+
+    let content = std::fs::read_to_string(&path).map_err(|e| {
+        SacrumClientError::ConfigError(format!(
+            "Failed to read config file at {}: {}",
+            path.display(),
+            e
+        ))
+    })?;
+
+    let config: VertebraeConfigFile = toml::from_str(&content).map_err(|e| {
+        SacrumClientError::ConfigError(format!("Failed to parse config file: {}", e))
+    })?;
+
+    Ok(config)
+}
+
+/// Serialize and write the config file. Creates parent directories if needed.
+pub fn save_config_file(config: &VertebraeConfigFile) -> SacrumClientResult<()> {
+    let path = config_path().ok_or_else(|| {
+        SacrumClientError::ConfigError("Could not determine config directory".to_string())
+    })?;
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            SacrumClientError::ConfigError(format!(
+                "Failed to create config directory {}: {}",
+                parent.display(),
+                e
+            ))
+        })?;
+    }
+
+    let content = toml::to_string_pretty(config).map_err(|e| {
+        SacrumClientError::ConfigError(format!("Failed to serialize config: {}", e))
+    })?;
+
+    std::fs::write(&path, content).map_err(|e| {
+        SacrumClientError::ConfigError(format!(
+            "Failed to write config file at {}: {}",
+            path.display(),
+            e
+        ))
+    })?;
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -420,5 +504,111 @@ mod tests {
         assert_eq!(original.base_url, deserialized.base_url);
         assert_eq!(original.api_token, deserialized.api_token);
         assert_eq!(original.project_id, deserialized.project_id);
+    }
+
+    #[test]
+    fn test_vertebrae_config_file_default() {
+        let config = VertebraeConfigFile::default();
+        assert_eq!(config.sacrum.url, "http://localhost:4000");
+        assert!(config.projects.is_empty());
+    }
+
+    #[test]
+    fn test_vertebrae_config_file_roundtrip() {
+        let mut config = VertebraeConfigFile::default();
+        config.sacrum.url = "http://custom:5000".to_string();
+        config.projects.insert(
+            "my-project".to_string(),
+            ProjectSection {
+                project_id: "uuid-123".to_string(),
+                url: None,
+            },
+        );
+        config.projects.insert(
+            "other".to_string(),
+            ProjectSection {
+                project_id: "uuid-456".to_string(),
+                url: Some("https://other-server.com".to_string()),
+            },
+        );
+
+        let toml_str = toml::to_string_pretty(&config).unwrap();
+        let parsed: VertebraeConfigFile = toml::from_str(&toml_str).unwrap();
+
+        assert_eq!(parsed.sacrum.url, "http://custom:5000");
+        assert_eq!(parsed.projects.len(), 2);
+        assert_eq!(parsed.projects["my-project"].project_id, "uuid-123");
+        assert!(parsed.projects["my-project"].url.is_none());
+        assert_eq!(parsed.projects["other"].project_id, "uuid-456");
+        assert_eq!(
+            parsed.projects["other"].url.as_deref(),
+            Some("https://other-server.com")
+        );
+    }
+
+    #[test]
+    fn test_vertebrae_config_file_parse_minimal() {
+        let toml_str = r#"
+[sacrum]
+url = "http://localhost:4000"
+
+[projects.vertebrae]
+project_id = "bb747fd8-5395-486f-bc8b-24ccd1615e18"
+"#;
+        let config: VertebraeConfigFile = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.sacrum.url, "http://localhost:4000");
+        assert_eq!(config.projects.len(), 1);
+        assert_eq!(
+            config.projects["vertebrae"].project_id,
+            "bb747fd8-5395-486f-bc8b-24ccd1615e18"
+        );
+    }
+
+    #[test]
+    fn test_vertebrae_config_file_parse_with_override() {
+        let toml_str = r#"
+[sacrum]
+url = "http://localhost:4000"
+
+[projects.vertebrae]
+project_id = "uuid-1"
+
+[projects.other-project]
+project_id = "uuid-2"
+url = "https://custom-server.com"
+"#;
+        let config: VertebraeConfigFile = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.projects.len(), 2);
+        assert!(config.projects["vertebrae"].url.is_none());
+        assert_eq!(
+            config.projects["other-project"].url.as_deref(),
+            Some("https://custom-server.com")
+        );
+    }
+
+    #[test]
+    fn test_config_path_returns_some() {
+        // On most systems, config_dir should return Some
+        let path = config_path();
+        if let Some(p) = path {
+            assert!(p.ends_with("vertebrae/config.toml"));
+        }
+    }
+
+    #[test]
+    fn test_project_section_url_skip_serializing_none() {
+        let section = ProjectSection {
+            project_id: "uuid-123".to_string(),
+            url: None,
+        };
+        let toml_str = toml::to_string(&section).unwrap();
+        assert!(!toml_str.contains("url"));
+
+        let section_with_url = ProjectSection {
+            project_id: "uuid-123".to_string(),
+            url: Some("http://custom.com".to_string()),
+        };
+        let toml_str = toml::to_string(&section_with_url).unwrap();
+        assert!(toml_str.contains("url"));
     }
 }

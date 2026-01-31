@@ -128,10 +128,14 @@ pub async fn set_current_project(
         .map_err(|e| CommandError { message: e })?;
 
     // Connect to Sacrum backend and create service if a project is selected
-    if let Some(_project_path) = path {
+    if let Some(project_path) = path {
         log::info!("Attempting to connect to Sacrum backend");
 
-        match vertebrae_sacrum_client::SacrumConfig::load() {
+        let slug = crate::slug_from_path(&project_path).ok_or_else(|| CommandError {
+            message: format!("Failed to derive project slug from path: {}", project_path),
+        })?;
+
+        match vertebrae_sacrum_client::SacrumConfig::load(&slug) {
             Ok(config) => {
                 let client = vertebrae_sacrum_client::SacrumClient::new(config);
                 let client_arc = std::sync::Arc::new(client);
@@ -1945,7 +1949,7 @@ mod tests {
             .await
             .unwrap();
         let child_id = create_task(
-            state,
+            state.clone(),
             "Child".to_string(),
             None,
             None,
