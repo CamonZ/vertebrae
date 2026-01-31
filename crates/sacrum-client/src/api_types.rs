@@ -95,6 +95,36 @@ pub struct ErrorResponse {
     pub code: Option<String>,
 }
 
+/// Project response from Sacrum API
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectResponse {
+    /// Project UUID
+    pub id: String,
+    /// Project name
+    pub name: String,
+    /// Project slug (URL-friendly identifier)
+    pub slug: String,
+    /// Project description
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+/// Request to create a new project
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateProjectRequest {
+    /// Project name
+    pub name: String,
+    /// Project slug (URL-friendly identifier)
+    pub slug: String,
+}
+
+/// Project list response from Sacrum API
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectListResponse {
+    /// List of projects
+    pub projects: Vec<ProjectResponse>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

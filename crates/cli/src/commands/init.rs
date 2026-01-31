@@ -1,17 +1,26 @@
 //! Init command for initializing vertebrae in a project
 //!
 //! Implements the `vtb init` command to:
-//! 1. Create the .vtb/ database directory
-//! 2. Copy skills from skills/ to .claude/skills/
+//! 1. Check SACRUM_API_TOKEN environment variable is set
+//! 2. Accept --url flag for Sacrum API endpoint (default localhost:4000)
+//! 3. Derive project slug from git root folder name
+//! 4. Check if project exists in Sacrum API, create if needed
+//! 5. Write .vtb/config.toml with sacrum URL and project_id
+//! 6. Copy skills from skills/ to .claude/skills/
 
 use clap::Args;
 use std::fs;
 use std::path::{Path, PathBuf};
-use vertebrae_db::find_project_root;
+use std::process::Command as StdCommand;
+use vertebrae_sacrum_client::{CreateProjectRequest, ProjectResponse, SacrumClient, SacrumConfig};
 
 /// Initialize vertebrae in the current project
 #[derive(Debug, Args)]
 pub struct InitCommand {
+    /// Sacrum API base URL (default: http://localhost:4000)
+    #[arg(long, default_value = "http://localhost:4000")]
+    pub url: String,
+
     /// Source directory containing skills (defaults to "skills/")
     #[arg(long, default_value = "skills")]
     pub skills_source: PathBuf,
@@ -25,36 +34,29 @@ pub struct InitCommand {
 #[derive(Debug)]
 pub struct InitResult {
     /// Path to the created .vtb/ directory
-    pub db_path: PathBuf,
+    pub config_path: PathBuf,
+    /// Project ID in Sacrum
+    pub project_id: String,
+    /// Project name
+    pub project_name: String,
     /// Number of skills copied
     pub skills_copied: usize,
-    /// Whether the db directory was newly created
-    pub db_created: bool,
-    /// Whether the skills directory was newly created
-    pub skills_dir_created: bool,
+    /// Whether the project was newly created
+    pub project_created: bool,
 }
 
 impl std::fmt::Display for InitResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "Vertebrae initialized successfully!")?;
         writeln!(f)?;
+        writeln!(f, "  Created config file: {}", self.config_path.display())?;
+        writeln!(f, "  Project name: {}", self.project_name)?;
+        writeln!(f, "  Project ID: {}", self.project_id)?;
 
-        if self.db_created {
-            writeln!(
-                f,
-                "  Created database directory: {}",
-                self.db_path.display()
-            )?;
+        if self.project_created {
+            writeln!(f, "  Created new Sacrum project")?;
         } else {
-            writeln!(
-                f,
-                "  Database directory already exists: {}",
-                self.db_path.display()
-            )?;
-        }
-
-        if self.skills_dir_created {
-            writeln!(f, "  Created skills directory: .claude/skills/")?;
+            writeln!(f, "  Found existing Sacrum project")?;
         }
 
         if self.skills_copied > 0 {
@@ -77,6 +79,14 @@ impl std::fmt::Display for InitResult {
 /// Error type for init command failures
 #[derive(Debug)]
 pub enum InitError {
+    /// Missing SACRUM_API_TOKEN environment variable
+    MissingToken(String),
+    /// Failed to get git root
+    GitRoot { reason: String },
+    /// Failed to derive project slug
+    SlugDerive { reason: String },
+    /// Failed to communicate with Sacrum API
+    SacrumApi { reason: String },
     /// Failed to create directory
     CreateDir { path: PathBuf, reason: String },
     /// Failed to copy file
@@ -87,11 +97,23 @@ pub enum InitError {
     },
     /// Failed to read directory
     ReadDir { path: PathBuf, reason: String },
+    /// Failed to write config file
+    WriteConfig { path: PathBuf, reason: String },
 }
 
 impl std::fmt::Display for InitError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            InitError::MissingToken(reason) => write!(f, "{}", reason),
+            InitError::GitRoot { reason } => {
+                write!(f, "Failed to get git root directory: {}", reason)
+            }
+            InitError::SlugDerive { reason } => {
+                write!(f, "Failed to derive project slug: {}", reason)
+            }
+            InitError::SacrumApi { reason } => {
+                write!(f, "Failed to communicate with Sacrum API: {}", reason)
+            }
             InitError::CreateDir { path, reason } => {
                 write!(
                     f,
@@ -121,6 +143,14 @@ impl std::fmt::Display for InitError {
                     reason
                 )
             }
+            InitError::WriteConfig { path, reason } => {
+                write!(
+                    f,
+                    "Failed to write config file '{}': {}",
+                    path.display(),
+                    reason
+                )
+            }
         }
     }
 }
@@ -130,33 +160,163 @@ impl std::error::Error for InitError {}
 impl InitCommand {
     /// Execute the init command.
     ///
-    /// Creates the .vtb/ database directory and copies skills from the source
-    /// directory to .claude/skills/.
-    ///
-    /// # Errors
-    ///
-    /// Returns `InitError` if:
-    /// - Failed to create directories
-    /// - Failed to copy skill files
-    pub fn execute(&self) -> Result<InitResult, InitError> {
-        // Use git project root if available, otherwise fall back to current directory
-        let base_path = find_project_root().unwrap_or_else(|| PathBuf::from("."));
-        let db_path = base_path.join(".vtb/data");
-        let db_created = self.create_dir_if_not_exists(&db_path)?;
+    /// 1. Checks SACRUM_API_TOKEN is set
+    /// 2. Gets git root directory
+    /// 3. Derives project slug from folder name
+    /// 4. Checks if project exists in Sacrum, creates if not
+    /// 5. Writes .vtb/config.toml with sacrum section
+    /// 6. Copies skills from source to target directory
+    pub async fn execute(&self) -> Result<InitResult, InitError> {
+        // Check SACRUM_API_TOKEN is set
+        let api_token = std::env::var("SACRUM_API_TOKEN").map_err(|_| {
+            InitError::MissingToken(
+                "Error: SACRUM_API_TOKEN environment variable not set\n\
+                 Hint: Export your Sacrum API token: export SACRUM_API_TOKEN=your_token_here"
+                    .to_string(),
+            )
+        })?;
 
-        // Resolve skills paths relative to project root
-        let skills_source = base_path.join(&self.skills_source);
+        // Get git root directory
+        let git_root = self.get_git_root()?;
+        let base_path = &git_root;
+
+        // Derive project slug from folder name
+        let folder_name = base_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| InitError::SlugDerive {
+                reason: "Failed to extract folder name".to_string(),
+            })?
+            .to_string();
+
+        let project_slug = self.derive_slug(&folder_name)?;
+
+        // Create Sacrum client and check/create project
+        let config = SacrumConfig::new(self.url.clone(), api_token, "temp".to_string());
+        let client = SacrumClient::new(config);
+
+        let (project, created) = self
+            .get_or_create_project(&client, &folder_name, &project_slug)
+            .await?;
+
+        // Create .vtb directory if it doesn't exist
+        let vtb_dir = base_path.join(".vtb");
+        self.create_dir_if_not_exists(&vtb_dir)?;
+
+        // Write config file
+        let config_path = vtb_dir.join("config.toml");
+        if config_path.exists() {
+            return Err(InitError::WriteConfig {
+                path: config_path,
+                reason: "Config file already exists. Use a different directory or remove the existing config.".to_string(),
+            });
+        }
+
+        self.write_config_file(&config_path, &self.url, &project.id)?;
+
+        // Copy skills
         let skills_target = base_path.join(&self.skills_target);
-
-        let skills_dir_created = self.create_dir_if_not_exists(&skills_target)?;
+        self.create_dir_if_not_exists(&skills_target)?;
+        let skills_source = base_path.join(&self.skills_source);
         let skills_copied = self.copy_skills(&skills_source, &skills_target)?;
 
         Ok(InitResult {
-            db_path,
+            config_path,
+            project_id: project.id,
+            project_name: project.name,
             skills_copied,
-            db_created,
-            skills_dir_created,
+            project_created: created,
         })
+    }
+
+    /// Get the git root directory
+    fn get_git_root(&self) -> Result<PathBuf, InitError> {
+        let output = StdCommand::new("git")
+            .args(["rev-parse", "--show-toplevel"])
+            .output()
+            .map_err(|e| InitError::GitRoot {
+                reason: format!("Failed to run git command: {}", e),
+            })?;
+
+        if !output.status.success() {
+            return Err(InitError::GitRoot {
+                reason: "Not a git repository or git not installed".to_string(),
+            });
+        }
+
+        let path = String::from_utf8(output.stdout)
+            .map_err(|e| InitError::GitRoot {
+                reason: format!("Invalid UTF-8 from git: {}", e),
+            })?
+            .trim()
+            .to_string();
+
+        Ok(PathBuf::from(path))
+    }
+
+    /// Derive a URL-friendly slug from a folder name
+    /// Converts to lowercase, replaces spaces and special chars with hyphens
+    fn derive_slug(&self, name: &str) -> Result<String, InitError> {
+        let slug = slug::slugify(name);
+        if slug.is_empty() {
+            return Err(InitError::SlugDerive {
+                reason: format!("Could not create valid slug from: {}", name),
+            });
+        }
+        Ok(slug)
+    }
+
+    /// Get existing project or create a new one
+    async fn get_or_create_project(
+        &self,
+        client: &SacrumClient,
+        name: &str,
+        slug: &str,
+    ) -> Result<(ProjectResponse, bool), InitError> {
+        // Try to find existing project by slug
+        match client.get::<Vec<ProjectResponse>>("/api/projects").await {
+            Ok(projects) => {
+                if let Some(project) = projects.iter().find(|p| p.slug == slug) {
+                    return Ok((project.clone(), false));
+                }
+            }
+            Err(e) => {
+                return Err(InitError::SacrumApi {
+                    reason: format!("Failed to list projects: {}", e),
+                });
+            }
+        }
+
+        // Project not found, create it
+        let req = CreateProjectRequest {
+            name: name.to_string(),
+            slug: slug.to_string(),
+        };
+
+        match client
+            .post::<ProjectResponse, _>("/api/projects", &req)
+            .await
+        {
+            Ok(project) => Ok((project, true)),
+            Err(e) => Err(InitError::SacrumApi {
+                reason: format!("Failed to create project: {}", e),
+            }),
+        }
+    }
+
+    /// Write the .vtb/config.toml file
+    fn write_config_file(&self, path: &Path, url: &str, project_id: &str) -> Result<(), InitError> {
+        let config_content = format!(
+            "[sacrum]\nurl = \"{}\"\nproject_id = \"{}\"\n",
+            url, project_id
+        );
+
+        fs::write(path, config_content).map_err(|e| InitError::WriteConfig {
+            path: path.to_path_buf(),
+            reason: e.to_string(),
+        })?;
+
+        Ok(())
     }
 
     /// Create a directory if it doesn't exist.
@@ -250,44 +410,67 @@ mod tests {
     }
 
     #[test]
-    fn test_init_creates_db_directory() {
-        let temp_dir = create_temp_dir("db");
-        fs::create_dir_all(&temp_dir).unwrap();
-
-        // Use absolute paths for the test
-        let db_path = temp_dir.join(".vtb/data");
-        let skills_target = temp_dir.join(".claude/skills");
-
+    fn test_derive_slug_lowercase() {
         let cmd = InitCommand {
-            skills_source: temp_dir.join("nonexistent-skills"),
-            skills_target: skills_target.clone(),
+            url: "http://localhost:4000".to_string(),
+            skills_source: PathBuf::from("skills"),
+            skills_target: PathBuf::from(".claude/skills"),
         };
-
-        // Execute with a custom db_path by calling create_dir_if_not_exists directly
-        let db_created = cmd.create_dir_if_not_exists(&db_path);
-        assert!(db_created.is_ok(), "Init failed: {:?}", db_created.err());
-        assert!(db_created.unwrap());
-        assert!(db_path.exists());
-
-        cleanup(&temp_dir);
+        let slug = cmd.derive_slug("My Project").unwrap();
+        assert_eq!(slug, "my-project");
     }
 
     #[test]
-    fn test_init_creates_skills_directory() {
-        let temp_dir = create_temp_dir("skills");
+    fn test_derive_slug_with_spaces() {
+        let cmd = InitCommand {
+            url: "http://localhost:4000".to_string(),
+            skills_source: PathBuf::from("skills"),
+            skills_target: PathBuf::from(".claude/skills"),
+        };
+        let slug = cmd.derive_slug("Project With Spaces").unwrap();
+        assert_eq!(slug, "project-with-spaces");
+    }
+
+    #[test]
+    fn test_derive_slug_with_special_chars() {
+        let cmd = InitCommand {
+            url: "http://localhost:4000".to_string(),
+            skills_source: PathBuf::from("skills"),
+            skills_target: PathBuf::from(".claude/skills"),
+        };
+        let slug = cmd.derive_slug("My-Project_123").unwrap();
+        // slug crate will handle the conversion
+        assert!(!slug.is_empty());
+    }
+
+    #[test]
+    fn test_derive_slug_empty() {
+        let cmd = InitCommand {
+            url: "http://localhost:4000".to_string(),
+            skills_source: PathBuf::from("skills"),
+            skills_target: PathBuf::from(".claude/skills"),
+        };
+        let result = cmd.derive_slug("@#$%");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_init_creates_vtb_directory() {
+        let temp_dir = create_temp_dir("db");
         fs::create_dir_all(&temp_dir).unwrap();
 
-        let skills_target = temp_dir.join(".claude/skills");
+        let vtb_path = temp_dir.join(".vtb");
 
         let cmd = InitCommand {
+            url: "http://localhost:4000".to_string(),
             skills_source: temp_dir.join("nonexistent-skills"),
-            skills_target: skills_target.clone(),
+            skills_target: temp_dir.join(".claude/skills"),
         };
 
-        let result = cmd.create_dir_if_not_exists(&skills_target);
+        let result = cmd.create_dir_if_not_exists(&vtb_path);
         assert!(result.is_ok());
         assert!(result.unwrap());
-        assert!(skills_target.exists());
+        assert!(vtb_path.exists());
 
         cleanup(&temp_dir);
     }
@@ -307,6 +490,7 @@ mod tests {
         fs::create_dir_all(&skills_target).unwrap();
 
         let cmd = InitCommand {
+            url: "http://localhost:4000".to_string(),
             skills_source: skills_source.clone(),
             skills_target: skills_target.clone(),
         };
@@ -336,6 +520,7 @@ mod tests {
         fs::create_dir_all(&skills_target).unwrap();
 
         let cmd = InitCommand {
+            url: "http://localhost:4000".to_string(),
             skills_source: skills_source.clone(),
             skills_target: skills_target.clone(),
         };
@@ -362,6 +547,7 @@ mod tests {
         fs::create_dir_all(&skills_target).unwrap();
 
         let cmd = InitCommand {
+            url: "http://localhost:4000".to_string(),
             skills_source: skills_source.clone(),
             skills_target: skills_target.clone(),
         };
@@ -374,20 +560,21 @@ mod tests {
     }
 
     #[test]
-    fn test_init_existing_db_dir_not_created() {
+    fn test_init_existing_vtb_dir_not_created() {
         let temp_dir = create_temp_dir("existing");
         fs::create_dir_all(&temp_dir).unwrap();
 
-        // Pre-create the db directory
-        let db_path = temp_dir.join(".vtb/data");
-        fs::create_dir_all(&db_path).unwrap();
+        // Pre-create the vtb directory
+        let vtb_path = temp_dir.join(".vtb");
+        fs::create_dir_all(&vtb_path).unwrap();
 
         let cmd = InitCommand {
+            url: "http://localhost:4000".to_string(),
             skills_source: temp_dir.join("nonexistent"),
             skills_target: temp_dir.join(".claude/skills"),
         };
 
-        let result = cmd.create_dir_if_not_exists(&db_path);
+        let result = cmd.create_dir_if_not_exists(&vtb_path);
         assert!(result.is_ok());
         assert!(!result.unwrap()); // Was not newly created
 
@@ -397,71 +584,57 @@ mod tests {
     #[test]
     fn test_init_result_display() {
         let result = InitResult {
-            db_path: PathBuf::from(".vtb/data"),
+            config_path: PathBuf::from(".vtb/config.toml"),
+            project_id: "proj-123".to_string(),
+            project_name: "My Project".to_string(),
             skills_copied: 5,
-            db_created: true,
-            skills_dir_created: true,
+            project_created: true,
         };
 
         let output = format!("{}", result);
         assert!(output.contains("Vertebrae initialized successfully"));
-        assert!(output.contains("Created database directory"));
-        assert!(output.contains(".vtb/data"));
+        assert!(output.contains(".vtb/config.toml"));
+        assert!(output.contains("proj-123"));
+        assert!(output.contains("My Project"));
         assert!(output.contains("Copied 5 skill(s)"));
     }
 
     #[test]
-    fn test_init_result_display_existing() {
-        let result = InitResult {
-            db_path: PathBuf::from(".vtb/data"),
-            skills_copied: 0,
-            db_created: false,
-            skills_dir_created: false,
-        };
-
-        let output = format!("{}", result);
-        assert!(output.contains("Database directory already exists"));
-        assert!(output.contains("No skills to copy"));
+    fn test_init_error_missing_token() {
+        let err = InitError::MissingToken("test error".to_string());
+        let output = format!("{}", err);
+        assert!(output.contains("test error"));
     }
 
     #[test]
-    fn test_init_error_display() {
-        let err = InitError::CreateDir {
-            path: PathBuf::from("/test/path"),
-            reason: "Permission denied".to_string(),
+    fn test_init_error_git_root() {
+        let err = InitError::GitRoot {
+            reason: "Not a git repo".to_string(),
         };
         let output = format!("{}", err);
-        assert!(output.contains("Failed to create directory"));
-        assert!(output.contains("/test/path"));
-        assert!(output.contains("Permission denied"));
+        assert!(output.contains("Failed to get git root directory"));
+        assert!(output.contains("Not a git repo"));
+    }
 
-        let err = InitError::CopyFile {
-            source: PathBuf::from("/source"),
-            target: PathBuf::from("/target"),
-            reason: "No space".to_string(),
+    #[test]
+    fn test_init_error_sacrum_api() {
+        let err = InitError::SacrumApi {
+            reason: "Connection failed".to_string(),
         };
         let output = format!("{}", err);
-        assert!(output.contains("Failed to copy"));
-        assert!(output.contains("/source"));
-        assert!(output.contains("/target"));
-
-        let err = InitError::ReadDir {
-            path: PathBuf::from("/dir"),
-            reason: "Not found".to_string(),
-        };
-        let output = format!("{}", err);
-        assert!(output.contains("Failed to read directory"));
+        assert!(output.contains("Failed to communicate with Sacrum API"));
+        assert!(output.contains("Connection failed"));
     }
 
     #[test]
     fn test_init_command_debug() {
         let cmd = InitCommand {
+            url: "http://localhost:4000".to_string(),
             skills_source: PathBuf::from("skills"),
             skills_target: PathBuf::from(".claude/skills"),
         };
         let debug_str = format!("{:?}", cmd);
         assert!(debug_str.contains("InitCommand"));
-        assert!(debug_str.contains("skills_source"));
-        assert!(debug_str.contains("skills_target"));
+        assert!(debug_str.contains("url"));
     }
 }

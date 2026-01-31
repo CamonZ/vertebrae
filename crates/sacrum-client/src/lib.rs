@@ -47,7 +47,8 @@ pub mod config;
 pub mod error;
 
 pub use api_types::{
-    DataEnvelope, ErrorResponse, StepResponse, TaskListResponse, TaskResponse, WorkflowResponse,
+    CreateProjectRequest, DataEnvelope, ErrorResponse, ProjectListResponse, ProjectResponse,
+    StepResponse, TaskListResponse, TaskResponse, WorkflowResponse,
 };
 pub use client::SacrumClient;
 pub use config::SacrumConfig;

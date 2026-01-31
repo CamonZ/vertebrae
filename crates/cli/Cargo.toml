@@ -27,11 +27,14 @@ rand = "0.9"
 uuid = { version = "1", features = ["v7"] }
 vertebrae-db = { path = "../db" }
 vertebrae-core = { path = "../core" }
+vertebrae-sacrum-client = { path = "../sacrum-client" }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 http = "1"
 log = "0.4"
 reqwest = { version = "0.12", features = ["json"] }
+toml = "0.8"
+slug = "0.1"
 
 [dev-dependencies]
 serial_test = "3"

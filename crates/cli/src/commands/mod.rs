@@ -196,9 +196,10 @@ impl Command {
                 Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Init(cmd) => {
-                // Init doesn't use the database - it creates the db directory
+                // Init doesn't use the database - it registers with Sacrum API
                 let result = cmd
                     .execute()
+                    .await
                     .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
