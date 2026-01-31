@@ -48,4 +48,48 @@ mod tests {
         assert!(debug.contains("WorkflowRejectCommand"));
         assert!(debug.contains("task1"));
     }
+
+    #[test]
+    fn test_workflow_reject_command_with_various_ids() {
+        let ids = vec!["task1", "task-abc", "TASK123", "my-task"];
+        for id in ids {
+            let cmd = WorkflowRejectCommand {
+                task_id: id.to_string(),
+            };
+            assert_eq!(cmd.task_id, id);
+        }
+    }
+
+    #[test]
+    fn test_workflow_reject_command_field_value() {
+        let cmd = WorkflowRejectCommand {
+            task_id: "my-task".to_string(),
+        };
+        assert_eq!(cmd.task_id, "my-task");
+    }
+
+    #[test]
+    fn test_workflow_reject_command_case_preservation() {
+        let cmd = WorkflowRejectCommand {
+            task_id: "MyTask".to_string(),
+        };
+        assert_eq!(cmd.task_id, "MyTask");
+    }
+
+    #[test]
+    fn test_workflow_reject_command_with_hyphens() {
+        let cmd = WorkflowRejectCommand {
+            task_id: "task-with-hyphens".to_string(),
+        };
+        assert!(cmd.task_id.contains("task"));
+        assert!(cmd.task_id.contains("hyphens"));
+    }
+
+    #[test]
+    fn test_workflow_reject_command_with_numbers() {
+        let cmd = WorkflowRejectCommand {
+            task_id: "task123abc456".to_string(),
+        };
+        assert_eq!(cmd.task_id, "task123abc456");
+    }
 }

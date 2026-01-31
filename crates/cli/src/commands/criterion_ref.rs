@@ -7,8 +7,8 @@
 use crate::commands::r#ref::parse_file_ref;
 use clap::Args;
 use std::path::Path;
+use vertebrae_core::CodeRef;
 use vertebrae_core::{ServiceError, VertebraeServices};
-use vertebrae_db::CodeRef;
 
 /// Add a code reference to a testing criterion
 #[derive(Debug, Args)]
@@ -120,11 +120,11 @@ impl CriterionRefCommand {
         let task = services.tasks().get_task(&id).await?;
 
         // Filter to only testing_criterion sections and sort by order
-        let mut criteria: Vec<(usize, &vertebrae_db::Section)> = task
+        let mut criteria: Vec<(usize, &vertebrae_core::Section)> = task
             .sections
             .iter()
             .enumerate()
-            .filter(|(_, s)| s.section_type == vertebrae_db::SectionType::TestingCriterion)
+            .filter(|(_, s)| s.section_type == vertebrae_core::SectionType::TestingCriterion)
             .collect();
         criteria.sort_by_key(|(_, s)| s.order.unwrap_or(u32::MAX));
 
@@ -180,11 +180,11 @@ impl CriterionRefCommand {
 mod tests {
     use super::*;
     use vertebrae_core::{CreateTaskOptions, ServiceError};
-    use vertebrae_db::{Section, SectionType};
+    use vertebrae_core::{Section, SectionType};
 
     /// Helper to create a test service with an in-memory database
     async fn setup_test_service() -> VertebraeServices {
-        let db = vertebrae_db::Database::connect_mem().await.unwrap();
+        let db = vertebrae_core::Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
         VertebraeServices::new(db)
     }

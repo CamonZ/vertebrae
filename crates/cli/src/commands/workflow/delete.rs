@@ -43,4 +43,38 @@ mod tests {
         assert!(debug.contains("WorkflowDeleteCommand"));
         assert!(debug.contains("wf1"));
     }
+
+    #[test]
+    fn test_workflow_delete_command_with_various_ids() {
+        let ids = vec!["wf1", "workflow-abc", "WORKFLOW123", "my-workflow"];
+        for id in ids {
+            let cmd = WorkflowDeleteCommand { id: id.to_string() };
+            assert_eq!(cmd.id, id);
+        }
+    }
+
+    #[test]
+    fn test_workflow_delete_command_field_value() {
+        let cmd = WorkflowDeleteCommand {
+            id: "my-workflow".to_string(),
+        };
+        assert_eq!(cmd.id, "my-workflow");
+    }
+
+    #[test]
+    fn test_workflow_delete_command_case_preservation() {
+        let cmd = WorkflowDeleteCommand {
+            id: "MyWorkflow".to_string(),
+        };
+        assert_eq!(cmd.id, "MyWorkflow");
+    }
+
+    #[test]
+    fn test_workflow_delete_command_with_special_ids() {
+        let cmd = WorkflowDeleteCommand {
+            id: "workflow-with-many-dashes-and-numbers-123".to_string(),
+        };
+        assert!(cmd.id.contains("workflow"));
+        assert!(cmd.id.contains("123"));
+    }
 }

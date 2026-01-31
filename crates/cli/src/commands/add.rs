@@ -4,7 +4,7 @@
 
 use clap::Args;
 use vertebrae_core::{CreateTaskOptions, ServiceError, VertebraeServices};
-use vertebrae_db::{Level, Priority};
+use vertebrae_core::{Level, Priority};
 
 /// Create a new task
 #[derive(Debug, Args)]
@@ -199,6 +199,191 @@ mod tests {
         let result = parse_priority("wrong");
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("invalid priority"));
+    }
+
+    // ==================== Async execute tests ====================
+
+    async fn setup_services() -> VertebraeServices {
+        let db = vertebrae_core::Database::connect_mem().await.unwrap();
+        db.init().await.unwrap();
+        VertebraeServices::new(db)
+    }
+
+    #[tokio::test]
+    async fn test_execute_add_minimal() {
+        let services = setup_services().await;
+        let cmd = AddCommand {
+            title: "My task".to_string(),
+            level: None,
+            description: None,
+            priority: None,
+            tags: vec![],
+            parent: None,
+            depends_on: vec![],
+            needs_review: false,
+            workflow: None,
+        };
+        let result = cmd.execute(&services).await;
+        assert!(result.is_ok());
+        let id = result.unwrap();
+        assert!(!id.is_empty());
+
+        // Verify task was created
+        let task = services.tasks().get_task(&id).await.unwrap();
+        assert_eq!(task.title, "My task");
+        assert_eq!(task.level, Level::Task); // default
+    }
+
+    #[tokio::test]
+    async fn test_execute_add_with_all_options() {
+        let services = setup_services().await;
+        let cmd = AddCommand {
+            title: "Epic task".to_string(),
+            level: Some(Level::Epic),
+            description: Some("Detailed description".to_string()),
+            priority: Some(Priority::High),
+            tags: vec!["backend".to_string(), "api".to_string()],
+            parent: None,
+            depends_on: vec![],
+            needs_review: true,
+            workflow: None,
+        };
+        let result = cmd.execute(&services).await;
+        assert!(result.is_ok());
+        let id = result.unwrap();
+
+        let task = services.tasks().get_task(&id).await.unwrap();
+        assert_eq!(task.title, "Epic task");
+        assert_eq!(task.level, Level::Epic);
+        assert_eq!(task.description, Some("Detailed description".to_string()));
+        assert_eq!(task.priority, Some(Priority::High));
+        assert!(task.tags.contains(&"backend".to_string()));
+        assert!(task.tags.contains(&"api".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_execute_add_empty_title_fails() {
+        let services = setup_services().await;
+        let cmd = AddCommand {
+            title: "   ".to_string(),
+            level: None,
+            description: None,
+            priority: None,
+            tags: vec![],
+            parent: None,
+            depends_on: vec![],
+            needs_review: false,
+            workflow: None,
+        };
+        let result = cmd.execute(&services).await;
+        assert!(result.is_err());
+        let err = format!("{}", result.unwrap_err());
+        assert!(err.contains("title") || err.contains("Title"));
+    }
+
+    #[tokio::test]
+    async fn test_execute_add_with_parent() {
+        let services = setup_services().await;
+
+        // Create parent task first
+        let parent_cmd = AddCommand {
+            title: "Parent epic".to_string(),
+            level: Some(Level::Epic),
+            description: None,
+            priority: None,
+            tags: vec![],
+            parent: None,
+            depends_on: vec![],
+            needs_review: false,
+            workflow: None,
+        };
+        let parent_id = parent_cmd.execute(&services).await.unwrap();
+
+        // Create child task
+        let child_cmd = AddCommand {
+            title: "Child task".to_string(),
+            level: None,
+            description: None,
+            priority: None,
+            tags: vec![],
+            parent: Some(parent_id.clone()),
+            depends_on: vec![],
+            needs_review: false,
+            workflow: None,
+        };
+        let child_id = child_cmd.execute(&services).await.unwrap();
+        assert!(!child_id.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_execute_add_with_nonexistent_parent_fails() {
+        let services = setup_services().await;
+        let cmd = AddCommand {
+            title: "Orphan task".to_string(),
+            level: None,
+            description: None,
+            priority: None,
+            tags: vec![],
+            parent: Some("nonexistent".to_string()),
+            depends_on: vec![],
+            needs_review: false,
+            workflow: None,
+        };
+        let result = cmd.execute(&services).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_execute_add_with_dependency() {
+        let services = setup_services().await;
+
+        // Create the blocker task first
+        let blocker_cmd = AddCommand {
+            title: "Blocker task".to_string(),
+            level: None,
+            description: None,
+            priority: None,
+            tags: vec![],
+            parent: None,
+            depends_on: vec![],
+            needs_review: false,
+            workflow: None,
+        };
+        let blocker_id = blocker_cmd.execute(&services).await.unwrap();
+
+        // Create dependent task
+        let cmd = AddCommand {
+            title: "Dependent task".to_string(),
+            level: None,
+            description: None,
+            priority: None,
+            tags: vec![],
+            parent: None,
+            depends_on: vec![blocker_id],
+            needs_review: false,
+            workflow: None,
+        };
+        let result = cmd.execute(&services).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_add_ticket_level() {
+        let services = setup_services().await;
+        let cmd = AddCommand {
+            title: "Ticket".to_string(),
+            level: Some(Level::Ticket),
+            description: None,
+            priority: None,
+            tags: vec![],
+            parent: None,
+            depends_on: vec![],
+            needs_review: false,
+            workflow: None,
+        };
+        let id = cmd.execute(&services).await.unwrap();
+        let task = services.tasks().get_task(&id).await.unwrap();
+        assert_eq!(task.level, Level::Ticket);
     }
 }
 

@@ -4,11 +4,11 @@
 //! title, description, priority, tags, parent relationship, and sections.
 
 use clap::Args;
+use vertebrae_core::{Priority, SectionType};
 use vertebrae_core::{ServiceError, UpdateTaskOptions, VertebraeServices};
-use vertebrae_db::{Priority, SectionType};
 
 #[cfg(test)]
-use vertebrae_db::Database;
+use vertebrae_core::Database;
 
 /// Update an existing task
 #[derive(Debug, Args)]
@@ -248,7 +248,7 @@ mod tests {
     use super::*;
     use serial_test::serial;
     use vertebrae_core::{CreateTaskOptions, VertebraeServices};
-    use vertebrae_db::{Level, Priority};
+    use vertebrae_core::{Level, Priority};
 
     /// Helper to create an in-memory test database wrapped in a service
     async fn setup_test_db() -> VertebraeServices {
@@ -1089,7 +1089,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_preserves_other_fields() {
-        use vertebrae_db::{CodeRef, Level, Section, SectionType};
+        use vertebrae_core::{CodeRef, Level, Section, SectionType};
 
         let services = setup_test_db().await;
 
@@ -1149,7 +1149,7 @@ mod tests {
         // Verify workflow assignment is preserved
         assert_eq!(task.workflow_id, original_workflow_id);
         assert_eq!(task.current_step_id, original_step_id);
-        assert_eq!(task.priority, Some(vertebrae_db::Priority::High));
+        assert_eq!(task.priority, Some(vertebrae_core::Priority::High));
         // Verify tags are preserved
         assert_eq!(task.tags, vec!["backend", "api"]);
     }
@@ -1308,7 +1308,7 @@ mod tests {
         content: &str,
         order: Option<u32>,
     ) {
-        use vertebrae_db::Section;
+        use vertebrae_core::Section;
 
         // Parse section type and add section via service
         if let Ok(section_enum) = parse_section_type(section_type) {
@@ -1325,7 +1325,7 @@ mod tests {
     }
 
     /// Helper to get sections from a task
-    async fn get_sections(services: &VertebraeServices, id: &str) -> Vec<vertebrae_db::Section> {
+    async fn get_sections(services: &VertebraeServices, id: &str) -> Vec<vertebrae_core::Section> {
         let task = services.tasks().get_task(id).await.unwrap();
         task.sections
     }
@@ -2089,7 +2089,7 @@ mod tests {
         assert!(updated_task.description.is_none());
         // Other fields should be preserved
         assert_eq!(updated_task.title, "Test task");
-        assert_eq!(updated_task.priority, Some(vertebrae_db::Priority::High));
+        assert_eq!(updated_task.priority, Some(vertebrae_core::Priority::High));
         assert!(updated_task.tags.contains(&"important".to_string()));
     }
 }

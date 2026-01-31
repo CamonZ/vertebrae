@@ -5,8 +5,8 @@
 
 use clap::Args;
 use std::path::Path;
+use vertebrae_core::CodeRef;
 use vertebrae_core::{ServiceError, VertebraeServices};
-use vertebrae_db::CodeRef;
 
 /// Add a code reference to a task
 #[derive(Debug, Args)]
@@ -224,8 +224,8 @@ impl RefCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vertebrae_core::Database;
     use vertebrae_core::{CreateTaskOptions, VertebraeServices};
-    use vertebrae_db::Database;
 
     /// Helper to create a test service with an in-memory database
     async fn setup_test_service() -> VertebraeServices {

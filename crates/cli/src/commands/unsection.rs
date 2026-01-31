@@ -6,8 +6,8 @@
 
 use clap::Args;
 use serde::Deserialize;
+use vertebrae_core::SectionType;
 use vertebrae_core::{ServiceError, VertebraeServices};
-use vertebrae_db::SectionType;
 
 /// Remove sections from a task
 #[derive(Debug, Args)]
@@ -99,7 +99,7 @@ impl std::fmt::Display for UnsectionResult {
 #[derive(Debug, Deserialize)]
 struct TaskSectionsRow {
     #[allow(dead_code)]
-    id: surrealdb::sql::Thing,
+    id: vertebrae_core::Thing,
     #[serde(default)]
     sections: Vec<SectionRow>,
 }
@@ -177,7 +177,7 @@ impl UnsectionCommand {
             .collect();
 
         let task = TaskSectionsRow {
-            id: surrealdb::sql::Thing::from(("task", id.as_str())),
+            id: vertebrae_core::Thing::from(("task", id.as_str())),
             sections: existing_sections,
         };
 
@@ -382,7 +382,7 @@ impl UnsectionCommand {
 mod tests {
     use super::*;
     use vertebrae_core::{CreateTaskOptions, VertebraeServices};
-    use vertebrae_db::{Database, Section};
+    use vertebrae_core::{Database, Section};
 
     /// Helper to create an in-memory test service
     async fn setup_test_service() -> VertebraeServices {

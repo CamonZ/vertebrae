@@ -13,8 +13,8 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::path::PathBuf;
 use uuid::Uuid;
+use vertebrae_core::{AgentConfig, CodeRef, Section};
 use vertebrae_core::{ServiceError, VertebraeServices};
-use vertebrae_db::{AgentConfig, CodeRef, Section};
 
 /// Export database to JSONL format
 #[derive(Debug, Args)]
@@ -726,5 +726,344 @@ mod tests {
         assert_ne!(task_uuid, workflow_uuid);
         assert_ne!(task_uuid, step_uuid);
         assert_ne!(workflow_uuid, step_uuid);
+    }
+
+    // ==================== IdMapper workflow_transition tests ====================
+
+    #[test]
+    fn test_id_mapper_workflow_transition() {
+        let mut mapper = IdMapper::new();
+        let old_id = "xtrans1";
+        let result = mapper.workflow_transition(old_id);
+        assert!(is_valid_uuid(&result));
+
+        // Idempotent
+        let result2 = mapper.workflow_transition(old_id);
+        assert_eq!(result, result2);
+    }
+
+    #[test]
+    fn test_id_mapper_workflow_transition_preserves_uuid() {
+        let mut mapper = IdMapper::new();
+        let uuid = "550e8400-e29b-41d4-a716-446655440000";
+        let result = mapper.workflow_transition(uuid);
+        assert_eq!(result, uuid);
+    }
+
+    #[test]
+    fn test_id_mapper_get_workflow_transition() {
+        let mut mapper = IdMapper::new();
+        // Not yet mapped
+        assert!(mapper.get_workflow_transition("unknown").is_none());
+
+        // Map it
+        let mapped = mapper.workflow_transition("tr1");
+        assert_eq!(mapper.get_workflow_transition("tr1"), Some(mapped));
+    }
+
+    // ==================== IdMapper get_* returns None for unknown ====================
+
+    #[test]
+    fn test_id_mapper_get_unknown_returns_none() {
+        let mapper = IdMapper::new();
+        assert!(mapper.get_task("nonexistent").is_none());
+        assert!(mapper.get_workflow("nonexistent").is_none());
+        assert!(mapper.get_step("nonexistent").is_none());
+        assert!(mapper.get_workflow_transition("nonexistent").is_none());
+    }
+
+    // ==================== IdMapper default ====================
+
+    #[test]
+    fn test_id_mapper_default() {
+        let mapper = IdMapper::default();
+        let debug = format!("{:?}", mapper);
+        assert!(debug.contains("IdMapper"));
+    }
+
+    // ==================== write_records tests ====================
+
+    #[test]
+    fn test_write_records_empty() {
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!(
+            "vtb-test-export-empty-{}.jsonl",
+            std::process::id()
+        ));
+        let cmd = ExportCommand {
+            output: Some(path.clone()),
+        };
+        let result = cmd.write_records(&[]).unwrap();
+        assert_eq!(result, path.display().to_string());
+
+        // File should exist but be empty
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.is_empty());
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_write_records_single_record() {
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!(
+            "vtb-test-export-single-{}.jsonl",
+            std::process::id()
+        ));
+        let cmd = ExportCommand {
+            output: Some(path.clone()),
+        };
+        let records = vec![ExportRecord::ChildOf {
+            child: "c1".to_string(),
+            parent: "p1".to_string(),
+        }];
+        cmd.write_records(&records).unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].contains(r#""type":"child_of""#));
+        assert!(lines[0].contains(r#""child":"c1""#));
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_write_records_multiple_records() {
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!(
+            "vtb-test-export-multi-{}.jsonl",
+            std::process::id()
+        ));
+        let cmd = ExportCommand {
+            output: Some(path.clone()),
+        };
+        let records = vec![
+            ExportRecord::Workflow(ExportedWorkflow {
+                id: "wf1".to_string(),
+                name: "Test".to_string(),
+                description: None,
+                initial_step_id: None,
+                auto_advance: false,
+                order: 0,
+                created_at: None,
+                updated_at: None,
+            }),
+            ExportRecord::Task(Box::new(ExportedTask {
+                id: "t1".to_string(),
+                title: "Task".to_string(),
+                description: None,
+                level: "task".to_string(),
+                priority: None,
+                tags: vec![],
+                sections: vec![],
+                code_refs: vec![],
+                needs_human_review: None,
+                revision_feedback: None,
+                rejection_reason: None,
+                workflow_id: None,
+                current_step_id: None,
+                created_at: None,
+                updated_at: None,
+                started_at: None,
+                completed_at: None,
+            })),
+            ExportRecord::DependsOn {
+                task: "t2".to_string(),
+                blocker: "t1".to_string(),
+            },
+        ];
+        cmd.write_records(&records).unwrap();
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(lines.len(), 3);
+        assert!(lines[0].contains(r#""type":"workflow""#));
+        assert!(lines[1].contains(r#""type":"task""#));
+        assert!(lines[2].contains(r#""type":"depends_on""#));
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_write_records_default_filename() {
+        // When output is None, write_records generates a timestamped filename
+        let cmd = ExportCommand { output: None };
+        let records = vec![ExportRecord::ChildOf {
+            child: "c".to_string(),
+            parent: "p".to_string(),
+        }];
+        let destination = cmd.write_records(&records).unwrap();
+        assert!(destination.starts_with("vtb-export-"));
+        assert!(destination.ends_with(".jsonl"));
+        // Clean up the generated file
+        std::fs::remove_file(&destination).ok();
+    }
+
+    #[test]
+    fn test_write_records_invalid_path() {
+        let cmd = ExportCommand {
+            output: Some(PathBuf::from("/nonexistent/dir/file.jsonl")),
+        };
+        let result = cmd.write_records(&[]);
+        assert!(result.is_err());
+    }
+
+    // ==================== ExportResult Display edge cases ====================
+
+    #[test]
+    fn test_export_result_display_all_zeros() {
+        let result = ExportResult {
+            workflows: 0,
+            steps: 0,
+            workflow_transitions: 0,
+            tasks: 0,
+            child_of_relations: 0,
+            depends_on_relations: 0,
+            destination: "empty.jsonl".to_string(),
+        };
+        let output = format!("{}", result);
+        assert!(output.contains("Export complete!"));
+        assert!(output.contains("Workflows: 0"));
+        assert!(output.contains("Tasks: 0"));
+    }
+
+    // ==================== ExportRecord serialization - skip_serializing_if ====================
+
+    #[test]
+    fn test_export_workflow_skips_none_fields() {
+        let record = ExportRecord::Workflow(ExportedWorkflow {
+            id: "wf1".to_string(),
+            name: "Test".to_string(),
+            description: None,
+            initial_step_id: None,
+            auto_advance: false,
+            order: 0,
+            created_at: None,
+            updated_at: None,
+        });
+        let json = serde_json::to_string(&record).unwrap();
+        assert!(!json.contains("description"));
+        assert!(!json.contains("initial_step_id"));
+        assert!(!json.contains("created_at"));
+        assert!(!json.contains("updated_at"));
+    }
+
+    #[test]
+    fn test_export_task_skips_empty_and_none_fields() {
+        let record = ExportRecord::Task(Box::new(ExportedTask {
+            id: "t1".to_string(),
+            title: "Minimal".to_string(),
+            description: None,
+            level: "task".to_string(),
+            priority: None,
+            tags: vec![],
+            sections: vec![],
+            code_refs: vec![],
+            needs_human_review: None,
+            revision_feedback: None,
+            rejection_reason: None,
+            workflow_id: None,
+            current_step_id: None,
+            created_at: None,
+            updated_at: None,
+            started_at: None,
+            completed_at: None,
+        }));
+        let json = serde_json::to_string(&record).unwrap();
+        assert!(!json.contains("description"));
+        assert!(!json.contains("priority"));
+        assert!(!json.contains("tags"));
+        assert!(!json.contains("sections"));
+        assert!(!json.contains("code_refs"));
+        assert!(!json.contains("workflow_id"));
+        assert!(!json.contains("current_step_id"));
+    }
+
+    #[test]
+    fn test_export_step_skips_empty_fields() {
+        let record = ExportRecord::Step(Box::new(ExportedStep {
+            id: "s1".to_string(),
+            name: "Step".to_string(),
+            workflow_id: "wf1".to_string(),
+            goal: None,
+            agents: vec![],
+            skills: vec![],
+            agent_config: AgentConfig::default(),
+            is_final: false,
+            transitions_to: vec![],
+            order: 0,
+            created_at: None,
+            updated_at: None,
+        }));
+        let json = serde_json::to_string(&record).unwrap();
+        assert!(!json.contains("goal"));
+        assert!(!json.contains("agents"));
+        assert!(!json.contains("skills"));
+        assert!(!json.contains("transitions_to"));
+    }
+
+    #[test]
+    fn test_export_workflow_transition_with_target_step() {
+        let record = ExportRecord::WorkflowTransition(ExportedWorkflowTransition {
+            id: "tr1".to_string(),
+            from_workflow_id: "wf1".to_string(),
+            to_workflow_id: "wf2".to_string(),
+            label: "Go".to_string(),
+            target_step_id: Some("s5".to_string()),
+        });
+        let json = serde_json::to_string(&record).unwrap();
+        assert!(json.contains(r#""target_step_id":"s5""#));
+    }
+
+    #[test]
+    fn test_export_workflow_transition_skips_none_target_step() {
+        let record = ExportRecord::WorkflowTransition(ExportedWorkflowTransition {
+            id: "tr1".to_string(),
+            from_workflow_id: "wf1".to_string(),
+            to_workflow_id: "wf2".to_string(),
+            label: "Go".to_string(),
+            target_step_id: None,
+        });
+        let json = serde_json::to_string(&record).unwrap();
+        assert!(!json.contains("target_step_id"));
+    }
+
+    // ==================== IdMapper multiple IDs ====================
+
+    #[test]
+    fn test_id_mapper_multiple_tasks() {
+        let mut mapper = IdMapper::new();
+        let id1 = mapper.task("x111");
+        let id2 = mapper.task("x222");
+        let id3 = mapper.task("x333");
+
+        assert!(is_valid_uuid(&id1));
+        assert!(is_valid_uuid(&id2));
+        assert!(is_valid_uuid(&id3));
+        assert_ne!(id1, id2);
+        assert_ne!(id2, id3);
+
+        // Lookup works
+        assert_eq!(mapper.get_task("x111"), Some(id1));
+        assert_eq!(mapper.get_task("x222"), Some(id2));
+        assert_eq!(mapper.get_task("x333"), Some(id3));
+    }
+
+    #[test]
+    fn test_normalize_or_generate_deterministic_for_same_uuid() {
+        let uuid = "019bdbcf-c4d3-76c3-9502-176660223f2a";
+        let r1 = normalize_or_generate(uuid);
+        let r2 = normalize_or_generate(uuid);
+        assert_eq!(r1, r2);
+    }
+
+    #[test]
+    fn test_normalize_or_generate_different_for_old_ids() {
+        // Each call for non-UUID IDs generates a new UUIDv7
+        let r1 = normalize_or_generate("old1");
+        let r2 = normalize_or_generate("old1");
+        // Both are valid UUIDs but different (UUIDv7 is time-based)
+        assert!(is_valid_uuid(&r1));
+        assert!(is_valid_uuid(&r2));
+        // They could theoretically be the same if called in same nanosecond,
+        // but practically they differ. Don't assert inequality here.
     }
 }

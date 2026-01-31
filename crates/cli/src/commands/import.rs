@@ -9,12 +9,11 @@ use clap::Args;
 use serde::Deserialize;
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
-use surrealdb::sql::Thing;
-use vertebrae_core::{ServiceError, VertebraeServices};
-use vertebrae_db::{
+use vertebrae_core::{
     AgentConfig, CodeRef, Level, Priority, Section, Step as DbStep, Task as DbTask,
     Workflow as DbWorkflow,
 };
+use vertebrae_core::{ServiceError, Thing, VertebraeServices};
 
 /// Import database from JSONL format
 #[derive(Debug, Args)]
@@ -227,9 +226,9 @@ fn parse_datetime(s: &Option<String>) -> Option<chrono::DateTime<chrono::Utc>> {
         .map(|dt| dt.with_timezone(&chrono::Utc))
 }
 
-/// Create a Thing from table name and ID string
-fn make_thing(table: &str, id: &str) -> Thing {
-    Thing::from((table.to_string(), id.to_string()))
+/// Get string ID from table name and ID string (vertebrae_core models use String IDs)
+fn make_thing(_table: &str, id: &str) -> String {
+    id.to_string()
 }
 
 impl ImportCommand {
@@ -290,7 +289,7 @@ impl ImportCommand {
                 };
                 services
                     .workflows()
-                    .create_workflow_raw(&workflow.id, &db_workflow.into())
+                    .create_workflow_raw(&workflow.id, &db_workflow)
                     .await?;
                 result.workflows_imported += 1;
             }
@@ -327,7 +326,7 @@ impl ImportCommand {
                 };
                 services
                     .steps()
-                    .create_step_with_id(&step.id, &db_step.into())
+                    .create_step_with_id(&step.id, &db_step)
                     .await?;
                 result.steps_imported += 1;
             }
@@ -338,7 +337,7 @@ impl ImportCommand {
             if let ImportRecord::Workflow(workflow) = record
                 && let Some(ref initial_step_id) = workflow.initial_step_id
             {
-                let step_thing = make_thing("step", initial_step_id);
+                let step_thing = Thing::from(("step".to_string(), initial_step_id.to_string()));
                 services
                     .workflows()
                     .update_workflow_initial_step(&workflow.id, &step_thing)
@@ -420,10 +419,7 @@ impl ImportCommand {
                     started_at: parse_datetime(&task.started_at),
                     completed_at: parse_datetime(&task.completed_at),
                 };
-                services
-                    .tasks()
-                    .create_task_raw(&task.id, &db_task.into())
-                    .await?;
+                services.tasks().create_task_raw(&task.id, &db_task).await?;
                 result.tasks_imported += 1;
             }
         }
@@ -692,5 +688,317 @@ mod tests {
             Some(Priority::Critical)
         ));
         assert!(parse_priority("unknown").is_none());
+    }
+
+    // ==================== parse_lines tests ====================
+
+    #[test]
+    fn test_parse_lines_empty_input() {
+        let cmd = ImportCommand {
+            input: None,
+            skip_existing: false,
+        };
+        let reader = std::io::Cursor::new(b"");
+        let path = PathBuf::from("<test>");
+        let records = cmd.parse_lines(reader, &path).unwrap();
+        assert!(records.is_empty());
+    }
+
+    #[test]
+    fn test_parse_lines_skips_blank_lines() {
+        let cmd = ImportCommand {
+            input: None,
+            skip_existing: false,
+        };
+        let input = "\n\n   \n\n";
+        let reader = std::io::Cursor::new(input.as_bytes());
+        let path = PathBuf::from("<test>");
+        let records = cmd.parse_lines(reader, &path).unwrap();
+        assert!(records.is_empty());
+    }
+
+    #[test]
+    fn test_parse_lines_single_workflow() {
+        let cmd = ImportCommand {
+            input: None,
+            skip_existing: false,
+        };
+        let input =
+            r#"{"type":"workflow","id":"wf1","name":"Test","auto_advance":false,"order":0}"#;
+        let reader = std::io::Cursor::new(input.as_bytes());
+        let path = PathBuf::from("<test>");
+        let records = cmd.parse_lines(reader, &path).unwrap();
+        assert_eq!(records.len(), 1);
+        assert!(matches!(&records[0], ImportRecord::Workflow(_)));
+    }
+
+    #[test]
+    fn test_parse_lines_multiple_record_types() {
+        let cmd = ImportCommand {
+            input: None,
+            skip_existing: false,
+        };
+        let input = concat!(
+            r#"{"type":"workflow","id":"wf1","name":"Test","auto_advance":false,"order":0}"#,
+            "\n",
+            r#"{"type":"task","id":"t1","title":"Task 1","level":"task","tags":[],"sections":[],"code_refs":[]}"#,
+            "\n",
+            r#"{"type":"child_of","child":"t2","parent":"t1"}"#,
+            "\n",
+            r#"{"type":"depends_on","task":"t3","blocker":"t1"}"#,
+        );
+        let reader = std::io::Cursor::new(input.as_bytes());
+        let path = PathBuf::from("test.jsonl");
+        let records = cmd.parse_lines(reader, &path).unwrap();
+        assert_eq!(records.len(), 4);
+        assert!(matches!(&records[0], ImportRecord::Workflow(_)));
+        assert!(matches!(&records[1], ImportRecord::Task(_)));
+        assert!(matches!(&records[2], ImportRecord::ChildOf { .. }));
+        assert!(matches!(&records[3], ImportRecord::DependsOn { .. }));
+    }
+
+    #[test]
+    fn test_parse_lines_invalid_json() {
+        let cmd = ImportCommand {
+            input: None,
+            skip_existing: false,
+        };
+        let input = "not valid json\n";
+        let reader = std::io::Cursor::new(input.as_bytes());
+        let path = PathBuf::from("test.jsonl");
+        let result = cmd.parse_lines(reader, &path);
+        assert!(result.is_err());
+        let err = format!("{}", result.unwrap_err());
+        assert!(err.contains("test.jsonl"));
+        assert!(err.contains("line 1"));
+    }
+
+    #[test]
+    fn test_parse_lines_invalid_json_on_second_line() {
+        let cmd = ImportCommand {
+            input: None,
+            skip_existing: false,
+        };
+        let input = concat!(
+            r#"{"type":"workflow","id":"wf1","name":"Test","auto_advance":false,"order":0}"#,
+            "\n",
+            "bad json\n",
+        );
+        let reader = std::io::Cursor::new(input.as_bytes());
+        let path = PathBuf::from("test.jsonl");
+        let result = cmd.parse_lines(reader, &path);
+        assert!(result.is_err());
+        let err = format!("{}", result.unwrap_err());
+        assert!(err.contains("line 2"));
+    }
+
+    #[test]
+    fn test_parse_lines_with_blank_lines_between_records() {
+        let cmd = ImportCommand {
+            input: None,
+            skip_existing: false,
+        };
+        let input = concat!(
+            r#"{"type":"workflow","id":"wf1","name":"Test","auto_advance":false,"order":0}"#,
+            "\n\n\n",
+            r#"{"type":"task","id":"t1","title":"Task","level":"task","tags":[],"sections":[],"code_refs":[]}"#,
+            "\n",
+        );
+        let reader = std::io::Cursor::new(input.as_bytes());
+        let path = PathBuf::from("<test>");
+        let records = cmd.parse_lines(reader, &path).unwrap();
+        assert_eq!(records.len(), 2);
+    }
+
+    // ==================== make_thing tests ====================
+
+    #[test]
+    fn test_make_thing_returns_id() {
+        assert_eq!(make_thing("task", "abc123"), "abc123");
+        assert_eq!(make_thing("workflow", "wf-1"), "wf-1");
+        assert_eq!(make_thing("step", ""), "");
+    }
+
+    // ==================== ImportResult Display edge cases ====================
+
+    #[test]
+    fn test_import_result_display_with_all_skipped() {
+        let result = ImportResult {
+            workflows_imported: 1,
+            workflows_skipped: 2,
+            steps_imported: 3,
+            steps_skipped: 4,
+            transitions_imported: 5,
+            transitions_skipped: 6,
+            tasks_imported: 7,
+            tasks_skipped: 8,
+            child_of_relations: 9,
+            depends_on_relations: 10,
+            source: "test.jsonl".to_string(),
+        };
+        let output = format!("{}", result);
+        assert!(output.contains("Workflows imported: 1"));
+        assert!(output.contains("Workflows skipped: 2"));
+        assert!(output.contains("Steps imported: 3"));
+        assert!(output.contains("Steps skipped: 4"));
+        assert!(output.contains("Transitions imported: 5"));
+        assert!(output.contains("Transitions skipped: 6"));
+        assert!(output.contains("Tasks imported: 7"));
+        assert!(output.contains("Tasks skipped: 8"));
+        assert!(output.contains("Child relationships: 9"));
+        assert!(output.contains("Dependencies: 10"));
+    }
+
+    #[test]
+    fn test_import_result_display_empty_import() {
+        let result = ImportResult {
+            workflows_imported: 0,
+            workflows_skipped: 0,
+            steps_imported: 0,
+            steps_skipped: 0,
+            transitions_imported: 0,
+            transitions_skipped: 0,
+            tasks_imported: 0,
+            tasks_skipped: 0,
+            child_of_relations: 0,
+            depends_on_relations: 0,
+            source: "empty.jsonl".to_string(),
+        };
+        let output = format!("{}", result);
+        assert!(output.contains("Import complete!"));
+        assert!(output.contains("Tasks imported: 0"));
+        // Workflows/Steps/Transitions sections should not appear when both imported and skipped are 0
+        assert!(!output.contains("Workflows"));
+        assert!(!output.contains("Steps"));
+        assert!(!output.contains("Transitions"));
+    }
+
+    // ==================== ImportRecord deserialization edge cases ====================
+
+    #[test]
+    fn test_import_record_workflow_with_all_fields() {
+        let json = r#"{"type":"workflow","id":"wf1","name":"Full Workflow","description":"Desc","initial_step_id":"s1","auto_advance":true,"order":5,"created_at":"2024-01-15T10:30:00Z","updated_at":"2024-01-16T12:00:00Z"}"#;
+        let record: ImportRecord = serde_json::from_str(json).unwrap();
+        match record {
+            ImportRecord::Workflow(wf) => {
+                assert_eq!(wf.description, Some("Desc".to_string()));
+                assert_eq!(wf.initial_step_id, Some("s1".to_string()));
+                assert!(wf.auto_advance);
+                assert_eq!(wf.order, 5);
+            }
+            _ => panic!("Expected Workflow"),
+        }
+    }
+
+    #[test]
+    fn test_import_record_task_with_all_fields() {
+        let json = r#"{"type":"task","id":"t1","title":"Full Task","description":"Desc","level":"epic","priority":"high","tags":["a","b"],"sections":[],"code_refs":[],"needs_human_review":true,"revision_feedback":"feedback","rejection_reason":"reason","workflow_id":"wf1","current_step_id":"s1","created_at":"2024-01-15T10:30:00Z","updated_at":"2024-01-16T12:00:00Z","started_at":"2024-01-15T11:00:00Z","completed_at":"2024-01-16T13:00:00Z"}"#;
+        let record: ImportRecord = serde_json::from_str(json).unwrap();
+        match record {
+            ImportRecord::Task(task) => {
+                assert_eq!(task.title, "Full Task");
+                assert_eq!(task.description, Some("Desc".to_string()));
+                assert_eq!(task.level, "epic");
+                assert_eq!(task.priority, Some("high".to_string()));
+                assert_eq!(task.tags, vec!["a", "b"]);
+                assert_eq!(task.needs_human_review, Some(true));
+                assert_eq!(task.revision_feedback, Some("feedback".to_string()));
+                assert_eq!(task.rejection_reason, Some("reason".to_string()));
+            }
+            _ => panic!("Expected Task"),
+        }
+    }
+
+    #[test]
+    fn test_import_record_step_with_all_fields() {
+        let json = r#"{"type":"step","id":"s1","name":"Review","workflow_id":"wf1","goal":"Review code","agents":["agent1"],"skills":["skill1"],"agent_config":{"model":"opus"},"is_final":true,"transitions_to":["s2","s3"],"order":2,"created_at":"2024-01-15T10:30:00Z","updated_at":"2024-01-16T12:00:00Z"}"#;
+        let record: ImportRecord = serde_json::from_str(json).unwrap();
+        match record {
+            ImportRecord::Step(step) => {
+                assert_eq!(step.goal, Some("Review code".to_string()));
+                assert_eq!(step.agents, vec!["agent1"]);
+                assert_eq!(step.skills, vec!["skill1"]);
+                assert!(step.is_final);
+                assert_eq!(step.transitions_to, vec!["s2", "s3"]);
+            }
+            _ => panic!("Expected Step"),
+        }
+    }
+
+    #[test]
+    fn test_import_record_workflow_transition_with_target_step() {
+        let json = r#"{"type":"workflow_transition","id":"tr1","from_workflow_id":"wf1","to_workflow_id":"wf2","label":"Advance","target_step_id":"s5"}"#;
+        let record: ImportRecord = serde_json::from_str(json).unwrap();
+        match record {
+            ImportRecord::WorkflowTransition(tr) => {
+                assert_eq!(tr.target_step_id, Some("s5".to_string()));
+            }
+            _ => panic!("Expected WorkflowTransition"),
+        }
+    }
+
+    #[test]
+    fn test_import_record_invalid_type() {
+        let json = r#"{"type":"invalid_type","id":"x"}"#;
+        let result: Result<ImportRecord, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    // ==================== parse_datetime edge cases ====================
+
+    #[test]
+    fn test_parse_datetime_with_timezone_offset() {
+        use chrono::Timelike;
+        let dt = Some("2024-01-15T10:30:00+05:00".to_string());
+        let result = parse_datetime(&dt);
+        assert!(result.is_some());
+        // Should be converted to UTC
+        let utc = result.unwrap();
+        assert_eq!(utc.hour(), 5); // 10:30 +05:00 = 05:30 UTC
+    }
+
+    #[test]
+    fn test_parse_datetime_with_fractional_seconds() {
+        let dt = Some("2024-01-15T10:30:00.123456Z".to_string());
+        let result = parse_datetime(&dt);
+        assert!(result.is_some());
+    }
+
+    // ==================== parse_level edge cases ====================
+
+    #[test]
+    fn test_parse_level_mixed_case() {
+        assert!(matches!(parse_level("Epic"), Level::Epic));
+        assert!(matches!(parse_level("TICKET"), Level::Ticket));
+        assert!(matches!(parse_level("TaSk"), Level::Task));
+    }
+
+    #[test]
+    fn test_parse_level_empty_defaults_to_task() {
+        assert!(matches!(parse_level(""), Level::Task));
+    }
+
+    // ==================== parse_priority edge cases ====================
+
+    #[test]
+    fn test_parse_priority_all_variants() {
+        assert!(matches!(parse_priority("low"), Some(Priority::Low)));
+        assert!(matches!(parse_priority("medium"), Some(Priority::Medium)));
+        assert!(matches!(parse_priority("high"), Some(Priority::High)));
+        assert!(matches!(
+            parse_priority("critical"),
+            Some(Priority::Critical)
+        ));
+    }
+
+    #[test]
+    fn test_parse_priority_mixed_case() {
+        assert!(matches!(parse_priority("Low"), Some(Priority::Low)));
+        assert!(matches!(parse_priority("MEDIUM"), Some(Priority::Medium)));
+    }
+
+    #[test]
+    fn test_parse_priority_empty_returns_none() {
+        assert!(parse_priority("").is_none());
     }
 }

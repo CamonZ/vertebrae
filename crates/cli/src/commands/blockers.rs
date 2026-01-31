@@ -138,7 +138,7 @@ impl BlockersCommand {
         &self,
         services: &VertebraeServices,
         task_id: &str,
-    ) -> Result<Vec<vertebrae_db::TaskSummary>, ServiceError> {
+    ) -> Result<Vec<vertebrae_core::TaskSummary>, ServiceError> {
         // Get tasks that this task depends on via the depends_on relationship
         // Using service layer method that returns full task details
         let blockers = services.tasks().get_dependencies(task_id).await?;
@@ -174,7 +174,7 @@ impl BlockersCommand {
                     continue;
                 }
 
-                result.push(vertebrae_db::TaskSummary {
+                result.push(vertebrae_core::TaskSummary {
                     id: blocker_id,
                     title: task.title,
                     level: task.level,
@@ -284,7 +284,7 @@ fn print_node(
 mod tests {
     use super::*;
     use vertebrae_core::{CreateTaskOptions, ServiceError};
-    use vertebrae_db::{Database, Level};
+    use vertebrae_core::{Database, Level};
 
     /// Helper to create an in-memory test service
     async fn setup_test_service() -> VertebraeServices {

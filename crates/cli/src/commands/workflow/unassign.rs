@@ -45,4 +45,40 @@ mod tests {
         assert!(debug.contains("WorkflowUnassignCommand"));
         assert!(debug.contains("task1"));
     }
+
+    #[test]
+    fn test_workflow_unassign_command_with_various_ids() {
+        let ids = vec!["task1", "task-abc", "TASK123", "my-task"];
+        for id in ids {
+            let cmd = WorkflowUnassignCommand {
+                task_id: id.to_string(),
+            };
+            assert_eq!(cmd.task_id, id);
+        }
+    }
+
+    #[test]
+    fn test_workflow_unassign_command_field_value() {
+        let cmd = WorkflowUnassignCommand {
+            task_id: "my-task".to_string(),
+        };
+        assert_eq!(cmd.task_id, "my-task");
+    }
+
+    #[test]
+    fn test_workflow_unassign_command_case_preservation() {
+        let cmd = WorkflowUnassignCommand {
+            task_id: "MyTask".to_string(),
+        };
+        assert_eq!(cmd.task_id, "MyTask");
+    }
+
+    #[test]
+    fn test_workflow_unassign_command_with_dashes() {
+        let cmd = WorkflowUnassignCommand {
+            task_id: "task-with-multiple-dashes".to_string(),
+        };
+        assert!(cmd.task_id.contains("task"));
+        assert!(cmd.task_id.contains("dashes"));
+    }
 }

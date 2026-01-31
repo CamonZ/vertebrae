@@ -286,4 +286,307 @@ mod tests {
         let debug = format!("{:?}", detail);
         assert!(debug.contains("WorkflowDetail"));
     }
+
+    // ==================== WorkflowDetail Display branch coverage ====================
+
+    #[test]
+    fn test_workflow_detail_display_no_steps() {
+        let detail = WorkflowDetail {
+            id: "wf1".to_string(),
+            name: "Empty".to_string(),
+            description: None,
+            auto_advance: false,
+            steps: vec![],
+            metadata: HashMap::new(),
+            created_at: None,
+            updated_at: None,
+        };
+        let output = format!("{}", detail);
+        assert!(output.contains("Steps (0 total)"));
+        assert!(output.contains("(no steps defined)"));
+    }
+
+    #[test]
+    fn test_workflow_detail_display_auto_advance_yes() {
+        let detail = WorkflowDetail {
+            id: "wf1".to_string(),
+            name: "Auto".to_string(),
+            description: None,
+            auto_advance: true,
+            steps: vec![],
+            metadata: HashMap::new(),
+            created_at: None,
+            updated_at: None,
+        };
+        let output = format!("{}", detail);
+        assert!(output.contains("Auto Advance: Yes"));
+    }
+
+    #[test]
+    fn test_workflow_detail_display_with_timestamps() {
+        let detail = WorkflowDetail {
+            id: "wf1".to_string(),
+            name: "Timestamped".to_string(),
+            description: None,
+            auto_advance: false,
+            steps: vec![],
+            metadata: HashMap::new(),
+            created_at: Some("2024-01-15T10:30:00Z".to_string()),
+            updated_at: Some("2024-01-16T12:00:00Z".to_string()),
+        };
+        let output = format!("{}", detail);
+        assert!(output.contains("Timestamps"));
+        assert!(output.contains("Created:"));
+        assert!(output.contains("Updated:"));
+    }
+
+    #[test]
+    fn test_workflow_detail_display_created_only() {
+        let detail = WorkflowDetail {
+            id: "wf1".to_string(),
+            name: "Created".to_string(),
+            description: None,
+            auto_advance: false,
+            steps: vec![],
+            metadata: HashMap::new(),
+            created_at: Some("2024-01-15T10:30:00Z".to_string()),
+            updated_at: None,
+        };
+        let output = format!("{}", detail);
+        assert!(output.contains("Timestamps"));
+        assert!(output.contains("Created:"));
+        assert!(!output.contains("Updated:"));
+    }
+
+    #[test]
+    fn test_workflow_detail_display_updated_only() {
+        let detail = WorkflowDetail {
+            id: "wf1".to_string(),
+            name: "Updated".to_string(),
+            description: None,
+            auto_advance: false,
+            steps: vec![],
+            metadata: HashMap::new(),
+            created_at: None,
+            updated_at: Some("2024-01-16T12:00:00Z".to_string()),
+        };
+        let output = format!("{}", detail);
+        assert!(output.contains("Timestamps"));
+        assert!(!output.contains("Created:"));
+        assert!(output.contains("Updated:"));
+    }
+
+    #[test]
+    fn test_workflow_detail_display_no_timestamps_no_section() {
+        let detail = WorkflowDetail {
+            id: "wf1".to_string(),
+            name: "NoTs".to_string(),
+            description: None,
+            auto_advance: false,
+            steps: vec![],
+            metadata: HashMap::new(),
+            created_at: None,
+            updated_at: None,
+        };
+        let output = format!("{}", detail);
+        assert!(!output.contains("Timestamps"));
+    }
+
+    #[test]
+    fn test_workflow_detail_display_step_default_model() {
+        let detail = WorkflowDetail {
+            id: "wf1".to_string(),
+            name: "Default Model".to_string(),
+            description: None,
+            auto_advance: false,
+            steps: vec![StepDisplayInfo {
+                name: "review".to_string(),
+                model: None,
+                order: 0,
+            }],
+            metadata: HashMap::new(),
+            created_at: None,
+            updated_at: None,
+        };
+        let output = format!("{}", detail);
+        assert!(output.contains("1. review (model: default)"));
+    }
+
+    #[test]
+    fn test_workflow_detail_display_steps_sorted_by_order() {
+        let detail = WorkflowDetail {
+            id: "wf1".to_string(),
+            name: "Sorted".to_string(),
+            description: None,
+            auto_advance: false,
+            steps: vec![
+                StepDisplayInfo {
+                    name: "deploy".to_string(),
+                    model: Some("m3".to_string()),
+                    order: 2,
+                },
+                StepDisplayInfo {
+                    name: "code".to_string(),
+                    model: Some("m1".to_string()),
+                    order: 0,
+                },
+                StepDisplayInfo {
+                    name: "review".to_string(),
+                    model: Some("m2".to_string()),
+                    order: 1,
+                },
+            ],
+            metadata: HashMap::new(),
+            created_at: None,
+            updated_at: None,
+        };
+        let output = format!("{}", detail);
+        // Steps should be sorted: code (0), review (1), deploy (2)
+        let code_pos = output.find("code").unwrap();
+        let review_pos = output.find("review").unwrap();
+        let deploy_pos = output.find("deploy").unwrap();
+        assert!(code_pos < review_pos);
+        assert!(review_pos < deploy_pos);
+    }
+
+    #[test]
+    fn test_workflow_detail_display_no_description() {
+        let detail = WorkflowDetail {
+            id: "wf1".to_string(),
+            name: "NoDesc".to_string(),
+            description: None,
+            auto_advance: false,
+            steps: vec![],
+            metadata: HashMap::new(),
+            created_at: None,
+            updated_at: None,
+        };
+        let output = format!("{}", detail);
+        // Should not have Description section header followed by separator
+        assert!(!output.contains("Description\n"));
+    }
+
+    #[test]
+    fn test_workflow_detail_display_multiple_metadata() {
+        let mut metadata = HashMap::new();
+        metadata.insert("team".to_string(), "backend".to_string());
+        metadata.insert("env".to_string(), "production".to_string());
+
+        let detail = WorkflowDetail {
+            id: "wf1".to_string(),
+            name: "Meta".to_string(),
+            description: None,
+            auto_advance: false,
+            steps: vec![],
+            metadata,
+            created_at: None,
+            updated_at: None,
+        };
+        let output = format!("{}", detail);
+        assert!(output.contains("Metadata"));
+        assert!(output.contains("team: backend"));
+        assert!(output.contains("env: production"));
+    }
+
+    // ==================== format_timestamp tests ====================
+
+    #[test]
+    fn test_format_timestamp_rfc3339() {
+        let ts = "2024-06-15T14:30:00Z".to_string();
+        let result = format_timestamp(Some(&ts));
+        assert_eq!(result, "2024-06-15 14:30");
+    }
+
+    #[test]
+    fn test_format_timestamp_rfc3339_with_offset() {
+        let ts = "2024-06-15T14:30:00+05:00".to_string();
+        let result = format_timestamp(Some(&ts));
+        assert_eq!(result, "2024-06-15 14:30");
+    }
+
+    #[test]
+    fn test_format_timestamp_surrealdb_format() {
+        // Non-RFC3339 format falls back to replacing T and Z
+        let ts = "2024-06-15T14:30:00Z extra".to_string();
+        let result = format_timestamp(Some(&ts));
+        // Can't parse as RFC3339, so falls back to replacement
+        assert!(result.contains("2024-06-15"));
+        assert!(!result.contains('T'));
+        assert!(!result.contains('Z'));
+    }
+
+    #[test]
+    fn test_format_timestamp_none() {
+        assert_eq!(format_timestamp(None), "");
+    }
+
+    #[test]
+    fn test_format_timestamp_empty_string() {
+        let ts = "".to_string();
+        let result = format_timestamp(Some(&ts));
+        assert_eq!(result, "");
+    }
+
+    // ==================== StepDisplayInfo tests ====================
+
+    #[test]
+    fn test_step_display_info_clone() {
+        let step = StepDisplayInfo {
+            name: "review".to_string(),
+            model: Some("sonnet".to_string()),
+            order: 1,
+        };
+        let cloned = step.clone();
+        assert_eq!(step.name, cloned.name);
+        assert_eq!(step.model, cloned.model);
+        assert_eq!(step.order, cloned.order);
+    }
+
+    #[test]
+    fn test_step_display_info_debug() {
+        let step = StepDisplayInfo {
+            name: "review".to_string(),
+            model: Some("opus".to_string()),
+            order: 0,
+        };
+        let debug = format!("{:?}", step);
+        assert!(debug.contains("StepDisplayInfo"));
+        assert!(debug.contains("review"));
+        assert!(debug.contains("opus"));
+    }
+
+    #[test]
+    fn test_step_display_info_no_model() {
+        let step = StepDisplayInfo {
+            name: "test".to_string(),
+            model: None,
+            order: 0,
+        };
+        assert!(step.model.is_none());
+    }
+
+    // ==================== WorkflowSummary edge cases ====================
+
+    #[test]
+    fn test_workflow_summary_display_zero_steps() {
+        let summary = WorkflowSummary {
+            id: "wf1".to_string(),
+            name: "Empty".to_string(),
+            description: None,
+            step_count: 0,
+        };
+        assert_eq!(format!("{}", summary), "wf1 - Empty (0 steps)");
+    }
+
+    #[test]
+    fn test_workflow_summary_display_one_step() {
+        let summary = WorkflowSummary {
+            id: "wf1".to_string(),
+            name: "Single".to_string(),
+            description: None,
+            step_count: 1,
+        };
+        // Note: uses "steps" not "step" even for 1
+        assert_eq!(format!("{}", summary), "wf1 - Single (1 steps)");
+    }
 }

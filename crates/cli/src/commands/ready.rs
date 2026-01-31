@@ -4,8 +4,8 @@
 //! Shows highest-level unblocked items prioritized by hierarchy (epic > ticket > task).
 
 use clap::Args;
+use vertebrae_core::TaskSummary;
 use vertebrae_core::{ServiceError, VertebraeServices};
-use vertebrae_db::TaskSummary;
 
 /// Show highest-level actionable items
 #[derive(Debug, Args)]
@@ -62,7 +62,7 @@ impl ReadyCommand {
 mod tests {
     use super::*;
     use vertebrae_core::CreateTaskOptions;
-    use vertebrae_db::{Database, Level};
+    use vertebrae_core::{Database, Level};
 
     /// Helper to create an in-memory test service
     async fn setup_test_service() -> VertebraeServices {

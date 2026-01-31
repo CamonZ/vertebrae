@@ -342,6 +342,8 @@ impl TransitionToCommand {
 mod tests {
     use super::*;
 
+    // ==================== ParsedTarget::parse tests ====================
+
     #[test]
     fn test_parse_target_workflow_only() {
         let target = ParsedTarget::parse("implementation");
@@ -361,5 +363,215 @@ mod tests {
         let target = ParsedTarget::parse("in_progress:coding_done");
         assert_eq!(target.workflow, "in_progress");
         assert_eq!(target.step, Some("coding_done".to_string()));
+    }
+
+    #[test]
+    fn test_parse_target_empty_string() {
+        let target = ParsedTarget::parse("");
+        assert_eq!(target.workflow, "");
+        assert!(target.step.is_none());
+    }
+
+    #[test]
+    fn test_parse_target_colon_only() {
+        let target = ParsedTarget::parse(":");
+        assert_eq!(target.workflow, "");
+        assert_eq!(target.step, Some("".to_string()));
+    }
+
+    #[test]
+    fn test_parse_target_multiple_colons() {
+        // split_once only splits on first colon
+        let target = ParsedTarget::parse("a:b:c");
+        assert_eq!(target.workflow, "a");
+        assert_eq!(target.step, Some("b:c".to_string()));
+    }
+
+    #[test]
+    fn test_parse_target_clone() {
+        let target = ParsedTarget::parse("review:approved");
+        let cloned = target.clone();
+        assert_eq!(target.workflow, cloned.workflow);
+        assert_eq!(target.step, cloned.step);
+    }
+
+    #[test]
+    fn test_parse_target_debug() {
+        let target = ParsedTarget::parse("review:approved");
+        let debug = format!("{:?}", target);
+        assert!(debug.contains("ParsedTarget"));
+        assert!(debug.contains("review"));
+        assert!(debug.contains("approved"));
+    }
+
+    // ==================== TransitionToResult Display tests ====================
+
+    #[test]
+    fn test_display_transition_with_from_workflow_and_step() {
+        let result = TransitionToResult {
+            id: "task1".to_string(),
+            target_workflow: "review".to_string(),
+            target_step: Some("pending".to_string()),
+            from_workflow: Some("implementation".to_string()),
+            from_step: Some("coding".to_string()),
+            unblocked_tasks: vec![],
+            validation_skipped: false,
+        };
+        let output = format!("{}", result);
+        assert!(
+            output
+                .contains("Transitioned task 'task1' from implementation:coding to review:pending")
+        );
+        assert!(!output.contains("validation skipped"));
+        assert!(!output.contains("Unblocked"));
+    }
+
+    #[test]
+    fn test_display_transition_with_from_workflow_no_step() {
+        let result = TransitionToResult {
+            id: "task1".to_string(),
+            target_workflow: "review".to_string(),
+            target_step: None,
+            from_workflow: Some("implementation".to_string()),
+            from_step: None,
+            unblocked_tasks: vec![],
+            validation_skipped: false,
+        };
+        let output = format!("{}", result);
+        assert!(output.contains("Transitioned task 'task1' from implementation to review"));
+    }
+
+    #[test]
+    fn test_display_transition_no_from_workflow() {
+        let result = TransitionToResult {
+            id: "task1".to_string(),
+            target_workflow: "implementation".to_string(),
+            target_step: Some("backlog".to_string()),
+            from_workflow: None,
+            from_step: None,
+            unblocked_tasks: vec![],
+            validation_skipped: false,
+        };
+        let output = format!("{}", result);
+        assert!(output.contains("Assigned task 'task1' to workflow implementation:backlog"));
+    }
+
+    #[test]
+    fn test_display_transition_no_from_no_step() {
+        let result = TransitionToResult {
+            id: "task1".to_string(),
+            target_workflow: "default".to_string(),
+            target_step: None,
+            from_workflow: None,
+            from_step: None,
+            unblocked_tasks: vec![],
+            validation_skipped: false,
+        };
+        let output = format!("{}", result);
+        assert!(output.contains("Assigned task 'task1' to workflow default"));
+    }
+
+    #[test]
+    fn test_display_transition_with_validation_skipped() {
+        let result = TransitionToResult {
+            id: "task1".to_string(),
+            target_workflow: "review".to_string(),
+            target_step: None,
+            from_workflow: None,
+            from_step: None,
+            unblocked_tasks: vec![],
+            validation_skipped: true,
+        };
+        let output = format!("{}", result);
+        assert!(output.contains("validation skipped"));
+        assert!(output.contains("--skip-validation"));
+    }
+
+    #[test]
+    fn test_display_transition_with_unblocked_tasks() {
+        let result = TransitionToResult {
+            id: "task1".to_string(),
+            target_workflow: "default".to_string(),
+            target_step: Some("done".to_string()),
+            from_workflow: Some("default".to_string()),
+            from_step: Some("in_progress".to_string()),
+            unblocked_tasks: vec![
+                ("task2".to_string(), "Build feature X".to_string()),
+                ("task3".to_string(), "Write tests".to_string()),
+            ],
+            validation_skipped: false,
+        };
+        let output = format!("{}", result);
+        assert!(output.contains("Unblocked tasks:"));
+        assert!(output.contains("task2"));
+        assert!(output.contains("Build feature X"));
+        assert!(output.contains("task3"));
+        assert!(output.contains("Write tests"));
+    }
+
+    #[test]
+    fn test_display_transition_all_features() {
+        let result = TransitionToResult {
+            id: "task1".to_string(),
+            target_workflow: "done".to_string(),
+            target_step: Some("completed".to_string()),
+            from_workflow: Some("review".to_string()),
+            from_step: Some("approved".to_string()),
+            unblocked_tasks: vec![("task2".to_string(), "Next task".to_string())],
+            validation_skipped: true,
+        };
+        let output = format!("{}", result);
+        assert!(output.contains("validation skipped"));
+        assert!(output.contains("Transitioned task 'task1'"));
+        assert!(output.contains("from review:approved to done:completed"));
+        assert!(output.contains("Unblocked tasks:"));
+        assert!(output.contains("task2"));
+    }
+
+    // ==================== TransitionToCommand struct tests ====================
+
+    #[test]
+    fn test_transition_to_command_debug() {
+        let cmd = TransitionToCommand {
+            id: "task1".to_string(),
+            target: "review:approved".to_string(),
+            force: true,
+            skip_validation: false,
+        };
+        let debug = format!("{:?}", cmd);
+        assert!(debug.contains("TransitionToCommand"));
+        assert!(debug.contains("task1"));
+        assert!(debug.contains("review:approved"));
+    }
+
+    #[test]
+    fn test_transition_to_command_defaults() {
+        let cmd = TransitionToCommand {
+            id: "task1".to_string(),
+            target: "default".to_string(),
+            force: false,
+            skip_validation: false,
+        };
+        assert!(!cmd.force);
+        assert!(!cmd.skip_validation);
+    }
+
+    // ==================== TransitionToResult debug ====================
+
+    #[test]
+    fn test_transition_to_result_debug() {
+        let result = TransitionToResult {
+            id: "task1".to_string(),
+            target_workflow: "review".to_string(),
+            target_step: Some("pending".to_string()),
+            from_workflow: None,
+            from_step: None,
+            unblocked_tasks: vec![],
+            validation_skipped: false,
+        };
+        let debug = format!("{:?}", result);
+        assert!(debug.contains("TransitionToResult"));
+        assert!(debug.contains("task1"));
+        assert!(debug.contains("review"));
     }
 }

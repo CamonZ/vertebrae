@@ -5,8 +5,8 @@
 
 use crate::commands::list::TaskSummary;
 use clap::Args;
+use vertebrae_core::{CodeRef, Section, SectionType};
 use vertebrae_core::{ServiceError, VertebraeServices, WorkflowInfo, WorkflowService};
-use vertebrae_db::{CodeRef, Section, SectionType};
 
 /// Show full details of a task
 #[derive(Debug, Args)]
@@ -754,7 +754,7 @@ fn format_code_ref_location(code_ref: &CodeRef) -> String {
 mod tests {
     use super::*;
     use vertebrae_core::{CreateTaskOptions, VertebraeServices};
-    use vertebrae_db::{Database, Level, Priority};
+    use vertebrae_core::{Database, Level, Priority};
 
     /// Helper to create an in-memory test service
     async fn setup_test_service() -> VertebraeServices {

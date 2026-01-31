@@ -6,8 +6,8 @@
 //! section types.
 
 use clap::Args;
+use vertebrae_core::{Section, SectionType};
 use vertebrae_core::{ServiceError, VertebraeServices};
-use vertebrae_db::{Section, SectionType};
 
 /// Add a typed content section to a task
 #[derive(Debug, Args)]
@@ -325,5 +325,200 @@ mod tests {
                 && debug_str.contains("ordinal: Some(3)"),
             "Debug output should contain SectionResult and all field values"
         );
+    }
+
+    // ==================== Async execute tests ====================
+
+    async fn setup_services() -> VertebraeServices {
+        let db = vertebrae_core::Database::connect_mem().await.unwrap();
+        db.init().await.unwrap();
+        VertebraeServices::new(db)
+    }
+
+    async fn create_task(services: &VertebraeServices, title: &str) -> String {
+        let options = vertebrae_core::CreateTaskOptions::new(title);
+        services.tasks().create_task(options).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_execute_section_add_goal() {
+        let services = setup_services().await;
+        let id = create_task(&services, "Test task").await;
+
+        let cmd = SectionCommand {
+            id: id.clone(),
+            section_type: SectionType::Goal,
+            content: "Implement feature X".to_string(),
+        };
+        let result = cmd.execute(&services).await.unwrap();
+        assert_eq!(result.id, id);
+        assert_eq!(result.section_type, SectionType::Goal);
+        assert!(!result.replaced);
+        assert!(result.ordinal.is_none()); // single-instance type
+
+        // Verify section was added
+        let task = services.tasks().get_task(&id).await.unwrap();
+        assert!(
+            task.sections
+                .iter()
+                .any(|s| s.section_type == SectionType::Goal && s.content == "Implement feature X")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_execute_section_add_step_multi_instance() {
+        let services = setup_services().await;
+        let id = create_task(&services, "Test task").await;
+
+        // Add first step
+        let cmd1 = SectionCommand {
+            id: id.clone(),
+            section_type: SectionType::Step,
+            content: "First step".to_string(),
+        };
+        let result1 = cmd1.execute(&services).await.unwrap();
+        assert_eq!(result1.ordinal, Some(0));
+        assert!(!result1.replaced);
+
+        // Add second step
+        let cmd2 = SectionCommand {
+            id: id.clone(),
+            section_type: SectionType::Step,
+            content: "Second step".to_string(),
+        };
+        let result2 = cmd2.execute(&services).await.unwrap();
+        assert_eq!(result2.ordinal, Some(1));
+        assert!(!result2.replaced);
+
+        // Verify both steps exist
+        let task = services.tasks().get_task(&id).await.unwrap();
+        let steps: Vec<_> = task
+            .sections
+            .iter()
+            .filter(|s| s.section_type == SectionType::Step)
+            .collect();
+        assert_eq!(steps.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_execute_section_replace_single_instance() {
+        let services = setup_services().await;
+        let id = create_task(&services, "Test task").await;
+
+        // Add goal
+        let cmd1 = SectionCommand {
+            id: id.clone(),
+            section_type: SectionType::Goal,
+            content: "Original goal".to_string(),
+        };
+        cmd1.execute(&services).await.unwrap();
+
+        // Replace goal
+        let cmd2 = SectionCommand {
+            id: id.clone(),
+            section_type: SectionType::Goal,
+            content: "Updated goal".to_string(),
+        };
+        let result = cmd2.execute(&services).await.unwrap();
+        assert!(result.replaced);
+
+        // Verify only updated goal exists
+        let task = services.tasks().get_task(&id).await.unwrap();
+        let goals: Vec<_> = task
+            .sections
+            .iter()
+            .filter(|s| s.section_type == SectionType::Goal)
+            .collect();
+        assert_eq!(goals.len(), 1);
+        assert_eq!(goals[0].content, "Updated goal");
+    }
+
+    #[tokio::test]
+    async fn test_execute_section_empty_content_fails() {
+        let services = setup_services().await;
+        let id = create_task(&services, "Test task").await;
+
+        let cmd = SectionCommand {
+            id: id.clone(),
+            section_type: SectionType::Goal,
+            content: "   ".to_string(),
+        };
+        let result = cmd.execute(&services).await;
+        assert!(result.is_err());
+        let err = format!("{}", result.unwrap_err());
+        assert!(err.contains("empty"));
+    }
+
+    #[tokio::test]
+    async fn test_execute_section_nonexistent_task() {
+        let services = setup_services().await;
+
+        let cmd = SectionCommand {
+            id: "nonexistent".to_string(),
+            section_type: SectionType::Goal,
+            content: "Some content".to_string(),
+        };
+        let result = cmd.execute(&services).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_execute_section_add_constraint() {
+        let services = setup_services().await;
+        let id = create_task(&services, "Test task").await;
+
+        let cmd = SectionCommand {
+            id: id.clone(),
+            section_type: SectionType::Constraint,
+            content: "Must handle concurrent access".to_string(),
+        };
+        let result = cmd.execute(&services).await.unwrap();
+        assert_eq!(result.section_type, SectionType::Constraint);
+        assert_eq!(result.ordinal, Some(0)); // multi-instance
+    }
+
+    #[tokio::test]
+    async fn test_execute_section_add_testing_criterion() {
+        let services = setup_services().await;
+        let id = create_task(&services, "Test task").await;
+
+        let cmd = SectionCommand {
+            id: id.clone(),
+            section_type: SectionType::TestingCriterion,
+            content: "All unit tests pass".to_string(),
+        };
+        let result = cmd.execute(&services).await.unwrap();
+        assert_eq!(result.section_type, SectionType::TestingCriterion);
+        assert_eq!(result.ordinal, Some(0));
+    }
+
+    #[tokio::test]
+    async fn test_execute_section_case_insensitive_id() {
+        let services = setup_services().await;
+        let id = create_task(&services, "Test task").await;
+
+        let cmd = SectionCommand {
+            id: id.to_uppercase(),
+            section_type: SectionType::Context,
+            content: "Some context".to_string(),
+        };
+        let result = cmd.execute(&services).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_section_display_output() {
+        let services = setup_services().await;
+        let id = create_task(&services, "Test task").await;
+
+        let cmd = SectionCommand {
+            id: id.clone(),
+            section_type: SectionType::Step,
+            content: "Do something".to_string(),
+        };
+        let result = cmd.execute(&services).await.unwrap();
+        let display = format!("{}", result);
+        assert!(display.contains("Added step section"));
+        assert!(display.contains(&id));
     }
 }

@@ -568,4 +568,70 @@ mod tests {
         // Clean up
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
+
+    #[tokio::test]
+    async fn test_memory_database_creation() {
+        // Test in-memory database creation
+        let db = Database::connect_mem().await;
+        assert!(
+            db.is_ok(),
+            "Failed to create memory database: {:?}",
+            db.err()
+        );
+
+        let db = db.unwrap();
+        // Path should indicate in-memory
+        assert_eq!(db.path(), &PathBuf::from(":memory:"));
+    }
+
+    #[tokio::test]
+    async fn test_memory_database_init() {
+        // Test in-memory database initialization
+        let db = Database::connect_mem().await.unwrap();
+        let init_result = db.init().await;
+        assert!(
+            init_result.is_ok(),
+            "Failed to init memory database: {:?}",
+            init_result.err()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_repository_accessors() {
+        // Test that all repository accessors return valid instances
+        let db = Database::connect_mem().await.unwrap();
+        db.init().await.unwrap();
+
+        // All these should succeed without panicking
+        let _ = db.tasks();
+        let _ = db.workflows();
+        let _ = db.graph();
+        let _ = db.relationships();
+        let _ = db.executions();
+        let _ = db.steps();
+        let _ = db.workflow_transitions();
+        let _ = db.list_tasks();
+    }
+
+    #[tokio::test]
+    async fn test_database_cloning() {
+        // Test that cloned databases share the same connection
+        let db1 = Database::connect_mem().await.unwrap();
+        db1.init().await.unwrap();
+
+        let db2 = db1.clone();
+
+        // Both should have the same path
+        assert_eq!(db1.path(), db2.path());
+    }
+
+    #[test]
+    fn test_default_db_path_structure() {
+        let path = Database::default_path();
+        assert!(path.is_ok());
+        let path = path.unwrap();
+        // Path should be absolute and end with .vtb/data
+        assert!(path.is_absolute());
+        assert!(path.ends_with(".vtb/data"));
+    }
 }

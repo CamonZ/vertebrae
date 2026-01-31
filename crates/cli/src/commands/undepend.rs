@@ -101,8 +101,8 @@ impl UndependCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vertebrae_core::Database;
     use vertebrae_core::{CreateTaskOptions, VertebraeServices};
-    use vertebrae_db::Database;
 
     /// Helper to create an in-memory test service
     async fn setup_test_service() -> VertebraeServices {

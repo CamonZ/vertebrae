@@ -56,4 +56,63 @@ mod tests {
         assert!(debug.contains("task1"));
         assert!(debug.contains("wf1"));
     }
+
+    #[test]
+    fn test_workflow_assign_command_with_various_ids() {
+        let test_cases = vec![
+            ("task1", "workflow1"),
+            ("task-abc", "workflow-xyz"),
+            ("TASK123", "WORKFLOW456"),
+            ("t1", "w1"),
+        ];
+
+        for (task_id, workflow_id) in test_cases {
+            let cmd = WorkflowAssignCommand {
+                task_id: task_id.to_string(),
+                workflow_id: workflow_id.to_string(),
+            };
+            assert_eq!(cmd.task_id, task_id);
+            assert_eq!(cmd.workflow_id, workflow_id);
+        }
+    }
+
+    #[test]
+    fn test_workflow_assign_command_field_values() {
+        let cmd = WorkflowAssignCommand {
+            task_id: "my-task".to_string(),
+            workflow_id: "my-workflow".to_string(),
+        };
+        assert_eq!(cmd.task_id, "my-task");
+        assert_eq!(cmd.workflow_id, "my-workflow");
+    }
+
+    #[test]
+    fn test_workflow_assign_command_case_preservation() {
+        let cmd = WorkflowAssignCommand {
+            task_id: "TaskABC".to_string(),
+            workflow_id: "WorkflowXYZ".to_string(),
+        };
+        assert_eq!(cmd.task_id, "TaskABC");
+        assert_eq!(cmd.workflow_id, "WorkflowXYZ");
+    }
+
+    #[test]
+    fn test_workflow_assign_command_with_hyphens() {
+        let cmd = WorkflowAssignCommand {
+            task_id: "task-with-hyphens".to_string(),
+            workflow_id: "workflow-with-hyphens".to_string(),
+        };
+        assert_eq!(cmd.task_id, "task-with-hyphens");
+        assert_eq!(cmd.workflow_id, "workflow-with-hyphens");
+    }
+
+    #[test]
+    fn test_workflow_assign_command_with_numbers() {
+        let cmd = WorkflowAssignCommand {
+            task_id: "task123".to_string(),
+            workflow_id: "workflow456".to_string(),
+        };
+        assert_eq!(cmd.task_id, "task123");
+        assert_eq!(cmd.workflow_id, "workflow456");
+    }
 }

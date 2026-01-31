@@ -4,8 +4,8 @@
 //! sorted by file path and then line number.
 
 use clap::Args;
+use vertebrae_core::CodeRef;
 use vertebrae_core::{ServiceError, VertebraeServices};
-use vertebrae_db::CodeRef;
 
 /// List all code references for a task
 #[derive(Debug, Args)]
@@ -167,8 +167,8 @@ impl RefsCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vertebrae_core::Database;
     use vertebrae_core::{CreateTaskOptions, VertebraeServices};
-    use vertebrae_db::Database;
 
     /// Helper to create a test service with in-memory database
     async fn setup_test_service() -> VertebraeServices {

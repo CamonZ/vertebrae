@@ -4,8 +4,8 @@
 //! optionally filtered by type and grouped by positive/negative space.
 
 use clap::Args;
+use vertebrae_core::{Section, SectionType};
 use vertebrae_core::{ServiceError, VertebraeServices};
-use vertebrae_db::{Section, SectionType};
 
 /// List all sections for a task
 #[derive(Debug, Args)]
@@ -192,7 +192,7 @@ fn format_section_group(
 }
 
 /// Format a code reference location in file:line format
-fn format_code_ref_location(code_ref: &vertebrae_db::CodeRef) -> String {
+fn format_code_ref_location(code_ref: &vertebrae_core::CodeRef) -> String {
     let location = match (code_ref.line_start, code_ref.line_end) {
         (Some(start), Some(end)) => format!("{}:L{}-{}", code_ref.path, start, end),
         (Some(line), None) => format!("{}:L{}", code_ref.path, line),
@@ -301,8 +301,8 @@ fn type_sort_order(section_type: &SectionType) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vertebrae_core::Database;
     use vertebrae_core::{CreateTaskOptions, VertebraeServices};
-    use vertebrae_db::Database;
 
     /// Helper to create a test service with in-memory database
     async fn setup_test_service() -> VertebraeServices {

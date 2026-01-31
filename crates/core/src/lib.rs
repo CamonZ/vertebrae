@@ -79,5 +79,5 @@ pub use models::{
     TaskUpdate, TokenUsage, Workflow, WorkflowTransition,
 };
 
-// Re-export Database for convenience
-pub use vertebrae_db::Database;
+// Re-export Database and Thing for convenience
+pub use vertebrae_db::{Database, Thing};

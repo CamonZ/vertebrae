@@ -1,15 +1,12 @@
 use clap::Parser;
-use std::path::PathBuf;
 use std::process;
+use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
 
 use vertebrae_cli::commands::Command;
 use vertebrae_cli::notification::create_http_notification_callback;
-use vertebrae_core::{ServiceError, VertebraeServices};
-use vertebrae_db::Database;
-
-/// Environment variable name for the database path
-const VTB_DB_PATH_ENV: &str = "VTB_DB_PATH";
+use vertebrae_core::ServiceError;
+use vertebrae_sacrum_client::SacrumConfig;
 
 /// Vertebrae - A task management CLI tool
 #[derive(Parser)]
@@ -17,39 +14,10 @@ const VTB_DB_PATH_ENV: &str = "VTB_DB_PATH";
 #[command(version = "0.1.0")]
 #[command(about = "A task management CLI tool", long_about = None)]
 struct Args {
-    /// Path to the database directory (can also be set via VTB_DB_PATH env var)
-    #[arg(long, global = true)]
-    db: Option<PathBuf>,
-
     /// Subcommand to execute
     #[command(subcommand)]
     command: Option<Command>,
 }
-
-/// Get the database path from command line, environment variable, or default.
-///
-/// Priority:
-/// 1. Command line --db argument
-/// 2. VTB_DB_PATH environment variable (if non-empty)
-/// 3. Default path (~/.vtb/data)
-fn resolve_db_path(cli_db: Option<PathBuf>) -> DbResult<PathBuf> {
-    // First priority: explicit command line argument
-    if let Some(path) = cli_db {
-        return Ok(path);
-    }
-
-    // Second priority: environment variable (if set and non-empty)
-    if let Ok(env_path) = std::env::var(VTB_DB_PATH_ENV)
-        && !env_path.is_empty()
-    {
-        return Ok(PathBuf::from(env_path));
-    }
-
-    // Third priority: default path
-    Database::default_path()
-}
-
-use vertebrae_db::DbResult;
 
 /// Initialize logging based on DEBUGGING environment variable
 ///
@@ -90,19 +58,23 @@ async fn run_app() -> Result<(), ServiceError> {
 
 /// Run the application with the given arguments
 async fn run_with_args(args: &Args) -> Result<(), ServiceError> {
-    // Determine database path using priority: CLI arg > env var > default
-    let db_path = resolve_db_path(args.db.clone())?;
+    // Load Sacrum configuration from .vtb/config.toml and environment variables
+    let config = SacrumConfig::load().map_err(|e| {
+        ServiceError::config_error(format!("Failed to load Sacrum configuration: {}", e))
+    })?;
 
-    // Initialize database connection
-    let db = Database::connect(&db_path).await?;
-
-    // Initialize database schema
-    db.init().await?;
+    // Initialize Sacrum HTTP client
+    let client = vertebrae_sacrum_client::SacrumClient::new(config);
+    let client_arc = Arc::new(client);
 
     // Create the task service with HTTP notification callback
     // This enables CLI mutations to notify the Tauri GUI for cache invalidation
     let callback = create_http_notification_callback();
-    let services = VertebraeServices::with_task_callback(db, callback);
+    let services = vertebrae_cli::sacrum::from_sacrum_with_callbacks(
+        client_arc,
+        callback,
+        Arc::new(|_event| { /* No-op for workflow callbacks */ }),
+    );
 
     // Run the command or show welcome message
     match &args.command {
@@ -129,26 +101,12 @@ mod tests {
     fn test_args_parsing() {
         // Test that Args can be parsed with default values
         let args = Args::try_parse_from(["vtb"]).unwrap();
-        assert!(args.db.is_none());
         assert!(args.command.is_none());
-    }
-
-    #[test]
-    fn test_args_with_db_path() {
-        let args = Args::try_parse_from(["vtb", "--db", "/tmp/test-db"]).unwrap();
-        assert_eq!(args.db, Some(PathBuf::from("/tmp/test-db")));
     }
 
     #[test]
     fn test_args_with_add_command() {
         let args = Args::try_parse_from(["vtb", "add", "My task"]).unwrap();
-        assert!(args.command.is_some());
-    }
-
-    #[test]
-    fn test_args_with_db_and_add_command() {
-        let args = Args::try_parse_from(["vtb", "--db", "/custom/path", "add", "My task"]).unwrap();
-        assert_eq!(args.db, Some(PathBuf::from("/custom/path")));
         assert!(args.command.is_some());
     }
 
@@ -169,122 +127,6 @@ mod tests {
         ])
         .unwrap();
         assert!(args.command.is_some());
-    }
-
-    #[tokio::test]
-    async fn test_run_with_args_no_command() {
-        let temp_dir = env::temp_dir().join(format!(
-            "vtb-main-test-{}-{:?}-{}",
-            std::process::id(),
-            std::thread::current().id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-
-        let args = Args {
-            db: Some(temp_dir.clone()),
-            command: None,
-        };
-
-        let result = run_with_args(&args).await;
-        assert!(result.is_ok(), "run_with_args failed: {:?}", result.err());
-
-        // Clean up
-        let _ = std::fs::remove_dir_all(&temp_dir);
-    }
-
-    #[tokio::test]
-    async fn test_run_with_args_default_path() {
-        // Test with default path (will use ~/.vtb/data)
-        let args = Args {
-            db: None,
-            command: None,
-        };
-
-        // This should succeed as it will use the default path
-        let result = run_with_args(&args).await;
-        assert!(
-            result.is_ok(),
-            "run_with_args with default path failed: {:?}",
-            result.err()
-        );
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_run_with_add_command() {
-        let temp_dir = env::temp_dir().join(format!(
-            "vtb-main-add-test-{}-{:?}-{}",
-            std::process::id(),
-            std::thread::current().id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-
-        let args = Args::try_parse_from([
-            "vtb",
-            "--db",
-            temp_dir.to_str().unwrap(),
-            "add",
-            "Test task",
-        ])
-        .unwrap();
-
-        let result = run_with_args(&args).await;
-        assert!(result.is_ok(), "Add command failed: {:?}", result.err());
-
-        // Clean up
-        let _ = std::fs::remove_dir_all(&temp_dir);
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_run_with_add_command_all_options() {
-        let temp_dir = env::temp_dir().join(format!(
-            "vtb-main-add-full-test-{}-{:?}-{}",
-            std::process::id(),
-            std::thread::current().id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-
-        let args = Args::try_parse_from([
-            "vtb",
-            "--db",
-            temp_dir.to_str().unwrap(),
-            "add",
-            "Full task",
-            "--level",
-            "epic",
-            "--priority",
-            "critical",
-            "-t",
-            "urgent",
-        ])
-        .unwrap();
-
-        let result = run_with_args(&args).await;
-        assert!(
-            result.is_ok(),
-            "Full add command failed: {:?}",
-            result.err()
-        );
-
-        // Clean up
-        let _ = std::fs::remove_dir_all(&temp_dir);
-    }
-
-    #[test]
-    fn test_args_env_variable_support() {
-        // Test that the env attribute is correctly set up
-        // Note: We can't easily test env var parsing in unit tests,
-        // but we can verify the Args struct handles None correctly
-        let args = Args::try_parse_from(["vtb"]).unwrap();
-        assert!(args.db.is_none());
     }
 
     #[test]
@@ -350,114 +192,248 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_db_path_cli_takes_priority() {
-        // CLI argument takes priority over everything else
-        let cli_path = PathBuf::from("/custom/path");
-        let result = resolve_db_path(Some(cli_path.clone()));
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), cli_path);
+    fn test_args_with_multiple_tags() {
+        let args = Args::try_parse_from([
+            "vtb", "add", "My task", "-t", "tag1", "-t", "tag2", "-t", "tag3",
+        ])
+        .unwrap();
+        assert!(args.command.is_some());
     }
 
     #[test]
-    #[serial]
-    fn test_resolve_db_path_env_var_takes_priority_over_default() {
-        // Set environment variable
-        let original = env::var(VTB_DB_PATH_ENV).ok();
-        // SAFETY: Test is single-threaded and we restore the original value
-        unsafe { env::set_var(VTB_DB_PATH_ENV, "/env/path") };
+    fn test_args_with_show_command() {
+        let args = Args::try_parse_from(["vtb", "show", "task-id"]).unwrap();
+        assert!(args.command.is_some());
+    }
 
-        let result = resolve_db_path(None);
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), PathBuf::from("/env/path"));
+    #[test]
+    fn test_args_with_list_command() {
+        let args = Args::try_parse_from(["vtb", "list"]).unwrap();
+        assert!(args.command.is_some());
+    }
 
-        // Restore original
-        // SAFETY: Test is single-threaded and we're restoring to original state
-        unsafe {
-            match original {
-                Some(val) => env::set_var(VTB_DB_PATH_ENV, val),
-                None => env::remove_var(VTB_DB_PATH_ENV),
-            }
+    #[test]
+    fn test_args_with_delete_command() {
+        let args = Args::try_parse_from(["vtb", "delete", "task-id"]).unwrap();
+        assert!(args.command.is_some());
+    }
+
+    #[test]
+    fn test_args_with_update_command() {
+        let args =
+            Args::try_parse_from(["vtb", "update", "task-id", "--title", "New title"]).unwrap();
+        assert!(args.command.is_some());
+    }
+
+    #[test]
+    fn test_args_with_depend_command() {
+        let args = Args::try_parse_from(["vtb", "depend", "task1", "--on", "task2"]).unwrap();
+        assert!(args.command.is_some());
+    }
+
+    #[test]
+    fn test_args_with_workflow_command() {
+        let args = Args::try_parse_from(["vtb", "workflow", "list"]).unwrap();
+        assert!(args.command.is_some());
+    }
+
+    #[test]
+    fn test_args_with_multiple_filters() {
+        let args = Args::try_parse_from(["vtb", "list", "--level", "epic", "--status", "backlog"])
+            .unwrap();
+        assert!(args.command.is_some());
+    }
+
+    #[test]
+    fn test_args_various_subcommands() {
+        let commands = vec![
+            vec!["vtb", "add", "Task"],
+            vec!["vtb", "list"],
+            vec!["vtb", "show", "id"],
+            vec!["vtb", "delete", "id"],
+            vec!["vtb", "ready"],
+            vec!["vtb", "blockers", "id"],
+        ];
+
+        for cmd in &commands {
+            let args = Args::try_parse_from(cmd.clone()).unwrap();
+            assert!(args.command.is_some(), "Failed to parse: {:?}", cmd);
         }
     }
 
     #[test]
-    #[serial]
-    fn test_resolve_db_path_empty_env_var_uses_default() {
-        // Set environment variable to empty string
-        let original = env::var(VTB_DB_PATH_ENV).ok();
-        // SAFETY: Test is single-threaded and we restore the original value
-        unsafe { env::set_var(VTB_DB_PATH_ENV, "") };
-
-        let result = resolve_db_path(None);
-        assert!(result.is_ok());
-        // Should use default path (based on project root), not empty string
-        let path = result.unwrap();
-        // In a git repo, default_path returns an absolute path ending with .vtb/data
-        // If not in a git repo, it returns a relative path
-        assert!(
-            path.ends_with(".vtb/data"),
-            "Expected path ending with .vtb/data, got: {:?}",
-            path
-        );
-
-        // Restore original
-        // SAFETY: Test is single-threaded and we're restoring to original state
-        unsafe {
-            match original {
-                Some(val) => env::set_var(VTB_DB_PATH_ENV, val),
-                None => env::remove_var(VTB_DB_PATH_ENV),
-            }
-        }
+    fn test_args_with_no_arguments() {
+        let args = Args::try_parse_from(["vtb"]).unwrap();
+        assert!(args.command.is_none());
     }
 
     #[test]
-    #[serial]
-    fn test_resolve_db_path_unset_env_var_uses_default() {
-        // Unset environment variable
-        let original = env::var(VTB_DB_PATH_ENV).ok();
-        // SAFETY: Test is single-threaded and we restore the original value
-        unsafe { env::remove_var(VTB_DB_PATH_ENV) };
-
-        let result = resolve_db_path(None);
-        assert!(result.is_ok());
-        // Should use default path (based on project root)
-        let path = result.unwrap();
-        // In a git repo, default_path returns an absolute path ending with .vtb/data
-        // If not in a git repo, it returns a relative path
-        assert!(
-            path.ends_with(".vtb/data"),
-            "Expected path ending with .vtb/data, got: {:?}",
-            path
-        );
-
-        // Restore original
-        // SAFETY: Test is single-threaded and we're restoring to original state
-        if let Some(val) = original {
-            unsafe { env::set_var(VTB_DB_PATH_ENV, val) };
-        }
+    fn test_args_add_minimal() {
+        let args = Args::try_parse_from(["vtb", "add", "Minimal task"]).unwrap();
+        assert!(args.command.is_some());
     }
 
     #[test]
-    #[serial]
-    fn test_resolve_db_path_cli_overrides_env_var() {
-        // Set environment variable
-        let original = env::var(VTB_DB_PATH_ENV).ok();
-        // SAFETY: Test is single-threaded and we restore the original value
-        unsafe { env::set_var(VTB_DB_PATH_ENV, "/env/path") };
+    fn test_args_add_with_single_tag() {
+        let args = Args::try_parse_from(["vtb", "add", "Task", "-t", "urgent"]).unwrap();
+        assert!(args.command.is_some());
+    }
 
-        // CLI should take priority
-        let cli_path = PathBuf::from("/cli/path");
-        let result = resolve_db_path(Some(cli_path.clone()));
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), cli_path);
+    #[test]
+    fn test_args_add_with_level_only() {
+        let args = Args::try_parse_from(["vtb", "add", "Task", "--level", "epic"]).unwrap();
+        assert!(args.command.is_some());
+    }
 
-        // Restore original
-        // SAFETY: Test is single-threaded and we're restoring to original state
-        unsafe {
-            match original {
-                Some(val) => env::set_var(VTB_DB_PATH_ENV, val),
-                None => env::remove_var(VTB_DB_PATH_ENV),
-            }
+    #[test]
+    fn test_args_add_with_priority_only() {
+        let args = Args::try_parse_from(["vtb", "add", "Task", "--priority", "high"]).unwrap();
+        assert!(args.command.is_some());
+    }
+
+    #[test]
+    fn test_args_add_with_description() {
+        let args =
+            Args::try_parse_from(["vtb", "add", "Task", "-d", "This is a description"]).unwrap();
+        assert!(args.command.is_some());
+    }
+
+    #[test]
+    fn test_args_show_command() {
+        let args = Args::try_parse_from(["vtb", "show", "some-task-id"]).unwrap();
+        assert!(args.command.is_some());
+    }
+
+    #[test]
+    fn test_args_delete_command() {
+        let args = Args::try_parse_from(["vtb", "delete", "some-task-id"]).unwrap();
+        assert!(args.command.is_some());
+    }
+
+    #[test]
+    fn test_args_list_command_no_filters() {
+        let args = Args::try_parse_from(["vtb", "list"]).unwrap();
+        assert!(args.command.is_some());
+    }
+
+    #[test]
+    fn test_args_list_with_level_filter() {
+        let args = Args::try_parse_from(["vtb", "list", "--level", "task"]).unwrap();
+        assert!(args.command.is_some());
+    }
+
+    #[test]
+    fn test_args_list_with_status_filter() {
+        let args = Args::try_parse_from(["vtb", "list", "--status", "backlog"]).unwrap();
+        assert!(args.command.is_some());
+    }
+
+    #[test]
+    fn test_args_update_basic() {
+        let args =
+            Args::try_parse_from(["vtb", "update", "task-id", "--title", "New Title"]).unwrap();
+        assert!(args.command.is_some());
+    }
+
+    #[test]
+    fn test_args_update_with_priority() {
+        let args =
+            Args::try_parse_from(["vtb", "update", "task-id", "--priority", "high"]).unwrap();
+        assert!(args.command.is_some());
+    }
+
+    #[test]
+    fn test_args_depend_command() {
+        let args = Args::try_parse_from(["vtb", "depend", "task1", "--on", "task2"]).unwrap();
+        assert!(args.command.is_some());
+    }
+
+    #[test]
+    fn test_args_blockers_command() {
+        let args = Args::try_parse_from(["vtb", "blockers", "some-task"]).unwrap();
+        assert!(args.command.is_some());
+    }
+
+    #[test]
+    fn test_args_ready_command() {
+        let args = Args::try_parse_from(["vtb", "ready"]).unwrap();
+        assert!(args.command.is_some());
+    }
+
+    #[test]
+    fn test_args_help_flag() {
+        let result = Args::try_parse_from(["vtb", "--help"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_args_version_flag() {
+        let result = Args::try_parse_from(["vtb", "--version"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_args_with_empty_title() {
+        let result = Args::try_parse_from(["vtb", "add", ""]);
+        // Empty title should still parse but might be rejected by validation
+        let args = result.unwrap();
+        assert!(args.command.is_some());
+    }
+
+    #[test]
+    fn test_args_command_case_sensitivity() {
+        // Commands should be case-sensitive
+        let result = Args::try_parse_from(["vtb", "ADD", "Task"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_args_with_special_characters_in_title() {
+        let args =
+            Args::try_parse_from(["vtb", "add", "Task with special chars !@#$%^&*()"]).unwrap();
+        assert!(args.command.is_some());
+    }
+
+    #[test]
+    fn test_args_add_with_long_title() {
+        let long_title = "a".repeat(500);
+        let args = Args::try_parse_from(["vtb", "add", &long_title]).unwrap();
+        assert!(args.command.is_some());
+    }
+
+    #[test]
+    fn test_args_add_with_many_tags() {
+        let mut cmd: Vec<&str> = vec!["vtb", "add", "Task"];
+        let tag_strings: Vec<String> = (0..10).map(|i| format!("tag{}", i)).collect();
+        for tag_str in &tag_strings {
+            cmd.push("-t");
+            cmd.push(tag_str);
         }
+        let args = Args::try_parse_from(&cmd).unwrap();
+        assert!(args.command.is_some());
+    }
+
+    #[test]
+    fn test_args_workflow_list() {
+        let args = Args::try_parse_from(["vtb", "workflow", "list"]).unwrap();
+        assert!(args.command.is_some());
+    }
+
+    #[test]
+    fn test_args_workflow_show() {
+        let args = Args::try_parse_from(["vtb", "workflow", "show", "workflow-id"]).unwrap();
+        assert!(args.command.is_some());
+    }
+
+    #[test]
+    fn test_args_export_command() {
+        let args = Args::try_parse_from(["vtb", "export"]).unwrap();
+        assert!(args.command.is_some());
+    }
+
+    #[test]
+    fn test_args_import_command() {
+        let args = Args::try_parse_from(["vtb", "import"]).unwrap();
+        assert!(args.command.is_some());
     }
 }

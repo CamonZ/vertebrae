@@ -4,7 +4,7 @@
 //! the Tauri backend of changes. The Tauri backend listens on an HTTP server and
 //! converts these notifications to events that trigger frontend cache invalidation.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use vertebrae_core::service::MutationCallback;
 pub use vertebrae_core::service::MutationEvent;
@@ -15,7 +15,7 @@ pub use vertebrae_core::workflow_service::WorkflowMutationEvent;
 pub const NOTIFICATION_PORT: u16 = 17273;
 
 /// Notification payload sent to Tauri
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, Deserialize)]
 pub struct NotificationPayload {
     /// ID of the task that changed (optional - one of task_id or workflow_id required)
     pub task_id: Option<String>,
@@ -271,6 +271,80 @@ mod tests {
         let json = serde_json::to_string(&payload).unwrap();
         assert!(json.contains("workflow:default"));
         assert!(json.contains("Updated"));
+    }
+
+    #[test]
+    fn test_notification_payload_serialization_all_fields() {
+        let payload = NotificationPayload {
+            task_id: Some("t123".to_string()),
+            workflow_id: Some("w456".to_string()),
+            change_type: "StatusChanged".to_string(),
+        };
+
+        let json = serde_json::to_string(&payload).unwrap();
+        assert!(json.contains("\"task_id\":\"t123\"") || json.contains("\"task_id\": \"t123\""));
+        assert!(
+            json.contains("\"workflow_id\":\"w456\"") || json.contains("\"workflow_id\": \"w456\"")
+        );
+        assert!(json.contains("StatusChanged"));
+    }
+
+    #[test]
+    fn test_notification_payload_deserialization() {
+        let json = r#"{"task_id":"task:123","workflow_id":null,"change_type":"Updated"}"#;
+        let payload: NotificationPayload = serde_json::from_str(json).unwrap();
+
+        assert_eq!(payload.task_id.as_deref(), Some("task:123"));
+        assert!(payload.workflow_id.is_none());
+        assert_eq!(payload.change_type, "Updated");
+    }
+
+    #[test]
+    fn test_notification_payload_various_change_types() {
+        let change_types = vec!["Created", "Updated", "Deleted", "StatusChanged"];
+
+        for change_type in change_types {
+            let payload = NotificationPayload {
+                task_id: Some("task:123".to_string()),
+                workflow_id: None,
+                change_type: change_type.to_string(),
+            };
+
+            let json = serde_json::to_string(&payload).unwrap();
+            assert!(json.contains(change_type));
+        }
+    }
+
+    #[test]
+    fn test_notification_payload_port_constant() {
+        assert_eq!(NOTIFICATION_PORT, 17273);
+    }
+
+    #[test]
+    fn test_notification_payload_clone() {
+        let payload = NotificationPayload {
+            task_id: Some("task:123".to_string()),
+            workflow_id: None,
+            change_type: "Updated".to_string(),
+        };
+
+        let cloned = payload.clone();
+        assert_eq!(cloned.task_id, payload.task_id);
+        assert_eq!(cloned.workflow_id, payload.workflow_id);
+        assert_eq!(cloned.change_type, payload.change_type);
+    }
+
+    #[test]
+    fn test_notification_payload_debug() {
+        let payload = NotificationPayload {
+            task_id: Some("task:123".to_string()),
+            workflow_id: None,
+            change_type: "Updated".to_string(),
+        };
+
+        let debug_str = format!("{:?}", payload);
+        assert!(debug_str.contains("NotificationPayload"));
+        assert!(debug_str.contains("task:123"));
     }
 
     #[test]

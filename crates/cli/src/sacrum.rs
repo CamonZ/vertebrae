@@ -142,4 +142,118 @@ mod tests {
         let _ = services.executions_arc();
         let _ = services.steps_arc();
     }
+
+    #[test]
+    fn test_from_sacrum_multiple_calls_create_independent_services() {
+        let config1 = SacrumConfig::new(
+            "http://localhost:4000".to_string(),
+            "token1".to_string(),
+            "project1".to_string(),
+        );
+        let config2 = SacrumConfig::new(
+            "http://localhost:5000".to_string(),
+            "token2".to_string(),
+            "project2".to_string(),
+        );
+
+        let client1 = SacrumClient::new(config1);
+        let client2 = SacrumClient::new(config2);
+
+        let services1 = from_sacrum(Arc::new(client1));
+        let services2 = from_sacrum(Arc::new(client2));
+
+        // Both should be valid and independent
+        let _ = services1.tasks();
+        let _ = services2.tasks();
+    }
+
+    #[test]
+    fn test_from_sacrum_with_callbacks_ignores_callbacks() {
+        // Even though callbacks are provided, they're not used
+        let config = SacrumConfig::new(
+            "http://localhost:4000".to_string(),
+            "test-token".to_string(),
+            "test-project".to_string(),
+        );
+        let client = SacrumClient::new(config);
+        let client_arc = Arc::new(client);
+
+        let task_callback: MutationCallback = Arc::new(|_event| {
+            // Callback that tracks calls
+        });
+        let workflow_callback: WorkflowMutationCallback = Arc::new(|_event| {
+            // Callback that tracks calls
+        });
+
+        // Should still work even though callbacks aren't used by Sacrum services
+        let services = from_sacrum_with_callbacks(client_arc, task_callback, workflow_callback);
+
+        // Verify all services are accessible
+        let _ = services.tasks();
+        let _ = services.workflows();
+        let _ = services.executions();
+        let _ = services.steps();
+    }
+
+    #[test]
+    fn test_from_sacrum_arc_accessors() {
+        let config = SacrumConfig::new(
+            "http://localhost:4000".to_string(),
+            "test-token".to_string(),
+            "test-project".to_string(),
+        );
+        let client = SacrumClient::new(config);
+        let client_arc = Arc::new(client);
+
+        let services = from_sacrum(client_arc);
+
+        // Verify Arc accessors work
+        let _ = services.tasks_arc();
+        let _ = services.workflows_arc();
+        let _ = services.executions_arc();
+        let _ = services.steps_arc();
+    }
+
+    #[test]
+    fn test_from_sacrum_with_callbacks_arc_accessors() {
+        let config = SacrumConfig::new(
+            "http://localhost:4000".to_string(),
+            "test-token".to_string(),
+            "test-project".to_string(),
+        );
+        let client = SacrumClient::new(config);
+        let client_arc = Arc::new(client);
+
+        let task_callback: MutationCallback = Arc::new(|_event| {});
+        let workflow_callback: WorkflowMutationCallback = Arc::new(|_event| {});
+
+        let services = from_sacrum_with_callbacks(client_arc, task_callback, workflow_callback);
+
+        // Verify Arc accessors work
+        let _ = services.tasks_arc();
+        let _ = services.workflows_arc();
+        let _ = services.executions_arc();
+        let _ = services.steps_arc();
+    }
+
+    #[test]
+    fn test_from_sacrum_different_clients() {
+        let config1 = SacrumConfig::new(
+            "http://localhost:4000".to_string(),
+            "token-a".to_string(),
+            "proj-a".to_string(),
+        );
+        let config2 = SacrumConfig::new(
+            "http://localhost:4000".to_string(),
+            "token-b".to_string(),
+            "proj-b".to_string(),
+        );
+
+        let services1 = from_sacrum(Arc::new(SacrumClient::new(config1)));
+        let services2 = from_sacrum(Arc::new(SacrumClient::new(config2)));
+
+        // Both services should be created successfully
+        let _ = services1.tasks();
+        let _ = services2.tasks();
+    }
 }

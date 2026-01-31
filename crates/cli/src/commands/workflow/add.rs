@@ -1,8 +1,8 @@
 //! Workflow add command
 
 use clap::Args;
+use vertebrae_core::AgentConfig;
 use vertebrae_core::{CreateWorkflowOptions, ServiceError, WorkflowService, WorkflowStepInput};
-use vertebrae_db::AgentConfig;
 
 /// Create a new workflow
 #[derive(Debug, Args)]

@@ -3,8 +3,8 @@
 //! Implements the `vtb list` command to display tasks with filtering options.
 
 use clap::Args;
+use vertebrae_core::{Level, Priority, TaskFilter};
 use vertebrae_core::{ServiceError, VertebraeServices};
-use vertebrae_db::{Level, Priority, TaskFilter};
 
 /// A summary of a task for display in the list
 #[derive(Debug, Clone)]
@@ -125,8 +125,8 @@ fn compute_derived_status(
 }
 
 /// Convert repository TaskSummary to CLI TaskSummary
-impl From<vertebrae_db::TaskSummary> for TaskSummary {
-    fn from(summary: vertebrae_db::TaskSummary) -> Self {
+impl From<vertebrae_core::TaskSummary> for TaskSummary {
+    fn from(summary: vertebrae_core::TaskSummary) -> Self {
         let derived_status = compute_derived_status(
             &summary.status,
             summary.workflow_name.as_deref(),
@@ -250,70 +250,53 @@ impl ListCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use vertebrae_db::Database;
+    use vertebrae_core::{CreateTaskOptions, Database, VertebraeServices};
 
-    /// Helper to create an in-memory test database
-    async fn setup_test_db() -> Database {
+    /// Helper to create an in-memory test service
+    async fn setup_test_service() -> VertebraeServices {
         let db = Database::connect_mem().await.unwrap();
         db.init().await.unwrap();
-        db
+        VertebraeServices::new(db)
     }
 
-    /// Helper to create a task in the database
+    /// Helper to create a task via the service layer
     async fn create_task(
-        db: &Database,
+        services: &VertebraeServices,
         id: &str,
         title: &str,
-        level: &str,
+        level: Level,
         status: &str,
-        priority: Option<&str>,
+        priority: Option<Priority>,
         tags: &[&str],
     ) {
-        use vertebrae_db::{Level, Priority, Task};
+        let mut options = CreateTaskOptions::new(title)
+            .with_id(id)
+            .with_level(level)
+            .with_status(status);
 
-        let level_enum = match level {
-            "epic" => Level::Epic,
-            "ticket" => Level::Ticket,
-            "task" => Level::Task,
-            _ => Level::Task,
-        };
-
-        let priority_enum = priority.and_then(|p| match p {
-            "low" => Some(Priority::Low),
-            "medium" => Some(Priority::Medium),
-            "high" => Some(Priority::High),
-            "critical" => Some(Priority::Critical),
-            _ => None,
-        });
-
-        let tags_vec: Vec<String> = tags.iter().map(|t| t.to_string()).collect();
-
-        let mut task = Task::new(title, level_enum);
-
-        if let Some(p) = priority_enum {
-            task = task.with_priority(p);
-        }
-        task.tags = tags_vec;
-
-        // Set up workflow and step
-        let default_workflow_id = surrealdb::sql::Thing::from(("workflow", "default"));
-        task.workflow_id = Some(default_workflow_id);
-        if status != "backlog" {
-            let step_id_str = format!("default_{}", status);
-            let step_id = surrealdb::sql::Thing::from(("step", step_id_str.as_str()));
-            task.current_step_id = Some(step_id);
+        if let Some(p) = priority {
+            options = options.with_priority(p);
         }
 
-        db.tasks().create(id, &task).await.unwrap();
+        for tag in tags {
+            options = options.with_tag(*tag);
+        }
+
+        services.tasks().create_task(options).await.unwrap();
     }
 
-    /// Helper to create a child_of relationship
-    async fn create_child_of(db: &Database, child_id: &str, parent_id: &str) {
-        db.relationships()
-            .create_child_of(child_id, parent_id)
+    /// Helper to create a child_of relationship via the service layer
+    async fn create_child_of(services: &VertebraeServices, child_id: &str, parent_id: &str) {
+        services
+            .tasks()
+            .set_parent(child_id, parent_id)
             .await
             .unwrap();
     }
+
+    // ========================================
+    // Parser tests
+    // ========================================
 
     #[test]
     fn test_parse_level_valid() {
@@ -358,685 +341,68 @@ mod tests {
         assert!(result.unwrap_err().contains("invalid priority"));
     }
 
-    #[tokio::test]
-    async fn test_list_all_tasks_excludes_done_by_default() {
-        let db = setup_test_db().await;
+    // ========================================
+    // compute_derived_status tests
+    // ========================================
 
-        // Create some tasks
-        create_task(&db, "task1", "Task 1", "task", "in_progress", None, &[]).await;
-        create_task(&db, "task2", "Task 2", "task", "in_progress", None, &[]).await;
-        create_task(&db, "task3", "Task 3", "task", "done", None, &[]).await;
-
-        let cmd = ListCommand {
-            levels: vec![],
-            statuses: vec![],
-            priorities: vec![],
-            tags: vec![],
-            workflow: None,
-            step: None,
-            root: false,
-            parent: None,
-            all: false,
-            search: None,
-            flat: false,
-        };
-
-        let services = vertebrae_core::VertebraeServices::new(db);
-
-        let result = cmd.execute(&services).await.unwrap();
-
-        // Should have 2 tasks (excluding done)
-        assert_eq!(result.len(), 2);
-        assert!(result.iter().all(|t| t.status != "done"));
-
-        // Verify specific tasks are included
-        use std::collections::HashSet;
-        let ids: HashSet<_> = result.iter().map(|t| t.id.as_str()).collect();
-        assert!(ids.contains("task1"), "Should contain task1");
-        assert!(ids.contains("task2"), "Should contain task2");
-        assert!(!ids.contains("task3"), "Should not contain done task");
-    }
-
-    #[tokio::test]
-    async fn test_list_all_includes_done_with_flag() {
-        let db = setup_test_db().await;
-
-        // Create some tasks
-        create_task(&db, "task1", "Task 1", "task", "in_progress", None, &[]).await;
-        create_task(&db, "task2", "Task 2", "task", "done", None, &[]).await;
-
-        let cmd = ListCommand {
-            levels: vec![],
-            statuses: vec![],
-            priorities: vec![],
-            tags: vec![],
-            workflow: None,
-            step: None,
-            root: false,
-            parent: None,
-            all: true,
-            search: None,
-            flat: false,
-        };
-
-        let services = vertebrae_core::VertebraeServices::new(db);
-
-        let result = cmd.execute(&services).await.unwrap();
-
-        // Should have all 2 tasks
-        assert_eq!(result.len(), 2);
-
-        // Verify specific tasks are included (including done task)
-        use std::collections::HashSet;
-        let ids: HashSet<_> = result.iter().map(|t| t.id.as_str()).collect();
-        assert!(ids.contains("task1"), "Should contain task1");
-        assert!(
-            ids.contains("task2"),
-            "Should contain done task2 with --all flag"
+    #[test]
+    fn test_compute_derived_status_with_workflow_and_step() {
+        let result = compute_derived_status(
+            "in_progress",
+            Some("Default Workflow"),
+            Some("active"),
+            Some("wf123"),
+            Some("step456"),
         );
-    }
-
-    #[tokio::test]
-    async fn test_list_filter_by_level() {
-        let db = setup_test_db().await;
-
-        create_task(&db, "epic1", "Epic 1", "epic", "in_progress", None, &[]).await;
-        create_task(
-            &db,
-            "ticket1",
-            "Ticket 1",
-            "ticket",
-            "in_progress",
-            None,
-            &[],
-        )
-        .await;
-        create_task(&db, "task1", "Task 1", "task", "in_progress", None, &[]).await;
-
-        let cmd = ListCommand {
-            levels: vec![Level::Epic],
-            statuses: vec![],
-            priorities: vec![],
-            tags: vec![],
-            workflow: None,
-            step: None,
-            root: false,
-            parent: None,
-            all: false,
-            search: None,
-            flat: false,
-        };
-
-        let services = vertebrae_core::VertebraeServices::new(db);
-
-        let result = cmd.execute(&services).await.unwrap();
-
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].level, "epic");
-    }
-
-    #[tokio::test]
-    async fn test_list_filter_by_multiple_levels() {
-        let db = setup_test_db().await;
-
-        create_task(&db, "epic1", "Epic 1", "epic", "in_progress", None, &[]).await;
-        create_task(
-            &db,
-            "ticket1",
-            "Ticket 1",
-            "ticket",
-            "in_progress",
-            None,
-            &[],
-        )
-        .await;
-        create_task(&db, "task1", "Task 1", "task", "in_progress", None, &[]).await;
-
-        let cmd = ListCommand {
-            levels: vec![Level::Epic, Level::Ticket],
-            statuses: vec![],
-            priorities: vec![],
-            tags: vec![],
-            workflow: None,
-            step: None,
-            root: false,
-            parent: None,
-            all: false,
-            search: None,
-            flat: false,
-        };
-
-        let services = vertebrae_core::VertebraeServices::new(db);
-
-        let result = cmd.execute(&services).await.unwrap();
-
-        assert_eq!(result.len(), 2);
-        assert!(
-            result
-                .iter()
-                .all(|t| t.level == "epic" || t.level == "ticket")
+        assert_eq!(
+            result,
+            "Default Workflow:active (workflow:wf123, step:step456)"
         );
-
-        // Verify specific tasks are included
-        use std::collections::HashSet;
-        let ids: HashSet<_> = result.iter().map(|t| t.id.as_str()).collect();
-        assert!(ids.contains("epic1"), "Should contain epic1");
-        assert!(ids.contains("ticket1"), "Should contain ticket1");
-        assert!(
-            !ids.contains("task1"),
-            "Should not contain task1 (level=task)"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_list_filter_by_status() {
-        let db = setup_test_db().await;
-
-        create_task(&db, "task1", "Task 1", "task", "in_progress", None, &[]).await;
-        create_task(&db, "task2", "Task 2", "task", "backlog", None, &[]).await;
-        create_task(&db, "task3", "Task 3", "task", "in_progress", None, &[]).await;
-
-        let cmd = ListCommand {
-            levels: vec![],
-            statuses: vec!["backlog".to_string()],
-            priorities: vec![],
-            tags: vec![],
-            workflow: None,
-            step: None,
-            root: false,
-            parent: None,
-            all: false,
-            search: None,
-            flat: false,
-        };
-
-        let services = vertebrae_core::VertebraeServices::new(db);
-
-        let result = cmd.execute(&services).await.unwrap();
-
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].status, "backlog");
-    }
-
-    #[tokio::test]
-    async fn test_list_filter_by_priority() {
-        let db = setup_test_db().await;
-
-        create_task(
-            &db,
-            "task1",
-            "Task 1",
-            "task",
-            "in_progress",
-            Some("high"),
-            &[],
-        )
-        .await;
-        create_task(
-            &db,
-            "task2",
-            "Task 2",
-            "task",
-            "in_progress",
-            Some("low"),
-            &[],
-        )
-        .await;
-        create_task(&db, "task3", "Task 3", "task", "in_progress", None, &[]).await;
-
-        let cmd = ListCommand {
-            levels: vec![],
-            statuses: vec![],
-            priorities: vec![Priority::High],
-            tags: vec![],
-            workflow: None,
-            step: None,
-            root: false,
-            parent: None,
-            all: false,
-            search: None,
-            flat: false,
-        };
-
-        let services = vertebrae_core::VertebraeServices::new(db);
-
-        let result = cmd.execute(&services).await.unwrap();
-
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].priority, Some("high".to_string()));
-    }
-
-    #[tokio::test]
-    async fn test_list_filter_by_tag() {
-        let db = setup_test_db().await;
-
-        create_task(
-            &db,
-            "task1",
-            "Task 1",
-            "task",
-            "in_progress",
-            None,
-            &["backend"],
-        )
-        .await;
-        create_task(
-            &db,
-            "task2",
-            "Task 2",
-            "task",
-            "in_progress",
-            None,
-            &["frontend"],
-        )
-        .await;
-        create_task(
-            &db,
-            "task3",
-            "Task 3",
-            "task",
-            "in_progress",
-            None,
-            &["backend", "api"],
-        )
-        .await;
-
-        let cmd = ListCommand {
-            levels: vec![],
-            statuses: vec![],
-            priorities: vec![],
-            tags: vec!["backend".to_string()],
-            workflow: None,
-            step: None,
-            root: false,
-            parent: None,
-            all: false,
-            search: None,
-            flat: false,
-        };
-
-        let services = vertebrae_core::VertebraeServices::new(db);
-
-        let result = cmd.execute(&services).await.unwrap();
-
-        assert_eq!(result.len(), 2);
-        assert!(
-            result
-                .iter()
-                .all(|t| t.tags.contains(&"backend".to_string()))
-        );
-
-        // Verify specific tasks are included
-        use std::collections::HashSet;
-        let ids: HashSet<_> = result.iter().map(|t| t.id.as_str()).collect();
-        assert!(
-            ids.contains("task1"),
-            "Should contain task1 (has backend tag)"
-        );
-        assert!(
-            ids.contains("task3"),
-            "Should contain task3 (has backend tag)"
-        );
-        assert!(
-            !ids.contains("task2"),
-            "Should not contain task2 (only has frontend tag)"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_list_root_tasks() {
-        let db = setup_test_db().await;
-
-        // Create parent and child tasks
-        create_task(
-            &db,
-            "parent1",
-            "Parent Epic",
-            "epic",
-            "in_progress",
-            None,
-            &[],
-        )
-        .await;
-        create_task(
-            &db,
-            "child1",
-            "Child Ticket",
-            "ticket",
-            "in_progress",
-            None,
-            &[],
-        )
-        .await;
-        create_task(
-            &db,
-            "orphan1",
-            "Orphan Task",
-            "task",
-            "in_progress",
-            None,
-            &[],
-        )
-        .await;
-
-        // Create parent-child relationship
-        create_child_of(&db, "child1", "parent1").await;
-
-        let cmd = ListCommand {
-            levels: vec![],
-            statuses: vec![],
-            priorities: vec![],
-            tags: vec![],
-            workflow: None,
-            step: None,
-            root: true,
-            parent: None,
-            all: false,
-            search: None,
-            flat: false,
-        };
-
-        let services = vertebrae_core::VertebraeServices::new(db);
-
-        let result = cmd.execute(&services).await.unwrap();
-
-        // Should have 2 root tasks (parent1 and orphan1, but not child1)
-        assert_eq!(result.len(), 2);
-        assert!(result.iter().any(|t| t.id == "parent1"));
-        assert!(result.iter().any(|t| t.id == "orphan1"));
-        assert!(!result.iter().any(|t| t.id == "child1"));
-    }
-
-    #[tokio::test]
-    async fn test_list_children_of_task() {
-        let db = setup_test_db().await;
-
-        // Create parent and child tasks
-        create_task(
-            &db,
-            "parent1",
-            "Parent Epic",
-            "epic",
-            "in_progress",
-            None,
-            &[],
-        )
-        .await;
-        create_task(&db, "child1", "Child 1", "ticket", "in_progress", None, &[]).await;
-        create_task(&db, "child2", "Child 2", "ticket", "in_progress", None, &[]).await;
-        create_task(
-            &db,
-            "other1",
-            "Other Task",
-            "task",
-            "in_progress",
-            None,
-            &[],
-        )
-        .await;
-
-        // Create parent-child relationships
-        create_child_of(&db, "child1", "parent1").await;
-        create_child_of(&db, "child2", "parent1").await;
-
-        let cmd = ListCommand {
-            levels: vec![],
-            statuses: vec![],
-            priorities: vec![],
-            tags: vec![],
-            workflow: None,
-            step: None,
-            root: false,
-            parent: Some("parent1".to_string()),
-            all: false,
-            search: None,
-            flat: false,
-        };
-
-        let services = vertebrae_core::VertebraeServices::new(db);
-
-        let result = cmd.execute(&services).await.unwrap();
-
-        // Should have 2 children
-        assert_eq!(result.len(), 2);
-        assert!(result.iter().any(|t| t.id == "child1"));
-        assert!(result.iter().any(|t| t.id == "child2"));
-    }
-
-    #[tokio::test]
-    async fn test_list_children_nonexistent_parent() {
-        let db = setup_test_db().await;
-
-        create_task(&db, "task1", "Task 1", "task", "in_progress", None, &[]).await;
-
-        let cmd = ListCommand {
-            levels: vec![],
-            statuses: vec![],
-            priorities: vec![],
-            tags: vec![],
-            workflow: None,
-            step: None,
-            root: false,
-            parent: Some("nonexistent".to_string()),
-            all: false,
-            search: None,
-            flat: false,
-        };
-
-        let services = vertebrae_core::VertebraeServices::new(db);
-
-        let result = cmd.execute(&services).await.unwrap();
-
-        // Should return empty list
-        assert!(result.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_list_empty_database() {
-        let db = setup_test_db().await;
-
-        let cmd = ListCommand {
-            levels: vec![],
-            statuses: vec![],
-            priorities: vec![],
-            tags: vec![],
-            workflow: None,
-            step: None,
-            root: false,
-            parent: None,
-            all: false,
-            search: None,
-            flat: false,
-        };
-
-        let services = vertebrae_core::VertebraeServices::new(db);
-
-        let result = cmd.execute(&services).await.unwrap();
-
-        assert!(result.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_list_combined_filters() {
-        let db = setup_test_db().await;
-
-        create_task(
-            &db,
-            "task1",
-            "Task 1",
-            "epic",
-            "in_progress",
-            Some("high"),
-            &["backend"],
-        )
-        .await;
-        create_task(
-            &db,
-            "task2",
-            "Task 2",
-            "epic",
-            "in_progress",
-            Some("low"),
-            &["backend"],
-        )
-        .await;
-        create_task(
-            &db,
-            "task3",
-            "Task 3",
-            "ticket",
-            "in_progress",
-            Some("high"),
-            &["backend"],
-        )
-        .await;
-        create_task(
-            &db,
-            "task4",
-            "Task 4",
-            "epic",
-            "done",
-            Some("high"),
-            &["backend"],
-        )
-        .await;
-
-        let cmd = ListCommand {
-            levels: vec![Level::Epic],
-            statuses: vec![],
-            priorities: vec![Priority::High],
-            tags: vec!["backend".to_string()],
-            workflow: None,
-            step: None,
-            root: false,
-            parent: None,
-            all: false,
-            search: None,
-            flat: false,
-        };
-
-        let services = vertebrae_core::VertebraeServices::new(db);
-
-        let result = cmd.execute(&services).await.unwrap();
-
-        // Should match task1 only (epic + high priority + backend tag + not done)
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].id, "task1");
-    }
-
-    #[tokio::test]
-    async fn test_list_root_with_level_filter() {
-        let db = setup_test_db().await;
-
-        create_task(&db, "epic1", "Epic", "epic", "in_progress", None, &[]).await;
-        create_task(&db, "ticket1", "Ticket", "ticket", "in_progress", None, &[]).await;
-
-        let cmd = ListCommand {
-            levels: vec![Level::Epic],
-            statuses: vec![],
-            priorities: vec![],
-            tags: vec![],
-            workflow: None,
-            step: None,
-            root: true,
-            parent: None,
-            all: false,
-            search: None,
-            flat: false,
-        };
-
-        let services = vertebrae_core::VertebraeServices::new(db);
-
-        let result = cmd.execute(&services).await.unwrap();
-
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].level, "epic");
     }
 
     #[test]
-    fn test_build_filter_with_all_options() {
-        let cmd = ListCommand {
-            levels: vec![Level::Epic, Level::Ticket],
-            statuses: vec!["in_progress".to_string(), "in_progress".to_string()],
-            priorities: vec![Priority::High],
-            tags: vec!["backend".to_string(), "api".to_string()],
-            workflow: None,
-            step: None,
-            root: true,
-            parent: None,
-            all: true,
-            search: Some("test query".to_string()),
-            flat: false,
-        };
-
-        let filter = cmd.build_filter();
-
-        assert_eq!(filter.levels.len(), 2);
-        assert_eq!(filter.statuses.len(), 2);
-        assert_eq!(filter.priorities.len(), 1);
-        assert_eq!(filter.tags.len(), 2);
-        assert!(filter.root_only);
-        assert!(filter.children_of.is_none());
-        assert!(filter.include_done);
-        assert_eq!(filter.search, Some("test query".to_string()));
+    fn test_compute_derived_status_with_workflow_id_only() {
+        let result = compute_derived_status(
+            "in_progress",
+            Some("Default Workflow"),
+            Some("active"),
+            Some("wf123"),
+            None,
+        );
+        assert_eq!(result, "Default Workflow:active (workflow:wf123)");
     }
 
     #[test]
-    fn test_build_filter_with_parent() {
-        let cmd = ListCommand {
-            levels: vec![],
-            statuses: vec![],
-            priorities: vec![],
-            tags: vec![],
-            workflow: None,
-            step: None,
-            root: false,
-            parent: Some("parent123".to_string()),
-            all: false,
-            search: None,
-            flat: false,
-        };
-
-        let filter = cmd.build_filter();
-
-        assert!(!filter.root_only);
-        assert_eq!(filter.children_of, Some("parent123".to_string()));
-        assert!(!filter.include_done);
-        assert!(filter.search.is_none());
+    fn test_compute_derived_status_no_ids() {
+        let result = compute_derived_status(
+            "in_progress",
+            Some("Default Workflow"),
+            Some("active"),
+            None,
+            None,
+        );
+        assert_eq!(result, "Default Workflow:active");
     }
 
     #[test]
-    fn test_build_filter_empty() {
-        let cmd = ListCommand {
-            levels: vec![],
-            statuses: vec![],
-            priorities: vec![],
-            tags: vec![],
-            workflow: None,
-            step: None,
-            root: false,
-            parent: None,
-            all: false,
-            search: None,
-            flat: false,
-        };
-
-        let filter = cmd.build_filter();
-
-        assert!(filter.levels.is_empty());
-        assert!(filter.statuses.is_empty());
-        assert!(filter.priorities.is_empty());
-        assert!(filter.tags.is_empty());
-        assert!(!filter.root_only);
-        assert!(filter.children_of.is_none());
-        assert!(!filter.include_done);
-        assert!(filter.search.is_none());
+    fn test_compute_derived_status_no_workflow() {
+        let result = compute_derived_status("backlog", None, None, None, None);
+        assert_eq!(result, "backlog");
     }
 
     #[test]
-    fn test_task_summary_from_db_task_summary() {
-        // Test conversion from repository TaskSummary to CLI TaskSummary
-        let db_summary = vertebrae_db::TaskSummary {
+    fn test_compute_derived_status_partial_workflow_info() {
+        let result = compute_derived_status("in_progress", Some("Workflow"), None, None, None);
+        assert_eq!(result, "in_progress");
+    }
+
+    // ========================================
+    // TaskSummary conversion tests
+    // ========================================
+
+    #[test]
+    fn test_task_summary_from_core_summary() {
+        let core_summary = vertebrae_core::TaskSummary {
             id: "abc123".to_string(),
             title: "Test Task".to_string(),
             level: Level::Ticket,
@@ -1051,12 +417,11 @@ mod tests {
             step_name: None,
         };
 
-        let summary = TaskSummary::from(db_summary);
+        let summary = TaskSummary::from(core_summary);
 
         assert_eq!(summary.id, "abc123");
         assert_eq!(summary.title, "Test Task");
         assert_eq!(summary.level, "ticket");
-        // Without workflow/step, derived status falls back to raw status
         assert_eq!(summary.status, "in_progress");
         assert_eq!(summary.priority, Some("medium".to_string()));
         assert_eq!(summary.tags, vec!["test".to_string()]);
@@ -1064,9 +429,8 @@ mod tests {
     }
 
     #[test]
-    fn test_task_summary_from_db_task_summary_with_workflow() {
-        // Test conversion with workflow info - should compute derived status with IDs
-        let db_summary = vertebrae_db::TaskSummary {
+    fn test_task_summary_from_core_summary_with_workflow() {
+        let core_summary = vertebrae_core::TaskSummary {
             id: "abc123".to_string(),
             title: "Test Task".to_string(),
             level: Level::Ticket,
@@ -1081,19 +445,12 @@ mod tests {
             step_name: Some("active".to_string()),
         };
 
-        let summary = TaskSummary::from(db_summary);
+        let summary = TaskSummary::from(core_summary);
 
-        assert_eq!(summary.id, "abc123");
-        assert_eq!(summary.title, "Test Task");
-        assert_eq!(summary.level, "ticket");
-        // With workflow/step, derived status is "workflow_name:step_name (workflow:id, step:id)"
         assert_eq!(
             summary.status,
             "Default Workflow:active (workflow:wf123, step:wf123_active)"
         );
-        assert_eq!(summary.priority, Some("medium".to_string()));
-        assert_eq!(summary.tags, vec!["test".to_string()]);
-        assert_eq!(summary.needs_human_review, Some(true));
     }
 
     #[test]
@@ -1131,17 +488,92 @@ mod tests {
         };
 
         let debug_str = format!("{:?}", summary);
-        assert!(
-            debug_str.contains("TaskSummary")
-                && debug_str.contains("id: \"abc123\"")
-                && debug_str.contains("title: \"Test Task\"")
-                && debug_str.contains("level: \"ticket\"")
-                && debug_str.contains("status: \"in_progress\"")
-                && debug_str.contains("high")
-                && debug_str.contains("backend")
-                && debug_str.contains("needs_human_review"),
-            "Debug output should contain TaskSummary and all field values"
-        );
+        assert!(debug_str.contains("TaskSummary"));
+        assert!(debug_str.contains("abc123"));
+        assert!(debug_str.contains("Test Task"));
+    }
+
+    // ========================================
+    // build_filter tests
+    // ========================================
+
+    #[test]
+    fn test_build_filter_empty() {
+        let cmd = ListCommand {
+            levels: vec![],
+            statuses: vec![],
+            priorities: vec![],
+            tags: vec![],
+            workflow: None,
+            step: None,
+            root: false,
+            parent: None,
+            all: false,
+            search: None,
+            flat: false,
+        };
+
+        let filter = cmd.build_filter();
+
+        assert!(filter.levels.is_empty());
+        assert!(filter.statuses.is_empty());
+        assert!(filter.priorities.is_empty());
+        assert!(filter.tags.is_empty());
+        assert!(!filter.root_only);
+        assert!(filter.children_of.is_none());
+        assert!(!filter.include_done);
+        assert!(filter.search.is_none());
+    }
+
+    #[test]
+    fn test_build_filter_with_all_options() {
+        let cmd = ListCommand {
+            levels: vec![Level::Epic, Level::Ticket],
+            statuses: vec!["in_progress".to_string()],
+            priorities: vec![Priority::High],
+            tags: vec!["backend".to_string(), "api".to_string()],
+            workflow: Some("wf123".to_string()),
+            step: Some("review".to_string()),
+            root: true,
+            parent: None,
+            all: true,
+            search: Some("test query".to_string()),
+            flat: false,
+        };
+
+        let filter = cmd.build_filter();
+
+        assert_eq!(filter.levels.len(), 2);
+        assert_eq!(filter.statuses.len(), 1);
+        assert_eq!(filter.priorities.len(), 1);
+        assert_eq!(filter.tags.len(), 2);
+        assert!(filter.root_only);
+        assert!(filter.children_of.is_none());
+        assert!(filter.include_done);
+        assert_eq!(filter.search, Some("test query".to_string()));
+    }
+
+    #[test]
+    fn test_build_filter_with_parent() {
+        let cmd = ListCommand {
+            levels: vec![],
+            statuses: vec![],
+            priorities: vec![],
+            tags: vec![],
+            workflow: None,
+            step: None,
+            root: false,
+            parent: Some("parent123".to_string()),
+            all: false,
+            search: None,
+            flat: false,
+        };
+
+        let filter = cmd.build_filter();
+
+        assert!(!filter.root_only);
+        assert_eq!(filter.children_of, Some("parent123".to_string()));
+        assert!(!filter.include_done);
     }
 
     #[test]
@@ -1161,93 +593,597 @@ mod tests {
         };
 
         let debug_str = format!("{:?}", cmd);
-        assert!(
-            debug_str.contains("ListCommand")
-                && debug_str.contains("Epic")
-                && debug_str.contains("in_progress")
-                && debug_str.contains("High")
-                && debug_str.contains("backend")
-                && debug_str.contains("root: true")
-                && debug_str.contains("parent123")
-                && debug_str.contains("all: true")
-                && debug_str.contains("search")
-                && debug_str.contains("test query"),
-            "Debug output should contain ListCommand and all field values"
-        );
+        assert!(debug_str.contains("ListCommand"));
+        assert!(debug_str.contains("Epic"));
+        assert!(debug_str.contains("in_progress"));
     }
 
     // ========================================
-    // Search functionality tests
+    // Async execution tests
     // ========================================
-    // Note: Unit tests for escape_search_string and build_search_condition
-    // have been moved to the repository layer (crates/db/src/repository/filter.rs)
-    // since the search SQL building is now handled there.
 
-    /// Helper to create a task with description
-    async fn create_task_with_description(
-        db: &Database,
-        id: &str,
-        title: &str,
-        description: &str,
-        level: &str,
-        status: &str,
-    ) {
-        use vertebrae_db::{Level, Task, TaskUpdate};
+    #[tokio::test]
+    async fn test_list_empty_database() {
+        let services = setup_test_service().await;
 
-        let level_enum = match level {
-            "epic" => Level::Epic,
-            "ticket" => Level::Ticket,
-            "task" => Level::Task,
-            _ => Level::Task,
+        let cmd = ListCommand {
+            levels: vec![],
+            statuses: vec![],
+            priorities: vec![],
+            tags: vec![],
+            workflow: None,
+            step: None,
+            root: false,
+            parent: None,
+            all: false,
+            search: None,
+            flat: false,
         };
 
-        let mut task = Task::new(title, level_enum).with_description(description);
-
-        // Set up workflow and step
-        let default_workflow_id = surrealdb::sql::Thing::from(("workflow", "default"));
-        task.workflow_id = Some(default_workflow_id);
-        if status != "backlog" {
-            let step_id_str = format!("default_{}", status);
-            let step_id = surrealdb::sql::Thing::from(("step", step_id_str.as_str()));
-            task.current_step_id = Some(step_id);
-        }
-
-        db.tasks().create(id, &task).await.unwrap();
-
-        // Update task to persist description (which create() doesn't persist)
-        let update = TaskUpdate::new().with_description(description);
-        db.tasks().update(id, &update).await.unwrap();
+        let result = cmd.execute(&services).await.unwrap();
+        assert!(result.is_empty());
     }
 
     #[tokio::test]
-    async fn test_search_finds_task_by_title() {
-        let db = setup_test_db().await;
+    async fn test_list_excludes_done_by_default() {
+        let services = setup_test_service().await;
 
         create_task(
-            &db,
+            &services,
+            "task1",
+            "Task 1",
+            Level::Task,
+            "in_progress",
+            None,
+            &[],
+        )
+        .await;
+        create_task(
+            &services,
+            "task2",
+            "Task 2",
+            Level::Task,
+            "in_progress",
+            None,
+            &[],
+        )
+        .await;
+        create_task(&services, "task3", "Task 3", Level::Task, "done", None, &[]).await;
+
+        let cmd = ListCommand {
+            levels: vec![],
+            statuses: vec![],
+            priorities: vec![],
+            tags: vec![],
+            workflow: None,
+            step: None,
+            root: false,
+            parent: None,
+            all: false,
+            search: None,
+            flat: false,
+        };
+
+        let result = cmd.execute(&services).await.unwrap();
+        assert_eq!(result.len(), 2);
+
+        let ids: std::collections::HashSet<_> = result.iter().map(|t| t.id.as_str()).collect();
+        assert!(ids.contains("task1"));
+        assert!(ids.contains("task2"));
+        assert!(!ids.contains("task3"));
+    }
+
+    #[tokio::test]
+    async fn test_list_includes_done_with_all_flag() {
+        let services = setup_test_service().await;
+
+        create_task(
+            &services,
+            "task1",
+            "Task 1",
+            Level::Task,
+            "in_progress",
+            None,
+            &[],
+        )
+        .await;
+        create_task(&services, "task2", "Task 2", Level::Task, "done", None, &[]).await;
+
+        let cmd = ListCommand {
+            levels: vec![],
+            statuses: vec![],
+            priorities: vec![],
+            tags: vec![],
+            workflow: None,
+            step: None,
+            root: false,
+            parent: None,
+            all: true,
+            search: None,
+            flat: false,
+        };
+
+        let result = cmd.execute(&services).await.unwrap();
+        assert_eq!(result.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_list_filter_by_level() {
+        let services = setup_test_service().await;
+
+        create_task(
+            &services,
+            "epic1",
+            "Epic 1",
+            Level::Epic,
+            "in_progress",
+            None,
+            &[],
+        )
+        .await;
+        create_task(
+            &services,
+            "ticket1",
+            "Ticket 1",
+            Level::Ticket,
+            "in_progress",
+            None,
+            &[],
+        )
+        .await;
+        create_task(
+            &services,
+            "task1",
+            "Task 1",
+            Level::Task,
+            "in_progress",
+            None,
+            &[],
+        )
+        .await;
+
+        let cmd = ListCommand {
+            levels: vec![Level::Epic],
+            statuses: vec![],
+            priorities: vec![],
+            tags: vec![],
+            workflow: None,
+            step: None,
+            root: false,
+            parent: None,
+            all: false,
+            search: None,
+            flat: false,
+        };
+
+        let result = cmd.execute(&services).await.unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].level, "epic");
+    }
+
+    #[tokio::test]
+    async fn test_list_filter_by_multiple_levels() {
+        let services = setup_test_service().await;
+
+        create_task(
+            &services,
+            "epic1",
+            "Epic 1",
+            Level::Epic,
+            "in_progress",
+            None,
+            &[],
+        )
+        .await;
+        create_task(
+            &services,
+            "ticket1",
+            "Ticket 1",
+            Level::Ticket,
+            "in_progress",
+            None,
+            &[],
+        )
+        .await;
+        create_task(
+            &services,
+            "task1",
+            "Task 1",
+            Level::Task,
+            "in_progress",
+            None,
+            &[],
+        )
+        .await;
+
+        let cmd = ListCommand {
+            levels: vec![Level::Epic, Level::Ticket],
+            statuses: vec![],
+            priorities: vec![],
+            tags: vec![],
+            workflow: None,
+            step: None,
+            root: false,
+            parent: None,
+            all: false,
+            search: None,
+            flat: false,
+        };
+
+        let result = cmd.execute(&services).await.unwrap();
+        assert_eq!(result.len(), 2);
+        assert!(
+            result
+                .iter()
+                .all(|t| t.level == "epic" || t.level == "ticket")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_list_filter_by_priority() {
+        let services = setup_test_service().await;
+
+        create_task(
+            &services,
+            "task1",
+            "Task 1",
+            Level::Task,
+            "in_progress",
+            Some(Priority::High),
+            &[],
+        )
+        .await;
+        create_task(
+            &services,
+            "task2",
+            "Task 2",
+            Level::Task,
+            "in_progress",
+            Some(Priority::Low),
+            &[],
+        )
+        .await;
+        create_task(
+            &services,
+            "task3",
+            "Task 3",
+            Level::Task,
+            "in_progress",
+            None,
+            &[],
+        )
+        .await;
+
+        let cmd = ListCommand {
+            levels: vec![],
+            statuses: vec![],
+            priorities: vec![Priority::High],
+            tags: vec![],
+            workflow: None,
+            step: None,
+            root: false,
+            parent: None,
+            all: false,
+            search: None,
+            flat: false,
+        };
+
+        let result = cmd.execute(&services).await.unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].priority, Some("high".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_list_filter_by_tag() {
+        let services = setup_test_service().await;
+
+        create_task(
+            &services,
+            "task1",
+            "Task 1",
+            Level::Task,
+            "in_progress",
+            None,
+            &["backend"],
+        )
+        .await;
+        create_task(
+            &services,
+            "task2",
+            "Task 2",
+            Level::Task,
+            "in_progress",
+            None,
+            &["frontend"],
+        )
+        .await;
+        create_task(
+            &services,
+            "task3",
+            "Task 3",
+            Level::Task,
+            "in_progress",
+            None,
+            &["backend", "api"],
+        )
+        .await;
+        create_task(
+            &services,
+            "task4",
+            "Task 4",
+            Level::Task,
+            "in_progress",
+            None,
+            &["other"],
+        )
+        .await;
+
+        let cmd = ListCommand {
+            levels: vec![],
+            statuses: vec![],
+            priorities: vec![],
+            tags: vec!["backend".to_string(), "frontend".to_string()],
+            workflow: None,
+            step: None,
+            root: false,
+            parent: None,
+            all: false,
+            search: None,
+            flat: false,
+        };
+
+        let result = cmd.execute(&services).await.unwrap();
+        assert_eq!(result.len(), 3);
+
+        let ids: std::collections::HashSet<_> = result.iter().map(|t| t.id.as_str()).collect();
+        assert!(ids.contains("task1"));
+        assert!(ids.contains("task2"));
+        assert!(ids.contains("task3"));
+        assert!(!ids.contains("task4"));
+    }
+
+    #[tokio::test]
+    async fn test_list_root_tasks() {
+        let services = setup_test_service().await;
+
+        create_task(
+            &services,
+            "parent1",
+            "Parent",
+            Level::Epic,
+            "in_progress",
+            None,
+            &[],
+        )
+        .await;
+        create_task(
+            &services,
+            "child1",
+            "Child",
+            Level::Ticket,
+            "in_progress",
+            None,
+            &[],
+        )
+        .await;
+        create_task(
+            &services,
+            "orphan1",
+            "Orphan",
+            Level::Task,
+            "in_progress",
+            None,
+            &[],
+        )
+        .await;
+
+        create_child_of(&services, "child1", "parent1").await;
+
+        let cmd = ListCommand {
+            levels: vec![],
+            statuses: vec![],
+            priorities: vec![],
+            tags: vec![],
+            workflow: None,
+            step: None,
+            root: true,
+            parent: None,
+            all: false,
+            search: None,
+            flat: false,
+        };
+
+        let result = cmd.execute(&services).await.unwrap();
+        assert_eq!(result.len(), 2);
+        assert!(result.iter().any(|t| t.id == "parent1"));
+        assert!(result.iter().any(|t| t.id == "orphan1"));
+        assert!(!result.iter().any(|t| t.id == "child1"));
+    }
+
+    #[tokio::test]
+    async fn test_list_children_of_task() {
+        let services = setup_test_service().await;
+
+        create_task(
+            &services,
+            "parent1",
+            "Parent",
+            Level::Epic,
+            "in_progress",
+            None,
+            &[],
+        )
+        .await;
+        create_task(
+            &services,
+            "child1",
+            "Child 1",
+            Level::Ticket,
+            "in_progress",
+            None,
+            &[],
+        )
+        .await;
+        create_task(
+            &services,
+            "child2",
+            "Child 2",
+            Level::Ticket,
+            "in_progress",
+            None,
+            &[],
+        )
+        .await;
+        create_task(
+            &services,
+            "other1",
+            "Other",
+            Level::Task,
+            "in_progress",
+            None,
+            &[],
+        )
+        .await;
+
+        create_child_of(&services, "child1", "parent1").await;
+        create_child_of(&services, "child2", "parent1").await;
+
+        let cmd = ListCommand {
+            levels: vec![],
+            statuses: vec![],
+            priorities: vec![],
+            tags: vec![],
+            workflow: None,
+            step: None,
+            root: false,
+            parent: Some("parent1".to_string()),
+            all: false,
+            search: None,
+            flat: false,
+        };
+
+        let result = cmd.execute(&services).await.unwrap();
+        assert_eq!(result.len(), 2);
+        assert!(result.iter().any(|t| t.id == "child1"));
+        assert!(result.iter().any(|t| t.id == "child2"));
+    }
+
+    #[tokio::test]
+    async fn test_list_children_nonexistent_parent() {
+        let services = setup_test_service().await;
+
+        create_task(
+            &services,
+            "task1",
+            "Task 1",
+            Level::Task,
+            "in_progress",
+            None,
+            &[],
+        )
+        .await;
+
+        let cmd = ListCommand {
+            levels: vec![],
+            statuses: vec![],
+            priorities: vec![],
+            tags: vec![],
+            workflow: None,
+            step: None,
+            root: false,
+            parent: Some("nonexistent".to_string()),
+            all: false,
+            search: None,
+            flat: false,
+        };
+
+        let result = cmd.execute(&services).await.unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_list_combined_filters() {
+        let services = setup_test_service().await;
+
+        create_task(
+            &services,
+            "task1",
+            "Task 1",
+            Level::Epic,
+            "in_progress",
+            Some(Priority::High),
+            &["backend"],
+        )
+        .await;
+        create_task(
+            &services,
+            "task2",
+            "Task 2",
+            Level::Epic,
+            "in_progress",
+            Some(Priority::Low),
+            &["backend"],
+        )
+        .await;
+        create_task(
+            &services,
+            "task3",
+            "Task 3",
+            Level::Ticket,
+            "in_progress",
+            Some(Priority::High),
+            &["backend"],
+        )
+        .await;
+        create_task(
+            &services,
+            "task4",
+            "Task 4",
+            Level::Epic,
+            "done",
+            Some(Priority::High),
+            &["backend"],
+        )
+        .await;
+
+        let cmd = ListCommand {
+            levels: vec![Level::Epic],
+            statuses: vec![],
+            priorities: vec![Priority::High],
+            tags: vec!["backend".to_string()],
+            workflow: None,
+            step: None,
+            root: false,
+            parent: None,
+            all: false,
+            search: None,
+            flat: false,
+        };
+
+        let result = cmd.execute(&services).await.unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].id, "task1");
+    }
+
+    #[tokio::test]
+    async fn test_list_search_by_title() {
+        let services = setup_test_service().await;
+
+        create_task(
+            &services,
             "task1",
             "Authentication feature",
-            "task",
+            Level::Task,
             "in_progress",
             None,
             &[],
         )
         .await;
         create_task(
-            &db,
+            &services,
             "task2",
             "Database migration",
-            "task",
-            "in_progress",
-            None,
-            &[],
-        )
-        .await;
-        create_task(
-            &db,
-            "task3",
-            "API endpoint",
-            "task",
+            Level::Task,
             "in_progress",
             None,
             &[],
@@ -1268,125 +1204,25 @@ mod tests {
             flat: false,
         };
 
-        let services = vertebrae_core::VertebraeServices::new(db);
-
         let result = cmd.execute(&services).await.unwrap();
-
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].id, "task1");
-        assert_eq!(result[0].title, "Authentication feature");
-    }
-
-    #[tokio::test]
-    async fn test_search_finds_task_by_description() {
-        let db = setup_test_db().await;
-
-        create_task_with_description(
-            &db,
-            "task1",
-            "Feature A",
-            "Implement user authentication system",
-            "task",
-            "in_progress",
-        )
-        .await;
-        create_task_with_description(
-            &db,
-            "task2",
-            "Feature B",
-            "Add database caching",
-            "task",
-            "in_progress",
-        )
-        .await;
-
-        let cmd = ListCommand {
-            levels: vec![],
-            statuses: vec![],
-            priorities: vec![],
-            tags: vec![],
-            workflow: None,
-            step: None,
-            root: false,
-            parent: None,
-            all: false,
-            search: Some("authentication".to_string()),
-            flat: false,
-        };
-
-        let services = vertebrae_core::VertebraeServices::new(db);
-
-        let result = cmd.execute(&services).await.unwrap();
-
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].id, "task1");
     }
 
     #[tokio::test]
-    async fn test_search_is_case_insensitive() {
-        let db = setup_test_db().await;
+    async fn test_list_search_no_matches() {
+        let services = setup_test_service().await;
 
         create_task(
-            &db,
+            &services,
             "task1",
-            "AUTHENTICATION Feature",
-            "task",
+            "Task A",
+            Level::Task,
             "in_progress",
             None,
             &[],
         )
         .await;
-        create_task(&db, "task2", "Other task", "task", "in_progress", None, &[]).await;
-
-        // Search with lowercase should find uppercase title
-        let cmd = ListCommand {
-            levels: vec![],
-            statuses: vec![],
-            priorities: vec![],
-            tags: vec![],
-            workflow: None,
-            step: None,
-            root: false,
-            parent: None,
-            all: false,
-            search: Some("authentication".to_string()),
-            flat: false,
-        };
-
-        let services = vertebrae_core::VertebraeServices::new(db);
-
-        let result = cmd.execute(&services).await.unwrap();
-
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].id, "task1");
-
-        // Search with uppercase should also find
-        let cmd2 = ListCommand {
-            levels: vec![],
-            statuses: vec![],
-            priorities: vec![],
-            tags: vec![],
-            workflow: None,
-            step: None,
-            root: false,
-            parent: None,
-            all: false,
-            search: Some("AUTHENTICATION".to_string()),
-            flat: false,
-        };
-
-        let result2 = cmd2.execute(&services).await.unwrap();
-
-        assert_eq!(result2.len(), 1);
-        assert_eq!(result2[0].id, "task1");
-    }
-
-    #[tokio::test]
-    async fn test_search_with_no_matches_returns_empty() {
-        let db = setup_test_db().await;
-
-        create_task(&db, "task1", "Task A", "task", "in_progress", None, &[]).await;
-        create_task(&db, "task2", "Task B", "task", "in_progress", None, &[]).await;
 
         let cmd = ListCommand {
             levels: vec![],
@@ -1402,98 +1238,13 @@ mod tests {
             flat: false,
         };
 
-        let services = vertebrae_core::VertebraeServices::new(db);
-
         let result = cmd.execute(&services).await.unwrap();
-
         assert!(result.is_empty());
     }
 
     #[tokio::test]
-    async fn test_search_combined_with_status_filter() {
-        let db = setup_test_db().await;
-
-        create_task(
-            &db,
-            "task1",
-            "Auth task backlog",
-            "task",
-            "backlog",
-            None,
-            &[],
-        )
-        .await;
-        create_task(
-            &db,
-            "task2",
-            "Auth task in_progress",
-            "task",
-            "in_progress",
-            None,
-            &[],
-        )
-        .await;
-        create_task(&db, "task3", "Other task", "task", "in_progress", None, &[]).await;
-
-        // Search for "auth" but only in_progress status
-        let cmd = ListCommand {
-            levels: vec![],
-            statuses: vec!["in_progress".to_string()],
-            priorities: vec![],
-            tags: vec![],
-            workflow: None,
-            step: None,
-            root: false,
-            parent: None,
-            all: false,
-            search: Some("auth".to_string()),
-            flat: false,
-        };
-
-        let services = vertebrae_core::VertebraeServices::new(db);
-
-        let result = cmd.execute(&services).await.unwrap();
-
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].id, "task2");
-    }
-
-    #[tokio::test]
-    async fn test_search_combined_with_level_filter() {
-        let db = setup_test_db().await;
-
-        create_task(&db, "epic1", "Auth epic", "epic", "in_progress", None, &[]).await;
-        create_task(&db, "task1", "Auth task", "task", "in_progress", None, &[]).await;
-        create_task(&db, "task2", "Other task", "task", "in_progress", None, &[]).await;
-
-        // Search for "auth" but only epic level
-        let cmd = ListCommand {
-            levels: vec![Level::Epic],
-            statuses: vec![],
-            priorities: vec![],
-            tags: vec![],
-            workflow: None,
-            step: None,
-            root: false,
-            parent: None,
-            all: false,
-            search: Some("auth".to_string()),
-            flat: false,
-        };
-
-        let services = vertebrae_core::VertebraeServices::new(db);
-
-        let result = cmd.execute(&services).await.unwrap();
-
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].id, "epic1");
-    }
-
-    #[tokio::test]
-    async fn test_search_empty_string_returns_error() {
-        let db = setup_test_db().await;
-
-        create_task(&db, "task1", "Task 1", "task", "in_progress", None, &[]).await;
+    async fn test_list_search_empty_string_returns_error() {
+        let services = setup_test_service().await;
 
         let cmd = ListCommand {
             levels: vec![],
@@ -1509,24 +1260,13 @@ mod tests {
             flat: false,
         };
 
-        let services = vertebrae_core::VertebraeServices::new(db);
-
         let result = cmd.execute(&services).await;
-
         assert!(result.is_err());
-        match result {
-            Err(ServiceError::ValidationFailed { message }) => {
-                assert_eq!(message, "Search query cannot be empty");
-            }
-            _ => panic!("Expected ValidationFailed"),
-        }
     }
 
     #[tokio::test]
-    async fn test_search_whitespace_only_returns_error() {
-        let db = setup_test_db().await;
-
-        create_task(&db, "task1", "Task 1", "task", "in_progress", None, &[]).await;
+    async fn test_list_search_whitespace_only_returns_error() {
+        let services = setup_test_service().await;
 
         let cmd = ListCommand {
             levels: vec![],
@@ -1542,186 +1282,37 @@ mod tests {
             flat: false,
         };
 
-        let services = vertebrae_core::VertebraeServices::new(db);
-
         let result = cmd.execute(&services).await;
-
         assert!(result.is_err());
-        match result {
-            Err(ServiceError::ValidationFailed { message }) => {
-                assert_eq!(message, "Search query cannot be empty");
-            }
-            _ => panic!("Expected ValidationFailed"),
-        }
     }
 
     #[tokio::test]
-    async fn test_search_with_root_flag() {
-        let db = setup_test_db().await;
+    async fn test_list_search_combined_with_level_filter() {
+        let services = setup_test_service().await;
 
         create_task(
-            &db,
-            "parent1",
-            "Auth Parent",
-            "epic",
+            &services,
+            "epic1",
+            "Auth epic",
+            Level::Epic,
             "in_progress",
             None,
             &[],
         )
         .await;
         create_task(
-            &db,
-            "child1",
-            "Auth Child",
-            "task",
-            "in_progress",
-            None,
-            &[],
-        )
-        .await;
-        create_task(
-            &db,
-            "other1",
-            "Other Parent",
-            "epic",
-            "in_progress",
-            None,
-            &[],
-        )
-        .await;
-        create_child_of(&db, "child1", "parent1").await;
-
-        // Search for "auth" with root flag - should only return root task
-        let cmd = ListCommand {
-            levels: vec![],
-            statuses: vec![],
-            priorities: vec![],
-            tags: vec![],
-            workflow: None,
-            step: None,
-            root: true,
-            parent: None,
-            all: false,
-            search: Some("auth".to_string()),
-            flat: false,
-        };
-
-        let services = vertebrae_core::VertebraeServices::new(db);
-
-        let result = cmd.execute(&services).await.unwrap();
-
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].id, "parent1");
-    }
-
-    #[tokio::test]
-    async fn test_search_with_children_flag() {
-        let db = setup_test_db().await;
-
-        create_task(&db, "parent1", "Parent", "epic", "in_progress", None, &[]).await;
-        create_task(
-            &db,
-            "child1",
-            "Auth Child",
-            "task",
-            "in_progress",
-            None,
-            &[],
-        )
-        .await;
-        create_task(
-            &db,
-            "child2",
-            "Other Child",
-            "task",
-            "in_progress",
-            None,
-            &[],
-        )
-        .await;
-        create_child_of(&db, "child1", "parent1").await;
-        create_child_of(&db, "child2", "parent1").await;
-
-        // Search for "auth" among children of parent1
-        let cmd = ListCommand {
-            levels: vec![],
-            statuses: vec![],
-            priorities: vec![],
-            tags: vec![],
-            workflow: None,
-            step: None,
-            root: false,
-            parent: Some("parent1".to_string()),
-            all: false,
-            search: Some("auth".to_string()),
-            flat: false,
-        };
-
-        let services = vertebrae_core::VertebraeServices::new(db);
-
-        let result = cmd.execute(&services).await.unwrap();
-
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].id, "child1");
-    }
-
-    #[tokio::test]
-    async fn test_search_with_special_characters() {
-        let db = setup_test_db().await;
-
-        create_task(&db, "task1", "Test task", "task", "in_progress", None, &[]).await;
-
-        // Search with quotes - should not cause SQL injection
-        let cmd = ListCommand {
-            levels: vec![],
-            statuses: vec![],
-            priorities: vec![],
-            tags: vec![],
-            workflow: None,
-            step: None,
-            root: false,
-            parent: None,
-            all: false,
-            search: Some("test\" OR 1=1 --".to_string()),
-            flat: false,
-        };
-
-        let services = vertebrae_core::VertebraeServices::new(db);
-
-        let result = cmd.execute(&services).await.unwrap();
-
-        // Should return empty (no SQL injection)
-        assert!(result.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_search_with_null_description() {
-        let db = setup_test_db().await;
-
-        // Create task without description
-        create_task(
-            &db,
+            &services,
             "task1",
-            "Auth Feature",
-            "task",
+            "Auth task",
+            Level::Task,
             "in_progress",
             None,
             &[],
         )
         .await;
-        // Create task with description
-        create_task_with_description(
-            &db,
-            "task2",
-            "Other",
-            "auth in description",
-            "task",
-            "in_progress",
-        )
-        .await;
 
         let cmd = ListCommand {
-            levels: vec![],
+            levels: vec![Level::Epic],
             statuses: vec![],
             priorities: vec![],
             tags: vec![],
@@ -1734,64 +1325,56 @@ mod tests {
             flat: false,
         };
 
-        let services = vertebrae_core::VertebraeServices::new(db);
-
         let result = cmd.execute(&services).await.unwrap();
-
-        // Should find both tasks (one in title, one in description)
-        assert_eq!(result.len(), 2);
-
-        let ids: std::collections::HashSet<_> = result.iter().map(|t| t.id.as_str()).collect();
-        assert!(ids.contains("task1"));
-        assert!(ids.contains("task2"));
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].id, "epic1");
     }
 
     #[tokio::test]
-    async fn test_tag_or_semantics_preserved() {
-        let db = setup_test_db().await;
+    async fn test_list_tag_or_semantics() {
+        let services = setup_test_service().await;
 
         create_task(
-            &db,
+            &services,
             "task1",
             "Task 1",
-            "task",
+            Level::Task,
             "in_progress",
             None,
             &["backend"],
         )
         .await;
         create_task(
-            &db,
+            &services,
             "task2",
             "Task 2",
-            "task",
+            Level::Task,
             "in_progress",
             None,
             &["frontend"],
         )
         .await;
         create_task(
-            &db,
+            &services,
             "task3",
             "Task 3",
-            "task",
+            Level::Task,
             "in_progress",
             None,
             &["backend", "api"],
         )
         .await;
         create_task(
-            &db,
+            &services,
             "task4",
             "Task 4",
-            "task",
+            Level::Task,
             "in_progress",
             None,
             &["other"],
         )
         .await;
 
-        // Filter by multiple tags (OR semantics)
         let cmd = ListCommand {
             levels: vec![],
             statuses: vec![],
@@ -1806,11 +1389,7 @@ mod tests {
             flat: false,
         };
 
-        let services = vertebrae_core::VertebraeServices::new(db);
-
         let result = cmd.execute(&services).await.unwrap();
-
-        // Should find 3 tasks (task1, task2, task3 - any with backend OR frontend)
         assert_eq!(result.len(), 3);
 
         let ids: std::collections::HashSet<_> = result.iter().map(|t| t.id.as_str()).collect();

@@ -337,4 +337,110 @@ mod tests {
             &(step_service as Arc<dyn StepService>)
         ));
     }
+
+    #[tokio::test]
+    async fn test_vertebrae_services_with_workflow_callback() {
+        use crate::WorkflowMutationCallback;
+
+        let db = Database::connect_mem().await.unwrap();
+        db.init().await.unwrap();
+
+        let callback: WorkflowMutationCallback = Arc::new(|_event| {
+            // No-op callback for testing
+        });
+
+        let services = VertebraeServices::with_workflow_callback(db, callback);
+
+        // Verify services are accessible
+        let _ = services.tasks();
+        let _ = services.workflows();
+        let _ = services.executions();
+        let _ = services.steps();
+    }
+
+    #[tokio::test]
+    async fn test_vertebrae_services_with_both_callbacks() {
+        use crate::MutationCallback;
+        use crate::WorkflowMutationCallback;
+
+        let db = Database::connect_mem().await.unwrap();
+        db.init().await.unwrap();
+
+        let task_callback: MutationCallback = Arc::new(|_event| {});
+        let workflow_callback: WorkflowMutationCallback = Arc::new(|_event| {});
+
+        let services = VertebraeServices::with_callbacks(db, task_callback, workflow_callback);
+
+        // Verify services are accessible
+        let _ = services.tasks();
+        let _ = services.workflows();
+        let _ = services.executions();
+        let _ = services.steps();
+    }
+
+    #[tokio::test]
+    async fn test_vertebrae_services_multiple_instances() {
+        let db1 = Database::connect_mem().await.unwrap();
+        db1.init().await.unwrap();
+
+        let db2 = Database::connect_mem().await.unwrap();
+        db2.init().await.unwrap();
+
+        let services1 = VertebraeServices::new(db1);
+        let services2 = VertebraeServices::new(db2);
+
+        // Both services should be independent
+        let _ = services1.tasks();
+        let _ = services2.tasks();
+
+        // Arc accessors should be different instances
+        assert!(!Arc::ptr_eq(&services1.tasks_arc(), &services2.tasks_arc()));
+    }
+
+    #[tokio::test]
+    async fn test_vertebrae_services_task_and_workflow_callbacks_combination() {
+        use crate::MutationCallback;
+        use crate::WorkflowMutationCallback;
+
+        let db = Database::connect_mem().await.unwrap();
+        db.init().await.unwrap();
+
+        let task_callback: MutationCallback = Arc::new(|_event| {});
+        let workflow_callback: WorkflowMutationCallback = Arc::new(|_event| {});
+
+        let services1 = VertebraeServices::with_task_callback(db.clone(), task_callback.clone());
+        let services2 =
+            VertebraeServices::with_workflow_callback(db.clone(), workflow_callback.clone());
+        let services3 = VertebraeServices::with_callbacks(db, task_callback, workflow_callback);
+
+        // All should be accessible
+        let _ = services1.tasks();
+        let _ = services2.workflows();
+        let _ = services3.tasks();
+    }
+
+    #[tokio::test]
+    async fn test_vertebrae_services_reference_accessors() {
+        let db = Database::connect_mem().await.unwrap();
+        db.init().await.unwrap();
+
+        let services = VertebraeServices::new(db);
+
+        // Get references (non-Arc)
+        let tasks_ref = services.tasks();
+        let workflows_ref = services.workflows();
+        let executions_ref = services.executions();
+        let steps_ref = services.steps();
+
+        // Verify they're valid trait objects (non-null pointers)
+        let tasks_ptr = tasks_ref as *const dyn TaskService;
+        let workflows_ptr = workflows_ref as *const dyn WorkflowService;
+        let executions_ptr = executions_ref as *const dyn ExecutionService;
+        let steps_ptr = steps_ref as *const dyn StepService;
+
+        assert!(!tasks_ptr.is_null());
+        assert!(!workflows_ptr.is_null());
+        assert!(!executions_ptr.is_null());
+        assert!(!steps_ptr.is_null());
+    }
 }
