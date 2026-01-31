@@ -5,6 +5,7 @@ pub mod events;
 pub mod notification_server;
 pub mod project_config;
 pub mod pty_manager;
+pub mod sacrum;
 pub mod types;
 pub mod workflow_runner;
 

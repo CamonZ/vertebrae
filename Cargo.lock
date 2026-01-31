@@ -2369,6 +2369,7 @@ dependencies = [
  "tokio",
  "vertebrae-core",
  "vertebrae-db",
+ "vertebrae-sacrum-client",
 ]
 
 [[package]]

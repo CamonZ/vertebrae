@@ -3,6 +3,13 @@
 //! This module provides a single entry point for accessing all service layer components.
 //! The `VertebraeServices` struct bundles all service traits (TaskService, WorkflowService,
 //! ExecutionService, StepService) into a unified container for convenient access in both CLI and GUI.
+//!
+//! # Sacrum Backend Support
+//!
+//! When the `sacrum` feature is enabled, additional factory methods are available to create
+//! VertebraeServices from a Sacrum HTTP client. Note that these methods require importing
+//! from `vertebrae_sacrum_client` and should be used in contexts where both dependencies
+//! are available (such as CLI and GUI binaries).
 
 use std::sync::Arc;
 use vertebrae_db::Database;
@@ -189,6 +196,35 @@ impl VertebraeServices {
     pub fn steps_arc(&self) -> Arc<dyn StepService> {
         Arc::clone(&self.steps)
     }
+
+    /// Create a VertebraeServices from individual service trait objects.
+    ///
+    /// This is a low-level constructor useful for creating VertebraeServices
+    /// from custom service implementations, such as those from Sacrum or other backends.
+    ///
+    /// # Arguments
+    ///
+    /// * `tasks` - Arc-wrapped task service implementation
+    /// * `workflows` - Arc-wrapped workflow service implementation
+    /// * `executions` - Arc-wrapped execution service implementation
+    /// * `steps` - Arc-wrapped step service implementation
+    ///
+    /// # Returns
+    ///
+    /// A new VertebraeServices container with the provided services
+    pub fn from_services(
+        tasks: Arc<dyn TaskService>,
+        workflows: Arc<dyn WorkflowService>,
+        executions: Arc<dyn ExecutionService>,
+        steps: Arc<dyn StepService>,
+    ) -> Self {
+        Self {
+            tasks,
+            workflows,
+            executions,
+            steps,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -262,5 +298,43 @@ mod tests {
 
         // Verify they point to the same instance
         assert!(Arc::ptr_eq(&tasks1, &tasks2));
+    }
+
+    #[tokio::test]
+    async fn test_vertebrae_services_from_services() {
+        let db = Database::connect_mem().await.unwrap();
+        db.init().await.unwrap();
+
+        // Create services the traditional way
+        let task_service = Arc::new(DefaultTaskService::new(db.clone()));
+        let workflow_service = Arc::new(DefaultWorkflowService::new(db.clone()));
+        let execution_service = Arc::new(DefaultExecutionService::new(db.clone()));
+        let step_service = Arc::new(DefaultStepService::new(db));
+
+        // Create VertebraeServices from components
+        let services = VertebraeServices::from_services(
+            task_service.clone(),
+            workflow_service.clone(),
+            execution_service.clone(),
+            step_service.clone(),
+        );
+
+        // Verify services are accessible and correct
+        assert!(Arc::ptr_eq(
+            &services.tasks_arc(),
+            &(task_service as Arc<dyn TaskService>)
+        ));
+        assert!(Arc::ptr_eq(
+            &services.workflows_arc(),
+            &(workflow_service as Arc<dyn WorkflowService>)
+        ));
+        assert!(Arc::ptr_eq(
+            &services.executions_arc(),
+            &(execution_service as Arc<dyn ExecutionService>)
+        ));
+        assert!(Arc::ptr_eq(
+            &services.steps_arc(),
+            &(step_service as Arc<dyn StepService>)
+        ));
     }
 }
