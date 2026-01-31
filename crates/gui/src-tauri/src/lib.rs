@@ -2,21 +2,19 @@
 
 pub mod commands;
 pub mod events;
-pub mod notification_server;
 pub mod project_config;
 pub mod pty_manager;
 pub mod sacrum;
 pub mod types;
 pub mod workflow_runner;
 
-use std::path::PathBuf;
+use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use specta_typescript::Typescript;
 use tauri::Manager;
 use tauri_specta::{collect_commands, collect_events, Builder};
-use vertebrae_core::VertebraeServices;
-use vertebrae_db::Database;
+use vertebrae_sacrum_client::{SacrumClient, SacrumConfig};
 
 use commands::AppState;
 use events::{
@@ -139,44 +137,29 @@ pub fn run() {
         .setup(move |app| {
             builder.mount_events(app);
 
-            // Start HTTP notification server for CLI mutations
-            let app_handle = app.handle().clone();
-            notification_server::start_notification_server(
-                app_handle,
-                notification_server::DEFAULT_NOTIFICATION_PORT,
-            );
-            log::info!(
-                "[STARTUP] Notification server started on 127.0.0.1:{}",
-                notification_server::DEFAULT_NOTIFICATION_PORT
-            );
-
             // Initialize project configuration
             let project_config = ProjectConfig::new().expect("Failed to initialize project config");
 
             // Check if there's a current project set
             let current_project = project_config.get_current_project();
-            let service = if let Some(ref project_path) = current_project {
-                let db_path = PathBuf::from(project_path).join(".vtb/data");
-                log::info!("Connecting to database at: {:?}", db_path);
+            let service = if let Some(_project_path) = current_project {
+                log::info!("Attempting to connect to Sacrum backend");
 
                 tauri::async_runtime::block_on(async {
-                    match Database::connect(&db_path).await {
-                        Ok(db) => {
-                            if let Err(e) = db.init().await {
-                                log::error!("Failed to initialize database: {}", e);
-                                None
-                            } else {
-                                Some(VertebraeServices::new(db))
-                            }
+                    match SacrumConfig::load() {
+                        Ok(config) => {
+                            let client = SacrumClient::new(config);
+                            let client_arc = Arc::new(client);
+                            Some(crate::sacrum::from_sacrum(client_arc))
                         }
                         Err(e) => {
-                            log::error!("Failed to connect to database: {}", e);
+                            log::error!("Failed to load Sacrum configuration: {}", e);
                             None
                         }
                     }
                 })
             } else {
-                log::info!("No project selected, starting without database connection");
+                log::info!("No project selected, starting without Sacrum connection");
                 None
             };
 

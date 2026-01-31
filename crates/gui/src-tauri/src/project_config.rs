@@ -14,8 +14,8 @@ pub struct SavedProject {
     pub name: String,
     /// Path to the project directory
     pub path: String,
-    /// Whether a vtb database exists at this project path
-    pub has_database: bool,
+    /// Whether a vtb config exists at this project path
+    pub has_config: bool,
     /// Whether the project directory still exists on disk
     pub exists: bool,
 }
@@ -98,12 +98,12 @@ impl ProjectConfig {
             .map(|entry| {
                 let path = PathBuf::from(&entry.path);
                 let exists = path.exists();
-                let has_database = exists && path.join(".vtb/data").exists();
+                let has_config = exists && path.join(".vtb/config.toml").exists();
 
                 SavedProject {
                     name: entry.name,
                     path: entry.path,
-                    has_database,
+                    has_config,
                     exists,
                 }
             })
@@ -135,12 +135,12 @@ impl ProjectConfig {
 
         self.save(&config)?;
 
-        let has_database = path_buf.join(".vtb/data").exists();
+        let has_config = path_buf.join(".vtb/config.toml").exists();
 
         Ok(SavedProject {
             name,
             path,
-            has_database,
+            has_config,
             exists: true,
         })
     }
@@ -182,24 +182,6 @@ impl ProjectConfig {
 
         config.current_project = path;
         self.save(&config)
-    }
-
-    /// Check if a vtb database exists at the given path
-    pub fn database_exists(path: &str) -> bool {
-        PathBuf::from(path).join(".vtb/data").exists()
-    }
-
-    /// Initialize a vtb database at the given path
-    pub async fn init_database(path: &str) -> Result<(), String> {
-        let db_path = PathBuf::from(path).join(".vtb/data");
-
-        let db = vertebrae_db::Database::connect(&db_path)
-            .await
-            .map_err(|e| format!("Failed to connect to database: {}", e))?;
-
-        db.init()
-            .await
-            .map_err(|e| format!("Failed to initialize database: {}", e))
     }
 }
 

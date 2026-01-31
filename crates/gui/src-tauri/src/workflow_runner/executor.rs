@@ -9,8 +9,7 @@ use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
-use vertebrae_core::{ExecutionService, OrchestratorOutput, SessionLog};
-use vertebrae_db::PermissionMode;
+use vertebrae_core::{ExecutionService, OrchestratorOutput, PermissionMode, SessionLog};
 
 use crate::events::{WorkflowExecutionEvent, WorkflowExecutionEventType};
 
@@ -67,7 +66,7 @@ pub async fn run_execution(
         step.agent_config.clone()
     } else {
         // Build config from step's agents and skills
-        let mut config = vertebrae_db::AgentConfig::new();
+        let mut config = vertebrae_core::AgentConfig::new();
 
         // For now, use the step's goal as an append system prompt if available
         if let Some(ref goal) = step.goal {

@@ -166,9 +166,9 @@ export function ProjectSetupPage() {
                           Not Found
                         </span>
                       )}
-                      {project.has_database && project.exists && (
+                      {project.has_config && project.exists && (
                         <span className="rounded bg-green-500/20 px-2 py-0.5 text-xs text-green-400">
-                          Database Ready
+                          Configured
                         </span>
                       )}
                     </div>

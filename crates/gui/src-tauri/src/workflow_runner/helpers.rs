@@ -6,8 +6,7 @@ use crate::events::{StepExecutionChangeType, StepExecutionChangedEvent, StepExec
 use chrono::Utc;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
-use vertebrae_core::{ExecutionService, TaskService};
-use vertebrae_db::ExecutionStatus;
+use vertebrae_core::{ExecutionService, ExecutionStatus, TaskService};
 
 /// Find the Claude Code CLI binary
 pub fn find_claude_binary() -> Result<PathBuf, String> {

@@ -27,14 +27,6 @@ pub struct CommandError {
     pub message: String,
 }
 
-impl From<vertebrae_db::DbError> for CommandError {
-    fn from(err: vertebrae_db::DbError) -> Self {
-        CommandError {
-            message: err.to_string(),
-        }
-    }
-}
-
 impl From<vertebrae_core::ServiceError> for CommandError {
     fn from(err: vertebrae_core::ServiceError) -> Self {
         CommandError {
@@ -88,19 +80,13 @@ pub async fn add_project(
     log::info!("add_project called with name: {}, path: {}", name, path);
 
     // Add to config
-    let mut project = state
+    let project = state
         .project_config
         .add_project(name, path.clone())
         .map_err(|e| CommandError { message: e })?;
 
-    // Initialize database if it doesn't exist
-    if !project.has_database {
-        log::info!("Initializing database at: {}", path);
-        ProjectConfig::init_database(&path)
-            .await
-            .map_err(|e| CommandError { message: e })?;
-        project.has_database = true;
-    }
+    // With Sacrum backend, database initialization is handled by the Sacrum server
+    // No need for local database setup
 
     Ok(project)
 }
@@ -141,24 +127,24 @@ pub async fn set_current_project(
         .set_current_project(path.clone())
         .map_err(|e| CommandError { message: e })?;
 
-    // Connect to database and create service if a project is selected
-    if let Some(project_path) = path {
-        let db_path = std::path::PathBuf::from(&project_path).join(".vtb/data");
-        log::info!("Connecting to database at: {:?}", db_path);
+    // Connect to Sacrum backend and create service if a project is selected
+    if let Some(_project_path) = path {
+        log::info!("Attempting to connect to Sacrum backend");
 
-        let db = vertebrae_db::Database::connect(&db_path)
-            .await
-            .map_err(|e| CommandError {
-                message: format!("Failed to connect to database: {}", e),
-            })?;
-
-        db.init().await.map_err(|e| CommandError {
-            message: format!("Failed to initialize database: {}", e),
-        })?;
-
-        let services = vertebrae_core::VertebraeServices::new(db);
-        let mut service_lock = state.services.write().await;
-        *service_lock = Some(services);
+        match vertebrae_sacrum_client::SacrumConfig::load() {
+            Ok(config) => {
+                let client = vertebrae_sacrum_client::SacrumClient::new(config);
+                let client_arc = std::sync::Arc::new(client);
+                let services = crate::sacrum::from_sacrum(client_arc);
+                let mut service_lock = state.services.write().await;
+                *service_lock = Some(services);
+            }
+            Err(e) => {
+                return Err(CommandError {
+                    message: format!("Failed to load Sacrum configuration: {}", e),
+                });
+            }
+        }
     } else {
         let mut service_lock = state.services.write().await;
         *service_lock = None;
@@ -190,7 +176,7 @@ pub async fn list_tasks(
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    let db_filter: vertebrae_db::TaskFilter = filter.unwrap_or_default().into();
+    let db_filter: vertebrae_core::TaskFilter = filter.unwrap_or_default().into();
     match service.tasks().list_tasks(&db_filter).await {
         Ok(summaries) => {
             log::info!("list_tasks returned {} tasks", summaries.len());
@@ -246,9 +232,9 @@ pub async fn get_task_hierarchy(
         .ok_or_else(CommandError::no_project_selected)?;
 
     // Convert filter options to db filter, applying all fields (statuses, levels, workflow_id, etc.)
-    let db_filter: vertebrae_db::TaskFilter = match filter {
+    let db_filter: vertebrae_core::TaskFilter = match filter {
         Some(opts) => opts.into(),
-        None => vertebrae_db::TaskFilter::new().include_done(),
+        None => vertebrae_core::TaskFilter::new().include_done(),
     };
 
     let tree_options = vertebrae_core::TreeFilterOptions::new(db_filter);
@@ -446,7 +432,7 @@ pub async fn get_workflow_with_tasks(
     let workflow = workflow_service.get_workflow(&id).await?;
 
     // Get tasks associated with this workflow using the service
-    let filter = vertebrae_db::TaskFilter::new().include_done();
+    let filter = vertebrae_core::TaskFilter::new().include_done();
     let all_tasks = service.tasks().list_tasks(&filter).await?;
 
     // Filter tasks that have this workflow_id
@@ -508,7 +494,7 @@ pub async fn get_workflow_with_task_details(
 
     // Query tasks with filter for the workflow using optimized single-query method
     let query_start = std::time::Instant::now();
-    let filter = vertebrae_db::TaskFilter::new()
+    let filter = vertebrae_core::TaskFilter::new()
         .include_done()
         .with_workflow_id(workflow_id_str.clone());
     let tasks_with_relations = service.tasks().list_tasks_with_relations(&filter).await?;
@@ -1172,9 +1158,9 @@ pub async fn create_task(
     // Parse level if provided
     let parsed_level = if let Some(level_str) = level {
         match level_str.to_lowercase().as_str() {
-            "epic" => Some(vertebrae_db::Level::Epic),
-            "ticket" => Some(vertebrae_db::Level::Ticket),
-            "task" => Some(vertebrae_db::Level::Task),
+            "epic" => Some(vertebrae_core::Level::Epic),
+            "ticket" => Some(vertebrae_core::Level::Ticket),
+            "task" => Some(vertebrae_core::Level::Task),
             _ => {
                 return Err(CommandError {
                     message: format!("Invalid level: {}", level_str),
@@ -1238,11 +1224,11 @@ pub async fn update_task(
     if let Some(new_priority) = options.priority {
         update_opts.priority = Some(new_priority.map(|p| {
             match p.to_lowercase().as_str() {
-                "high" => vertebrae_db::Priority::High,
-                "medium" => vertebrae_db::Priority::Medium,
-                "low" => vertebrae_db::Priority::Low,
-                "critical" => vertebrae_db::Priority::Critical,
-                _ => vertebrae_db::Priority::Medium, // Default to medium if invalid
+                "high" => vertebrae_core::Priority::High,
+                "medium" => vertebrae_core::Priority::Medium,
+                "low" => vertebrae_core::Priority::Low,
+                "critical" => vertebrae_core::Priority::Critical,
+                _ => vertebrae_core::Priority::Medium, // Default to medium if invalid
             }
         }));
     }
@@ -1253,10 +1239,6 @@ pub async fn update_task(
 
     if let Some(review_flag) = options.needs_human_review {
         update_opts.needs_human_review = Some(review_flag);
-    }
-
-    if let Some(new_feedback) = options.revision_feedback {
-        update_opts.revision_feedback = Some(new_feedback);
     }
 
     service.tasks().update_task(&task_id, update_opts).await?;
@@ -1364,15 +1346,15 @@ pub async fn add_section(
 
     // Parse section type
     let parsed_type = match section_type.to_lowercase().as_str() {
-        "goal" => vertebrae_db::SectionType::Goal,
-        "context" => vertebrae_db::SectionType::Context,
-        "current_behavior" => vertebrae_db::SectionType::CurrentBehavior,
-        "desired_behavior" => vertebrae_db::SectionType::DesiredBehavior,
-        "step" => vertebrae_db::SectionType::Step,
-        "testing_criterion" => vertebrae_db::SectionType::TestingCriterion,
-        "anti_pattern" => vertebrae_db::SectionType::AntiPattern,
-        "failure_test" => vertebrae_db::SectionType::FailureTest,
-        "constraint" => vertebrae_db::SectionType::Constraint,
+        "goal" => vertebrae_core::SectionType::Goal,
+        "context" => vertebrae_core::SectionType::Context,
+        "current_behavior" => vertebrae_core::SectionType::CurrentBehavior,
+        "desired_behavior" => vertebrae_core::SectionType::DesiredBehavior,
+        "step" => vertebrae_core::SectionType::Step,
+        "testing_criterion" => vertebrae_core::SectionType::TestingCriterion,
+        "anti_pattern" => vertebrae_core::SectionType::AntiPattern,
+        "failure_test" => vertebrae_core::SectionType::FailureTest,
+        "constraint" => vertebrae_core::SectionType::Constraint,
         _ => {
             return Err(CommandError {
                 message: format!("Invalid section type: {}", section_type),
@@ -1393,7 +1375,7 @@ pub async fn add_section(
     // Use provided content or empty string
     let section_content = content.unwrap_or_default();
 
-    let section = vertebrae_db::Section {
+    let section = vertebrae_core::Section {
         section_type: parsed_type,
         content: section_content,
         order: Some(order),
@@ -1434,15 +1416,15 @@ pub async fn edit_section(
 
     // Parse section type
     let parsed_type = match section_type.to_lowercase().as_str() {
-        "goal" => vertebrae_db::SectionType::Goal,
-        "context" => vertebrae_db::SectionType::Context,
-        "current_behavior" => vertebrae_db::SectionType::CurrentBehavior,
-        "desired_behavior" => vertebrae_db::SectionType::DesiredBehavior,
-        "step" => vertebrae_db::SectionType::Step,
-        "testing_criterion" => vertebrae_db::SectionType::TestingCriterion,
-        "anti_pattern" => vertebrae_db::SectionType::AntiPattern,
-        "failure_test" => vertebrae_db::SectionType::FailureTest,
-        "constraint" => vertebrae_db::SectionType::Constraint,
+        "goal" => vertebrae_core::SectionType::Goal,
+        "context" => vertebrae_core::SectionType::Context,
+        "current_behavior" => vertebrae_core::SectionType::CurrentBehavior,
+        "desired_behavior" => vertebrae_core::SectionType::DesiredBehavior,
+        "step" => vertebrae_core::SectionType::Step,
+        "testing_criterion" => vertebrae_core::SectionType::TestingCriterion,
+        "anti_pattern" => vertebrae_core::SectionType::AntiPattern,
+        "failure_test" => vertebrae_core::SectionType::FailureTest,
+        "constraint" => vertebrae_core::SectionType::Constraint,
         _ => {
             return Err(CommandError {
                 message: format!("Invalid section type: {}", section_type),
@@ -1517,15 +1499,15 @@ pub async fn remove_section(
 
     // Parse section type
     let parsed_type = match section_type.to_lowercase().as_str() {
-        "goal" => vertebrae_db::SectionType::Goal,
-        "context" => vertebrae_db::SectionType::Context,
-        "current_behavior" => vertebrae_db::SectionType::CurrentBehavior,
-        "desired_behavior" => vertebrae_db::SectionType::DesiredBehavior,
-        "step" => vertebrae_db::SectionType::Step,
-        "testing_criterion" => vertebrae_db::SectionType::TestingCriterion,
-        "anti_pattern" => vertebrae_db::SectionType::AntiPattern,
-        "failure_test" => vertebrae_db::SectionType::FailureTest,
-        "constraint" => vertebrae_db::SectionType::Constraint,
+        "goal" => vertebrae_core::SectionType::Goal,
+        "context" => vertebrae_core::SectionType::Context,
+        "current_behavior" => vertebrae_core::SectionType::CurrentBehavior,
+        "desired_behavior" => vertebrae_core::SectionType::DesiredBehavior,
+        "step" => vertebrae_core::SectionType::Step,
+        "testing_criterion" => vertebrae_core::SectionType::TestingCriterion,
+        "anti_pattern" => vertebrae_core::SectionType::AntiPattern,
+        "failure_test" => vertebrae_core::SectionType::FailureTest,
+        "constraint" => vertebrae_core::SectionType::Constraint,
         _ => {
             return Err(CommandError {
                 message: format!("Invalid section type: {}", section_type),
@@ -1576,7 +1558,7 @@ pub async fn add_criterion_ref(
         .iter()
         .enumerate()
         .find(|(_, s)| {
-            s.section_type == vertebrae_db::SectionType::TestingCriterion
+            s.section_type == vertebrae_core::SectionType::TestingCriterion
                 && s.order == Some(section_ordinal)
         })
         .map(|(idx, _)| idx)
@@ -1588,7 +1570,7 @@ pub async fn add_criterion_ref(
         })?;
 
     // Create the code reference
-    let code_ref = vertebrae_db::CodeRef {
+    let code_ref = vertebrae_core::CodeRef {
         path: file_path,
         line_start: line_number,
         line_end: None,
@@ -1637,7 +1619,7 @@ pub async fn add_code_ref(
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    let code_ref = vertebrae_db::CodeRef {
+    let code_ref = vertebrae_core::CodeRef {
         path,
         line_start,
         line_end,
@@ -1699,7 +1681,7 @@ pub async fn remove_code_refs(
     for code_ref in task.code_refs.iter().enumerate() {
         if let Some(ref idx_list) = to_remove {
             if !idx_list.contains(&code_ref.0) {
-                let db_ref = vertebrae_db::CodeRef {
+                let db_ref = vertebrae_core::CodeRef {
                     path: code_ref.1.path.clone(),
                     line_start: code_ref.1.line_start,
                     line_end: code_ref.1.line_end,
@@ -1744,7 +1726,7 @@ pub async fn replace_code_refs(
     service.tasks().remove_code_refs(&task_id, None).await?;
 
     for code_ref in refs {
-        let db_ref = vertebrae_db::CodeRef {
+        let db_ref = vertebrae_core::CodeRef {
             path: code_ref.path,
             line_start: code_ref.line_start,
             line_end: code_ref.line_end,
@@ -2013,6 +1995,7 @@ mod tests {
         let state = create_disconnected_app_state().await;
         let result = get_task_executions(mock_state(&state), "task1".to_string()).await;
         assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("No project selected"));
     }
 
     #[tokio::test]

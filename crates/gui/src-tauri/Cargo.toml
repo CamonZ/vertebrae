@@ -48,12 +48,6 @@ vertebrae-db = { path = "../../db", features = ["test-utils"] }
 vertebrae-core = { path = "../../core" }
 vertebrae-sacrum-client = { path = "../../sacrum-client" }
 
-# Database access
-surrealdb = { version = "2" }
-
-# HTTP server for receiving mutation notifications from CLI
-axum = "0.7"
-
 # Actor framework for workflow execution
 ractor = "0.12"
 

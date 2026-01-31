@@ -14,12 +14,12 @@ pub enum TaskLevel {
     Task,
 }
 
-impl From<vertebrae_db::Level> for TaskLevel {
-    fn from(level: vertebrae_db::Level) -> Self {
+impl From<vertebrae_core::Level> for TaskLevel {
+    fn from(level: vertebrae_core::Level) -> Self {
         match level {
-            vertebrae_db::Level::Epic => TaskLevel::Epic,
-            vertebrae_db::Level::Ticket => TaskLevel::Ticket,
-            vertebrae_db::Level::Task => TaskLevel::Task,
+            vertebrae_core::Level::Epic => TaskLevel::Epic,
+            vertebrae_core::Level::Ticket => TaskLevel::Ticket,
+            vertebrae_core::Level::Task => TaskLevel::Task,
         }
     }
 }
@@ -37,24 +37,24 @@ pub enum TaskPriority {
     Critical,
 }
 
-impl From<vertebrae_db::Priority> for TaskPriority {
-    fn from(priority: vertebrae_db::Priority) -> Self {
+impl From<vertebrae_core::Priority> for TaskPriority {
+    fn from(priority: vertebrae_core::Priority) -> Self {
         match priority {
-            vertebrae_db::Priority::Low => TaskPriority::Low,
-            vertebrae_db::Priority::Medium => TaskPriority::Medium,
-            vertebrae_db::Priority::High => TaskPriority::High,
-            vertebrae_db::Priority::Critical => TaskPriority::Critical,
+            vertebrae_core::Priority::Low => TaskPriority::Low,
+            vertebrae_core::Priority::Medium => TaskPriority::Medium,
+            vertebrae_core::Priority::High => TaskPriority::High,
+            vertebrae_core::Priority::Critical => TaskPriority::Critical,
         }
     }
 }
 
-impl From<TaskPriority> for vertebrae_db::Priority {
+impl From<TaskPriority> for vertebrae_core::Priority {
     fn from(priority: TaskPriority) -> Self {
         match priority {
-            TaskPriority::Low => vertebrae_db::Priority::Low,
-            TaskPriority::Medium => vertebrae_db::Priority::Medium,
-            TaskPriority::High => vertebrae_db::Priority::High,
-            TaskPriority::Critical => vertebrae_db::Priority::Critical,
+            TaskPriority::Low => vertebrae_core::Priority::Low,
+            TaskPriority::Medium => vertebrae_core::Priority::Medium,
+            TaskPriority::High => vertebrae_core::Priority::High,
+            TaskPriority::Critical => vertebrae_core::Priority::Critical,
         }
     }
 }
@@ -74,18 +74,18 @@ pub enum SectionType {
     Constraint,
 }
 
-impl From<vertebrae_db::SectionType> for SectionType {
-    fn from(section_type: vertebrae_db::SectionType) -> Self {
+impl From<vertebrae_core::SectionType> for SectionType {
+    fn from(section_type: vertebrae_core::SectionType) -> Self {
         match section_type {
-            vertebrae_db::SectionType::Goal => SectionType::Goal,
-            vertebrae_db::SectionType::Context => SectionType::Context,
-            vertebrae_db::SectionType::CurrentBehavior => SectionType::CurrentBehavior,
-            vertebrae_db::SectionType::DesiredBehavior => SectionType::DesiredBehavior,
-            vertebrae_db::SectionType::Step => SectionType::Step,
-            vertebrae_db::SectionType::TestingCriterion => SectionType::TestingCriterion,
-            vertebrae_db::SectionType::AntiPattern => SectionType::AntiPattern,
-            vertebrae_db::SectionType::FailureTest => SectionType::FailureTest,
-            vertebrae_db::SectionType::Constraint => SectionType::Constraint,
+            vertebrae_core::SectionType::Goal => SectionType::Goal,
+            vertebrae_core::SectionType::Context => SectionType::Context,
+            vertebrae_core::SectionType::CurrentBehavior => SectionType::CurrentBehavior,
+            vertebrae_core::SectionType::DesiredBehavior => SectionType::DesiredBehavior,
+            vertebrae_core::SectionType::Step => SectionType::Step,
+            vertebrae_core::SectionType::TestingCriterion => SectionType::TestingCriterion,
+            vertebrae_core::SectionType::AntiPattern => SectionType::AntiPattern,
+            vertebrae_core::SectionType::FailureTest => SectionType::FailureTest,
+            vertebrae_core::SectionType::Constraint => SectionType::Constraint,
         }
     }
 }
@@ -105,8 +105,8 @@ pub struct CodeRef {
     pub description: Option<String>,
 }
 
-impl From<vertebrae_db::CodeRef> for CodeRef {
-    fn from(code_ref: vertebrae_db::CodeRef) -> Self {
+impl From<vertebrae_core::CodeRef> for CodeRef {
+    fn from(code_ref: vertebrae_core::CodeRef) -> Self {
         CodeRef {
             path: code_ref.path,
             line_start: code_ref.line_start,
@@ -136,8 +136,8 @@ pub struct Section {
     pub refs: Vec<CodeRef>,
 }
 
-impl From<vertebrae_db::Section> for Section {
-    fn from(section: vertebrae_db::Section) -> Self {
+impl From<vertebrae_core::Section> for Section {
+    fn from(section: vertebrae_core::Section) -> Self {
         Section {
             section_type: section.section_type.into(),
             content: section.content,
@@ -174,8 +174,8 @@ pub struct TaskSummary {
     pub step_name: Option<String>,
 }
 
-impl From<vertebrae_db::TaskSummary> for TaskSummary {
-    fn from(summary: vertebrae_db::TaskSummary) -> Self {
+impl From<vertebrae_core::TaskSummary> for TaskSummary {
+    fn from(summary: vertebrae_core::TaskSummary) -> Self {
         TaskSummary {
             id: summary.id,
             title: summary.title,
@@ -230,34 +230,6 @@ pub struct Task {
     pub workflow_id: Option<String>,
     /// Current step ID (string form) - used for positioning
     pub current_step_id: Option<String>,
-}
-
-impl From<vertebrae_db::Task> for Task {
-    fn from(task: vertebrae_db::Task) -> Self {
-        // Note: status is now derived from workflow step
-        // This conversion uses a default; caller should update with derived status
-        Task {
-            id: task.id.map(|t| t.id.to_raw()),
-            title: task.title,
-            description: task.description,
-            level: task.level.into(),
-            // Default status - should be updated by caller with derived status
-            status: "backlog".to_string(),
-            priority: task.priority.map(Into::into),
-            tags: task.tags,
-            created_at: task.created_at.map(|dt| dt.to_rfc3339()),
-            updated_at: task.updated_at.map(|dt| dt.to_rfc3339()),
-            started_at: task.started_at.map(|dt| dt.to_rfc3339()),
-            completed_at: task.completed_at.map(|dt| dt.to_rfc3339()),
-            sections: task.sections.into_iter().map(Into::into).collect(),
-            code_refs: task.code_refs.into_iter().map(Into::into).collect(),
-            needs_human_review: task.needs_human_review,
-            revision_feedback: task.revision_feedback,
-            rejection_reason: task.rejection_reason,
-            workflow_id: task.workflow_id.map(|t| t.id.to_raw()),
-            current_step_id: task.current_step_id.map(|t| t.id.to_raw()),
-        }
-    }
 }
 
 impl From<vertebrae_core::Task> for Task {
@@ -330,9 +302,9 @@ pub struct TaskFilterOptions {
     pub workflow_id: Option<String>,
 }
 
-impl From<TaskFilterOptions> for vertebrae_db::TaskFilter {
+impl From<TaskFilterOptions> for vertebrae_core::TaskFilter {
     fn from(opts: TaskFilterOptions) -> Self {
-        let mut filter = vertebrae_db::TaskFilter::new();
+        let mut filter = vertebrae_core::TaskFilter::new();
 
         if let Some(statuses) = opts.statuses {
             for status in statuses {
@@ -343,9 +315,9 @@ impl From<TaskFilterOptions> for vertebrae_db::TaskFilter {
         if let Some(levels) = opts.levels {
             for level in levels {
                 filter = filter.with_level(match level {
-                    TaskLevel::Epic => vertebrae_db::Level::Epic,
-                    TaskLevel::Ticket => vertebrae_db::Level::Ticket,
-                    TaskLevel::Task => vertebrae_db::Level::Task,
+                    TaskLevel::Epic => vertebrae_core::Level::Epic,
+                    TaskLevel::Ticket => vertebrae_core::Level::Ticket,
+                    TaskLevel::Task => vertebrae_core::Level::Task,
                 });
             }
         }
@@ -417,15 +389,15 @@ pub enum PermissionMode {
     Plan,
 }
 
-impl From<vertebrae_db::PermissionMode> for PermissionMode {
-    fn from(mode: vertebrae_db::PermissionMode) -> Self {
+impl From<vertebrae_core::PermissionMode> for PermissionMode {
+    fn from(mode: vertebrae_core::PermissionMode) -> Self {
         match mode {
-            vertebrae_db::PermissionMode::AcceptEdits => PermissionMode::AcceptEdits,
-            vertebrae_db::PermissionMode::BypassPermissions => PermissionMode::BypassPermissions,
-            vertebrae_db::PermissionMode::Default => PermissionMode::Default,
-            vertebrae_db::PermissionMode::Delegate => PermissionMode::Delegate,
-            vertebrae_db::PermissionMode::DontAsk => PermissionMode::DontAsk,
-            vertebrae_db::PermissionMode::Plan => PermissionMode::Plan,
+            vertebrae_core::PermissionMode::AcceptEdits => PermissionMode::AcceptEdits,
+            vertebrae_core::PermissionMode::BypassPermissions => PermissionMode::BypassPermissions,
+            vertebrae_core::PermissionMode::Default => PermissionMode::Default,
+            vertebrae_core::PermissionMode::Delegate => PermissionMode::Delegate,
+            vertebrae_core::PermissionMode::DontAsk => PermissionMode::DontAsk,
+            vertebrae_core::PermissionMode::Plan => PermissionMode::Plan,
         }
     }
 }
@@ -461,8 +433,8 @@ pub struct AgentConfig {
     pub json_schema: Option<String>,
 }
 
-impl From<vertebrae_db::AgentConfig> for AgentConfig {
-    fn from(config: vertebrae_db::AgentConfig) -> Self {
+impl From<vertebrae_core::AgentConfig> for AgentConfig {
+    fn from(config: vertebrae_core::AgentConfig) -> Self {
         AgentConfig {
             model: config.model,
             fallback_model: config.fallback_model,
@@ -512,25 +484,6 @@ pub struct Step {
     pub updated_at: Option<String>,
 }
 
-impl From<vertebrae_db::Step> for Step {
-    fn from(step: vertebrae_db::Step) -> Self {
-        Step {
-            id: step.id.map(|t| t.id.to_raw()),
-            name: step.name,
-            workflow_id: step.workflow_id.id.to_raw(),
-            goal: step.goal,
-            agents: step.agents,
-            skills: step.skills,
-            agent_config: step.agent_config.into(),
-            is_final: step.is_final,
-            transitions_to: step.transitions_to.iter().map(|t| t.id.to_raw()).collect(),
-            order: step.order,
-            created_at: step.created_at.map(|dt| dt.to_rfc3339()),
-            updated_at: step.updated_at.map(|dt| dt.to_rfc3339()),
-        }
-    }
-}
-
 impl From<vertebrae_core::Step> for Step {
     fn from(step: vertebrae_core::Step) -> Self {
         Step {
@@ -567,20 +520,6 @@ pub struct Workflow {
     pub created_at: Option<String>,
     /// Last update timestamp (ISO 8601 string)
     pub updated_at: Option<String>,
-}
-
-impl From<vertebrae_db::Workflow> for Workflow {
-    fn from(workflow: vertebrae_db::Workflow) -> Self {
-        Workflow {
-            id: workflow.id.map(|t| t.id.to_raw()),
-            name: workflow.name,
-            description: workflow.description,
-            initial_step: workflow.initial_step.map(|t| t.id.to_raw()),
-            metadata: workflow.metadata,
-            created_at: workflow.created_at.map(|dt| dt.to_rfc3339()),
-            updated_at: workflow.updated_at.map(|dt| dt.to_rfc3339()),
-        }
-    }
 }
 
 impl From<vertebrae_core::Workflow> for Workflow {
@@ -647,12 +586,12 @@ pub enum ExecutionStatus {
     Failed,
 }
 
-impl From<vertebrae_db::ExecutionStatus> for ExecutionStatus {
-    fn from(status: vertebrae_db::ExecutionStatus) -> Self {
+impl From<vertebrae_core::ExecutionStatus> for ExecutionStatus {
+    fn from(status: vertebrae_core::ExecutionStatus) -> Self {
         match status {
-            vertebrae_db::ExecutionStatus::InProgress => ExecutionStatus::InProgress,
-            vertebrae_db::ExecutionStatus::Completed => ExecutionStatus::Completed,
-            vertebrae_db::ExecutionStatus::Failed => ExecutionStatus::Failed,
+            vertebrae_core::ExecutionStatus::InProgress => ExecutionStatus::InProgress,
+            vertebrae_core::ExecutionStatus::Completed => ExecutionStatus::Completed,
+            vertebrae_core::ExecutionStatus::Failed => ExecutionStatus::Failed,
         }
     }
 }
@@ -674,20 +613,6 @@ pub struct StepExecution {
     pub completed_at: Option<String>,
     /// Current status of this step execution
     pub status: ExecutionStatus,
-}
-
-impl From<vertebrae_db::StepExecution> for StepExecution {
-    fn from(exec: vertebrae_db::StepExecution) -> Self {
-        StepExecution {
-            id: exec.id.map(|t| t.id.to_raw()),
-            task_id: exec.task_id.id.to_raw(),
-            workflow_id: exec.workflow_id.id.to_raw(),
-            step_name: exec.step_name,
-            started_at: exec.started_at.to_rfc3339(),
-            completed_at: exec.completed_at.map(|dt| dt.to_rfc3339()),
-            status: exec.status.into(),
-        }
-    }
 }
 
 impl From<vertebrae_core::StepExecution> for StepExecution {
@@ -715,17 +640,6 @@ pub struct SessionLog {
     pub content: String,
     /// When this log was created (ISO 8601 string)
     pub created_at: String,
-}
-
-impl From<vertebrae_db::SessionLog> for SessionLog {
-    fn from(log: vertebrae_db::SessionLog) -> Self {
-        SessionLog {
-            id: log.id.map(|t| t.id.to_raw()),
-            step_execution_id: log.step_execution_id.id.to_raw(),
-            content: log.content,
-            created_at: log.created_at.to_rfc3339(),
-        }
-    }
 }
 
 impl From<vertebrae_core::SessionLog> for SessionLog {
