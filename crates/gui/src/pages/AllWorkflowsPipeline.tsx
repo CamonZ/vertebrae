@@ -7,6 +7,7 @@ import {
   useNodesState,
   useEdgesState,
   ReactFlowProvider,
+  useReactFlow,
   type Node,
   type Edge,
   type NodeTypes,
@@ -17,16 +18,16 @@ import "@xyflow/react/dist/style.css";
 
 import {
   commands,
-  type TaskWithRelations,
+  type Task,
   type Step,
   type Workflow,
   type WorkflowTransition,
 } from "../bindings";
-import { useWorkflows } from "../hooks/useWorkflows";
 import { useWorkflowChangeListener } from "../hooks/useWorkflowChangeListener";
 import { useTaskChangeListener } from "../hooks/useTaskChangeListener";
 import { useElkLayout, type LayoutNode, type LayoutEdge } from "../hooks";
 import { useToastStore } from "../stores";
+import { useTaskStore } from "../stores";
 import { groupTasksByStep } from "../utils";
 import {
   StepNode,
@@ -71,18 +72,22 @@ const edgeTypes: EdgeTypes = {
  * Press 'c' to toggle collapsed/expanded view.
  */
 function AllWorkflowsPipelineInner() {
-  const { workflows, isLoading, error, refetch } = useWorkflows();
   const addToast = useToastStore((state) => state.addToast);
+  const { fitView } = useReactFlow();
 
-  // State for fetched task relationships per workflow
+  // Pipeline data loaded in a single batch
+  const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [workflowTasksMap, setWorkflowTasksMap] = useState<
-    Map<string, TaskWithRelations[]>
+    Map<string, Task[]>
   >(new Map());
-
-  // State for fetched steps per workflow
   const [workflowStepsMap, setWorkflowStepsMap] = useState<Map<string, Step[]>>(
     new Map()
   );
+  const [workflowTransitions, setWorkflowTransitions] = useState<
+    WorkflowTransition[]
+  >([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   // State for selected task (for detail panel)
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
@@ -100,11 +105,6 @@ function AllWorkflowsPipelineInner() {
     workflowId: string;
     step: Step;
   } | null>(null);
-
-  // State for workflow transitions (edges between workflows)
-  const [workflowTransitions, setWorkflowTransitions] = useState<
-    WorkflowTransition[]
-  >([]);
 
   // State for collapsed view toggle (press 'c' to toggle)
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -158,131 +158,90 @@ function AllWorkflowsPipelineInner() {
     setSelectedZone(null);
   }, []);
 
-  // Extracted fetch function so it can be called both on workflow changes and task changes
-  const fetchAllWorkflowData = useCallback(async () => {
-    if (workflows.length === 0) {
-      setWorkflowTasksMap(new Map());
-      setWorkflowStepsMap(new Map());
-      return;
-    }
-
-    const tasksMap = new Map<string, TaskWithRelations[]>();
-    const stepsMap = new Map<string, Step[]>();
-
+  // Single fetch function that loads all pipeline data in one command
+  const fetchPipelineData = useCallback(async () => {
     try {
-      for (const workflow of workflows) {
-        // Skip workflows without an ID
-        const workflowId = workflow.id;
-        if (!workflowId) continue;
+      const result = await commands.getPipelineData();
+      if (result.status === "ok") {
+        const data = result.data;
 
-        // Fetch tasks for this workflow
-        try {
-          const tasksResult =
-            await commands.getWorkflowWithTaskDetails(workflowId);
-          if (tasksResult.status === "ok") {
-            tasksMap.set(workflowId, tasksResult.data.tasks);
-          } else {
-            console.warn(
-              `Failed to load tasks for workflow ${workflowId}:`,
-              tasksResult.error.message
-            );
-            tasksMap.set(workflowId, []);
+        setWorkflows(data.workflows);
+
+        // Push all tasks to the store so detail panel can derive relations
+        useTaskStore.getState().setTasks(data.tasks);
+
+        // Group tasks by workflow_id
+        const tasksMap = new Map<string, Task[]>();
+        for (const task of data.tasks) {
+          const wfId = task.workflow_id;
+          if (wfId) {
+            if (!tasksMap.has(wfId)) tasksMap.set(wfId, []);
+            tasksMap.get(wfId)!.push(task);
           }
-        } catch (err) {
-          console.warn(
-            `Failed to load tasks for workflow ${workflowId}:`,
-            String(err)
-          );
-          tasksMap.set(workflowId, []);
         }
+        setWorkflowTasksMap(tasksMap);
 
-        // Fetch steps for this workflow
-        try {
-          const stepsResult = await commands.listStepsForWorkflow(workflowId);
-          if (stepsResult.status === "ok") {
-            stepsMap.set(workflowId, stepsResult.data);
-          } else {
-            console.warn(
-              `Failed to load steps for workflow ${workflowId}:`,
-              stepsResult.error.message
-            );
-            stepsMap.set(workflowId, []);
+        // Steps are already grouped by workflow_id from the backend
+        const stepsMap = new Map<string, Step[]>();
+        for (const [wfId, steps] of Object.entries(data.workflow_steps)) {
+          if (steps) {
+            stepsMap.set(wfId, steps);
           }
-        } catch (err) {
-          console.warn(
-            `Failed to load steps for workflow ${workflowId}:`,
-            String(err)
-          );
-          stepsMap.set(workflowId, []);
         }
-      }
-    } catch (err) {
-      addToast(`Failed to load workflow data: ${String(err)}`, "error");
-    }
+        setWorkflowStepsMap(stepsMap);
 
-    setWorkflowTasksMap(tasksMap);
-    setWorkflowStepsMap(stepsMap);
-
-    // Fetch workflow transitions (edges between workflows)
-    try {
-      const transitionsResult = await commands.listWorkflowTransitions();
-      if (transitionsResult.status === "ok") {
-        setWorkflowTransitions(transitionsResult.data);
+        setWorkflowTransitions(data.transitions);
+        setError(null);
       } else {
-        console.warn(
-          "Failed to load workflow transitions:",
-          transitionsResult.error.message
-        );
-        setWorkflowTransitions([]);
+        setError(result.error.message);
+        addToast(`Failed to load pipeline data: ${result.error.message}`, "error");
       }
     } catch (err) {
-      console.warn("Failed to load workflow transitions:", String(err));
-      setWorkflowTransitions([]);
+      const msg = String(err);
+      setError(msg);
+      addToast(`Failed to load pipeline data: ${msg}`, "error");
+    } finally {
+      setIsLoading(false);
     }
-  }, [workflows, addToast]);
+  }, [addToast]);
 
-  // Store fetchAllWorkflowData in a ref to avoid dependency cycles
-  const fetchAllWorkflowDataRef = useRef(fetchAllWorkflowData);
+  // Store fetchPipelineData in a ref to avoid dependency cycles
+  const fetchPipelineDataRef = useRef(fetchPipelineData);
   useEffect(() => {
-    fetchAllWorkflowDataRef.current = fetchAllWorkflowData;
-  }, [fetchAllWorkflowData]);
+    fetchPipelineDataRef.current = fetchPipelineData;
+  }, [fetchPipelineData]);
 
-  // Handle step updates (refetch workflow steps)
+  // Handle step updates (refetch all data)
   const handleStepUpdated = useCallback(async () => {
-    await fetchAllWorkflowDataRef.current();
+    await fetchPipelineDataRef.current();
   }, []);
 
   // Handle step deletion (refetch and close panel)
   const handleStepDeleted = useCallback(async () => {
-    await fetchAllWorkflowDataRef.current();
+    await fetchPipelineDataRef.current();
     setSelectedStepId(null);
   }, []);
 
-  // Fetch task details and steps for all workflows
+  // Initial fetch
   useEffect(() => {
-    fetchAllWorkflowData();
-  }, [fetchAllWorkflowData]);
+    fetchPipelineData();
+  }, [fetchPipelineData]);
 
-  // Subscribe to workflow change events for automatic list refresh
+  // Subscribe to workflow change events for automatic refresh
   useWorkflowChangeListener({
-    onWorkflowListChange: refetch,
+    onWorkflowListChange: fetchPipelineData,
   });
 
-  // Subscribe to task change events - reload all workflow tasks when any task changes
+  // Subscribe to task change events - reload all data when any task changes
   useTaskChangeListener({
-    onTaskListChange: fetchAllWorkflowData,
+    onTaskListChange: fetchPipelineData,
   });
-
-  // Note: StepDetailPanel now handles its own data fetching via useStep hook
-  // and listens to StepChangedEvent for updates, so we don't need to sync here
 
   // Calculate workflow zone dimensions for ELK layout
-  // Always use expanded dimensions for consistent positioning
   const workflowDimensions = useMemo(() => {
     const dimensions = new Map<string, { width: number; height: number }>();
     workflows.forEach((workflow) => {
       if (!workflow.id) return;
-      // Always use full zone dimensions for ELK layout positioning
       const workflowSteps = workflowStepsMap.get(workflow.id) || [];
       const width = calculateWorkflowZoneWidth(workflowSteps.length);
       const height = calculateWorkflowZoneHeight();
@@ -296,9 +255,9 @@ function AllWorkflowsPipelineInner() {
     return workflows
       .filter((w) => w.id)
       .map((workflow) => {
-        const dims = workflowDimensions.get(workflow.id!) || { 
-          width: 800, 
-          height: 400 
+        const dims = workflowDimensions.get(workflow.id!) || {
+          width: 800,
+          height: 400
         };
         return {
           id: workflow.id!,
@@ -340,7 +299,7 @@ function AllWorkflowsPipelineInner() {
         setIsCollapsed(prev => !prev);
       }
     };
-    
+
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
@@ -598,7 +557,13 @@ function AllWorkflowsPipelineInner() {
   // Update nodes when allNodes changes
   useEffect(() => {
     setNodes(allNodes);
-  }, [allNodes, setNodes]);
+    if (allNodes.length > 0) {
+      // Wait for React Flow to process the new nodes before fitting
+      requestAnimationFrame(() => {
+        fitView({ padding: 0.1, minZoom: 0.3, maxZoom: 1.5 });
+      });
+    }
+  }, [allNodes, setNodes, fitView]);
 
   // Update edges when allEdges changes
   useEffect(() => {
@@ -629,7 +594,7 @@ function AllWorkflowsPipelineInner() {
         </h2>
         <p className="mb-4 font-mono text-sm text-error">{error}</p>
         <button
-          onClick={refetch}
+          onClick={fetchPipelineData}
           className="rounded-lg bg-error px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-error/90"
         >
           Try Again
@@ -704,8 +669,8 @@ function AllWorkflowsPipelineInner() {
             <button
               onClick={() => setIsCollapsed(prev => !prev)}
               className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
-                isCollapsed 
-                  ? "bg-accent/20 text-accent hover:bg-accent/30" 
+                isCollapsed
+                  ? "bg-accent/20 text-accent hover:bg-accent/30"
                   : "bg-bg-secondary text-text-muted hover:bg-bg-elevated"
               }`}
               title="Press 'c' to toggle"
@@ -725,6 +690,7 @@ function AllWorkflowsPipelineInner() {
             onEdgesChange={onEdgesChange}
             nodeTypes={nodeTypes}
             edgeTypes={edgeTypes}
+            fitView
             fitViewOptions={{ padding: 0.1, minZoom: 0.3, maxZoom: 1.5 }}
             minZoom={0.1}
             maxZoom={2}
@@ -779,8 +745,7 @@ function AllWorkflowsPipelineInner() {
           tasks={
             workflowTasksMap
               .get(selectedWorkflow.id || "")
-              ?.filter((t) => t.task.id !== null)
-              .map((t) => ({ id: t.task.id!, title: t.task.title })) || []
+              ?.map((t) => ({ id: t.id, title: t.title })) || []
           }
           onClose={handleCloseWorkflowPanel}
         />
@@ -801,25 +766,11 @@ function AllWorkflowsPipelineInner() {
           // Get tasks for selected step
           const stepTasks =
             tasksByStep.get(selectedZone.step.name.toLowerCase()) || [];
-          // Convert TaskWithRelations to TaskSummary for the panel
-          // Filter out any tasks without IDs and map to TaskSummary format
-          const taskSummaries = stepTasks
-            .filter((tr) => tr.task.id !== null)
-            .map((tr) => ({
-              id: tr.task.id as string,
-              title: tr.task.title,
-              level: tr.task.level,
-              status: tr.task.status,
-              priority: tr.task.priority,
-              tags: tr.task.tags,
-              needs_human_review: tr.task.needs_human_review,
-              created_at: tr.task.created_at ?? new Date().toISOString(),
-            }));
 
           return (
             <FilteredTasksPanel
               step={selectedZone.step}
-              tasks={taskSummaries}
+              tasks={stepTasks}
               workflowId={selectedZone.workflowId}
               onClose={handleCloseZonePanel}
               onTaskSelect={handleRelatedTaskSelect}
