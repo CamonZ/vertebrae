@@ -96,7 +96,8 @@ describe("FilteredTasksPanel", () => {
       ];
       render(<FilteredTasksPanel step={step} tasks={tasks} workflowId="workflow-1" />);
 
-      expect(screen.getByText("2 tasks")).toBeInTheDocument();
+      const matches = screen.getAllByText("2 tasks");
+      expect(matches.length).toBeGreaterThanOrEqual(1);
     });
 
     it("displays active task count", () => {

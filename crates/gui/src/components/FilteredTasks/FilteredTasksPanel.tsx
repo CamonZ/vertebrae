@@ -1,15 +1,15 @@
 import { useState, useCallback, useMemo } from "react";
-import type { TaskFilterOptions, TaskSummary, TaskHierarchyNode, Step, TaskLevel } from "../../bindings";
+import type { Task, TaskTreeNode, Step, TaskLevel } from "../../bindings";
 import { commands } from "../../bindings";
 import type { ViewMode } from "../TaskList";
 import { TaskList, TaskTreeView } from "../TaskList";
-import { useTaskHierarchy } from "../../hooks/useTaskHierarchy";
+import { buildTreeFromTasks } from "../../utils/buildTreeFromTasks";
 import { useExpandedNodes } from "../../hooks/useExpandedNodes";
 import { ResizablePanel } from "../ResizablePanel";
 
 interface FilteredTasksPanelProps {
   step: Step | null;
-  tasks: TaskSummary[];
+  tasks: Task[];
   workflowId: string;
   onClose?: () => void;
   onTaskSelect?: (taskId: string) => void;
@@ -160,27 +160,17 @@ export function FilteredTasksPanel({
   // Use expanded nodes hook to preserve tree collapse state
   const expandedNodes = useExpandedNodes();
 
-  // Create filter for workflow and step status (plus search)
-  const memoizedFilters = useMemo(
-    () => ({
-      statuses: step ? [step.name] : null,
-      levels: null,
-      tags: null,
-      root_only: null,
-      children_of: null,
-      include_done: step?.name.toLowerCase() === "done",
-      search,
-      workflow_id: workflowId,
-    } as TaskFilterOptions),
-    [search, step, workflowId]
-  );
-
-  // Fetch hierarchy with current filters
-  const {
-    hierarchy = [],
-    isLoading: isHierarchyLoading,
-    error: hierarchyError,
-  } = useTaskHierarchy(null, memoizedFilters) || {};
+  // Build tree locally from tasks prop (no API call needed)
+  const hierarchy = useMemo(() => {
+    const filtered = search
+      ? tasks.filter(
+          (t) =>
+            t.title.toLowerCase().includes(search.toLowerCase()) ||
+            t.id.toLowerCase().includes(search.toLowerCase())
+        )
+      : tasks;
+    return buildTreeFromTasks(filtered);
+  }, [tasks, search]);
 
   const handleViewModeChange = useCallback((mode: ViewMode) => {
     setViewMode(mode);
@@ -373,8 +363,8 @@ export function FilteredTasksPanel({
         {viewMode === "tree" ? (
           <TaskTreeView
             hierarchy={hierarchy}
-            isLoading={isHierarchyLoading}
-            error={hierarchyError}
+            isLoading={false}
+            error={null}
             selectedTaskId={selectedTaskId}
             onTaskSelect={(task) => onTaskSelect?.(task.id)}
             expandedNodes={expandedNodes}
@@ -415,6 +405,6 @@ export function FilteredTasksPanel({
 /**
  * Count total tasks in hierarchy recursively
  */
-function countHierarchyTasks(node: TaskHierarchyNode): number {
+function countHierarchyTasks(node: TaskTreeNode): number {
   return 1 + node.children.reduce((count, child) => count + countHierarchyTasks(child), 0);
 }

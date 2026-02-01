@@ -1,8 +1,8 @@
 import { useState, useCallback, useMemo, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
-import type { TaskFilterOptions, TaskSummary, TaskHierarchyNode } from "../bindings";
+import type { TaskFilterOptions, Task, TaskTreeNode } from "../bindings";
 import { useTasks } from "../hooks/useTasks";
-import { useTaskHierarchy } from "../hooks/useTaskHierarchy";
+import { buildTreeFromTasks } from "../utils/buildTreeFromTasks";
 import { useTaskChangeListener } from "../hooks/useTaskChangeListener";
 import { useExpandedNodes } from "../hooks/useExpandedNodes";
 import { TaskList, TaskFilters, TaskTreeView, type ViewMode } from "../components/TaskList";
@@ -25,7 +25,7 @@ const INITIAL_FILTERS: TaskFilterOptions = {
 /**
  * Count total tasks in hierarchy recursively
  */
-function countHierarchyTasks(nodes: TaskHierarchyNode[]): number {
+function countHierarchyTasks(nodes: TaskTreeNode[]): number {
   return nodes.reduce((count, node) => {
     return count + 1 + countHierarchyTasks(node.children);
   }, 0);
@@ -65,13 +65,14 @@ export function TasksPage() {
     [filters, showDone]
   );
   const { tasks, isLoading, error, refetch } = useTasks(memoizedFilters);
-  const { hierarchy, isLoading: isHierarchyLoading, error: hierarchyError, refetch: refetchHierarchy } = useTaskHierarchy(null, memoizedFilters);
 
-  // Refetch both list and hierarchy when task changes are detected
+  // Build tree locally from flat task list (no separate API call needed)
+  const hierarchy = useMemo(() => buildTreeFromTasks(tasks), [tasks]);
+
+  // Refetch when task changes are detected
   const handleTaskListChange = useCallback(() => {
     refetch();
-    refetchHierarchy();
-  }, [refetch, refetchHierarchy]);
+  }, [refetch]);
 
   // Subscribe to task change events for automatic list refresh
   useTaskChangeListener({
@@ -82,7 +83,7 @@ export function TasksPage() {
     setFilters(newFilters);
   }, []);
 
-  const handleTaskSelect = useCallback((task: TaskSummary) => {
+  const handleTaskSelect = useCallback((task: Task) => {
     setSelectedTaskId(task.id);
   }, []);
 
@@ -102,8 +103,8 @@ export function TasksPage() {
   const activeCount = tasks.filter((t) => t.status === "in_progress").length;
 
   // Determine current loading/error state based on view mode
-  const currentIsLoading = viewMode === 'tree' ? isHierarchyLoading : isLoading;
-  const currentError = viewMode === 'tree' ? hierarchyError : error;
+  const currentIsLoading = isLoading;
+  const currentError = error;
 
   // Calculate task count for footer
   const taskCount = viewMode === 'tree'
@@ -152,8 +153,8 @@ export function TasksPage() {
           {viewMode === 'tree' ? (
             <TaskTreeView
               hierarchy={hierarchy}
-              isLoading={isHierarchyLoading}
-              error={hierarchyError}
+              isLoading={isLoading}
+              error={error}
               selectedTaskId={selectedTaskId}
               onTaskSelect={handleTaskSelect}
               expandedNodes={expandedNodes}
