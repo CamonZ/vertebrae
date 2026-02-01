@@ -65,7 +65,7 @@ impl SacrumSocket {
         let allow_reconnect = Arc::clone(&self.allow_reconnect);
         let app_handle = app_handle.clone();
 
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             let mut reconnect_delay = Duration::from_millis(100);
 
             loop {
@@ -133,7 +133,7 @@ impl SacrumSocket {
 
         // Build WebSocket URL
         let ws_url = format!(
-            "{}{}?token={}",
+            "{}{}?token={}&vsn=2.0.0",
             base_url
                 .replace("https://", "wss://")
                 .replace("http://", "ws://"),
@@ -845,11 +845,14 @@ mod tests {
         let transformed = base_url
             .replace("https://", "wss://")
             .replace("http://", "ws://");
-        let ws_url = format!("{}{}?token={}", transformed, "/socket/websocket", api_token);
+        let ws_url = format!(
+            "{}{}?token={}&vsn=2.0.0",
+            transformed, "/socket/websocket", api_token
+        );
 
         assert_eq!(
             ws_url,
-            "ws://localhost:4000/socket/websocket?token=test_token"
+            "ws://localhost:4000/socket/websocket?token=test_token&vsn=2.0.0"
         );
     }
 
@@ -861,11 +864,14 @@ mod tests {
         let transformed = base_url
             .replace("https://", "wss://")
             .replace("http://", "ws://");
-        let ws_url = format!("{}{}?token={}", transformed, "/socket/websocket", api_token);
+        let ws_url = format!(
+            "{}{}?token={}&vsn=2.0.0",
+            transformed, "/socket/websocket", api_token
+        );
 
         assert_eq!(
             ws_url,
-            "wss://secure.example.com:4000/socket/websocket?token=secure_token"
+            "wss://secure.example.com:4000/socket/websocket?token=secure_token&vsn=2.0.0"
         );
     }
 
@@ -877,11 +883,14 @@ mod tests {
         let transformed = base_url
             .replace("https://", "wss://")
             .replace("http://", "ws://");
-        let ws_url = format!("{}{}?token={}", transformed, "/socket/websocket", api_token);
+        let ws_url = format!(
+            "{}{}?token={}&vsn=2.0.0",
+            transformed, "/socket/websocket", api_token
+        );
 
         assert_eq!(
             ws_url,
-            "ws://api.example.com:8080/app/socket/websocket?token=path_token"
+            "ws://api.example.com:8080/app/socket/websocket?token=path_token&vsn=2.0.0"
         );
     }
 
@@ -893,11 +902,14 @@ mod tests {
         let transformed = base_url
             .replace("https://", "wss://")
             .replace("http://", "ws://");
-        let ws_url = format!("{}{}?token={}", transformed, "/socket/websocket", api_token);
+        let ws_url = format!(
+            "{}{}?token={}&vsn=2.0.0",
+            transformed, "/socket/websocket", api_token
+        );
 
         assert_eq!(
             ws_url,
-            "ws://127.0.0.1:8000/socket/websocket?token=token123"
+            "ws://127.0.0.1:8000/socket/websocket?token=token123&vsn=2.0.0"
         );
     }
 
@@ -909,11 +921,14 @@ mod tests {
         let transformed = base_url
             .replace("https://", "wss://")
             .replace("http://", "ws://");
-        let ws_url = format!("{}{}?token={}", transformed, "/socket/websocket", api_token);
+        let ws_url = format!(
+            "{}{}?token={}&vsn=2.0.0",
+            transformed, "/socket/websocket", api_token
+        );
 
         assert_eq!(
             ws_url,
-            "wss://api.example.com/socket/websocket?token=secure123"
+            "wss://api.example.com/socket/websocket?token=secure123&vsn=2.0.0"
         );
     }
 

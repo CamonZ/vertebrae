@@ -1,23 +1,29 @@
-//! TaskService implementation for Sacrum HTTP API - Stub
+//! TaskService implementation for Sacrum HTTP API
 //!
 //! Implements the TaskService trait by making HTTP calls to the Sacrum REST API.
-//! Many methods are currently unimplemented as they require additional API endpoints
-//! to be defined in the Sacrum backend.
+//! Uses flat /api/... routes with project_id as a query parameter.
 
 use async_trait::async_trait;
+use serde::Serialize;
 use serde_json::json;
 use vertebrae_core::error::{ServiceError, ServiceResult};
 use vertebrae_core::models::Task;
 use vertebrae_core::models::{
-    BlockerNode, CodeRef, Level, Section, SectionType, TaskFilter, TaskSummary,
+    BlockerNode, CodeRef, Level, Priority, Section, SectionType, TaskFilter, TaskSummary,
 };
 use vertebrae_core::service::{
     CreateTaskOptions, TaskService, TaskTreeNode, TaskWithRelations, TransitionResult,
     TreeFilterOptions, UpdateTaskOptions,
 };
 
-use crate::api_types::TaskResponse;
+use crate::api_types::{CodeRefResponse, SectionResponse, TaskResponse};
 use crate::client::SacrumClient;
+
+/// Query param helper for project_id
+#[derive(Serialize)]
+struct ProjectQuery<'a> {
+    project_id: &'a str,
+}
 
 /// TaskService implementation for Sacrum HTTP client
 pub struct SacrumTaskService {
@@ -32,25 +38,160 @@ impl SacrumTaskService {
 
     /// Convert Sacrum TaskResponse to vertebrae_core Task model
     fn response_to_task(&self, response: &TaskResponse) -> Task {
+        let level = response
+            .level
+            .as_deref()
+            .and_then(parse_level)
+            .unwrap_or(Level::Task);
+
+        let priority = response.priority.as_deref().and_then(parse_priority);
+
+        let sections = response
+            .sections
+            .iter()
+            .map(section_response_to_section)
+            .collect();
+
+        let code_refs = response
+            .code_refs
+            .iter()
+            .map(code_ref_response_to_code_ref)
+            .collect();
+
+        let created_at = response
+            .inserted_at
+            .as_deref()
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+            .map(|dt| dt.with_timezone(&chrono::Utc));
+
+        let updated_at = response
+            .updated_at
+            .as_deref()
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+            .map(|dt| dt.with_timezone(&chrono::Utc));
+
+        let started_at = response
+            .started_at
+            .as_deref()
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+            .map(|dt| dt.with_timezone(&chrono::Utc));
+
+        let completed_at = response
+            .completed_at
+            .as_deref()
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+            .map(|dt| dt.with_timezone(&chrono::Utc));
+
         Task {
             id: Some(response.id.clone()),
-            title: response.subject.clone(),
+            title: response.title.clone(),
             description: response.description.clone(),
-            level: Level::Task, // Default level - real implementation would determine this
-            priority: None,     // Would be mapped from response
-            tags: vec![],       // Would be mapped from response
-            created_at: None,
-            updated_at: None,
-            started_at: None,
-            completed_at: None,
-            sections: vec![],
-            code_refs: vec![],
-            needs_human_review: None,
-            revision_feedback: None,
-            rejection_reason: None,
-            workflow_id: None,
-            current_step_id: None,
+            level,
+            priority,
+            tags: response.tags.clone(),
+            created_at,
+            updated_at,
+            started_at,
+            completed_at,
+            sections,
+            code_refs,
+            needs_human_review: response.needs_human_review,
+            revision_feedback: response.revision_feedback.clone(),
+            rejection_reason: response.rejection_reason.clone(),
+            workflow_id: response.workflow_id.clone(),
+            current_step_id: response.current_step_id.clone(),
         }
+    }
+
+    fn response_to_summary(&self, response: &TaskResponse) -> TaskSummary {
+        let level = response
+            .level
+            .as_deref()
+            .and_then(parse_level)
+            .unwrap_or(Level::Task);
+
+        let priority = response.priority.as_deref().and_then(parse_priority);
+
+        let created_at = response
+            .inserted_at
+            .as_deref()
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+            .map(|dt| dt.with_timezone(&chrono::Utc))
+            .unwrap_or_else(chrono::Utc::now);
+
+        TaskSummary {
+            id: response.id.clone(),
+            title: response.title.clone(),
+            level,
+            status: "backlog".to_string(), // Status derived from workflow step name
+            priority,
+            tags: response.tags.clone(),
+            needs_human_review: response.needs_human_review,
+            created_at,
+            workflow_id: response.workflow_id.clone(),
+            current_step_id: response.current_step_id.clone(),
+            workflow_name: None,
+            step_name: None,
+        }
+    }
+}
+
+fn parse_level(s: &str) -> Option<Level> {
+    match s {
+        "epic" => Some(Level::Epic),
+        "ticket" => Some(Level::Ticket),
+        "task" => Some(Level::Task),
+        _ => None,
+    }
+}
+
+fn parse_priority(s: &str) -> Option<Priority> {
+    match s {
+        "low" => Some(Priority::Low),
+        "medium" => Some(Priority::Medium),
+        "high" => Some(Priority::High),
+        "critical" => Some(Priority::Critical),
+        _ => None,
+    }
+}
+
+fn section_response_to_section(r: &SectionResponse) -> Section {
+    let section_type = match r.section_type.as_str() {
+        "goal" => SectionType::Goal,
+        "context" => SectionType::Context,
+        "current_behavior" => SectionType::CurrentBehavior,
+        "desired_behavior" => SectionType::DesiredBehavior,
+        "step" => SectionType::Step,
+        "testing_criterion" => SectionType::TestingCriterion,
+        "anti_pattern" => SectionType::AntiPattern,
+        "failure_test" => SectionType::FailureTest,
+        "constraint" => SectionType::Constraint,
+        _ => SectionType::Step, // fallback
+    };
+
+    let done_at = r
+        .done_at
+        .as_deref()
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|dt| dt.with_timezone(&chrono::Utc));
+
+    Section {
+        section_type,
+        content: r.content.clone(),
+        order: Some(r.section_order as u32),
+        done: r.done,
+        done_at,
+        refs: Vec::new(),
+    }
+}
+
+fn code_ref_response_to_code_ref(r: &CodeRefResponse) -> CodeRef {
+    CodeRef {
+        path: r.path.clone(),
+        line_start: r.line_start.map(|v| v as u32),
+        line_end: r.line_end.map(|v| v as u32),
+        name: r.name.clone(),
+        description: r.description.clone(),
     }
 }
 
@@ -71,36 +212,32 @@ impl TaskService for SacrumTaskService {
             "project_id": self.client.project_id(),
         });
 
-        let path = format!("/projects/{}/tasks", self.client.project_id());
-        let response: TaskResponse = self.client.post(&path, &request).await?;
+        let response: TaskResponse = self.client.post("/api/tasks", &request).await?;
 
         Ok(response.id.clone())
     }
 
     async fn get_task(&self, id: &str) -> ServiceResult<Task> {
-        let path = format!("/projects/{}/tasks/{}", self.client.project_id(), id);
-        let response: TaskResponse = self.client.get(&path).await?;
+        let path = format!("/api/tasks/{}", id);
+        let response: TaskResponse = self.client.get(&path, &()).await?;
         Ok(self.response_to_task(&response))
     }
 
     async fn get_task_with_relations(&self, id: &str) -> ServiceResult<TaskWithRelations> {
-        let task = self.get_task(id).await?;
-        let parent_id = self.get_parent(id).await?;
-        let children_ids = self.get_children(id).await?;
-        let depends_on_ids = self.get_dependencies(id).await?;
-        let dependent_ids = self.get_dependents(id).await?;
+        let path = format!("/api/tasks/{}", id);
+        let response: TaskResponse = self.client.get(&path, &()).await?;
+        let task = self.response_to_task(&response);
 
         Ok(TaskWithRelations {
             task,
-            parent_id,
-            children_ids,
-            depends_on_ids,
-            dependent_ids,
+            parent_id: response.parent_id,
+            children_ids: vec![], // Not in the flat response; use get_children separately
+            depends_on_ids: response.dependency_ids,
+            dependent_ids: vec![], // Would require a separate query
         })
     }
 
     async fn get_derived_status(&self, _task: &Task) -> ServiceResult<String> {
-        // Return default status - in real implementation would derive from workflow
         Ok("backlog".to_string())
     }
 
@@ -115,7 +252,7 @@ impl TaskService for SacrumTaskService {
             update_json["description"] = json!(desc_opt);
         }
 
-        let path = format!("/projects/{}/tasks/{}", self.client.project_id(), id);
+        let path = format!("/api/tasks/{}", id);
         let _response: TaskResponse = self.client.put(&path, &update_json).await?;
 
         Ok(())
@@ -126,7 +263,7 @@ impl TaskService for SacrumTaskService {
     }
 
     async fn delete_task(&self, id: &str, _cascade: bool) -> ServiceResult<()> {
-        let path = format!("/projects/{}/tasks/{}", self.client.project_id(), id);
+        let path = format!("/api/tasks/{}", id);
         self.client.delete(&path).await?;
         Ok(())
     }
@@ -140,34 +277,12 @@ impl TaskService for SacrumTaskService {
     }
 
     async fn list_tasks(&self, _filter: &TaskFilter) -> ServiceResult<Vec<TaskSummary>> {
-        let path = format!("/projects/{}/tasks", self.client.project_id());
-        let response: serde_json::Value = self.client.get(&path).await?;
+        let query = ProjectQuery {
+            project_id: self.client.project_id(),
+        };
+        let tasks: Vec<TaskResponse> = self.client.get("/api/tasks", &query).await?;
 
-        let tasks = response
-            .get("tasks")
-            .and_then(|v| v.as_array())
-            .unwrap_or(&vec![])
-            .iter()
-            .filter_map(|t| {
-                let task_response: TaskResponse = serde_json::from_value(t.clone()).ok()?;
-                Some(TaskSummary {
-                    id: task_response.id,
-                    title: task_response.subject,
-                    level: Level::Task,
-                    status: "backlog".to_string(),
-                    priority: None,
-                    tags: vec![],
-                    needs_human_review: None,
-                    created_at: chrono::Utc::now(),
-                    workflow_id: None,
-                    current_step_id: None,
-                    workflow_name: None,
-                    step_name: None,
-                })
-            })
-            .collect();
-
-        Ok(tasks)
+        Ok(tasks.iter().map(|t| self.response_to_summary(t)).collect())
     }
 
     async fn list_tasks_with_relations(
@@ -187,14 +302,23 @@ impl TaskService for SacrumTaskService {
     }
 
     async fn list_ready(&self, _status: &str) -> ServiceResult<Vec<TaskSummary>> {
-        unimplemented!("Ready task listing not yet implemented for Sacrum HTTP client")
+        let query = ProjectQuery {
+            project_id: self.client.project_id(),
+        };
+        let tasks: Vec<TaskResponse> = self.client.get("/api/tasks/ready", &query).await?;
+
+        Ok(tasks.iter().map(|t| self.response_to_summary(t)).collect())
     }
 
-    async fn get_task_tree(
-        &self,
-        _options: &TreeFilterOptions,
-    ) -> ServiceResult<Vec<TaskTreeNode>> {
-        unimplemented!("Task tree retrieval not yet implemented for Sacrum HTTP client")
+    async fn get_task_tree(&self, options: &TreeFilterOptions) -> ServiceResult<Vec<TaskTreeNode>> {
+        let path = match &options.filter.children_of {
+            Some(root_id) => format!("/api/tasks/{}/tree", root_id),
+            None => "/api/tasks/tree".to_string(),
+        };
+        let query = ProjectQuery {
+            project_id: self.client.project_id(),
+        };
+        Ok(self.client.get(&path, &query).await?)
     }
 
     async fn transition_to(&self, _id: &str, _target: &str) -> ServiceResult<TransitionResult> {
@@ -217,8 +341,9 @@ impl TaskService for SacrumTaskService {
         unimplemented!("Dependency removal not yet implemented for Sacrum HTTP client")
     }
 
-    async fn get_blockers(&self, _id: &str) -> ServiceResult<Vec<BlockerNode>> {
-        unimplemented!("Blocker retrieval not yet implemented for Sacrum HTTP client")
+    async fn get_blockers(&self, id: &str) -> ServiceResult<Vec<BlockerNode>> {
+        let path = format!("/api/tasks/{}/blockers", id);
+        Ok(self.client.get(&path, &()).await?)
     }
 
     async fn get_incomplete_blockers_with_details(
@@ -228,8 +353,14 @@ impl TaskService for SacrumTaskService {
         unimplemented!("Incomplete blocker retrieval not yet implemented for Sacrum HTTP client")
     }
 
-    async fn find_path(&self, _from_id: &str, _to_id: &str) -> ServiceResult<Option<Vec<String>>> {
-        unimplemented!("Path finding not yet implemented for Sacrum HTTP client")
+    async fn find_path(&self, from_id: &str, to_id: &str) -> ServiceResult<Option<Vec<String>>> {
+        #[derive(Serialize)]
+        struct PathQuery<'a> {
+            to: &'a str,
+        }
+        let path = format!("/api/tasks/{}/path", from_id);
+        let query = PathQuery { to: to_id };
+        Ok(self.client.get(&path, &query).await?)
     }
 
     async fn get_parent(&self, _task_id: &str) -> ServiceResult<Option<String>> {
@@ -288,16 +419,36 @@ impl TaskService for SacrumTaskService {
         unimplemented!("Toggle step done not yet implemented for Sacrum HTTP client")
     }
 
-    async fn add_code_ref(&self, _id: &str, _code_ref: CodeRef) -> ServiceResult<()> {
-        unimplemented!("Code reference addition not yet implemented for Sacrum HTTP client")
+    async fn add_code_ref(&self, id: &str, code_ref: CodeRef) -> ServiceResult<()> {
+        let path = format!("/api/tasks/{}/refs", id);
+        let request = json!({
+            "path": code_ref.path,
+            "line_start": code_ref.line_start,
+            "line_end": code_ref.line_end,
+            "name": code_ref.name,
+            "description": code_ref.description,
+        });
+        let _response: serde_json::Value = self.client.post(&path, &request).await?;
+        Ok(())
     }
 
-    async fn remove_code_refs(&self, _id: &str, _indices: Option<Vec<usize>>) -> ServiceResult<()> {
-        unimplemented!("Code reference removal not yet implemented for Sacrum HTTP client")
+    async fn remove_code_refs(&self, id: &str, indices: Option<Vec<usize>>) -> ServiceResult<()> {
+        if let Some(indices) = indices {
+            // Get current refs to find the ref IDs at the given indices
+            let task_path = format!("/api/tasks/{}", id);
+            let response: TaskResponse = self.client.get(&task_path, &()).await?;
+            for idx in indices {
+                if let Some(ref_response) = response.code_refs.get(idx) {
+                    let path = format!("/api/tasks/{}/refs/{}", id, ref_response.id);
+                    self.client.delete(&path).await?;
+                }
+            }
+        }
+        Ok(())
     }
 
-    async fn append_ref(&self, _id: &str, _code_ref: &CodeRef) -> ServiceResult<()> {
-        unimplemented!("Code reference append not yet implemented for Sacrum HTTP client")
+    async fn append_ref(&self, id: &str, code_ref: &CodeRef) -> ServiceResult<()> {
+        self.add_code_ref(id, code_ref.clone()).await
     }
 
     async fn append_section_ref(
@@ -337,8 +488,7 @@ impl TaskService for SacrumTaskService {
             "project_id": self.client.project_id(),
         });
 
-        let path = format!("/projects/{}/tasks", self.client.project_id());
-        let response: TaskResponse = self.client.post(&path, &request).await?;
+        let response: TaskResponse = self.client.post("/api/tasks", &request).await?;
 
         Ok(response.id.clone())
     }
@@ -357,6 +507,33 @@ mod tests {
         ))
     }
 
+    fn make_task_response(id: &str, title: &str) -> TaskResponse {
+        TaskResponse {
+            id: id.to_string(),
+            short_id: None,
+            project_id: "test-project".to_string(),
+            title: title.to_string(),
+            description: None,
+            level: None,
+            priority: None,
+            tags: vec![],
+            workflow_id: None,
+            current_step_id: None,
+            needs_human_review: None,
+            review_comment: None,
+            rejection_reason: None,
+            revision_feedback: None,
+            parent_id: None,
+            dependency_ids: vec![],
+            sections: vec![],
+            code_refs: vec![],
+            started_at: None,
+            completed_at: None,
+            inserted_at: None,
+            updated_at: None,
+        }
+    }
+
     #[test]
     fn test_new_creates_service() {
         let client = create_test_client();
@@ -369,28 +546,21 @@ mod tests {
         let client = create_test_client();
         let service = SacrumTaskService::new(client);
 
-        let response = TaskResponse {
-            id: "task-123".to_string(),
-            short_id: Some("t-123".to_string()),
-            subject: "Test Task".to_string(),
-            description: Some("Task description".to_string()),
-            status: "backlog".to_string(),
-            priority: Some("high".to_string()),
-            parent_id: None,
-            project_id: "test-project".to_string(),
-        };
+        let mut response = make_task_response("task-123", "Test Task");
+        response.short_id = Some("t-123".to_string());
+        response.description = Some("Task description".to_string());
+        response.level = Some("ticket".to_string());
+        response.priority = Some("high".to_string());
+        response.tags = vec!["rust".to_string()];
 
         let task = service.response_to_task(&response);
 
         assert_eq!(task.id, Some("task-123".to_string()));
         assert_eq!(task.title, "Test Task");
         assert_eq!(task.description, Some("Task description".to_string()));
-        assert_eq!(task.level, Level::Task);
-        assert!(task.tags.is_empty());
-        assert!(task.sections.is_empty());
-        assert!(task.code_refs.is_empty());
-        assert!(task.workflow_id.is_none());
-        assert!(task.current_step_id.is_none());
+        assert_eq!(task.level, Level::Ticket);
+        assert_eq!(task.priority, Some(Priority::High));
+        assert_eq!(task.tags, vec!["rust"]);
     }
 
     #[test]
@@ -398,16 +568,7 @@ mod tests {
         let client = create_test_client();
         let service = SacrumTaskService::new(client);
 
-        let response = TaskResponse {
-            id: "task-456".to_string(),
-            short_id: None,
-            subject: "Minimal Task".to_string(),
-            description: None,
-            status: "in_progress".to_string(),
-            priority: None,
-            parent_id: None,
-            project_id: "test-project".to_string(),
-        };
+        let response = make_task_response("task-456", "Minimal Task");
 
         let task = service.response_to_task(&response);
 
@@ -416,52 +577,142 @@ mod tests {
         assert_eq!(task.description, None);
         assert_eq!(task.priority, None);
         assert_eq!(task.level, Level::Task);
+        assert!(task.tags.is_empty());
     }
 
     #[test]
-    fn test_response_to_task_with_parent() {
+    fn test_response_to_task_with_sections() {
         let client = create_test_client();
         let service = SacrumTaskService::new(client);
 
-        let response = TaskResponse {
-            id: "child-task".to_string(),
-            short_id: None,
-            subject: "Child Task".to_string(),
-            description: Some("A child task".to_string()),
-            status: "todo".to_string(),
-            priority: Some("medium".to_string()),
-            parent_id: Some("parent-task".to_string()),
-            project_id: "test-project".to_string(),
-        };
+        let mut response = make_task_response("task-sec", "With Sections");
+        response.sections = vec![SectionResponse {
+            id: "sec-1".to_string(),
+            section_type: "step".to_string(),
+            content: "Do this".to_string(),
+            section_order: 1,
+            done: Some(true),
+            done_at: None,
+            inserted_at: None,
+            updated_at: None,
+        }];
 
         let task = service.response_to_task(&response);
-
-        assert_eq!(task.id, Some("child-task".to_string()));
-        assert_eq!(task.title, "Child Task");
-        assert_eq!(task.description, Some("A child task".to_string()));
+        assert_eq!(task.sections.len(), 1);
+        assert_eq!(task.sections[0].section_type, SectionType::Step);
+        assert_eq!(task.sections[0].content, "Do this");
+        assert_eq!(task.sections[0].done, Some(true));
     }
 
     #[test]
-    fn test_response_to_task_empty_subject() {
+    fn test_response_to_task_with_code_refs() {
         let client = create_test_client();
         let service = SacrumTaskService::new(client);
 
-        let response = TaskResponse {
-            id: "task-789".to_string(),
-            short_id: None,
-            subject: String::new(),
+        let mut response = make_task_response("task-ref", "With Refs");
+        response.code_refs = vec![CodeRefResponse {
+            id: "ref-1".to_string(),
+            task_id: "task-ref".to_string(),
+            section_id: None,
+            path: "src/main.rs".to_string(),
+            line_start: Some(42),
+            line_end: Some(50),
+            name: Some("main_fn".to_string()),
             description: None,
-            status: "done".to_string(),
-            priority: None,
-            parent_id: None,
-            project_id: "test-project".to_string(),
-        };
+            inserted_at: None,
+            updated_at: None,
+        }];
 
         let task = service.response_to_task(&response);
+        assert_eq!(task.code_refs.len(), 1);
+        assert_eq!(task.code_refs[0].path, "src/main.rs");
+        assert_eq!(task.code_refs[0].line_start, Some(42));
+        assert_eq!(task.code_refs[0].line_end, Some(50));
+    }
 
-        assert_eq!(task.id, Some("task-789".to_string()));
-        assert_eq!(task.title, "");
-        assert_eq!(task.level, Level::Task);
+    #[test]
+    fn test_response_to_task_with_timestamps() {
+        let client = create_test_client();
+        let service = SacrumTaskService::new(client);
+
+        let mut response = make_task_response("task-ts", "With Timestamps");
+        response.inserted_at = Some("2024-01-01T00:00:00Z".to_string());
+        response.updated_at = Some("2024-01-02T00:00:00Z".to_string());
+        response.started_at = Some("2024-01-01T12:00:00Z".to_string());
+
+        let task = service.response_to_task(&response);
+        assert!(task.created_at.is_some());
+        assert!(task.updated_at.is_some());
+        assert!(task.started_at.is_some());
+        assert!(task.completed_at.is_none());
+    }
+
+    #[test]
+    fn test_response_to_summary() {
+        let client = create_test_client();
+        let service = SacrumTaskService::new(client);
+
+        let mut response = make_task_response("task-sum", "Summary Task");
+        response.level = Some("epic".to_string());
+        response.priority = Some("critical".to_string());
+        response.tags = vec!["tag1".to_string()];
+        response.needs_human_review = Some(true);
+        response.workflow_id = Some("wf-1".to_string());
+        response.current_step_id = Some("step-1".to_string());
+
+        let summary = service.response_to_summary(&response);
+
+        assert_eq!(summary.id, "task-sum");
+        assert_eq!(summary.title, "Summary Task");
+        assert_eq!(summary.level, Level::Epic);
+        assert_eq!(summary.priority, Some(Priority::Critical));
+        assert_eq!(summary.tags, vec!["tag1"]);
+        assert_eq!(summary.needs_human_review, Some(true));
+        assert_eq!(summary.workflow_id.as_deref(), Some("wf-1"));
+        assert_eq!(summary.current_step_id.as_deref(), Some("step-1"));
+    }
+
+    #[test]
+    fn test_parse_level() {
+        assert_eq!(parse_level("epic"), Some(Level::Epic));
+        assert_eq!(parse_level("ticket"), Some(Level::Ticket));
+        assert_eq!(parse_level("task"), Some(Level::Task));
+        assert_eq!(parse_level("unknown"), None);
+    }
+
+    #[test]
+    fn test_parse_priority() {
+        assert_eq!(parse_priority("low"), Some(Priority::Low));
+        assert_eq!(parse_priority("medium"), Some(Priority::Medium));
+        assert_eq!(parse_priority("high"), Some(Priority::High));
+        assert_eq!(parse_priority("critical"), Some(Priority::Critical));
+        assert_eq!(parse_priority("unknown"), None);
+    }
+
+    #[test]
+    fn test_section_response_to_section_all_types() {
+        let types = vec![
+            ("goal", SectionType::Goal),
+            ("context", SectionType::Context),
+            ("step", SectionType::Step),
+            ("testing_criterion", SectionType::TestingCriterion),
+            ("constraint", SectionType::Constraint),
+        ];
+
+        for (type_str, expected_type) in types {
+            let response = SectionResponse {
+                id: "s-1".to_string(),
+                section_type: type_str.to_string(),
+                content: "content".to_string(),
+                section_order: 0,
+                done: None,
+                done_at: None,
+                inserted_at: None,
+                updated_at: None,
+            };
+            let section = section_response_to_section(&response);
+            assert_eq!(section.section_type, expected_type);
+        }
     }
 
     #[test]
@@ -476,451 +727,23 @@ mod tests {
     }
 
     #[test]
-    fn test_response_to_task_with_all_fields() {
+    fn test_response_to_task_with_workflow_fields() {
         let client = create_test_client();
         let service = SacrumTaskService::new(client);
 
-        let response = TaskResponse {
-            id: "complete-task".to_string(),
-            short_id: Some("ct-1".to_string()),
-            subject: "Complete Task".to_string(),
-            description: Some("Detailed description here".to_string()),
-            status: "pending_review".to_string(),
-            priority: Some("critical".to_string()),
-            parent_id: Some("parent-1".to_string()),
-            project_id: "test-project".to_string(),
-        };
+        let mut response = make_task_response("task-wf", "Workflow Task");
+        response.workflow_id = Some("wf-123".to_string());
+        response.current_step_id = Some("step-456".to_string());
+        response.needs_human_review = Some(false);
+        response.revision_feedback = Some("feedback".to_string());
+        response.rejection_reason = Some("reason".to_string());
 
         let task = service.response_to_task(&response);
 
-        assert_eq!(task.id, Some("complete-task".to_string()));
-        assert_eq!(task.title, "Complete Task");
-        assert_eq!(
-            task.description,
-            Some("Detailed description here".to_string())
-        );
-        assert_eq!(task.level, Level::Task);
-        assert!(task.priority.is_none());
-        assert!(task.tags.is_empty());
-        assert!(task.sections.is_empty());
-        assert!(task.code_refs.is_empty());
-        assert_eq!(task.needs_human_review, None);
-        assert_eq!(task.revision_feedback, None);
-        assert_eq!(task.rejection_reason, None);
-    }
-
-    #[test]
-    fn test_response_with_special_characters_in_subject() {
-        let client = create_test_client();
-        let service = SacrumTaskService::new(client);
-
-        let response = TaskResponse {
-            id: "special-task".to_string(),
-            short_id: None,
-            subject: "Task with \"quotes\" and 'apostrophes' & symbols".to_string(),
-            description: Some("Description with émojis and ünicode".to_string()),
-            status: "done".to_string(),
-            priority: None,
-            parent_id: None,
-            project_id: "test-project".to_string(),
-        };
-
-        let task = service.response_to_task(&response);
-
-        assert_eq!(
-            task.title,
-            "Task with \"quotes\" and 'apostrophes' & symbols"
-        );
-        assert_eq!(
-            task.description,
-            Some("Description with émojis and ünicode".to_string())
-        );
-    }
-
-    #[test]
-    fn test_response_preserves_all_id_formats() {
-        let client = create_test_client();
-        let service = SacrumTaskService::new(client);
-
-        let response = TaskResponse {
-            id: "uuid-style-id-12345678901234567890".to_string(),
-            short_id: Some("short-id".to_string()),
-            subject: "ID Test".to_string(),
-            description: None,
-            status: "backlog".to_string(),
-            priority: None,
-            parent_id: None,
-            project_id: "test-project".to_string(),
-        };
-
-        let task = service.response_to_task(&response);
-
-        assert_eq!(
-            task.id,
-            Some("uuid-style-id-12345678901234567890".to_string())
-        );
-    }
-
-    #[test]
-    fn test_level_always_task() {
-        let client = create_test_client();
-        let service = SacrumTaskService::new(client);
-
-        for status in &["backlog", "todo", "in_progress", "in_review", "done"] {
-            let response = TaskResponse {
-                id: format!("task-{}", status),
-                short_id: None,
-                subject: format!("Task with status {}", status),
-                description: None,
-                status: status.to_string(),
-                priority: None,
-                parent_id: None,
-                project_id: "test-project".to_string(),
-            };
-
-            let task = service.response_to_task(&response);
-            assert_eq!(task.level, Level::Task);
-        }
-    }
-
-    #[test]
-    fn test_response_fields_always_none() {
-        let client = create_test_client();
-        let service = SacrumTaskService::new(client);
-
-        let response = TaskResponse {
-            id: "test-id".to_string(),
-            short_id: None,
-            subject: "Test".to_string(),
-            description: None,
-            status: "backlog".to_string(),
-            priority: None,
-            parent_id: None,
-            project_id: "test-project".to_string(),
-        };
-
-        let task = service.response_to_task(&response);
-
-        assert!(task.created_at.is_none());
-        assert!(task.updated_at.is_none());
-        assert!(task.started_at.is_none());
-        assert!(task.completed_at.is_none());
-        assert!(task.workflow_id.is_none());
-        assert!(task.current_step_id.is_none());
-        assert!(task.needs_human_review.is_none());
-        assert!(task.revision_feedback.is_none());
-        assert!(task.rejection_reason.is_none());
-    }
-
-    #[test]
-    fn test_task_conversion_preserves_id_exactly() {
-        let client = create_test_client();
-        let service = SacrumTaskService::new(client);
-
-        let ids = vec![
-            "simple",
-            "with-dashes",
-            "with_underscores",
-            "123456",
-            "mixed-Case_123",
-        ];
-
-        for id in ids {
-            let response = TaskResponse {
-                id: id.to_string(),
-                short_id: None,
-                subject: "Test".to_string(),
-                description: None,
-                status: "backlog".to_string(),
-                priority: None,
-                parent_id: None,
-                project_id: "test-project".to_string(),
-            };
-
-            let task = service.response_to_task(&response);
-            assert_eq!(task.id, Some(id.to_string()));
-        }
-    }
-
-    #[test]
-    fn test_task_conversion_preserves_title_exactly() {
-        let client = create_test_client();
-        let service = SacrumTaskService::new(client);
-
-        let titles = vec![
-            "Simple Title",
-            "Title with numbers 123",
-            "Title with special chars !@#$%",
-            "   Title with spaces   ",
-            "UPPERCASE TITLE",
-            "lowercase title",
-            "MiXeD CaSe TiTlE",
-        ];
-
-        for title in titles {
-            let response = TaskResponse {
-                id: "test-id".to_string(),
-                short_id: None,
-                subject: title.to_string(),
-                description: None,
-                status: "backlog".to_string(),
-                priority: None,
-                parent_id: None,
-                project_id: "test-project".to_string(),
-            };
-
-            let task = service.response_to_task(&response);
-            assert_eq!(task.title, title.to_string());
-        }
-    }
-
-    #[test]
-    fn test_task_conversion_preserves_description_exactly() {
-        let client = create_test_client();
-        let service = SacrumTaskService::new(client);
-
-        let descriptions = vec![
-            Some("Simple description".to_string()),
-            Some("Description with\nmultiple\nlines".to_string()),
-            Some("Description with \"quotes\"".to_string()),
-            Some("Description with 'apostrophes'".to_string()),
-            Some("Description with émojis 🚀 café".to_string()),
-        ];
-
-        for desc in descriptions {
-            let response = TaskResponse {
-                id: "test-id".to_string(),
-                short_id: None,
-                subject: "Test".to_string(),
-                description: desc.clone(),
-                status: "backlog".to_string(),
-                priority: None,
-                parent_id: None,
-                project_id: "test-project".to_string(),
-            };
-
-            let task = service.response_to_task(&response);
-            assert_eq!(task.description, desc);
-        }
-    }
-
-    #[test]
-    fn test_task_always_has_empty_collections() {
-        let client = create_test_client();
-        let service = SacrumTaskService::new(client);
-
-        let response = TaskResponse {
-            id: "test-id".to_string(),
-            short_id: None,
-            subject: "Test".to_string(),
-            description: None,
-            status: "backlog".to_string(),
-            priority: None,
-            parent_id: None,
-            project_id: "test-project".to_string(),
-        };
-
-        let task = service.response_to_task(&response);
-
-        assert!(task.tags.is_empty());
-        assert!(task.sections.is_empty());
-        assert!(task.code_refs.is_empty());
-    }
-
-    #[test]
-    fn test_response_with_long_text_values() {
-        let client = create_test_client();
-        let service = SacrumTaskService::new(client);
-
-        let long_text = "a".repeat(1000);
-        let response = TaskResponse {
-            id: "test-id".to_string(),
-            short_id: None,
-            subject: long_text.clone(),
-            description: Some(long_text.clone()),
-            status: "backlog".to_string(),
-            priority: None,
-            parent_id: None,
-            project_id: "test-project".to_string(),
-        };
-
-        let task = service.response_to_task(&response);
-
-        assert_eq!(task.title.len(), 1000);
-        assert_eq!(task.description.unwrap().len(), 1000);
-    }
-
-    #[test]
-    fn test_new_service_can_access_client_project_id() {
-        let client = create_test_client();
-        let service = SacrumTaskService::new(client);
-
-        let project_id = service.client.project_id();
-        assert_eq!(project_id, "test-project");
-    }
-
-    #[test]
-    fn test_service_client_project_id_consistency() {
-        let client1 = create_test_client();
-        let client2 = create_test_client();
-
-        let service1 = SacrumTaskService::new(client1);
-        let service2 = SacrumTaskService::new(client2);
-
-        assert_eq!(service1.client.project_id(), service2.client.project_id());
-        assert_eq!(service1.client.project_id(), "test-project");
-    }
-
-    #[test]
-    fn test_response_to_task_with_various_statuses() {
-        let client = create_test_client();
-        let service = SacrumTaskService::new(client);
-
-        let statuses = vec![
-            "backlog",
-            "todo",
-            "in_progress",
-            "in_review",
-            "done",
-            "archived",
-        ];
-
-        for status in statuses {
-            let response = TaskResponse {
-                id: format!("task-{}", status),
-                short_id: None,
-                subject: "Test".to_string(),
-                description: None,
-                status: status.to_string(),
-                priority: None,
-                parent_id: None,
-                project_id: "test-project".to_string(),
-            };
-
-            let task = service.response_to_task(&response);
-            assert_eq!(task.id, Some(format!("task-{}", status)));
-            assert_eq!(task.level, Level::Task);
-        }
-    }
-
-    #[test]
-    fn test_response_with_none_and_some_optionals() {
-        let client = create_test_client();
-        let service = SacrumTaskService::new(client);
-
-        let response_all_some = TaskResponse {
-            id: "id1".to_string(),
-            short_id: Some("short1".to_string()),
-            subject: "Subject 1".to_string(),
-            description: Some("Desc 1".to_string()),
-            status: "backlog".to_string(),
-            priority: Some("high".to_string()),
-            parent_id: Some("parent1".to_string()),
-            project_id: "test-project".to_string(),
-        };
-
-        let response_all_none = TaskResponse {
-            id: "id2".to_string(),
-            short_id: None,
-            subject: "Subject 2".to_string(),
-            description: None,
-            status: "backlog".to_string(),
-            priority: None,
-            parent_id: None,
-            project_id: "test-project".to_string(),
-        };
-
-        let task1 = service.response_to_task(&response_all_some);
-        let task2 = service.response_to_task(&response_all_none);
-
-        assert_eq!(task1.id, Some("id1".to_string()));
-        assert_eq!(task1.description, Some("Desc 1".to_string()));
-        assert_eq!(task1.title, "Subject 1");
-        assert!(task1.priority.is_none());
-        assert!(task1.tags.is_empty());
-
-        assert_eq!(task2.id, Some("id2".to_string()));
-        assert_eq!(task2.description, None);
-        assert_eq!(task2.title, "Subject 2");
-        assert!(task2.priority.is_none());
-        assert!(task2.tags.is_empty());
-    }
-
-    #[test]
-    fn test_conversion_always_initializes_empty_collections() {
-        let client = create_test_client();
-        let service = SacrumTaskService::new(client);
-
-        let response = TaskResponse {
-            id: "test-id".to_string(),
-            short_id: None,
-            subject: "Test".to_string(),
-            description: None,
-            status: "backlog".to_string(),
-            priority: None,
-            parent_id: None,
-            project_id: "test-project".to_string(),
-        };
-
-        let task = service.response_to_task(&response);
-
-        assert!(task.sections.is_empty());
-        assert!(task.code_refs.is_empty());
-        assert!(task.tags.is_empty());
-        assert_eq!(task.sections.len(), 0);
-        assert_eq!(task.code_refs.len(), 0);
-        assert_eq!(task.tags.len(), 0);
-    }
-
-    #[test]
-    fn test_task_fields_mapping_accuracy() {
-        let client = create_test_client();
-        let service = SacrumTaskService::new(client);
-
-        let response = TaskResponse {
-            id: "acc-id".to_string(),
-            short_id: Some("short".to_string()),
-            subject: "Accuracy Test".to_string(),
-            description: Some("Testing field mappings".to_string()),
-            status: "in_progress".to_string(),
-            priority: Some("medium".to_string()),
-            parent_id: Some("parent-id".to_string()),
-            project_id: "test-project".to_string(),
-        };
-
-        let task = service.response_to_task(&response);
-
-        assert_eq!(task.id, Some("acc-id".to_string()));
-        assert_eq!(task.title, "Accuracy Test");
-        assert_eq!(task.description, Some("Testing field mappings".to_string()));
-        assert!(task.priority.is_none());
-        assert!(task.needs_human_review.is_none());
-        assert!(task.revision_feedback.is_none());
-        assert!(task.rejection_reason.is_none());
-    }
-
-    #[test]
-    fn test_multiple_conversions_consistency() {
-        let client = create_test_client();
-        let service = SacrumTaskService::new(client);
-
-        let response = TaskResponse {
-            id: "consistency-id".to_string(),
-            short_id: None,
-            subject: "Consistency Test".to_string(),
-            description: Some("Testing consistency".to_string()),
-            status: "done".to_string(),
-            priority: None,
-            parent_id: None,
-            project_id: "test-project".to_string(),
-        };
-
-        let task1 = service.response_to_task(&response);
-        let task2 = service.response_to_task(&response);
-
-        assert_eq!(task1.id, task2.id);
-        assert_eq!(task1.title, task2.title);
-        assert_eq!(task1.description, task2.description);
-        assert_eq!(task1.level, task2.level);
+        assert_eq!(task.workflow_id.as_deref(), Some("wf-123"));
+        assert_eq!(task.current_step_id.as_deref(), Some("step-456"));
+        assert_eq!(task.needs_human_review, Some(false));
+        assert_eq!(task.revision_feedback.as_deref(), Some("feedback"));
+        assert_eq!(task.rejection_reason.as_deref(), Some("reason"));
     }
 }

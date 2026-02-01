@@ -10,32 +10,20 @@ use std::path::PathBuf;
 /// A saved project in the project list
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct SavedProject {
-    /// Display name for the project
-    pub name: String,
-    /// Path to the project directory
-    pub path: String,
-    /// Whether a vtb config exists at this project path
-    pub has_config: bool,
-    /// Whether the project directory still exists on disk
-    pub exists: bool,
+    /// Project slug (from config.toml key)
+    pub slug: String,
+    /// Sacrum project ID (UUID)
+    pub project_id: String,
+    /// Optional per-project URL override
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
 }
 
 /// The persisted project configuration
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ProjectConfigFile {
-    /// List of known project paths
-    pub projects: Vec<ProjectEntry>,
-    /// Currently selected project path (if any)
-    pub current_project: Option<String>,
-}
-
-/// A project entry in the config file
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProjectEntry {
-    /// Display name for the project
-    pub name: String,
-    /// Path to the project directory
-    pub path: String,
+    /// Currently selected project slug (if any)
+    pub current_project_slug: Option<String>,
 }
 
 /// Configuration manager for project settings
@@ -88,110 +76,40 @@ impl ProjectConfig {
         fs::write(&self.config_path, content).map_err(|e| format!("Failed to write config: {}", e))
     }
 
-    /// Get all saved projects with their current status
+    /// Get all saved projects from config.toml
     pub fn get_projects(&self) -> Vec<SavedProject> {
-        let config = self.load();
-
-        // Load the vertebrae config file once for all projects
-        let vtb_config = vertebrae_sacrum_client::load_config_file().ok();
-
-        config
-            .projects
-            .into_iter()
-            .map(|entry| {
-                let path = PathBuf::from(&entry.path);
-                let exists = path.exists();
-                let has_config = exists
-                    && vtb_config.as_ref().is_some_and(|cfg| {
-                        crate::slug_from_path(&entry.path)
-                            .is_some_and(|slug| cfg.projects.contains_key(&slug))
-                    });
-
-                SavedProject {
-                    name: entry.name,
-                    path: entry.path,
-                    has_config,
-                    exists,
-                }
-            })
-            .collect()
+        match vertebrae_sacrum_client::load_config_file() {
+            Ok(config) => config
+                .projects
+                .into_iter()
+                .map(|(slug, project_section)| SavedProject {
+                    slug,
+                    project_id: project_section.project_id,
+                    url: project_section.url,
+                })
+                .collect(),
+            Err(_) => Vec::new(),
+        }
     }
 
-    /// Add a project to the saved list
-    ///
-    /// Returns the saved project with current status
-    pub fn add_project(&self, name: String, path: String) -> Result<SavedProject, String> {
-        let path_buf = PathBuf::from(&path);
-
-        // Validate the path exists
-        if !path_buf.exists() {
-            return Err(format!("Directory does not exist: {}", path));
-        }
-
-        // Check if already added
-        let mut config = self.load();
-        if config.projects.iter().any(|p| p.path == path) {
-            return Err("Project already exists in list".to_string());
-        }
-
-        // Add to list
-        config.projects.push(ProjectEntry {
-            name: name.clone(),
-            path: path.clone(),
-        });
-
-        self.save(&config)?;
-
-        let has_config = vertebrae_sacrum_client::load_config_file()
-            .ok()
-            .is_some_and(|cfg| {
-                crate::slug_from_path(&path).is_some_and(|slug| cfg.projects.contains_key(&slug))
-            });
-
-        Ok(SavedProject {
-            name,
-            path,
-            has_config,
-            exists: true,
-        })
-    }
-
-    /// Remove a project from the saved list
-    pub fn remove_project(&self, path: &str) -> Result<(), String> {
-        let mut config = self.load();
-        let initial_len = config.projects.len();
-
-        config.projects.retain(|p| p.path != path);
-
-        if config.projects.len() == initial_len {
-            return Err("Project not found in list".to_string());
-        }
-
-        // Clear current project if it was removed
-        if config.current_project.as_deref() == Some(path) {
-            config.current_project = None;
-        }
-
-        self.save(&config)
-    }
-
-    /// Get the currently selected project path
+    /// Get the currently selected project slug
     pub fn get_current_project(&self) -> Option<String> {
-        self.load().current_project
+        self.load().current_project_slug
     }
 
-    /// Set the current project
-    pub fn set_current_project(&self, path: Option<String>) -> Result<(), String> {
-        let mut config = self.load();
-
-        // Validate that the project is in the list (if setting a project)
-        if let Some(ref p) = path {
-            if !config.projects.iter().any(|proj| &proj.path == p) {
-                return Err("Project not in saved list".to_string());
+    /// Set the current project by slug
+    pub fn set_current_project(&self, slug: Option<String>) -> Result<(), String> {
+        // Validate that the project exists in config.toml (if setting a project)
+        if let Some(ref s) = slug {
+            let config = vertebrae_sacrum_client::load_config_file()
+                .map_err(|e| format!("Failed to load config file: {}", e))?;
+            if !config.projects.contains_key(s) {
+                return Err(format!("Project '{}' not found in config", s));
             }
         }
 
-        config.current_project = path;
+        let mut config = self.load();
+        config.current_project_slug = slug;
         self.save(&config)
     }
 }
@@ -215,8 +133,7 @@ mod tests {
         };
 
         let result = config.load();
-        assert!(result.projects.is_empty());
-        assert!(result.current_project.is_none());
+        assert!(result.current_project_slug.is_none());
 
         let _ = fs::remove_dir_all(&config_dir);
     }

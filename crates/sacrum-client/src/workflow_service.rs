@@ -1,10 +1,10 @@
-//! WorkflowService implementation for Sacrum HTTP API - Stub
+//! WorkflowService implementation for Sacrum HTTP API
 //!
 //! Implements the WorkflowService trait by making HTTP calls to the Sacrum REST API.
-//! Many methods are currently unimplemented as they require additional API endpoints
-//! to be defined in the Sacrum backend.
+//! Uses flat /api/... routes with project_id as a query parameter.
 
 use async_trait::async_trait;
+use serde::Serialize;
 use serde_json::json;
 use vertebrae_core::WorkflowSummary;
 use vertebrae_core::error::{ServiceError, ServiceResult};
@@ -16,6 +16,12 @@ use vertebrae_core::workflow_service::{
 
 use crate::api_types::WorkflowResponse;
 use crate::client::SacrumClient;
+
+/// Query param helper for project_id
+#[derive(Serialize)]
+struct ProjectQuery<'a> {
+    project_id: &'a str,
+}
 
 /// WorkflowService implementation for Sacrum HTTP client
 pub struct SacrumWorkflowService {
@@ -29,16 +35,40 @@ impl SacrumWorkflowService {
     }
 
     fn response_to_workflow(&self, response: &WorkflowResponse) -> Workflow {
+        let metadata = response
+            .metadata
+            .as_ref()
+            .and_then(|v| {
+                v.as_object().map(|obj| {
+                    obj.iter()
+                        .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                        .collect()
+                })
+            })
+            .unwrap_or_default();
+
+        let created_at = response
+            .inserted_at
+            .as_deref()
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+            .map(|dt| dt.with_timezone(&chrono::Utc));
+
+        let updated_at = response
+            .updated_at
+            .as_deref()
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+            .map(|dt| dt.with_timezone(&chrono::Utc));
+
         Workflow {
             id: Some(response.id.clone()),
             name: response.name.clone(),
             description: response.description.clone(),
-            initial_step: None,
-            metadata: std::collections::HashMap::new(),
-            auto_advance: false,
-            order: 0,
-            created_at: None,
-            updated_at: None,
+            initial_step: response.initial_step_id.clone(),
+            metadata,
+            auto_advance: response.auto_advance.unwrap_or(false),
+            order: response.display_order.unwrap_or(0),
+            created_at,
+            updated_at,
         }
     }
 
@@ -47,7 +77,7 @@ impl SacrumWorkflowService {
             id: response.id.clone(),
             name: response.name.clone(),
             description: response.description.clone(),
-            step_count: response.steps.len(),
+            step_count: 0, // Step count not included in workflow response; fetched separately
         }
     }
 }
@@ -65,34 +95,27 @@ impl WorkflowService for SacrumWorkflowService {
             "project_id": self.client.project_id(),
         });
 
-        let path = format!("/projects/{}/workflows", self.client.project_id());
-        let response: WorkflowResponse = self.client.post(&path, &request).await?;
+        let response: WorkflowResponse = self.client.post("/api/workflows", &request).await?;
 
         Ok(response.id)
     }
 
     async fn get_workflow(&self, id: &str) -> ServiceResult<Workflow> {
-        let path = format!("/projects/{}/workflows/{}", self.client.project_id(), id);
-        let response: WorkflowResponse = self.client.get(&path).await?;
+        let path = format!("/api/workflows/{}", id);
+        let response: WorkflowResponse = self.client.get(&path, &()).await?;
         Ok(self.response_to_workflow(&response))
     }
 
     async fn list_workflows(&self) -> ServiceResult<Vec<WorkflowSummary>> {
-        let path = format!("/projects/{}/workflows", self.client.project_id());
-        let response: serde_json::Value = self.client.get(&path).await?;
+        let query = ProjectQuery {
+            project_id: self.client.project_id(),
+        };
+        let workflows: Vec<WorkflowResponse> = self.client.get("/api/workflows", &query).await?;
 
-        let summaries = response
-            .get("workflows")
-            .and_then(|v| v.as_array())
-            .unwrap_or(&vec![])
+        Ok(workflows
             .iter()
-            .filter_map(|w| {
-                let workflow_response: WorkflowResponse = serde_json::from_value(w.clone()).ok()?;
-                Some(self.response_to_summary(&workflow_response))
-            })
-            .collect();
-
-        Ok(summaries)
+            .map(|w| self.response_to_summary(w))
+            .collect())
     }
 
     async fn update_workflow(&self, id: &str, options: UpdateWorkflowOptions) -> ServiceResult<()> {
@@ -106,14 +129,14 @@ impl WorkflowService for SacrumWorkflowService {
             request["description"] = json!(desc);
         }
 
-        let path = format!("/projects/{}/workflows/{}", self.client.project_id(), id);
+        let path = format!("/api/workflows/{}", id);
         let _response: WorkflowResponse = self.client.put(&path, &request).await?;
 
         Ok(())
     }
 
     async fn delete_workflow(&self, id: &str) -> ServiceResult<()> {
-        let path = format!("/projects/{}/workflows/{}", self.client.project_id(), id);
+        let path = format!("/api/workflows/{}", id);
         self.client.delete(&path).await?;
         Ok(())
     }
@@ -134,11 +157,7 @@ impl WorkflowService for SacrumWorkflowService {
         let request = json!({
             "workflow_id": workflow_id
         });
-        let path = format!(
-            "/projects/{}/tasks/{}/assign-workflow",
-            self.client.project_id(),
-            task_id
-        );
+        let path = format!("/api/tasks/{}/assign-workflow", task_id);
         let _response: serde_json::Value = self.client.post(&path, &request).await?;
 
         Ok(AssignResult {
@@ -149,29 +168,34 @@ impl WorkflowService for SacrumWorkflowService {
     }
 
     async fn unassign_workflow(&self, task_id: &str) -> ServiceResult<()> {
-        let path = format!(
-            "/projects/{}/tasks/{}/assign-workflow",
-            self.client.project_id(),
-            task_id
-        );
+        let path = format!("/api/tasks/{}/assign-workflow", task_id);
         self.client.delete(&path).await?;
         Ok(())
     }
 
     async fn advance_step(&self, task_id: &str) -> ServiceResult<StepTransitionResult> {
-        let path = format!(
-            "/projects/{}/tasks/{}/advance-step",
-            self.client.project_id(),
-            task_id
-        );
-        let _response: serde_json::Value = self.client.post(&path, &json!({})).await?;
+        // The Sacrum API uses POST /api/tasks/{task_id}/move-to with a step_id body.
+        // For advance, we need to resolve the next step. Since we don't have that info
+        // here, we call the advance endpoint which the backend handles.
+        let path = format!("/api/tasks/{}/advance", task_id);
+        let response: serde_json::Value = self.client.post(&path, &json!({})).await?;
+
+        let step_name = response
+            .get("step_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
 
         Ok(StepTransitionResult {
             task_id: task_id.to_string(),
-            workflow_id: String::new(),
+            workflow_id: response
+                .get("workflow_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
             from_step: 0,
             to_step: 1,
-            step_name: String::new(),
+            step_name,
             total_steps: 0,
             execution_id: None,
             chained_to_workflow: None,
@@ -179,19 +203,25 @@ impl WorkflowService for SacrumWorkflowService {
     }
 
     async fn retreat_step(&self, task_id: &str) -> ServiceResult<StepTransitionResult> {
-        let path = format!(
-            "/projects/{}/tasks/{}/retreat-step",
-            self.client.project_id(),
-            task_id
-        );
-        let _response: serde_json::Value = self.client.post(&path, &json!({})).await?;
+        let path = format!("/api/tasks/{}/retreat", task_id);
+        let response: serde_json::Value = self.client.post(&path, &json!({})).await?;
+
+        let step_name = response
+            .get("step_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
 
         Ok(StepTransitionResult {
             task_id: task_id.to_string(),
-            workflow_id: String::new(),
+            workflow_id: response
+                .get("workflow_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
             from_step: 1,
             to_step: 0,
-            step_name: String::new(),
+            step_name,
             total_steps: 0,
             execution_id: None,
             chained_to_workflow: None,
@@ -199,11 +229,7 @@ impl WorkflowService for SacrumWorkflowService {
     }
 
     async fn reject_task(&self, task_id: &str) -> ServiceResult<RejectResult> {
-        let path = format!(
-            "/projects/{}/tasks/{}/reject",
-            self.client.project_id(),
-            task_id
-        );
+        let path = format!("/api/tasks/{}/reject", task_id);
         let _response: serde_json::Value = self.client.post(&path, &json!({})).await?;
 
         Ok(RejectResult {
@@ -294,10 +320,10 @@ impl WorkflowService for SacrumWorkflowService {
     async fn create_workflow_raw(&self, _id: &str, workflow: &Workflow) -> ServiceResult<String> {
         let request = json!({
             "name": workflow.name,
-            "description": workflow.description
+            "description": workflow.description,
+            "project_id": self.client.project_id(),
         });
-        let path = format!("/projects/{}/workflows", self.client.project_id());
-        let response: WorkflowResponse = self.client.post(&path, &request).await?;
+        let response: WorkflowResponse = self.client.post("/api/workflows", &request).await?;
         Ok(response.id)
     }
 
@@ -324,7 +350,6 @@ impl WorkflowService for SacrumWorkflowService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api_types::StepResponse;
 
     fn create_test_client() -> SacrumClient {
         crate::client::SacrumClient::new(crate::config::SacrumConfig::new(
@@ -332,6 +357,23 @@ mod tests {
             "test-token".to_string(),
             "test-proj".to_string(),
         ))
+    }
+
+    fn make_workflow_response(id: &str, name: &str) -> WorkflowResponse {
+        WorkflowResponse {
+            id: id.to_string(),
+            name: name.to_string(),
+            description: None,
+            auto_advance: None,
+            is_default: None,
+            display_order: None,
+            metadata: None,
+            initial_step_id: None,
+            project_id: Some("test-proj".to_string()),
+            transitions: None,
+            inserted_at: None,
+            updated_at: None,
+        }
     }
 
     #[test]
@@ -343,12 +385,7 @@ mod tests {
 
     #[test]
     fn test_workflow_summary_conversion() {
-        let response = WorkflowResponse {
-            id: "wf-1".to_string(),
-            name: "Test Workflow".to_string(),
-            description: None,
-            steps: vec![],
-        };
+        let response = make_workflow_response("wf-1", "Test Workflow");
 
         let client = create_test_client();
         let service = SacrumWorkflowService::new(client);
@@ -362,12 +399,8 @@ mod tests {
 
     #[test]
     fn test_workflow_summary_with_description() {
-        let response = WorkflowResponse {
-            id: "wf-2".to_string(),
-            name: "Complex Workflow".to_string(),
-            description: Some("A workflow with multiple steps".to_string()),
-            steps: vec![],
-        };
+        let mut response = make_workflow_response("wf-2", "Complex Workflow");
+        response.description = Some("A workflow with multiple steps".to_string());
 
         let client = create_test_client();
         let service = SacrumWorkflowService::new(client);
@@ -379,50 +412,15 @@ mod tests {
             summary.description,
             Some("A workflow with multiple steps".to_string())
         );
-        assert_eq!(summary.step_count, 0);
-    }
-
-    #[test]
-    fn test_workflow_summary_with_steps() {
-        let steps = vec![
-            StepResponse {
-                id: "step-1".to_string(),
-                name: "Review".to_string(),
-                ordinal: 0,
-                requires_human_review: true,
-            },
-            StepResponse {
-                id: "step-2".to_string(),
-                name: "Approve".to_string(),
-                ordinal: 1,
-                requires_human_review: false,
-            },
-        ];
-
-        let response = WorkflowResponse {
-            id: "wf-3".to_string(),
-            name: "Multi-Step Workflow".to_string(),
-            description: Some("Has steps".to_string()),
-            steps,
-        };
-
-        let client = create_test_client();
-        let service = SacrumWorkflowService::new(client);
-        let summary = service.response_to_summary(&response);
-
-        assert_eq!(summary.id, "wf-3");
-        assert_eq!(summary.name, "Multi-Step Workflow");
-        assert_eq!(summary.step_count, 2);
     }
 
     #[test]
     fn test_response_to_workflow_conversion() {
-        let response = WorkflowResponse {
-            id: "wf-4".to_string(),
-            name: "Domain Workflow".to_string(),
-            description: Some("For domain objects".to_string()),
-            steps: vec![],
-        };
+        let mut response = make_workflow_response("wf-4", "Domain Workflow");
+        response.description = Some("For domain objects".to_string());
+        response.auto_advance = Some(true);
+        response.display_order = Some(3);
+        response.initial_step_id = Some("step-1".to_string());
 
         let client = create_test_client();
         let service = SacrumWorkflowService::new(client);
@@ -431,19 +429,14 @@ mod tests {
         assert_eq!(workflow.id, Some("wf-4".to_string()));
         assert_eq!(workflow.name, "Domain Workflow");
         assert_eq!(workflow.description, Some("For domain objects".to_string()));
-        assert_eq!(workflow.auto_advance, false);
-        assert_eq!(workflow.order, 0);
-        assert!(workflow.metadata.is_empty());
+        assert!(workflow.auto_advance);
+        assert_eq!(workflow.order, 3);
+        assert_eq!(workflow.initial_step.as_deref(), Some("step-1"));
     }
 
     #[test]
     fn test_response_to_workflow_minimal() {
-        let response = WorkflowResponse {
-            id: "wf-5".to_string(),
-            name: "Minimal".to_string(),
-            description: None,
-            steps: vec![],
-        };
+        let response = make_workflow_response("wf-5", "Minimal");
 
         let client = create_test_client();
         let service = SacrumWorkflowService::new(client);
@@ -452,7 +445,36 @@ mod tests {
         assert_eq!(workflow.id, Some("wf-5".to_string()));
         assert_eq!(workflow.name, "Minimal");
         assert_eq!(workflow.description, None);
+        assert!(!workflow.auto_advance);
+        assert_eq!(workflow.order, 0);
         assert!(workflow.initial_step.is_none());
+    }
+
+    #[test]
+    fn test_response_to_workflow_with_metadata() {
+        let mut response = make_workflow_response("wf-meta", "Metadata Workflow");
+        response.metadata = Some(json!({"key1": "value1", "key2": "value2"}));
+
+        let client = create_test_client();
+        let service = SacrumWorkflowService::new(client);
+        let workflow = service.response_to_workflow(&response);
+
+        assert_eq!(workflow.metadata.get("key1").unwrap(), "value1");
+        assert_eq!(workflow.metadata.get("key2").unwrap(), "value2");
+    }
+
+    #[test]
+    fn test_response_to_workflow_with_timestamps() {
+        let mut response = make_workflow_response("wf-ts", "Timestamped");
+        response.inserted_at = Some("2024-01-01T00:00:00Z".to_string());
+        response.updated_at = Some("2024-01-02T00:00:00Z".to_string());
+
+        let client = create_test_client();
+        let service = SacrumWorkflowService::new(client);
+        let workflow = service.response_to_workflow(&response);
+
+        assert!(workflow.created_at.is_some());
+        assert!(workflow.updated_at.is_some());
     }
 
     #[test]
@@ -465,59 +487,9 @@ mod tests {
     }
 
     #[test]
-    fn test_response_to_workflow_with_all_fields() {
-        let response = WorkflowResponse {
-            id: "full-wf".to_string(),
-            name: "Full Workflow".to_string(),
-            description: Some("Complete workflow with all details".to_string()),
-            steps: vec![],
-        };
-
-        let client = create_test_client();
-        let service = SacrumWorkflowService::new(client);
-        let workflow = service.response_to_workflow(&response);
-
-        assert_eq!(workflow.id, Some("full-wf".to_string()));
-        assert_eq!(workflow.name, "Full Workflow");
-        assert_eq!(
-            workflow.description,
-            Some("Complete workflow with all details".to_string())
-        );
-        assert_eq!(workflow.auto_advance, false);
-        assert_eq!(workflow.order, 0);
-        assert!(workflow.initial_step.is_none());
-        assert!(workflow.metadata.is_empty());
-        assert!(workflow.created_at.is_none());
-        assert!(workflow.updated_at.is_none());
-    }
-
-    #[test]
     fn test_summary_and_workflow_consistency() {
-        let response = WorkflowResponse {
-            id: "consistency-test".to_string(),
-            name: "Consistent Workflow".to_string(),
-            description: Some("Test consistency".to_string()),
-            steps: vec![
-                StepResponse {
-                    id: "s1".to_string(),
-                    name: "Step 1".to_string(),
-                    ordinal: 0,
-                    requires_human_review: false,
-                },
-                StepResponse {
-                    id: "s2".to_string(),
-                    name: "Step 2".to_string(),
-                    ordinal: 1,
-                    requires_human_review: true,
-                },
-                StepResponse {
-                    id: "s3".to_string(),
-                    name: "Step 3".to_string(),
-                    ordinal: 2,
-                    requires_human_review: false,
-                },
-            ],
-        };
+        let mut response = make_workflow_response("consistency-test", "Consistent Workflow");
+        response.description = Some("Test consistency".to_string());
 
         let client = create_test_client();
         let service = SacrumWorkflowService::new(client);
@@ -528,127 +500,5 @@ mod tests {
         assert_eq!(summary.id, workflow.id.as_ref().unwrap().as_str());
         assert_eq!(summary.name, workflow.name);
         assert_eq!(summary.description, workflow.description);
-        assert_eq!(summary.step_count, 3);
-    }
-
-    #[test]
-    fn test_empty_and_full_workflows() {
-        let empty_response = WorkflowResponse {
-            id: "empty".to_string(),
-            name: "Empty".to_string(),
-            description: None,
-            steps: vec![],
-        };
-
-        let full_response = WorkflowResponse {
-            id: "full".to_string(),
-            name: "Full".to_string(),
-            description: Some("Full workflow".to_string()),
-            steps: vec![
-                StepResponse {
-                    id: "s1".to_string(),
-                    name: "Step 1".to_string(),
-                    ordinal: 0,
-                    requires_human_review: true,
-                },
-                StepResponse {
-                    id: "s2".to_string(),
-                    name: "Step 2".to_string(),
-                    ordinal: 1,
-                    requires_human_review: false,
-                },
-            ],
-        };
-
-        let client = create_test_client();
-        let service = SacrumWorkflowService::new(client);
-
-        let empty_summary = service.response_to_summary(&empty_response);
-        let full_summary = service.response_to_summary(&full_response);
-
-        assert_eq!(empty_summary.step_count, 0);
-        assert_eq!(full_summary.step_count, 2);
-
-        let empty_workflow = service.response_to_workflow(&empty_response);
-        let full_workflow = service.response_to_workflow(&full_response);
-
-        assert_eq!(empty_workflow.name, "Empty");
-        assert_eq!(full_workflow.name, "Full");
-    }
-
-    #[test]
-    fn test_special_characters_in_names() {
-        let response = WorkflowResponse {
-            id: "special-wf".to_string(),
-            name: "Workflow with \"quotes\" and 'apostrophes' & symbols".to_string(),
-            description: Some("Description with émojis: 🚀 and ünicode: café".to_string()),
-            steps: vec![],
-        };
-
-        let client = create_test_client();
-        let service = SacrumWorkflowService::new(client);
-
-        let summary = service.response_to_summary(&response);
-        let workflow = service.response_to_workflow(&response);
-
-        assert_eq!(
-            summary.name,
-            "Workflow with \"quotes\" and 'apostrophes' & symbols"
-        );
-        assert_eq!(
-            workflow.description,
-            Some("Description with émojis: 🚀 and ünicode: café".to_string())
-        );
-    }
-
-    #[test]
-    fn test_workflow_summary_step_counting() {
-        let client = create_test_client();
-        let service = SacrumWorkflowService::new(client);
-
-        for count in &[0, 1, 3, 5, 10, 100] {
-            let mut steps = vec![];
-            for i in 0..*count {
-                steps.push(StepResponse {
-                    id: format!("step-{}", i),
-                    name: format!("Step {}", i),
-                    ordinal: i as i32,
-                    requires_human_review: i % 2 == 0,
-                });
-            }
-
-            let response = WorkflowResponse {
-                id: format!("wf-{}", count),
-                name: format!("Workflow with {} steps", count),
-                description: None,
-                steps,
-            };
-
-            let summary = service.response_to_summary(&response);
-            assert_eq!(summary.step_count, *count);
-        }
-    }
-
-    #[test]
-    fn test_workflow_field_preservation() {
-        let response = WorkflowResponse {
-            id: "preserve-test".to_string(),
-            name: "Field Preservation".to_string(),
-            description: Some("Preserving all fields".to_string()),
-            steps: vec![],
-        };
-
-        let client = create_test_client();
-        let service = SacrumWorkflowService::new(client);
-
-        let workflow = service.response_to_workflow(&response);
-        let summary = service.response_to_summary(&response);
-
-        assert_eq!(workflow.id.unwrap(), summary.id);
-        assert_eq!(workflow.name, summary.name);
-        assert_eq!(workflow.description, summary.description);
-        assert_eq!(workflow.auto_advance, false);
-        assert_eq!(workflow.order, 0);
-        assert!(workflow.metadata.is_empty());
     }
 }

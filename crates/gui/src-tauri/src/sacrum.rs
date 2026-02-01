@@ -26,8 +26,8 @@ use vertebrae_sacrum_client::{
 pub fn from_sacrum(client: Arc<SacrumClient>) -> VertebraeServices {
     let task_service = SacrumTaskService::new((*client).clone());
     let workflow_service = SacrumWorkflowService::new((*client).clone());
-    let execution_service = SacrumExecutionService::new();
-    let step_service = SacrumStepService::new();
+    let execution_service = SacrumExecutionService::new((*client).clone());
+    let step_service = SacrumStepService::new((*client).clone());
 
     VertebraeServices::from_services(
         Arc::new(task_service),

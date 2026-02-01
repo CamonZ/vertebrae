@@ -37,7 +37,7 @@
 //!     let client = SacrumClient::new(config);
 //!
 //!     // Make API calls
-//!     // let task = client.get::<TaskResponse>("/projects/tasks/123").await?;
+//!     // let task = client.get::<TaskResponse>("/api/tasks/123", &()).await?;
 //!
 //!     Ok(())
 //! }
@@ -53,8 +53,10 @@ pub mod task_service;
 pub mod workflow_service;
 
 pub use api_types::{
-    CreateProjectRequest, DataEnvelope, ErrorResponse, ProjectListResponse, ProjectResponse,
-    StepResponse, TaskListResponse, TaskResponse, WorkflowResponse,
+    CodeRefResponse, CreateProjectRequest, DataEnvelope, ErrorResponse, MoveToRequest,
+    ProjectListResponse, ProjectResponse, SectionResponse, SessionLogResponse,
+    StepExecutionResponse, StepTransitionResponse, TaskResponse, WorkflowResponse,
+    WorkflowStepResponse, WorkflowTransitionResponse,
 };
 pub use client::SacrumClient;
 pub use config::{

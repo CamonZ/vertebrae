@@ -1,9 +1,10 @@
 //! HTTP client for Sacrum API
 //!
 //! Provides a wrapper around reqwest::Client that handles:
-//! - Bearer token authentication
+//! - Bearer token authentication (via default headers)
 //! - Automatic response deserialization with DataEnvelope unwrapping
 //! - Standard HTTP methods (GET, POST, PUT, DELETE)
+//! - Query parameter support on GET requests
 
 use crate::api_types::DataEnvelope;
 use crate::config::SacrumConfig;
@@ -17,21 +18,36 @@ use tracing::debug;
 ///
 /// Wraps reqwest::Client and manages authentication, base URLs,
 /// and automatic response envelope unwrapping.
+///
+/// Bearer auth is set once via default headers in the constructor,
+/// so individual requests don't need to attach the token.
 #[derive(Clone)]
 pub struct SacrumClient {
     client: Client,
     base_url: String,
-    api_token: String,
     project_id: String,
 }
 
 impl SacrumClient {
     /// Create a new SacrumClient from configuration
+    ///
+    /// Sets the bearer token as a default header on the underlying reqwest::Client.
     pub fn new(config: SacrumConfig) -> Self {
+        use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
+
+        let mut default_headers = HeaderMap::new();
+        if let Ok(val) = HeaderValue::from_str(&format!("Bearer {}", config.api_token)) {
+            default_headers.insert(AUTHORIZATION, val);
+        }
+
+        let client = Client::builder()
+            .default_headers(default_headers)
+            .build()
+            .expect("Failed to build reqwest client");
+
         SacrumClient {
-            client: Client::new(),
+            client,
             base_url: config.base_url,
-            api_token: config.api_token,
             project_id: config.project_id,
         }
     }
@@ -45,19 +61,19 @@ impl SacrumClient {
     ///
     /// # Arguments
     /// * `path` - The API path (relative to base_url, should start with /)
+    /// * `query` - Query parameters to serialize. Pass `&()` for no params.
     ///
     /// # Returns
     /// The deserialized response data (unwrapped from DataEnvelope)
-    pub async fn get<T: DeserializeOwned>(&self, path: &str) -> SacrumClientResult<T> {
+    pub async fn get<T: DeserializeOwned, Q: Serialize>(
+        &self,
+        path: &str,
+        query: &Q,
+    ) -> SacrumClientResult<T> {
         debug!("GET request to: {}{}", self.base_url, path);
 
         let url = format!("{}{}", self.base_url, path);
-        let response = self
-            .client
-            .get(&url)
-            .bearer_auth(&self.api_token)
-            .send()
-            .await?;
+        let response = self.client.get(&url).query(query).send().await?;
 
         self.handle_response::<T>(response).await
     }
@@ -78,13 +94,7 @@ impl SacrumClient {
         debug!("POST request to: {}{}", self.base_url, path);
 
         let url = format!("{}{}", self.base_url, path);
-        let response = self
-            .client
-            .post(&url)
-            .bearer_auth(&self.api_token)
-            .json(body)
-            .send()
-            .await?;
+        let response = self.client.post(&url).json(body).send().await?;
 
         self.handle_response::<T>(response).await
     }
@@ -105,13 +115,7 @@ impl SacrumClient {
         debug!("PUT request to: {}{}", self.base_url, path);
 
         let url = format!("{}{}", self.base_url, path);
-        let response = self
-            .client
-            .put(&url)
-            .bearer_auth(&self.api_token)
-            .json(body)
-            .send()
-            .await?;
+        let response = self.client.put(&url).json(body).send().await?;
 
         self.handle_response::<T>(response).await
     }
@@ -124,12 +128,7 @@ impl SacrumClient {
         debug!("DELETE request to: {}{}", self.base_url, path);
 
         let url = format!("{}{}", self.base_url, path);
-        let response = self
-            .client
-            .delete(&url)
-            .bearer_auth(&self.api_token)
-            .send()
-            .await?;
+        let response = self.client.delete(&url).send().await?;
 
         // For DELETE, we just check the status code
         if response.status().is_success() {
@@ -181,19 +180,6 @@ mod tests {
         assert_eq!(client.project_id(), "test-project");
     }
 
-    #[tokio::test]
-    async fn test_client_bearer_auth() {
-        let config = SacrumConfig::new(
-            "http://localhost:4000".to_string(),
-            "secret-token".to_string(),
-            "proj-123".to_string(),
-        );
-        let client = SacrumClient::new(config);
-
-        // Verify the client has the token
-        assert_eq!(client.api_token, "secret-token");
-    }
-
     #[test]
     fn test_client_with_different_base_urls() {
         let config1 = SacrumConfig::new(
@@ -214,7 +200,7 @@ mod tests {
     }
 
     #[test]
-    fn test_client_preserves_all_config_values() {
+    fn test_client_preserves_config_values() {
         let config = SacrumConfig::new(
             "http://my-server:5000".to_string(),
             "my-secret-token".to_string(),
@@ -223,7 +209,6 @@ mod tests {
         let client = SacrumClient::new(config);
 
         assert_eq!(client.base_url, "http://my-server:5000");
-        assert_eq!(client.api_token, "my-secret-token");
         assert_eq!(client.project_id(), "my-project-id");
     }
 
@@ -239,7 +224,6 @@ mod tests {
 
         assert_eq!(client1.project_id(), client2.project_id());
         assert_eq!(client1.base_url, client2.base_url);
-        assert_eq!(client1.api_token, client2.api_token);
     }
 
     #[test]
@@ -275,44 +259,6 @@ mod tests {
         assert_eq!(client1.project_id(), "project1");
         assert_eq!(client2.project_id(), "project2");
         assert_ne!(client1.base_url, client2.base_url);
-        assert_ne!(client1.api_token, client2.api_token);
-    }
-
-    #[test]
-    fn test_client_new_initializes_reqwest_client() {
-        let config = SacrumConfig::new(
-            "http://localhost:4000".to_string(),
-            "token".to_string(),
-            "proj".to_string(),
-        );
-        let client = SacrumClient::new(config);
-
-        // Verify the client is properly initialized by accessing its properties
-        assert_eq!(client.base_url, "http://localhost:4000");
-        assert_eq!(client.api_token, "token");
-        assert_eq!(client.project_id(), "proj");
-    }
-
-    #[test]
-    fn test_client_with_various_token_formats() {
-        let tokens = vec![
-            "simple-token",
-            "token_with_underscores",
-            "token-with-dashes",
-            "token.with.dots",
-            "CaseSensitiveToken",
-            "token123456789",
-        ];
-
-        for token in tokens {
-            let config = SacrumConfig::new(
-                "http://localhost:4000".to_string(),
-                token.to_string(),
-                "proj".to_string(),
-            );
-            let client = SacrumClient::new(config);
-            assert_eq!(client.api_token, token);
-        }
     }
 
     #[test]
@@ -343,25 +289,10 @@ mod tests {
         );
         let client = SacrumClient::new(config);
 
-        // Multiple accesses should return consistent values
         assert_eq!(client.project_id(), "test-project");
         assert_eq!(client.project_id(), "test-project");
         assert_eq!(client.base_url, "http://localhost:4000");
         assert_eq!(client.base_url, "http://localhost:4000");
-    }
-
-    #[test]
-    fn test_client_api_token_is_not_exposed_through_debug() {
-        let config = SacrumConfig::new(
-            "http://localhost:4000".to_string(),
-            "secret-token-12345".to_string(),
-            "proj".to_string(),
-        );
-        let client = SacrumClient::new(config);
-
-        // SacrumClient does not implement Debug trait to avoid exposing secrets
-        // This test documents that we intentionally don't derive Debug
-        assert_eq!(client.project_id(), "proj");
     }
 
     #[test]
@@ -374,10 +305,8 @@ mod tests {
         let client1 = SacrumClient::new(config);
         let client2 = client1.clone();
 
-        // Both should be equal and independent
         assert_eq!(client1.project_id(), client2.project_id());
         assert_eq!(client1.base_url, client2.base_url);
-        assert_eq!(client1.api_token, client2.api_token);
     }
 
     #[test]
@@ -420,7 +349,6 @@ mod tests {
 
         assert_eq!(client1.project_id(), client2.project_id());
         assert_eq!(client1.base_url, client2.base_url);
-        assert_eq!(client1.api_token, client2.api_token);
     }
 
     #[test]

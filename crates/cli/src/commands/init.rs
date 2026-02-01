@@ -322,7 +322,10 @@ impl InitCommand {
         slug: &str,
     ) -> Result<(ProjectResponse, bool), InitError> {
         // Try to find existing project by slug
-        match client.get::<Vec<ProjectResponse>>("/api/projects").await {
+        match client
+            .get::<Vec<ProjectResponse>, _>("/api/projects", &())
+            .await
+        {
             Ok(projects) => {
                 if let Some(project) = projects.iter().find(|p| p.slug == slug) {
                     return Ok((project.clone(), false));

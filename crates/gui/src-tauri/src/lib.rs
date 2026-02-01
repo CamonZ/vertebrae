@@ -120,15 +120,6 @@ fn create_builder() -> Builder {
         ])
 }
 
-/// Derive a project slug from a filesystem path by slugifying the last component.
-fn slug_from_path(path: &str) -> Option<String> {
-    std::path::Path::new(path)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .map(slug::slugify)
-        .filter(|s| !s.is_empty())
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = create_builder();
@@ -153,30 +144,23 @@ pub fn run() {
             // Initialize project configuration
             let project_config = ProjectConfig::new().expect("Failed to initialize project config");
 
-            // Check if there's a current project set
-            let current_project = project_config.get_current_project();
-            let service = if let Some(project_path) = current_project {
-                log::info!("Attempting to connect to Sacrum backend");
+            // Check if there's a current project selected (stored as slug)
+            let current_project_slug = project_config.get_current_project();
+            let service = if let Some(slug) = current_project_slug.clone() {
+                log::info!(
+                    "Attempting to connect to Sacrum backend for project: {}",
+                    slug
+                );
 
                 tauri::async_runtime::block_on(async {
-                    let slug = slug_from_path(&project_path);
-                    match slug {
-                        Some(slug) => match SacrumConfig::load(&slug) {
-                            Ok(config) => {
-                                let client = SacrumClient::new(config);
-                                let client_arc = Arc::new(client);
-                                Some(crate::sacrum::from_sacrum(client_arc))
-                            }
-                            Err(e) => {
-                                log::error!("Failed to load Sacrum configuration: {}", e);
-                                None
-                            }
-                        },
-                        None => {
-                            log::error!(
-                                "Failed to derive slug from project path: {}",
-                                project_path
-                            );
+                    match SacrumConfig::load(&slug) {
+                        Ok(config) => {
+                            let client = SacrumClient::new(config);
+                            let client_arc = Arc::new(client);
+                            Some(crate::sacrum::from_sacrum(client_arc))
+                        }
+                        Err(e) => {
+                            log::error!("Failed to load Sacrum configuration: {}", e);
                             None
                         }
                     }
@@ -197,11 +181,7 @@ pub fn run() {
             log::info!("[STARTUP] PTY manager initialized");
 
             // Start WebSocket connection to Sacrum for real-time updates
-            let ws_slug = app
-                .state::<AppState>()
-                .project_config
-                .get_current_project()
-                .and_then(|p| slug_from_path(&p));
+            let ws_slug = app.state::<AppState>().project_config.get_current_project();
             if let Some(slug) = ws_slug {
                 if let Ok(config) = SacrumConfig::load(&slug) {
                     log::info!("[STARTUP] Starting WebSocket connection to Sacrum");

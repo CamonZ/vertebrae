@@ -11,6 +11,7 @@ use crate::models::{
 };
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 // Re-export commonly used types
@@ -267,7 +268,7 @@ pub struct TransitionResult {
 ///
 /// Represents a task with its children nested hierarchically.
 /// Used for displaying tasks in a tree structure.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskTreeNode {
     /// Task ID
     pub id: String,

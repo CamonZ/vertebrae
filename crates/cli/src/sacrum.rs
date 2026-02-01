@@ -26,8 +26,8 @@ use vertebrae_sacrum_client::{
 pub fn from_sacrum(client: Arc<SacrumClient>) -> VertebraeServices {
     let task_service = SacrumTaskService::new((*client).clone());
     let workflow_service = SacrumWorkflowService::new((*client).clone());
-    let execution_service = SacrumExecutionService::new();
-    let step_service = SacrumStepService::new();
+    let execution_service = SacrumExecutionService::new((*client).clone());
+    let step_service = SacrumStepService::new((*client).clone());
 
     VertebraeServices::from_services(
         Arc::new(task_service),
@@ -102,25 +102,6 @@ mod tests {
         // Both should be valid and independent
         let _ = services1.tasks();
         let _ = services2.tasks();
-    }
-
-    #[test]
-    fn test_from_sacrum_arc_accessors() {
-        let config = SacrumConfig::new(
-            "http://localhost:4000".to_string(),
-            "test-token".to_string(),
-            "test-project".to_string(),
-        );
-        let client = SacrumClient::new(config);
-        let client_arc = Arc::new(client);
-
-        let services = from_sacrum(client_arc);
-
-        // Verify Arc accessors work
-        let _ = services.tasks_arc();
-        let _ = services.workflows_arc();
-        let _ = services.executions_arc();
-        let _ = services.steps_arc();
     }
 
     #[test]

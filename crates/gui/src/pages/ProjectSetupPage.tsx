@@ -34,17 +34,12 @@ export function ProjectSetupPage() {
 
   // Handle selecting a project
   const handleSelectProject = async (project: SavedProject) => {
-    if (!project.exists) {
-      setError(`Project directory no longer exists: ${project.path}`);
-      return;
-    }
-
     setIsLoading(true);
     setError(null);
     try {
-      const result = await commands.setCurrentProject(project.path);
+      const result = await commands.setCurrentProject(project.slug);
       if (result.status === "ok") {
-        navigate("/tasks");
+        navigate("/");
       } else {
         setError(result.error.message);
       }
@@ -69,12 +64,7 @@ export function ProjectSetupPage() {
       });
 
       if (selected && typeof selected === "string") {
-        // Extract project name from path
-        const pathParts = selected.split("/");
-        const projectName =
-          pathParts[pathParts.length - 1] || "Unnamed Project";
-
-        const result = await commands.addProject(projectName, selected);
+        const result = await commands.addProject(selected);
         if (result.status === "ok") {
           // Reload projects list
           await loadProjects();
@@ -97,7 +87,7 @@ export function ProjectSetupPage() {
     e.stopPropagation(); // Don't trigger selection
 
     try {
-      const result = await commands.removeProject(project.path);
+      const result = await commands.removeProject(project.slug);
       if (result.status === "ok") {
         await loadProjects();
       } else {
@@ -116,9 +106,7 @@ export function ProjectSetupPage() {
       >
         {/* Header */}
         <div className="mb-8 text-center">
-          <h1 className="mb-2 text-3xl font-bold text-text-primary">
-            Vertebrae
-          </h1>
+          <h1 className="mb-2 text-3xl font-bold text-primary">Vertebrae</h1>
           <p className="text-text-secondary">
             Select a project to get started, or add a new one.
           </p>
@@ -148,32 +136,18 @@ export function ProjectSetupPage() {
             ) : (
               projects.map((project) => (
                 <div
-                  key={project.path}
+                  key={project.slug}
                   onClick={() => handleSelectProject(project)}
-                  className={`flex cursor-pointer items-center justify-between rounded-lg border p-4 transition-colors ${
-                    project.exists
-                      ? "border-border hover:border-accent-secondary hover:bg-bg-tertiary"
-                      : "cursor-not-allowed border-red-500/30 bg-red-500/5"
-                  }`}
+                  className="flex cursor-pointer items-center justify-between rounded-lg border border-border p-4 transition-colors hover:border-accent-secondary hover:bg-bg-tertiary"
                 >
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <span className="font-medium text-text-primary">
-                        {project.name}
+                        {project.slug}
                       </span>
-                      {!project.exists && (
-                        <span className="rounded bg-red-500/20 px-2 py-0.5 text-xs text-red-400">
-                          Not Found
-                        </span>
-                      )}
-                      {project.has_config && project.exists && (
-                        <span className="rounded bg-green-500/20 px-2 py-0.5 text-xs text-green-400">
-                          Configured
-                        </span>
-                      )}
                     </div>
                     <div className="mt-1 truncate text-sm text-text-tertiary">
-                      {project.path}
+                      {project.url || project.project_id}
                     </div>
                   </div>
                   <button
