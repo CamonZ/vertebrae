@@ -1,6 +1,6 @@
 import { memo, useMemo } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
-import type { TaskLevel, TaskWithRelations, Step } from "../../bindings";
+import type { TaskLevel, Task, Step } from "../../bindings";
 import { getStatusColor, getStatusIcon, getLevelDotColor } from "./taskUtils";
 
 /**
@@ -8,7 +8,7 @@ import { getStatusColor, getStatusIcon, getLevelDotColor } from "./taskUtils";
  */
 export type TaskZoneNodeData = {
   label: string;
-  tasks: TaskWithRelations[];
+  tasks: Task[];
   executionState?: Map<
     string,
     { currentStep: string | number; status: string; error?: string }
@@ -45,8 +45,8 @@ export const TaskZoneNode = memo(function TaskZoneNode({
   // Calculate task breakdown by level
   const taskBreakdown = useMemo(() => {
     const breakdown = { epic: 0, ticket: 0, task: 0 };
-    tasks.forEach((tr) => {
-      const level = tr.task.level as TaskLevel;
+    tasks.forEach((task) => {
+      const level = task.level as TaskLevel;
       if (level === "epic") breakdown.epic++;
       else if (level === "ticket") breakdown.ticket++;
       else breakdown.task++;
@@ -84,72 +84,77 @@ export const TaskZoneNode = memo(function TaskZoneNode({
         <div className="flex gap-2 px-1 mb-2 text-[10px]">
           {taskBreakdown.epic > 0 && (
             <span className="flex items-center gap-1 text-text-muted">
-              <span className={`w-2 h-2 rounded-full ${getLevelDotColor("epic")}`} />
+              <span
+                className={`w-2 h-2 rounded-full ${getLevelDotColor("epic")}`}
+              />
               {taskBreakdown.epic}
             </span>
           )}
           {taskBreakdown.ticket > 0 && (
             <span className="flex items-center gap-1 text-text-muted">
-              <span className={`w-2 h-2 rounded-full ${getLevelDotColor("ticket")}`} />
+              <span
+                className={`w-2 h-2 rounded-full ${getLevelDotColor("ticket")}`}
+              />
               {taskBreakdown.ticket}
             </span>
           )}
           {taskBreakdown.task > 0 && (
             <span className="flex items-center gap-1 text-text-muted">
-              <span className={`w-2 h-2 rounded-full ${getLevelDotColor("task")}`} />
+              <span
+                className={`w-2 h-2 rounded-full ${getLevelDotColor("task")}`}
+              />
               {taskBreakdown.task}
             </span>
           )}
         </div>
       )}
       <div className="flex-1 overflow-y-auto overflow-x-hidden space-y-1.5 pr-1 scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
-        {tasks.map((tr) => {
-          const execState = executionState?.get(tr.task.id!);
+        {tasks.map((task) => {
+          const execState = executionState?.get(task.id);
           const status =
-            tr.task.status === "done" || tr.task.status === "rejected"
+            task.status === "done" || task.status === "rejected"
               ? "done"
               : execState?.status || "waiting";
-          const isSelected = selectedTaskId === tr.task.id;
+          const isSelected = selectedTaskId === task.id;
 
           return (
             <button
-              key={tr.task.id}
+              key={task.id}
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                onTaskClick?.(tr.task.id!);
+                onTaskClick?.(task.id);
               }}
               className={`w-full text-left rounded-lg border p-2 transition-all duration-200 ${getStatusColor(status, isSelected)} hover:border-primary/50 cursor-pointer`}
             >
               <div className="flex items-start gap-2">
                 <span
-                  className={`flex-shrink-0 text-xs font-bold ${
-                    status === "in_progress"
+                  className={`flex-shrink-0 text-xs font-bold ${status === "in_progress"
                       ? "animate-spin text-accent"
                       : status === "done"
                         ? "text-success"
                         : status === "failed"
                           ? "text-error"
                           : "text-text-muted"
-                  }`}
+                    }`}
                 >
                   {getStatusIcon(status)}
                 </span>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5">
                     <span
-                      className={`flex-shrink-0 w-2 h-2 rounded-full ${getLevelDotColor(tr.task.level as TaskLevel)}`}
-                      title={tr.task.level}
+                      className={`flex-shrink-0 w-2 h-2 rounded-full ${getLevelDotColor(task.level as TaskLevel)}`}
+                      title={task.level}
                     />
                     <p
                       className="truncate text-xs font-medium text-text-primary"
-                      title={tr.task.title}
+                      title={task.title}
                     >
-                      {tr.task.title}
+                      {task.title}
                     </p>
                   </div>
                   <code className="block truncate font-mono text-[10px] text-text-muted">
-                    {(tr.task.id ?? "").slice(0, 8)}
+                    {task.id.slice(0, 8)}
                   </code>
                 </div>
               </div>
