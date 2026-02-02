@@ -63,7 +63,6 @@ fn create_builder() -> Builder {
             // Task commands
             commands::list_tasks,
             commands::get_task,
-            commands::get_task_hierarchy,
             // Task relationship commands
             commands::set_parent,
             commands::remove_parent,

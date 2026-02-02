@@ -9,7 +9,6 @@ use crate::models::Task;
 use crate::models::{BlockerNode, CodeRef, Level, Priority, Section, SectionType, TaskFilter};
 use async_trait::async_trait;
 
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 // Re-export commonly used types
@@ -247,69 +246,6 @@ pub struct TransitionResult {
     pub unblocked_tasks: Vec<UnblockedTask>,
 }
 
-/// A node in the hierarchical task tree
-///
-/// Wraps a `Task` with hierarchy metadata (children, blocker info).
-/// Used for displaying tasks in a tree structure.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TaskTreeNode {
-    /// The task
-    pub task: Task,
-    /// Whether this task has incomplete dependencies (blockers)
-    pub has_blockers: bool,
-    /// Number of incomplete dependencies
-    pub blocker_count: usize,
-    /// Child nodes in the hierarchy
-    pub children: Vec<TaskTreeNode>,
-}
-
-impl TaskTreeNode {
-    /// Create a new TaskTreeNode from a Task
-    pub fn from_task(task: &Task, has_blockers: bool, blocker_count: usize) -> Self {
-        Self {
-            task: task.clone(),
-            has_blockers,
-            blocker_count,
-            children: Vec::new(),
-        }
-    }
-
-    /// Check if this is a leaf node (no children)
-    pub fn is_leaf(&self) -> bool {
-        self.children.is_empty()
-    }
-
-    /// Get the total number of descendants
-    pub fn descendant_count(&self) -> usize {
-        self.children.iter().map(|c| 1 + c.descendant_count()).sum()
-    }
-}
-
-/// Options for tree filtering
-#[derive(Debug, Clone, Default)]
-pub struct TreeFilterOptions {
-    /// Base task filter (levels, statuses, etc.)
-    pub filter: TaskFilter,
-    /// Whether to preserve ancestor chain for matching nodes
-    pub preserve_ancestors: bool,
-}
-
-impl TreeFilterOptions {
-    /// Create new tree filter options with a base filter
-    pub fn new(filter: TaskFilter) -> Self {
-        Self {
-            filter,
-            preserve_ancestors: true,
-        }
-    }
-
-    /// Set whether to preserve ancestors
-    pub fn with_preserve_ancestors(mut self, preserve: bool) -> Self {
-        self.preserve_ancestors = preserve;
-        self
-    }
-}
-
 /// Service trait for task management operations
 ///
 /// This trait defines the interface for all task-related business logic.
@@ -367,24 +303,6 @@ pub trait TaskService: Send + Sync {
 
     /// Get tasks ready for work at a given status
     async fn list_ready(&self, status: &str) -> ServiceResult<Vec<Task>>;
-
-    /// Get tasks as a hierarchical tree structure
-    ///
-    /// Returns root-level tasks (orphans) with their children nested recursively.
-    /// Each node includes dependency indicators (has_blockers, blocker_count).
-    ///
-    /// When `options.preserve_ancestors` is true and filters are applied,
-    /// matching nodes will have their ancestor chain included even if
-    /// ancestors don't match the filter criteria.
-    ///
-    /// # Arguments
-    ///
-    /// * `options` - Tree filter options including base filters and ancestor preservation
-    ///
-    /// # Returns
-    ///
-    /// A vector of root-level TaskTreeNode items, each with children populated.
-    async fn get_task_tree(&self, options: &TreeFilterOptions) -> ServiceResult<Vec<TaskTreeNode>>;
 
     // =========================================================================
     // Status Transitions

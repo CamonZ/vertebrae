@@ -1,12 +1,11 @@
 //! Tauri commands for task and workflow data access
 //!
-//! Implements list_tasks, get_task, get_task_hierarchy, and workflow commands
+//! Implements list_tasks, get_task, and workflow commands
 //! using the vertebrae-core TaskService layer.
 
 use crate::project_config::{ProjectConfig, SavedProject};
 use crate::types::{
-    SessionLog, Step, StepExecution, Task, TaskFilterOptions, TaskTreeNode, Workflow,
-    WorkflowWithTasks,
+    SessionLog, Step, StepExecution, Task, TaskFilterOptions, Workflow, WorkflowWithTasks,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, State};
@@ -315,74 +314,6 @@ pub async fn get_task(state: State<'_, AppState>, id: String) -> Result<Task, Co
     let task = service.tasks().get_task(&id).await?;
 
     Ok(task.into())
-}
-
-/// Get task hierarchy starting from a root task
-///
-/// Returns a tree structure of tasks starting from the given root.
-/// If no root_id is provided, returns all root-level tasks with their hierarchies.
-#[tauri::command]
-#[specta::specta]
-pub async fn get_task_hierarchy(
-    state: State<'_, AppState>,
-    root_id: Option<String>,
-    filter: Option<TaskFilterOptions>,
-) -> Result<Vec<TaskTreeNode>, CommandError> {
-    let service_guard = state.services.read().await;
-    let service = service_guard
-        .as_ref()
-        .ok_or_else(CommandError::no_project_selected)?;
-
-    // Convert filter options to db filter, applying all fields (statuses, levels, workflow_id, etc.)
-    let db_filter: vertebrae_core::TaskFilter = match filter {
-        Some(opts) => opts.into(),
-        None => vertebrae_core::TaskFilter::new().include_done(),
-    };
-
-    let tree_options = vertebrae_core::TreeFilterOptions::new(db_filter);
-    let tree = service.tasks().get_task_tree(&tree_options).await?;
-
-    match root_id {
-        Some(id) => {
-            // Find the specific node in the tree
-            fn find_node(nodes: &[vertebrae_core::TaskTreeNode], id: &str) -> Option<TaskTreeNode> {
-                for node in nodes {
-                    if node.task.id == id {
-                        return Some(convert_tree_node(node));
-                    }
-                    if let Some(found) = find_node(&node.children, id) {
-                        return Some(found);
-                    }
-                }
-                None
-            }
-
-            match find_node(&tree, &id) {
-                Some(node) => Ok(vec![node]),
-                None => Err(CommandError::task_not_found(&id)),
-            }
-        }
-        None => {
-            // Return all root nodes converted to TaskTreeNode, sorted by newest first
-            let mut nodes: Vec<TaskTreeNode> = tree.iter().map(convert_tree_node).collect();
-            nodes.sort_by(|a, b| b.task.created_at.cmp(&a.task.created_at));
-            Ok(nodes)
-        }
-    }
-}
-
-/// Helper function to convert core TaskTreeNode to GUI TaskTreeNode
-/// Children are sorted by created_at descending (newest first)
-fn convert_tree_node(node: &vertebrae_core::TaskTreeNode) -> TaskTreeNode {
-    let mut children: Vec<TaskTreeNode> = node.children.iter().map(convert_tree_node).collect();
-    children.sort_by(|a, b| b.task.created_at.cmp(&a.task.created_at));
-
-    TaskTreeNode {
-        task: node.task.clone().into(),
-        has_blockers: node.has_blockers,
-        blocker_count: node.blocker_count as u32,
-        children,
-    }
 }
 
 // ============================================================================
@@ -2010,14 +1941,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_task_hierarchy_no_project_returns_error() {
-        let app = build_app_without_services();
-        let state: tauri::State<'_, AppState> = app.state();
-        let result = get_task_hierarchy(state, None, None).await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
     async fn list_workflows_no_project_returns_error() {
         let app = build_app_without_services();
         let state: tauri::State<'_, AppState> = app.state();
@@ -2353,68 +2276,6 @@ mod tests {
             ..Default::default()
         };
         let result = update_task_inner(&services, "nonexistent", opts).await;
-        assert!(result.is_err());
-    }
-
-    // ========================================================================
-    // Task hierarchy tests
-    // ========================================================================
-
-    #[tokio::test]
-    async fn get_task_hierarchy_returns_tree() {
-        let app = build_app_with_services();
-        let state: tauri::State<'_, AppState> = app.state();
-        let parent_id = create_task(
-            state.clone(),
-            "Root".to_string(),
-            None,
-            Some("epic".to_string()),
-            None,
-        )
-        .await
-        .unwrap();
-        create_task(
-            state.clone(),
-            "Child".to_string(),
-            None,
-            None,
-            Some(parent_id.clone()),
-        )
-        .await
-        .unwrap();
-        let tree = get_task_hierarchy(state, None, None).await.unwrap();
-        // Should have the root node
-        assert!(!tree.is_empty());
-    }
-
-    #[tokio::test]
-    async fn get_task_hierarchy_with_root_id() {
-        let app = build_app_with_services();
-        let state: tauri::State<'_, AppState> = app.state();
-        let root_id = create_task(state.clone(), "Root".to_string(), None, None, None)
-            .await
-            .unwrap();
-        create_task(
-            state.clone(),
-            "Child".to_string(),
-            None,
-            None,
-            Some(root_id.clone()),
-        )
-        .await
-        .unwrap();
-        let tree = get_task_hierarchy(state, Some(root_id.clone()), None)
-            .await
-            .unwrap();
-        assert_eq!(tree.len(), 1);
-        assert_eq!(tree[0].task.id, root_id);
-    }
-
-    #[tokio::test]
-    async fn get_task_hierarchy_nonexistent_root_returns_error() {
-        let app = build_app_with_services();
-        let state: tauri::State<'_, AppState> = app.state();
-        let result = get_task_hierarchy(state, Some("nonexistent".to_string()), None).await;
         assert!(result.is_err());
     }
 
@@ -3355,72 +3216,5 @@ mod tests {
 
         let err = CommandError::no_project_selected();
         assert!(err.message.contains("No project selected"));
-    }
-
-    // ========================================================================
-    // convert_tree_node helper test
-    // ========================================================================
-
-    #[test]
-    fn convert_tree_node_sorts_children_by_created_at() {
-        use chrono::{Duration, Utc};
-
-        let now = Utc::now();
-
-        fn make_task(
-            id: &str,
-            title: &str,
-            created_at: chrono::DateTime<Utc>,
-        ) -> vertebrae_core::Task {
-            vertebrae_core::Task {
-                id: id.to_string(),
-                title: title.to_string(),
-                description: None,
-                level: vertebrae_core::Level::Task,
-                status: "backlog".to_string(),
-                priority: None,
-                tags: vec![],
-                workflow_id: None,
-                current_step_id: None,
-                workflow_name: None,
-                step_name: None,
-                needs_human_review: None,
-                review_comment: None,
-                revision_feedback: None,
-                rejection_reason: None,
-                parent_id: None,
-                dependency_ids: vec![],
-                sections: vec![],
-                code_refs: vec![],
-                created_at: Some(created_at),
-                updated_at: None,
-                started_at: None,
-                completed_at: None,
-            }
-        }
-
-        let node = vertebrae_core::TaskTreeNode {
-            task: make_task("root", "Root", now),
-            has_blockers: false,
-            blocker_count: 0,
-            children: vec![
-                vertebrae_core::TaskTreeNode {
-                    task: make_task("old", "Old", now - Duration::hours(2)),
-                    has_blockers: false,
-                    blocker_count: 0,
-                    children: vec![],
-                },
-                vertebrae_core::TaskTreeNode {
-                    task: make_task("new", "New", now),
-                    has_blockers: false,
-                    blocker_count: 0,
-                    children: vec![],
-                },
-            ],
-        };
-
-        let converted = convert_tree_node(&node);
-        assert_eq!(converted.children[0].task.id, "new");
-        assert_eq!(converted.children[1].task.id, "old");
     }
 }

@@ -50,8 +50,8 @@ pub use orchestrator::{
     orchestrator_agent_config, orchestrator_output_schema, orchestrator_prompt,
 };
 pub use service::{
-    CreateTaskOptions, MutationCallback, MutationEvent, TaskService, TaskTreeNode,
-    TransitionResult, TreeFilterOptions, UnblockedTask, UpdateTaskOptions,
+    CreateTaskOptions, MutationCallback, MutationEvent, TaskService, TransitionResult,
+    UnblockedTask, UpdateTaskOptions,
 };
 pub use services::VertebraeServices;
 pub use step_service::StepService;

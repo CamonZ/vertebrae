@@ -218,43 +218,6 @@ impl TaskService for MockTaskService {
             .collect())
     }
 
-    async fn get_task_tree(
-        &self,
-        _options: &TreeFilterOptions,
-    ) -> ServiceResult<Vec<TaskTreeNode>> {
-        // Return tree nodes from stored tasks (root tasks only)
-        let s = self.state.lock().unwrap();
-        let root_tasks: Vec<&Task> = s
-            .tasks
-            .values()
-            .filter(|t| !s.parents.contains_key(&t.id))
-            .collect();
-
-        fn build_node(task: &Task, state: &MockState) -> TaskTreeNode {
-            let id = task.id.clone();
-            let children_ids: Vec<String> = state
-                .parents
-                .iter()
-                .filter(|(_, p)| **p == id)
-                .map(|(c, _)| c.clone())
-                .collect();
-            let children: Vec<TaskTreeNode> = children_ids
-                .iter()
-                .filter_map(|cid| state.tasks.get(cid))
-                .map(|ct| build_node(ct, state))
-                .collect();
-
-            TaskTreeNode {
-                task: task.clone(),
-                has_blockers: false,
-                blocker_count: 0,
-                children,
-            }
-        }
-
-        Ok(root_tasks.iter().map(|t| build_node(t, &s)).collect())
-    }
-
     async fn transition_to(&self, id: &str, target: &str) -> ServiceResult<TransitionResult> {
         let s = self.state.lock().unwrap();
         if !s.tasks.contains_key(id) {

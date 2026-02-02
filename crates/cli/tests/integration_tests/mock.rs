@@ -224,13 +224,6 @@ impl TaskService for MockTaskService {
             .collect())
     }
 
-    async fn get_task_tree(
-        &self,
-        _options: &TreeFilterOptions,
-    ) -> ServiceResult<Vec<TaskTreeNode>> {
-        Ok(vec![])
-    }
-
     async fn transition_to(&self, id: &str, target: &str) -> ServiceResult<TransitionResult> {
         let s = self.state.lock().unwrap();
         if !s.tasks.contains_key(id) {

@@ -87,7 +87,6 @@ Tests for listing, filtering, and retrieving task information:
 - `test_list_all_tasks`: List all tasks in the system
 - `test_list_ready_tasks`: List tasks without blockers (ready for work)
 - `test_show_task_details`: Display complete task information
-- `test_get_task_tree`: Display hierarchical task structure
 
 ### relationship_tests
 

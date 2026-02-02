@@ -12,8 +12,7 @@ use vertebrae_core::models::{
     BlockerNode, CodeRef, Level, Priority, Section, SectionType, TaskFilter,
 };
 use vertebrae_core::service::{
-    CreateTaskOptions, TaskService, TaskTreeNode, TransitionResult, TreeFilterOptions,
-    UpdateTaskOptions,
+    CreateTaskOptions, TaskService, TransitionResult, UpdateTaskOptions,
 };
 
 use crate::api_types::{CodeRefResponse, SectionResponse, TaskResponse};
@@ -252,17 +251,6 @@ impl TaskService for SacrumTaskService {
         let tasks: Vec<TaskResponse> = self.client.get("/api/tasks/ready", &query).await?;
 
         Ok(tasks.iter().map(|t| self.response_to_task(t)).collect())
-    }
-
-    async fn get_task_tree(&self, options: &TreeFilterOptions) -> ServiceResult<Vec<TaskTreeNode>> {
-        let path = match &options.filter.children_of {
-            Some(root_id) => format!("/api/tasks/{}/tree", root_id),
-            None => "/api/tasks/tree".to_string(),
-        };
-        let query = ProjectQuery {
-            project_id: self.client.project_id(),
-        };
-        Ok(self.client.get(&path, &query).await?)
     }
 
     async fn transition_to(&self, _id: &str, _target: &str) -> ServiceResult<TransitionResult> {
