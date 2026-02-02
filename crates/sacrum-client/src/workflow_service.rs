@@ -80,6 +80,33 @@ impl SacrumWorkflowService {
             step_count: 0, // Step count not included in workflow response; fetched separately
         }
     }
+
+    fn extract_transitions(
+        workflows: &[WorkflowResponse],
+        from_workflow_id: Option<&str>,
+    ) -> Vec<WorkflowTransition> {
+        let mut transitions = Vec::new();
+        for workflow in workflows {
+            if let Some(from_id) = from_workflow_id
+                && workflow.id != from_id
+            {
+                continue;
+            }
+            if let Some(wf_transitions) = &workflow.transitions {
+                for t in wf_transitions {
+                    transitions.push(WorkflowTransition {
+                        id: Some(t.id.clone()),
+                        from_workflow: workflow.id.clone(),
+                        to_workflow: t.to_workflow_id.clone(),
+                        label: t.label.clone().unwrap_or_default(),
+                        target_step: t.target_step_id.clone(),
+                        created_at: None,
+                    });
+                }
+            }
+        }
+        transitions
+    }
 }
 
 #[async_trait]
@@ -292,23 +319,32 @@ impl WorkflowService for SacrumWorkflowService {
 
     async fn list_workflow_transitions(
         &self,
-        _from_workflow_id: Option<&str>,
+        from_workflow_id: Option<&str>,
     ) -> ServiceResult<Vec<WorkflowTransition>> {
-        Ok(Vec::new())
+        let query = ProjectQuery {
+            project_id: self.client.project_id(),
+        };
+        let workflows: Vec<WorkflowResponse> = self.client.get("/api/workflows", &query).await?;
+
+        Ok(Self::extract_transitions(&workflows, from_workflow_id))
     }
 
     async fn get_transitions_from_workflow(
         &self,
-        _workflow_id: &str,
+        workflow_id: &str,
     ) -> ServiceResult<Vec<WorkflowTransition>> {
-        Ok(Vec::new())
+        self.list_workflow_transitions(Some(workflow_id)).await
     }
 
     async fn get_transitions_to_workflow(
         &self,
-        _workflow_id: &str,
+        workflow_id: &str,
     ) -> ServiceResult<Vec<WorkflowTransition>> {
-        Ok(Vec::new())
+        let all = self.list_workflow_transitions(None).await?;
+        Ok(all
+            .into_iter()
+            .filter(|t| t.to_workflow == workflow_id)
+            .collect())
     }
 
     async fn delete_workflow_transition(
@@ -362,6 +398,7 @@ impl WorkflowService for SacrumWorkflowService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api_types::WorkflowTransitionResponse;
 
     fn create_test_client() -> SacrumClient {
         crate::client::SacrumClient::new(crate::config::SacrumConfig::new(
@@ -385,6 +422,15 @@ mod tests {
             transitions: None,
             inserted_at: None,
             updated_at: None,
+        }
+    }
+
+    fn make_transition(id: &str, to_workflow_id: &str) -> WorkflowTransitionResponse {
+        WorkflowTransitionResponse {
+            id: id.to_string(),
+            to_workflow_id: to_workflow_id.to_string(),
+            target_step_id: None,
+            label: None,
         }
     }
 
@@ -512,5 +558,102 @@ mod tests {
         assert_eq!(summary.id, workflow.id.as_ref().unwrap().as_str());
         assert_eq!(summary.name, workflow.name);
         assert_eq!(summary.description, workflow.description);
+    }
+
+    #[test]
+    fn test_extract_transitions_from_workflows_with_transitions() {
+        let mut wf = make_workflow_response("wf-1", "Source");
+        wf.transitions = Some(vec![
+            WorkflowTransitionResponse {
+                id: "t-1".to_string(),
+                to_workflow_id: "wf-2".to_string(),
+                target_step_id: Some("step-5".to_string()),
+                label: Some("on_done".to_string()),
+            },
+            make_transition("t-2", "wf-3"),
+        ]);
+
+        let result = SacrumWorkflowService::extract_transitions(&[wf], None);
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].id, Some("t-1".to_string()));
+        assert_eq!(result[0].from_workflow, "wf-1");
+        assert_eq!(result[0].to_workflow, "wf-2");
+        assert_eq!(result[0].label, "on_done");
+        assert_eq!(result[0].target_step, Some("step-5".to_string()));
+
+        assert_eq!(result[1].id, Some("t-2".to_string()));
+        assert_eq!(result[1].from_workflow, "wf-1");
+        assert_eq!(result[1].to_workflow, "wf-3");
+        assert_eq!(result[1].label, "");
+        assert_eq!(result[1].target_step, None);
+    }
+
+    #[test]
+    fn test_extract_transitions_no_transitions() {
+        let wf = make_workflow_response("wf-1", "No Transitions");
+
+        let result = SacrumWorkflowService::extract_transitions(&[wf], None);
+
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_extract_transitions_empty_transitions_list() {
+        let mut wf = make_workflow_response("wf-1", "Empty List");
+        wf.transitions = Some(vec![]);
+
+        let result = SacrumWorkflowService::extract_transitions(&[wf], None);
+
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_extract_transitions_filters_by_from_workflow_id() {
+        let mut wf1 = make_workflow_response("wf-1", "Source A");
+        wf1.transitions = Some(vec![make_transition("t-1", "wf-3")]);
+
+        let mut wf2 = make_workflow_response("wf-2", "Source B");
+        wf2.transitions = Some(vec![make_transition("t-2", "wf-3")]);
+
+        let result = SacrumWorkflowService::extract_transitions(&[wf1, wf2], Some("wf-2"));
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].from_workflow, "wf-2");
+        assert_eq!(result[0].id, Some("t-2".to_string()));
+    }
+
+    #[test]
+    fn test_extract_transitions_filter_no_match() {
+        let mut wf = make_workflow_response("wf-1", "Source");
+        wf.transitions = Some(vec![make_transition("t-1", "wf-2")]);
+
+        let result = SacrumWorkflowService::extract_transitions(&[wf], Some("wf-nonexistent"));
+
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_extract_transitions_multiple_workflows() {
+        let mut wf1 = make_workflow_response("wf-1", "First");
+        wf1.transitions = Some(vec![make_transition("t-1", "wf-2")]);
+
+        let mut wf2 = make_workflow_response("wf-2", "Second");
+        wf2.transitions = Some(vec![
+            make_transition("t-2", "wf-3"),
+            make_transition("t-3", "wf-1"),
+        ]);
+
+        let wf3 = make_workflow_response("wf-3", "Third");
+
+        let result = SacrumWorkflowService::extract_transitions(&[wf1, wf2, wf3], None);
+
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0].from_workflow, "wf-1");
+        assert_eq!(result[0].to_workflow, "wf-2");
+        assert_eq!(result[1].from_workflow, "wf-2");
+        assert_eq!(result[1].to_workflow, "wf-3");
+        assert_eq!(result[2].from_workflow, "wf-2");
+        assert_eq!(result[2].to_workflow, "wf-1");
     }
 }
