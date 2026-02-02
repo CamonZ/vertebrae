@@ -554,16 +554,23 @@ function AllWorkflowsPipelineInner() {
   const [nodes, setNodes, onNodesChange] = useNodesState(allNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(allEdges);
 
+  // Track whether initial fitView has fired
+  const hasFittedRef = useRef(false);
+
   // Update nodes when allNodes changes
   useEffect(() => {
     setNodes(allNodes);
-    if (allNodes.length > 0) {
-      // Wait for React Flow to process the new nodes before fitting
+  }, [allNodes, setNodes]);
+
+  // Fit view only once on initial load
+  useEffect(() => {
+    if (!hasFittedRef.current && allNodes.length > 0) {
+      hasFittedRef.current = true;
       requestAnimationFrame(() => {
         fitView({ padding: 0.1, minZoom: 0.3, maxZoom: 1.5 });
       });
     }
-  }, [allNodes, setNodes, fitView]);
+  }, [allNodes, fitView]);
 
   // Update edges when allEdges changes
   useEffect(() => {
