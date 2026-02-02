@@ -9,11 +9,11 @@ use serde_json::json;
 use vertebrae_core::error::{ServiceError, ServiceResult};
 use vertebrae_core::models::Task;
 use vertebrae_core::models::{
-    BlockerNode, CodeRef, Level, Priority, Section, SectionType, TaskFilter, TaskSummary,
+    BlockerNode, CodeRef, Level, Priority, Section, SectionType, TaskFilter,
 };
 use vertebrae_core::service::{
-    CreateTaskOptions, TaskService, TaskTreeNode, TaskWithRelations, TransitionResult,
-    TreeFilterOptions, UpdateTaskOptions,
+    CreateTaskOptions, TaskService, TaskTreeNode, TransitionResult, TreeFilterOptions,
+    UpdateTaskOptions,
 };
 
 use crate::api_types::{CodeRefResponse, SectionResponse, TaskResponse};
@@ -83,55 +83,29 @@ impl SacrumTaskService {
             .map(|dt| dt.with_timezone(&chrono::Utc));
 
         Task {
-            id: Some(response.id.clone()),
+            id: response.id.clone(),
             title: response.title.clone(),
             description: response.description.clone(),
             level,
+            status: "backlog".to_string(),
             priority,
             tags: response.tags.clone(),
-            created_at,
-            updated_at,
-            started_at,
-            completed_at,
-            sections,
-            code_refs,
-            needs_human_review: response.needs_human_review,
-            revision_feedback: response.revision_feedback.clone(),
-            rejection_reason: response.rejection_reason.clone(),
-            workflow_id: response.workflow_id.clone(),
-            current_step_id: response.current_step_id.clone(),
-        }
-    }
-
-    fn response_to_summary(&self, response: &TaskResponse) -> TaskSummary {
-        let level = response
-            .level
-            .as_deref()
-            .and_then(parse_level)
-            .unwrap_or(Level::Task);
-
-        let priority = response.priority.as_deref().and_then(parse_priority);
-
-        let created_at = response
-            .inserted_at
-            .as_deref()
-            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-            .map(|dt| dt.with_timezone(&chrono::Utc))
-            .unwrap_or_else(chrono::Utc::now);
-
-        TaskSummary {
-            id: response.id.clone(),
-            title: response.title.clone(),
-            level,
-            status: "backlog".to_string(), // Status derived from workflow step name
-            priority,
-            tags: response.tags.clone(),
-            needs_human_review: response.needs_human_review,
-            created_at,
             workflow_id: response.workflow_id.clone(),
             current_step_id: response.current_step_id.clone(),
             workflow_name: None,
             step_name: None,
+            needs_human_review: response.needs_human_review,
+            review_comment: response.review_comment.clone(),
+            revision_feedback: response.revision_feedback.clone(),
+            rejection_reason: response.rejection_reason.clone(),
+            parent_id: response.parent_id.clone(),
+            dependency_ids: response.dependency_ids.clone(),
+            sections,
+            code_refs,
+            created_at,
+            updated_at,
+            started_at,
+            completed_at,
         }
     }
 }
@@ -223,20 +197,6 @@ impl TaskService for SacrumTaskService {
         Ok(self.response_to_task(&response))
     }
 
-    async fn get_task_with_relations(&self, id: &str) -> ServiceResult<TaskWithRelations> {
-        let path = format!("/api/tasks/{}", id);
-        let response: TaskResponse = self.client.get(&path, &()).await?;
-        let task = self.response_to_task(&response);
-
-        Ok(TaskWithRelations {
-            task,
-            parent_id: response.parent_id,
-            children_ids: vec![], // Not in the flat response; use get_children separately
-            depends_on_ids: response.dependency_ids,
-            dependent_ids: vec![], // Would require a separate query
-        })
-    }
-
     async fn get_derived_status(&self, _task: &Task) -> ServiceResult<String> {
         Ok("backlog".to_string())
     }
@@ -276,38 +236,22 @@ impl TaskService for SacrumTaskService {
         }
     }
 
-    async fn list_tasks(&self, _filter: &TaskFilter) -> ServiceResult<Vec<TaskSummary>> {
+    async fn list_tasks(&self, _filter: &TaskFilter) -> ServiceResult<Vec<Task>> {
         let query = ProjectQuery {
             project_id: self.client.project_id(),
         };
         let tasks: Vec<TaskResponse> = self.client.get("/api/tasks", &query).await?;
 
-        Ok(tasks.iter().map(|t| self.response_to_summary(t)).collect())
+        Ok(tasks.iter().map(|t| self.response_to_task(t)).collect())
     }
 
-    async fn list_tasks_with_relations(
-        &self,
-        filter: &TaskFilter,
-    ) -> ServiceResult<Vec<TaskWithRelations>> {
-        let tasks = self.list_tasks(filter).await?;
-        let mut results = Vec::new();
-
-        for task_summary in tasks {
-            if let Ok(with_relations) = self.get_task_with_relations(&task_summary.id).await {
-                results.push(with_relations);
-            }
-        }
-
-        Ok(results)
-    }
-
-    async fn list_ready(&self, _status: &str) -> ServiceResult<Vec<TaskSummary>> {
+    async fn list_ready(&self, _status: &str) -> ServiceResult<Vec<Task>> {
         let query = ProjectQuery {
             project_id: self.client.project_id(),
         };
         let tasks: Vec<TaskResponse> = self.client.get("/api/tasks/ready", &query).await?;
 
-        Ok(tasks.iter().map(|t| self.response_to_summary(t)).collect())
+        Ok(tasks.iter().map(|t| self.response_to_task(t)).collect())
     }
 
     async fn get_task_tree(&self, options: &TreeFilterOptions) -> ServiceResult<Vec<TaskTreeNode>> {
@@ -346,10 +290,7 @@ impl TaskService for SacrumTaskService {
         Ok(self.client.get(&path, &()).await?)
     }
 
-    async fn get_incomplete_blockers_with_details(
-        &self,
-        _id: &str,
-    ) -> ServiceResult<Vec<TaskSummary>> {
+    async fn get_incomplete_blockers_with_details(&self, _id: &str) -> ServiceResult<Vec<Task>> {
         unimplemented!("Incomplete blocker retrieval not yet implemented for Sacrum HTTP client")
     }
 
@@ -555,7 +496,7 @@ mod tests {
 
         let task = service.response_to_task(&response);
 
-        assert_eq!(task.id, Some("task-123".to_string()));
+        assert_eq!(task.id, "task-123");
         assert_eq!(task.title, "Test Task");
         assert_eq!(task.description, Some("Task description".to_string()));
         assert_eq!(task.level, Level::Ticket);
@@ -572,7 +513,7 @@ mod tests {
 
         let task = service.response_to_task(&response);
 
-        assert_eq!(task.id, Some("task-456".to_string()));
+        assert_eq!(task.id, "task-456");
         assert_eq!(task.title, "Minimal Task");
         assert_eq!(task.description, None);
         assert_eq!(task.priority, None);
@@ -645,31 +586,6 @@ mod tests {
         assert!(task.updated_at.is_some());
         assert!(task.started_at.is_some());
         assert!(task.completed_at.is_none());
-    }
-
-    #[test]
-    fn test_response_to_summary() {
-        let client = create_test_client();
-        let service = SacrumTaskService::new(client);
-
-        let mut response = make_task_response("task-sum", "Summary Task");
-        response.level = Some("epic".to_string());
-        response.priority = Some("critical".to_string());
-        response.tags = vec!["tag1".to_string()];
-        response.needs_human_review = Some(true);
-        response.workflow_id = Some("wf-1".to_string());
-        response.current_step_id = Some("step-1".to_string());
-
-        let summary = service.response_to_summary(&response);
-
-        assert_eq!(summary.id, "task-sum");
-        assert_eq!(summary.title, "Summary Task");
-        assert_eq!(summary.level, Level::Epic);
-        assert_eq!(summary.priority, Some(Priority::Critical));
-        assert_eq!(summary.tags, vec!["tag1"]);
-        assert_eq!(summary.needs_human_review, Some(true));
-        assert_eq!(summary.workflow_id.as_deref(), Some("wf-1"));
-        assert_eq!(summary.current_step_id.as_deref(), Some("step-1"));
     }
 
     #[test]

@@ -1,14 +1,14 @@
-import type { TaskSummary } from '../../bindings';
+import type { Task } from '../../bindings';
 import { TaskRow } from './TaskRow';
 import { ColumnResizer } from './ColumnResizer';
 import { useResizableColumns } from '../../hooks/useResizableColumns';
 
 interface TaskListProps {
-  tasks: TaskSummary[];
+  tasks: Task[];
   isLoading: boolean;
   error: string | null;
   selectedTaskId?: string | null;
-  onTaskSelect?: (task: TaskSummary) => void;
+  onTaskSelect?: (task: Task) => void;
   hideStatus?: boolean;
 }
 

@@ -91,7 +91,7 @@ async hasProjectSelected() : Promise<Result<boolean, CommandError>> {
  * 
  * Returns a list of task summaries matching the filter criteria.
  */
-async listTasks(filter: TaskFilterOptions | null) : Promise<Result<TaskSummary[], CommandError>> {
+async listTasks(filter: TaskFilterOptions | null) : Promise<Result<Task[], CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("list_tasks", { filter }) };
 } catch (e) {
@@ -102,9 +102,9 @@ async listTasks(filter: TaskFilterOptions | null) : Promise<Result<TaskSummary[]
 /**
  * Get a single task by ID with its relations
  * 
- * Returns the full task details along with parent, children, and dependency relations.
+ * Returns the full task details.
  */
-async getTask(id: string) : Promise<Result<TaskWithRelations, CommandError>> {
+async getTask(id: string) : Promise<Result<Task, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("get_task", { id }) };
 } catch (e) {
@@ -118,7 +118,7 @@ async getTask(id: string) : Promise<Result<TaskWithRelations, CommandError>> {
  * Returns a tree structure of tasks starting from the given root.
  * If no root_id is provided, returns all root-level tasks with their hierarchies.
  */
-async getTaskHierarchy(rootId: string | null, filter: TaskFilterOptions | null) : Promise<Result<TaskHierarchyNode[], CommandError>> {
+async getTaskHierarchy(rootId: string | null, filter: TaskFilterOptions | null) : Promise<Result<TaskTreeNode[], CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("get_task_hierarchy", { rootId, filter }) };
 } catch (e) {
@@ -395,6 +395,23 @@ async getWorkflowWithTasks(id: string) : Promise<Result<WorkflowWithTasks, Comma
 async getWorkflowWithTaskDetails(id: string) : Promise<Result<WorkflowWithTaskDetails, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("get_workflow_with_task_details", { id }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Get all pipeline data in a single command.
+ * 
+ * Fetches workflows, all tasks (as lightweight summaries), all steps grouped
+ * by workflow, and workflow transitions. Replaces the N+1 sequential fetch
+ * pattern where each workflow triggers individual task and step queries.
+ * 
+ * Makes 3-4 service calls total instead of 2N+2.
+ */
+async getPipelineData() : Promise<Result<PipelineData, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_pipeline_data") };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -690,6 +707,11 @@ export type ExecutionStatus = "in_progress" | "completed" | "failed"
  */
 export type PermissionMode = "accept_edits" | "bypass_permissions" | "default" | "delegate" | "dont_ask" | "plan"
 /**
+ * Aggregated data for the pipeline view, loaded in a single command.
+ * Replaces N+1 sequential HTTP calls with 3 batch calls.
+ */
+export type PipelineData = { workflows: Workflow[]; workflow_steps: Partial<{ [key in string]: Step[] }>; tasks: Task[]; transitions: WorkflowTransition[] }
+/**
  * PTY operation errors
  */
 export type PtyError = { SpawnFailed: string } | { SessionNotFound: string } | { WriteFailed: string } | { ResizeFailed: string }
@@ -888,13 +910,13 @@ export type StepExecutionChangedEvent = { execution_id: string; task_id: string;
  */
 export type StepExecutionStatus = "Pending" | "Running" | "Completed" | "Failed"
 /**
- * Full task details - mirrors db::Task but with string IDs and dates
+ * Full task details - mirrors core::Task with string IDs and dates
  */
 export type Task = { 
 /**
  * Task ID (string form)
  */
-id: string | null; 
+id: string; 
 /**
  * Task title
  */
@@ -920,6 +942,54 @@ priority: TaskPriority | null;
  */
 tags: string[]; 
 /**
+ * Workflow ID (string form)
+ */
+workflow_id: string | null; 
+/**
+ * Current step ID (string form) - used for positioning
+ */
+current_step_id: string | null; 
+/**
+ * Workflow name (if task is assigned to a workflow)
+ */
+workflow_name: string | null; 
+/**
+ * Current step name (if task has a current step in workflow)
+ */
+step_name: string | null; 
+/**
+ * Whether this task needs human review
+ */
+needs_human_review: boolean | null; 
+/**
+ * Review comment
+ */
+review_comment: string | null; 
+/**
+ * Feedback to address when a validation gate fails
+ */
+revision_feedback: string | null; 
+/**
+ * Reason why the task was rejected
+ */
+rejection_reason: string | null; 
+/**
+ * Parent task ID (if any)
+ */
+parent_id: string | null; 
+/**
+ * IDs of tasks this task depends on
+ */
+dependency_ids?: string[]; 
+/**
+ * Embedded sections
+ */
+sections: Section[]; 
+/**
+ * Embedded code references
+ */
+code_refs: CodeRef[]; 
+/**
  * Creation timestamp (ISO 8601 string)
  */
 created_at: string | null; 
@@ -934,35 +1004,7 @@ started_at: string | null;
 /**
  * When this task was completed (ISO 8601 string)
  */
-completed_at: string | null; 
-/**
- * Embedded sections
- */
-sections: Section[]; 
-/**
- * Embedded code references
- */
-code_refs: CodeRef[]; 
-/**
- * Whether this task needs human review
- */
-needs_human_review: boolean | null; 
-/**
- * Feedback to address when a validation gate fails
- */
-revision_feedback: string | null; 
-/**
- * Reason why the task was rejected
- */
-rejection_reason: string | null; 
-/**
- * Workflow ID (string form)
- */
-workflow_id: string | null; 
-/**
- * Current step ID (string form) - used for positioning
- */
-current_step_id: string | null }
+completed_at: string | null }
 /**
  * The type of change that occurred on a task.
  */
@@ -1009,18 +1051,6 @@ search: string | null;
  */
 workflow_id: string | null }
 /**
- * Task hierarchy node for tree views
- */
-export type TaskHierarchyNode = { 
-/**
- * The task summary
- */
-task: TaskSummary; 
-/**
- * Child nodes
- */
-children: TaskHierarchyNode[] }
-/**
  * Task hierarchy level - mirrors db::Level
  */
 export type TaskLevel = "epic" | "ticket" | "task"
@@ -1035,73 +1065,25 @@ export type TaskPriority = "low" | "medium" | "high" | "critical"
  */
 export type TaskStepChangedEvent = { task_id: string; step_id: string; step_name: string }
 /**
- * Summary of a task for list views - mirrors db::TaskSummary
+ * Task tree node for hierarchical views
  */
-export type TaskSummary = { 
+export type TaskTreeNode = { 
 /**
- * The task ID
- */
-id: string; 
-/**
- * Task title
- */
-title: string; 
-/**
- * Hierarchy level
- */
-level: TaskLevel; 
-/**
- * Current status (derived from workflow step name)
- */
-status: string; 
-/**
- * Optional priority
- */
-priority: TaskPriority | null; 
-/**
- * Tags for categorization
- */
-tags: string[]; 
-/**
- * Whether this task needs human review
- */
-needs_human_review: boolean | null; 
-/**
- * When the task was created (ISO 8601 format)
- */
-created_at: string; 
-/**
- * Workflow name (if task is assigned to a workflow)
- */
-workflow_name: string | null; 
-/**
- * Current step name (if task has a current step in workflow)
- */
-step_name: string | null }
-/**
- * Task with its relations (parent, children, dependencies)
- */
-export type TaskWithRelations = { 
-/**
- * The task itself
+ * The task
  */
 task: Task; 
 /**
- * Parent task ID (if any)
+ * Whether this task has incomplete blockers
  */
-parent_id: string | null; 
+has_blockers: boolean; 
 /**
- * Child task IDs
+ * Number of incomplete blockers
  */
-children_ids: string[]; 
+blocker_count: number; 
 /**
- * Task IDs this task depends on (blockers)
+ * Child nodes
  */
-depends_on_ids: string[]; 
-/**
- * Task IDs that depend on this task
- */
-dependent_ids: string[] }
+children: TaskTreeNode[] }
 /**
  * Options for updating a task - allows updating multiple fields at once
  */
@@ -1281,7 +1263,7 @@ label: string;
  */
 target_step_id: string | null }
 /**
- * Workflow with its associated tasks including full details and relations
+ * Workflow with its associated tasks including full details
  */
 export type WorkflowWithTaskDetails = { 
 /**
@@ -1289,9 +1271,9 @@ export type WorkflowWithTaskDetails = {
  */
 workflow: Workflow; 
 /**
- * Tasks associated with this workflow with full details and relations
+ * Tasks associated with this workflow
  */
-tasks: TaskWithRelations[] }
+tasks: Task[] }
 /**
  * Workflow with its associated tasks
  */
@@ -1303,7 +1285,7 @@ workflow: Workflow;
 /**
  * Tasks associated with this workflow
  */
-tasks: TaskSummary[] }
+tasks: Task[] }
 
 /** tauri-specta globals **/
 

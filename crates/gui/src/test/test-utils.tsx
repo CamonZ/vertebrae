@@ -2,7 +2,7 @@ import { render, type RenderOptions } from "@testing-library/react";
 import { ReactFlowProvider } from "@xyflow/react";
 import { BrowserRouter } from "react-router-dom";
 import type { ReactElement, ReactNode } from "react";
-import type { Task, Workflow, Step, TaskWithRelations, AgentConfig, TaskSummary } from "../bindings";
+import type { Task, Workflow, Step, AgentConfig } from "../bindings";
 
 /**
  * Custom render function that wraps components with necessary providers
@@ -123,53 +123,21 @@ export function createMockTask(overrides?: Partial<Task>): Task {
     priority: null,
     tags: [],
     workflow_id: null,
-    current_step: null,
     current_step_id: null,
+    workflow_name: null,
+    step_name: null,
+    needs_human_review: null,
+    review_comment: null,
+    revision_feedback: null,
+    rejection_reason: null,
+    parent_id: null,
+    dependency_ids: [],
+    sections: [],
+    code_refs: [],
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     started_at: null,
     completed_at: null,
-    sections: [],
-    code_refs: [],
-    needs_human_review: null,
-    revision_feedback: null,
-    rejection_reason: null,
     ...overrides,
-  };
-}
-
-/**
- * Create mock task summary data for testing
- */
-export function createMockTaskSummary(overrides?: Partial<TaskSummary>): TaskSummary {
-  return {
-    id: `task-${Math.random().toString(36).slice(2, 10)}`,
-    title: "Test Task",
-    level: "task",
-    status: "backlog",
-    priority: null,
-    tags: [],
-    needs_human_review: null,
-    created_at: new Date().toISOString(),
-    ...overrides,
-  };
-}
-
-/**
- * Create mock task with relations for testing
- */
-export function createMockTaskWithRelations(overrides?: {
-  task?: Partial<Task>;
-  parent_id?: string | null;
-  children_ids?: string[];
-  depends_on_ids?: string[];
-  dependent_ids?: string[];
-}): TaskWithRelations {
-  return {
-    task: createMockTask(overrides?.task),
-    parent_id: overrides?.parent_id ?? null,
-    children_ids: overrides?.children_ids ?? [],
-    depends_on_ids: overrides?.depends_on_ids ?? [],
-    dependent_ids: overrides?.dependent_ids ?? [],
   };
 }

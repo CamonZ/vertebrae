@@ -1,4 +1,4 @@
-import type { Step, TaskWithRelations } from "../bindings";
+import type { Step, Task } from "../bindings";
 
 /**
  * Groups tasks by their workflow step based on current_step_id.
@@ -6,11 +6,11 @@ import type { Step, TaskWithRelations } from "../bindings";
  * Tasks that don't match any step fall back to the first step.
  */
 export function groupTasksByStep(
-  tasks: TaskWithRelations[],
+  tasks: Task[],
   steps: Step[]
-): Map<string, TaskWithRelations[]> {
+): Map<string, Task[]> {
   const sortedSteps = [...steps].sort((a, b) => a.order - b.order);
-  const groups = new Map<string, TaskWithRelations[]>();
+  const groups = new Map<string, Task[]>();
 
   // Initialize groups for each step (keyed by step name for display compatibility)
   sortedSteps.forEach((step) => {
@@ -25,13 +25,13 @@ export function groupTasksByStep(
     }
   });
 
-  tasks.forEach((tr) => {
-    const currentStepId = tr.task.current_step_id?.toLowerCase();
+  tasks.forEach((item) => {
+    const currentStepId = item.current_step_id?.toLowerCase();
     if (currentStepId) {
       // First try direct lookup by step ID
       const stepName = stepIdToName.get(currentStepId);
       if (stepName && groups.has(stepName)) {
-        groups.get(stepName)?.push(tr);
+        groups.get(stepName)?.push(item);
         return;
       }
 
@@ -44,7 +44,7 @@ export function groupTasksByStep(
           currentStepId.endsWith(`_${name}`) ||
           currentStepId === name
         ) {
-          groups.get(name)?.push(tr);
+          groups.get(name)?.push(item);
           return;
         }
       }
@@ -53,7 +53,7 @@ export function groupTasksByStep(
     // Fall back to first step if no match
     const firstStep = sortedSteps[0]?.name?.toLowerCase();
     if (firstStep && groups.has(firstStep)) {
-      groups.get(firstStep)!.push(tr);
+      groups.get(firstStep)!.push(item);
     }
   });
 

@@ -6,11 +6,9 @@
 
 use crate::error::ServiceResult;
 use crate::models::Task;
-use crate::models::{
-    BlockerNode, CodeRef, Level, Priority, Section, SectionType, TaskFilter, TaskSummary,
-};
+use crate::models::{BlockerNode, CodeRef, Level, Priority, Section, SectionType, TaskFilter};
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
+
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -227,21 +225,6 @@ impl UpdateTaskOptions {
     }
 }
 
-/// Task with its relationships
-#[derive(Debug)]
-pub struct TaskWithRelations {
-    /// The task itself
-    pub task: Task,
-    /// Parent task ID (if any)
-    pub parent_id: Option<String>,
-    /// Children task IDs
-    pub children_ids: Vec<String>,
-    /// IDs of tasks this task depends on
-    pub depends_on_ids: Vec<String>,
-    /// IDs of tasks that depend on this task
-    pub dependent_ids: Vec<String>,
-}
-
 /// Summary of an unblocked task
 #[derive(Debug, Clone)]
 pub struct UnblockedTask {
@@ -266,55 +249,28 @@ pub struct TransitionResult {
 
 /// A node in the hierarchical task tree
 ///
-/// Represents a task with its children nested hierarchically.
+/// Wraps a `Task` with hierarchy metadata (children, blocker info).
 /// Used for displaying tasks in a tree structure.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskTreeNode {
-    /// Task ID
-    pub id: String,
-    /// Task title
-    pub title: String,
-    /// Hierarchy level (epic, ticket, task)
-    pub level: Level,
-    /// Current status (derived from workflow step name)
-    pub status: String,
-    /// Optional priority
-    pub priority: Option<Priority>,
-    /// Tags for categorization
-    pub tags: Vec<String>,
-    /// Whether this task needs human review
-    pub needs_human_review: Option<bool>,
+    /// The task
+    pub task: Task,
     /// Whether this task has incomplete dependencies (blockers)
     pub has_blockers: bool,
     /// Number of incomplete dependencies
     pub blocker_count: usize,
-    /// When the task was created
-    pub created_at: DateTime<Utc>,
     /// Child nodes in the hierarchy
     pub children: Vec<TaskTreeNode>,
-    /// Workflow name (if task is assigned to a workflow)
-    pub workflow_name: Option<String>,
-    /// Current step name (if task has a current step in workflow)
-    pub step_name: Option<String>,
 }
 
 impl TaskTreeNode {
-    /// Create a new TaskTreeNode from a TaskSummary
-    pub fn from_summary(summary: &TaskSummary, has_blockers: bool, blocker_count: usize) -> Self {
+    /// Create a new TaskTreeNode from a Task
+    pub fn from_task(task: &Task, has_blockers: bool, blocker_count: usize) -> Self {
         Self {
-            id: summary.id.clone(),
-            title: summary.title.clone(),
-            level: summary.level.clone(),
-            status: summary.status.clone(),
-            priority: summary.priority.clone(),
-            tags: summary.tags.clone(),
-            needs_human_review: summary.needs_human_review,
+            task: task.clone(),
             has_blockers,
             blocker_count,
-            created_at: summary.created_at,
             children: Vec::new(),
-            workflow_name: summary.workflow_name.clone(),
-            step_name: summary.step_name.clone(),
         }
     }
 
@@ -377,9 +333,6 @@ pub trait TaskService: Send + Sync {
     /// Get a task by ID
     async fn get_task(&self, id: &str) -> ServiceResult<Task>;
 
-    /// Get a task with all its relationships
-    async fn get_task_with_relations(&self, id: &str) -> ServiceResult<TaskWithRelations>;
-
     /// Get the derived status string for a task
     ///
     /// Computes the status string based on workflow assignment:
@@ -410,20 +363,10 @@ pub trait TaskService: Send + Sync {
     // =========================================================================
 
     /// List tasks with optional filters
-    async fn list_tasks(&self, filter: &TaskFilter) -> ServiceResult<Vec<TaskSummary>>;
-
-    /// List tasks with their relationships (optimized single query)
-    ///
-    /// This is significantly more efficient than calling `get_task_with_relations`
-    /// for each task individually, as it fetches all tasks and their relationships
-    /// in a single database query.
-    async fn list_tasks_with_relations(
-        &self,
-        filter: &TaskFilter,
-    ) -> ServiceResult<Vec<TaskWithRelations>>;
+    async fn list_tasks(&self, filter: &TaskFilter) -> ServiceResult<Vec<Task>>;
 
     /// Get tasks ready for work at a given status
-    async fn list_ready(&self, status: &str) -> ServiceResult<Vec<TaskSummary>>;
+    async fn list_ready(&self, status: &str) -> ServiceResult<Vec<Task>>;
 
     /// Get tasks as a hierarchical tree structure
     ///
@@ -473,13 +416,10 @@ pub trait TaskService: Send + Sync {
 
     /// Get incomplete blockers for a task with full details
     ///
-    /// Returns `TaskSummary` information for all tasks that block this task
+    /// Returns `Task` information for all tasks that block this task
     /// and are not yet done. This is a read-only query that doesn't fire
     /// mutation callbacks.
-    async fn get_incomplete_blockers_with_details(
-        &self,
-        id: &str,
-    ) -> ServiceResult<Vec<TaskSummary>>;
+    async fn get_incomplete_blockers_with_details(&self, id: &str) -> ServiceResult<Vec<Task>>;
 
     /// Find the shortest path between two tasks through their dependencies
     ///
@@ -692,5 +632,6 @@ pub trait TaskService: Send + Sync {
     ///
     /// A vector of (task_id, blocker_id) tuples.
     async fn export_depends_on_relations(&self) -> ServiceResult<Vec<(String, String)>>;
+
     async fn create_task_raw(&self, id: &str, task: &Task) -> ServiceResult<String>;
 }

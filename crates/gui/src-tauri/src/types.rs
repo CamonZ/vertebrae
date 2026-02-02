@@ -149,53 +149,11 @@ impl From<vertebrae_core::Section> for Section {
     }
 }
 
-/// Summary of a task for list views - mirrors db::TaskSummary
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
-pub struct TaskSummary {
-    /// The task ID
-    pub id: String,
-    /// Task title
-    pub title: String,
-    /// Hierarchy level
-    pub level: TaskLevel,
-    /// Current status (derived from workflow step name)
-    pub status: String,
-    /// Optional priority
-    pub priority: Option<TaskPriority>,
-    /// Tags for categorization
-    pub tags: Vec<String>,
-    /// Whether this task needs human review
-    pub needs_human_review: Option<bool>,
-    /// When the task was created (ISO 8601 format)
-    pub created_at: String,
-    /// Workflow name (if task is assigned to a workflow)
-    pub workflow_name: Option<String>,
-    /// Current step name (if task has a current step in workflow)
-    pub step_name: Option<String>,
-}
-
-impl From<vertebrae_core::TaskSummary> for TaskSummary {
-    fn from(summary: vertebrae_core::TaskSummary) -> Self {
-        TaskSummary {
-            id: summary.id,
-            title: summary.title,
-            level: summary.level.into(),
-            status: summary.status,
-            priority: summary.priority.map(Into::into),
-            tags: summary.tags,
-            needs_human_review: summary.needs_human_review,
-            created_at: summary.created_at.to_rfc3339(),
-            workflow_name: summary.workflow_name,
-            step_name: summary.step_name,
-        }
-    }
-}
-
-/// Full task details - mirrors db::Task but with string IDs and dates
+/// Full task details - mirrors core::Task with string IDs and dates
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct Task {
     /// Task ID (string form)
-    pub id: Option<String>,
+    pub id: String,
     /// Task title
     pub title: String,
     /// Optional description
@@ -208,6 +166,31 @@ pub struct Task {
     pub priority: Option<TaskPriority>,
     /// Tags for categorization
     pub tags: Vec<String>,
+    /// Workflow ID (string form)
+    pub workflow_id: Option<String>,
+    /// Current step ID (string form) - used for positioning
+    pub current_step_id: Option<String>,
+    /// Workflow name (if task is assigned to a workflow)
+    pub workflow_name: Option<String>,
+    /// Current step name (if task has a current step in workflow)
+    pub step_name: Option<String>,
+    /// Whether this task needs human review
+    pub needs_human_review: Option<bool>,
+    /// Review comment
+    pub review_comment: Option<String>,
+    /// Feedback to address when a validation gate fails
+    pub revision_feedback: Option<String>,
+    /// Reason why the task was rejected
+    pub rejection_reason: Option<String>,
+    /// Parent task ID (if any)
+    pub parent_id: Option<String>,
+    /// IDs of tasks this task depends on
+    #[serde(default)]
+    pub dependency_ids: Vec<String>,
+    /// Embedded sections
+    pub sections: Vec<Section>,
+    /// Embedded code references
+    pub code_refs: Vec<CodeRef>,
     /// Creation timestamp (ISO 8601 string)
     pub created_at: Option<String>,
     /// Last update timestamp (ISO 8601 string)
@@ -216,20 +199,6 @@ pub struct Task {
     pub started_at: Option<String>,
     /// When this task was completed (ISO 8601 string)
     pub completed_at: Option<String>,
-    /// Embedded sections
-    pub sections: Vec<Section>,
-    /// Embedded code references
-    pub code_refs: Vec<CodeRef>,
-    /// Whether this task needs human review
-    pub needs_human_review: Option<bool>,
-    /// Feedback to address when a validation gate fails
-    pub revision_feedback: Option<String>,
-    /// Reason why the task was rejected
-    pub rejection_reason: Option<String>,
-    /// Workflow ID (string form)
-    pub workflow_id: Option<String>,
-    /// Current step ID (string form) - used for positioning
-    pub current_step_id: Option<String>,
 }
 
 impl From<vertebrae_core::Task> for Task {
@@ -239,46 +208,40 @@ impl From<vertebrae_core::Task> for Task {
             title: task.title,
             description: task.description,
             level: task.level.into(),
-            status: "backlog".to_string(),
+            status: task.status,
             priority: task.priority.map(Into::into),
             tags: task.tags,
+            workflow_id: task.workflow_id,
+            current_step_id: task.current_step_id,
+            workflow_name: task.workflow_name,
+            step_name: task.step_name,
+            needs_human_review: task.needs_human_review,
+            review_comment: task.review_comment,
+            revision_feedback: task.revision_feedback,
+            rejection_reason: task.rejection_reason,
+            parent_id: task.parent_id,
+            dependency_ids: task.dependency_ids,
+            sections: task.sections.into_iter().map(Into::into).collect(),
+            code_refs: task.code_refs.into_iter().map(Into::into).collect(),
             created_at: task.created_at.map(|dt| dt.to_rfc3339()),
             updated_at: task.updated_at.map(|dt| dt.to_rfc3339()),
             started_at: task.started_at.map(|dt| dt.to_rfc3339()),
             completed_at: task.completed_at.map(|dt| dt.to_rfc3339()),
-            sections: task.sections.into_iter().map(Into::into).collect(),
-            code_refs: task.code_refs.into_iter().map(Into::into).collect(),
-            needs_human_review: task.needs_human_review,
-            revision_feedback: task.revision_feedback,
-            rejection_reason: task.rejection_reason,
-            workflow_id: task.workflow_id,
-            current_step_id: task.current_step_id,
         }
     }
 }
 
-/// Task with its relations (parent, children, dependencies)
+/// Task tree node for hierarchical views
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
-pub struct TaskWithRelations {
-    /// The task itself
+pub struct TaskTreeNode {
+    /// The task
     pub task: Task,
-    /// Parent task ID (if any)
-    pub parent_id: Option<String>,
-    /// Child task IDs
-    pub children_ids: Vec<String>,
-    /// Task IDs this task depends on (blockers)
-    pub depends_on_ids: Vec<String>,
-    /// Task IDs that depend on this task
-    pub dependent_ids: Vec<String>,
-}
-
-/// Task hierarchy node for tree views
-#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
-pub struct TaskHierarchyNode {
-    /// The task summary
-    pub task: TaskSummary,
+    /// Whether this task has incomplete blockers
+    pub has_blockers: bool,
+    /// Number of incomplete blockers
+    pub blocker_count: u32,
     /// Child nodes
-    pub children: Vec<TaskHierarchyNode>,
+    pub children: Vec<TaskTreeNode>,
 }
 
 /// Filter options for listing tasks
@@ -542,16 +505,16 @@ pub struct WorkflowWithTasks {
     /// The workflow itself
     pub workflow: Workflow,
     /// Tasks associated with this workflow
-    pub tasks: Vec<TaskSummary>,
+    pub tasks: Vec<Task>,
 }
 
-/// Workflow with its associated tasks including full details and relations
+/// Workflow with its associated tasks including full details
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct WorkflowWithTaskDetails {
     /// The workflow itself
     pub workflow: Workflow,
-    /// Tasks associated with this workflow with full details and relations
-    pub tasks: Vec<TaskWithRelations>,
+    /// Tasks associated with this workflow
+    pub tasks: Vec<Task>,
 }
 
 /// Workflow transition - defines allowed transitions between workflows
@@ -651,6 +614,20 @@ impl From<vertebrae_core::SessionLog> for SessionLog {
             created_at: log.created_at.to_rfc3339(),
         }
     }
+}
+
+// ============================================================================
+// Pipeline Types
+// ============================================================================
+
+/// Aggregated data for the pipeline view, loaded in a single command.
+/// Replaces N+1 sequential HTTP calls with 3 batch calls.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct PipelineData {
+    pub workflows: Vec<Workflow>,
+    pub workflow_steps: std::collections::HashMap<String, Vec<Step>>,
+    pub tasks: Vec<Task>,
+    pub transitions: Vec<WorkflowTransition>,
 }
 
 #[cfg(test)]
@@ -873,60 +850,6 @@ mod tests {
             .with_refs(vec![ref1, ref2]);
         let gui = Section::from(core);
         assert_eq!(gui.refs.len(), 2);
-    }
-
-    // ─── TaskSummary Conversion Tests ────────────────────────────────
-
-    #[test]
-    fn task_summary_from_core() {
-        let now = chrono::Utc::now();
-        let core = vertebrae_core::TaskSummary {
-            id: "task1".to_string(),
-            title: "My Task".to_string(),
-            level: vertebrae_core::Level::Ticket,
-            status: "in_progress".to_string(),
-            priority: Some(vertebrae_core::Priority::High),
-            tags: vec!["rust".to_string(), "cli".to_string()],
-            needs_human_review: Some(true),
-            created_at: now,
-            workflow_id: Some("wf1".to_string()),
-            current_step_id: Some("step1".to_string()),
-            workflow_name: Some("Review".to_string()),
-            step_name: Some("Code Review".to_string()),
-        };
-        let gui = TaskSummary::from(core);
-        assert_eq!(gui.id, "task1");
-        assert_eq!(gui.title, "My Task");
-        assert_eq!(gui.level, TaskLevel::Ticket);
-        assert_eq!(gui.status, "in_progress");
-        assert_eq!(gui.priority, Some(TaskPriority::High));
-        assert_eq!(gui.tags, vec!["rust", "cli"]);
-        assert_eq!(gui.needs_human_review, Some(true));
-        assert_eq!(gui.workflow_name, Some("Review".to_string()));
-        assert_eq!(gui.step_name, Some("Code Review".to_string()));
-        assert!(!gui.created_at.is_empty());
-    }
-
-    #[test]
-    fn task_summary_from_core_rfc3339_format() {
-        let now = chrono::Utc::now();
-        let core = vertebrae_core::TaskSummary {
-            id: "t".to_string(),
-            title: "T".to_string(),
-            level: vertebrae_core::Level::Task,
-            status: "todo".to_string(),
-            priority: None,
-            tags: vec![],
-            needs_human_review: None,
-            created_at: now,
-            workflow_id: None,
-            current_step_id: None,
-            workflow_name: None,
-            step_name: None,
-        };
-        let gui = TaskSummary::from(core);
-        chrono::DateTime::parse_from_rfc3339(&gui.created_at)
-            .expect("created_at should be valid RFC3339");
     }
 
     // ─── Task Conversion Tests ──────────────────────────────────────

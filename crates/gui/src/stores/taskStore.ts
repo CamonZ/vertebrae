@@ -1,22 +1,22 @@
 import { create } from "zustand";
-import type { TaskSummary, TaskWithRelations } from "../bindings";
+import type { Task } from "../bindings";
 
 interface TaskState {
-  /** List of task summaries for list views */
-  tasks: TaskSummary[];
+  /** List of tasks for list views */
+  tasks: Task[];
   /** Currently selected task ID */
   selectedTaskId: string | null;
-  /** Full details of the selected task with relations */
-  selectedTask: TaskWithRelations | null;
+  /** Full details of the selected task */
+  selectedTask: Task | null;
   /** Loading state for async operations */
   isLoading: boolean;
 }
 
 interface TaskActions {
   /** Set the list of tasks */
-  setTasks: (tasks: TaskSummary[]) => void;
+  setTasks: (tasks: Task[]) => void;
   /** Select a task by ID and optionally set its full details */
-  selectTask: (id: string | null, task?: TaskWithRelations | null) => void;
+  selectTask: (id: string | null, task?: Task | null) => void;
   /** Set the loading state */
   setLoading: (isLoading: boolean) => void;
   /** Clear the selected task */

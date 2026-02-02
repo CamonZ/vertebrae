@@ -60,10 +60,11 @@ impl TaskService for MockTaskService {
         let mut s = self.state.lock().unwrap();
         let id = options.id.clone().unwrap_or_else(|| s.gen_id());
         let task = Task {
-            id: Some(id.clone()),
+            id: id.clone(),
             title: options.title.clone(),
             description: options.description.clone(),
             level: options.level.clone().unwrap_or(Level::Task),
+            status: "backlog".to_string(),
             priority: options.priority.clone(),
             tags: options.tags.clone(),
             created_at: Some(Utc::now()),
@@ -79,8 +80,13 @@ impl TaskService for MockTaskService {
             },
             revision_feedback: None,
             rejection_reason: None,
+            review_comment: None,
             workflow_id: None,
             current_step_id: None,
+            parent_id: None,
+            dependency_ids: vec![],
+            workflow_name: None,
+            step_name: None,
         };
         s.tasks.insert(id.clone(), task);
 
@@ -112,41 +118,6 @@ impl TaskService for MockTaskService {
             .get(id)
             .cloned()
             .ok_or_else(|| ServiceError::task_not_found(id))
-    }
-
-    async fn get_task_with_relations(&self, id: &str) -> ServiceResult<TaskWithRelations> {
-        let s = self.state.lock().unwrap();
-        let task = s
-            .tasks
-            .get(id)
-            .cloned()
-            .ok_or_else(|| ServiceError::task_not_found(id))?;
-        let parent_id = s.parents.get(id).cloned();
-        let children_ids: Vec<String> = s
-            .parents
-            .iter()
-            .filter(|(_, p)| *p == id)
-            .map(|(c, _)| c.clone())
-            .collect();
-        let depends_on_ids: Vec<String> = s
-            .dependencies
-            .get(id)
-            .map(|set| set.iter().cloned().collect())
-            .unwrap_or_default();
-        let dependent_ids: Vec<String> = s
-            .dependencies
-            .iter()
-            .filter(|(_, blockers)| blockers.contains(id))
-            .map(|(tid, _)| tid.clone())
-            .collect();
-
-        Ok(TaskWithRelations {
-            task,
-            parent_id,
-            children_ids,
-            depends_on_ids,
-            dependent_ids,
-        })
     }
 
     async fn get_derived_status(&self, _task: &Task) -> ServiceResult<String> {
@@ -217,9 +188,9 @@ impl TaskService for MockTaskService {
         Ok(s.tasks.contains_key(id))
     }
 
-    async fn list_tasks(&self, filter: &TaskFilter) -> ServiceResult<Vec<TaskSummary>> {
+    async fn list_tasks(&self, filter: &TaskFilter) -> ServiceResult<Vec<Task>> {
         let s = self.state.lock().unwrap();
-        let summaries: Vec<TaskSummary> = s
+        let tasks: Vec<Task> = s
             .tasks
             .values()
             .filter(|t| {
@@ -228,38 +199,12 @@ impl TaskService for MockTaskService {
                 }
                 true
             })
-            .map(|t| TaskSummary {
-                id: t.id.clone().unwrap_or_default(),
-                title: t.title.clone(),
-                level: t.level.clone(),
-                status: "backlog".to_string(),
-                priority: t.priority.clone(),
-                tags: t.tags.clone(),
-                needs_human_review: t.needs_human_review,
-                created_at: t.created_at.unwrap_or_else(Utc::now),
-                workflow_id: t.workflow_id.clone(),
-                current_step_id: t.current_step_id.clone(),
-                workflow_name: None,
-                step_name: None,
-            })
+            .cloned()
             .collect();
-        Ok(summaries)
+        Ok(tasks)
     }
 
-    async fn list_tasks_with_relations(
-        &self,
-        filter: &TaskFilter,
-    ) -> ServiceResult<Vec<TaskWithRelations>> {
-        let summaries = self.list_tasks(filter).await?;
-        let mut result = vec![];
-        for summary in &summaries {
-            let twr = self.get_task_with_relations(&summary.id).await?;
-            result.push(twr);
-        }
-        Ok(result)
-    }
-
-    async fn list_ready(&self, _status: &str) -> ServiceResult<Vec<TaskSummary>> {
+    async fn list_ready(&self, _status: &str) -> ServiceResult<Vec<Task>> {
         let all = self.list_tasks(&TaskFilter::default()).await?;
         let s = self.state.lock().unwrap();
         Ok(all
@@ -282,14 +227,11 @@ impl TaskService for MockTaskService {
         let root_tasks: Vec<&Task> = s
             .tasks
             .values()
-            .filter(|t| {
-                let id = t.id.as_deref().unwrap_or("");
-                !s.parents.contains_key(id)
-            })
+            .filter(|t| !s.parents.contains_key(&t.id))
             .collect();
 
         fn build_node(task: &Task, state: &MockState) -> TaskTreeNode {
-            let id = task.id.clone().unwrap_or_default();
+            let id = task.id.clone();
             let children_ids: Vec<String> = state
                 .parents
                 .iter()
@@ -303,16 +245,7 @@ impl TaskService for MockTaskService {
                 .collect();
 
             TaskTreeNode {
-                id,
-                title: task.title.clone(),
-                level: task.level.clone(),
-                status: "backlog".to_string(),
-                priority: task.priority.clone(),
-                tags: task.tags.clone(),
-                needs_human_review: task.needs_human_review,
-                created_at: task.created_at.unwrap_or_else(Utc::now),
-                workflow_name: None,
-                step_name: None,
+                task: task.clone(),
                 has_blockers: false,
                 blocker_count: 0,
                 children,
@@ -345,12 +278,18 @@ impl TaskService for MockTaskService {
         }
         s.parents
             .insert(child_id.to_string(), parent_id.to_string());
+        if let Some(task) = s.tasks.get_mut(child_id) {
+            task.parent_id = Some(parent_id.to_string());
+        }
         Ok(())
     }
 
     async fn remove_parent(&self, child_id: &str) -> ServiceResult<()> {
         let mut s = self.state.lock().unwrap();
         s.parents.remove(child_id);
+        if let Some(task) = s.tasks.get_mut(child_id) {
+            task.parent_id = None;
+        }
         Ok(())
     }
 
@@ -366,6 +305,11 @@ impl TaskService for MockTaskService {
             .entry(task_id.to_string())
             .or_default()
             .insert(depends_on_id.to_string());
+        if let Some(task) = s.tasks.get_mut(task_id) {
+            if !task.dependency_ids.contains(&depends_on_id.to_string()) {
+                task.dependency_ids.push(depends_on_id.to_string());
+            }
+        }
         Ok(())
     }
 
@@ -373,6 +317,9 @@ impl TaskService for MockTaskService {
         let mut s = self.state.lock().unwrap();
         if let Some(deps) = s.dependencies.get_mut(task_id) {
             deps.remove(depends_on_id);
+        }
+        if let Some(task) = s.tasks.get_mut(task_id) {
+            task.dependency_ids.retain(|d| d != depends_on_id);
         }
         Ok(())
     }
@@ -402,30 +349,12 @@ impl TaskService for MockTaskService {
         Ok(blockers)
     }
 
-    async fn get_incomplete_blockers_with_details(
-        &self,
-        id: &str,
-    ) -> ServiceResult<Vec<TaskSummary>> {
+    async fn get_incomplete_blockers_with_details(&self, id: &str) -> ServiceResult<Vec<Task>> {
         let blockers = self.get_blockers(id).await?;
         let s = self.state.lock().unwrap();
         Ok(blockers
             .iter()
-            .filter_map(|b| {
-                s.tasks.get(&b.id).map(|t| TaskSummary {
-                    id: b.id.clone(),
-                    title: t.title.clone(),
-                    level: t.level.clone(),
-                    status: "backlog".to_string(),
-                    priority: t.priority.clone(),
-                    tags: t.tags.clone(),
-                    needs_human_review: t.needs_human_review,
-                    created_at: t.created_at.unwrap_or_else(Utc::now),
-                    workflow_id: t.workflow_id.clone(),
-                    current_step_id: t.current_step_id.clone(),
-                    workflow_name: None,
-                    step_name: None,
-                })
-            })
+            .filter_map(|b| s.tasks.get(&b.id).cloned())
             .collect())
     }
 
@@ -678,7 +607,7 @@ impl TaskService for MockTaskService {
     async fn create_task_raw(&self, id: &str, task: &Task) -> ServiceResult<String> {
         let mut s = self.state.lock().unwrap();
         let mut t = task.clone();
-        t.id = Some(id.to_string());
+        t.id = id.to_string();
         s.tasks.insert(id.to_string(), t);
         Ok(id.to_string())
     }

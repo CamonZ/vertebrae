@@ -92,9 +92,9 @@ impl DependCommand {
         }
 
         // Check if dependency already exists (idempotent) using service layer
-        let with_relations = services.tasks().get_task_with_relations(&task_id).await?;
+        let existing_deps = services.tasks().get_dependencies(&task_id).await?;
 
-        if with_relations.depends_on_ids.contains(&blocker_id) {
+        if existing_deps.contains(&blocker_id) {
             // Dependency already exists - idempotent behavior
             return Ok(DependResult {
                 task_id,

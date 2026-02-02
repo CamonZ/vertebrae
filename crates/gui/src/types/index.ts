@@ -14,9 +14,7 @@
 export type {
   // Core task types
   Task,
-  TaskSummary,
-  TaskWithRelations,
-  TaskHierarchyNode,
+  TaskTreeNode,
   TaskFilterOptions,
 
   // Task enums

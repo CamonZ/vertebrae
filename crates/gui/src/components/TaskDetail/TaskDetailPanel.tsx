@@ -1,12 +1,13 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import type {
-  TaskWithRelations,
+  Task,
   TaskLevel,
   TaskPriority,
   TaskChangedEvent,
 } from "../../bindings";
 import { commands, events } from "../../bindings";
 import { useTask } from "../../hooks/useTask";
+import { useTaskStore } from "../../stores";
 import { TaskSections } from "./TaskSections";
 import { TaskCodeRefs } from "./TaskCodeRefs";
 import { TaskRelations } from "./TaskRelations";
@@ -267,6 +268,7 @@ function DetailRow({
  */
 function TaskDetailsTab({
   taskData,
+  childrenIds,
   editingField,
   editValues,
   isSubmitting,
@@ -284,7 +286,8 @@ function TaskDetailsTab({
   onConfirmDelete,
   onCascadeChange,
 }: {
-  taskData: TaskWithRelations;
+  taskData: Task;
+  childrenIds: string[];
   editingField: "title" | "priority" | "level" | null;
   editValues: {
     title: string;
@@ -314,10 +317,9 @@ function TaskDetailsTab({
   onConfirmDelete: () => void;
   onCascadeChange: (value: boolean) => void;
 }) {
-  const { task } = taskData;
-  const statusStyles = getStatusStyles(task.status);
-  const levelStyles = getLevelStyles(task.level);
-  const priorityStyles = getPriorityStyles(task.priority);
+  const statusStyles = getStatusStyles(taskData.status);
+  const levelStyles = getLevelStyles(taskData.level);
+  const priorityStyles = getPriorityStyles(taskData.priority);
 
   return (
     <div className="divide-y divide-border">
@@ -326,12 +328,12 @@ function TaskDetailsTab({
         <span
           className={`inline-flex items-center rounded border px-2 py-1 text-[10px] font-medium uppercase tracking-wider ${levelStyles.bg} ${levelStyles.text} ${levelStyles.border}`}
         >
-          {task.level}
+          {taskData.level}
         </span>
         <span
           className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${statusStyles.bg} ${statusStyles.text} ${statusStyles.glow ?? ""}`}
         >
-          {task.status.replace("_", " ")}
+          {taskData.status.replace("_", " ")}
         </span>
         {priorityStyles && (
           <span
@@ -356,7 +358,7 @@ function TaskDetailsTab({
               onBlur={() => onFieldSave("priority")}
               autoFocus
               disabled={isSubmitting}
-              className="w-full rounded border border-primary/30 bg-bg-secondary px-2 py-1.5 text-sm text-text-primary focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-50"
+              className="w-full rounded border border-primary/30 bg-bg-secondary px-2 py-1.5 text-sm text-text-primary focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <option value="">None</option>
               <option value="low">Low</option>
@@ -371,7 +373,7 @@ function TaskDetailsTab({
             onClick={() => onFieldClick("priority")}
             className="text-sm text-text-secondary cursor-pointer hover:bg-bg-hover p-2 rounded"
           >
-            {task.priority || "None"}
+            {taskData.priority || "None"}
           </p>
         )}
       </div>
@@ -410,7 +412,7 @@ function TaskDetailsTab({
             onClick={() => onFieldClick("level")}
             className="text-sm text-text-secondary cursor-pointer hover:bg-bg-hover p-2 rounded"
           >
-            {task.level.charAt(0).toUpperCase() + task.level.slice(1)}
+            {taskData.level.charAt(0).toUpperCase() + taskData.level.slice(1)}
           </p>
         )}
       </div>
@@ -421,13 +423,13 @@ function TaskDetailsTab({
           <DetailRow label="ID">
             <div className="flex items-center gap-1.5">
               <code className="rounded bg-bg-tertiary px-1.5 py-0.5 font-mono text-xs">
-                {task.id?.slice(0, 8) ?? "-"}
+                {taskData.id?.slice(0, 8) ?? "-"}
               </code>
-              {task.id && (
+              {taskData.id && (
                 <button
                   type="button"
                   onClick={() => {
-                    navigator.clipboard.writeText(task.id!);
+                    navigator.clipboard.writeText(taskData.id!);
                   }}
                   className="rounded p-1 text-text-muted hover:bg-bg-tertiary hover:text-text-primary transition-colors cursor-pointer"
                   title="Copy full ID to clipboard"
@@ -440,10 +442,10 @@ function TaskDetailsTab({
                   >
                     <path
                       fillRule="evenodd"
-                      d="M15.988 3.012A2.25 2.25 0 0118 5.25v6.5A2.25 2.25 0 0115.75 14H13.5v-3.379a3 3 0 00-.879-2.121l-3.12-3.121a3 3 0 00-1.402-.791 2.252 2.252 0 011.913-1.576A2.25 2.25 0 0112.25 1h1.5a2.25 2.25 0 012.238 2.012zM11.5 3.25a.75.75 0 01.75-.75h1.5a.75.75 0 01.75.75v.25h-3v-.25z"
+                      d="M15.988 3.012A2.25 2.25 0 0118 5.25v6.5A2.25 2.25 0 0115.75 14H13.5v-3.379a3 3 0 00-.879-2.121l-3.12-3.122a3 3 0 00-1.402-.791 2.252 2.252 0 011.913-1.576A2.25 2.25 0 0112.25 1h1.5a2.25 2.25 0 012.238 2.012zM11.5 3.25a.75.75 0 01.75-.75h1.5a.75.75 0 01.75.75v.25h-3v-.25z"
                       clipRule="evenodd"
                     />
-                    <path d="M3.5 6A1.5 1.5 0 002 7.5v9A1.5 1.5 0 003.5 18h7a1.5 1.5 0 001.5-1.5v-5.879a1.5 1.5 0 00-.44-1.06l-3.12-3.122a1.5 1.5 0 00-1.061-.439H3.5z" />
+                    <path d="M3.5 6A1.5 1.5 0 002 7.5v9A1.5 1.5 0 003.5 18h7a1.5 1.5 0 011.5-1.5v-5.879a1.5 1.5 0 00-.44-1.06l-3.12-3.122a1.5 1.5 0 00-1.061-.439H3.5z" />
                   </svg>
                 </button>
               )}
@@ -458,7 +460,7 @@ function TaskDetailsTab({
           Description
         </h3>
         <InlineEditField
-          value={task.description || ""}
+          value={taskData.description || ""}
           placeholder="Click to add description"
           multiline
           rows={4}
@@ -474,7 +476,7 @@ function TaskDetailsTab({
           Tags
         </h3>
         <InlineEditField
-          value={task.tags.join(", ")}
+          value={taskData.tags.join(", ")}
           placeholder="Click to add tags (comma-separated)"
           onSave={async (value) => {
             const tags = value.split(",").map(t => t.trim()).filter(t => t.length > 0);
@@ -490,19 +492,19 @@ function TaskDetailsTab({
         </h3>
         <div className="space-y-1">
           <DetailRow label="Created">
-            {formatDateTime(task.created_at)}
+            {formatDateTime(taskData.created_at)}
           </DetailRow>
           <DetailRow label="Updated">
-            {formatDateTime(task.updated_at)}
+            {formatDateTime(taskData.updated_at)}
           </DetailRow>
-          {task.started_at && (
+          {taskData.started_at && (
             <DetailRow label="Started">
-              {formatDateTime(task.started_at)}
+              {formatDateTime(taskData.started_at)}
             </DetailRow>
           )}
-          {task.completed_at && (
+          {taskData.completed_at && (
             <DetailRow label="Completed">
-              {formatDateTime(task.completed_at)}
+              {formatDateTime(taskData.completed_at)}
             </DetailRow>
           )}
         </div>
@@ -515,13 +517,13 @@ function TaskDetailsTab({
             Human Review
           </h3>
           <Toggle
-            checked={task.needs_human_review ?? false}
+            checked={taskData.needs_human_review ?? false}
             onChange={(checked) => onUpdateField("needs_human_review", checked)}
             label="Toggle human review requirement"
             activeColor="warning"
           />
         </div>
-        {task.needs_human_review && (
+        {taskData.needs_human_review && (
           <p className="mt-2 text-xs text-warning">This task requires human review before completion</p>
         )}
       </div>
@@ -532,7 +534,7 @@ function TaskDetailsTab({
           Revision Feedback
         </h3>
         <InlineEditField
-          value={task.revision_feedback || ""}
+          value={taskData.revision_feedback || ""}
           placeholder="Click to add revision feedback"
           multiline
           rows={4}
@@ -543,7 +545,7 @@ function TaskDetailsTab({
       </div>
 
       {/* Rejection Reason Banner */}
-      {task.rejection_reason && (
+      {taskData.rejection_reason && (
         <div className="p-4">
           <div className="rounded-lg border border-error/30 bg-error/10 p-4">
             <div className="flex items-start gap-3">
@@ -567,7 +569,7 @@ function TaskDetailsTab({
                   Rejection Reason
                 </h4>
                 <p className="mt-1 whitespace-pre-wrap text-sm text-text-secondary">
-                  {task.rejection_reason}
+                  {taskData.rejection_reason}
                 </p>
               </div>
             </div>
@@ -579,17 +581,17 @@ function TaskDetailsTab({
       {showDeleteConfirmation && (
         <DeleteConfirmation
           itemType="Task"
-          itemName={task.title}
+          itemName={taskData.title}
           isDeleting={isDeleting}
           error={deleteError}
           onConfirm={onConfirmDelete}
           onCancel={onCancelDelete}
         >
-          {taskData.children_ids && taskData.children_ids.length > 0 && (
+          {childrenIds.length > 0 && (
             <div className="rounded border border-warning/20 bg-warning/5 p-2.5">
               <p className="text-xs text-warning font-medium mb-2">
-                This task has {taskData.children_ids.length} child task
-                {taskData.children_ids.length !== 1 ? "s" : ""}
+                This task has {childrenIds.length} child task
+                {childrenIds.length !== 1 ? "s" : ""}
               </p>
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
@@ -655,6 +657,22 @@ export function TaskDetailPanel({
   const [isRunningWorkflow, setIsRunningWorkflow] = useState(false);
   const [workflowError, setWorkflowError] = useState<string | null>(null);
   const { task: taskData, isLoading, error, refetch } = useTask(taskId);
+  const allTasks = useTaskStore((s) => s.tasks);
+
+  // Derive children and dependents from the already-loaded task list
+  const childrenIds = useMemo(() => {
+    if (!taskId || allTasks.length === 0) return [];
+    return allTasks
+      .filter((t) => t.parent_id === taskId)
+      .map((t) => t.id);
+  }, [taskId, allTasks]);
+
+  const dependentIds = useMemo(() => {
+    if (!taskId || allTasks.length === 0) return [];
+    return allTasks
+      .filter((t) => t.dependency_ids?.includes(taskId))
+      .map((t) => t.id);
+  }, [taskId, allTasks]);
 
   // Track pending refetch for debouncing
   const pendingRefetch = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -714,13 +732,12 @@ export function TaskDetailPanel({
   // Click-to-edit handlers
   const handleFieldClick = useCallback(
     (fieldName: "title" | "priority" | "level") => {
-      if (!taskData?.task) return;
+      if (!taskData) return;
 
-      const task = taskData.task;
       const fieldMap = {
-        title: task.title,
-        priority: task.priority || "",
-        level: task.level,
+        title: taskData.title,
+        priority: taskData.priority || "",
+        level: taskData.level,
       };
 
       setEditValues((prev) => ({ ...prev, [fieldName]: fieldMap[fieldName] }));
@@ -742,7 +759,7 @@ export function TaskDetailPanel({
 
   const handleFieldSave = useCallback(
     async (fieldName: "title" | "priority" | "level") => {
-      if (!taskData?.task.id) return;
+      if (!taskData?.id) return;
 
       setIsSubmitting(true);
       setFieldError(null);
@@ -757,18 +774,18 @@ export function TaskDetailPanel({
 
         // Build options object with only the changed field
         const options = {
-          title: fieldName === "title" ? editValues.title : taskData.task.title,
-          description: taskData.task.description,
-          priority: fieldName === "priority" ? (editValues.priority as string | null) : taskData.task.priority,
+          title: fieldName === "title" ? editValues.title : taskData.title,
+          description: taskData.description,
+          priority: fieldName === "priority" ? (editValues.priority as string | null) : taskData.priority,
           add_tags: [],
           remove_tags: [],
-          level: fieldName === "level" ? editValues.level : taskData.task.level,
-          needs_human_review: taskData.task.needs_human_review,
-          revision_feedback: taskData.task.revision_feedback,
+          level: fieldName === "level" ? editValues.level : taskData.level,
+          needs_human_review: taskData.needs_human_review,
+          revision_feedback: taskData.revision_feedback,
         };
 
         // Call updateTask command
-        const result = await commands.updateTask(taskData.task.id, options);
+        const result = await commands.updateTask(taskData.id, options);
 
         if (result.status === "error") {
           setFieldError(result.error.message);
@@ -807,11 +824,8 @@ export function TaskDetailPanel({
   // Generic field update handler for InlineEditField components
   const onUpdateField = useCallback(
     async (field: string, value: string | boolean | string[]) => {
-      const taskId = taskData?.task.id;
-      if (!taskId) return;
+      if (!taskData?.id) return;
 
-      const task = taskData.task;
-      
       // Build update options based on the field being updated
       const options: {
         title: string;
@@ -823,14 +837,14 @@ export function TaskDetailPanel({
         needs_human_review: boolean;
         revision_feedback: string | null;
       } = {
-        title: task.title,
-        description: task.description,
-        priority: task.priority,
+        title: taskData.title,
+        description: taskData.description,
+        priority: taskData.priority,
         add_tags: [],
         remove_tags: [],
-        level: task.level,
-        needs_human_review: task.needs_human_review ?? false,
-        revision_feedback: task.revision_feedback,
+        level: taskData.level,
+        needs_human_review: taskData.needs_human_review ?? false,
+        revision_feedback: taskData.revision_feedback,
       };
 
       switch (field) {
@@ -840,7 +854,7 @@ export function TaskDetailPanel({
         case "tags": {
           // For tags, we need to compute the difference
           const newTags = value as string[];
-          const currentTags = task.tags;
+          const currentTags = taskData.tags;
           options.add_tags = newTags.filter(t => !currentTags.includes(t));
           options.remove_tags = currentTags.filter(t => !newTags.includes(t));
           break;
@@ -853,7 +867,7 @@ export function TaskDetailPanel({
           break;
       }
 
-      const result = await commands.updateTask(taskId, options);
+      const result = await commands.updateTask(taskData.id, options);
       if (result.status === "error") {
         throw new Error(result.error.message);
       }
@@ -874,13 +888,13 @@ export function TaskDetailPanel({
   }, []);
 
   const handleConfirmDelete = useCallback(async () => {
-    if (!taskData?.task.id) return;
+    if (!taskData?.id) return;
 
     setIsDeleting(true);
     setDeleteError(null);
 
     try {
-      const result = await commands.deleteTask(taskData.task.id, cascade);
+      const result = await commands.deleteTask(taskData.id, cascade);
 
       if (result.status === "error") {
         setDeleteError(result.error.message);
@@ -895,17 +909,17 @@ export function TaskDetailPanel({
     } finally {
       setIsDeleting(false);
     }
-  }, [taskData?.task.id, cascade, onClose]);
+  }, [taskData?.id, cascade, onClose]);
 
   // Run workflow handler
   const handleRunWorkflow = useCallback(async () => {
-    if (!taskData?.task.id) return;
+    if (!taskData?.id) return;
 
     setIsRunningWorkflow(true);
     setWorkflowError(null);
 
     try {
-      const result = await commands.runWorkflow(taskData.task.id);
+      const result = await commands.runWorkflow(taskData.id);
 
       if (result.status === "error") {
         setWorkflowError(result.error.message);
@@ -917,7 +931,7 @@ export function TaskDetailPanel({
     } finally {
       setIsRunningWorkflow(false);
     }
-  }, [taskData?.task.id]);
+  }, [taskData?.id]);
 
   if (!taskId) {
     return null;
@@ -935,7 +949,7 @@ export function TaskDetailPanel({
         </h2>
         <div className="flex items-center gap-2">
           {/* Run Workflow Button - only show if task has a workflow */}
-          {taskData?.task.workflow_id && (
+          {taskData?.workflow_id && (
             <button
               type="button"
               onClick={handleRunWorkflow}
@@ -1088,7 +1102,7 @@ export function TaskDetailPanel({
                 onClick={() => handleFieldClick("title")}
                 className="text-sm font-medium leading-snug text-text-primary cursor-pointer hover:bg-bg-hover p-2 rounded"
               >
-                {taskData.task.title}
+                {taskData.title}
               </h3>
             )}
           </div>
@@ -1141,6 +1155,7 @@ export function TaskDetailPanel({
             {activeTab === "details" && (
               <TaskDetailsTab
                 taskData={taskData}
+                childrenIds={childrenIds}
                 editingField={editingField}
                 editValues={editValues}
                 isSubmitting={isSubmitting}
@@ -1159,33 +1174,33 @@ export function TaskDetailPanel({
                 onCascadeChange={setCascade}
               />
             )}
-            {activeTab === "sections" && taskData.task.id && (
+            {activeTab === "sections" && taskData.id && (
               <TaskSections
-                sections={taskData.task.sections}
-                taskId={taskData.task.id}
+                sections={taskData.sections}
+                taskId={taskData.id}
                 onSectionsChanged={refetch}
               />
             )}
-            {activeTab === "code_refs" && taskData.task.id && (
+            {activeTab === "code_refs" && taskData.id && (
               <TaskCodeRefs
-                codeRefs={taskData.task.code_refs}
-                taskId={taskData.task.id}
+                codeRefs={taskData.code_refs}
+                taskId={taskData.id}
                 onCodeRefsChanged={refetch}
               />
             )}
-            {activeTab === "relations" && taskData.task.id && (
+            {activeTab === "relations" && taskData.id && (
               <TaskRelations
-                taskId={taskData.task.id}
+                taskId={taskData.id}
                 parentId={taskData.parent_id}
-                childrenIds={taskData.children_ids}
-                dependsOnIds={taskData.depends_on_ids}
-                dependentIds={taskData.dependent_ids}
+                childrenIds={childrenIds}
+                dependsOnIds={taskData.dependency_ids ?? []}
+                dependentIds={dependentIds}
                 onTaskSelect={onTaskSelect}
                 onRelationshipChange={refetch}
               />
             )}
-            {activeTab === "history" && taskData.task.id && (
-              <ExecutionHistory taskId={taskData.task.id} />
+            {activeTab === "history" && taskData.id && (
+              <ExecutionHistory taskId={taskData.id} />
             )}
           </div>
         </>

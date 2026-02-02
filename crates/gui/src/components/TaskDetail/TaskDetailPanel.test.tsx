@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, fireEvent } from "@testing-library/react";
-import { render, createMockTaskWithRelations } from "../../test/test-utils";
+import { render, createMockTask } from "../../test/test-utils";
 import { TaskDetailPanel } from "./TaskDetailPanel";
 import * as eventsModule from "../../bindings";
 
@@ -11,17 +11,15 @@ vi.mock("../../hooks/useTask", () => ({
       return { task: null, isLoading: false, error: null, refetch: vi.fn() };
     }
     return {
-      task: createMockTaskWithRelations({
-        task: {
-          id: id,
-          title: "Test Task",
-          description: "Test Description",
-          level: "task" as const,
-          priority: "medium" as const,
-          tags: ["tag1"],
-          sections: [],
-          code_refs: [],
-        },
+      task: createMockTask({
+        id: id,
+        title: "Test Task",
+        description: "Test Description",
+        level: "task" as const,
+        priority: "medium" as const,
+        tags: ["tag1"],
+        sections: [],
+        code_refs: [],
       }),
       isLoading: false,
       error: null,
@@ -43,17 +41,15 @@ vi.mock("../../bindings", () => ({
   },
 }));
 
-const mockTaskData = createMockTaskWithRelations({
-  task: {
-    id: "task-123",
-    title: "Test Task",
-    description: "Test Description",
-    level: "task",
-    priority: "medium",
-    tags: ["tag1"],
-    sections: [],
-    code_refs: [],
-  },
+const mockTaskData = createMockTask({
+  id: "task-123",
+  title: "Test Task",
+  description: "Test Description",
+  level: "task",
+  priority: "medium",
+  tags: ["tag1"],
+  sections: [],
+  code_refs: [],
 });
 
 describe("TaskDetailPanel - Edit Integration", () => {
@@ -66,7 +62,7 @@ describe("TaskDetailPanel - Edit Integration", () => {
     it("displays Details tab by default", () => {
       render(
         <TaskDetailPanel
-          taskId={mockTaskData.task.id}
+          taskId={mockTaskData.id}
           onClose={vi.fn()}
         />
       );
@@ -78,7 +74,7 @@ describe("TaskDetailPanel - Edit Integration", () => {
     it("can switch to Sections tab", () => {
       render(
         <TaskDetailPanel
-          taskId={mockTaskData.task.id}
+          taskId={mockTaskData.id}
           onClose={vi.fn()}
         />
       );
@@ -91,7 +87,7 @@ describe("TaskDetailPanel - Edit Integration", () => {
     it("can switch to Graph (Relations) tab", () => {
       render(
         <TaskDetailPanel
-          taskId={mockTaskData.task.id}
+          taskId={mockTaskData.id}
           onClose={vi.fn()}
         />
       );
@@ -104,7 +100,7 @@ describe("TaskDetailPanel - Edit Integration", () => {
     it("can switch to Code tab", () => {
       render(
         <TaskDetailPanel
-          taskId={mockTaskData.task.id}
+          taskId={mockTaskData.id}
           onClose={vi.fn()}
         />
       );
@@ -119,7 +115,7 @@ describe("TaskDetailPanel - Edit Integration", () => {
     it("renders Close button", () => {
       render(
         <TaskDetailPanel
-          taskId={mockTaskData.task.id}
+          taskId={mockTaskData.id}
           onClose={vi.fn()}
         />
       );
@@ -133,7 +129,7 @@ describe("TaskDetailPanel - Edit Integration", () => {
 
       render(
         <TaskDetailPanel
-          taskId={mockTaskData.task.id}
+          taskId={mockTaskData.id}
           onClose={mockOnClose}
         />
       );
@@ -149,7 +145,7 @@ describe("TaskDetailPanel - Edit Integration", () => {
     it("renders Delete and Close buttons in header", () => {
       render(
         <TaskDetailPanel
-          taskId={mockTaskData.task.id}
+          taskId={mockTaskData.id}
           onClose={vi.fn()}
         />
       );
@@ -161,7 +157,7 @@ describe("TaskDetailPanel - Edit Integration", () => {
     it("Delete button is positioned before Close button", () => {
       render(
         <TaskDetailPanel
-          taskId={mockTaskData.task.id}
+          taskId={mockTaskData.id}
           onClose={vi.fn()}
         />
       );
@@ -178,7 +174,7 @@ describe("TaskDetailPanel - Edit Integration", () => {
     it("displays task title in the panel", () => {
       render(
         <TaskDetailPanel
-          taskId={mockTaskData.task.id}
+          taskId={mockTaskData.id}
           onClose={vi.fn()}
         />
       );
@@ -191,7 +187,7 @@ describe("TaskDetailPanel - Edit Integration", () => {
     it("makes title editable when clicked", () => {
       render(
         <TaskDetailPanel
-          taskId={mockTaskData.task.id}
+          taskId={mockTaskData.id}
           onClose={vi.fn()}
         />
       );
@@ -211,7 +207,7 @@ describe("TaskDetailPanel - Edit Integration", () => {
     it("makes description editable when clicked", () => {
       render(
         <TaskDetailPanel
-          taskId={mockTaskData.task.id}
+          taskId={mockTaskData.id}
           onClose={vi.fn()}
         />
       );
@@ -231,7 +227,7 @@ describe("TaskDetailPanel - Edit Integration", () => {
     it("makes tags editable when clicked", () => {
       render(
         <TaskDetailPanel
-          taskId={mockTaskData.task.id}
+          taskId={mockTaskData.id}
           onClose={vi.fn()}
         />
       );
@@ -251,7 +247,7 @@ describe("TaskDetailPanel - Edit Integration", () => {
     it("Priority field is visible in details tab", () => {
       render(
         <TaskDetailPanel
-          taskId={mockTaskData.task.id}
+          taskId={mockTaskData.id}
           onClose={vi.fn()}
         />
       );
@@ -266,7 +262,7 @@ describe("TaskDetailPanel - Edit Integration", () => {
     it("renders Delete button in header", () => {
       render(
         <TaskDetailPanel
-          taskId={mockTaskData.task.id}
+          taskId={mockTaskData.id}
           onClose={vi.fn()}
         />
       );
@@ -279,7 +275,7 @@ describe("TaskDetailPanel - Edit Integration", () => {
     it("shows delete confirmation when Delete button clicked", () => {
       render(
         <TaskDetailPanel
-          taskId={mockTaskData.task.id}
+          taskId={mockTaskData.id}
           onClose={vi.fn()}
         />
       );
@@ -294,7 +290,7 @@ describe("TaskDetailPanel - Edit Integration", () => {
     it("shows Confirm Delete button when delete confirmation visible", () => {
       render(
         <TaskDetailPanel
-          taskId={mockTaskData.task.id}
+          taskId={mockTaskData.id}
           onClose={vi.fn()}
         />
       );
@@ -309,7 +305,7 @@ describe("TaskDetailPanel - Edit Integration", () => {
     it("hides confirmation when Cancel button clicked", () => {
       render(
         <TaskDetailPanel
-          taskId={mockTaskData.task.id}
+          taskId={mockTaskData.id}
           onClose={vi.fn()}
         />
       );

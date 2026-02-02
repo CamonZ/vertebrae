@@ -1,13 +1,13 @@
-import type { TaskHierarchyNode, TaskSummary } from "../../bindings";
+import type { TaskTreeNode as TaskTreeNodeType, Task } from "../../bindings";
 import { TaskTreeNode } from "./TaskTreeNode";
 import type { useExpandedNodes } from "../../hooks/useExpandedNodes";
 
 interface TaskTreeViewProps {
-  hierarchy: TaskHierarchyNode[];
+  hierarchy: TaskTreeNodeType[];
   isLoading: boolean;
   error: string | null;
   selectedTaskId?: string | null;
-  onTaskSelect?: (task: TaskSummary) => void;
+  onTaskSelect?: (task: Task) => void;
   expandedNodes?: ReturnType<typeof useExpandedNodes>;
   hideStatus?: boolean;
 }
@@ -119,7 +119,7 @@ function ErrorState({ error }: { error: string }) {
 /**
  * Count total tasks in hierarchy (recursive)
  */
-function countTasks(nodes: TaskHierarchyNode[]): number {
+function countTasks(nodes: TaskTreeNodeType[]): number {
   return nodes.reduce((count, node) => {
     return count + 1 + countTasks(node.children);
   }, 0);

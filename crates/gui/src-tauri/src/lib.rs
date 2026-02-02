@@ -90,6 +90,7 @@ fn create_builder() -> Builder {
             commands::get_workflow,
             commands::get_workflow_with_tasks,
             commands::get_workflow_with_task_details,
+            commands::get_pipeline_data,
             commands::list_workflow_transitions,
             // Execution commands
             commands::get_task_executions,

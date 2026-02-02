@@ -4,7 +4,7 @@
 //! Shows highest-level unblocked items prioritized by hierarchy (epic > ticket > task).
 
 use clap::Args;
-use vertebrae_core::TaskSummary;
+use vertebrae_core::Task;
 use vertebrae_core::{ServiceError, VertebraeServices};
 
 /// Show highest-level actionable items
@@ -15,7 +15,7 @@ pub struct ReadyCommand {}
 #[derive(Debug)]
 pub struct ReadyResult {
     /// Tasks that are ready to start (backlog status, unblocked, work not started on children)
-    pub backlog_ready: Vec<TaskSummary>,
+    pub backlog_ready: Vec<Task>,
 }
 
 impl std::fmt::Display for ReadyResult {

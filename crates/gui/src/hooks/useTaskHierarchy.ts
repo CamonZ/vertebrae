@@ -1,11 +1,11 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
-import { commands, type TaskHierarchyNode, type TaskFilterOptions } from "../bindings";
+import { commands, type TaskTreeNode, type TaskFilterOptions } from "../bindings";
 
 /**
  * Check if a task matches the search query (case-insensitive).
  * Searches in task ID and title.
  */
-function taskMatchesSearch(node: TaskHierarchyNode, search: string): boolean {
+function taskMatchesSearch(node: TaskTreeNode, search: string): boolean {
   const lowerSearch = search.toLowerCase();
   return (
     node.task.id.toLowerCase().includes(lowerSearch) ||
@@ -19,9 +19,9 @@ function taskMatchesSearch(node: TaskHierarchyNode, search: string): boolean {
  * Preserves the tree structure by keeping parent nodes if any child matches.
  */
 function filterHierarchyBySearch(
-  nodes: TaskHierarchyNode[],
+  nodes: TaskTreeNode[],
   search: string
-): TaskHierarchyNode[] {
+): TaskTreeNode[] {
   // Guard against undefined nodes
   if (!nodes) {
     return [];
@@ -51,14 +51,14 @@ function filterHierarchyBySearch(
       // Node doesn't match and has no matching children
       return null;
     })
-    .filter((node): node is TaskHierarchyNode => node !== null);
+    .filter((node): node is TaskTreeNode => node !== null);
 }
 
 /**
  * Check if a task matches status filter.
  */
 function taskMatchesStatus(
-  node: TaskHierarchyNode,
+  node: TaskTreeNode,
   statuses: TaskFilterOptions["statuses"]
 ): boolean {
   if (!statuses || statuses.length === 0) return true;
@@ -69,7 +69,7 @@ function taskMatchesStatus(
  * Check if a task matches level filter.
  */
 function taskMatchesLevel(
-  node: TaskHierarchyNode,
+  node: TaskTreeNode,
   levels: TaskFilterOptions["levels"]
 ): boolean {
   if (!levels || levels.length === 0) return true;
@@ -81,9 +81,9 @@ function taskMatchesLevel(
  * Preserves the tree structure by keeping parent nodes if any child matches.
  */
 function filterHierarchyByFilters(
-  nodes: TaskHierarchyNode[],
+  nodes: TaskTreeNode[],
   filters: TaskFilterOptions
-): TaskHierarchyNode[] {
+): TaskTreeNode[] {
   // Guard against undefined nodes
   if (!nodes) {
     return [];
@@ -120,7 +120,7 @@ function filterHierarchyByFilters(
       // Node doesn't match and has no matching children
       return null;
     })
-    .filter((node): node is TaskHierarchyNode => node !== null);
+    .filter((node): node is TaskTreeNode => node !== null);
 }
 
 /**
@@ -136,7 +136,7 @@ export function useTaskHierarchy(
   rootId?: string | null,
   filter?: TaskFilterOptions
 ) {
-  const [rawHierarchy, setRawHierarchy] = useState<TaskHierarchyNode[]>([]);
+  const [rawHierarchy, setRawHierarchy] = useState<TaskTreeNode[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

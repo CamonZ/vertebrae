@@ -53,11 +53,13 @@ impl DeleteCommand {
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
 
-        // Get task with all its relationships
-        let task_with_relations = services.tasks().get_task_with_relations(&id).await?;
-        let task_title = &task_with_relations.task.title;
-        let children_count = task_with_relations.children_ids.len();
-        let blocks_count = task_with_relations.dependent_ids.len();
+        // Get task and its relationships separately
+        let task = services.tasks().get_task(&id).await?;
+        let task_title = &task.title;
+        let children_ids = services.tasks().get_children(&id).await?;
+        let children_count = children_ids.len();
+        let dependent_ids = services.tasks().get_dependents(&id).await?;
+        let blocks_count = dependent_ids.len();
 
         // Determine action for children
         let child_action = if children_count > 0 {
@@ -119,10 +121,10 @@ impl DeleteCommand {
         services: &VertebraeServices,
         id: &str,
     ) -> Result<usize, ServiceError> {
-        let relations = services.tasks().get_task_with_relations(id).await?;
-        let mut count = relations.children_ids.len();
+        let children_ids = services.tasks().get_children(id).await?;
+        let mut count = children_ids.len();
 
-        for child_id in &relations.children_ids {
+        for child_id in &children_ids {
             count += Box::pin(self.count_descendants(services, child_id)).await?;
         }
 

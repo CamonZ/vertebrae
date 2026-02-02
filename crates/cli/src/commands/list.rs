@@ -23,6 +23,8 @@ pub struct TaskSummary {
     pub tags: Vec<String>,
     /// Whether this task needs human review
     pub needs_human_review: Option<bool>,
+    /// Parent task ID (if any)
+    pub parent_id: Option<String>,
 }
 
 /// List tasks with optional filters
@@ -124,25 +126,26 @@ fn compute_derived_status(
     }
 }
 
-/// Convert repository TaskSummary to CLI TaskSummary
-impl From<vertebrae_core::TaskSummary> for TaskSummary {
-    fn from(summary: vertebrae_core::TaskSummary) -> Self {
+/// Convert core Task to CLI TaskSummary
+impl From<vertebrae_core::Task> for TaskSummary {
+    fn from(task: vertebrae_core::Task) -> Self {
         let derived_status = compute_derived_status(
-            &summary.status,
-            summary.workflow_name.as_deref(),
-            summary.step_name.as_deref(),
-            summary.workflow_id.as_deref(),
-            summary.current_step_id.as_deref(),
+            &task.status,
+            task.workflow_name.as_deref(),
+            task.step_name.as_deref(),
+            task.workflow_id.as_deref(),
+            task.current_step_id.as_deref(),
         );
 
         TaskSummary {
-            id: summary.id,
-            title: summary.title,
-            level: summary.level.as_str().to_string(),
+            id: task.id,
+            title: task.title,
+            level: task.level.as_str().to_string(),
             status: derived_status,
-            priority: summary.priority.map(|p| p.as_str().to_string()),
-            tags: summary.tags,
-            needs_human_review: summary.needs_human_review,
+            priority: task.priority.map(|p| p.as_str().to_string()),
+            tags: task.tags,
+            needs_human_review: task.needs_human_review,
+            parent_id: task.parent_id,
         }
     }
 }

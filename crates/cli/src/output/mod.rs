@@ -409,6 +409,7 @@ mod tests {
             priority: Some("high".to_string()),
             tags: vec!["backend".to_string()],
             needs_human_review: None,
+            parent_id: None,
         }];
 
         let result = format_task_table(&tasks);
@@ -449,6 +450,7 @@ mod tests {
                 priority: Some("critical".to_string()),
                 tags: vec!["urgent".to_string(), "backend".to_string()],
                 needs_human_review: Some(true),
+                parent_id: None,
             },
             TaskSummary {
                 id: "d4e5f6".to_string(),
@@ -458,6 +460,7 @@ mod tests {
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
+                parent_id: None,
             },
         ];
 
@@ -493,6 +496,7 @@ mod tests {
             priority: None,
             tags: vec![],
             needs_human_review: None,
+            parent_id: None,
         }];
 
         let result = format_task_table(&tasks);
@@ -513,6 +517,7 @@ mod tests {
             priority: Some("low".to_string()),
             tags: vec![],
             needs_human_review: None,
+            parent_id: None,
         }];
 
         let result = format_task_table(&tasks);
@@ -580,6 +585,7 @@ mod tests {
             priority: None,
             tags: vec![],
             needs_human_review: None,
+            parent_id: None,
         }];
 
         let result = format_task_table(&tasks);
@@ -621,6 +627,7 @@ mod tests {
             priority: None,
             tags: tags_input.clone(),
             needs_human_review: None,
+            parent_id: None,
         }];
 
         let result = format_task_table(&tasks);
@@ -647,6 +654,7 @@ mod tests {
                 priority: Some("high".to_string()),
                 tags: vec!["x".to_string()],
                 needs_human_review: None,
+                parent_id: None,
             },
             TaskSummary {
                 id: "abcdef".to_string(),
@@ -656,6 +664,7 @@ mod tests {
                 priority: Some("critical".to_string()),
                 tags: vec!["backend".to_string(), "api".to_string()],
                 needs_human_review: Some(true),
+                parent_id: None,
             },
         ];
 
@@ -702,6 +711,7 @@ mod tests {
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
+                parent_id: None,
             }];
 
             let result = format_task_table(&tasks);
@@ -722,6 +732,7 @@ mod tests {
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
+                parent_id: None,
             }];
 
             let result = format_task_table(&tasks);
@@ -742,6 +753,7 @@ mod tests {
                 priority: Some(priority.to_string()),
                 tags: vec![],
                 needs_human_review: None,
+                parent_id: None,
             }];
 
             let result = format_task_table(&tasks);
@@ -767,6 +779,7 @@ mod tests {
             priority: None,
             tags: vec![],
             needs_human_review: Some(true),
+            parent_id: None,
         }];
 
         let result = format_task_table(&tasks);
@@ -788,6 +801,7 @@ mod tests {
             priority: None,
             tags: vec![],
             needs_human_review: Some(false),
+            parent_id: None,
         }];
 
         let result = format_task_table(&tasks);
@@ -828,6 +842,7 @@ mod tests {
             priority: None,
             tags: vec![],
             needs_human_review: None,
+            parent_id: None,
         }];
         let parent_map = HashMap::new();
 
@@ -852,6 +867,7 @@ mod tests {
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
+                parent_id: None,
             },
             TaskSummary {
                 id: "ticket1".to_string(),
@@ -861,6 +877,7 @@ mod tests {
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
+                parent_id: None,
             },
         ];
 
@@ -892,6 +909,7 @@ mod tests {
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
+                parent_id: None,
             },
             TaskSummary {
                 id: "ticket1".to_string(),
@@ -901,6 +919,7 @@ mod tests {
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
+                parent_id: None,
             },
             TaskSummary {
                 id: "ticket2".to_string(),
@@ -910,6 +929,7 @@ mod tests {
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
+                parent_id: None,
             },
         ];
 
@@ -940,6 +960,7 @@ mod tests {
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
+                parent_id: None,
             },
             TaskSummary {
                 id: "ticket1".to_string(),
@@ -949,6 +970,7 @@ mod tests {
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
+                parent_id: None,
             },
             TaskSummary {
                 id: "task1".to_string(),
@@ -958,6 +980,7 @@ mod tests {
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
+                parent_id: None,
             },
         ];
 
@@ -986,6 +1009,7 @@ mod tests {
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
+                parent_id: None,
             },
             TaskSummary {
                 id: "epic1".to_string(),
@@ -995,6 +1019,7 @@ mod tests {
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
+                parent_id: None,
             },
         ];
 
@@ -1021,6 +1046,7 @@ mod tests {
             priority: None,
             tags: vec![],
             needs_human_review: None,
+            parent_id: None,
         }];
 
         let mut parent_map = HashMap::new();
@@ -1046,6 +1072,7 @@ mod tests {
             priority: None,
             tags: vec![],
             needs_human_review: Some(true),
+            parent_id: None,
         }];
 
         let parent_map = HashMap::new();
@@ -1073,6 +1100,7 @@ mod tests {
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
+                parent_id: None,
             },
             children: vec![],
         };
@@ -1093,6 +1121,7 @@ mod tests {
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
+                parent_id: None,
             },
             children: vec![],
         };

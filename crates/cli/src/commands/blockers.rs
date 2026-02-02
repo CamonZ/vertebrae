@@ -138,7 +138,7 @@ impl BlockersCommand {
         &self,
         services: &VertebraeServices,
         task_id: &str,
-    ) -> Result<Vec<vertebrae_core::TaskSummary>, ServiceError> {
+    ) -> Result<Vec<vertebrae_core::Task>, ServiceError> {
         // Get tasks that this task depends on via the depends_on relationship
         // Using service layer method that returns full task details
         let blockers = services.tasks().get_dependencies(task_id).await?;
@@ -146,8 +146,8 @@ impl BlockersCommand {
         // Fetch full task details for each blocker
         let mut result = Vec::new();
         for blocker_id in blockers {
-            // Get the blocker task summary
-            if let Ok(task) = services.tasks().get_task(&blocker_id).await {
+            // Get the blocker task
+            if let Ok(mut task) = services.tasks().get_task(&blocker_id).await {
                 // Get step name and workflow name using WorkflowService
                 let (step_name, workflow_name) = if let (Some(step_id), Some(wf_id)) =
                     (&task.current_step_id, &task.workflow_id)
@@ -174,20 +174,10 @@ impl BlockersCommand {
                     continue;
                 }
 
-                result.push(vertebrae_core::TaskSummary {
-                    id: blocker_id,
-                    title: task.title,
-                    level: task.level,
-                    status: step_name.clone(),
-                    priority: task.priority,
-                    tags: task.tags,
-                    needs_human_review: task.needs_human_review,
-                    created_at: task.created_at.unwrap_or_else(chrono::Utc::now),
-                    workflow_id: task.workflow_id,
-                    current_step_id: task.current_step_id,
-                    workflow_name,
-                    step_name: Some(step_name),
-                });
+                task.status = step_name.clone();
+                task.workflow_name = workflow_name;
+                task.step_name = Some(step_name);
+                result.push(task);
             }
         }
 

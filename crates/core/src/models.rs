@@ -362,23 +362,6 @@ pub struct BlockerNode {
     pub children: Vec<BlockerNode>,
 }
 
-/// Task summary for listings
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TaskSummary {
-    pub id: String,
-    pub title: String,
-    pub level: Level,
-    pub status: String,
-    pub priority: Option<Priority>,
-    pub tags: Vec<String>,
-    pub needs_human_review: Option<bool>,
-    pub created_at: DateTime<Utc>,
-    pub workflow_id: Option<String>,
-    pub current_step_id: Option<String>,
-    pub workflow_name: Option<String>,
-    pub step_name: Option<String>,
-}
-
 /// Task filter for queries
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TaskFilter {
@@ -759,12 +742,12 @@ impl std::fmt::Display for Thing {
 
 /// A task in the Vertebrae task management system (domain model)
 ///
+/// This is the canonical task type used throughout the system.
 /// All IDs are plain strings rather than database-specific record types.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
-    /// Unique identifier
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub id: Option<String>,
+    /// Unique identifier (always populated for persisted tasks)
+    pub id: String,
 
     /// Task title
     pub title: String,
@@ -776,6 +759,10 @@ pub struct Task {
     /// Hierarchy level (epic, ticket, task)
     pub level: Level,
 
+    /// Current status (derived from workflow step name, e.g. "backlog", "in_progress")
+    #[serde(default = "default_status")]
+    pub status: String,
+
     /// Optional priority
     #[serde(skip_serializing_if = "Option::is_none")]
     pub priority: Option<Priority>,
@@ -783,6 +770,54 @@ pub struct Task {
     /// Tags for categorization
     #[serde(default)]
     pub tags: Vec<String>,
+
+    /// Workflow ID (as string)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workflow_id: Option<String>,
+
+    /// Current step ID (as string)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_step_id: Option<String>,
+
+    /// Workflow name (if task is assigned to a workflow)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workflow_name: Option<String>,
+
+    /// Current step name (if task has a current step in workflow)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub step_name: Option<String>,
+
+    /// Whether this task needs human review
+    #[serde(default)]
+    pub needs_human_review: Option<bool>,
+
+    /// Review comment
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub review_comment: Option<String>,
+
+    /// Feedback for revision
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub revision_feedback: Option<String>,
+
+    /// Rejection reason
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rejection_reason: Option<String>,
+
+    /// Parent task ID (if any)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<String>,
+
+    /// IDs of tasks this task depends on
+    #[serde(default)]
+    pub dependency_ids: Vec<String>,
+
+    /// Embedded sections
+    #[serde(default)]
+    pub sections: Vec<Section>,
+
+    /// Embedded code references
+    #[serde(default, rename = "refs")]
+    pub code_refs: Vec<CodeRef>,
 
     /// Creation timestamp
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -799,57 +834,39 @@ pub struct Task {
     /// When this task was completed
     #[serde(skip_serializing_if = "Option::is_none")]
     pub completed_at: Option<DateTime<Utc>>,
+}
 
-    /// Embedded sections
-    #[serde(default)]
-    pub sections: Vec<Section>,
-
-    /// Embedded code references
-    #[serde(default, rename = "refs")]
-    pub code_refs: Vec<CodeRef>,
-
-    /// Whether this task needs human review
-    #[serde(default)]
-    pub needs_human_review: Option<bool>,
-
-    /// Feedback for revision
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub revision_feedback: Option<String>,
-
-    /// Rejection reason
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub rejection_reason: Option<String>,
-
-    /// Workflow ID (as string)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub workflow_id: Option<String>,
-
-    /// Current step ID (as string)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub current_step_id: Option<String>,
+fn default_status() -> String {
+    "backlog".to_string()
 }
 
 impl Task {
     /// Create a new task with required fields
     pub fn new(title: impl Into<String>, level: Level) -> Self {
         Self {
-            id: None,
+            id: String::new(),
             title: title.into(),
             description: None,
             level,
+            status: "backlog".to_string(),
             priority: None,
             tags: Vec::new(),
+            workflow_id: None,
+            current_step_id: None,
+            workflow_name: None,
+            step_name: None,
+            needs_human_review: None,
+            review_comment: None,
+            revision_feedback: None,
+            rejection_reason: None,
+            parent_id: None,
+            dependency_ids: Vec::new(),
+            sections: Vec::new(),
+            code_refs: Vec::new(),
             created_at: None,
             updated_at: None,
             started_at: None,
             completed_at: None,
-            sections: Vec::new(),
-            code_refs: Vec::new(),
-            needs_human_review: None,
-            revision_feedback: None,
-            rejection_reason: None,
-            workflow_id: None,
-            current_step_id: None,
         }
     }
 
@@ -1579,7 +1596,7 @@ mod tests {
         let task = Task::new("My Task", Level::Task);
         assert_eq!(task.title, "My Task");
         assert_eq!(task.level, Level::Task);
-        assert!(task.id.is_none());
+        assert!(task.id.is_empty());
         assert!(task.description.is_none());
         assert!(task.priority.is_none());
         assert!(task.tags.is_empty());
@@ -1587,6 +1604,12 @@ mod tests {
         assert!(task.code_refs.is_empty());
         assert!(task.workflow_id.is_none());
         assert!(task.current_step_id.is_none());
+        assert_eq!(task.status, "backlog");
+        assert!(task.parent_id.is_none());
+        assert!(task.dependency_ids.is_empty());
+        assert!(task.workflow_name.is_none());
+        assert!(task.step_name.is_none());
+        assert!(task.review_comment.is_none());
     }
 
     #[test]

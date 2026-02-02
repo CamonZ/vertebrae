@@ -124,6 +124,7 @@ impl From<RelatedTaskRow> for TaskSummary {
             priority: row.priority,
             tags: row.tags,
             needs_human_review: row.needs_human_review,
+            parent_id: None,
         }
     }
 }
@@ -280,9 +281,7 @@ impl ShowCommand {
 
         // Convert Task to TaskRow for display
         Ok(TaskRow {
-            id: task
-                .id
-                .ok_or_else(|| ServiceError::task_not_found(&self.id))?,
+            id: task.id,
             title: task.title,
             description: task.description,
             level: task.level.as_str().to_string(),
@@ -353,6 +352,7 @@ impl ShowCommand {
                 priority: task.priority.map(|p| p.as_str().to_string()),
                 tags: task.tags,
                 needs_human_review: task.needs_human_review,
+                parent_id: None,
             }))
         } else {
             Ok(None)
@@ -385,6 +385,7 @@ impl ShowCommand {
                 priority: task.priority.map(|p| p.as_str().to_string()),
                 tags: task.tags,
                 needs_human_review: task.needs_human_review,
+                parent_id: None,
             });
         }
 
@@ -403,7 +404,19 @@ impl ShowCommand {
             .get_incomplete_blockers_with_details(&self.id.to_lowercase())
             .await?;
 
-        Ok(blockers.into_iter().map(TaskSummary::from).collect())
+        Ok(blockers
+            .into_iter()
+            .map(|task| TaskSummary {
+                id: task.id,
+                title: task.title,
+                level: task.level.as_str().to_string(),
+                status: task.status,
+                priority: task.priority.map(|p| p.as_str().to_string()),
+                tags: task.tags,
+                needs_human_review: task.needs_human_review,
+                parent_id: None,
+            })
+            .collect())
     }
 
     /// Fetch tasks that are blocked by this task.
@@ -432,6 +445,7 @@ impl ShowCommand {
                 priority: task.priority.map(|p| p.as_str().to_string()),
                 tags: task.tags,
                 needs_human_review: task.needs_human_review,
+                parent_id: None,
             });
         }
 

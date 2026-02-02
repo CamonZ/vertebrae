@@ -78,9 +78,9 @@ impl UndependCommand {
         }
 
         // Check if dependency exists using service layer
-        let with_relations = services.tasks().get_task_with_relations(&task_id).await?;
+        let existing_deps = services.tasks().get_dependencies(&task_id).await?;
 
-        let existed = with_relations.depends_on_ids.contains(&blocker_id);
+        let existed = existing_deps.contains(&blocker_id);
 
         if existed {
             // Remove the dependency using the service layer (fires mutation callback)

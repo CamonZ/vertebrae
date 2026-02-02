@@ -9,10 +9,12 @@ vi.mock("./bindings", () => ({
     hasProjectSelected: vi.fn(),
     listWorkflows: vi.fn(),
     getWorkflowWithTaskDetails: vi.fn(),
+    getPipelineData: vi.fn(),
     listTasks: vi.fn(),
     getTaskHierarchy: vi.fn(),
     getTask: vi.fn(),
     listStepsForWorkflow: vi.fn(),
+    listWorkflowTransitions: vi.fn(),
   },
   events: {
     workflowChangedEvent: {
@@ -70,6 +72,16 @@ describe("Router Acceptance Tests", () => {
     (commands.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue({
       status: "ok",
       data: [],
+    });
+
+    (commands.getPipelineData as ReturnType<typeof vi.fn>).mockResolvedValue({
+      status: "ok",
+      data: {
+        workflows: [],
+        workflow_steps: {},
+        tasks: [],
+        transitions: [],
+      },
     });
 
     (commands.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue({
@@ -154,11 +166,7 @@ describe("Router Acceptance Tests", () => {
     });
 
     it("shows empty state when no workflows exist", async () => {
-      (commands.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue({
-        status: "ok",
-        data: [],
-      });
-
+      // Default getPipelineData mock already returns empty workflows
       const router = createTestRouter(["/"]);
 
       render(
@@ -173,22 +181,25 @@ describe("Router Acceptance Tests", () => {
     });
 
     it("displays workflows when they exist", async () => {
-      (commands.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue({
+      (commands.getPipelineData as ReturnType<typeof vi.fn>).mockResolvedValue({
         status: "ok",
-        data: [
-          {
-            id: "workflow-1",
-            name: "Development Workflow",
-            description: "Main dev workflow",
-            steps: [{ name: "backlog", order: 0, agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } }],
-            metadata: {},
+        data: {
+          workflows: [
+            {
+              id: "workflow-1",
+              name: "Development Workflow",
+              description: "Main dev workflow",
+              metadata: {},
+            },
+          ],
+          workflow_steps: {
+            "workflow-1": [
+              { id: "step-backlog", name: "backlog", workflow_id: "workflow-1", order: 0, is_final: false, transitions_to: [], agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
+            ],
           },
-        ],
-      });
-
-      (commands.getWorkflowWithTaskDetails as ReturnType<typeof vi.fn>).mockResolvedValue({
-        status: "ok",
-        data: { workflow: {}, tasks: [] },
+          tasks: [],
+          transitions: [],
+        },
       });
 
       const router = createTestRouter(["/"]);
@@ -276,34 +287,35 @@ describe("Router Acceptance Tests", () => {
 
   describe("Unified canvas with workflow zones", () => {
     it("displays multiple workflows as zones in a single canvas", async () => {
-      (commands.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue({
+      (commands.getPipelineData as ReturnType<typeof vi.fn>).mockResolvedValue({
         status: "ok",
-        data: [
-          {
-            id: "workflow-1",
-            name: "Development Workflow",
-            description: "Main dev workflow",
-            steps: [
-              { name: "backlog", order: 0, agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
-              { name: "in_progress", order: 1, agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
+        data: {
+          workflows: [
+            {
+              id: "workflow-1",
+              name: "Development Workflow",
+              description: "Main dev workflow",
+              metadata: {},
+            },
+            {
+              id: "workflow-2",
+              name: "QA Workflow",
+              description: "Quality assurance",
+              metadata: {},
+            },
+          ],
+          workflow_steps: {
+            "workflow-1": [
+              { id: "s1", name: "backlog", workflow_id: "workflow-1", order: 0, is_final: false, transitions_to: [], agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
+              { id: "s2", name: "in_progress", workflow_id: "workflow-1", order: 1, is_final: false, transitions_to: [], agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
             ],
-            metadata: {},
-          },
-          {
-            id: "workflow-2",
-            name: "QA Workflow",
-            description: "Quality assurance",
-            steps: [
-              { name: "review", order: 0, agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
+            "workflow-2": [
+              { id: "s3", name: "review", workflow_id: "workflow-2", order: 0, is_final: false, transitions_to: [], agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
             ],
-            metadata: {},
           },
-        ],
-      });
-
-      (commands.getWorkflowWithTaskDetails as ReturnType<typeof vi.fn>).mockResolvedValue({
-        status: "ok",
-        data: { workflow: {}, tasks: [] },
+          tasks: [],
+          transitions: [],
+        },
       });
 
       const router = createTestRouter(["/"]);
@@ -327,26 +339,27 @@ describe("Router Acceptance Tests", () => {
     });
 
     it("displays workflow zones with step counts", async () => {
-      (commands.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue({
+      (commands.getPipelineData as ReturnType<typeof vi.fn>).mockResolvedValue({
         status: "ok",
-        data: [
-          {
-            id: "workflow-1",
-            name: "Test Workflow",
-            description: null,
-            steps: [
-              { name: "step1", order: 0, agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
-              { name: "step2", order: 1, agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
-              { name: "step3", order: 2, agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
+        data: {
+          workflows: [
+            {
+              id: "workflow-1",
+              name: "Test Workflow",
+              description: null,
+              metadata: {},
+            },
+          ],
+          workflow_steps: {
+            "workflow-1": [
+              { id: "s1", name: "step1", workflow_id: "workflow-1", order: 0, is_final: false, transitions_to: [], agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
+              { id: "s2", name: "step2", workflow_id: "workflow-1", order: 1, is_final: false, transitions_to: [], agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
+              { id: "s3", name: "step3", workflow_id: "workflow-1", order: 2, is_final: false, transitions_to: [], agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
             ],
-            metadata: {},
           },
-        ],
-      });
-
-      (commands.getWorkflowWithTaskDetails as ReturnType<typeof vi.fn>).mockResolvedValue({
-        status: "ok",
-        data: { workflow: {}, tasks: [] },
+          tasks: [],
+          transitions: [],
+        },
       });
 
       const router = createTestRouter(["/"]);
@@ -366,50 +379,37 @@ describe("Router Acceptance Tests", () => {
 
   describe("Task detail panel integration", () => {
     it("opens TaskDetailPanel when clicking a task in the pipeline", async () => {
-      (commands.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue({
-        status: "ok",
-        data: [
-          {
-            id: "workflow-1",
-            name: "Test Workflow",
-            description: null,
-            steps: [
-              { name: "backlog", order: 0, agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
-            ],
-            metadata: {},
-          },
-        ],
-      });
-
-      (commands.getWorkflowWithTaskDetails as ReturnType<typeof vi.fn>).mockResolvedValue({
+      (commands.getPipelineData as ReturnType<typeof vi.fn>).mockResolvedValue({
         status: "ok",
         data: {
-          workflow: {},
-          tasks: [
+          workflows: [
             {
-              task: {
-                id: "task-123",
-                title: "Test Task for Detail Panel",
-                status: "backlog",
-                level: "task",
-                description: "A task to test the detail panel",
-                tags: [],
-                code_refs: [],
-                sections: [],
-                priority: null,
-                needs_human_review: false,
-                workflow_id: null,
-                created_at: "2024-01-01T00:00:00Z",
-                updated_at: "2024-01-01T00:00:00Z",
-                started_at: null,
-                completed_at: null,
-              },
-              parent_id: null,
-              children_ids: [],
-              depends_on_ids: [],
-              dependent_ids: [],
+              id: "workflow-1",
+              name: "Test Workflow",
+              description: null,
+              metadata: {},
             },
           ],
+          workflow_steps: {
+            "workflow-1": [
+              { id: "step-backlog", name: "backlog", workflow_id: "workflow-1", order: 0, is_final: false, transitions_to: [], agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
+            ],
+          },
+          tasks: [
+            {
+              id: "task-123",
+              title: "Test Task for Detail Panel",
+              status: "backlog",
+              level: "task",
+              current_step_id: "step-backlog",
+              workflow_id: "workflow-1",
+              priority: null,
+              tags: [],
+              needs_human_review: false,
+              created_at: "2024-01-01T00:00:00Z",
+            },
+          ],
+          transitions: [],
         },
       });
 
@@ -417,27 +417,29 @@ describe("Router Acceptance Tests", () => {
       (commands.getTask as ReturnType<typeof vi.fn>).mockResolvedValue({
         status: "ok",
         data: {
-          task: {
-            id: "task-123",
-            title: "Test Task for Detail Panel",
-            status: "backlog",
-            level: "task",
-            description: "A task to test the detail panel",
-            tags: [],
-            code_refs: [],
-            sections: [],
-            priority: null,
-            needs_human_review: false,
-            workflow_id: null,
-            created_at: "2024-01-01T00:00:00Z",
-            updated_at: "2024-01-01T00:00:00Z",
-            started_at: null,
-            completed_at: null,
-          },
+          id: "task-123",
+          title: "Test Task for Detail Panel",
+          status: "backlog",
+          level: "task",
+          description: "A task to test the detail panel",
+          tags: [],
+          code_refs: [],
+          sections: [],
+          priority: null,
+          needs_human_review: false,
+          workflow_id: null,
+          current_step_id: null,
+          workflow_name: null,
+          step_name: null,
+          review_comment: null,
+          revision_feedback: null,
+          rejection_reason: null,
           parent_id: null,
-          children_ids: [],
-          depends_on_ids: [],
-          dependent_ids: [],
+          dependency_ids: [],
+          created_at: "2024-01-01T00:00:00Z",
+          updated_at: "2024-01-01T00:00:00Z",
+          started_at: null,
+          completed_at: null,
         },
       });
 
@@ -465,50 +467,37 @@ describe("Router Acceptance Tests", () => {
     });
 
     it("shows selected task with visual highlight", async () => {
-      (commands.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue({
-        status: "ok",
-        data: [
-          {
-            id: "workflow-1",
-            name: "Test Workflow",
-            description: null,
-            steps: [
-              { name: "backlog", order: 0, agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
-            ],
-            metadata: {},
-          },
-        ],
-      });
-
-      (commands.getWorkflowWithTaskDetails as ReturnType<typeof vi.fn>).mockResolvedValue({
+      (commands.getPipelineData as ReturnType<typeof vi.fn>).mockResolvedValue({
         status: "ok",
         data: {
-          workflow: {},
-          tasks: [
+          workflows: [
             {
-              task: {
-                id: "task-456",
-                title: "Selectable Task",
-                status: "todo",
-                level: "task",
-                description: null,
-                tags: [],
-                code_refs: [],
-                sections: [],
-                priority: null,
-                needs_human_review: false,
-                workflow_id: null,
-                created_at: "2024-01-01T00:00:00Z",
-                updated_at: "2024-01-01T00:00:00Z",
-                started_at: null,
-                completed_at: null,
-              },
-              parent_id: null,
-              children_ids: [],
-              depends_on_ids: [],
-              dependent_ids: [],
+              id: "workflow-1",
+              name: "Test Workflow",
+              description: null,
+              metadata: {},
             },
           ],
+          workflow_steps: {
+            "workflow-1": [
+              { id: "step-backlog", name: "backlog", workflow_id: "workflow-1", order: 0, is_final: false, transitions_to: [], agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
+            ],
+          },
+          tasks: [
+            {
+              id: "task-456",
+              title: "Selectable Task",
+              status: "todo",
+              level: "task",
+              current_step_id: "step-backlog",
+              workflow_id: "workflow-1",
+              priority: null,
+              tags: [],
+              needs_human_review: false,
+              created_at: "2024-01-01T00:00:00Z",
+            },
+          ],
+          transitions: [],
         },
       });
 
@@ -551,25 +540,26 @@ describe("Router Acceptance Tests", () => {
     // 4. TaskZoneNode has selectable: false to prevent React Flow selection glow
 
     it("displays step zones as clickable elements within workflow zones", async () => {
-      (commands.listWorkflows as ReturnType<typeof vi.fn>).mockResolvedValue({
+      (commands.getPipelineData as ReturnType<typeof vi.fn>).mockResolvedValue({
         status: "ok",
-        data: [
-          {
-            id: "workflow-filter-test",
-            name: "Filterable Workflow",
-            description: "Workflow to test filtering",
-            steps: [
-              { name: "backlog", order: 0, agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
-              { name: "todo", order: 1, agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
+        data: {
+          workflows: [
+            {
+              id: "workflow-filter-test",
+              name: "Filterable Workflow",
+              description: "Workflow to test filtering",
+              metadata: {},
+            },
+          ],
+          workflow_steps: {
+            "workflow-filter-test": [
+              { id: "step-backlog", name: "backlog", workflow_id: "workflow-filter-test", order: 0, is_final: false, transitions_to: [], agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
+              { id: "step-todo", name: "todo", workflow_id: "workflow-filter-test", order: 1, is_final: false, transitions_to: [], agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
             ],
-            metadata: {},
           },
-        ],
-      });
-
-      (commands.getWorkflowWithTaskDetails as ReturnType<typeof vi.fn>).mockResolvedValue({
-        status: "ok",
-        data: { workflow: {}, tasks: [] },
+          tasks: [],
+          transitions: [],
+        },
       });
 
       const router = createTestRouter(["/"]);

@@ -3,7 +3,7 @@ import { commands } from "../bindings";
 import { useTaskStore } from "../stores";
 
 /**
- * Hook for fetching a single task with its relations.
+ * Hook for fetching a single task.
  * Automatically syncs the selected task to the Zustand store.
  *
  * @param id - The task ID to fetch. If null/undefined, no fetch is performed.

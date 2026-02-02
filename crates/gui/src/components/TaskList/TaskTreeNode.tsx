@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import type {
-  TaskHierarchyNode,
-  TaskSummary,
+  TaskTreeNode as TaskTreeNodeType,
+  Task,
   TaskLevel,
   TaskPriority,
 } from "../../bindings";
@@ -9,11 +9,11 @@ import type { useExpandedNodes } from "../../hooks/useExpandedNodes";
 import { RelativeTime } from "../RelativeTime";
 
 interface TaskTreeNodeProps {
-  node: TaskHierarchyNode;
+  node: TaskTreeNodeType;
   depth: number;
   isSelected?: boolean;
   selectedTaskId?: string | null;
-  onTaskSelect?: (task: TaskSummary) => void;
+  onTaskSelect?: (task: Task) => void;
   expandedNodes?: ReturnType<typeof useExpandedNodes>;
   hideStatus?: boolean;
 }

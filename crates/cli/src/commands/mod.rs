@@ -210,11 +210,11 @@ impl Command {
                 let output = if cmd.flat {
                     format_task_table(&tasks)
                 } else {
-                    // Get all parent-child relationships for tree rendering
-                    let parent_relations = services.tasks().export_child_of_relations().await?;
-                    // Build a map from child_id to parent_id
-                    let parent_map: std::collections::HashMap<String, String> =
-                        parent_relations.into_iter().collect();
+                    // Build parent_map from task parent_id fields
+                    let parent_map: std::collections::HashMap<String, String> = tasks
+                        .iter()
+                        .filter_map(|t| t.parent_id.as_ref().map(|pid| (t.id.clone(), pid.clone())))
+                        .collect();
                     format_task_tree(&tasks, &parent_map)
                 };
                 Ok(CommandResult::Table(output))

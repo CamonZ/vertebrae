@@ -1,10 +1,10 @@
-import type { TaskSummary, TaskLevel, TaskPriority } from '../../bindings';
+import type { Task, TaskLevel, TaskPriority } from '../../bindings';
 import { RelativeTime } from '../RelativeTime';
 
 interface TaskRowProps {
-  task: TaskSummary;
+  task: Task;
   isSelected?: boolean;
-  onClick?: (task: TaskSummary) => void;
+  onClick?: (task: Task) => void;
   columnWidths?: Record<string, number>;
   hideStatus?: boolean;
 }

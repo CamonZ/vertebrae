@@ -395,15 +395,17 @@ impl ImportCommand {
                 }
 
                 let db_task = DbTask {
-                    id: None,
+                    id: task.id.clone(),
                     title: task.title.clone(),
                     description: task.description.clone(),
                     level: parse_level(&task.level),
+                    status: "backlog".to_string(),
                     priority: task.priority.as_deref().and_then(parse_priority),
                     tags: task.tags.clone(),
                     sections: task.sections.clone(),
                     code_refs: task.code_refs.clone(),
                     needs_human_review: task.needs_human_review,
+                    review_comment: None,
                     revision_feedback: task.revision_feedback.clone(),
                     rejection_reason: task.rejection_reason.clone(),
                     workflow_id: task
@@ -414,6 +416,10 @@ impl ImportCommand {
                         .current_step_id
                         .as_ref()
                         .map(|id| make_thing("step", id)),
+                    workflow_name: None,
+                    step_name: None,
+                    parent_id: None,
+                    dependency_ids: Vec::new(),
                     created_at: parse_datetime(&task.created_at),
                     updated_at: parse_datetime(&task.updated_at),
                     started_at: parse_datetime(&task.started_at),

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { useTaskStore } from "./taskStore";
-import { createMockTaskWithRelations, createMockTaskSummary } from "../test/test-utils";
+import { createMockTask } from "../test/test-utils";
 
 describe("taskStore", () => {
   beforeEach(() => {
@@ -34,8 +34,8 @@ describe("taskStore", () => {
   describe("setTasks", () => {
     it("updates the tasks array", () => {
       const tasks = [
-        createMockTaskSummary({ id: "task-1", title: "Task 1", status: "backlog" }),
-        createMockTaskSummary({ id: "task-2", title: "Task 2", status: "done" }),
+        createMockTask({ id: "task-1", title: "Task 1", status: "backlog" }),
+        createMockTask({ id: "task-2", title: "Task 2", status: "done" }),
       ];
 
       useTaskStore.getState().setTasks(tasks);
@@ -45,10 +45,10 @@ describe("taskStore", () => {
 
     it("replaces existing tasks", () => {
       const initialTasks = [
-        createMockTaskSummary({ id: "task-1", title: "Task 1", status: "backlog" }),
+        createMockTask({ id: "task-1", title: "Task 1", status: "backlog" }),
       ];
       const newTasks = [
-        createMockTaskSummary({ id: "task-2", title: "Task 2", status: "done" }),
+        createMockTask({ id: "task-2", title: "Task 2", status: "done" }),
       ];
 
       useTaskStore.getState().setTasks(initialTasks);
@@ -66,14 +66,12 @@ describe("taskStore", () => {
     });
 
     it("sets the selected task details when provided", () => {
-      const taskWithRelations = createMockTaskWithRelations({
-        task: { id: "task-123", title: "Selected Task" },
-      });
+      const task = createMockTask({ id: "task-123", title: "Selected Task" });
 
-      useTaskStore.getState().selectTask("task-123", taskWithRelations);
+      useTaskStore.getState().selectTask("task-123", task);
 
       expect(useTaskStore.getState().selectedTaskId).toBe("task-123");
-      expect(useTaskStore.getState().selectedTask).toEqual(taskWithRelations);
+      expect(useTaskStore.getState().selectedTask).toEqual(task);
     });
 
     it("clears selection when null is passed", () => {
@@ -105,8 +103,8 @@ describe("taskStore", () => {
 
   describe("clearSelection", () => {
     it("clears both selectedTaskId and selectedTask", () => {
-      const taskWithRelations = createMockTaskWithRelations();
-      useTaskStore.getState().selectTask("task-123", taskWithRelations);
+      const task = createMockTask();
+      useTaskStore.getState().selectTask("task-123", task);
 
       useTaskStore.getState().clearSelection();
 

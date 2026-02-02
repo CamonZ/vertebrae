@@ -5,8 +5,8 @@
 
 use crate::project_config::{ProjectConfig, SavedProject};
 use crate::types::{
-    SessionLog, Step, StepExecution, TaskFilterOptions, TaskHierarchyNode, TaskSummary,
-    TaskWithRelations, Workflow, WorkflowWithTasks,
+    SessionLog, Step, StepExecution, Task, TaskFilterOptions, TaskTreeNode, Workflow,
+    WorkflowWithTasks,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, State};
@@ -281,7 +281,7 @@ pub async fn has_project_selected(state: State<'_, AppState>) -> Result<bool, Co
 pub async fn list_tasks(
     state: State<'_, AppState>,
     filter: Option<TaskFilterOptions>,
-) -> Result<Vec<TaskSummary>, CommandError> {
+) -> Result<Vec<Task>, CommandError> {
     log::info!("list_tasks called with filter: {:?}", filter);
     let service_guard = state.services.read().await;
     let service = service_guard
@@ -303,28 +303,18 @@ pub async fn list_tasks(
 
 /// Get a single task by ID with its relations
 ///
-/// Returns the full task details along with parent, children, and dependency relations.
+/// Returns the full task details.
 #[tauri::command]
 #[specta::specta]
-pub async fn get_task(
-    state: State<'_, AppState>,
-    id: String,
-) -> Result<TaskWithRelations, CommandError> {
+pub async fn get_task(state: State<'_, AppState>, id: String) -> Result<Task, CommandError> {
     let service_guard = state.services.read().await;
     let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    // Get the task with relations using the service
-    let task_with_relations = service.tasks().get_task_with_relations(&id).await?;
+    let task = service.tasks().get_task(&id).await?;
 
-    Ok(TaskWithRelations {
-        task: task_with_relations.task.into(),
-        parent_id: task_with_relations.parent_id,
-        children_ids: task_with_relations.children_ids,
-        depends_on_ids: task_with_relations.depends_on_ids,
-        dependent_ids: task_with_relations.dependent_ids,
-    })
+    Ok(task.into())
 }
 
 /// Get task hierarchy starting from a root task
@@ -337,7 +327,7 @@ pub async fn get_task_hierarchy(
     state: State<'_, AppState>,
     root_id: Option<String>,
     filter: Option<TaskFilterOptions>,
-) -> Result<Vec<TaskHierarchyNode>, CommandError> {
+) -> Result<Vec<TaskTreeNode>, CommandError> {
     let service_guard = state.services.read().await;
     let service = service_guard
         .as_ref()
@@ -355,12 +345,9 @@ pub async fn get_task_hierarchy(
     match root_id {
         Some(id) => {
             // Find the specific node in the tree
-            fn find_node(
-                nodes: &[vertebrae_core::TaskTreeNode],
-                id: &str,
-            ) -> Option<TaskHierarchyNode> {
+            fn find_node(nodes: &[vertebrae_core::TaskTreeNode], id: &str) -> Option<TaskTreeNode> {
                 for node in nodes {
-                    if node.id == id {
+                    if node.task.id == id {
                         return Some(convert_tree_node(node));
                     }
                     if let Some(found) = find_node(&node.children, id) {
@@ -376,34 +363,24 @@ pub async fn get_task_hierarchy(
             }
         }
         None => {
-            // Return all root nodes converted to TaskHierarchyNode, sorted by newest first
-            let mut nodes: Vec<TaskHierarchyNode> = tree.iter().map(convert_tree_node).collect();
+            // Return all root nodes converted to TaskTreeNode, sorted by newest first
+            let mut nodes: Vec<TaskTreeNode> = tree.iter().map(convert_tree_node).collect();
             nodes.sort_by(|a, b| b.task.created_at.cmp(&a.task.created_at));
             Ok(nodes)
         }
     }
 }
 
-/// Helper function to convert TaskTreeNode to TaskHierarchyNode
+/// Helper function to convert core TaskTreeNode to GUI TaskTreeNode
 /// Children are sorted by created_at descending (newest first)
-fn convert_tree_node(node: &vertebrae_core::TaskTreeNode) -> TaskHierarchyNode {
-    let mut children: Vec<TaskHierarchyNode> =
-        node.children.iter().map(convert_tree_node).collect();
+fn convert_tree_node(node: &vertebrae_core::TaskTreeNode) -> TaskTreeNode {
+    let mut children: Vec<TaskTreeNode> = node.children.iter().map(convert_tree_node).collect();
     children.sort_by(|a, b| b.task.created_at.cmp(&a.task.created_at));
 
-    TaskHierarchyNode {
-        task: TaskSummary {
-            id: node.id.clone(),
-            title: node.title.clone(),
-            level: node.level.clone().into(),
-            status: node.status.clone(),
-            priority: node.priority.clone().map(Into::into),
-            tags: node.tags.clone(),
-            needs_human_review: node.needs_human_review,
-            created_at: node.created_at.to_rfc3339(),
-            workflow_name: node.workflow_name.clone(),
-            step_name: node.step_name.clone(),
-        },
+    TaskTreeNode {
+        task: node.task.clone().into(),
+        has_blockers: node.has_blockers,
+        blocker_count: node.blocker_count as u32,
         children,
     }
 }
@@ -548,20 +525,13 @@ pub async fn get_workflow_with_tasks(
     let all_tasks = service.tasks().list_tasks(&filter).await?;
 
     // Filter tasks that have this workflow_id
-    // Tasks now have workflow_id as Option<String> from the service
     let workflow_id_str = workflow.id.clone().unwrap_or_default();
 
-    // We need to get full tasks to check workflow_id since TaskSummary doesn't include it
-    let mut tasks = Vec::new();
-    for summary in all_tasks {
-        if let Ok(task) = service.tasks().get_task(&summary.id).await {
-            if let Some(wf_id) = &task.workflow_id {
-                if wf_id == &workflow_id_str {
-                    tasks.push(summary.into());
-                }
-            }
-        }
-    }
+    let tasks: Vec<Task> = all_tasks
+        .into_iter()
+        .filter(|t| t.workflow_id.as_deref() == Some(&workflow_id_str))
+        .map(Into::into)
+        .collect();
 
     Ok(WorkflowWithTasks {
         workflow: workflow.into(),
@@ -604,30 +574,20 @@ pub async fn get_workflow_with_task_details(
     // Get the workflow_id string for filtering
     let workflow_id_str = workflow.id.clone().unwrap_or_default();
 
-    // Query tasks with filter for the workflow using optimized single-query method
+    // Query tasks with filter for the workflow
     let query_start = std::time::Instant::now();
     let filter = vertebrae_core::TaskFilter::new()
         .include_done()
         .with_workflow_id(workflow_id_str.clone());
-    let tasks_with_relations = service.tasks().list_tasks_with_relations(&filter).await?;
+    let tasks = service.tasks().list_tasks(&filter).await?;
     log::info!(
-        "[get_workflow_with_task_details] Fetched {} tasks with relations in {}ms",
-        tasks_with_relations.len(),
+        "[get_workflow_with_task_details] Fetched {} tasks in {}ms",
+        tasks.len(),
         query_start.elapsed().as_millis()
     );
 
     let convert_start = std::time::Instant::now();
-    // Convert TaskWithRelations to GUI format
-    let tasks_gui: Vec<TaskWithRelations> = tasks_with_relations
-        .into_iter()
-        .map(|twr| TaskWithRelations {
-            task: twr.task.into(),
-            parent_id: twr.parent_id,
-            children_ids: twr.children_ids,
-            depends_on_ids: twr.depends_on_ids,
-            dependent_ids: twr.dependent_ids,
-        })
-        .collect();
+    let tasks_gui: Vec<Task> = tasks.into_iter().map(Into::into).collect();
     log::info!(
         "[get_workflow_with_task_details] Converted {} tasks to GUI types in {}ms",
         tasks_gui.len(),
@@ -642,6 +602,129 @@ pub async fn get_workflow_with_task_details(
     Ok(crate::types::WorkflowWithTaskDetails {
         workflow: workflow.into(),
         tasks: tasks_gui,
+    })
+}
+
+/// Get all pipeline data in a single command.
+///
+/// Fetches workflows, all tasks (as lightweight summaries), all steps grouped
+/// by workflow, and workflow transitions. Replaces the N+1 sequential fetch
+/// pattern where each workflow triggers individual task and step queries.
+///
+/// Makes 3-4 service calls total instead of 2N+2.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_pipeline_data(
+    state: State<'_, AppState>,
+) -> Result<crate::types::PipelineData, CommandError> {
+    log::info!("[get_pipeline_data] Starting");
+    let start_time = std::time::Instant::now();
+
+    let service_guard = state.services.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    // 1. List all workflows
+    let wf_start = std::time::Instant::now();
+    let workflow_summaries = service.workflows().list_workflows().await?;
+    let mut workflows_gui = Vec::with_capacity(workflow_summaries.len());
+    for ws in &workflow_summaries {
+        let wf = service.workflows().get_workflow(&ws.id).await?;
+        workflows_gui.push(crate::types::Workflow::from(wf));
+    }
+    log::info!(
+        "[get_pipeline_data] Fetched {} workflows in {}ms",
+        workflows_gui.len(),
+        wf_start.elapsed().as_millis()
+    );
+
+    // 2. List all tasks (single HTTP call via include_done filter)
+    let tasks_start = std::time::Instant::now();
+    let filter = vertebrae_core::TaskFilter::new().include_done();
+    let task_summaries = service.tasks().list_tasks(&filter).await?;
+    let tasks: Vec<crate::types::Task> = task_summaries.into_iter().map(Into::into).collect();
+    log::info!(
+        "[get_pipeline_data] Fetched {} tasks in {}ms",
+        tasks.len(),
+        tasks_start.elapsed().as_millis()
+    );
+
+    // 3. List steps per workflow (API requires workflow_id)
+    let steps_start = std::time::Instant::now();
+    let mut workflow_steps: std::collections::HashMap<String, Vec<crate::types::Step>> =
+        std::collections::HashMap::new();
+    for wf in &workflows_gui {
+        if let Some(wf_id) = &wf.id {
+            match service.steps().list_steps_for_workflow(wf_id).await {
+                Ok(steps) => {
+                    workflow_steps.insert(
+                        wf_id.clone(),
+                        steps.into_iter().map(crate::types::Step::from).collect(),
+                    );
+                }
+                Err(e) => {
+                    log::warn!(
+                        "[get_pipeline_data] Failed to fetch steps for workflow {}: {}",
+                        wf_id,
+                        e
+                    );
+                    workflow_steps.insert(wf_id.clone(), Vec::new());
+                }
+            }
+        }
+    }
+    log::info!(
+        "[get_pipeline_data] Fetched steps for {} workflows in {}ms",
+        workflow_steps.len(),
+        steps_start.elapsed().as_millis()
+    );
+
+    // 4. Fetch workflow transitions
+    let trans_start = std::time::Instant::now();
+    let transitions_raw = service.workflows().list_workflow_transitions(None).await?;
+    let workflow_names: std::collections::HashMap<String, String> = workflow_summaries
+        .into_iter()
+        .map(|w| (w.id.clone(), w.name))
+        .collect();
+    let transitions: Vec<crate::types::WorkflowTransition> = transitions_raw
+        .into_iter()
+        .map(|t| {
+            let from_id = &t.from_workflow;
+            let to_id = &t.to_workflow;
+            crate::types::WorkflowTransition {
+                id: t.id,
+                from_workflow_id: from_id.clone(),
+                from_workflow_name: workflow_names
+                    .get(from_id)
+                    .cloned()
+                    .unwrap_or_else(|| from_id.clone()),
+                to_workflow_id: to_id.clone(),
+                to_workflow_name: workflow_names
+                    .get(to_id)
+                    .cloned()
+                    .unwrap_or_else(|| to_id.clone()),
+                label: t.label,
+                target_step_id: t.target_step,
+            }
+        })
+        .collect();
+    log::info!(
+        "[get_pipeline_data] Fetched {} transitions in {}ms",
+        transitions.len(),
+        trans_start.elapsed().as_millis()
+    );
+
+    log::info!(
+        "[get_pipeline_data] Total time: {}ms",
+        start_time.elapsed().as_millis()
+    );
+
+    Ok(crate::types::PipelineData {
+        workflows: workflows_gui,
+        workflow_steps,
+        tasks,
+        transitions,
     })
 }
 
@@ -2027,7 +2110,7 @@ mod tests {
         let app = build_app_with_services();
         let state: tauri::State<'_, AppState> = app.state();
         let id = create_task(
-            state,
+            state.clone(),
             "Epic Task".to_string(),
             Some("Description".to_string()),
             Some("epic".to_string()),
@@ -2102,8 +2185,8 @@ mod tests {
         .await
         .unwrap();
         let task = get_task(state, id.clone()).await.unwrap();
-        assert_eq!(task.task.title, "Detail Task");
-        assert_eq!(task.task.id, Some(id));
+        assert_eq!(task.title, "Detail Task");
+        assert_eq!(task.id, id);
     }
 
     #[tokio::test]
@@ -2216,13 +2299,13 @@ mod tests {
             .unwrap();
 
         let opts = crate::types::UpdateTaskOptions {
-            title: Some("Updated".to_string()),
+            title: Some("New".to_string()),
             ..Default::default()
         };
         update_task_inner(&services, &id, opts).await.unwrap();
 
         let task = services.tasks().get_task(&id).await.unwrap();
-        assert_eq!(task.title, "Updated");
+        assert_eq!(task.title, "New");
     }
 
     #[tokio::test]
@@ -2375,7 +2458,7 @@ mod tests {
             .unwrap();
 
         let child = get_task(state, child_id).await.unwrap();
-        assert_eq!(child.parent_id, Some(parent_id));
+        assert_eq!(child.parent_id.as_deref(), Some(parent_id.as_str()));
     }
 
     #[tokio::test]
@@ -2414,13 +2497,13 @@ mod tests {
             .await
             .unwrap();
         let task = get_task(state.clone(), task_a.clone()).await.unwrap();
-        assert!(task.depends_on_ids.contains(&task_b));
+        assert!(task.dependency_ids.contains(&task_b));
 
         remove_dependency(state.clone(), task_a.clone(), task_b.clone())
             .await
             .unwrap();
         let task = get_task(state, task_a).await.unwrap();
-        assert!(!task.depends_on_ids.contains(&task_b));
+        assert!(!task.dependency_ids.contains(&task_b));
     }
 
     #[tokio::test]
@@ -2767,8 +2850,8 @@ mod tests {
         .unwrap();
 
         let task = get_task(state, id).await.unwrap();
-        assert_eq!(task.task.sections.len(), 1);
-        assert_eq!(task.task.sections[0].content, "Do the thing");
+        assert_eq!(task.sections.len(), 1);
+        assert_eq!(task.sections[0].content, "Do the thing");
     }
 
     #[tokio::test]
@@ -2814,7 +2897,7 @@ mod tests {
         }
 
         let task = get_task(state, id).await.unwrap();
-        assert_eq!(task.task.sections.len(), 9);
+        assert_eq!(task.sections.len(), 9);
     }
 
     #[tokio::test]
@@ -2845,7 +2928,7 @@ mod tests {
         .unwrap();
 
         let task = get_task(state, id).await.unwrap();
-        assert_eq!(task.task.sections[0].content, "Updated content");
+        assert_eq!(task.sections[0].content, "Updated content");
     }
 
     #[tokio::test]
@@ -2881,7 +2964,7 @@ mod tests {
             .unwrap();
 
         let task = get_task(state, id).await.unwrap();
-        assert!(task.task.sections.is_empty());
+        assert!(task.sections.is_empty());
     }
 
     #[tokio::test]
@@ -2917,7 +3000,7 @@ mod tests {
             .unwrap();
 
         let task = get_task(state, id).await.unwrap();
-        assert_eq!(task.task.sections[0].done, Some(true));
+        assert_eq!(task.sections[0].done, Some(true));
     }
 
     // ========================================================================
@@ -2945,8 +3028,8 @@ mod tests {
         .unwrap();
 
         let task = get_task(state.clone(), id.clone()).await.unwrap();
-        assert_eq!(task.task.code_refs.len(), 1);
-        assert_eq!(task.task.code_refs[0].path, "src/main.rs");
+        assert_eq!(task.code_refs.len(), 1);
+        assert_eq!(task.code_refs[0].path, "src/main.rs");
 
         // Replace with new refs
         let new_refs = vec![crate::types::CodeRef {
@@ -2961,8 +3044,8 @@ mod tests {
             .unwrap();
 
         let task = get_task(state, id).await.unwrap();
-        assert_eq!(task.task.code_refs.len(), 1);
-        assert_eq!(task.task.code_refs[0].path, "src/lib.rs");
+        assert_eq!(task.code_refs.len(), 1);
+        assert_eq!(task.code_refs[0].path, "src/lib.rs");
     }
 
     #[tokio::test]
@@ -3001,7 +3084,7 @@ mod tests {
             .unwrap();
 
         let task = get_task(state, id).await.unwrap();
-        assert!(task.task.code_refs.is_empty());
+        assert!(task.code_refs.is_empty());
     }
 
     #[tokio::test]
@@ -3035,8 +3118,8 @@ mod tests {
         .unwrap();
 
         let task = get_task(state, id).await.unwrap();
-        assert_eq!(task.task.sections[0].refs.len(), 1);
-        assert_eq!(task.task.sections[0].refs[0].path, "tests/test.rs");
+        assert_eq!(task.sections[0].refs.len(), 1);
+        assert_eq!(task.sections[0].refs[0].path, "tests/test.rs");
     }
 
     #[tokio::test]
@@ -3086,46 +3169,52 @@ mod tests {
         use chrono::{Duration, Utc};
 
         let now = Utc::now();
+
+        fn make_task(
+            id: &str,
+            title: &str,
+            created_at: chrono::DateTime<Utc>,
+        ) -> vertebrae_core::Task {
+            vertebrae_core::Task {
+                id: id.to_string(),
+                title: title.to_string(),
+                description: None,
+                level: vertebrae_core::Level::Task,
+                status: "backlog".to_string(),
+                priority: None,
+                tags: vec![],
+                workflow_id: None,
+                current_step_id: None,
+                workflow_name: None,
+                step_name: None,
+                needs_human_review: None,
+                review_comment: None,
+                revision_feedback: None,
+                rejection_reason: None,
+                parent_id: None,
+                dependency_ids: vec![],
+                sections: vec![],
+                code_refs: vec![],
+                created_at: Some(created_at),
+                updated_at: None,
+                started_at: None,
+                completed_at: None,
+            }
+        }
+
         let node = vertebrae_core::TaskTreeNode {
-            id: "root".to_string(),
-            title: "Root".to_string(),
-            level: vertebrae_core::Level::Epic,
-            status: "backlog".to_string(),
-            priority: None,
-            tags: vec![],
-            needs_human_review: None,
-            created_at: now,
-            workflow_name: None,
-            step_name: None,
+            task: make_task("root", "Root", now),
             has_blockers: false,
             blocker_count: 0,
             children: vec![
                 vertebrae_core::TaskTreeNode {
-                    id: "old".to_string(),
-                    title: "Old".to_string(),
-                    level: vertebrae_core::Level::Task,
-                    status: "backlog".to_string(),
-                    priority: None,
-                    tags: vec![],
-                    needs_human_review: None,
-                    created_at: now - Duration::hours(2),
-                    workflow_name: None,
-                    step_name: None,
+                    task: make_task("old", "Old", now - Duration::hours(2)),
                     has_blockers: false,
                     blocker_count: 0,
                     children: vec![],
                 },
                 vertebrae_core::TaskTreeNode {
-                    id: "new".to_string(),
-                    title: "New".to_string(),
-                    level: vertebrae_core::Level::Task,
-                    status: "backlog".to_string(),
-                    priority: None,
-                    tags: vec![],
-                    needs_human_review: None,
-                    created_at: now,
-                    workflow_name: None,
-                    step_name: None,
+                    task: make_task("new", "New", now),
                     has_blockers: false,
                     blocker_count: 0,
                     children: vec![],
