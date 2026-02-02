@@ -403,17 +403,10 @@ pub async fn list_workflows(state: State<'_, AppState>) -> Result<Vec<Workflow>,
 
     let workflow_service = service.workflows();
 
-    match workflow_service.list_workflows().await {
-        Ok(summaries) => {
-            log::info!("list_workflows returned {} workflows", summaries.len());
-            // Convert summaries to full workflows for display
-            // For now, we'll fetch the full workflows from the database if needed
-            let mut workflows = Vec::new();
-            for summary in summaries {
-                if let Ok(workflow) = workflow_service.get_workflow(&summary.id).await {
-                    workflows.push(workflow.into());
-                }
-            }
+    match workflow_service.list_workflows_full().await {
+        Ok(workflows_full) => {
+            log::info!("list_workflows returned {} workflows", workflows_full.len());
+            let workflows: Vec<Workflow> = workflows_full.into_iter().map(Into::into).collect();
             Ok(workflows)
         }
         Err(e) => {
@@ -625,14 +618,18 @@ pub async fn get_pipeline_data(
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    // 1. List all workflows
+    // 1. List all workflows (single HTTP call, full details)
     let wf_start = std::time::Instant::now();
-    let workflow_summaries = service.workflows().list_workflows().await?;
-    let mut workflows_gui = Vec::with_capacity(workflow_summaries.len());
-    for ws in &workflow_summaries {
-        let wf = service.workflows().get_workflow(&ws.id).await?;
-        workflows_gui.push(crate::types::Workflow::from(wf));
-    }
+    let workflows_full = service.workflows().list_workflows_full().await?;
+    let workflows_gui: Vec<crate::types::Workflow> = workflows_full
+        .iter()
+        .cloned()
+        .map(crate::types::Workflow::from)
+        .collect();
+    let workflow_names: std::collections::HashMap<String, String> = workflows_full
+        .iter()
+        .filter_map(|w| w.id.as_ref().map(|id| (id.clone(), w.name.clone())))
+        .collect();
     log::info!(
         "[get_pipeline_data] Fetched {} workflows in {}ms",
         workflows_gui.len(),
@@ -650,29 +647,16 @@ pub async fn get_pipeline_data(
         tasks_start.elapsed().as_millis()
     );
 
-    // 3. List steps per workflow (API requires workflow_id)
+    // 3. List all steps (single HTTP call), then group by workflow_id
     let steps_start = std::time::Instant::now();
+    let all_steps = service.steps().list_all_steps().await?;
     let mut workflow_steps: std::collections::HashMap<String, Vec<crate::types::Step>> =
         std::collections::HashMap::new();
-    for wf in &workflows_gui {
-        if let Some(wf_id) = &wf.id {
-            match service.steps().list_steps_for_workflow(wf_id).await {
-                Ok(steps) => {
-                    workflow_steps.insert(
-                        wf_id.clone(),
-                        steps.into_iter().map(crate::types::Step::from).collect(),
-                    );
-                }
-                Err(e) => {
-                    log::warn!(
-                        "[get_pipeline_data] Failed to fetch steps for workflow {}: {}",
-                        wf_id,
-                        e
-                    );
-                    workflow_steps.insert(wf_id.clone(), Vec::new());
-                }
-            }
-        }
+    for step in all_steps {
+        workflow_steps
+            .entry(step.workflow_id.clone())
+            .or_default()
+            .push(crate::types::Step::from(step));
     }
     log::info!(
         "[get_pipeline_data] Fetched steps for {} workflows in {}ms",
@@ -683,10 +667,6 @@ pub async fn get_pipeline_data(
     // 4. Fetch workflow transitions
     let trans_start = std::time::Instant::now();
     let transitions_raw = service.workflows().list_workflow_transitions(None).await?;
-    let workflow_names: std::collections::HashMap<String, String> = workflow_summaries
-        .into_iter()
-        .map(|w| (w.id.clone(), w.name))
-        .collect();
     let transitions: Vec<crate::types::WorkflowTransition> = transitions_raw
         .into_iter()
         .map(|t| {
@@ -2636,6 +2616,223 @@ mod tests {
 
         let result = get_workflow_with_task_details(state, wf_id).await.unwrap();
         assert!(result.tasks.is_empty());
+    }
+
+    // ========================================================================
+    // list_workflows_full integration tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn list_workflows_returns_full_workflow_fields() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+
+        // Create a workflow with description via the service directly
+        {
+            let guard = state.services.read().await;
+            let svc = guard.as_ref().unwrap();
+            svc.workflows()
+                .create_workflow(vertebrae_core::CreateWorkflowOptions {
+                    name: "Full Details WF".to_string(),
+                    description: Some("A detailed workflow".to_string()),
+                    steps: vec![],
+                    auto_advance: false,
+                    order: 0,
+                })
+                .await
+                .unwrap();
+        }
+
+        let workflows = list_workflows(state).await.unwrap();
+        assert_eq!(workflows.len(), 1);
+        let wf = &workflows[0];
+        assert!(wf.id.is_some());
+        assert_eq!(wf.name, "Full Details WF");
+        assert_eq!(wf.description, Some("A detailed workflow".to_string()));
+        assert!(wf.created_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn list_workflows_returns_multiple_full_workflows() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+
+        {
+            let guard = state.services.read().await;
+            let svc = guard.as_ref().unwrap();
+            svc.workflows()
+                .create_workflow(vertebrae_core::CreateWorkflowOptions {
+                    name: "WF One".to_string(),
+                    description: None,
+                    steps: vec![],
+                    auto_advance: false,
+                    order: 0,
+                })
+                .await
+                .unwrap();
+            svc.workflows()
+                .create_workflow(vertebrae_core::CreateWorkflowOptions {
+                    name: "WF Two".to_string(),
+                    description: Some("Second workflow".to_string()),
+                    steps: vec![],
+                    auto_advance: false,
+                    order: 1,
+                })
+                .await
+                .unwrap();
+        }
+
+        let workflows = list_workflows(state).await.unwrap();
+        assert_eq!(workflows.len(), 2);
+        let names: Vec<&str> = workflows.iter().map(|w| w.name.as_str()).collect();
+        assert!(names.contains(&"WF One"));
+        assert!(names.contains(&"WF Two"));
+    }
+
+    // ========================================================================
+    // get_pipeline_data tests
+    // ========================================================================
+
+    #[tokio::test]
+    async fn get_pipeline_data_empty_returns_empty_collections() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let data = get_pipeline_data(state).await.unwrap();
+        assert!(data.workflows.is_empty());
+        assert!(data.tasks.is_empty());
+        assert!(data.workflow_steps.is_empty());
+        assert!(data.transitions.is_empty());
+    }
+
+    #[tokio::test]
+    async fn get_pipeline_data_no_project_returns_error() {
+        let app = build_app_without_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let result = get_pipeline_data(state).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().message.contains("No project selected"));
+    }
+
+    #[tokio::test]
+    async fn get_pipeline_data_includes_workflows_and_tasks() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+
+        {
+            let guard = state.services.read().await;
+            let svc = guard.as_ref().unwrap();
+            svc.workflows()
+                .create_workflow(vertebrae_core::CreateWorkflowOptions {
+                    name: "Pipeline WF".to_string(),
+                    description: Some("Test pipeline".to_string()),
+                    steps: vec![],
+                    auto_advance: false,
+                    order: 0,
+                })
+                .await
+                .unwrap();
+        }
+        create_task(state.clone(), "Pipeline Task".to_string(), None, None, None)
+            .await
+            .unwrap();
+
+        let data = get_pipeline_data(state).await.unwrap();
+        assert_eq!(data.workflows.len(), 1);
+        assert_eq!(data.workflows[0].name, "Pipeline WF");
+        assert_eq!(
+            data.workflows[0].description,
+            Some("Test pipeline".to_string())
+        );
+        assert_eq!(data.tasks.len(), 1);
+        assert_eq!(data.tasks[0].title, "Pipeline Task");
+    }
+
+    #[tokio::test]
+    async fn get_pipeline_data_groups_steps_by_workflow() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+
+        let (wf1_id, wf2_id) = {
+            let guard = state.services.read().await;
+            let svc = guard.as_ref().unwrap();
+            let id1 = svc
+                .workflows()
+                .create_workflow(vertebrae_core::CreateWorkflowOptions {
+                    name: "WF A".to_string(),
+                    description: None,
+                    steps: vec![],
+                    auto_advance: false,
+                    order: 0,
+                })
+                .await
+                .unwrap();
+            let id2 = svc
+                .workflows()
+                .create_workflow(vertebrae_core::CreateWorkflowOptions {
+                    name: "WF B".to_string(),
+                    description: None,
+                    steps: vec![],
+                    auto_advance: false,
+                    order: 1,
+                })
+                .await
+                .unwrap();
+            (id1, id2)
+        };
+
+        create_step(
+            state.clone(),
+            wf1_id.clone(),
+            "Step A1".to_string(),
+            None,
+            vec![],
+            vec![],
+            0,
+            false,
+            vec![],
+        )
+        .await
+        .unwrap();
+        create_step(
+            state.clone(),
+            wf1_id.clone(),
+            "Step A2".to_string(),
+            None,
+            vec![],
+            vec![],
+            1,
+            false,
+            vec![],
+        )
+        .await
+        .unwrap();
+        create_step(
+            state.clone(),
+            wf2_id.clone(),
+            "Step B1".to_string(),
+            None,
+            vec![],
+            vec![],
+            0,
+            false,
+            vec![],
+        )
+        .await
+        .unwrap();
+
+        let data = get_pipeline_data(state).await.unwrap();
+
+        assert_eq!(data.workflow_steps.len(), 2);
+
+        let steps_a = data.workflow_steps.get(&wf1_id).unwrap();
+        assert_eq!(steps_a.len(), 2);
+        let step_names_a: Vec<&str> = steps_a.iter().map(|s| s.name.as_str()).collect();
+        assert!(step_names_a.contains(&"Step A1"));
+        assert!(step_names_a.contains(&"Step A2"));
+
+        let steps_b = data.workflow_steps.get(&wf2_id).unwrap();
+        assert_eq!(steps_b.len(), 1);
+        assert_eq!(steps_b[0].name, "Step B1");
     }
 
     // ========================================================================

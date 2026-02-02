@@ -546,3 +546,47 @@ async fn test_workflow_list_after_multiple_creates() {
     assert!(output.contains("Workflow 3"));
     assert!(output.contains("With description"));
 }
+
+// ============================================================================
+// list_workflows_full tests
+// ============================================================================
+
+#[tokio::test]
+async fn test_list_workflows_full_empty() {
+    let services = mock_services();
+    let result = services.workflows().list_workflows_full().await.unwrap();
+    assert!(result.is_empty());
+}
+
+#[tokio::test]
+async fn test_list_workflows_full_returns_complete_workflow_objects() {
+    let services = mock_services();
+    let wf_id = create_workflow(&services, "Full Workflow", Some("Detailed description")).await;
+
+    let workflows = services.workflows().list_workflows_full().await.unwrap();
+
+    assert_eq!(workflows.len(), 1);
+    let wf = &workflows[0];
+    assert_eq!(wf.id.as_deref(), Some(wf_id.as_str()));
+    assert_eq!(wf.name, "Full Workflow");
+    assert_eq!(wf.description, Some("Detailed description".to_string()));
+    // Full workflows have timestamps that summaries don't
+    assert!(wf.created_at.is_some());
+    assert!(wf.updated_at.is_some());
+}
+
+#[tokio::test]
+async fn test_list_workflows_full_returns_all_workflows() {
+    let services = mock_services();
+    let id1 = create_workflow(&services, "WF Alpha", None).await;
+    let id2 = create_workflow(&services, "WF Beta", Some("Beta desc")).await;
+    let id3 = create_workflow(&services, "WF Gamma", Some("Gamma desc")).await;
+
+    let workflows = services.workflows().list_workflows_full().await.unwrap();
+
+    assert_eq!(workflows.len(), 3);
+    let ids: Vec<&str> = workflows.iter().filter_map(|w| w.id.as_deref()).collect();
+    assert!(ids.contains(&id1.as_str()));
+    assert!(ids.contains(&id2.as_str()));
+    assert!(ids.contains(&id3.as_str()));
+}

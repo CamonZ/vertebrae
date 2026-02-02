@@ -118,6 +118,18 @@ impl WorkflowService for SacrumWorkflowService {
             .collect())
     }
 
+    async fn list_workflows_full(&self) -> ServiceResult<Vec<Workflow>> {
+        let query = ProjectQuery {
+            project_id: self.client.project_id(),
+        };
+        let workflows: Vec<WorkflowResponse> = self.client.get("/api/workflows", &query).await?;
+
+        Ok(workflows
+            .iter()
+            .map(|w| self.response_to_workflow(w))
+            .collect())
+    }
+
     async fn update_workflow(&self, id: &str, options: UpdateWorkflowOptions) -> ServiceResult<()> {
         let mut request = json!({});
 

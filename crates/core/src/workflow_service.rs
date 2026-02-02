@@ -317,6 +317,12 @@ pub trait WorkflowService: Send + Sync {
     /// List all workflows
     async fn list_workflows(&self) -> ServiceResult<Vec<WorkflowSummary>>;
 
+    /// List all workflows with full details
+    ///
+    /// Returns complete Workflow objects instead of summaries.
+    /// Useful when the caller needs all workflow fields without N+1 queries.
+    async fn list_workflows_full(&self) -> ServiceResult<Vec<Workflow>>;
+
     /// Update a workflow
     ///
     /// Only updates fields specified in the options.

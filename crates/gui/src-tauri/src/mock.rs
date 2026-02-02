@@ -668,6 +668,11 @@ impl WorkflowService for MockWorkflowService {
             .collect())
     }
 
+    async fn list_workflows_full(&self) -> ServiceResult<Vec<Workflow>> {
+        let s = self.state.lock().unwrap();
+        Ok(s.workflows.values().cloned().collect())
+    }
+
     async fn update_workflow(&self, id: &str, options: UpdateWorkflowOptions) -> ServiceResult<()> {
         let mut s = self.state.lock().unwrap();
         let wf = s.workflows.get_mut(id).ok_or_else(|| {
