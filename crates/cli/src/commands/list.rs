@@ -15,8 +15,10 @@ pub struct TaskSummary {
     pub title: String,
     /// Hierarchy level
     pub level: String,
-    /// Derived status (workflow:step if available, else raw status)
-    pub status: String,
+    /// Workflow name (if assigned)
+    pub workflow_name: Option<String>,
+    /// Current step name (if assigned)
+    pub step_name: Option<String>,
     /// Optional priority
     pub priority: Option<String>,
     /// Tags for categorization
@@ -102,46 +104,15 @@ fn parse_priority(s: &str) -> Result<Priority, String> {
     }
 }
 
-/// Compute the derived status from workflow and step names with IDs
-///
-/// Returns `workflow_name:step_name (workflow:id, step:id)` if all are present,
-/// otherwise falls back to the raw status string.
-fn compute_derived_status(
-    status: &str,
-    workflow_name: Option<&str>,
-    step_name: Option<&str>,
-    workflow_id: Option<&str>,
-    step_id: Option<&str>,
-) -> String {
-    match (workflow_name, step_name) {
-        (Some(wf), Some(step)) => {
-            let ids_suffix = match (workflow_id, step_id) {
-                (Some(wf_id), Some(s_id)) => format!(" (workflow:{}, step:{})", wf_id, s_id),
-                (Some(wf_id), None) => format!(" (workflow:{})", wf_id),
-                _ => String::new(),
-            };
-            format!("{}:{}{}", wf, step, ids_suffix)
-        }
-        _ => status.to_string(),
-    }
-}
-
 /// Convert core Task to CLI TaskSummary
 impl From<vertebrae_core::Task> for TaskSummary {
     fn from(task: vertebrae_core::Task) -> Self {
-        let derived_status = compute_derived_status(
-            &task.status,
-            task.workflow_name.as_deref(),
-            task.step_name.as_deref(),
-            task.workflow_id.as_deref(),
-            task.current_step_id.as_deref(),
-        );
-
         TaskSummary {
             id: task.id,
             title: task.title,
             level: task.level.as_str().to_string(),
-            status: derived_status,
+            workflow_name: task.workflow_name,
+            step_name: task.step_name,
             priority: task.priority.map(|p| p.as_str().to_string()),
             tags: task.tags,
             needs_human_review: task.needs_human_review,
@@ -204,7 +175,7 @@ impl ListCommand {
 
         // Add status filters
         if !self.statuses.is_empty() {
-            filter = filter.with_statuses(self.statuses.clone());
+            filter = filter.with_step_names(self.statuses.clone());
         }
 
         // Add priority filters

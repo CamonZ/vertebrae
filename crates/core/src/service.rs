@@ -23,12 +23,6 @@ pub enum MutationEvent {
     TaskUpdated { id: String },
     /// Task was deleted
     TaskDeleted { id: String },
-    /// Task status changed (for explicit status-only updates)
-    TaskStatusChanged {
-        id: String,
-        old_status: String,
-        new_status: String,
-    },
 }
 
 /// Callback for mutation events - fires after each mutation completes
@@ -44,8 +38,6 @@ pub struct CreateTaskOptions {
     pub description: Option<String>,
     /// Task level (defaults to Task)
     pub level: Option<Level>,
-    /// Task status (defaults to "backlog") - workflow step name
-    pub status: Option<String>,
     /// Task priority
     pub priority: Option<Priority>,
     /// Tags for categorization
@@ -78,12 +70,6 @@ impl CreateTaskOptions {
     /// Set the level
     pub fn with_level(mut self, level: Level) -> Self {
         self.level = Some(level);
-        self
-    }
-
-    /// Set the status
-    pub fn with_status(mut self, status: impl Into<String>) -> Self {
-        self.status = Some(status.into());
         self
     }
 
@@ -239,9 +225,9 @@ pub struct TransitionResult {
     /// The task ID that was transitioned
     pub task_id: String,
     /// The previous status
-    pub from_status: String,
+    pub from_step: String,
     /// The new status
-    pub to_status: String,
+    pub to_step: String,
     /// Tasks that are now unblocked (for statuses with unblocks_dependents=true)
     pub unblocked_tasks: Vec<UnblockedTask>,
 }
@@ -268,15 +254,6 @@ pub trait TaskService: Send + Sync {
 
     /// Get a task by ID
     async fn get_task(&self, id: &str) -> ServiceResult<Task>;
-
-    /// Get the derived status string for a task
-    ///
-    /// Computes the status string based on workflow assignment:
-    /// - If task has workflow and current step: returns "workflow_name:step_name"
-    /// - Otherwise: returns "backlog"
-    ///
-    /// This is a read-only query operation.
-    async fn get_derived_status(&self, task: &Task) -> ServiceResult<String>;
 
     /// Update a task
     async fn update_task(&self, id: &str, options: UpdateTaskOptions) -> ServiceResult<()>;

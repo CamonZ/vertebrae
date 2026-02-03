@@ -27,8 +27,10 @@ pub struct TaskDetail {
     pub description: Option<String>,
     /// Hierarchy level
     pub level: String,
-    /// Current status
-    pub status: String,
+    /// Workflow name (if assigned)
+    pub workflow_name: Option<String>,
+    /// Current step name (if assigned)
+    pub step_name: Option<String>,
     /// Optional priority
     pub priority: Option<String>,
     /// Tags for categorization
@@ -68,7 +70,8 @@ struct TaskRow {
     title: String,
     description: Option<String>,
     level: String,
-    status: String,
+    workflow_name: Option<String>,
+    step_name: Option<String>,
     priority: Option<String>,
     tags: Vec<String>,
     created_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -108,7 +111,8 @@ struct RelatedTaskRow {
     id: String,
     title: String,
     level: String,
-    status: String,
+    workflow_name: Option<String>,
+    step_name: Option<String>,
     priority: Option<String>,
     tags: Vec<String>,
     needs_human_review: Option<bool>,
@@ -120,7 +124,8 @@ impl From<RelatedTaskRow> for TaskSummary {
             id: row.id,
             title: row.title,
             level: row.level,
-            status: row.status,
+            workflow_name: row.workflow_name,
+            step_name: row.step_name,
             priority: row.priority,
             tags: row.tags,
             needs_human_review: row.needs_human_review,
@@ -233,14 +238,10 @@ impl ShowCommand {
             .collect();
 
         // Compute the derived status from workflow info
-        let derived_status = if let Some(ref wf) = workflow {
-            let ids_suffix = match &wf.current_step_id {
-                Some(step_id) => format!(" (workflow:{}, step:{})", wf.id, step_id),
-                None => format!(" (workflow:{})", wf.id),
-            };
-            format!("{}:{}{}", wf.name, wf.current_step_name, ids_suffix)
+        let (derived_workflow_name, derived_step_name) = if let Some(ref wf) = workflow {
+            (Some(wf.name.clone()), Some(wf.current_step_name.clone()))
         } else {
-            task.status.clone()
+            (task.workflow_name, task.step_name)
         };
 
         Ok(TaskDetail {
@@ -248,7 +249,8 @@ impl ShowCommand {
             title: task.title,
             description: task.description,
             level: task.level.as_str().to_string(),
-            status: derived_status,
+            workflow_name: derived_workflow_name,
+            step_name: derived_step_name,
             priority: task.priority.map(|p| p.as_str().to_string()),
             tags: task.tags,
             created_at: task.created_at.map(|dt| dt.to_string()),
@@ -276,16 +278,14 @@ impl ShowCommand {
         // Use service method to get the task
         let task = services.tasks().get_task(id).await?;
 
-        // Compute derived status from workflow step using service
-        let derived_status = services.tasks().get_derived_status(&task).await?;
-
         // Convert Task to TaskRow for display
         Ok(TaskRow {
             id: task.id,
             title: task.title,
             description: task.description,
             level: task.level.as_str().to_string(),
-            status: derived_status,
+            workflow_name: task.workflow_name,
+            step_name: task.step_name,
             priority: task.priority.map(|p| p.as_str().to_string()),
             tags: task.tags,
             created_at: task.created_at,
@@ -341,14 +341,12 @@ impl ShowCommand {
         if let Some(parent_id) = parent_id {
             let task = services.tasks().get_task(&parent_id).await?;
 
-            // Compute derived status from workflow info using service
-            let derived_status = services.tasks().get_derived_status(&task).await?;
-
             Ok(Some(TaskSummary {
                 id: parent_id,
                 title: task.title,
                 level: task.level.as_str().to_string(),
-                status: derived_status,
+                workflow_name: task.workflow_name,
+                step_name: task.step_name,
                 priority: task.priority.map(|p| p.as_str().to_string()),
                 tags: task.tags,
                 needs_human_review: task.needs_human_review,
@@ -374,14 +372,12 @@ impl ShowCommand {
         for child_id in child_ids {
             let task = services.tasks().get_task(&child_id).await?;
 
-            // Compute derived status from workflow info using service
-            let derived_status = services.tasks().get_derived_status(&task).await?;
-
             children.push(TaskSummary {
                 id: child_id,
                 title: task.title,
                 level: task.level.as_str().to_string(),
-                status: derived_status,
+                workflow_name: task.workflow_name,
+                step_name: task.step_name,
                 priority: task.priority.map(|p| p.as_str().to_string()),
                 tags: task.tags,
                 needs_human_review: task.needs_human_review,
@@ -410,7 +406,8 @@ impl ShowCommand {
                 id: task.id,
                 title: task.title,
                 level: task.level.as_str().to_string(),
-                status: task.status,
+                workflow_name: task.workflow_name,
+                step_name: task.step_name,
                 priority: task.priority.map(|p| p.as_str().to_string()),
                 tags: task.tags,
                 needs_human_review: task.needs_human_review,
@@ -434,14 +431,12 @@ impl ShowCommand {
         for dependent_id in dependent_ids {
             let task = services.tasks().get_task(&dependent_id).await?;
 
-            // Compute derived status from workflow info using service
-            let derived_status = services.tasks().get_derived_status(&task).await?;
-
             blocks.push(TaskSummary {
                 id: dependent_id,
                 title: task.title,
                 level: task.level.as_str().to_string(),
-                status: derived_status,
+                workflow_name: task.workflow_name,
+                step_name: task.step_name,
                 priority: task.priority.map(|p| p.as_str().to_string()),
                 tags: task.tags,
                 needs_human_review: task.needs_human_review,
@@ -501,7 +496,11 @@ impl std::fmt::Display for TaskDetail {
         writeln!(f, "Metadata")?;
         writeln!(f, "{}", "-".repeat(40))?;
         writeln!(f, "Level:    {}", self.level)?;
-        writeln!(f, "Status:   {}", self.status)?;
+        let status_display = match (&self.workflow_name, &self.step_name) {
+            (Some(wf), Some(step)) => format!("{}:{}", wf, step),
+            _ => "unassigned".to_string(),
+        };
+        writeln!(f, "Status:   {}", status_display)?;
         writeln!(
             f,
             "Priority: {}",

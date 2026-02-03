@@ -6,6 +6,7 @@
 use async_trait::async_trait;
 use serde::Serialize;
 use serde_json::json;
+use std::collections::HashMap;
 use vertebrae_core::error::{ServiceError, ServiceResult};
 use vertebrae_core::models::Task;
 use vertebrae_core::models::{
@@ -15,7 +16,9 @@ use vertebrae_core::service::{
     CreateTaskOptions, TaskService, TransitionResult, UpdateTaskOptions,
 };
 
-use crate::api_types::{CodeRefResponse, SectionResponse, TaskResponse};
+use crate::api_types::{
+    CodeRefResponse, SectionResponse, TaskResponse, WorkflowResponse, WorkflowStepResponse,
+};
 use crate::client::SacrumClient;
 
 /// Query param helper for project_id
@@ -35,8 +38,34 @@ impl SacrumTaskService {
         Self { client }
     }
 
+    /// Fetch all workflows and return a map of workflow_id -> workflow_name
+    async fn fetch_workflow_names(&self) -> ServiceResult<HashMap<String, String>> {
+        let query = ProjectQuery {
+            project_id: self.client.project_id(),
+        };
+        let workflows: Vec<WorkflowResponse> = self.client.get("/api/workflows", &query).await?;
+        Ok(workflows.into_iter().map(|w| (w.id, w.name)).collect())
+    }
+
+    /// Fetch all steps and return a map of step_id -> step_name
+    async fn fetch_step_names(&self) -> ServiceResult<HashMap<String, String>> {
+        let steps: Vec<WorkflowStepResponse> = self.client.get("/api/workflow-steps", &()).await?;
+        Ok(steps.into_iter().map(|s| (s.id, s.name)).collect())
+    }
+
     /// Convert Sacrum TaskResponse to vertebrae_core Task model
+    #[cfg(test)]
     fn response_to_task(&self, response: &TaskResponse) -> Task {
+        self.response_to_task_with_lookups(response, None, None)
+    }
+
+    /// Convert Sacrum TaskResponse to vertebrae_core Task model with optional lookups
+    fn response_to_task_with_lookups(
+        &self,
+        response: &TaskResponse,
+        workflow_names: Option<&HashMap<String, String>>,
+        step_names: Option<&HashMap<String, String>>,
+    ) -> Task {
         let level = response
             .level
             .as_deref()
@@ -81,18 +110,29 @@ impl SacrumTaskService {
             .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
             .map(|dt| dt.with_timezone(&chrono::Utc));
 
+        // Resolve workflow_name from lookup or default to None
+        let workflow_name = response
+            .workflow_id
+            .as_ref()
+            .and_then(|wf_id| workflow_names.and_then(|m| m.get(wf_id).cloned()));
+
+        // Resolve step_name from lookup or default to None
+        let step_name = response
+            .current_step_id
+            .as_ref()
+            .and_then(|step_id| step_names.and_then(|m| m.get(step_id).cloned()));
+
         Task {
             id: response.id.clone(),
             title: response.title.clone(),
             description: response.description.clone(),
             level,
-            status: "backlog".to_string(),
             priority,
             tags: response.tags.clone(),
             workflow_id: response.workflow_id.clone(),
             current_step_id: response.current_step_id.clone(),
-            workflow_name: None,
-            step_name: None,
+            workflow_name,
+            step_name,
             needs_human_review: response.needs_human_review,
             review_comment: response.review_comment.clone(),
             revision_feedback: response.revision_feedback.clone(),
@@ -193,11 +233,12 @@ impl TaskService for SacrumTaskService {
     async fn get_task(&self, id: &str) -> ServiceResult<Task> {
         let path = format!("/api/tasks/{}", id);
         let response: TaskResponse = self.client.get(&path, &()).await?;
-        Ok(self.response_to_task(&response))
-    }
 
-    async fn get_derived_status(&self, _task: &Task) -> ServiceResult<String> {
-        Ok("backlog".to_string())
+        // Fetch lookups to resolve workflow_name and step_name
+        let workflow_names = self.fetch_workflow_names().await.unwrap_or_default();
+        let step_names = self.fetch_step_names().await.unwrap_or_default();
+
+        Ok(self.response_to_task_with_lookups(&response, Some(&workflow_names), Some(&step_names)))
     }
 
     async fn update_task(&self, id: &str, options: UpdateTaskOptions) -> ServiceResult<()> {
@@ -241,7 +282,16 @@ impl TaskService for SacrumTaskService {
         };
         let tasks: Vec<TaskResponse> = self.client.get("/api/tasks", &query).await?;
 
-        Ok(tasks.iter().map(|t| self.response_to_task(t)).collect())
+        // Fetch lookups once for all tasks
+        let workflow_names = self.fetch_workflow_names().await.unwrap_or_default();
+        let step_names = self.fetch_step_names().await.unwrap_or_default();
+
+        Ok(tasks
+            .iter()
+            .map(|t| {
+                self.response_to_task_with_lookups(t, Some(&workflow_names), Some(&step_names))
+            })
+            .collect())
     }
 
     async fn list_ready(&self, _status: &str) -> ServiceResult<Vec<Task>> {
@@ -250,7 +300,16 @@ impl TaskService for SacrumTaskService {
         };
         let tasks: Vec<TaskResponse> = self.client.get("/api/tasks/ready", &query).await?;
 
-        Ok(tasks.iter().map(|t| self.response_to_task(t)).collect())
+        // Fetch lookups once for all tasks
+        let workflow_names = self.fetch_workflow_names().await.unwrap_or_default();
+        let step_names = self.fetch_step_names().await.unwrap_or_default();
+
+        Ok(tasks
+            .iter()
+            .map(|t| {
+                self.response_to_task_with_lookups(t, Some(&workflow_names), Some(&step_names))
+            })
+            .collect())
     }
 
     async fn transition_to(&self, _id: &str, _target: &str) -> ServiceResult<TransitionResult> {

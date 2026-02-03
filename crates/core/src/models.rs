@@ -358,7 +358,7 @@ pub struct BlockerNode {
     pub id: String,
     pub title: String,
     pub level: String,
-    pub status: String,
+    pub step_name: Option<String>,
     pub children: Vec<BlockerNode>,
 }
 
@@ -366,7 +366,7 @@ pub struct BlockerNode {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TaskFilter {
     pub levels: Vec<Level>,
-    pub statuses: Vec<String>,
+    pub step_names: Vec<String>,
     pub priorities: Vec<Priority>,
     pub tags: Vec<String>,
     pub root_only: bool,
@@ -392,13 +392,17 @@ impl TaskFilter {
         self
     }
 
-    pub fn with_status(mut self, status: impl Into<String>) -> Self {
-        self.statuses.push(status.into());
+    pub fn with_step_name(mut self, step_name: impl Into<String>) -> Self {
+        self.step_names.push(step_name.into());
         self
     }
 
-    pub fn with_statuses(mut self, statuses: impl IntoIterator<Item = impl Into<String>>) -> Self {
-        self.statuses.extend(statuses.into_iter().map(|s| s.into()));
+    pub fn with_step_names(
+        mut self,
+        step_names: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        self.step_names
+            .extend(step_names.into_iter().map(|s| s.into()));
         self
     }
 
@@ -759,10 +763,6 @@ pub struct Task {
     /// Hierarchy level (epic, ticket, task)
     pub level: Level,
 
-    /// Current status (derived from workflow step name, e.g. "backlog", "in_progress")
-    #[serde(default = "default_status")]
-    pub status: String,
-
     /// Optional priority
     #[serde(skip_serializing_if = "Option::is_none")]
     pub priority: Option<Priority>,
@@ -836,10 +836,6 @@ pub struct Task {
     pub completed_at: Option<DateTime<Utc>>,
 }
 
-fn default_status() -> String {
-    "backlog".to_string()
-}
-
 impl Task {
     /// Create a new task with required fields
     pub fn new(title: impl Into<String>, level: Level) -> Self {
@@ -848,7 +844,6 @@ impl Task {
             title: title.into(),
             description: None,
             level,
-            status: "backlog".to_string(),
             priority: None,
             tags: Vec::new(),
             workflow_id: None,
@@ -1604,7 +1599,6 @@ mod tests {
         assert!(task.code_refs.is_empty());
         assert!(task.workflow_id.is_none());
         assert!(task.current_step_id.is_none());
-        assert_eq!(task.status, "backlog");
         assert!(task.parent_id.is_none());
         assert!(task.dependency_ids.is_empty());
         assert!(task.workflow_name.is_none());
@@ -2221,7 +2215,7 @@ mod tests {
     fn task_filter_new() {
         let filter = TaskFilter::new();
         assert!(filter.levels.is_empty());
-        assert!(filter.statuses.is_empty());
+        assert!(filter.step_names.is_empty());
         assert!(filter.priorities.is_empty());
         assert!(filter.tags.is_empty());
         assert!(!filter.root_only);
@@ -2245,15 +2239,15 @@ mod tests {
     }
 
     #[test]
-    fn task_filter_with_status() {
-        let filter = TaskFilter::new().with_status("in_progress");
-        assert_eq!(filter.statuses, vec!["in_progress"]);
+    fn task_filter_with_step_name() {
+        let filter = TaskFilter::new().with_step_name("in_progress");
+        assert_eq!(filter.step_names, vec!["in_progress"]);
     }
 
     #[test]
-    fn task_filter_with_statuses() {
-        let filter = TaskFilter::new().with_statuses(vec!["in_progress", "done"]);
-        assert_eq!(filter.statuses, vec!["in_progress", "done"]);
+    fn task_filter_with_step_names() {
+        let filter = TaskFilter::new().with_step_names(vec!["in_progress", "done"]);
+        assert_eq!(filter.step_names, vec!["in_progress", "done"]);
     }
 
     #[test]

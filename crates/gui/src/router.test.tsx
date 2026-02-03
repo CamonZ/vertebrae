@@ -399,7 +399,7 @@ describe("Router Acceptance Tests", () => {
             {
               id: "task-123",
               title: "Test Task for Detail Panel",
-              status: "backlog",
+
               level: "task",
               current_step_id: "step-backlog",
               workflow_id: "workflow-1",
@@ -419,7 +419,6 @@ describe("Router Acceptance Tests", () => {
         data: {
           id: "task-123",
           title: "Test Task for Detail Panel",
-          status: "backlog",
           level: "task",
           description: "A task to test the detail panel",
           tags: [],
@@ -487,7 +486,7 @@ describe("Router Acceptance Tests", () => {
             {
               id: "task-456",
               title: "Selectable Task",
-              status: "todo",
+  
               level: "task",
               current_step_id: "step-backlog",
               workflow_id: "workflow-1",
@@ -589,7 +588,7 @@ describe("Router Acceptance Tests", () => {
             id: "task-in-workflow",
             title: "Task in Filtered Workflow",
             description: "This task is in the workflow",
-            status: "todo",
+
             level: "task",
             tags: [],
             code_refs: [],
@@ -614,7 +613,7 @@ describe("Router Acceptance Tests", () => {
               id: "task-in-workflow",
               title: "Task in Filtered Workflow",
               description: "This task is in the workflow",
-              status: "todo",
+  
               level: "task",
               tags: [],
               code_refs: [],
@@ -688,7 +687,7 @@ describe("Router Acceptance Tests", () => {
             id: "task-1",
             title: "Any Task",
             description: null,
-            status: "todo",
+
             level: "task",
             tags: [],
             code_refs: [],
@@ -713,7 +712,7 @@ describe("Router Acceptance Tests", () => {
               id: "task-1",
               title: "Any Task",
               description: null,
-              status: "todo",
+  
               level: "task",
               tags: [],
               code_refs: [],

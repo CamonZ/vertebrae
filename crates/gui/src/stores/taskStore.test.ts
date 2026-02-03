@@ -34,8 +34,8 @@ describe("taskStore", () => {
   describe("setTasks", () => {
     it("updates the tasks array", () => {
       const tasks = [
-        createMockTask({ id: "task-1", title: "Task 1", status: "backlog" }),
-        createMockTask({ id: "task-2", title: "Task 2", status: "done" }),
+        createMockTask({ id: "task-1", title: "Task 1", step_name: "backlog" }),
+        createMockTask({ id: "task-2", title: "Task 2", step_name: "done" }),
       ];
 
       useTaskStore.getState().setTasks(tasks);
@@ -45,10 +45,10 @@ describe("taskStore", () => {
 
     it("replaces existing tasks", () => {
       const initialTasks = [
-        createMockTask({ id: "task-1", title: "Task 1", status: "backlog" }),
+        createMockTask({ id: "task-1", title: "Task 1", step_name: "backlog" }),
       ];
       const newTasks = [
-        createMockTask({ id: "task-2", title: "Task 2", status: "done" }),
+        createMockTask({ id: "task-2", title: "Task 2", step_name: "done" }),
       ];
 
       useTaskStore.getState().setTasks(initialTasks);

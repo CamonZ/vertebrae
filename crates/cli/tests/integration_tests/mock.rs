@@ -69,7 +69,6 @@ impl TaskService for MockTaskService {
             title: options.title.clone(),
             description: options.description.clone(),
             level: options.level.clone().unwrap_or(Level::Task),
-            status: "backlog".to_string(),
             priority: options.priority.clone(),
             tags: options.tags.clone(),
             created_at: Some(Utc::now()),
@@ -123,10 +122,6 @@ impl TaskService for MockTaskService {
             .get(id)
             .cloned()
             .ok_or_else(|| ServiceError::task_not_found(id))
-    }
-
-    async fn get_derived_status(&self, _task: &Task) -> ServiceResult<String> {
-        Ok("backlog".to_string())
     }
 
     async fn update_task(&self, id: &str, options: UpdateTaskOptions) -> ServiceResult<()> {
@@ -231,8 +226,8 @@ impl TaskService for MockTaskService {
         }
         Ok(TransitionResult {
             task_id: id.to_string(),
-            from_status: "backlog".to_string(),
-            to_status: target.to_string(),
+            from_step: "backlog".to_string(),
+            to_step: target.to_string(),
             unblocked_tasks: vec![],
         })
     }
@@ -294,7 +289,7 @@ impl TaskService for MockTaskService {
                             id: dep_id.clone(),
                             title: t.title.clone(),
                             level: t.level.as_str().to_string(),
-                            status: "backlog".to_string(),
+                            step_name: None,
                             children: vec![],
                         })
                     })

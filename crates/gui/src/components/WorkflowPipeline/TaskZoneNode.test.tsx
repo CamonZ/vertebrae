@@ -12,7 +12,7 @@ function createPipelineTask(overrides?: Partial<PipelineTask>): PipelineTask {
     id: "task-1",
     title: "Test Task",
     level: "task",
-    status: "pending",
+    step_name: "pending",
     current_step_id: null,
     workflow_id: null,
     priority: null,
@@ -133,7 +133,7 @@ describe("TaskZoneNode", () => {
   describe("task status display", () => {
     it("shows checkmark icon for done tasks", () => {
       const props = createTaskZoneNodeProps({
-        tasks: [createPipelineTask({ status: "done" })],
+        tasks: [createPipelineTask({ step_name: "done" })],
       });
       render(<TaskZoneNode {...props} />);
       expect(screen.getByText("✓")).toBeInTheDocument();
@@ -141,7 +141,7 @@ describe("TaskZoneNode", () => {
 
     it("shows checkmark icon for rejected tasks (treated as done)", () => {
       const props = createTaskZoneNodeProps({
-        tasks: [createPipelineTask({ status: "rejected" })],
+        tasks: [createPipelineTask({ step_name: "rejected" })],
       });
       render(<TaskZoneNode {...props} />);
       expect(screen.getByText("✓")).toBeInTheDocument();
@@ -152,7 +152,7 @@ describe("TaskZoneNode", () => {
         ["task-1", { currentStep: 1, status: "in_progress" }],
       ]);
       const props = createTaskZoneNodeProps({
-        tasks: [createPipelineTask({ status: "pending" })],
+        tasks: [createPipelineTask({ step_name: "pending" })],
         executionState,
       });
       render(<TaskZoneNode {...props} />);
@@ -164,7 +164,7 @@ describe("TaskZoneNode", () => {
         ["task-1", { currentStep: 1, status: "failed", error: "Something went wrong" }],
       ]);
       const props = createTaskZoneNodeProps({
-        tasks: [createPipelineTask({ status: "pending" })],
+        tasks: [createPipelineTask({ step_name: "pending" })],
         executionState,
       });
       render(<TaskZoneNode {...props} />);
@@ -173,7 +173,7 @@ describe("TaskZoneNode", () => {
 
     it("shows circle icon for waiting tasks", () => {
       const props = createTaskZoneNodeProps({
-        tasks: [createPipelineTask({ status: "pending" })],
+        tasks: [createPipelineTask({ step_name: "pending" })],
       });
       render(<TaskZoneNode {...props} />);
       expect(screen.getByText("○")).toBeInTheDocument();

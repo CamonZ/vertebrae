@@ -190,7 +190,7 @@ export function FilteredTasksPanel({
   }
 
   // Count active tasks
-  const activeCount = tasks.filter((t) => t.status === "in_progress").length;
+  const activeCount = tasks.filter((t) => t.step_name === "in_progress").length;
 
   // Count total tasks based on view mode
   const totalTasks =

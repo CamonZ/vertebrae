@@ -160,8 +160,6 @@ pub struct Task {
     pub description: Option<String>,
     /// Hierarchy level
     pub level: TaskLevel,
-    /// Current status (derived from workflow step name)
-    pub status: String,
     /// Optional priority
     pub priority: Option<TaskPriority>,
     /// Tags for categorization
@@ -208,7 +206,6 @@ impl From<vertebrae_core::Task> for Task {
             title: task.title,
             description: task.description,
             level: task.level.into(),
-            status: task.status,
             priority: task.priority.map(Into::into),
             tags: task.tags,
             workflow_id: task.workflow_id,
@@ -247,8 +244,8 @@ pub struct TaskTreeNode {
 /// Filter options for listing tasks
 #[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
 pub struct TaskFilterOptions {
-    /// Filter by statuses (OR semantics) - workflow step names
-    pub statuses: Option<Vec<String>>,
+    /// Filter by step names (OR semantics) - workflow step names
+    pub step_names: Option<Vec<String>>,
     /// Filter by levels (OR semantics)
     pub levels: Option<Vec<TaskLevel>>,
     /// Filter by tags (OR semantics)
@@ -269,9 +266,9 @@ impl From<TaskFilterOptions> for vertebrae_core::TaskFilter {
     fn from(opts: TaskFilterOptions) -> Self {
         let mut filter = vertebrae_core::TaskFilter::new();
 
-        if let Some(statuses) = opts.statuses {
-            for status in statuses {
-                filter = filter.with_status(status);
+        if let Some(step_names) = opts.step_names {
+            for step_name in step_names {
+                filter = filter.with_step_name(step_name);
             }
         }
 
@@ -860,7 +857,6 @@ mod tests {
         let gui = Task::from(core);
         assert_eq!(gui.title, "Task");
         assert_eq!(gui.level, TaskLevel::Task);
-        assert_eq!(gui.status, "backlog");
         assert_eq!(gui.priority, None);
         assert!(gui.description.is_none());
         assert!(gui.tags.is_empty());
@@ -918,7 +914,7 @@ mod tests {
         let gui_filter = TaskFilterOptions::default();
         let core_filter = vertebrae_core::TaskFilter::from(gui_filter);
         assert!(core_filter.levels.is_empty());
-        assert!(core_filter.statuses.is_empty());
+        assert!(core_filter.step_names.is_empty());
         assert!(!core_filter.root_only);
     }
 
@@ -937,11 +933,11 @@ mod tests {
     #[test]
     fn task_filter_from_gui_with_statuses() {
         let gui_filter = TaskFilterOptions {
-            statuses: Some(vec!["in_progress".to_string(), "done".to_string()]),
+            step_names: Some(vec!["in_progress".to_string(), "done".to_string()]),
             ..Default::default()
         };
         let core_filter = vertebrae_core::TaskFilter::from(gui_filter);
-        assert_eq!(core_filter.statuses, vec!["in_progress", "done"]);
+        assert_eq!(core_filter.step_names, vec!["in_progress", "done"]);
     }
 
     #[test]
@@ -1008,7 +1004,7 @@ mod tests {
     fn task_filter_from_gui_complex() {
         let gui_filter = TaskFilterOptions {
             levels: Some(vec![TaskLevel::Epic]),
-            statuses: Some(vec!["in_progress".to_string()]),
+            step_names: Some(vec!["in_progress".to_string()]),
             tags: Some(vec!["urgent".to_string()]),
             root_only: Some(true),
             include_done: Some(false),
@@ -1018,7 +1014,7 @@ mod tests {
         };
         let core_filter = vertebrae_core::TaskFilter::from(gui_filter);
         assert_eq!(core_filter.levels.len(), 1);
-        assert_eq!(core_filter.statuses.len(), 1);
+        assert_eq!(core_filter.step_names.len(), 1);
         assert_eq!(core_filter.tags.len(), 1);
         assert!(core_filter.root_only);
         assert!(!core_filter.include_done);

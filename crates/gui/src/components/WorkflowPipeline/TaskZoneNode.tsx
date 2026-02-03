@@ -112,7 +112,7 @@ export const TaskZoneNode = memo(function TaskZoneNode({
         {tasks.map((task) => {
           const execState = executionState?.get(task.id);
           const status =
-            task.status === "done" || task.status === "rejected"
+            task.step_name === "done" || task.step_name === "rejected"
               ? "done"
               : execState?.status || "waiting";
           const isSelected = selectedTaskId === task.id;

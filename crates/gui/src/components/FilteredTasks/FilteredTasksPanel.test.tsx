@@ -54,7 +54,7 @@ function createTaskSummary(
   return {
     id: "task-123",
     title: "Test Task",
-    status: "todo",
+    step_name: "todo",
     level: "task",
     priority: null,
     created_at: "2024-01-01T00:00:00Z",
@@ -103,8 +103,8 @@ describe("FilteredTasksPanel", () => {
     it("displays active task count", () => {
       const step = createStep();
       const tasks = [
-        createTaskSummary({ id: "task-1", status: "in_progress" }),
-        createTaskSummary({ id: "task-2", status: "todo" }),
+        createTaskSummary({ id: "task-1", step_name: "in_progress" }),
+        createTaskSummary({ id: "task-2", step_name: "todo" }),
       ];
       render(<FilteredTasksPanel step={step} tasks={tasks} workflowId="workflow-1" />);
 

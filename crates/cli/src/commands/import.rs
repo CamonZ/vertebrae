@@ -399,7 +399,6 @@ impl ImportCommand {
                     title: task.title.clone(),
                     description: task.description.clone(),
                     level: parse_level(&task.level),
-                    status: "backlog".to_string(),
                     priority: task.priority.as_deref().and_then(parse_priority),
                     tags: task.tags.clone(),
                     sections: task.sections.clone(),

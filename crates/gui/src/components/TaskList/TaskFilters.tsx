@@ -46,10 +46,10 @@ export function TaskFilters({
   const handleStatusChange = useCallback(
     (event: React.ChangeEvent<HTMLSelectElement>) => {
       const value = event.target.value;
-      const statuses = value ? [value] : null;
+      const step_names = value ? [value] : null;
       // When 'All' is selected (no specific status), include done tasks to show everything
       const include_done = value ? filters.include_done : true;
-      onFiltersChange({ ...filters, statuses, include_done });
+      onFiltersChange({ ...filters, step_names, include_done });
     },
     [filters, onFiltersChange]
   );
@@ -73,7 +73,7 @@ export function TaskFilters({
 
   const handleClearFilters = useCallback(() => {
     onFiltersChange({
-      statuses: null,
+      step_names: null,
       levels: null,
       tags: null,
       root_only: null,
@@ -89,11 +89,11 @@ export function TaskFilters({
   }, [showDone, onShowDoneChange]);
 
   const hasActiveFilters =
-    filters.statuses ||
+    filters.step_names ||
     filters.levels ||
     filters.search;
 
-  const selectedStatus = filters.statuses?.[0] ?? '';
+  const selectedStatus = filters.step_names?.[0] ?? '';
   const selectedLevel = filters.levels?.[0] ?? '';
 
   return (

@@ -31,8 +31,8 @@ pub struct BlockerNode {
     pub title: String,
     /// Hierarchy level
     pub level: String,
-    /// Current status
-    pub status: String,
+    /// Current step name (if assigned to workflow)
+    pub step_name: Option<String>,
     /// Child blockers (tasks that this task depends on)
     pub children: Vec<BlockerNode>,
 }
@@ -122,7 +122,7 @@ impl BlockersCommand {
                 id: blocker_id,
                 title: blocker.title,
                 level: blocker.level.to_string(),
-                status: blocker.status.to_string(),
+                step_name: blocker.step_name.clone(),
                 children,
             });
         }
@@ -174,7 +174,6 @@ impl BlockersCommand {
                     continue;
                 }
 
-                task.status = step_name.clone();
                 task.workflow_name = workflow_name;
                 task.step_name = Some(step_name);
                 result.push(task);
@@ -237,7 +236,7 @@ fn print_node(
 
     // Format fields with fixed width for alignment
     let level_display = format!("{:8}", node.level);
-    let status_display = format!("{:12}", node.status);
+    let status_display = format!("{:12}", node.step_name.as_deref().unwrap_or("unassigned"));
 
     writeln!(
         f,

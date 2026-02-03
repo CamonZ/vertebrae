@@ -12,7 +12,7 @@ import { TaskDetailPanel } from "../components/TaskDetail";
  * Initial filter state - shows all tasks including done when status is 'All'
  */
 const INITIAL_FILTERS: TaskFilterOptions = {
-  statuses: null,
+  step_names: null,
   levels: null,
   tags: null,
   root_only: null,
@@ -100,7 +100,7 @@ export function TasksPage() {
   }, []);
 
   // Count active tasks - works for both list and tree views
-  const activeCount = tasks.filter((t) => t.status === "in_progress").length;
+  const activeCount = tasks.filter((t) => t.step_name === "in_progress").length;
 
   // Determine current loading/error state based on view mode
   const currentIsLoading = isLoading;

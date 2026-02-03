@@ -118,7 +118,6 @@ export function createMockTask(overrides?: Partial<Task>): Task {
     id: `task-${Math.random().toString(36).slice(2, 10)}`,
     title: "Test Task",
     description: "A test task description",
-    status: "backlog",
     level: "task",
     priority: null,
     tags: [],

@@ -930,10 +930,6 @@ description: string | null;
  */
 level: TaskLevel; 
 /**
- * Current status (derived from workflow step name)
- */
-status: string; 
-/**
  * Optional priority
  */
 priority: TaskPriority | null; 
@@ -1019,9 +1015,9 @@ export type TaskChangedEvent = { task_id: string; change_type: TaskChangeType }
  */
 export type TaskFilterOptions = { 
 /**
- * Filter by statuses (OR semantics) - workflow step names
+ * Filter by step names (OR semantics) - workflow step names
  */
-statuses: string[] | null; 
+step_names: string[] | null;
 /**
  * Filter by levels (OR semantics)
  */

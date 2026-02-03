@@ -36,7 +36,6 @@ const { mockTaskData } = vi.hoisted(() => {
     title: "Test Task",
     description: "Test Description for inline editing",
     level: "task" as const,
-    status: "backlog",
     priority: "medium" as const,
     tags: ["tag1", "tag2"],
     sections: sections,

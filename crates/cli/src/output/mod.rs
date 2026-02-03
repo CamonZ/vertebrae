@@ -21,6 +21,15 @@ fn truncate(s: &str, max_width: usize) -> String {
     }
 }
 
+/// Format the status display from workflow_name and step_name.
+/// Returns "workflow_name:step_name" if both are present, otherwise "unassigned".
+fn format_status_display(task: &TaskSummary) -> String {
+    match (&task.workflow_name, &task.step_name) {
+        (Some(wf), Some(step)) => format!("{}:{}", wf, step),
+        _ => "unassigned".to_string(),
+    }
+}
+
 /// Format tasks into an aligned table string.
 ///
 /// Produces output in the format:
@@ -64,7 +73,7 @@ pub fn format_task_table(tasks: &[TaskSummary]) -> String {
 
     let status_width = tasks
         .iter()
-        .map(|t| t.status.len())
+        .map(|t| format_status_display(t).len())
         .max()
         .unwrap_or(0)
         .max(headers[2].len());
@@ -139,12 +148,13 @@ pub fn format_task_table(tasks: &[TaskSummary]) -> String {
         let title_display = truncate(&task.title, MAX_TITLE_WIDTH);
         let tags_display = truncate(&format_tags(&task.tags), MAX_TAGS_WIDTH);
         let review_display = format_review_status(task.needs_human_review);
+        let status_display = format_status_display(task);
 
         output.push_str(&format!(
             "{:<id_w$}  {:<level_w$}  {:<status_w$}  {:<priority_w$}  {:<title_w$}  {:<tags_w$}  {:<review_w$}\n",
             task.id,
             task.level,
-            task.status,
+            status_display,
             priority_display,
             title_display,
             tags_display,
@@ -320,7 +330,7 @@ fn render_node(
 
     // Format task fields
     let level_display = format!("{:8}", task.level);
-    let status_display = format!("{:14}", task.status);
+    let status_display = format!("{:14}", format_status_display(task));
     let title_display = truncate(&task.title, MAX_TITLE_WIDTH);
     let review_display = if task.needs_human_review == Some(true) {
         " [R]"
@@ -405,7 +415,8 @@ mod tests {
             id: "abc123".to_string(),
             title: "Test Task".to_string(),
             level: "task".to_string(),
-            status: "in_progress".to_string(),
+            workflow_name: Some("default".to_string()),
+            step_name: Some("in_progress".to_string()),
             priority: Some("high".to_string()),
             tags: vec!["backend".to_string()],
             needs_human_review: None,
@@ -432,7 +443,7 @@ mod tests {
         let data_parts: Vec<&str> = lines[2].split_whitespace().collect();
         assert_eq!(data_parts[0], "abc123", "ID column");
         assert_eq!(data_parts[1], "task", "Level column");
-        assert_eq!(data_parts[2], "in_progress", "Status column");
+        assert_eq!(data_parts[2], "default:in_progress", "Status column");
         assert_eq!(data_parts[3], "high", "Priority column");
         assert_eq!(data_parts[4], "Test", "Title column (first word)");
         assert_eq!(data_parts[5], "Task", "Title column (second word)");
@@ -446,7 +457,8 @@ mod tests {
                 id: "a1b2c3".to_string(),
                 title: "Epic Task".to_string(),
                 level: "epic".to_string(),
-                status: "in_progress".to_string(),
+                workflow_name: Some("default".to_string()),
+                step_name: Some("in_progress".to_string()),
                 priority: Some("critical".to_string()),
                 tags: vec!["urgent".to_string(), "backend".to_string()],
                 needs_human_review: Some(true),
@@ -456,7 +468,8 @@ mod tests {
                 id: "d4e5f6".to_string(),
                 title: "Simple Task".to_string(),
                 level: "task".to_string(),
-                status: "in_progress".to_string(),
+                workflow_name: Some("default".to_string()),
+                step_name: Some("in_progress".to_string()),
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -492,7 +505,8 @@ mod tests {
             id: "abc123".to_string(),
             title: "No Priority".to_string(),
             level: "task".to_string(),
-            status: "in_progress".to_string(),
+            workflow_name: Some("default".to_string()),
+            step_name: Some("in_progress".to_string()),
             priority: None,
             tags: vec![],
             needs_human_review: None,
@@ -513,7 +527,8 @@ mod tests {
             id: "abc123".to_string(),
             title: "No Tags".to_string(),
             level: "task".to_string(),
-            status: "in_progress".to_string(),
+            workflow_name: Some("default".to_string()),
+            step_name: Some("in_progress".to_string()),
             priority: Some("low".to_string()),
             tags: vec![],
             needs_human_review: None,
@@ -581,13 +596,13 @@ mod tests {
             id: "abc123".to_string(),
             title: "This is a very long task title that should be truncated".to_string(),
             level: "task".to_string(),
-            status: "in_progress".to_string(),
+            workflow_name: Some("default".to_string()),
+            step_name: Some("in_progress".to_string()),
             priority: None,
             tags: vec![],
             needs_human_review: None,
             parent_id: None,
         }];
-
         let result = format_task_table(&tasks);
         let lines: Vec<&str> = result.lines().collect();
 
@@ -623,13 +638,13 @@ mod tests {
             id: "abc123".to_string(),
             title: "Task".to_string(),
             level: "task".to_string(),
-            status: "in_progress".to_string(),
+            workflow_name: Some("default".to_string()),
+            step_name: Some("in_progress".to_string()),
             priority: None,
             tags: tags_input.clone(),
             needs_human_review: None,
             parent_id: None,
         }];
-
         let result = format_task_table(&tasks);
         let lines: Vec<&str> = result.lines().collect();
 
@@ -650,7 +665,8 @@ mod tests {
                 id: "a".to_string(),
                 title: "Short".to_string(),
                 level: "epic".to_string(),
-                status: "in_progress".to_string(),
+                workflow_name: Some("default".to_string()),
+                step_name: Some("in_progress".to_string()),
                 priority: Some("high".to_string()),
                 tags: vec!["x".to_string()],
                 needs_human_review: None,
@@ -660,7 +676,8 @@ mod tests {
                 id: "abcdef".to_string(),
                 title: "Longer Title".to_string(),
                 level: "subtask".to_string(),
-                status: "in_progress".to_string(),
+                workflow_name: Some("default".to_string()),
+                step_name: Some("in_progress".to_string()),
                 priority: Some("critical".to_string()),
                 tags: vec!["backend".to_string(), "api".to_string()],
                 needs_human_review: Some(true),
@@ -700,22 +717,22 @@ mod tests {
 
     #[test]
     fn test_format_all_statuses() {
-        let statuses = ["backlog", "in_progress", "done", "rejected"];
+        let step_names = ["backlog", "in_progress", "done", "rejected"];
 
-        for status in statuses {
+        for step_name in step_names {
             let tasks = vec![TaskSummary {
                 id: "abc".to_string(),
                 title: "Test".to_string(),
                 level: "task".to_string(),
-                status: status.to_string(),
+                workflow_name: Some("default".to_string()),
+                step_name: Some(step_name.to_string()),
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
                 parent_id: None,
             }];
-
             let result = format_task_table(&tasks);
-            assert!(result.contains(status));
+            assert!(result.contains(step_name));
         }
     }
 
@@ -728,13 +745,13 @@ mod tests {
                 id: "abc".to_string(),
                 title: "Test".to_string(),
                 level: level.to_string(),
-                status: "in_progress".to_string(),
+                workflow_name: Some("default".to_string()),
+                step_name: Some("in_progress".to_string()),
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
                 parent_id: None,
             }];
-
             let result = format_task_table(&tasks);
             assert!(result.contains(level));
         }
@@ -749,13 +766,13 @@ mod tests {
                 id: "abc".to_string(),
                 title: "Test".to_string(),
                 level: "task".to_string(),
-                status: "in_progress".to_string(),
+                workflow_name: Some("default".to_string()),
+                step_name: Some("in_progress".to_string()),
                 priority: Some(priority.to_string()),
                 tags: vec![],
                 needs_human_review: None,
                 parent_id: None,
             }];
-
             let result = format_task_table(&tasks);
             assert!(result.contains(priority));
         }
@@ -775,7 +792,8 @@ mod tests {
             id: "abc123".to_string(),
             title: "Needs Review".to_string(),
             level: "task".to_string(),
-            status: "in_progress".to_string(),
+            workflow_name: Some("default".to_string()),
+            step_name: Some("in_progress".to_string()),
             priority: None,
             tags: vec![],
             needs_human_review: Some(true),
@@ -797,7 +815,8 @@ mod tests {
             id: "abc123".to_string(),
             title: "No Review".to_string(),
             level: "task".to_string(),
-            status: "in_progress".to_string(),
+            workflow_name: Some("default".to_string()),
+            step_name: Some("in_progress".to_string()),
             priority: None,
             tags: vec![],
             needs_human_review: Some(false),
@@ -838,7 +857,8 @@ mod tests {
             id: "abc123".to_string(),
             title: "Epic Task".to_string(),
             level: "epic".to_string(),
-            status: "in_progress".to_string(),
+            workflow_name: Some("default".to_string()),
+            step_name: Some("in_progress".to_string()),
             priority: None,
             tags: vec![],
             needs_human_review: None,
@@ -863,7 +883,8 @@ mod tests {
                 id: "epic1".to_string(),
                 title: "Epic Task".to_string(),
                 level: "epic".to_string(),
-                status: "in_progress".to_string(),
+                workflow_name: Some("default".to_string()),
+                step_name: Some("in_progress".to_string()),
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -873,7 +894,8 @@ mod tests {
                 id: "ticket1".to_string(),
                 title: "Ticket Task".to_string(),
                 level: "ticket".to_string(),
-                status: "in_progress".to_string(),
+                workflow_name: Some("default".to_string()),
+                step_name: Some("in_progress".to_string()),
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -905,7 +927,8 @@ mod tests {
                 id: "epic1".to_string(),
                 title: "Epic".to_string(),
                 level: "epic".to_string(),
-                status: "in_progress".to_string(),
+                workflow_name: Some("default".to_string()),
+                step_name: Some("in_progress".to_string()),
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -915,7 +938,8 @@ mod tests {
                 id: "ticket1".to_string(),
                 title: "Ticket 1".to_string(),
                 level: "ticket".to_string(),
-                status: "in_progress".to_string(),
+                workflow_name: Some("default".to_string()),
+                step_name: Some("in_progress".to_string()),
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -925,7 +949,8 @@ mod tests {
                 id: "ticket2".to_string(),
                 title: "Ticket 2".to_string(),
                 level: "ticket".to_string(),
-                status: "in_progress".to_string(),
+                workflow_name: Some("default".to_string()),
+                step_name: Some("in_progress".to_string()),
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -956,7 +981,8 @@ mod tests {
                 id: "epic1".to_string(),
                 title: "Epic".to_string(),
                 level: "epic".to_string(),
-                status: "in_progress".to_string(),
+                workflow_name: Some("default".to_string()),
+                step_name: Some("in_progress".to_string()),
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -966,7 +992,8 @@ mod tests {
                 id: "ticket1".to_string(),
                 title: "Ticket".to_string(),
                 level: "ticket".to_string(),
-                status: "in_progress".to_string(),
+                workflow_name: Some("default".to_string()),
+                step_name: Some("in_progress".to_string()),
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -976,7 +1003,8 @@ mod tests {
                 id: "task1".to_string(),
                 title: "Task".to_string(),
                 level: "task".to_string(),
-                status: "in_progress".to_string(),
+                workflow_name: Some("default".to_string()),
+                step_name: Some("in_progress".to_string()),
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -1005,7 +1033,8 @@ mod tests {
                 id: "task1".to_string(),
                 title: "Orphan Task".to_string(),
                 level: "task".to_string(),
-                status: "in_progress".to_string(),
+                workflow_name: Some("default".to_string()),
+                step_name: Some("in_progress".to_string()),
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -1015,7 +1044,8 @@ mod tests {
                 id: "epic1".to_string(),
                 title: "Epic".to_string(),
                 level: "epic".to_string(),
-                status: "in_progress".to_string(),
+                workflow_name: Some("default".to_string()),
+                step_name: Some("in_progress".to_string()),
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -1042,7 +1072,8 @@ mod tests {
             id: "ticket1".to_string(),
             title: "Orphan Ticket".to_string(),
             level: "ticket".to_string(),
-            status: "in_progress".to_string(),
+            workflow_name: Some("default".to_string()),
+            step_name: Some("in_progress".to_string()),
             priority: None,
             tags: vec![],
             needs_human_review: None,
@@ -1068,7 +1099,8 @@ mod tests {
             id: "task1".to_string(),
             title: "Needs Review".to_string(),
             level: "task".to_string(),
-            status: "pending_review".to_string(),
+            workflow_name: Some("default".to_string()),
+            step_name: Some("pending_review".to_string()),
             priority: None,
             tags: vec![],
             needs_human_review: Some(true),
@@ -1096,7 +1128,8 @@ mod tests {
                 id: "test".to_string(),
                 title: "Test".to_string(),
                 level: "task".to_string(),
-                status: "in_progress".to_string(),
+                workflow_name: Some("default".to_string()),
+                step_name: Some("in_progress".to_string()),
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -1117,7 +1150,8 @@ mod tests {
                 id: "test".to_string(),
                 title: "Test".to_string(),
                 level: "task".to_string(),
-                status: "in_progress".to_string(),
+                workflow_name: Some("default".to_string()),
+                step_name: Some("in_progress".to_string()),
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,

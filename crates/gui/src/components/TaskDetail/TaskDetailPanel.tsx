@@ -317,7 +317,7 @@ function TaskDetailsTab({
   onConfirmDelete: () => void;
   onCascadeChange: (value: boolean) => void;
 }) {
-  const statusStyles = getStatusStyles(taskData.status);
+  const statusStyles = getStatusStyles(taskData.step_name ?? "unassigned");
   const levelStyles = getLevelStyles(taskData.level);
   const priorityStyles = getPriorityStyles(taskData.priority);
 
@@ -330,10 +330,28 @@ function TaskDetailsTab({
         >
           {taskData.level}
         </span>
+        {taskData.workflow_name && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-bg-tertiary px-2.5 py-1 text-xs font-medium text-text-secondary">
+            <svg
+              className="h-3 w-3"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={1.5}
+                d="M13 10V3L4 14h7v7l9-11h-7z"
+              />
+            </svg>
+            {taskData.workflow_name}
+          </span>
+        )}
         <span
           className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${statusStyles.bg} ${statusStyles.text} ${statusStyles.glow ?? ""}`}
         >
-          {taskData.status.replace("_", " ")}
+          {(taskData.step_name ?? "unassigned").replace("_", " ")}
         </span>
         {priorityStyles && (
           <span

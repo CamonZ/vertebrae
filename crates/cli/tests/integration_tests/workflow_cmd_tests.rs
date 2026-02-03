@@ -35,7 +35,7 @@ async fn create_task(services: &VertebraeServices, title: &str) -> String {
         title: title.to_string(),
         description: None,
         level: Some(vertebrae_core::Level::Task),
-        status: None,
+
         priority: None,
         tags: vec![],
         parent_id: None,
