@@ -557,41 +557,6 @@ impl TaskService for MockTaskService {
         task.current_step_id = None;
         Ok(())
     }
-
-    async fn export_all_tasks(&self) -> ServiceResult<Vec<(String, Task)>> {
-        let s = self.state.lock().unwrap();
-        Ok(s.tasks
-            .iter()
-            .map(|(id, t)| (id.clone(), t.clone()))
-            .collect())
-    }
-
-    async fn export_child_of_relations(&self) -> ServiceResult<Vec<(String, String)>> {
-        let s = self.state.lock().unwrap();
-        Ok(s.parents
-            .iter()
-            .map(|(c, p)| (c.clone(), p.clone()))
-            .collect())
-    }
-
-    async fn export_depends_on_relations(&self) -> ServiceResult<Vec<(String, String)>> {
-        let s = self.state.lock().unwrap();
-        let mut result = vec![];
-        for (task_id, deps) in &s.dependencies {
-            for dep_id in deps {
-                result.push((task_id.clone(), dep_id.clone()));
-            }
-        }
-        Ok(result)
-    }
-
-    async fn create_task_raw(&self, id: &str, task: &Task) -> ServiceResult<String> {
-        let mut s = self.state.lock().unwrap();
-        let mut t = task.clone();
-        t.id = id.to_string();
-        s.tasks.insert(id.to_string(), t);
-        Ok(id.to_string())
-    }
 }
 
 // ============================================================================
@@ -834,24 +799,6 @@ impl WorkflowService for MockWorkflowService {
         _to_workflow_id: &str,
     ) -> ServiceResult<bool> {
         Ok(false)
-    }
-
-    async fn create_workflow_raw(&self, id: &str, workflow: &Workflow) -> ServiceResult<String> {
-        let mut s = self.state.lock().unwrap();
-        s.workflows.insert(id.to_string(), workflow.clone());
-        Ok(id.to_string())
-    }
-
-    async fn update_workflow_initial_step(&self, _id: &str, _step_id: &Thing) -> ServiceResult<()> {
-        Ok(())
-    }
-
-    async fn export_all_workflows(&self) -> ServiceResult<Vec<(String, Workflow)>> {
-        let s = self.state.lock().unwrap();
-        Ok(s.workflows
-            .iter()
-            .map(|(id, w)| (id.clone(), w.clone()))
-            .collect())
     }
 }
 

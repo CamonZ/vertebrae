@@ -455,31 +455,6 @@ impl TaskService for SacrumTaskService {
     async fn unassign_workflow(&self, _task_id: &str) -> ServiceResult<()> {
         unimplemented!("Workflow unassignment not yet implemented for Sacrum HTTP client")
     }
-
-    async fn export_all_tasks(&self) -> ServiceResult<Vec<(String, Task)>> {
-        unimplemented!("Task export not yet implemented for Sacrum HTTP client")
-    }
-
-    async fn export_child_of_relations(&self) -> ServiceResult<Vec<(String, String)>> {
-        unimplemented!("Child relation export not yet implemented for Sacrum HTTP client")
-    }
-
-    async fn export_depends_on_relations(&self) -> ServiceResult<Vec<(String, String)>> {
-        unimplemented!("Dependency relation export not yet implemented for Sacrum HTTP client")
-    }
-
-    async fn create_task_raw(&self, _id: &str, task: &Task) -> ServiceResult<String> {
-        let request = json!({
-            "title": task.title,
-            "description": task.description,
-            "level": format!("{:?}", task.level),
-            "project_id": self.client.project_id(),
-        });
-
-        let response: TaskResponse = self.client.post("/api/tasks", &request).await?;
-
-        Ok(response.id.clone())
-    }
 }
 
 #[cfg(test)]

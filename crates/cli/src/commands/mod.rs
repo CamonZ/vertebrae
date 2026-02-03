@@ -10,8 +10,6 @@ pub mod criterion_ref;
 pub mod delete;
 pub mod depend;
 pub mod execution;
-pub mod export;
-pub mod import;
 pub mod init;
 pub mod list;
 pub mod path;
@@ -38,8 +36,6 @@ pub use criterion_ref::CriterionRefCommand;
 pub use delete::DeleteCommand;
 pub use depend::DependCommand;
 pub use execution::ExecutionCommand;
-pub use export::ExportCommand;
-pub use import::ImportCommand;
 pub use init::InitCommand;
 pub use list::ListCommand;
 pub use path::PathCommand;
@@ -81,10 +77,6 @@ pub enum Command {
     /// Execution history commands
     #[command(subcommand)]
     Execution(ExecutionCommand),
-    /// Export all tasks and relationships to JSONL format
-    Export(ExportCommand),
-    /// Import tasks and relationships from JSONL format
-    Import(ImportCommand),
     /// Initialize vertebrae in the current project
     Init(InitCommand),
     /// List tasks with optional filters
@@ -186,14 +178,6 @@ impl Command {
             Command::Execution(cmd) => {
                 let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(result))
-            }
-            Command::Export(cmd) => {
-                let result = cmd.execute(services).await?;
-                Ok(CommandResult::Message(format!("{}", result)))
-            }
-            Command::Import(cmd) => {
-                let result = cmd.execute(services).await?;
-                Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Init(cmd) => {
                 // Init doesn't use the database - it registers with Sacrum API

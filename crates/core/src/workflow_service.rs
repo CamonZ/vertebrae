@@ -5,7 +5,6 @@
 //! task-workflow assignments, and workflow transitions.
 
 use crate::error::ServiceResult;
-use crate::models::Thing;
 use crate::models::{Workflow, WorkflowTransition};
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -452,19 +451,4 @@ pub trait WorkflowService: Send + Sync {
         from_workflow_id: &str,
         to_workflow_id: &str,
     ) -> ServiceResult<bool>;
-
-    // =========================================================================
-    // Export Operations (Read-only, no mutation callbacks)
-    // =========================================================================
-
-    /// Export all workflows from the database for backup or import operations.
-    ///
-    /// Returns all workflows with their IDs. This is a read-only operation.
-    ///
-    /// # Returns
-    ///
-    /// A vector of (workflow_id, Workflow) tuples in deterministic order.
-    async fn create_workflow_raw(&self, id: &str, workflow: &Workflow) -> ServiceResult<String>;
-    async fn update_workflow_initial_step(&self, id: &str, step_id: &Thing) -> ServiceResult<()>;
-    async fn export_all_workflows(&self) -> ServiceResult<Vec<(String, Workflow)>>;
 }

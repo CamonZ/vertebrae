@@ -494,39 +494,4 @@ pub trait TaskService: Send + Sync {
     ///
     /// Clears both workflow_id and current_step_id fields.
     async fn unassign_workflow(&self, task_id: &str) -> ServiceResult<()>;
-
-    // =========================================================================
-    // Export Operations (Read-only, no mutation callbacks)
-    // =========================================================================
-
-    /// Export all tasks from the database for backup or import operations.
-    ///
-    /// Returns all tasks with their IDs. This is a read-only operation.
-    ///
-    /// # Returns
-    ///
-    /// A vector of (task_id, Task) tuples in deterministic order.
-    async fn export_all_tasks(&self) -> ServiceResult<Vec<(String, Task)>>;
-
-    /// Export all child_of relationships (parent-child hierarchy).
-    ///
-    /// Returns tuples of (child_id, parent_id) representing the hierarchy.
-    /// This is a read-only operation.
-    ///
-    /// # Returns
-    ///
-    /// A vector of (child_id, parent_id) tuples.
-    async fn export_child_of_relations(&self) -> ServiceResult<Vec<(String, String)>>;
-
-    /// Export all depends_on relationships (task dependencies).
-    ///
-    /// Returns tuples of (task_id, blocker_id) representing dependencies.
-    /// This is a read-only operation.
-    ///
-    /// # Returns
-    ///
-    /// A vector of (task_id, blocker_id) tuples.
-    async fn export_depends_on_relations(&self) -> ServiceResult<Vec<(String, String)>>;
-
-    async fn create_task_raw(&self, id: &str, task: &Task) -> ServiceResult<String>;
 }

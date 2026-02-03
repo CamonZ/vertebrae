@@ -364,35 +364,6 @@ impl WorkflowService for SacrumWorkflowService {
     ) -> ServiceResult<bool> {
         Ok(false)
     }
-
-    async fn create_workflow_raw(&self, _id: &str, workflow: &Workflow) -> ServiceResult<String> {
-        let request = json!({
-            "name": workflow.name,
-            "description": workflow.description,
-            "project_id": self.client.project_id(),
-        });
-        let response: WorkflowResponse = self.client.post("/api/workflows", &request).await?;
-        Ok(response.id)
-    }
-
-    async fn update_workflow_initial_step(
-        &self,
-        _id: &str,
-        _step_id: &vertebrae_core::models::Thing,
-    ) -> ServiceResult<()> {
-        Ok(())
-    }
-
-    async fn export_all_workflows(&self) -> ServiceResult<Vec<(String, Workflow)>> {
-        let workflows = self.list_workflows().await?;
-        let mut results = Vec::new();
-        for summary in workflows {
-            if let Ok(workflow) = self.get_workflow(&summary.id).await {
-                results.push((summary.id.clone(), workflow));
-            }
-        }
-        Ok(results)
-    }
 }
 
 #[cfg(test)]

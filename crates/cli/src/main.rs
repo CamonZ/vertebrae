@@ -461,16 +461,4 @@ mod tests {
         let args = Args::try_parse_from(["vtb", "workflow", "show", "workflow-id"]).unwrap();
         assert!(args.command.is_some());
     }
-
-    #[test]
-    fn test_args_export_command() {
-        let args = Args::try_parse_from(["vtb", "export"]).unwrap();
-        assert!(args.command.is_some());
-    }
-
-    #[test]
-    fn test_args_import_command() {
-        let args = Args::try_parse_from(["vtb", "import"]).unwrap();
-        assert!(args.command.is_some());
-    }
 }
