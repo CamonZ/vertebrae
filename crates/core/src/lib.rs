@@ -56,9 +56,9 @@ pub use service::{
 pub use services::VertebraeServices;
 pub use step_service::StepService;
 pub use workflow_service::{
-    AssignResult, CreateWorkflowOptions, MigrationResult, RejectResult, StepTransitionResult,
-    UpdateWorkflowOptions, WorkflowInfo, WorkflowMutationCallback, WorkflowMutationEvent,
-    WorkflowService, WorkflowStepInput, WorkflowSummary,
+    AssignResult, CreateWorkflowOptions, MigrationResult, UpdateWorkflowOptions, WorkflowInfo,
+    WorkflowMutationCallback, WorkflowMutationEvent, WorkflowService, WorkflowStepInput,
+    WorkflowSummary,
 };
 
 // Re-export domain models for convenience

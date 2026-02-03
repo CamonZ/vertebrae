@@ -25,26 +25,6 @@ pub enum WorkflowMutationEvent {
     },
     /// Task was unassigned from a workflow
     TaskUnassignedFromWorkflow { task_id: String },
-    /// Task advanced to next step in workflow
-    TaskStepAdvanced {
-        task_id: String,
-        workflow_id: String,
-        from_step: usize,
-        to_step: usize,
-    },
-    /// Task retreated to previous step in workflow
-    TaskStepRetreated {
-        task_id: String,
-        workflow_id: String,
-        from_step: usize,
-        to_step: usize,
-    },
-    /// Task was rejected in workflow
-    TaskRejected {
-        task_id: String,
-        from_workflow_id: String,
-        to_workflow_id: Option<String>,
-    },
 }
 
 /// Callback for workflow mutation events - fires after each mutation completes
@@ -197,42 +177,6 @@ pub struct AssignResult {
     pub first_step_name: String,
 }
 
-/// Result of advancing a step in a workflow
-#[derive(Debug, Clone)]
-pub struct StepTransitionResult {
-    /// The task ID
-    pub task_id: String,
-    /// The workflow ID
-    pub workflow_id: String,
-    /// The previous step index
-    pub from_step: usize,
-    /// The new step index
-    pub to_step: usize,
-    /// The name of the new step
-    pub step_name: String,
-    /// Total number of steps in the workflow
-    pub total_steps: usize,
-    /// Execution ID if an execution was created
-    pub execution_id: Option<String>,
-    /// If workflow chaining occurred, the new workflow ID
-    pub chained_to_workflow: Option<String>,
-}
-
-/// Result of rejecting a task in a workflow
-#[derive(Debug, Clone)]
-pub struct RejectResult {
-    /// The task ID
-    pub task_id: String,
-    /// The workflow ID it was in
-    pub from_workflow_id: String,
-    /// If workflow chaining occurred, the new workflow ID
-    pub chained_to_workflow: Option<String>,
-    /// The name of the first step of the new workflow (if chained)
-    pub first_step_name: Option<String>,
-    /// Execution ID if an execution was created
-    pub execution_id: Option<String>,
-}
-
 /// Information about a workflow at a specific step
 #[derive(Debug, Clone)]
 pub struct WorkflowInfo {
@@ -351,21 +295,6 @@ pub trait WorkflowService: Send + Sync {
     ///
     /// Clears both workflow_id and current_step fields.
     async fn unassign_workflow(&self, task_id: &str) -> ServiceResult<()>;
-
-    /// Advance a task to the next step in its workflow
-    ///
-    /// Returns an error if the task is already on the last step.
-    async fn advance_step(&self, task_id: &str) -> ServiceResult<StepTransitionResult>;
-
-    /// Move a task back to the previous step in its workflow
-    ///
-    /// If already on the first step, returns an error.
-    async fn retreat_step(&self, task_id: &str) -> ServiceResult<StepTransitionResult>;
-
-    /// Reject a task in its current workflow
-    ///
-    /// Unassigns the workflow from the task.
-    async fn reject_task(&self, task_id: &str) -> ServiceResult<RejectResult>;
 
     // =========================================================================
     // Query Operations

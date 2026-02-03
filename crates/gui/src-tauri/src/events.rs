@@ -37,12 +37,6 @@ pub enum WorkflowChangeType {
     TaskAssigned,
     /// A task was unassigned from a workflow
     TaskUnassigned,
-    /// A task advanced to the next step in the workflow
-    StepAdvanced,
-    /// A task retreated to a previous step in the workflow
-    StepRetreated,
-    /// A task was rejected from the workflow
-    TaskRejected,
 }
 
 /// Event payload for step changes.

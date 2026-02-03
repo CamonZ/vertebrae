@@ -10,8 +10,8 @@ use vertebrae_core::WorkflowSummary;
 use vertebrae_core::error::{ServiceError, ServiceResult};
 use vertebrae_core::models::{Workflow, WorkflowTransition};
 use vertebrae_core::workflow_service::{
-    AssignResult, CreateWorkflowOptions, MigrationResult, RejectResult, StepTransitionResult,
-    UpdateWorkflowOptions, WorkflowInfo, WorkflowService,
+    AssignResult, CreateWorkflowOptions, MigrationResult, UpdateWorkflowOptions, WorkflowInfo,
+    WorkflowService,
 };
 
 use crate::api_types::WorkflowResponse;
@@ -210,74 +210,6 @@ impl WorkflowService for SacrumWorkflowService {
         let path = format!("/api/tasks/{}/assign-workflow", task_id);
         self.client.delete(&path).await?;
         Ok(())
-    }
-
-    async fn advance_step(&self, task_id: &str) -> ServiceResult<StepTransitionResult> {
-        // The Sacrum API uses POST /api/tasks/{task_id}/move-to with a step_id body.
-        // For advance, we need to resolve the next step. Since we don't have that info
-        // here, we call the advance endpoint which the backend handles.
-        let path = format!("/api/tasks/{}/advance", task_id);
-        let response: serde_json::Value = self.client.post(&path, &json!({})).await?;
-
-        let step_name = response
-            .get("step_name")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-
-        Ok(StepTransitionResult {
-            task_id: task_id.to_string(),
-            workflow_id: response
-                .get("workflow_id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string(),
-            from_step: 0,
-            to_step: 1,
-            step_name,
-            total_steps: 0,
-            execution_id: None,
-            chained_to_workflow: None,
-        })
-    }
-
-    async fn retreat_step(&self, task_id: &str) -> ServiceResult<StepTransitionResult> {
-        let path = format!("/api/tasks/{}/retreat", task_id);
-        let response: serde_json::Value = self.client.post(&path, &json!({})).await?;
-
-        let step_name = response
-            .get("step_name")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-
-        Ok(StepTransitionResult {
-            task_id: task_id.to_string(),
-            workflow_id: response
-                .get("workflow_id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string(),
-            from_step: 1,
-            to_step: 0,
-            step_name,
-            total_steps: 0,
-            execution_id: None,
-            chained_to_workflow: None,
-        })
-    }
-
-    async fn reject_task(&self, task_id: &str) -> ServiceResult<RejectResult> {
-        let path = format!("/api/tasks/{}/reject", task_id);
-        let _response: serde_json::Value = self.client.post(&path, &json!({})).await?;
-
-        Ok(RejectResult {
-            task_id: task_id.to_string(),
-            from_workflow_id: String::new(),
-            chained_to_workflow: None,
-            first_step_name: None,
-            execution_id: None,
-        })
     }
 
     async fn get_workflow_info(

@@ -27,6 +27,13 @@ struct ProjectQuery<'a> {
     project_id: &'a str,
 }
 
+/// Query param helper for project_id with parent_id filter
+#[derive(Serialize)]
+struct ChildrenQuery<'a> {
+    project_id: &'a str,
+    parent_id: &'a str,
+}
+
 /// TaskService implementation for Sacrum HTTP client
 pub struct SacrumTaskService {
     client: SacrumClient,
@@ -324,12 +331,16 @@ impl TaskService for SacrumTaskService {
         unimplemented!("Parent removal not yet implemented for Sacrum HTTP client")
     }
 
-    async fn add_dependency(&self, _task_id: &str, _depends_on_id: &str) -> ServiceResult<()> {
-        unimplemented!("Dependency creation not yet implemented for Sacrum HTTP client")
+    async fn add_dependency(&self, task_id: &str, depends_on_id: &str) -> ServiceResult<()> {
+        let path = format!("/api/tasks/{}/dependencies/{}", task_id, depends_on_id);
+        self.client.post_void(&path, &()).await?;
+        Ok(())
     }
 
-    async fn remove_dependency(&self, _task_id: &str, _depends_on_id: &str) -> ServiceResult<()> {
-        unimplemented!("Dependency removal not yet implemented for Sacrum HTTP client")
+    async fn remove_dependency(&self, task_id: &str, depends_on_id: &str) -> ServiceResult<()> {
+        let path = format!("/api/tasks/{}/dependencies/{}", task_id, depends_on_id);
+        self.client.delete(&path).await?;
+        Ok(())
     }
 
     async fn get_blockers(&self, id: &str) -> ServiceResult<Vec<BlockerNode>> {
@@ -337,8 +348,22 @@ impl TaskService for SacrumTaskService {
         Ok(self.client.get(&path, &()).await?)
     }
 
-    async fn get_incomplete_blockers_with_details(&self, _id: &str) -> ServiceResult<Vec<Task>> {
-        unimplemented!("Incomplete blocker retrieval not yet implemented for Sacrum HTTP client")
+    async fn get_incomplete_blockers_with_details(&self, id: &str) -> ServiceResult<Vec<Task>> {
+        // Get the task to access its dependency_ids
+        let task = self.get_task(id).await?;
+
+        // Fetch each blocker and filter out completed ones
+        let mut blockers = Vec::new();
+        for dep_id in task.dependency_ids {
+            if let Ok(blocker) = self.get_task(&dep_id).await {
+                // Filter out done tasks
+                if blocker.step_name.as_deref() != Some("done") {
+                    blockers.push(blocker);
+                }
+            }
+        }
+
+        Ok(blockers)
     }
 
     async fn find_path(&self, from_id: &str, to_id: &str) -> ServiceResult<Option<Vec<String>>> {
@@ -355,20 +380,43 @@ impl TaskService for SacrumTaskService {
         unimplemented!("Parent retrieval not yet implemented for Sacrum HTTP client")
     }
 
-    async fn get_children(&self, _task_id: &str) -> ServiceResult<Vec<String>> {
-        unimplemented!("Children retrieval not yet implemented for Sacrum HTTP client")
+    async fn get_children(&self, task_id: &str) -> ServiceResult<Vec<String>> {
+        let query = ChildrenQuery {
+            project_id: self.client.project_id(),
+            parent_id: task_id,
+        };
+        let tasks: Vec<TaskResponse> = self.client.get("/api/tasks", &query).await?;
+        Ok(tasks.into_iter().map(|t| t.id).collect())
     }
 
     async fn get_dependencies(&self, _task_id: &str) -> ServiceResult<Vec<String>> {
         unimplemented!("Dependencies retrieval not yet implemented for Sacrum HTTP client")
     }
 
-    async fn get_dependents(&self, _task_id: &str) -> ServiceResult<Vec<String>> {
-        unimplemented!("Dependents retrieval not yet implemented for Sacrum HTTP client")
+    async fn get_dependents(&self, task_id: &str) -> ServiceResult<Vec<String>> {
+        // No backend filter for dependents, so fetch all tasks and filter client-side
+        let query = ProjectQuery {
+            project_id: self.client.project_id(),
+        };
+        let tasks: Vec<TaskResponse> = self.client.get("/api/tasks", &query).await?;
+
+        // Filter tasks whose dependency_ids contain task_id
+        Ok(tasks
+            .into_iter()
+            .filter(|t| t.dependency_ids.contains(&task_id.to_string()))
+            .map(|t| t.id)
+            .collect())
     }
 
-    async fn add_section(&self, _id: &str, _section: Section) -> ServiceResult<()> {
-        unimplemented!("Section addition not yet implemented for Sacrum HTTP client")
+    async fn add_section(&self, id: &str, section: Section) -> ServiceResult<()> {
+        let path = format!("/api/tasks/{}/sections", id);
+        let request = serde_json::json!({
+            "section_type": section.section_type.as_str(),
+            "content": section.content,
+            "section_order": section.order.unwrap_or(0),
+        });
+        self.client.post_void(&path, &request).await?;
+        Ok(())
     }
 
     async fn remove_sections(
@@ -377,26 +425,69 @@ impl TaskService for SacrumTaskService {
         _section_type: SectionType,
         _indices: Option<Vec<usize>>,
     ) -> ServiceResult<()> {
-        unimplemented!("Section removal not yet implemented for Sacrum HTTP client")
+        unimplemented!("Bulk section removal not yet implemented for Sacrum HTTP client")
     }
 
     async fn edit_section_by_ordinal(
         &self,
-        _id: &str,
-        _section_type: SectionType,
-        _ordinal: u32,
-        _new_content: &str,
+        task_id: &str,
+        section_type: SectionType,
+        ordinal: u32,
+        new_content: &str,
     ) -> ServiceResult<()> {
-        unimplemented!("Section editing not yet implemented for Sacrum HTTP client")
+        // Fetch the task to get section IDs
+        let path = format!("/api/tasks/{}", task_id);
+        let response: TaskResponse = self.client.get(&path, &()).await?;
+
+        // Find the section matching type and order
+        let section = response
+            .sections
+            .iter()
+            .find(|s| s.section_type == section_type.as_str() && s.section_order == ordinal as i32)
+            .ok_or_else(|| {
+                ServiceError::validation_failed(format!(
+                    "Section {} with order {} not found",
+                    section_type.as_str(),
+                    ordinal
+                ))
+            })?;
+
+        // PATCH the section by ID
+        let patch_path = format!("/api/tasks/{}/sections/{}", task_id, section.id);
+        let request = serde_json::json!({
+            "content": new_content,
+        });
+        self.client.patch(&patch_path, &request).await?;
+        Ok(())
     }
 
     async fn remove_section_by_ordinal(
         &self,
-        _id: &str,
-        _section_type: SectionType,
-        _ordinal: u32,
+        task_id: &str,
+        section_type: SectionType,
+        ordinal: u32,
     ) -> ServiceResult<()> {
-        unimplemented!("Section removal not yet implemented for Sacrum HTTP client")
+        // Fetch the task to get section IDs
+        let path = format!("/api/tasks/{}", task_id);
+        let response: TaskResponse = self.client.get(&path, &()).await?;
+
+        // Find the section matching type and order
+        let section = response
+            .sections
+            .iter()
+            .find(|s| s.section_type == section_type.as_str() && s.section_order == ordinal as i32)
+            .ok_or_else(|| {
+                ServiceError::validation_failed(format!(
+                    "Section {} with order {} not found",
+                    section_type.as_str(),
+                    ordinal
+                ))
+            })?;
+
+        // Delete by ID
+        let delete_path = format!("/api/tasks/{}/sections/{}", task_id, section.id);
+        self.client.delete(&delete_path).await?;
+        Ok(())
     }
 
     async fn mark_step_done(&self, _id: &str, _step_index: usize) -> ServiceResult<()> {

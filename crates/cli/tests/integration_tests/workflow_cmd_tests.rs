@@ -28,23 +28,6 @@ async fn create_workflow(
     services.workflows().create_workflow(options).await.unwrap()
 }
 
-/// Create a test task with given title
-async fn create_task(services: &VertebraeServices, title: &str) -> String {
-    let options = vertebrae_core::CreateTaskOptions {
-        id: None,
-        title: title.to_string(),
-        description: None,
-        level: Some(vertebrae_core::Level::Task),
-
-        priority: None,
-        tags: vec![],
-        parent_id: None,
-        depends_on: vec![],
-        needs_review: false,
-    };
-    services.tasks().create_task(options).await.unwrap()
-}
-
 // ============================================================================
 // WorkflowShowCommand tests
 // ============================================================================
@@ -279,126 +262,6 @@ async fn test_workflow_update_nonexistent_workflow() {
 }
 
 // ============================================================================
-// WorkflowAdvanceCommand tests
-// ============================================================================
-
-#[tokio::test]
-async fn test_workflow_advance_step() {
-    let services = mock_services();
-    let task_id = create_task(&services, "Task to advance").await;
-
-    let cmd = WorkflowAdvanceCommand {
-        task_id: task_id.clone(),
-    };
-    let output = cmd.execute(services.workflows()).await.unwrap();
-
-    // Verify output contains advancement information
-    assert!(output.contains("Advanced task"));
-    assert!(output.contains(&task_id));
-    assert!(output.contains("step"));
-}
-
-#[tokio::test]
-async fn test_workflow_advance_contains_step_numbers() {
-    let services = mock_services();
-    let task_id = create_task(&services, "Numbered task").await;
-
-    let cmd = WorkflowAdvanceCommand {
-        task_id: task_id.clone(),
-    };
-    let output = cmd.execute(services.workflows()).await.unwrap();
-
-    // Verify output shows step progression (step 2/3, etc)
-    assert!(output.contains("/"));
-}
-
-#[tokio::test]
-async fn test_workflow_advance_task_not_found() {
-    let services = mock_services();
-
-    let cmd = WorkflowAdvanceCommand {
-        task_id: "nonexistent".to_string(),
-    };
-    let result = cmd.execute(services.workflows()).await;
-
-    assert!(result.is_err());
-}
-
-#[tokio::test]
-async fn test_workflow_advance_execution_id_in_output() {
-    let services = mock_services();
-    let task_id = create_task(&services, "Execution task").await;
-
-    let cmd = WorkflowAdvanceCommand {
-        task_id: task_id.clone(),
-    };
-    let output = cmd.execute(services.workflows()).await.unwrap();
-
-    // Verify execution ID appears in output
-    assert!(output.contains("execution"));
-}
-
-// ============================================================================
-// WorkflowRetreatCommand tests
-// ============================================================================
-
-#[tokio::test]
-async fn test_workflow_retreat_step() {
-    let services = mock_services();
-    let task_id = create_task(&services, "Task to retreat").await;
-
-    let cmd = WorkflowRetreatCommand {
-        task_id: task_id.clone(),
-    };
-    let output = cmd.execute(services.workflows()).await.unwrap();
-
-    // Verify output contains retreat information
-    assert!(output.contains("Retreated task"));
-    assert!(output.contains(&task_id));
-    assert!(output.contains("step"));
-}
-
-#[tokio::test]
-async fn test_workflow_retreat_contains_step_numbers() {
-    let services = mock_services();
-    let task_id = create_task(&services, "Retreat numbered task").await;
-
-    let cmd = WorkflowRetreatCommand {
-        task_id: task_id.clone(),
-    };
-    let output = cmd.execute(services.workflows()).await.unwrap();
-
-    // Verify output shows step regression (e.g., step 1/3)
-    assert!(output.contains("/"));
-}
-
-#[tokio::test]
-async fn test_workflow_retreat_task_not_found() {
-    let services = mock_services();
-
-    let cmd = WorkflowRetreatCommand {
-        task_id: "nonexistent".to_string(),
-    };
-    let result = cmd.execute(services.workflows()).await;
-
-    assert!(result.is_err());
-}
-
-#[tokio::test]
-async fn test_workflow_retreat_execution_id_in_output() {
-    let services = mock_services();
-    let task_id = create_task(&services, "Retreat execution task").await;
-
-    let cmd = WorkflowRetreatCommand {
-        task_id: task_id.clone(),
-    };
-    let output = cmd.execute(services.workflows()).await.unwrap();
-
-    // Verify execution ID appears in output
-    assert!(output.contains("execution"));
-}
-
-// ============================================================================
 // WorkflowCommand dispatch tests
 // ============================================================================
 
@@ -448,34 +311,6 @@ async fn test_workflow_command_dispatch_update() {
     assert_eq!(updated.name, "Updated via dispatch");
 }
 
-#[tokio::test]
-async fn test_workflow_command_dispatch_advance() {
-    let services = mock_services();
-    let task_id = create_task(&services, "Dispatch advance task").await;
-
-    let cmd = WorkflowCommand::Advance(WorkflowAdvanceCommand {
-        task_id: task_id.clone(),
-    });
-    let output = cmd.execute(&services).await.unwrap();
-
-    assert!(output.contains("Advanced task"));
-    assert!(output.contains(&task_id));
-}
-
-#[tokio::test]
-async fn test_workflow_command_dispatch_retreat() {
-    let services = mock_services();
-    let task_id = create_task(&services, "Dispatch retreat task").await;
-
-    let cmd = WorkflowCommand::Retreat(WorkflowRetreatCommand {
-        task_id: task_id.clone(),
-    });
-    let output = cmd.execute(&services).await.unwrap();
-
-    assert!(output.contains("Retreated task"));
-    assert!(output.contains(&task_id));
-}
-
 // ============================================================================
 // Cross-command workflow scenarios
 // ============================================================================
@@ -503,26 +338,6 @@ async fn test_workflow_show_after_update() {
     assert!(output.contains("Modified"));
     assert!(output.contains("Modified description"));
     assert!(!output.contains("Original description"));
-}
-
-#[tokio::test]
-async fn test_advance_retreat_roundtrip() {
-    let services = mock_services();
-    let task_id = create_task(&services, "Roundtrip task").await;
-
-    // Advance
-    let advance_cmd = WorkflowAdvanceCommand {
-        task_id: task_id.clone(),
-    };
-    let advance_output = advance_cmd.execute(services.workflows()).await.unwrap();
-    assert!(advance_output.contains("Advanced task"));
-
-    // Retreat back
-    let retreat_cmd = WorkflowRetreatCommand {
-        task_id: task_id.clone(),
-    };
-    let retreat_output = retreat_cmd.execute(services.workflows()).await.unwrap();
-    assert!(retreat_output.contains("Retreated task"));
 }
 
 #[tokio::test]

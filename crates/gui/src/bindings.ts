@@ -113,20 +113,6 @@ async getTask(id: string) : Promise<Result<Task, CommandError>> {
 }
 },
 /**
- * Get task hierarchy starting from a root task
- * 
- * Returns a tree structure of tasks starting from the given root.
- * If no root_id is provided, returns all root-level tasks with their hierarchies.
- */
-async getTaskHierarchy(rootId: string | null, filter: TaskFilterOptions | null) : Promise<Result<TaskTreeNode[], CommandError>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("get_task_hierarchy", { rootId, filter }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-/**
  * Set the parent task
  * 
  * Sets the parent of the given task. If the task already has a parent, it will be replaced.
@@ -1017,7 +1003,7 @@ export type TaskFilterOptions = {
 /**
  * Filter by step names (OR semantics) - workflow step names
  */
-step_names: string[] | null;
+step_names: string[] | null; 
 /**
  * Filter by levels (OR semantics)
  */
@@ -1060,26 +1046,6 @@ export type TaskPriority = "low" | "medium" | "high" | "critical"
  * Includes the new step info so frontend can update directly without refetching.
  */
 export type TaskStepChangedEvent = { task_id: string; step_id: string; step_name: string }
-/**
- * Task tree node for hierarchical views
- */
-export type TaskTreeNode = { 
-/**
- * The task
- */
-task: Task; 
-/**
- * Whether this task has incomplete blockers
- */
-has_blockers: boolean; 
-/**
- * Number of incomplete blockers
- */
-blocker_count: number; 
-/**
- * Child nodes
- */
-children: TaskTreeNode[] }
 /**
  * Options for updating a task - allows updating multiple fields at once
  */
@@ -1159,19 +1125,7 @@ export type WorkflowChangeType = "Created" | "Updated" | "Deleted" |
 /**
  * A task was unassigned from a workflow
  */
-"TaskUnassigned" | 
-/**
- * A task advanced to the next step in the workflow
- */
-"StepAdvanced" | 
-/**
- * A task retreated to a previous step in the workflow
- */
-"StepRetreated" | 
-/**
- * A task was rejected from the workflow
- */
-"TaskRejected"
+"TaskUnassigned"
 /**
  * Event payload for workflow changes.
  * Emitted when a workflow is created, updated, or deleted.

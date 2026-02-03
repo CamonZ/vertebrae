@@ -72,15 +72,15 @@ impl UndependCommand {
         let task_id = self.id.to_lowercase();
         let blocker_id = self.blocker_id.to_lowercase();
 
-        // Validate source task exists using service layer
-        if !services.tasks().task_exists(&task_id).await? {
-            return Err(ServiceError::task_not_found(&self.id));
-        }
+        // Fetch the task - validates it exists and gives us dependency_ids
+        let task = services
+            .tasks()
+            .get_task(&task_id)
+            .await
+            .map_err(|_| ServiceError::task_not_found(&self.id))?;
 
-        // Check if dependency exists using service layer
-        let existing_deps = services.tasks().get_dependencies(&task_id).await?;
-
-        let existed = existing_deps.contains(&blocker_id);
+        // Check if dependency exists using dependency_ids from task
+        let existed = task.dependency_ids.contains(&blocker_id);
 
         if existed {
             // Remove the dependency using the service layer (fires mutation callback)

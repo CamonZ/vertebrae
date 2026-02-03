@@ -6,8 +6,6 @@
 //! - Removing with invalid section type
 //! - Removing with nonexistent task
 //! - Removing single-instance sections
-//! - Removing all sections of a type
-//! - Removing all sections from a task
 //! - Verifying sections are actually removed and remaining sections are correct
 
 use super::mock::mock_services;
@@ -61,17 +59,15 @@ mod tests {
         // Remove step at index 1
         let cmd = UnsectionCommand {
             id: id.clone(),
-            section_type: Some(SectionType::Step),
+            section_type: SectionType::Step,
             index: Some(1),
-            all: false,
         };
         let result = cmd.execute(&services).await.unwrap();
 
         // Verify result
         assert_eq!(result.id, id);
         assert_eq!(result.removed_count, 1);
-        assert_eq!(result.section_type, Some(SectionType::Step));
-        assert!(!result.removed_all);
+        assert_eq!(result.section_type, SectionType::Step);
 
         // Verify the step is removed
         let task = services.tasks().get_task(&id).await.unwrap();
@@ -103,9 +99,8 @@ mod tests {
         // Remove constraint at index 0
         let cmd = UnsectionCommand {
             id: id.clone(),
-            section_type: Some(SectionType::Constraint),
+            section_type: SectionType::Constraint,
             index: Some(0),
-            all: false,
         };
         let result = cmd.execute(&services).await.unwrap();
 
@@ -141,9 +136,8 @@ mod tests {
         // Remove testing criterion at index 2 (last)
         let cmd = UnsectionCommand {
             id: id.clone(),
-            section_type: Some(SectionType::TestingCriterion),
+            section_type: SectionType::TestingCriterion,
             index: Some(2),
-            all: false,
         };
         let result = cmd.execute(&services).await.unwrap();
 
@@ -187,14 +181,13 @@ mod tests {
         // Remove goal without specifying index
         let cmd = UnsectionCommand {
             id: id.clone(),
-            section_type: Some(SectionType::Goal),
+            section_type: SectionType::Goal,
             index: None,
-            all: false,
         };
         let result = cmd.execute(&services).await.unwrap();
 
         assert_eq!(result.removed_count, 1);
-        assert_eq!(result.section_type, Some(SectionType::Goal));
+        assert_eq!(result.section_type, SectionType::Goal);
 
         // Verify goal is removed
         let task = services.tasks().get_task(&id).await.unwrap();
@@ -223,14 +216,13 @@ mod tests {
         // Remove context
         let cmd = UnsectionCommand {
             id: id.clone(),
-            section_type: Some(SectionType::Context),
+            section_type: SectionType::Context,
             index: None,
-            all: false,
         };
         let result = cmd.execute(&services).await.unwrap();
 
         assert_eq!(result.removed_count, 1);
-        assert_eq!(result.section_type, Some(SectionType::Context));
+        assert_eq!(result.section_type, SectionType::Context);
 
         // Verify context is removed
         let task = services.tasks().get_task(&id).await.unwrap();
@@ -240,119 +232,6 @@ mod tests {
                 .iter()
                 .any(|s| s.section_type == SectionType::Context)
         );
-    }
-
-    #[tokio::test]
-    async fn test_remove_all_sections_of_type() {
-        let services = mock_services();
-        let id = create_task(&services, "Task with steps").await;
-
-        // Add multiple steps
-        for step in ["Step 1", "Step 2", "Step 3", "Step 4"] {
-            let cmd = SectionCommand {
-                id: id.clone(),
-                section_type: SectionType::Step,
-                content: step.to_string(),
-            };
-            cmd.execute(&services).await.unwrap();
-        }
-
-        // Add a goal to verify it's not removed
-        let cmd = SectionCommand {
-            id: id.clone(),
-            section_type: SectionType::Goal,
-            content: "Complete all steps".to_string(),
-        };
-        cmd.execute(&services).await.unwrap();
-
-        // Verify 4 steps and 1 goal exist
-        let task = services.tasks().get_task(&id).await.unwrap();
-        assert_eq!(
-            task.sections
-                .iter()
-                .filter(|s| s.section_type == SectionType::Step)
-                .count(),
-            4
-        );
-
-        // Remove all steps
-        let cmd = UnsectionCommand {
-            id: id.clone(),
-            section_type: Some(SectionType::Step),
-            index: None,
-            all: true,
-        };
-        let result = cmd.execute(&services).await.unwrap();
-
-        assert_eq!(result.removed_count, 4);
-        assert_eq!(result.section_type, Some(SectionType::Step));
-        assert!(result.removed_all);
-
-        // Verify all steps are removed but goal remains
-        let task = services.tasks().get_task(&id).await.unwrap();
-        assert_eq!(
-            task.sections
-                .iter()
-                .filter(|s| s.section_type == SectionType::Step)
-                .count(),
-            0
-        );
-        assert_eq!(
-            task.sections
-                .iter()
-                .filter(|s| s.section_type == SectionType::Goal)
-                .count(),
-            1
-        );
-    }
-
-    #[tokio::test]
-    async fn test_remove_all_sections_from_task() {
-        let services = mock_services();
-        let id = create_task(&services, "Task with many sections").await;
-
-        // Add various sections
-        let cmd = SectionCommand {
-            id: id.clone(),
-            section_type: SectionType::Goal,
-            content: "Goal".to_string(),
-        };
-        cmd.execute(&services).await.unwrap();
-
-        let cmd = SectionCommand {
-            id: id.clone(),
-            section_type: SectionType::Step,
-            content: "Step 1".to_string(),
-        };
-        cmd.execute(&services).await.unwrap();
-
-        let cmd = SectionCommand {
-            id: id.clone(),
-            section_type: SectionType::Constraint,
-            content: "Constraint".to_string(),
-        };
-        cmd.execute(&services).await.unwrap();
-
-        // Verify sections exist
-        let task = services.tasks().get_task(&id).await.unwrap();
-        assert_eq!(task.sections.len(), 3);
-
-        // Remove all sections
-        let cmd = UnsectionCommand {
-            id: id.clone(),
-            section_type: None,
-            index: None,
-            all: true,
-        };
-        let result = cmd.execute(&services).await.unwrap();
-
-        assert_eq!(result.removed_count, 3);
-        assert_eq!(result.section_type, None);
-        assert!(result.removed_all);
-
-        // Verify all sections are removed
-        let task = services.tasks().get_task(&id).await.unwrap();
-        assert_eq!(task.sections.len(), 0);
     }
 
     #[tokio::test]
@@ -371,9 +250,8 @@ mod tests {
         // Try to remove non-existent step at index 5
         let cmd = UnsectionCommand {
             id: id.clone(),
-            section_type: Some(SectionType::Step),
+            section_type: SectionType::Step,
             index: Some(5),
-            all: false,
         };
         let result = cmd.execute(&services).await;
 
@@ -391,9 +269,8 @@ mod tests {
 
         let cmd = UnsectionCommand {
             id: "nonexistent_task".to_string(),
-            section_type: Some(SectionType::Step),
+            section_type: SectionType::Step,
             index: Some(0),
-            all: false,
         };
         let result = cmd.execute(&services).await;
 
@@ -418,9 +295,8 @@ mod tests {
         // Try to remove a step (which doesn't exist)
         let cmd = UnsectionCommand {
             id: id.clone(),
-            section_type: Some(SectionType::Step),
+            section_type: SectionType::Step,
             index: Some(0),
-            all: false,
         };
         let result = cmd.execute(&services).await;
 
@@ -428,35 +304,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_remove_nonexistent_section_type_with_all_flag() {
-        let services = mock_services();
-        let id = create_task(&services, "Task with goal").await;
-
-        // Add only a goal
-        let cmd = SectionCommand {
-            id: id.clone(),
-            section_type: SectionType::Goal,
-            content: "Some goal".to_string(),
-        };
-        cmd.execute(&services).await.unwrap();
-
-        // Try to remove all steps (which don't exist)
-        let cmd = UnsectionCommand {
-            id: id.clone(),
-            section_type: Some(SectionType::Step),
-            index: None,
-            all: true,
-        };
-        let result = cmd.execute(&services).await.unwrap();
-
-        // Should succeed with 0 removed
-        assert_eq!(result.removed_count, 0);
-        assert_eq!(result.section_type, Some(SectionType::Step));
-        assert!(result.removed_all);
-    }
-
-    #[tokio::test]
-    async fn test_remove_multi_instance_without_index_or_all_fails() {
+    async fn test_remove_multi_instance_without_index_fails() {
         let services = mock_services();
         let id = create_task(&services, "Task with steps").await;
 
@@ -468,12 +316,11 @@ mod tests {
         };
         cmd.execute(&services).await.unwrap();
 
-        // Try to remove without index or --all (should fail for multi-instance)
+        // Try to remove without index (should fail for multi-instance)
         let cmd = UnsectionCommand {
             id: id.clone(),
-            section_type: Some(SectionType::Step),
+            section_type: SectionType::Step,
             index: None,
-            all: false,
         };
         let result = cmd.execute(&services).await;
 
@@ -483,25 +330,6 @@ mod tests {
             err.to_string().to_lowercase().contains("index")
                 || err.to_string().to_lowercase().contains("--index")
         );
-    }
-
-    #[tokio::test]
-    async fn test_remove_from_task_with_no_sections() {
-        let services = mock_services();
-        let id = create_task(&services, "Empty task").await;
-
-        // Try to remove from empty task with --all
-        let cmd = UnsectionCommand {
-            id: id.clone(),
-            section_type: None,
-            index: None,
-            all: true,
-        };
-        let result = cmd.execute(&services).await.unwrap();
-
-        assert_eq!(result.removed_count, 0);
-        assert_eq!(result.section_type, None);
-        assert!(result.removed_all);
     }
 
     #[tokio::test]
@@ -525,9 +353,8 @@ mod tests {
         let upper_id = id.to_uppercase();
         let cmd = UnsectionCommand {
             id: upper_id,
-            section_type: Some(SectionType::Step),
+            section_type: SectionType::Step,
             index: Some(0),
-            all: false,
         };
         let result = cmd.execute(&services).await.unwrap();
 
@@ -578,9 +405,8 @@ mod tests {
         // Remove step at index 0
         let cmd = UnsectionCommand {
             id: id.clone(),
-            section_type: Some(SectionType::Step),
+            section_type: SectionType::Step,
             index: Some(0),
-            all: false,
         };
         cmd.execute(&services).await.unwrap();
 
@@ -633,9 +459,8 @@ mod tests {
         // Remove step at index 1 (B)
         let cmd = UnsectionCommand {
             id: id.clone(),
-            section_type: Some(SectionType::Step),
+            section_type: SectionType::Step,
             index: Some(1),
-            all: false,
         };
         cmd.execute(&services).await.unwrap();
 
@@ -653,9 +478,8 @@ mod tests {
         // Remove step at index 0 (A)
         let cmd = UnsectionCommand {
             id: id.clone(),
-            section_type: Some(SectionType::Step),
+            section_type: SectionType::Step,
             index: Some(0),
-            all: false,
         };
         cmd.execute(&services).await.unwrap();
 
@@ -668,79 +492,6 @@ mod tests {
         assert_eq!(steps.len(), 2);
         assert_eq!(steps[0].content, "C");
         assert_eq!(steps[1].content, "D");
-    }
-
-    #[tokio::test]
-    async fn test_remove_all_of_one_type_with_multiple_types_present() {
-        let services = mock_services();
-        let id = create_task(&services, "Task with mixed sections").await;
-
-        // Add steps
-        for step in ["Step 1", "Step 2", "Step 3"] {
-            let cmd = SectionCommand {
-                id: id.clone(),
-                section_type: SectionType::Step,
-                content: step.to_string(),
-            };
-            cmd.execute(&services).await.unwrap();
-        }
-
-        // Add constraints
-        for constraint in ["Constraint 1", "Constraint 2"] {
-            let cmd = SectionCommand {
-                id: id.clone(),
-                section_type: SectionType::Constraint,
-                content: constraint.to_string(),
-            };
-            cmd.execute(&services).await.unwrap();
-        }
-
-        // Add goal
-        let cmd = SectionCommand {
-            id: id.clone(),
-            section_type: SectionType::Goal,
-            content: "Goal".to_string(),
-        };
-        cmd.execute(&services).await.unwrap();
-
-        // Verify initial state
-        let task = services.tasks().get_task(&id).await.unwrap();
-        assert_eq!(task.sections.len(), 6);
-
-        // Remove all steps
-        let cmd = UnsectionCommand {
-            id: id.clone(),
-            section_type: Some(SectionType::Step),
-            index: None,
-            all: true,
-        };
-        let result = cmd.execute(&services).await.unwrap();
-
-        assert_eq!(result.removed_count, 3);
-
-        // Verify steps are removed but others remain
-        let task = services.tasks().get_task(&id).await.unwrap();
-        assert_eq!(task.sections.len(), 3);
-        assert!(
-            !task
-                .sections
-                .iter()
-                .any(|s| s.section_type == SectionType::Step)
-        );
-        assert_eq!(
-            task.sections
-                .iter()
-                .filter(|s| s.section_type == SectionType::Constraint)
-                .count(),
-            2
-        );
-        assert_eq!(
-            task.sections
-                .iter()
-                .filter(|s| s.section_type == SectionType::Goal)
-                .count(),
-            1
-        );
     }
 
     #[tokio::test]
@@ -759,9 +510,8 @@ mod tests {
         // Remove it
         let cmd = UnsectionCommand {
             id: id.clone(),
-            section_type: Some(SectionType::Step),
+            section_type: SectionType::Step,
             index: Some(0),
-            all: false,
         };
         let result = cmd.execute(&services).await.unwrap();
 
@@ -769,35 +519,5 @@ mod tests {
         let message = format!("{}", result);
         assert!(message.contains("Removed") || message.contains("removed"));
         assert!(message.contains(&id));
-    }
-
-    #[tokio::test]
-    async fn test_remove_returns_correct_message_multiple_removals() {
-        let services = mock_services();
-        let id = create_task(&services, "Task for message test").await;
-
-        // Add multiple constraints
-        for constraint in ["C1", "C2", "C3"] {
-            let cmd = SectionCommand {
-                id: id.clone(),
-                section_type: SectionType::Constraint,
-                content: constraint.to_string(),
-            };
-            cmd.execute(&services).await.unwrap();
-        }
-
-        // Remove all
-        let cmd = UnsectionCommand {
-            id: id.clone(),
-            section_type: Some(SectionType::Constraint),
-            index: None,
-            all: true,
-        };
-        let result = cmd.execute(&services).await.unwrap();
-
-        // Verify message mentions multiple
-        let message = format!("{}", result);
-        assert!(message.contains("Removed") || message.contains("removed"));
-        assert!(message.contains("3"));
     }
 }

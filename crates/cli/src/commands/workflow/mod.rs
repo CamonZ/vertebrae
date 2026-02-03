@@ -3,12 +3,9 @@
 //! Implements the `vtb workflow` subcommand group for creating and managing workflows.
 
 mod add;
-mod advance;
 mod assign;
 mod delete;
 mod list;
-mod reject;
-mod retreat;
 mod show;
 pub mod transition;
 mod types;
@@ -20,12 +17,9 @@ mod update;
 // mod tests;
 
 pub use add::{ParsedStep, WorkflowAddCommand, parse_step};
-pub use advance::WorkflowAdvanceCommand;
 pub use assign::WorkflowAssignCommand;
 pub use delete::WorkflowDeleteCommand;
 pub use list::WorkflowListCommand;
-pub use reject::WorkflowRejectCommand;
-pub use retreat::WorkflowRetreatCommand;
 pub use show::WorkflowShowCommand;
 pub use transition::TransitionCommand;
 pub use types::{StepDisplayInfo, WorkflowDetail, WorkflowSummary, format_timestamp};
@@ -52,12 +46,6 @@ pub enum WorkflowCommand {
     Assign(WorkflowAssignCommand),
     /// Remove workflow assignment from a task
     Unassign(WorkflowUnassignCommand),
-    /// Advance a task to the next workflow step
-    Advance(WorkflowAdvanceCommand),
-    /// Retreat a task to the previous workflow step
-    Retreat(WorkflowRetreatCommand),
-    /// Reject a task in its workflow (unassigns workflow from task)
-    Reject(WorkflowRejectCommand),
     /// Manage workflow transitions
     #[command(subcommand)]
     Transition(TransitionCommand),
@@ -83,9 +71,6 @@ impl WorkflowCommand {
             WorkflowCommand::Delete(cmd) => cmd.execute(workflow_service).await,
             WorkflowCommand::Assign(cmd) => cmd.execute(workflow_service).await,
             WorkflowCommand::Unassign(cmd) => cmd.execute(workflow_service).await,
-            WorkflowCommand::Advance(cmd) => cmd.execute(workflow_service).await,
-            WorkflowCommand::Retreat(cmd) => cmd.execute(workflow_service).await,
-            WorkflowCommand::Reject(cmd) => cmd.execute(workflow_service).await,
             WorkflowCommand::Transition(cmd) => cmd.execute(workflow_service).await,
         }
     }

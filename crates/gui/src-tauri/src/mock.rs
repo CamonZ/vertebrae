@@ -653,50 +653,6 @@ impl WorkflowService for MockWorkflowService {
         Ok(())
     }
 
-    async fn advance_step(&self, task_id: &str) -> ServiceResult<StepTransitionResult> {
-        let s = self.state.lock().unwrap();
-        if !s.tasks.contains_key(task_id) {
-            return Err(ServiceError::task_not_found(task_id));
-        }
-        Ok(StepTransitionResult {
-            task_id: task_id.to_string(),
-            workflow_id: "mock-workflow".to_string(),
-            from_step: 0,
-            to_step: 1,
-            step_name: "step2".to_string(),
-            total_steps: 3,
-            execution_id: None,
-            chained_to_workflow: None,
-        })
-    }
-
-    async fn retreat_step(&self, task_id: &str) -> ServiceResult<StepTransitionResult> {
-        let s = self.state.lock().unwrap();
-        if !s.tasks.contains_key(task_id) {
-            return Err(ServiceError::task_not_found(task_id));
-        }
-        Ok(StepTransitionResult {
-            task_id: task_id.to_string(),
-            workflow_id: "mock-workflow".to_string(),
-            from_step: 1,
-            to_step: 0,
-            step_name: "step1".to_string(),
-            total_steps: 3,
-            execution_id: None,
-            chained_to_workflow: None,
-        })
-    }
-
-    async fn reject_task(&self, task_id: &str) -> ServiceResult<RejectResult> {
-        Ok(RejectResult {
-            task_id: task_id.to_string(),
-            from_workflow_id: "mock-workflow".to_string(),
-            chained_to_workflow: None,
-            first_step_name: None,
-            execution_id: None,
-        })
-    }
-
     async fn get_workflow_info(
         &self,
         workflow_id: &str,

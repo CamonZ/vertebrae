@@ -83,18 +83,19 @@ impl DependCommand {
         }
 
         // Validate both tasks exist using service layer
-        if !services.tasks().task_exists(&task_id).await? {
-            return Err(ServiceError::task_not_found(&self.id));
-        }
+        // Fetching the task also gives us dependency_ids
+        let task = services
+            .tasks()
+            .get_task(&task_id)
+            .await
+            .map_err(|_| ServiceError::task_not_found(&self.id))?;
 
         if !services.tasks().task_exists(&blocker_id).await? {
             return Err(ServiceError::task_not_found(&self.blocker_id));
         }
 
-        // Check if dependency already exists (idempotent) using service layer
-        let existing_deps = services.tasks().get_dependencies(&task_id).await?;
-
-        if existing_deps.contains(&blocker_id) {
+        // Check if dependency already exists (idempotent) using dependency_ids from task
+        if task.dependency_ids.contains(&blocker_id) {
             // Dependency already exists - idempotent behavior
             return Ok(DependResult {
                 task_id,

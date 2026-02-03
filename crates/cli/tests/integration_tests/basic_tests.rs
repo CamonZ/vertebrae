@@ -863,32 +863,9 @@ mod workflow_tests {
     }
 
     #[tokio::test]
-    async fn test_advance_workflow_step() {
-        let services = mock_services();
-        let task_id = create_task(&services, "Advancing task").await;
-
-        let result = services.workflows().advance_step(&task_id).await.unwrap();
-        assert_eq!(result.task_id, task_id);
-        assert_eq!(result.from_step, 0);
-        assert_eq!(result.to_step, 1);
-    }
-
-    #[tokio::test]
-    async fn test_retreat_workflow_step() {
-        let services = mock_services();
-        let task_id = create_task(&services, "Retreating task").await;
-
-        let result = services.workflows().retreat_step(&task_id).await.unwrap();
-        assert_eq!(result.task_id, task_id);
-        assert_eq!(result.from_step, 1);
-        assert_eq!(result.to_step, 0);
-    }
-
-    #[tokio::test]
     async fn test_unassign_workflow() {
         let services = mock_services();
         let task_id = create_task(&services, "Unassign test").await;
-
         // Assign workflow
         let wf_options = vertebrae_core::CreateWorkflowOptions {
             name: "Temporary Workflow".to_string(),

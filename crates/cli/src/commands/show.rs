@@ -82,6 +82,7 @@ struct TaskRow {
     rejection_reason: Option<String>,
     workflow_id: Option<String>,
     current_step_id: Option<String>,
+    parent_id: Option<String>,
     sections: Vec<SectionRow>,
     code_refs: Vec<CodeRefRow>,
 }
@@ -157,7 +158,9 @@ impl ShowCommand {
         let task = self.fetch_task(services, &id).await?;
 
         // Fetch related data in parallel-ish manner
-        let parent = self.fetch_parent(services).await?;
+        let parent = self
+            .fetch_parent(services, task.parent_id.as_deref())
+            .await?;
         let children = self.fetch_children(services).await?;
         let blocked_by = self.fetch_blocked_by(services).await?;
         let blocks = self.fetch_blocks(services).await?;
@@ -296,6 +299,7 @@ impl ShowCommand {
             rejection_reason: task.rejection_reason,
             workflow_id: task.workflow_id,
             current_step_id: task.current_step_id,
+            parent_id: task.parent_id,
             sections: task
                 .sections
                 .into_iter()
@@ -334,27 +338,26 @@ impl ShowCommand {
     async fn fetch_parent(
         &self,
         services: &VertebraeServices,
+        parent_id: Option<&str>,
     ) -> Result<Option<TaskSummary>, ServiceError> {
-        // Use service method to get parent ID
-        let parent_id = services.tasks().get_parent(&self.id.to_lowercase()).await?;
+        let parent_id = match parent_id {
+            Some(id) => id,
+            None => return Ok(None),
+        };
 
-        if let Some(parent_id) = parent_id {
-            let task = services.tasks().get_task(&parent_id).await?;
+        let task = services.tasks().get_task(parent_id).await?;
 
-            Ok(Some(TaskSummary {
-                id: parent_id,
-                title: task.title,
-                level: task.level.as_str().to_string(),
-                workflow_name: task.workflow_name,
-                step_name: task.step_name,
-                priority: task.priority.map(|p| p.as_str().to_string()),
-                tags: task.tags,
-                needs_human_review: task.needs_human_review,
-                parent_id: None,
-            }))
-        } else {
-            Ok(None)
-        }
+        Ok(Some(TaskSummary {
+            id: parent_id.to_string(),
+            title: task.title,
+            level: task.level.as_str().to_string(),
+            workflow_name: task.workflow_name,
+            step_name: task.step_name,
+            priority: task.priority.map(|p| p.as_str().to_string()),
+            tags: task.tags,
+            needs_human_review: task.needs_human_review,
+            parent_id: None,
+        }))
     }
 
     /// Fetch children tasks using the service layer.

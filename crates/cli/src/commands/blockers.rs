@@ -139,13 +139,13 @@ impl BlockersCommand {
         services: &VertebraeServices,
         task_id: &str,
     ) -> Result<Vec<vertebrae_core::Task>, ServiceError> {
-        // Get tasks that this task depends on via the depends_on relationship
-        // Using service layer method that returns full task details
-        let blockers = services.tasks().get_dependencies(task_id).await?;
+        // Get the task to access its dependency_ids
+        let task = services.tasks().get_task(task_id).await?;
+        let blocker_ids = task.dependency_ids;
 
         // Fetch full task details for each blocker
         let mut result = Vec::new();
-        for blocker_id in blockers {
+        for blocker_id in blocker_ids {
             // Get the blocker task
             if let Ok(mut task) = services.tasks().get_task(&blocker_id).await {
                 // Get step name and workflow name using WorkflowService

@@ -89,8 +89,8 @@ impl TaskService for MockTaskService {
             current_step_id: None,
             workflow_name: None,
             step_name: None,
-            parent_id: None,
-            dependency_ids: Vec::new(),
+            parent_id: options.parent_id.clone(),
+            dependency_ids: options.depends_on.clone(),
         };
         s.tasks.insert(id.clone(), task);
 
@@ -242,12 +242,20 @@ impl TaskService for MockTaskService {
         }
         s.parents
             .insert(child_id.to_string(), parent_id.to_string());
+        // Also update the task's parent_id field
+        if let Some(task) = s.tasks.get_mut(child_id) {
+            task.parent_id = Some(parent_id.to_string());
+        }
         Ok(())
     }
 
     async fn remove_parent(&self, child_id: &str) -> ServiceResult<()> {
         let mut s = self.state.lock().unwrap();
         s.parents.remove(child_id);
+        // Also clear the task's parent_id field
+        if let Some(task) = s.tasks.get_mut(child_id) {
+            task.parent_id = None;
+        }
         Ok(())
     }
 
@@ -263,6 +271,12 @@ impl TaskService for MockTaskService {
             .entry(task_id.to_string())
             .or_default()
             .insert(depends_on_id.to_string());
+        // Also update the task's dependency_ids field
+        if let Some(task) = s.tasks.get_mut(task_id) {
+            if !task.dependency_ids.contains(&depends_on_id.to_string()) {
+                task.dependency_ids.push(depends_on_id.to_string());
+            }
+        }
         Ok(())
     }
 
@@ -270,6 +284,10 @@ impl TaskService for MockTaskService {
         let mut s = self.state.lock().unwrap();
         if let Some(deps) = s.dependencies.get_mut(task_id) {
             deps.remove(depends_on_id);
+        }
+        // Also update the task's dependency_ids field
+        if let Some(task) = s.tasks.get_mut(task_id) {
+            task.dependency_ids.retain(|id| id != depends_on_id);
         }
         Ok(())
     }
@@ -674,50 +692,6 @@ impl WorkflowService for MockWorkflowService {
         task.workflow_id = None;
         task.current_step_id = None;
         Ok(())
-    }
-
-    async fn advance_step(&self, task_id: &str) -> ServiceResult<StepTransitionResult> {
-        let s = self.state.lock().unwrap();
-        if !s.tasks.contains_key(task_id) {
-            return Err(ServiceError::task_not_found(task_id));
-        }
-        Ok(StepTransitionResult {
-            task_id: task_id.to_string(),
-            workflow_id: "mock-workflow".to_string(),
-            from_step: 0,
-            to_step: 1,
-            step_name: "step2".to_string(),
-            total_steps: 3,
-            execution_id: None,
-            chained_to_workflow: None,
-        })
-    }
-
-    async fn retreat_step(&self, task_id: &str) -> ServiceResult<StepTransitionResult> {
-        let s = self.state.lock().unwrap();
-        if !s.tasks.contains_key(task_id) {
-            return Err(ServiceError::task_not_found(task_id));
-        }
-        Ok(StepTransitionResult {
-            task_id: task_id.to_string(),
-            workflow_id: "mock-workflow".to_string(),
-            from_step: 1,
-            to_step: 0,
-            step_name: "step1".to_string(),
-            total_steps: 3,
-            execution_id: None,
-            chained_to_workflow: None,
-        })
-    }
-
-    async fn reject_task(&self, task_id: &str) -> ServiceResult<RejectResult> {
-        Ok(RejectResult {
-            task_id: task_id.to_string(),
-            from_workflow_id: "mock-workflow".to_string(),
-            chained_to_workflow: None,
-            first_step_name: None,
-            execution_id: None,
-        })
     }
 
     async fn get_workflow_info(

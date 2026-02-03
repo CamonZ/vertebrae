@@ -99,6 +99,26 @@ impl SacrumClient {
         self.handle_response::<T>(response).await
     }
 
+    /// Perform a POST request that doesn't return data
+    ///
+    /// # Arguments
+    /// * `path` - The API path (relative to base_url, should start with /)
+    /// * `body` - The request body to serialize and send
+    pub async fn post_void<B: Serialize>(&self, path: &str, body: &B) -> SacrumClientResult<()> {
+        debug!("POST request to: {}{}", self.base_url, path);
+
+        let url = format!("{}{}", self.base_url, path);
+        let response = self.client.post(&url).json(body).send().await?;
+
+        if response.status().is_success() {
+            Ok(())
+        } else {
+            let status = response.status().as_u16();
+            let message = response.text().await.unwrap_or_default();
+            Err(SacrumClientError::ApiError { status, message })
+        }
+    }
+
     /// Perform a PUT request and deserialize the response
     ///
     /// # Arguments
@@ -118,6 +138,26 @@ impl SacrumClient {
         let response = self.client.put(&url).json(body).send().await?;
 
         self.handle_response::<T>(response).await
+    }
+
+    /// Perform a PATCH request that doesn't return data
+    ///
+    /// # Arguments
+    /// * `path` - The API path (relative to base_url, should start with /)
+    /// * `body` - The request body to serialize and send
+    pub async fn patch<B: Serialize>(&self, path: &str, body: &B) -> SacrumClientResult<()> {
+        debug!("PATCH request to: {}{}", self.base_url, path);
+
+        let url = format!("{}{}", self.base_url, path);
+        let response = self.client.patch(&url).json(body).send().await?;
+
+        if response.status().is_success() {
+            Ok(())
+        } else {
+            let status = response.status().as_u16();
+            let message = response.text().await.unwrap_or_default();
+            Err(SacrumClientError::ApiError { status, message })
+        }
     }
 
     /// Perform a DELETE request
