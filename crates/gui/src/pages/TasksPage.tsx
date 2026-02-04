@@ -1,6 +1,7 @@
 import { useState, useCallback, useMemo, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
-import type { TaskFilterOptions, Task, TaskTreeNode } from "../bindings";
+import type { TaskFilterOptions, Task } from "../bindings";
+import type { TaskTreeNode } from "../types/ui";
 import { useTasks } from "../hooks/useTasks";
 import { buildTreeFromTasks } from "../utils/buildTreeFromTasks";
 import { useTaskChangeListener } from "../hooks/useTaskChangeListener";

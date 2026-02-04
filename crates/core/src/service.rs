@@ -278,6 +278,26 @@ pub trait TaskService: Send + Sync {
     /// List tasks with optional filters
     async fn list_tasks(&self, filter: &TaskFilter) -> ServiceResult<Vec<Task>>;
 
+    /// List tasks with pre-fetched workflow and step name lookups.
+    ///
+    /// This is an optimization for callers who already have the workflow/step name
+    /// mappings and want to avoid redundant HTTP calls. The default implementation
+    /// ignores the lookups and calls `list_tasks`.
+    ///
+    /// # Arguments
+    /// * `filter` - Task filter criteria
+    /// * `workflow_names` - Optional map of workflow_id -> workflow_name
+    /// * `step_names` - Optional map of step_id -> step_name
+    async fn list_tasks_with_lookups(
+        &self,
+        filter: &TaskFilter,
+        _workflow_names: Option<&std::collections::HashMap<String, String>>,
+        _step_names: Option<&std::collections::HashMap<String, String>>,
+    ) -> ServiceResult<Vec<Task>> {
+        // Default: ignore the lookups and call list_tasks
+        self.list_tasks(filter).await
+    }
+
     /// Get tasks ready for work at a given status
     async fn list_ready(&self, status: &str) -> ServiceResult<Vec<Task>>;
 

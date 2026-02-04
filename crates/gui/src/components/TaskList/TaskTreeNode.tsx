@@ -1,10 +1,10 @@
 import { useCallback } from "react";
 import type {
-  TaskTreeNode as TaskTreeNodeType,
   Task,
   TaskLevel,
   TaskPriority,
 } from "../../bindings";
+import type { TaskTreeNode as TaskTreeNodeType } from "../../types/ui";
 import type { useExpandedNodes } from "../../hooks/useExpandedNodes";
 import { RelativeTime } from "../RelativeTime";
 
@@ -265,7 +265,11 @@ export function TaskTreeNode({
         </button>
 
         {/* Created timestamp */}
-        <RelativeTime date={task.created_at} className="shrink-0 w-16" />
+        {task.created_at ? (
+          <RelativeTime date={task.created_at} className="shrink-0 w-16" />
+        ) : (
+          <span className="shrink-0 w-16 text-text-muted">—</span>
+        )}
 
         {/* Task ID */}
         <code className="shrink-0 font-mono text-xs text-text-muted">
@@ -354,7 +358,7 @@ export function TaskTreeNode({
       {/* Children (when expanded) */}
       {hasChildren && isExpanded && (
         <div role="group" aria-label={`Children of ${task.title}`}>
-          {node.children.map((childNode) => (
+          {node.children.map((childNode: TaskTreeNodeType) => (
             <TaskTreeNode
               key={childNode.task.id}
               node={childNode}

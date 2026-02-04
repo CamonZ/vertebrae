@@ -6,6 +6,7 @@
  */
 
 import type { ReactNode } from "react";
+import type { Task } from "../bindings";
 
 /**
  * Theme mode options for the application.
@@ -100,4 +101,19 @@ export interface ToastMessage {
   type: ToastType;
   /** Optional duration in milliseconds (default: 5000) */
   duration?: number;
+}
+
+/**
+ * Frontend-only type for task tree nodes.
+ * Used to build hierarchical task trees from flat task lists.
+ */
+export interface TaskTreeNode {
+  /** The task data */
+  task: Task;
+  /** Whether this task has any blockers */
+  has_blockers: boolean;
+  /** Number of tasks blocking this one */
+  blocker_count: number;
+  /** Child task nodes */
+  children: TaskTreeNode[];
 }

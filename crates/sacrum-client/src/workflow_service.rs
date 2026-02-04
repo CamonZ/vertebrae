@@ -59,6 +59,24 @@ impl SacrumWorkflowService {
             .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
             .map(|dt| dt.with_timezone(&chrono::Utc));
 
+        // Convert transitions from response
+        let transitions = response
+            .transitions
+            .as_ref()
+            .map(|ts| {
+                ts.iter()
+                    .map(|t| WorkflowTransition {
+                        id: Some(t.id.clone()),
+                        from_workflow: response.id.clone(),
+                        to_workflow: t.to_workflow_id.clone(),
+                        label: t.label.clone().unwrap_or_default(),
+                        target_step: t.target_step_id.clone(),
+                        created_at: None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
         Workflow {
             id: Some(response.id.clone()),
             name: response.name.clone(),
@@ -67,6 +85,7 @@ impl SacrumWorkflowService {
             metadata,
             auto_advance: response.auto_advance.unwrap_or(false),
             order: response.display_order.unwrap_or(0),
+            transitions,
             created_at,
             updated_at,
         }

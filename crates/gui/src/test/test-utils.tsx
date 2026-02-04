@@ -57,6 +57,7 @@ export function createMockStep(overrides?: Partial<Step>): Step {
     id: null,
     name: "Test Step",
     workflow_id: "workflow-1",
+    goal: null,
     agent_config: createMockAgentConfig({ model: "claude-3-sonnet" }),
     is_final: false,
     transitions_to: [],

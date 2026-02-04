@@ -8,8 +8,8 @@ import * as bindingsModule from '../../bindings';
 vi.mock('../../bindings', () => ({
   commands: {
     addCodeRef: vi.fn().mockResolvedValue({ status: 'ok', data: null }),
-    editCodeRef: vi.fn().mockResolvedValue({ status: 'ok', data: null }),
-    removeCodeRef: vi.fn().mockResolvedValue({ status: 'ok', data: null }),
+    replaceCodeRefs: vi.fn().mockResolvedValue({ status: 'ok', data: null }),
+    removeCodeRefs: vi.fn().mockResolvedValue({ status: 'ok', data: null }),
   },
 }));
 
@@ -225,7 +225,10 @@ describe('TaskCodeRefs', () => {
       expect(screen.getByDisplayValue('Entry point')).toBeInTheDocument();
     });
 
-    it('calls editCodeRef command on save', async () => {
+    it('calls replaceCodeRefs command on save', async () => {
+      const codeRefs = [
+        { path: 'src/main.rs', line_start: 42, line_end: null, name: 'main', description: 'Entry point' },
+      ];
       render(<TaskCodeRefs {...defaultProps} codeRefs={codeRefs} />);
 
       await userEvent.click(screen.getByText('src/main.rs'));
@@ -237,14 +240,11 @@ describe('TaskCodeRefs', () => {
       await userEvent.click(screen.getByRole('button', { name: /save/i }));
 
       await waitFor(() => {
-        expect(bindingsModule.commands.editCodeRef).toHaveBeenCalledWith(
+        expect(bindingsModule.commands.replaceCodeRefs).toHaveBeenCalledWith(
           'task-123',
-          0,
-          'src/updated.rs',
-          42,
-          null,
-          'main',
-          'Entry point'
+          [
+            { path: 'src/updated.rs', line_start: 42, line_end: null, name: 'main', description: 'Entry point' },
+          ]
         );
       });
     });
@@ -275,7 +275,7 @@ describe('TaskCodeRefs', () => {
       { path: 'src/main.rs', line_start: 42, line_end: null, name: 'main', description: null },
     ];
 
-    it('calls removeCodeRef command when delete is clicked', async () => {
+    it('calls removeCodeRefs command when delete is clicked', async () => {
       render(<TaskCodeRefs {...defaultProps} codeRefs={codeRefs} />);
 
       // Enter edit mode
@@ -285,7 +285,7 @@ describe('TaskCodeRefs', () => {
       await userEvent.click(screen.getByRole('button', { name: /delete/i }));
 
       await waitFor(() => {
-        expect(bindingsModule.commands.removeCodeRef).toHaveBeenCalledWith('task-123', 0);
+        expect(bindingsModule.commands.removeCodeRefs).toHaveBeenCalledWith('task-123', [0]);
       });
     });
 

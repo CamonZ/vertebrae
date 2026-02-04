@@ -11,7 +11,6 @@ vi.mock("./bindings", () => ({
     getWorkflowWithTaskDetails: vi.fn(),
     getPipelineData: vi.fn(),
     listTasks: vi.fn(),
-    getTaskHierarchy: vi.fn(),
     getTask: vi.fn(),
     listStepsForWorkflow: vi.fn(),
     listWorkflowTransitions: vi.fn(),
@@ -89,9 +88,32 @@ describe("Router Acceptance Tests", () => {
       data: [],
     });
 
-    (commands.getTaskHierarchy as ReturnType<typeof vi.fn>).mockResolvedValue({
+    (commands.getTask as ReturnType<typeof vi.fn>).mockResolvedValue({
       status: "ok",
-      data: [],
+      data: {
+        id: "task-123",
+        title: "Test Task for Detail Panel",
+        level: "task",
+        description: "A task to test the detail panel",
+        tags: [],
+        code_refs: [],
+        sections: [],
+        priority: null,
+        needs_human_review: false,
+        workflow_id: null,
+        current_step_id: null,
+        workflow_name: null,
+        step_name: null,
+        review_comment: null,
+        revision_feedback: null,
+        rejection_reason: null,
+        parent_id: null,
+        dependency_ids: [],
+        created_at: "2024-01-01T00:00:00Z",
+        updated_at: "2024-01-01T00:00:00Z",
+        started_at: null,
+        completed_at: null,
+      },
     });
 
     (commands.listStepsForWorkflow as ReturnType<typeof vi.fn>).mockResolvedValue({
@@ -605,32 +627,6 @@ describe("Router Acceptance Tests", () => {
         ],
       });
 
-      (commands.getTaskHierarchy as ReturnType<typeof vi.fn>).mockResolvedValue({
-        status: "ok",
-        data: [
-          {
-            task: {
-              id: "task-in-workflow",
-              title: "Task in Filtered Workflow",
-              description: "This task is in the workflow",
-  
-              level: "task",
-              tags: [],
-              code_refs: [],
-              sections: [],
-              priority: null,
-              needs_human_review: false,
-              workflow_id: "workflow-filter-test",
-              created_at: "2024-01-01T00:00:00Z",
-              updated_at: "2024-01-01T00:00:00Z",
-              started_at: null,
-              completed_at: null,
-            },
-            children: [],
-          },
-        ],
-      });
-
       const router = createTestRouter(["/tasks?workflowId=workflow-filter-test"]);
 
       render(
@@ -652,11 +648,6 @@ describe("Router Acceptance Tests", () => {
 
     it("URL query parameter workflowId is read and applied to filters", async () => {
       (commands.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue({
-        status: "ok",
-        data: [],
-      });
-
-      (commands.getTaskHierarchy as ReturnType<typeof vi.fn>).mockResolvedValue({
         status: "ok",
         data: [],
       });
@@ -700,32 +691,6 @@ describe("Router Acceptance Tests", () => {
             started_at: null,
             completed_at: null,
             parent_id: null,
-          },
-        ],
-      });
-
-      (commands.getTaskHierarchy as ReturnType<typeof vi.fn>).mockResolvedValue({
-        status: "ok",
-        data: [
-          {
-            task: {
-              id: "task-1",
-              title: "Any Task",
-              description: null,
-  
-              level: "task",
-              tags: [],
-              code_refs: [],
-              sections: [],
-              priority: null,
-              needs_human_review: false,
-              workflow_id: null,
-              created_at: "2024-01-01T00:00:00Z",
-              updated_at: "2024-01-01T00:00:00Z",
-              started_at: null,
-              completed_at: null,
-            },
-            children: [],
           },
         ],
       });

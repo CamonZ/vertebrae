@@ -1,11 +1,12 @@
 import { useState, useCallback, useMemo } from "react";
-import type { Task, TaskTreeNode, Step, TaskLevel } from "../../bindings";
+import type { Task, Step, TaskLevel } from "../../bindings";
 import { commands } from "../../bindings";
 import type { ViewMode } from "../TaskList";
 import { TaskList, TaskTreeView } from "../TaskList";
 import { buildTreeFromTasks } from "../../utils/buildTreeFromTasks";
 import { useExpandedNodes } from "../../hooks/useExpandedNodes";
 import { ResizablePanel } from "../ResizablePanel";
+import type { TaskTreeNode } from "../../types/ui";
 
 interface FilteredTasksPanelProps {
   step: Step | null;
@@ -406,5 +407,5 @@ export function FilteredTasksPanel({
  * Count total tasks in hierarchy recursively
  */
 function countHierarchyTasks(node: TaskTreeNode): number {
-  return 1 + node.children.reduce((count, child) => count + countHierarchyTasks(child), 0);
+  return 1 + node.children.reduce((count: number, child: TaskTreeNode) => count + countHierarchyTasks(child), 0);
 }

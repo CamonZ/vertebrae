@@ -22,8 +22,9 @@ use vertebrae_sacrum_client::{SacrumClient, SacrumConfig};
 
 use commands::AppState;
 use events::{
-    StepChangedEvent, StepExecutionChangedEvent, TaskChangedEvent, TaskStepChangedEvent,
-    WorkflowChangedEvent, WorkflowExecutionEvent,
+    SectionChangedEvent, SessionLogCreatedEvent, StepChangedEvent, StepExecutionChangedEvent,
+    StepTransitionChangedEvent, TaskChangedEvent, TaskStepChangedEvent, WorkflowChangedEvent,
+    WorkflowExecutionEvent,
 };
 use project_config::ProjectConfig;
 use pty_manager::{PtyExitEvent, PtyManager, PtyOutputEvent};
@@ -107,6 +108,8 @@ fn create_builder() -> Builder {
             commands::write_pty,
             commands::resize_pty,
             commands::close_pty_session,
+            // WebSocket status command
+            commands::get_websocket_status,
         ])
         .events(collect_events![
             TaskChangedEvent,
@@ -114,6 +117,9 @@ fn create_builder() -> Builder {
             WorkflowChangedEvent,
             StepChangedEvent,
             StepExecutionChangedEvent,
+            StepTransitionChangedEvent,
+            SessionLogCreatedEvent,
+            SectionChangedEvent,
             WorkflowExecutionEvent,
             PtyOutputEvent,
             PtyExitEvent
@@ -124,17 +130,15 @@ fn create_builder() -> Builder {
 pub fn run() {
     let builder = create_builder();
 
-    let mut tauri_app_builder = tauri::Builder::default()
+    let tauri_app_builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_window_state::Builder::new().build());
-
-    if cfg!(debug_assertions) {
-        tauri_app_builder = tauri_app_builder.plugin(
+        .plugin(tauri_plugin_window_state::Builder::new().build())
+        // TODO: Remove this after debugging - enable logging in production temporarily
+        .plugin(
             tauri_plugin_log::Builder::default()
                 .level(log::LevelFilter::Info)
                 .build(),
         );
-    }
 
     tauri_app_builder
         .invoke_handler(builder.invoke_handler())
@@ -182,7 +186,7 @@ pub fn run() {
 
             // Start WebSocket connection to Sacrum for real-time updates
             let ws_slug = app.state::<AppState>().project_config.get_current_project();
-            if let Some(slug) = ws_slug {
+            let socket = if let Some(slug) = ws_slug {
                 if let Ok(config) = SacrumConfig::load(&slug) {
                     log::info!("[STARTUP] Starting WebSocket connection to Sacrum");
                     let socket = websocket_client::SacrumSocket::new(
@@ -191,16 +195,19 @@ pub fn run() {
                         config.project_id.clone(),
                     );
                     socket.connect(app.handle());
-                    // Keep socket alive by storing it in app state
-                    app.manage(socket);
+                    socket
                 } else {
                     log::warn!(
                         "[STARTUP] Failed to load Sacrum config, WebSocket connection skipped"
                     );
+                    websocket_client::SacrumSocket::disconnected()
                 }
             } else {
-                log::warn!("[STARTUP] No project slug available, WebSocket connection skipped");
-            }
+                log::info!("[STARTUP] No project selected, WebSocket starts disconnected");
+                websocket_client::SacrumSocket::disconnected()
+            };
+            // Always manage socket so the command can access it
+            app.manage(socket);
 
             Ok(())
         })

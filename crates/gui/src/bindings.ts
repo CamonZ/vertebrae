@@ -568,6 +568,17 @@ async closePtySession(sessionId: string) : Promise<Result<null, PtyError>> {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+/**
+ * Get the current WebSocket connection status
+ */
+async getWebsocketStatus() : Promise<Result<string, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_websocket_status") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -577,8 +588,11 @@ async closePtySession(sessionId: string) : Promise<Result<null, PtyError>> {
 export const events = __makeEvents__<{
 ptyExitEvent: PtyExitEvent,
 ptyOutputEvent: PtyOutputEvent,
+sectionChangedEvent: SectionChangedEvent,
+sessionLogCreatedEvent: SessionLogCreatedEvent,
 stepChangedEvent: StepChangedEvent,
 stepExecutionChangedEvent: StepExecutionChangedEvent,
+stepTransitionChangedEvent: StepTransitionChangedEvent,
 taskChangedEvent: TaskChangedEvent,
 taskStepChangedEvent: TaskStepChangedEvent,
 workflowChangedEvent: WorkflowChangedEvent,
@@ -586,8 +600,11 @@ workflowExecutionEvent: WorkflowExecutionEvent
 }>({
 ptyExitEvent: "pty-exit-event",
 ptyOutputEvent: "pty-output-event",
+sectionChangedEvent: "section-changed-event",
+sessionLogCreatedEvent: "session-log-created-event",
 stepChangedEvent: "step-changed-event",
 stepExecutionChangedEvent: "step-execution-changed-event",
+stepTransitionChangedEvent: "step-transition-changed-event",
 taskChangedEvent: "task-changed-event",
 taskStepChangedEvent: "task-step-changed-event",
 workflowChangedEvent: "workflow-changed-event",
@@ -766,6 +783,15 @@ done_at: string | null;
  */
 refs?: CodeRef[] }
 /**
+ * The type of change that occurred on a section.
+ */
+export type SectionChangeType = "Created" | "Updated" | "Deleted"
+/**
+ * Event payload for section changes.
+ * Emitted when a section is created, updated, or deleted.
+ */
+export type SectionChangedEvent = { section_id: string; task_id: string; change_type: SectionChangeType }
+/**
  * Section type - mirrors db::SectionType
  */
 export type SectionType = "goal" | "context" | "current_behavior" | "desired_behavior" | "step" | "testing_criterion" | "anti_pattern" | "failure_test" | "constraint"
@@ -789,6 +815,11 @@ content: string;
  * When this log was created (ISO 8601 string)
  */
 created_at: string }
+/**
+ * Event payload for session log creation.
+ * Emitted when a new session log is created during step execution.
+ */
+export type SessionLogCreatedEvent = { log_id: string; execution_id: string }
 /**
  * Workflow step entity - mirrors db::Step
  */
@@ -895,6 +926,15 @@ export type StepExecutionChangedEvent = { execution_id: string; task_id: string;
  * Status of a step execution (mirrors db::ExecutionStatus for frontend)
  */
 export type StepExecutionStatus = "Pending" | "Running" | "Completed" | "Failed"
+/**
+ * The type of change that occurred on a step transition.
+ */
+export type StepTransitionChangeType = "Created" | "Deleted"
+/**
+ * Event payload for step transition changes.
+ * Emitted when a step transition is created or deleted.
+ */
+export type StepTransitionChangedEvent = { transition_id: string; change_type: StepTransitionChangeType }
 /**
  * Full task details - mirrors core::Task with string IDs and dates
  */

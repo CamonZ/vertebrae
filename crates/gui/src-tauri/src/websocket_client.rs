@@ -12,7 +12,12 @@ use tungstenite::Message;
 use url::Url;
 use uuid::Uuid;
 
-use crate::events::{TaskChangeType, TaskChangedEvent, WorkflowChangeType, WorkflowChangedEvent};
+use crate::events::{
+    SectionChangeType, SectionChangedEvent, SessionLogCreatedEvent, StepChangeType,
+    StepChangedEvent, StepExecutionChangeType, StepExecutionChangedEvent, StepExecutionStatus,
+    StepTransitionChangeType, StepTransitionChangedEvent, TaskChangeType, TaskChangedEvent,
+    WorkflowChangeType, WorkflowChangedEvent,
+};
 
 /// Default heartbeat interval (30 seconds as per Phoenix protocol)
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
@@ -50,6 +55,17 @@ impl SacrumSocket {
             base_url,
             api_token,
             project_slug,
+        }
+    }
+
+    /// Create a disconnected socket placeholder (for when no project is selected)
+    pub fn disconnected() -> Self {
+        SacrumSocket {
+            state: Arc::new(Mutex::new(ConnectionState::Disconnected)),
+            allow_reconnect: Arc::new(AtomicBool::new(false)),
+            base_url: String::new(),
+            api_token: String::new(),
+            project_slug: String::new(),
         }
     }
 
@@ -294,6 +310,21 @@ impl SacrumSocket {
                 | "workflow_changed" => {
                     Self::handle_workflow_event(event, payload, app_handle)?;
                 }
+                "step_created" | "step_updated" | "step_deleted" => {
+                    Self::handle_step_event(event, payload, app_handle)?;
+                }
+                "step_transition_created" | "step_transition_deleted" => {
+                    Self::handle_step_transition_event(event, payload, app_handle)?;
+                }
+                "step_execution_created" | "step_execution_status_changed" => {
+                    Self::handle_step_execution_event(event, payload, app_handle)?;
+                }
+                "session_log_created" => {
+                    Self::handle_session_log_event(payload, app_handle)?;
+                }
+                "section_created" | "section_updated" | "section_deleted" => {
+                    Self::handle_section_event(event, payload, app_handle)?;
+                }
                 "phx_reply" | "phx_error" => {
                     log::debug!("[WebSocket] Phoenix reply: {}", event);
                 }
@@ -374,6 +405,216 @@ impl SacrumSocket {
 
         app_handle
             .emit("workflow-changed-event", &event)
+            .map_err(|e| format!("Failed to emit event: {}", e))?;
+
+        Ok(())
+    }
+
+    /// Handle step events and emit to Tauri
+    fn handle_step_event<R: Runtime>(
+        event: &str,
+        payload: &serde_json::Value,
+        app_handle: &tauri::AppHandle<R>,
+    ) -> Result<(), String> {
+        let step_id = payload
+            .get("id")
+            .and_then(|v| v.as_str())
+            .ok_or("Missing id in step payload")?
+            .to_string();
+
+        let workflow_id = payload
+            .get("workflow_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        let change_type = match event {
+            "step_created" => StepChangeType::Created,
+            "step_updated" => StepChangeType::Updated,
+            "step_deleted" => StepChangeType::Deleted,
+            _ => StepChangeType::Updated,
+        };
+
+        let event = StepChangedEvent {
+            step_id,
+            workflow_id,
+            change_type,
+        };
+
+        log::info!("[WebSocket] Emitting StepChangedEvent: {:?}", event);
+
+        app_handle
+            .emit("step-changed-event", &event)
+            .map_err(|e| format!("Failed to emit event: {}", e))?;
+
+        Ok(())
+    }
+
+    /// Handle step transition events and emit to Tauri
+    fn handle_step_transition_event<R: Runtime>(
+        event: &str,
+        payload: &serde_json::Value,
+        app_handle: &tauri::AppHandle<R>,
+    ) -> Result<(), String> {
+        let transition_id = payload
+            .get("id")
+            .and_then(|v| v.as_str())
+            .ok_or("Missing id in step transition payload")?
+            .to_string();
+
+        let change_type = match event {
+            "step_transition_created" => StepTransitionChangeType::Created,
+            "step_transition_deleted" => StepTransitionChangeType::Deleted,
+            _ => StepTransitionChangeType::Created,
+        };
+
+        let event = StepTransitionChangedEvent {
+            transition_id,
+            change_type,
+        };
+
+        log::info!(
+            "[WebSocket] Emitting StepTransitionChangedEvent: {:?}",
+            event
+        );
+
+        app_handle
+            .emit("step-transition-changed-event", &event)
+            .map_err(|e| format!("Failed to emit event: {}", e))?;
+
+        Ok(())
+    }
+
+    /// Handle step execution events and emit to Tauri
+    fn handle_step_execution_event<R: Runtime>(
+        event: &str,
+        payload: &serde_json::Value,
+        app_handle: &tauri::AppHandle<R>,
+    ) -> Result<(), String> {
+        let execution_id = payload
+            .get("id")
+            .and_then(|v| v.as_str())
+            .ok_or("Missing id in step execution payload")?
+            .to_string();
+
+        let task_id = payload
+            .get("task_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        let workflow_id = payload
+            .get("workflow_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        let step_name = payload
+            .get("step_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        let status = match payload.get("status").and_then(|v| v.as_str()) {
+            Some("running") => StepExecutionStatus::Running,
+            Some("completed") => StepExecutionStatus::Completed,
+            Some("failed") => StepExecutionStatus::Failed,
+            _ => StepExecutionStatus::Pending,
+        };
+
+        let change_type = match event {
+            "step_execution_created" => StepExecutionChangeType::Created,
+            "step_execution_status_changed" => StepExecutionChangeType::StatusChanged,
+            _ => StepExecutionChangeType::Created,
+        };
+
+        let event = StepExecutionChangedEvent {
+            execution_id,
+            task_id,
+            workflow_id,
+            step_name,
+            status,
+            change_type,
+        };
+
+        log::info!(
+            "[WebSocket] Emitting StepExecutionChangedEvent: {:?}",
+            event
+        );
+
+        app_handle
+            .emit("step-execution-changed-event", &event)
+            .map_err(|e| format!("Failed to emit event: {}", e))?;
+
+        Ok(())
+    }
+
+    /// Handle session log events and emit to Tauri
+    fn handle_session_log_event<R: Runtime>(
+        payload: &serde_json::Value,
+        app_handle: &tauri::AppHandle<R>,
+    ) -> Result<(), String> {
+        let log_id = payload
+            .get("id")
+            .and_then(|v| v.as_str())
+            .ok_or("Missing id in session log payload")?
+            .to_string();
+
+        let execution_id = payload
+            .get("execution_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        let event = SessionLogCreatedEvent {
+            log_id,
+            execution_id,
+        };
+
+        log::info!("[WebSocket] Emitting SessionLogCreatedEvent: {:?}", event);
+
+        app_handle
+            .emit("session-log-created-event", &event)
+            .map_err(|e| format!("Failed to emit event: {}", e))?;
+
+        Ok(())
+    }
+
+    /// Handle section events and emit to Tauri
+    fn handle_section_event<R: Runtime>(
+        event: &str,
+        payload: &serde_json::Value,
+        app_handle: &tauri::AppHandle<R>,
+    ) -> Result<(), String> {
+        let section_id = payload
+            .get("id")
+            .and_then(|v| v.as_str())
+            .ok_or("Missing id in section payload")?
+            .to_string();
+
+        let task_id = payload
+            .get("task_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        let change_type = match event {
+            "section_created" => SectionChangeType::Created,
+            "section_updated" => SectionChangeType::Updated,
+            "section_deleted" => SectionChangeType::Deleted,
+            _ => SectionChangeType::Updated,
+        };
+
+        let event = SectionChangedEvent {
+            section_id,
+            task_id,
+            change_type,
+        };
+
+        log::info!("[WebSocket] Emitting SectionChangedEvent: {:?}", event);
+
+        app_handle
+            .emit("section-changed-event", &event)
             .map_err(|e| format!("Failed to emit event: {}", e))?;
 
         Ok(())
@@ -1170,6 +1411,262 @@ mod tests {
         let result = SacrumSocket::handle_workflow_event("workflow_created", &payload, handle);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Missing workflow_id"));
+    }
+
+    // ===== Step Event Handler Tests =====
+
+    #[test]
+    fn test_handle_step_event_created() {
+        let app = build_test_app();
+        let handle = app.handle();
+        let payload = serde_json::json!({"id": "step123", "workflow_id": "wf123"});
+        let result = SacrumSocket::handle_step_event("step_created", &payload, handle);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_handle_step_event_updated() {
+        let app = build_test_app();
+        let handle = app.handle();
+        let payload = serde_json::json!({"id": "step456", "workflow_id": "wf456"});
+        let result = SacrumSocket::handle_step_event("step_updated", &payload, handle);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_handle_step_event_deleted() {
+        let app = build_test_app();
+        let handle = app.handle();
+        let payload = serde_json::json!({"id": "step789", "workflow_id": "wf789"});
+        let result = SacrumSocket::handle_step_event("step_deleted", &payload, handle);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_handle_step_event_missing_id_returns_error() {
+        let app = build_test_app();
+        let handle = app.handle();
+        let payload = serde_json::json!({"workflow_id": "wf123"});
+        let result = SacrumSocket::handle_step_event("step_created", &payload, handle);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Missing id"));
+    }
+
+    // ===== Step Transition Event Handler Tests =====
+
+    #[test]
+    fn test_handle_step_transition_event_created() {
+        let app = build_test_app();
+        let handle = app.handle();
+        let payload = serde_json::json!({"id": "trans123"});
+        let result =
+            SacrumSocket::handle_step_transition_event("step_transition_created", &payload, handle);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_handle_step_transition_event_deleted() {
+        let app = build_test_app();
+        let handle = app.handle();
+        let payload = serde_json::json!({"id": "trans456"});
+        let result =
+            SacrumSocket::handle_step_transition_event("step_transition_deleted", &payload, handle);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_handle_step_transition_event_missing_id_returns_error() {
+        let app = build_test_app();
+        let handle = app.handle();
+        let payload = serde_json::json!({"name": "no id"});
+        let result =
+            SacrumSocket::handle_step_transition_event("step_transition_created", &payload, handle);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Missing id"));
+    }
+
+    // ===== Step Execution Event Handler Tests =====
+
+    #[test]
+    fn test_handle_step_execution_event_created() {
+        let app = build_test_app();
+        let handle = app.handle();
+        let payload = serde_json::json!({
+            "id": "exec123",
+            "task_id": "task123",
+            "workflow_id": "wf123",
+            "step_name": "Step 1",
+            "status": "pending"
+        });
+        let result =
+            SacrumSocket::handle_step_execution_event("step_execution_created", &payload, handle);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_handle_step_execution_event_status_changed() {
+        let app = build_test_app();
+        let handle = app.handle();
+        let payload = serde_json::json!({
+            "id": "exec456",
+            "task_id": "task456",
+            "workflow_id": "wf456",
+            "step_name": "Step 2",
+            "status": "completed"
+        });
+        let result = SacrumSocket::handle_step_execution_event(
+            "step_execution_status_changed",
+            &payload,
+            handle,
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_handle_step_execution_event_running_status() {
+        let app = build_test_app();
+        let handle = app.handle();
+        let payload = serde_json::json!({
+            "id": "exec789",
+            "status": "running"
+        });
+        let result =
+            SacrumSocket::handle_step_execution_event("step_execution_created", &payload, handle);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_handle_step_execution_event_failed_status() {
+        let app = build_test_app();
+        let handle = app.handle();
+        let payload = serde_json::json!({
+            "id": "exec101",
+            "status": "failed"
+        });
+        let result =
+            SacrumSocket::handle_step_execution_event("step_execution_created", &payload, handle);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_handle_step_execution_event_missing_id_returns_error() {
+        let app = build_test_app();
+        let handle = app.handle();
+        let payload = serde_json::json!({"task_id": "task123"});
+        let result =
+            SacrumSocket::handle_step_execution_event("step_execution_created", &payload, handle);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Missing id"));
+    }
+
+    // ===== Session Log Event Handler Tests =====
+
+    #[test]
+    fn test_handle_session_log_event() {
+        let app = build_test_app();
+        let handle = app.handle();
+        let payload = serde_json::json!({
+            "id": "log123",
+            "execution_id": "exec123"
+        });
+        let result = SacrumSocket::handle_session_log_event(&payload, handle);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_handle_session_log_event_missing_id_returns_error() {
+        let app = build_test_app();
+        let handle = app.handle();
+        let payload = serde_json::json!({"execution_id": "exec123"});
+        let result = SacrumSocket::handle_session_log_event(&payload, handle);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Missing id"));
+    }
+
+    // ===== Section Event Handler Tests =====
+
+    #[test]
+    fn test_handle_section_event_created() {
+        let app = build_test_app();
+        let handle = app.handle();
+        let payload = serde_json::json!({"id": "sec123", "task_id": "task123"});
+        let result = SacrumSocket::handle_section_event("section_created", &payload, handle);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_handle_section_event_updated() {
+        let app = build_test_app();
+        let handle = app.handle();
+        let payload = serde_json::json!({"id": "sec456", "task_id": "task456"});
+        let result = SacrumSocket::handle_section_event("section_updated", &payload, handle);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_handle_section_event_deleted() {
+        let app = build_test_app();
+        let handle = app.handle();
+        let payload = serde_json::json!({"id": "sec789", "task_id": "task789"});
+        let result = SacrumSocket::handle_section_event("section_deleted", &payload, handle);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_handle_section_event_missing_id_returns_error() {
+        let app = build_test_app();
+        let handle = app.handle();
+        let payload = serde_json::json!({"task_id": "task123"});
+        let result = SacrumSocket::handle_section_event("section_created", &payload, handle);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Missing id"));
+    }
+
+    // ===== Phoenix Message Handler Tests for New Events =====
+
+    #[test]
+    fn test_handle_phoenix_message_step_created() {
+        let app = build_test_app();
+        let handle = app.handle();
+        let msg = r#"["ref1", "1", "project:test", "step_created", {"id": "step123", "workflow_id": "wf123"}]"#;
+        let result = SacrumSocket::handle_phoenix_message(msg, handle, "test");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_handle_phoenix_message_step_transition_created() {
+        let app = build_test_app();
+        let handle = app.handle();
+        let msg = r#"["ref1", "1", "project:test", "step_transition_created", {"id": "trans123"}]"#;
+        let result = SacrumSocket::handle_phoenix_message(msg, handle, "test");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_handle_phoenix_message_step_execution_created() {
+        let app = build_test_app();
+        let handle = app.handle();
+        let msg = r#"["ref1", "1", "project:test", "step_execution_created", {"id": "exec123", "status": "pending"}]"#;
+        let result = SacrumSocket::handle_phoenix_message(msg, handle, "test");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_handle_phoenix_message_session_log_created() {
+        let app = build_test_app();
+        let handle = app.handle();
+        let msg = r#"["ref1", "1", "project:test", "session_log_created", {"id": "log123", "execution_id": "exec123"}]"#;
+        let result = SacrumSocket::handle_phoenix_message(msg, handle, "test");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_handle_phoenix_message_section_created() {
+        let app = build_test_app();
+        let handle = app.handle();
+        let msg = r#"["ref1", "1", "project:test", "section_created", {"id": "sec123", "task_id": "task123"}]"#;
+        let result = SacrumSocket::handle_phoenix_message(msg, handle, "test");
+        assert!(result.is_ok());
     }
 
     #[test]

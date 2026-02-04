@@ -549,7 +549,7 @@ pub async fn get_pipeline_data(
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    // 1. List all workflows (single HTTP call, full details)
+    // 1. List all workflows (single HTTP call, full details including transitions)
     let wf_start = std::time::Instant::now();
     let workflows_full = service.workflows().list_workflows_full().await?;
     let workflows_gui: Vec<crate::types::Workflow> = workflows_full
@@ -561,26 +561,46 @@ pub async fn get_pipeline_data(
         .iter()
         .filter_map(|w| w.id.as_ref().map(|id| (id.clone(), w.name.clone())))
         .collect();
+
+    // Extract transitions from workflows (no separate API call needed)
+    let transitions: Vec<crate::types::WorkflowTransition> = workflows_full
+        .iter()
+        .flat_map(|w| {
+            w.transitions.iter().map(|t| {
+                let from_id = &t.from_workflow;
+                let to_id = &t.to_workflow;
+                crate::types::WorkflowTransition {
+                    id: t.id.clone(),
+                    from_workflow_id: from_id.clone(),
+                    from_workflow_name: workflow_names
+                        .get(from_id)
+                        .cloned()
+                        .unwrap_or_else(|| from_id.clone()),
+                    to_workflow_id: to_id.clone(),
+                    to_workflow_name: workflow_names
+                        .get(to_id)
+                        .cloned()
+                        .unwrap_or_else(|| to_id.clone()),
+                    label: t.label.clone(),
+                    target_step_id: t.target_step.clone(),
+                }
+            })
+        })
+        .collect();
     log::info!(
-        "[get_pipeline_data] Fetched {} workflows in {}ms",
+        "[get_pipeline_data] Fetched {} workflows with {} transitions in {}ms",
         workflows_gui.len(),
+        transitions.len(),
         wf_start.elapsed().as_millis()
     );
 
-    // 2. List all tasks (single HTTP call via include_done filter)
-    let tasks_start = std::time::Instant::now();
-    let filter = vertebrae_core::TaskFilter::new().include_done();
-    let task_summaries = service.tasks().list_tasks(&filter).await?;
-    let tasks: Vec<crate::types::Task> = task_summaries.into_iter().map(Into::into).collect();
-    log::info!(
-        "[get_pipeline_data] Fetched {} tasks in {}ms",
-        tasks.len(),
-        tasks_start.elapsed().as_millis()
-    );
-
-    // 3. List all steps (single HTTP call), then group by workflow_id
+    // 2. List all steps (single HTTP call), build step_names map for task lookup
     let steps_start = std::time::Instant::now();
     let all_steps = service.steps().list_all_steps().await?;
+    let step_names: std::collections::HashMap<String, String> = all_steps
+        .iter()
+        .filter_map(|s| s.id.as_ref().map(|id| (id.clone(), s.name.clone())))
+        .collect();
     let mut workflow_steps: std::collections::HashMap<String, Vec<crate::types::Step>> =
         std::collections::HashMap::new();
     for step in all_steps {
@@ -595,35 +615,18 @@ pub async fn get_pipeline_data(
         steps_start.elapsed().as_millis()
     );
 
-    // 4. Fetch workflow transitions
-    let trans_start = std::time::Instant::now();
-    let transitions_raw = service.workflows().list_workflow_transitions(None).await?;
-    let transitions: Vec<crate::types::WorkflowTransition> = transitions_raw
-        .into_iter()
-        .map(|t| {
-            let from_id = &t.from_workflow;
-            let to_id = &t.to_workflow;
-            crate::types::WorkflowTransition {
-                id: t.id,
-                from_workflow_id: from_id.clone(),
-                from_workflow_name: workflow_names
-                    .get(from_id)
-                    .cloned()
-                    .unwrap_or_else(|| from_id.clone()),
-                to_workflow_id: to_id.clone(),
-                to_workflow_name: workflow_names
-                    .get(to_id)
-                    .cloned()
-                    .unwrap_or_else(|| to_id.clone()),
-                label: t.label,
-                target_step_id: t.target_step,
-            }
-        })
-        .collect();
+    // 3. List all tasks with pre-fetched lookups (avoids duplicate HTTP calls)
+    let tasks_start = std::time::Instant::now();
+    let filter = vertebrae_core::TaskFilter::new().include_done();
+    let task_summaries = service
+        .tasks()
+        .list_tasks_with_lookups(&filter, Some(&workflow_names), Some(&step_names))
+        .await?;
+    let tasks: Vec<crate::types::Task> = task_summaries.into_iter().map(Into::into).collect();
     log::info!(
-        "[get_pipeline_data] Fetched {} transitions in {}ms",
-        transitions.len(),
-        trans_start.elapsed().as_millis()
+        "[get_pipeline_data] Fetched {} tasks in {}ms",
+        tasks.len(),
+        tasks_start.elapsed().as_millis()
     );
 
     log::info!(
@@ -1881,6 +1884,26 @@ pub async fn replace_code_refs(
 
     log::info!("Successfully replaced code refs for task: {}", task_id);
     Ok(())
+}
+
+// ============================================================================
+// WebSocket Status Command
+// ============================================================================
+
+/// Get the current WebSocket connection status
+#[tauri::command]
+#[specta::specta]
+pub async fn get_websocket_status(
+    socket: State<'_, crate::websocket_client::SacrumSocket>,
+) -> Result<String, CommandError> {
+    let status = socket.get_state().await;
+    let status_str = match status {
+        crate::websocket_client::ConnectionState::Disconnected => "disconnected",
+        crate::websocket_client::ConnectionState::Connecting => "connecting",
+        crate::websocket_client::ConnectionState::Connected => "connected",
+        crate::websocket_client::ConnectionState::Reconnecting => "reconnecting",
+    };
+    Ok(status_str.to_string())
 }
 
 #[cfg(test)]

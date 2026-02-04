@@ -604,6 +604,7 @@ impl WorkflowService for MockWorkflowService {
             metadata: std::collections::HashMap::new(),
             auto_advance: false,
             order: 0,
+            transitions: Vec::new(),
             created_at: Some(Utc::now()),
             updated_at: Some(Utc::now()),
         };

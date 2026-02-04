@@ -1113,6 +1113,10 @@ pub struct Workflow {
     #[serde(default)]
     pub order: i32,
 
+    /// Transitions to other workflows
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub transitions: Vec<WorkflowTransition>,
+
     /// Creation timestamp
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_at: Option<DateTime<Utc>>,
@@ -1133,6 +1137,7 @@ impl Workflow {
             metadata: std::collections::HashMap::new(),
             auto_advance: false,
             order: 0,
+            transitions: Vec::new(),
             created_at: None,
             updated_at: None,
         }
@@ -2331,6 +2336,9 @@ mod tests {
     fn agent_config_new() {
         let config = AgentConfig::new();
         assert!(config.is_empty());
+
+        let config2 = AgentConfig::new().with_model("claude");
+        assert!(!config2.is_empty());
     }
 
     #[test]

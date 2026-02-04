@@ -301,6 +301,23 @@ impl TaskService for SacrumTaskService {
             .collect())
     }
 
+    async fn list_tasks_with_lookups(
+        &self,
+        _filter: &TaskFilter,
+        workflow_names: Option<&HashMap<String, String>>,
+        step_names: Option<&HashMap<String, String>>,
+    ) -> ServiceResult<Vec<Task>> {
+        let query = ProjectQuery {
+            project_id: self.client.project_id(),
+        };
+        let tasks: Vec<TaskResponse> = self.client.get("/api/tasks", &query).await?;
+
+        Ok(tasks
+            .iter()
+            .map(|t| self.response_to_task_with_lookups(t, workflow_names, step_names))
+            .collect())
+    }
+
     async fn list_ready(&self, _status: &str) -> ServiceResult<Vec<Task>> {
         let query = ProjectQuery {
             project_id: self.client.project_id(),

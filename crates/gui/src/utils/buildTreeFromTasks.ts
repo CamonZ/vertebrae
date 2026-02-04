@@ -1,4 +1,5 @@
-import type { Task, TaskTreeNode } from "../bindings";
+import type { Task } from "../bindings";
+import type { TaskTreeNode } from "../types/ui";
 
 /**
  * Build a TaskTreeNode[] hierarchy from a flat array of tasks.

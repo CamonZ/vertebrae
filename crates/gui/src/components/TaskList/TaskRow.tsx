@@ -145,7 +145,7 @@ export function TaskRow({ task, isSelected = false, onClick, columnWidths = {}, 
         style={{ width: columnWidths['created'] ? `${columnWidths['created']}px` : '90px' }}
         className={`whitespace-nowrap px-2 py-3 ${isSelected ? 'border-l-2 border-primary' : 'border-l-2 border-transparent'}`}
       >
-        <RelativeTime date={task.created_at} />
+        {task.created_at ? <RelativeTime date={task.created_at} /> : <span className="text-text-muted">—</span>}
       </td>
 
       {/* ID column */}

@@ -14,7 +14,6 @@
 export type {
   // Core task types
   Task,
-  TaskTreeNode,
   TaskFilterOptions,
 
   // Task enums
@@ -50,6 +49,7 @@ export type {
   ModalProps,
   ToastMessage,
   ToastType,
+  TaskTreeNode,
 } from "./ui";
 
 // Utility types

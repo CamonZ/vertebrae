@@ -209,7 +209,7 @@ export const TagField = forwardRef<HTMLDivElement, TagFieldProps>(
     const hasNoTags = value.length === 0;
     
     // Combine errors
-    const displayError = error || inputError || (required && hasNoTags && "At least one tag is required");
+    const displayError = error || inputError || (required && hasNoTags ? "At least one tag is required" : undefined);
 
     // Generate help text with constraints
     const generateHelpText = () => {

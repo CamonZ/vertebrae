@@ -2,23 +2,34 @@ import { describe, it, expect, vi } from "vitest";
 import { screen, fireEvent } from "@testing-library/react";
 import { render } from "../../test/test-utils";
 import { TaskZoneNode, type TaskZoneNodeData } from "./TaskZoneNode";
-import type { PipelineTask, Step, AgentConfig } from "../../bindings";
+import type { Task, Step, AgentConfig } from "../../bindings";
 
 /**
- * Create a PipelineTask with defaults
+ * Create a Task with defaults
  */
-function createPipelineTask(overrides?: Partial<PipelineTask>): PipelineTask {
+function createTask(overrides?: Partial<Task>): Task {
   return {
     id: "task-1",
     title: "Test Task",
+    description: null,
     level: "task",
-    step_name: "pending",
-    current_step_id: null,
-    workflow_id: null,
     priority: null,
     tags: [],
-    needs_human_review: false,
+    workflow_id: null,
+    current_step_id: null,
+    workflow_name: null,
+    step_name: "pending",
+    needs_human_review: null,
+    review_comment: null,
+    revision_feedback: null,
+    rejection_reason: null,
+    parent_id: null,
+    sections: [],
+    code_refs: [],
     created_at: new Date().toISOString(),
+    updated_at: null,
+    started_at: null,
+    completed_at: null,
     ...overrides,
   };
 }
@@ -109,8 +120,8 @@ describe("TaskZoneNode", () => {
     it("renders task titles", () => {
       const props = createTaskZoneNodeProps({
         tasks: [
-          createPipelineTask({ title: "First Task" }),
-          createPipelineTask({ id: "task-2", title: "Second Task" }),
+          createTask({ title: "First Task" }),
+          createTask({ id: "task-2", title: "Second Task" }),
         ],
       });
       render(<TaskZoneNode {...props} />);
@@ -121,7 +132,7 @@ describe("TaskZoneNode", () => {
     it("renders truncated task IDs", () => {
       const props = createTaskZoneNodeProps({
         tasks: [
-          createPipelineTask({ id: "abc12345678" }),
+          createTask({ id: "abc12345678" }),
         ],
       });
       render(<TaskZoneNode {...props} />);
@@ -133,7 +144,7 @@ describe("TaskZoneNode", () => {
   describe("task status display", () => {
     it("shows checkmark icon for done tasks", () => {
       const props = createTaskZoneNodeProps({
-        tasks: [createPipelineTask({ step_name: "done" })],
+        tasks: [createTask({ step_name: "done" })],
       });
       render(<TaskZoneNode {...props} />);
       expect(screen.getByText("✓")).toBeInTheDocument();
@@ -141,7 +152,7 @@ describe("TaskZoneNode", () => {
 
     it("shows checkmark icon for rejected tasks (treated as done)", () => {
       const props = createTaskZoneNodeProps({
-        tasks: [createPipelineTask({ step_name: "rejected" })],
+        tasks: [createTask({ step_name: "rejected" })],
       });
       render(<TaskZoneNode {...props} />);
       expect(screen.getByText("✓")).toBeInTheDocument();
@@ -152,7 +163,7 @@ describe("TaskZoneNode", () => {
         ["task-1", { currentStep: 1, status: "in_progress" }],
       ]);
       const props = createTaskZoneNodeProps({
-        tasks: [createPipelineTask({ step_name: "pending" })],
+        tasks: [createTask({ step_name: "pending" })],
         executionState,
       });
       render(<TaskZoneNode {...props} />);
@@ -164,7 +175,7 @@ describe("TaskZoneNode", () => {
         ["task-1", { currentStep: 1, status: "failed", error: "Something went wrong" }],
       ]);
       const props = createTaskZoneNodeProps({
-        tasks: [createPipelineTask({ step_name: "pending" })],
+        tasks: [createTask({ step_name: "pending" })],
         executionState,
       });
       render(<TaskZoneNode {...props} />);
@@ -173,7 +184,7 @@ describe("TaskZoneNode", () => {
 
     it("shows circle icon for waiting tasks", () => {
       const props = createTaskZoneNodeProps({
-        tasks: [createPipelineTask({ step_name: "pending" })],
+        tasks: [createTask({ step_name: "pending" })],
       });
       render(<TaskZoneNode {...props} />);
       expect(screen.getByText("○")).toBeInTheDocument();
@@ -183,7 +194,7 @@ describe("TaskZoneNode", () => {
   describe("task level indicators", () => {
     it("renders level dot for epic", () => {
       const props = createTaskZoneNodeProps({
-        tasks: [createPipelineTask({ level: "epic" })],
+        tasks: [createTask({ level: "epic" })],
       });
       const { container } = render(<TaskZoneNode {...props} />);
       const levelDot = container.querySelector(".bg-info");
@@ -192,7 +203,7 @@ describe("TaskZoneNode", () => {
 
     it("renders level dot for ticket", () => {
       const props = createTaskZoneNodeProps({
-        tasks: [createPipelineTask({ level: "ticket" })],
+        tasks: [createTask({ level: "ticket" })],
       });
       const { container } = render(<TaskZoneNode {...props} />);
       const levelDot = container.querySelector(".bg-primary");
@@ -201,7 +212,7 @@ describe("TaskZoneNode", () => {
 
     it("renders level dot for task", () => {
       const props = createTaskZoneNodeProps({
-        tasks: [createPipelineTask({ level: "task" })],
+        tasks: [createTask({ level: "task" })],
       });
       const { container } = render(<TaskZoneNode {...props} />);
       const levelDot = container.querySelector(".bg-text-secondary");
@@ -212,7 +223,7 @@ describe("TaskZoneNode", () => {
   describe("selection state", () => {
     it("highlights selected task", () => {
       const props = createTaskZoneNodeProps({
-        tasks: [createPipelineTask({ id: "task-1" })],
+        tasks: [createTask({ id: "task-1" })],
         selectedTaskId: "task-1",
       });
       const { container } = render(<TaskZoneNode {...props} />);
@@ -223,7 +234,7 @@ describe("TaskZoneNode", () => {
 
     it("does not highlight unselected tasks", () => {
       const props = createTaskZoneNodeProps({
-        tasks: [createPipelineTask({ id: "task-1" })],
+        tasks: [createTask({ id: "task-1" })],
         selectedTaskId: "task-2", // Different task selected
       });
       const { container } = render(<TaskZoneNode {...props} />);
@@ -236,7 +247,7 @@ describe("TaskZoneNode", () => {
     it("calls onTaskClick when task is clicked", () => {
       const onTaskClick = vi.fn();
       const props = createTaskZoneNodeProps({
-        tasks: [createPipelineTask({ id: "task-1", title: "Click Me" })],
+        tasks: [createTask({ id: "task-1", title: "Click Me" })],
         onTaskClick,
       });
       render(<TaskZoneNode {...props} />);
@@ -275,7 +286,7 @@ describe("TaskZoneNode", () => {
     it("stops propagation when task is clicked", () => {
       const onTaskClick = vi.fn();
       const props = createTaskZoneNodeProps({
-        tasks: [createPipelineTask({ id: "task-1", title: "Click Me" })],
+        tasks: [createTask({ id: "task-1", title: "Click Me" })],
         onTaskClick,
       });
       render(<TaskZoneNode {...props} />);

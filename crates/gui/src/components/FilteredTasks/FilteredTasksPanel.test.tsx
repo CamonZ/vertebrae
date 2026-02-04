@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FilteredTasksPanel } from "./FilteredTasksPanel";
-import type { TaskSummary, Step } from "../../bindings";
+import type { Task, Step } from "../../bindings";
 import { commands } from "../../bindings";
 
 // Mock the commands module
@@ -23,6 +23,7 @@ function createStep(overrides?: Partial<Step>): Step {
     id: null,
     name: "Test Step",
     workflow_id: "workflow-1",
+    goal: null,
     order: 0,
     is_final: false,
     transitions_to: [],
@@ -47,19 +48,30 @@ function createStep(overrides?: Partial<Step>): Step {
   };
 }
 
-// Helper to create a task summary
-function createTaskSummary(
-  overrides?: Partial<TaskSummary>
-): TaskSummary {
+// Helper to create a task
+function createTask(overrides?: Partial<Task>): Task {
   return {
     id: "task-123",
     title: "Test Task",
-    step_name: "todo",
+    description: null,
     level: "task",
     priority: null,
-    created_at: "2024-01-01T00:00:00Z",
-    needs_human_review: false,
     tags: [],
+    workflow_id: null,
+    current_step_id: null,
+    workflow_name: null,
+    step_name: "todo",
+    needs_human_review: null,
+    review_comment: null,
+    revision_feedback: null,
+    rejection_reason: null,
+    parent_id: null,
+    sections: [],
+    code_refs: [],
+    created_at: "2024-01-01T00:00:00Z",
+    updated_at: null,
+    started_at: null,
+    completed_at: null,
     ...overrides,
   };
 }
@@ -91,8 +103,8 @@ describe("FilteredTasksPanel", () => {
     it("renders task count", () => {
       const step = createStep();
       const tasks = [
-        createTaskSummary({ id: "task-1" }),
-        createTaskSummary({ id: "task-2" }),
+        createTask({ id: "task-1" }),
+        createTask({ id: "task-2" }),
       ];
       render(<FilteredTasksPanel step={step} tasks={tasks} workflowId="workflow-1" />);
 
@@ -103,8 +115,8 @@ describe("FilteredTasksPanel", () => {
     it("displays active task count", () => {
       const step = createStep();
       const tasks = [
-        createTaskSummary({ id: "task-1", step_name: "in_progress" }),
-        createTaskSummary({ id: "task-2", step_name: "todo" }),
+        createTask({ id: "task-1", step_name: "in_progress" }),
+        createTask({ id: "task-2", step_name: "todo" }),
       ];
       render(<FilteredTasksPanel step={step} tasks={tasks} workflowId="workflow-1" />);
 
@@ -184,7 +196,7 @@ describe("FilteredTasksPanel", () => {
       const user = userEvent.setup();
       const step = createStep();
       const tasks = [
-        createTaskSummary({ id: "task-1", title: "Test Task" }),
+        createTask({ id: "task-1", title: "Test Task" }),
       ];
       const onTaskSelect = vi.fn();
       render(

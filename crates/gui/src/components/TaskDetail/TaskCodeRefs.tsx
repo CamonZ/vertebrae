@@ -335,15 +335,21 @@ export function TaskCodeRefs({ codeRefs, taskId, onCodeRefsChanged }: TaskCodeRe
   const handleEdit = useCallback(async (index: number, formData: CodeRefFormData) => {
     const parsed = parseCodeRefString(formData.path.trim());
 
-    const result = await commands.editCodeRef(
-      taskId,
-      index,
-      parsed.path,
-      formData.lineStart ? parseInt(formData.lineStart, 10) : parsed.lineStart,
-      formData.lineEnd ? parseInt(formData.lineEnd, 10) : parsed.lineEnd,
-      formData.name.trim() || null,
-      formData.description.trim() || null
-    );
+    // Create updated refs array with the modified ref
+    const updatedRefs = codeRefs.map((ref, i) => {
+      if (i === index) {
+        return {
+          path: parsed.path,
+          line_start: formData.lineStart ? parseInt(formData.lineStart, 10) : parsed.lineStart,
+          line_end: formData.lineEnd ? parseInt(formData.lineEnd, 10) : parsed.lineEnd,
+          name: formData.name.trim() || null,
+          description: formData.description.trim() || null,
+        };
+      }
+      return ref;
+    });
+
+    const result = await commands.replaceCodeRefs(taskId, updatedRefs);
 
     if (result.status === 'error') {
       throw new Error(result.error.message);
@@ -351,12 +357,12 @@ export function TaskCodeRefs({ codeRefs, taskId, onCodeRefsChanged }: TaskCodeRe
 
     setEditingIndex(null);
     onCodeRefsChanged?.();
-  }, [taskId, onCodeRefsChanged]);
+  }, [taskId, codeRefs, onCodeRefsChanged]);
 
   const handleDelete = useCallback(async (index: number) => {
     setDeletingIndex(index);
     try {
-      const result = await commands.removeCodeRef(taskId, index);
+      const result = await commands.removeCodeRefs(taskId, [index]);
       if (result.status === 'error') {
         console.error('Failed to delete code ref:', result.error.message);
       } else {

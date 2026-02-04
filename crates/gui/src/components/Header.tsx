@@ -1,3 +1,4 @@
+import { ConnectionStatus } from "./ConnectionStatus";
 import { ThemeToggle } from "./ThemeToggle";
 
 interface HeaderProps {
@@ -27,7 +28,8 @@ export function Header({ title, subtitle }: HeaderProps) {
       </div>
 
       {/* Actions */}
-      <div className="titlebar-button flex items-center gap-3">
+      <div className="titlebar-button flex items-center gap-4">
+        <ConnectionStatus />
         <ThemeToggle />
       </div>
     </header>

@@ -12,7 +12,6 @@ use crate::error::{SacrumClientError, SacrumClientResult};
 use reqwest::Client;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use tracing::debug;
 
 /// HTTP client for Sacrum API
 ///
@@ -70,12 +69,26 @@ impl SacrumClient {
         path: &str,
         query: &Q,
     ) -> SacrumClientResult<T> {
-        debug!("GET request to: {}{}", self.base_url, path);
-
         let url = format!("{}{}", self.base_url, path);
-        let response = self.client.get(&url).query(query).send().await?;
+        let start = std::time::Instant::now();
+        log::info!("[HTTP] GET {}", url);
 
-        self.handle_response::<T>(response).await
+        let response = self.client.get(&url).query(query).send().await?;
+        let send_time = start.elapsed().as_millis();
+
+        let status = response.status();
+        let result = self.handle_response::<T>(response).await;
+        let total_time = start.elapsed().as_millis();
+
+        log::info!(
+            "[HTTP] GET {} -> {} (send: {}ms, parse: {}ms, total: {}ms)",
+            url,
+            status.as_u16(),
+            send_time,
+            total_time - send_time,
+            total_time
+        );
+        result
     }
 
     /// Perform a POST request and deserialize the response
@@ -91,12 +104,21 @@ impl SacrumClient {
         path: &str,
         body: &B,
     ) -> SacrumClientResult<T> {
-        debug!("POST request to: {}{}", self.base_url, path);
-
         let url = format!("{}{}", self.base_url, path);
-        let response = self.client.post(&url).json(body).send().await?;
+        let start = std::time::Instant::now();
+        log::info!("[HTTP] POST {}", url);
 
-        self.handle_response::<T>(response).await
+        let response = self.client.post(&url).json(body).send().await?;
+        let status = response.status();
+        let result = self.handle_response::<T>(response).await;
+
+        log::info!(
+            "[HTTP] POST {} -> {} ({}ms)",
+            url,
+            status.as_u16(),
+            start.elapsed().as_millis()
+        );
+        result
     }
 
     /// Perform a POST request that doesn't return data
@@ -105,18 +127,31 @@ impl SacrumClient {
     /// * `path` - The API path (relative to base_url, should start with /)
     /// * `body` - The request body to serialize and send
     pub async fn post_void<B: Serialize>(&self, path: &str, body: &B) -> SacrumClientResult<()> {
-        debug!("POST request to: {}{}", self.base_url, path);
-
         let url = format!("{}{}", self.base_url, path);
-        let response = self.client.post(&url).json(body).send().await?;
+        let start = std::time::Instant::now();
+        log::info!("[HTTP] POST {}", url);
 
-        if response.status().is_success() {
+        let response = self.client.post(&url).json(body).send().await?;
+        let status = response.status();
+
+        let result = if response.status().is_success() {
             Ok(())
         } else {
-            let status = response.status().as_u16();
+            let status_code = response.status().as_u16();
             let message = response.text().await.unwrap_or_default();
-            Err(SacrumClientError::ApiError { status, message })
-        }
+            Err(SacrumClientError::ApiError {
+                status: status_code,
+                message,
+            })
+        };
+
+        log::info!(
+            "[HTTP] POST {} -> {} ({}ms)",
+            url,
+            status.as_u16(),
+            start.elapsed().as_millis()
+        );
+        result
     }
 
     /// Perform a PUT request and deserialize the response
@@ -132,12 +167,21 @@ impl SacrumClient {
         path: &str,
         body: &B,
     ) -> SacrumClientResult<T> {
-        debug!("PUT request to: {}{}", self.base_url, path);
-
         let url = format!("{}{}", self.base_url, path);
-        let response = self.client.put(&url).json(body).send().await?;
+        let start = std::time::Instant::now();
+        log::info!("[HTTP] PUT {}", url);
 
-        self.handle_response::<T>(response).await
+        let response = self.client.put(&url).json(body).send().await?;
+        let status = response.status();
+        let result = self.handle_response::<T>(response).await;
+
+        log::info!(
+            "[HTTP] PUT {} -> {} ({}ms)",
+            url,
+            status.as_u16(),
+            start.elapsed().as_millis()
+        );
+        result
     }
 
     /// Perform a PATCH request that doesn't return data
@@ -146,18 +190,31 @@ impl SacrumClient {
     /// * `path` - The API path (relative to base_url, should start with /)
     /// * `body` - The request body to serialize and send
     pub async fn patch<B: Serialize>(&self, path: &str, body: &B) -> SacrumClientResult<()> {
-        debug!("PATCH request to: {}{}", self.base_url, path);
-
         let url = format!("{}{}", self.base_url, path);
-        let response = self.client.patch(&url).json(body).send().await?;
+        let start = std::time::Instant::now();
+        log::info!("[HTTP] PATCH {}", url);
 
-        if response.status().is_success() {
+        let response = self.client.patch(&url).json(body).send().await?;
+        let status = response.status();
+
+        let result = if response.status().is_success() {
             Ok(())
         } else {
-            let status = response.status().as_u16();
+            let status_code = response.status().as_u16();
             let message = response.text().await.unwrap_or_default();
-            Err(SacrumClientError::ApiError { status, message })
-        }
+            Err(SacrumClientError::ApiError {
+                status: status_code,
+                message,
+            })
+        };
+
+        log::info!(
+            "[HTTP] PATCH {} -> {} ({}ms)",
+            url,
+            status.as_u16(),
+            start.elapsed().as_millis()
+        );
+        result
     }
 
     /// Perform a DELETE request
@@ -165,19 +222,32 @@ impl SacrumClient {
     /// # Arguments
     /// * `path` - The API path (relative to base_url, should start with /)
     pub async fn delete(&self, path: &str) -> SacrumClientResult<()> {
-        debug!("DELETE request to: {}{}", self.base_url, path);
-
         let url = format!("{}{}", self.base_url, path);
+        let start = std::time::Instant::now();
+        log::info!("[HTTP] DELETE {}", url);
+
         let response = self.client.delete(&url).send().await?;
+        let status = response.status();
 
         // For DELETE, we just check the status code
-        if response.status().is_success() {
+        let result = if response.status().is_success() {
             Ok(())
         } else {
-            let status = response.status().as_u16();
+            let status_code = response.status().as_u16();
             let message = response.text().await.unwrap_or_default();
-            Err(SacrumClientError::ApiError { status, message })
-        }
+            Err(SacrumClientError::ApiError {
+                status: status_code,
+                message,
+            })
+        };
+
+        log::info!(
+            "[HTTP] DELETE {} -> {} ({}ms)",
+            url,
+            status.as_u16(),
+            start.elapsed().as_millis()
+        );
+        result
     }
 
     /// Handle HTTP response, unwrapping DataEnvelope and converting errors
@@ -188,7 +258,9 @@ impl SacrumClient {
         let status = response.status();
 
         if status.is_success() {
-            let envelope: DataEnvelope<T> = response.json().await?;
+            let bytes = response.bytes().await?;
+            log::debug!("[HTTP] Response body: {} bytes", bytes.len());
+            let envelope: DataEnvelope<T> = serde_json::from_slice(&bytes)?;
             Ok(envelope.into_inner())
         } else {
             let status_code = status.as_u16();

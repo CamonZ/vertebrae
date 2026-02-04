@@ -4,7 +4,7 @@ import {
 } from "react";
 import { FormField } from "./FormField";
 
-export interface BooleanFieldProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "onChange"> {
+export interface BooleanFieldProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "onChange" | "value"> {
   /**
    * The field label text
    */

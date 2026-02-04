@@ -1,4 +1,5 @@
-import type { TaskTreeNode as TaskTreeNodeType, Task } from "../../bindings";
+import type { Task } from "../../bindings";
+import type { TaskTreeNode as TaskTreeNodeType } from "../../types/ui";
 import { TaskTreeNode } from "./TaskTreeNode";
 import type { useExpandedNodes } from "../../hooks/useExpandedNodes";
 

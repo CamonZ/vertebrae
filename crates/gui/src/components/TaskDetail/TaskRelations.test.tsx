@@ -3,23 +3,34 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TaskRelations } from './TaskRelations';
 import * as bindingsModule from '../../bindings';
+import type { Task } from '../../bindings';
 
-// Helper to create mock TaskSummary
-const createMockTask = (id: string, title: string) => ({
+// Helper to create mock Task with all required fields
+const createMockTask = (id: string, title: string): Task => ({
   id,
   title,
+  description: null,
   level: 'task' as const,
-  status: 'backlog',
   priority: null,
   tags: [] as string[],
-  needs_human_review: null,
-  created_at: '2024-01-01T00:00:00Z',
+  workflow_id: null,
+  current_step_id: null,
   workflow_name: null,
-  current_step_name: null,
   step_name: null,
+  needs_human_review: null,
+  review_comment: null,
+  revision_feedback: null,
+  rejection_reason: null,
+  parent_id: null,
+  sections: [],
+  code_refs: [],
+  created_at: '2024-01-01T00:00:00Z',
+  updated_at: null,
+  started_at: null,
+  completed_at: null,
 });
 
-const mockTaskList = [
+const mockTaskList: Task[] = [
   createMockTask('task-1', 'Task One'),
   createMockTask('task-2', 'Task Two'),
   createMockTask('task-3', 'Task Three'),

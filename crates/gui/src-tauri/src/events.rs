@@ -136,3 +136,43 @@ pub enum WorkflowExecutionEventType {
     /// Workflow failed
     Failed { error: String },
 }
+
+/// Event payload for step transition changes.
+/// Emitted when a step transition is created or deleted.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct StepTransitionChangedEvent {
+    pub transition_id: String,
+    pub change_type: StepTransitionChangeType,
+}
+
+/// The type of change that occurred on a step transition.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub enum StepTransitionChangeType {
+    Created,
+    Deleted,
+}
+
+/// Event payload for session log creation.
+/// Emitted when a new session log is created during step execution.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct SessionLogCreatedEvent {
+    pub log_id: String,
+    pub execution_id: String,
+}
+
+/// Event payload for section changes.
+/// Emitted when a section is created, updated, or deleted.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct SectionChangedEvent {
+    pub section_id: String,
+    pub task_id: String,
+    pub change_type: SectionChangeType,
+}
+
+/// The type of change that occurred on a section.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub enum SectionChangeType {
+    Created,
+    Updated,
+    Deleted,
+}
