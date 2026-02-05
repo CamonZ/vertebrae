@@ -16,6 +16,5 @@ export { useStepExecutionChangeListener } from "./useStepExecutionChangeListener
 export { useTheme } from "./useTheme";
 export { useExpandedNodes } from "./useExpandedNodes";
 export { useResizableColumns } from "./useResizableColumns";
-export { usePtySession } from "./usePtySession";
 export { useElkLayout, calculateElkLayout } from "./useElkLayout";
 export type { LayoutNode, LayoutEdge, LayoutPoint, LayoutEdgePath, LayoutResult, ElkLayoutOptions } from "./useElkLayout";

@@ -3,7 +3,7 @@ import { Sidebar } from "./Sidebar";
 import { Header } from "./Header";
 import { ContentArea } from "./ContentArea";
 import { ToastContainer } from "./Toast";
-import { ChatPanel } from "./ChatPanel";
+import { ClaudeChatSidebar } from "./ClaudeChatSidebar";
 
 interface AppShellProps {
   children: ReactNode;
@@ -22,8 +22,8 @@ export function AppShell({
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <Header title={title} subtitle={subtitle} />
         <ContentArea>{children}</ContentArea>
-        <ChatPanel />
       </div>
+      <ClaudeChatSidebar />
       <ToastContainer />
     </div>
   );

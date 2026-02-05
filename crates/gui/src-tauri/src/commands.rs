@@ -158,6 +158,7 @@ pub async fn add_project(
         vertebrae_sacrum_client::ProjectSection {
             project_id: project.id.clone(),
             url: None,
+            path: None,
         },
     );
 
@@ -169,6 +170,7 @@ pub async fn add_project(
         slug: project_slug,
         project_id: project.id,
         url: None,
+        path: None,
     })
 }
 
@@ -221,6 +223,30 @@ pub async fn get_current_project(
 ) -> Result<Option<String>, CommandError> {
     log::info!("get_current_project called");
     Ok(state.project_config.get_current_project())
+}
+
+/// Get the currently selected project's git root path
+#[tauri::command]
+#[specta::specta]
+pub async fn get_current_project_path(
+    state: State<'_, AppState>,
+) -> Result<Option<String>, CommandError> {
+    log::info!("get_current_project_path called");
+
+    // Get current project slug
+    let slug = match state.project_config.get_current_project() {
+        Some(s) => s,
+        None => return Ok(None),
+    };
+
+    // Load config file and find the project's path
+    let config_file = vertebrae_sacrum_client::load_config_file().map_err(|e| CommandError {
+        message: format!("Failed to load config: {}", e),
+    })?;
+
+    let path = config_file.projects.get(&slug).and_then(|p| p.path.clone());
+
+    Ok(path)
 }
 
 /// Set the current project by slug and connect to its backend
@@ -1066,83 +1092,72 @@ pub async fn run_workflow(
 }
 
 // ============================================================================
-// PTY Commands
+// Claude Session Commands (JSONL streaming)
 // ============================================================================
 
-/// Create a new PTY session with the user's default shell
+/// Create a new Claude session with JSONL streaming
 ///
-/// Returns the session ID on success. The PTY will emit PtyOutputEvent for output
-/// and PtyExitEvent when the session ends.
+/// Spawns the Claude CLI with streaming JSON input/output mode.
+/// If `resume_session_id` is provided, continues an existing conversation.
+/// Returns immediately; the session emits events for all output.
 #[tauri::command]
 #[specta::specta]
-pub async fn create_pty_session(
-    pty_manager: State<'_, crate::pty_manager::PtyManager>,
+pub async fn create_claude_session(
+    claude_manager: State<'_, crate::claude_session::ClaudeSessionManager>,
     app_handle: tauri::AppHandle,
     session_id: String,
-    cols: u16,
-    rows: u16,
     working_dir: Option<String>,
-) -> Result<(), crate::pty_manager::PtyError> {
+    initial_prompt: Option<String>,
+    resume_session_id: Option<String>,
+) -> Result<(), crate::claude_session::ClaudeSessionError> {
     log::info!(
-        "create_pty_session called: session_id={}, cols={}, rows={}, working_dir={:?}",
+        "create_claude_session called: session_id={}, working_dir={:?}, resume={:?}",
         session_id,
-        cols,
-        rows,
-        working_dir
+        working_dir,
+        resume_session_id
     );
 
-    pty_manager
-        .spawn_shell_pty(session_id, cols, rows, working_dir, app_handle)
+    claude_manager
+        .create_session(
+            session_id,
+            working_dir,
+            initial_prompt,
+            resume_session_id,
+            app_handle,
+        )
         .await
 }
 
-/// Write data to a PTY session
+/// Send a message to a Claude session
 ///
-/// The data should be base64-encoded bytes.
+/// Sends a user message to an active Claude session via stdin.
 #[tauri::command]
 #[specta::specta]
-pub async fn write_pty(
-    pty_manager: State<'_, crate::pty_manager::PtyManager>,
+pub async fn send_claude_message(
+    claude_manager: State<'_, crate::claude_session::ClaudeSessionManager>,
     session_id: String,
-    data: String,
-) -> Result<(), crate::pty_manager::PtyError> {
-    use base64::Engine;
-    let decoder = base64::engine::general_purpose::STANDARD;
-
-    let bytes = decoder
-        .decode(&data)
-        .map_err(|e| crate::pty_manager::PtyError::WriteFailed(format!("Invalid base64: {}", e)))?;
-
-    pty_manager.write_to_pty(&session_id, &bytes).await
-}
-
-/// Resize a PTY session
-#[tauri::command]
-#[specta::specta]
-pub async fn resize_pty(
-    pty_manager: State<'_, crate::pty_manager::PtyManager>,
-    session_id: String,
-    cols: u16,
-    rows: u16,
-) -> Result<(), crate::pty_manager::PtyError> {
+    content: String,
+) -> Result<(), crate::claude_session::ClaudeSessionError> {
     log::info!(
-        "resize_pty called: session_id={}, cols={}, rows={}",
+        "send_claude_message called: session_id={}, content_len={}",
         session_id,
-        cols,
-        rows
+        content.len()
     );
-    pty_manager.resize_pty(&session_id, cols, rows).await
+
+    claude_manager.send_message(&session_id, &content).await
 }
 
-/// Close a PTY session
+/// Close a Claude session
+///
+/// Terminates the Claude CLI process for the given session.
 #[tauri::command]
 #[specta::specta]
-pub async fn close_pty_session(
-    pty_manager: State<'_, crate::pty_manager::PtyManager>,
+pub async fn close_claude_session(
+    claude_manager: State<'_, crate::claude_session::ClaudeSessionManager>,
     session_id: String,
-) -> Result<(), crate::pty_manager::PtyError> {
-    log::info!("close_pty_session called: session_id={}", session_id);
-    pty_manager.close_session(&session_id).await
+) -> Result<(), crate::claude_session::ClaudeSessionError> {
+    log::info!("close_claude_session called: session_id={}", session_id);
+    claude_manager.close_session(&session_id).await
 }
 
 // ============================================================================
@@ -2602,6 +2617,7 @@ mod tests {
         let app = build_app_with_services();
         let state: tauri::State<'_, AppState> = app.state();
 
+        // Create a workflow via the service directly
         {
             let guard = state.services.read().await;
             let svc = guard.as_ref().unwrap();
@@ -3100,7 +3116,7 @@ mod tests {
             state.clone(),
             id.clone(),
             "src/main.rs".to_string(),
-            Some(42),
+            None,
             None,
             Some("main fn".to_string()),
             None,

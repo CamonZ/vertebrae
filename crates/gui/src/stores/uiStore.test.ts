@@ -6,8 +6,7 @@ describe("uiStore", () => {
     // Reset store state before each test
     useUIStore.setState({
       theme: "system",
-      chatPanelOpen: false,
-      chatPanelHeight: 320,
+      claudeSidebarOpen: false,
     });
   });
 
@@ -17,14 +16,9 @@ describe("uiStore", () => {
       expect(state.theme).toBe("system");
     });
 
-    it("has chat panel closed by default", () => {
+    it("has Claude sidebar closed by default", () => {
       const state = useUIStore.getState();
-      expect(state.chatPanelOpen).toBe(false);
-    });
-
-    it("has default chat panel height", () => {
-      const state = useUIStore.getState();
-      expect(state.chatPanelHeight).toBe(320);
+      expect(state.claudeSidebarOpen).toBe(false);
     });
   });
 
@@ -50,60 +44,46 @@ describe("uiStore", () => {
     });
   });
 
-  describe("toggleChatPanel", () => {
-    it("opens chat panel when closed", () => {
-      useUIStore.getState().toggleChatPanel();
+  describe("toggleClaudeSidebar", () => {
+    it("opens Claude sidebar when closed", () => {
+      useUIStore.getState().toggleClaudeSidebar();
 
-      expect(useUIStore.getState().chatPanelOpen).toBe(true);
+      expect(useUIStore.getState().claudeSidebarOpen).toBe(true);
     });
 
-    it("closes chat panel when open", () => {
-      useUIStore.setState({ chatPanelOpen: true });
+    it("closes Claude sidebar when open", () => {
+      useUIStore.setState({ claudeSidebarOpen: true });
 
-      useUIStore.getState().toggleChatPanel();
+      useUIStore.getState().toggleClaudeSidebar();
 
-      expect(useUIStore.getState().chatPanelOpen).toBe(false);
+      expect(useUIStore.getState().claudeSidebarOpen).toBe(false);
     });
 
     it("toggles multiple times correctly", () => {
-      useUIStore.getState().toggleChatPanel();
-      expect(useUIStore.getState().chatPanelOpen).toBe(true);
+      useUIStore.getState().toggleClaudeSidebar();
+      expect(useUIStore.getState().claudeSidebarOpen).toBe(true);
 
-      useUIStore.getState().toggleChatPanel();
-      expect(useUIStore.getState().chatPanelOpen).toBe(false);
+      useUIStore.getState().toggleClaudeSidebar();
+      expect(useUIStore.getState().claudeSidebarOpen).toBe(false);
 
-      useUIStore.getState().toggleChatPanel();
-      expect(useUIStore.getState().chatPanelOpen).toBe(true);
+      useUIStore.getState().toggleClaudeSidebar();
+      expect(useUIStore.getState().claudeSidebarOpen).toBe(true);
     });
   });
 
-  describe("setChatPanelOpen", () => {
-    it("sets chat panel to open", () => {
-      useUIStore.getState().setChatPanelOpen(true);
+  describe("setClaudeSidebarOpen", () => {
+    it("sets Claude sidebar to open", () => {
+      useUIStore.getState().setClaudeSidebarOpen(true);
 
-      expect(useUIStore.getState().chatPanelOpen).toBe(true);
+      expect(useUIStore.getState().claudeSidebarOpen).toBe(true);
     });
 
-    it("sets chat panel to closed", () => {
-      useUIStore.setState({ chatPanelOpen: true });
+    it("sets Claude sidebar to closed", () => {
+      useUIStore.setState({ claudeSidebarOpen: true });
 
-      useUIStore.getState().setChatPanelOpen(false);
+      useUIStore.getState().setClaudeSidebarOpen(false);
 
-      expect(useUIStore.getState().chatPanelOpen).toBe(false);
-    });
-  });
-
-  describe("setChatPanelHeight", () => {
-    it("sets chat panel height", () => {
-      useUIStore.getState().setChatPanelHeight(400);
-
-      expect(useUIStore.getState().chatPanelHeight).toBe(400);
-    });
-
-    it("allows setting height to minimum", () => {
-      useUIStore.getState().setChatPanelHeight(150);
-
-      expect(useUIStore.getState().chatPanelHeight).toBe(150);
+      expect(useUIStore.getState().claudeSidebarOpen).toBe(false);
     });
   });
 });

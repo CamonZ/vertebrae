@@ -59,6 +59,9 @@ pub struct ProjectSection {
     /// Optional per-project URL override
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    /// Optional git root path for the project
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
 }
 
 impl SacrumConfig {
@@ -522,6 +525,7 @@ mod tests {
             ProjectSection {
                 project_id: "uuid-123".to_string(),
                 url: None,
+                path: None,
             },
         );
         config.projects.insert(
@@ -529,6 +533,7 @@ mod tests {
             ProjectSection {
                 project_id: "uuid-456".to_string(),
                 url: Some("https://other-server.com".to_string()),
+                path: None,
             },
         );
 
@@ -600,6 +605,7 @@ url = "https://custom-server.com"
         let section = ProjectSection {
             project_id: "uuid-123".to_string(),
             url: None,
+            path: None,
         };
         let toml_str = toml::to_string(&section).unwrap();
         assert!(!toml_str.contains("url"));
@@ -607,6 +613,7 @@ url = "https://custom-server.com"
         let section_with_url = ProjectSection {
             project_id: "uuid-123".to_string(),
             url: Some("http://custom.com".to_string()),
+            path: None,
         };
         let toml_str = toml::to_string(&section_with_url).unwrap();
         assert!(toml_str.contains("url"));

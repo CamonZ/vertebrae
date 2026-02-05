@@ -248,6 +248,7 @@ impl InitCommand {
             ProjectSection {
                 project_id: project.id.clone(),
                 url: url_override,
+                path: Some(git_root.to_string_lossy().to_string()),
             },
         );
 

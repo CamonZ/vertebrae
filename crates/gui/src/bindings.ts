@@ -65,6 +65,17 @@ async getCurrentProject() : Promise<Result<string | null, CommandError>> {
 }
 },
 /**
+ * Get the currently selected project's git root path
+ */
+async getCurrentProjectPath() : Promise<Result<string | null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_current_project_path") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Set the current project by slug and connect to its backend
  */
 async setCurrentProject(slug: string | null) : Promise<Result<null, CommandError>> {
@@ -521,49 +532,41 @@ async runWorkflow(taskId: string) : Promise<Result<null, CommandError>> {
 }
 },
 /**
- * Create a new PTY session with the user's default shell
+ * Create a new Claude session with JSONL streaming
  * 
- * Returns the session ID on success. The PTY will emit PtyOutputEvent for output
- * and PtyExitEvent when the session ends.
+ * Spawns the Claude CLI with streaming JSON input/output mode.
+ * If `resume_session_id` is provided, continues an existing conversation.
+ * Returns immediately; the session emits events for all output.
  */
-async createPtySession(sessionId: string, cols: number, rows: number, workingDir: string | null) : Promise<Result<null, PtyError>> {
+async createClaudeSession(sessionId: string, workingDir: string | null, initialPrompt: string | null, resumeSessionId: string | null) : Promise<Result<null, ClaudeSessionError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("create_pty_session", { sessionId, cols, rows, workingDir }) };
+    return { status: "ok", data: await TAURI_INVOKE("create_claude_session", { sessionId, workingDir, initialPrompt, resumeSessionId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
 /**
- * Write data to a PTY session
+ * Send a message to a Claude session
  * 
- * The data should be base64-encoded bytes.
+ * Sends a user message to an active Claude session via stdin.
  */
-async writePty(sessionId: string, data: string) : Promise<Result<null, PtyError>> {
+async sendClaudeMessage(sessionId: string, content: string) : Promise<Result<null, ClaudeSessionError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("write_pty", { sessionId, data }) };
+    return { status: "ok", data: await TAURI_INVOKE("send_claude_message", { sessionId, content }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
 /**
- * Resize a PTY session
+ * Close a Claude session
+ * 
+ * Terminates the Claude CLI process for the given session.
  */
-async resizePty(sessionId: string, cols: number, rows: number) : Promise<Result<null, PtyError>> {
+async closeClaudeSession(sessionId: string) : Promise<Result<null, ClaudeSessionError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("resize_pty", { sessionId, cols, rows }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-/**
- * Close a PTY session
- */
-async closePtySession(sessionId: string) : Promise<Result<null, PtyError>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("close_pty_session", { sessionId }) };
+    return { status: "ok", data: await TAURI_INVOKE("close_claude_session", { sessionId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -586,8 +589,13 @@ async getWebsocketStatus() : Promise<Result<string, CommandError>> {
 
 
 export const events = __makeEvents__<{
-ptyExitEvent: PtyExitEvent,
-ptyOutputEvent: PtyOutputEvent,
+claudePermissionRequestEvent: ClaudePermissionRequestEvent,
+claudeSessionEndEvent: ClaudeSessionEndEvent,
+claudeSessionErrorEvent: ClaudeSessionErrorEvent,
+claudeSessionInitEvent: ClaudeSessionInitEvent,
+claudeTextEvent: ClaudeTextEvent,
+claudeToolCallEvent: ClaudeToolCallEvent,
+claudeToolResultEvent: ClaudeToolResultEvent,
 sectionChangedEvent: SectionChangedEvent,
 sessionLogCreatedEvent: SessionLogCreatedEvent,
 stepChangedEvent: StepChangedEvent,
@@ -598,8 +606,13 @@ taskStepChangedEvent: TaskStepChangedEvent,
 workflowChangedEvent: WorkflowChangedEvent,
 workflowExecutionEvent: WorkflowExecutionEvent
 }>({
-ptyExitEvent: "pty-exit-event",
-ptyOutputEvent: "pty-output-event",
+claudePermissionRequestEvent: "claude-permission-request-event",
+claudeSessionEndEvent: "claude-session-end-event",
+claudeSessionErrorEvent: "claude-session-error-event",
+claudeSessionInitEvent: "claude-session-init-event",
+claudeTextEvent: "claude-text-event",
+claudeToolCallEvent: "claude-tool-call-event",
+claudeToolResultEvent: "claude-tool-result-event",
 sectionChangedEvent: "section-changed-event",
 sessionLogCreatedEvent: "session-log-created-event",
 stepChangedEvent: "step-changed-event",
@@ -674,6 +687,54 @@ plugin_dirs: string[];
  */
 json_schema: string | null }
 /**
+ * Event emitted when Claude requests permission
+ */
+export type ClaudePermissionRequestEvent = { session_id: string; tool_name: string; permission_message: string }
+/**
+ * Event emitted when Claude session ends
+ */
+export type ClaudeSessionEndEvent = { session_id: string; duration_ms: number; cost_usd: number; num_turns: number; result: string; is_error: boolean; 
+/**
+ * Total tokens used in context (input + cache)
+ */
+context_tokens: number; 
+/**
+ * Maximum context window size
+ */
+context_window: number }
+/**
+ * Claude session errors
+ */
+export type ClaudeSessionError = { SessionExists: string } | { SessionNotFound: string } | { SendFailed: string } | { SpawnFailed: string }
+/**
+ * Event emitted when Claude session encounters an error
+ */
+export type ClaudeSessionErrorEvent = { session_id: string; error: string }
+/**
+ * Event emitted when Claude session initializes
+ */
+export type ClaudeSessionInitEvent = { session_id: string; 
+/**
+ * Claude's conversation ID - use this with --resume for multi-turn
+ */
+claude_conversation_id: string | null; model: string; tools: string[] }
+/**
+ * Event emitted when Claude produces text output
+ */
+export type ClaudeTextEvent = { session_id: string; text: string; 
+/**
+ * Whether this is a partial (streaming) message
+ */
+is_partial: boolean }
+/**
+ * Event emitted when Claude calls a tool
+ */
+export type ClaudeToolCallEvent = { session_id: string; tool_id: string; tool_name: string; input: string }
+/**
+ * Event emitted when a tool returns a result
+ */
+export type ClaudeToolResultEvent = { session_id: string; tool_id: string; result: string; is_error: boolean }
+/**
  * Code reference - file location reference
  */
 export type CodeRef = { 
@@ -715,30 +776,6 @@ export type PermissionMode = "accept_edits" | "bypass_permissions" | "default" |
  */
 export type PipelineData = { workflows: Workflow[]; workflow_steps: Partial<{ [key in string]: Step[] }>; tasks: Task[]; transitions: WorkflowTransition[] }
 /**
- * PTY operation errors
- */
-export type PtyError = { SpawnFailed: string } | { SessionNotFound: string } | { WriteFailed: string } | { ResizeFailed: string }
-/**
- * Event emitted when PTY session ends
- */
-export type PtyExitEvent = { session_id: string; 
-/**
- * Exit code if process exited normally
- */
-exit_code: number | null; 
-/**
- * Error message if process failed
- */
-error: string | null }
-/**
- * Event emitted when PTY produces output
- */
-export type PtyOutputEvent = { session_id: string; 
-/**
- * Raw output bytes encoded as base64 to preserve binary data
- */
-data: string }
-/**
  * A saved project in the project list
  */
 export type SavedProject = { 
@@ -753,7 +790,11 @@ project_id: string;
 /**
  * Optional per-project URL override
  */
-url?: string | null }
+url?: string | null; 
+/**
+ * Optional git root path for the project
+ */
+path?: string | null }
 /**
  * Section content within a task
  */

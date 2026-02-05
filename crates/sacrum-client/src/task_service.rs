@@ -393,8 +393,9 @@ impl TaskService for SacrumTaskService {
         Ok(self.client.get(&path, &query).await?)
     }
 
-    async fn get_parent(&self, _task_id: &str) -> ServiceResult<Option<String>> {
-        unimplemented!("Parent retrieval not yet implemented for Sacrum HTTP client")
+    async fn get_parent(&self, task_id: &str) -> ServiceResult<Option<String>> {
+        let task = self.get_task(task_id).await?;
+        Ok(task.parent_id)
     }
 
     async fn get_children(&self, task_id: &str) -> ServiceResult<Vec<String>> {

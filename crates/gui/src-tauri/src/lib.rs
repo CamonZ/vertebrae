@@ -1,9 +1,9 @@
 #![allow(deprecated)]
 
+pub mod claude_session;
 pub mod commands;
 pub mod events;
 pub mod project_config;
-pub mod pty_manager;
 pub mod sacrum;
 pub mod types;
 pub mod websocket_client;
@@ -20,6 +20,11 @@ use tauri::Manager;
 use tauri_specta::{collect_commands, collect_events, Builder};
 use vertebrae_sacrum_client::{SacrumClient, SacrumConfig};
 
+use claude_session::{
+    ClaudePermissionRequestEvent, ClaudeSessionEndEvent, ClaudeSessionErrorEvent,
+    ClaudeSessionInitEvent, ClaudeSessionManager, ClaudeTextEvent, ClaudeToolCallEvent,
+    ClaudeToolResultEvent,
+};
 use commands::AppState;
 use events::{
     SectionChangedEvent, SessionLogCreatedEvent, StepChangedEvent, StepExecutionChangedEvent,
@@ -27,7 +32,6 @@ use events::{
     WorkflowExecutionEvent,
 };
 use project_config::ProjectConfig;
-use pty_manager::{PtyExitEvent, PtyManager, PtyOutputEvent};
 
 /// Example command that will be exported with type definitions.
 /// This serves as a template for future Tauri commands.
@@ -59,6 +63,7 @@ fn create_builder() -> Builder {
             commands::add_project,
             commands::remove_project,
             commands::get_current_project,
+            commands::get_current_project_path,
             commands::set_current_project,
             commands::has_project_selected,
             // Task commands
@@ -103,11 +108,10 @@ fn create_builder() -> Builder {
             commands::delete_step,
             // Workflow execution commands
             commands::run_workflow,
-            // PTY commands
-            commands::create_pty_session,
-            commands::write_pty,
-            commands::resize_pty,
-            commands::close_pty_session,
+            // Claude session commands (JSONL streaming)
+            commands::create_claude_session,
+            commands::send_claude_message,
+            commands::close_claude_session,
             // WebSocket status command
             commands::get_websocket_status,
         ])
@@ -121,8 +125,14 @@ fn create_builder() -> Builder {
             SessionLogCreatedEvent,
             SectionChangedEvent,
             WorkflowExecutionEvent,
-            PtyOutputEvent,
-            PtyExitEvent
+            // Claude session events
+            ClaudeSessionInitEvent,
+            ClaudeTextEvent,
+            ClaudeToolCallEvent,
+            ClaudeToolResultEvent,
+            ClaudeSessionEndEvent,
+            ClaudeSessionErrorEvent,
+            ClaudePermissionRequestEvent
         ])
 }
 
@@ -180,9 +190,9 @@ pub fn run() {
                 project_config,
             });
 
-            // Initialize PTY manager for terminal sessions
-            app.manage(PtyManager::new());
-            log::info!("[STARTUP] PTY manager initialized");
+            // Initialize Claude session manager for JSONL chat
+            app.manage(ClaudeSessionManager::new());
+            log::info!("[STARTUP] Claude session manager initialized");
 
             // Start WebSocket connection to Sacrum for real-time updates
             let ws_slug = app.state::<AppState>().project_config.get_current_project();
