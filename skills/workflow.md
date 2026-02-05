@@ -12,8 +12,6 @@ vtb workflow list                    # See all configured workflows
 vtb workflow show <workflow-id>      # See steps within a workflow
 ```
 
-Workflow names and steps are project-specific. Always check what's configured before using `transition-to` or `workflow advance`.
-
 ## Subcommands
 
 | Command | Description |
@@ -25,9 +23,9 @@ Workflow names and steps are project-specific. Always check what's configured be
 | `workflow delete` | Delete a workflow |
 | `workflow assign` | Assign a task to a workflow |
 | `workflow unassign` | Remove workflow from a task |
-| `workflow advance` | Move task to next step |
-| `workflow retreat` | Move task to previous step |
-| `workflow reject` | Reject task (unassigns workflow) |
+| `workflow transition add` | Create a transition between workflows |
+| `workflow transition list` | List workflow transitions |
+| `workflow transition delete` | Delete a workflow transition |
 
 ---
 
@@ -66,39 +64,14 @@ List all defined workflows.
 vtb workflow list
 ```
 
-Output:
-```
-impl - Implementation (3 steps) - Standard development workflow
-review - Code Review (2 steps)
-deploy - Deployment (4 steps) - Production deployment pipeline
-```
-
 ---
 
 ## workflow show
 
-Show detailed workflow information.
+Show detailed workflow information including steps.
 
 ```bash
-vtb workflow show impl
-```
-
-Output:
-```
-Workflow: impl - Implementation
-============================================================
-
-Description
-----------------------------------------
-Standard development workflow
-
-Auto Advance: No
-
-Steps (3 total)
-----------------------------------------
-1. coding (model: sonnet)
-2. testing (model: haiku)
-3. documentation (model: haiku)
+vtb workflow show <workflow-id>
 ```
 
 ---
@@ -108,18 +81,11 @@ Steps (3 total)
 Update workflow properties.
 
 ```bash
-# Update name
-vtb workflow update impl --name "Development"
-
-# Update description
-vtb workflow update impl --description "New description"
-
-# Clear description
-vtb workflow update impl --clear-description
-
-# Enable/disable auto-advance
-vtb workflow update impl --auto-advance
-vtb workflow update impl --no-auto-advance
+vtb workflow update <id> --name "Development"
+vtb workflow update <id> --description "New description"
+vtb workflow update <id> --clear-description
+vtb workflow update <id> --auto-advance
+vtb workflow update <id> --no-auto-advance
 ```
 
 ### Options
@@ -136,28 +102,20 @@ vtb workflow update impl --no-auto-advance
 
 ## workflow delete
 
-Delete a workflow.
+Delete a workflow. Cannot delete workflows with assigned tasks.
 
 ```bash
-vtb workflow delete old-workflow
+vtb workflow delete <workflow-id>
 ```
-
-Note: Cannot delete workflows with assigned tasks.
 
 ---
 
 ## workflow assign
 
-Assign a task to a workflow.
+Assign a task to a workflow (starts at first step).
 
 ```bash
 vtb workflow assign <task-id> <workflow-id>
-```
-
-Example:
-```bash
-vtb workflow assign abc123 implementation
-# Output: Assigned task abc123 to workflow implementation at step 1: coding
 ```
 
 ---
@@ -172,58 +130,42 @@ vtb workflow unassign <task-id>
 
 ---
 
-## workflow advance
+## workflow transition add
 
-Advance a task to the next workflow step.
+Create a transition definition between two workflows.
 
 ```bash
-vtb workflow advance <task-id>
+# Basic transition
+vtb workflow transition add <from-workflow> <to-workflow> --label "approve"
+
+# With target step in destination workflow
+vtb workflow transition add <from-workflow> <to-workflow> --label "escalate" --target-step <step-id>
 ```
 
-Example:
+## workflow transition list
+
+List workflow transitions.
+
 ```bash
-vtb workflow advance abc123
-# Output: Advanced task abc123: coding → testing (execution: a1b2c3)
+vtb workflow transition list
+vtb workflow transition list --workflow-id <workflow-id>
+```
+
+## workflow transition delete
+
+Delete a transition between workflows.
+
+```bash
+vtb workflow transition delete <from-workflow> <to-workflow>
 ```
 
 ---
 
-## workflow retreat
+## Moving tasks between workflows
 
-Move a task back to the previous step.
-
-```bash
-vtb workflow retreat <task-id>
-```
-
----
-
-## workflow reject
-
-Reject a task, removing its workflow assignment.
+Use `vtb transition-to` (separate command) to move tasks:
 
 ```bash
-vtb workflow reject <task-id>
-```
-
-## When to Use
-
-- **workflow add**: Define new task progression patterns
-- **workflow assign**: Start a task on a workflow
-- **workflow advance/retreat**: Navigate through steps **within** a workflow
-- **transition-to**: Move **across** workflows (e.g., `backlog` → `implementation`)
-
-## advance/retreat vs transition-to
-
-| Command | Purpose |
-|---------|---------|
-| `workflow advance/retreat` | Move within current workflow (step to step) |
-| `transition-to <workflow>` | Move across workflows |
-| `transition-to <workflow>:<step>` | Jump to specific workflow and step |
-
-**Example progression:**
-```
-backlog → implementation:coding → implementation:testing → review → done
-        \_______ transition-to _______/
-                 \___ advance ___/
+vtb transition-to <task-id> <workflow>            # Move to workflow
+vtb transition-to <task-id> <workflow>:<step>      # Move to specific step
 ```

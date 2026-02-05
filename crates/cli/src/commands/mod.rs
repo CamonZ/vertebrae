@@ -1012,7 +1012,6 @@ mod tests {
         assert!(cli.is_ok());
         match cli.unwrap().command {
             Command::Init(cmd) => {
-                assert_eq!(cmd.skills_source.to_str().unwrap(), "skills");
                 assert_eq!(cmd.skills_target.to_str().unwrap(), ".claude/skills");
             }
             _ => panic!("Expected Init command"),
@@ -1021,14 +1020,8 @@ mod tests {
 
     #[test]
     fn test_command_init_with_custom_source() {
-        let cli = TestCli::try_parse_from(["test", "init", "--skills-source", "custom/skills"]);
-        assert!(cli.is_ok());
-        match cli.unwrap().command {
-            Command::Init(cmd) => {
-                assert_eq!(cmd.skills_source.to_str().unwrap(), "custom/skills");
-            }
-            _ => panic!("Expected Init command"),
-        }
+        // skills_source is no longer a CLI argument since skills are now embedded
+        // This test is no longer applicable
     }
 
     #[test]

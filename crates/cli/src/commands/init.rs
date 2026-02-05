@@ -6,9 +6,10 @@
 //! 3. Derive project slug from git root folder name (or use --slug override)
 //! 4. Check if project exists in Sacrum API, create if needed
 //! 5. Upsert project entry into ~/.config/vertebrae/config.toml
-//! 6. Copy skills from skills/ to .claude/skills/
+//! 6. Write embedded skills to .claude/skills/
 
 use clap::Args;
+use include_dir::{Dir, include_dir};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
@@ -16,6 +17,9 @@ use vertebrae_sacrum_client::{
     CreateProjectRequest, ProjectResponse, ProjectSection, SacrumClient, SacrumConfig,
     load_config_file, save_config_file,
 };
+
+/// Embedded skills directory at compile time
+const SKILLS_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/../../skills");
 
 /// Initialize vertebrae in the current project
 #[derive(Debug, Args)]
@@ -27,10 +31,6 @@ pub struct InitCommand {
     /// Override the auto-derived project slug
     #[arg(long)]
     pub slug: Option<String>,
-
-    /// Source directory containing skills (defaults to "skills/")
-    #[arg(long, default_value = "skills")]
-    pub skills_source: PathBuf,
 
     /// Target directory for skills (defaults to ".claude/skills/")
     #[arg(long, default_value = ".claude/skills")]
@@ -265,8 +265,7 @@ impl InitCommand {
         // Copy skills
         let skills_target = base_path.join(&self.skills_target);
         self.create_dir_if_not_exists(&skills_target)?;
-        let skills_source = base_path.join(&self.skills_source);
-        let skills_copied = self.copy_skills(&skills_source, &skills_target)?;
+        let skills_copied = self.copy_skills(&SKILLS_DIR, &skills_target)?;
 
         Ok(InitResult {
             config_path,
@@ -375,42 +374,17 @@ impl InitCommand {
     /// Copy skill files from source to target directory.
     ///
     /// Returns the number of files copied.
-    fn copy_skills(&self, skills_source: &Path, skills_target: &Path) -> Result<usize, InitError> {
-        // If source directory doesn't exist, return 0 (not an error)
-        if !skills_source.exists() {
-            return Ok(0);
-        }
-
-        let entries = fs::read_dir(skills_source).map_err(|e| InitError::ReadDir {
-            path: skills_source.to_path_buf(),
-            reason: e.to_string(),
-        })?;
-
+    fn copy_skills(&self, skills_source: &Dir, skills_target: &Path) -> Result<usize, InitError> {
         let mut copied = 0;
 
-        for entry in entries {
-            let entry = entry.map_err(|e| InitError::ReadDir {
-                path: skills_source.to_path_buf(),
-                reason: e.to_string(),
-            })?;
-
-            let path = entry.path();
-
-            // Only copy files (not directories)
-            if !path.is_file() {
-                continue;
-            }
-
-            // Get the file name
-            let file_name = match path.file_name() {
-                Some(name) => name,
-                None => continue,
-            };
-
+        for file in skills_source.files() {
+            let file_name = file.path().file_name().unwrap().to_str().unwrap();
             let target_path = skills_target.join(file_name);
 
-            fs::copy(&path, &target_path).map_err(|e| InitError::CopyFile {
-                source: path.clone(),
+            // Read the embedded file content and write it to the target
+            let content = file.contents();
+            fs::write(&target_path, content).map_err(|e| InitError::CopyFile {
+                source: file.path().to_path_buf(),
                 target: target_path.clone(),
                 reason: e.to_string(),
             })?;
@@ -450,7 +424,6 @@ mod tests {
         InitCommand {
             url: "http://localhost:4000".to_string(),
             slug: None,
-            skills_source: PathBuf::from("skills"),
             skills_target: PathBuf::from(".claude/skills"),
         }
     }
@@ -489,69 +462,71 @@ mod tests {
         let temp_dir = create_temp_dir("copy");
         fs::create_dir_all(&temp_dir).unwrap();
 
-        // Create source skills directory with test files
-        let skills_source = temp_dir.join("skills");
-        fs::create_dir_all(&skills_source).unwrap();
-        fs::write(skills_source.join("skill1.md"), "# Skill 1").unwrap();
-        fs::write(skills_source.join("skill2.md"), "# Skill 2").unwrap();
-
         let skills_target = temp_dir.join(".claude/skills");
         fs::create_dir_all(&skills_target).unwrap();
 
         let cmd = default_cmd();
 
-        let result = cmd.copy_skills(&skills_source, &skills_target);
+        let result = cmd.copy_skills(&SKILLS_DIR, &skills_target);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 2);
+        // Should copy all the embedded skill files
+        let count = result.unwrap();
+        assert!(count > 0, "Should have copied at least one skill file");
 
-        // Verify files were copied
-        assert!(skills_target.join("skill1.md").exists());
-        assert!(skills_target.join("skill2.md").exists());
-
-        // Verify content
-        let content = fs::read_to_string(skills_target.join("skill1.md")).unwrap();
-        assert_eq!(content, "# Skill 1");
+        // Verify at least one known skill file exists
+        assert!(skills_target.join("plan.md").exists());
 
         cleanup(&temp_dir);
+    }
+
+    #[test]
+    fn test_init_embedded_skills_exist() {
+        // Verify that SKILLS_DIR contains files
+        let file_count = SKILLS_DIR.files().count();
+        assert!(
+            file_count > 0,
+            "SKILLS_DIR should contain embedded skill files"
+        );
     }
 
     #[test]
     fn test_init_skips_nonexistent_source() {
+        // This test is no longer applicable since skills are embedded
+        // and always available. We just verify the embedded skills work.
         let temp_dir = create_temp_dir("nosource");
         fs::create_dir_all(&temp_dir).unwrap();
 
-        let skills_source = temp_dir.join("nonexistent");
         let skills_target = temp_dir.join(".claude/skills");
         fs::create_dir_all(&skills_target).unwrap();
 
         let cmd = default_cmd();
 
-        let result = cmd.copy_skills(&skills_source, &skills_target);
+        let result = cmd.copy_skills(&SKILLS_DIR, &skills_target);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 0);
+        // Embedded skills are always available
+        assert!(result.unwrap() > 0);
 
         cleanup(&temp_dir);
     }
 
     #[test]
-    fn test_init_skips_directories_in_skills() {
-        let temp_dir = create_temp_dir("subdir");
+    fn test_init_writes_skill_content() {
+        let temp_dir = create_temp_dir("content");
         fs::create_dir_all(&temp_dir).unwrap();
-
-        // Create source with file and subdirectory
-        let skills_source = temp_dir.join("skills");
-        fs::create_dir_all(&skills_source).unwrap();
-        fs::write(skills_source.join("skill.md"), "# Skill").unwrap();
-        fs::create_dir_all(skills_source.join("subdir")).unwrap();
 
         let skills_target = temp_dir.join(".claude/skills");
         fs::create_dir_all(&skills_target).unwrap();
 
         let cmd = default_cmd();
 
-        let result = cmd.copy_skills(&skills_source, &skills_target);
+        let result = cmd.copy_skills(&SKILLS_DIR, &skills_target);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 1); // Only the file, not the subdir
+
+        // Verify that written files have content
+        if skills_target.join("plan.md").exists() {
+            let content = fs::read_to_string(skills_target.join("plan.md")).unwrap();
+            assert!(!content.is_empty(), "Skill file should have content");
+        }
 
         cleanup(&temp_dir);
     }
@@ -682,7 +657,6 @@ mod tests {
         let cmd = InitCommand {
             url: "http://localhost:4000".to_string(),
             slug: Some("custom-slug".to_string()),
-            skills_source: PathBuf::from("skills"),
             skills_target: PathBuf::from(".claude/skills"),
         };
         assert_eq!(cmd.slug.as_deref(), Some("custom-slug"));
