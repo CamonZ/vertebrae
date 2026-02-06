@@ -219,19 +219,6 @@ impl TaskService for MockTaskService {
             .collect())
     }
 
-    async fn transition_to(&self, id: &str, target: &str) -> ServiceResult<TransitionResult> {
-        let s = self.state.lock().unwrap();
-        if !s.tasks.contains_key(id) {
-            return Err(ServiceError::task_not_found(id));
-        }
-        Ok(TransitionResult {
-            task_id: id.to_string(),
-            from_step: "backlog".to_string(),
-            to_step: target.to_string(),
-            unblocked_tasks: vec![],
-        })
-    }
-
     async fn set_parent(&self, child_id: &str, parent_id: &str) -> ServiceResult<()> {
         let mut s = self.state.lock().unwrap();
         if !s.tasks.contains_key(child_id) {
@@ -711,14 +698,6 @@ impl WorkflowService for MockWorkflowService {
             total_steps: 1,
             prev_step_name: None,
             next_step_name: None,
-        })
-    }
-
-    async fn migrate_to_default_workflow(&self, _dry_run: bool) -> ServiceResult<MigrationResult> {
-        Ok(MigrationResult {
-            migrated: 0,
-            skipped: 0,
-            skipped_ids: vec![],
         })
     }
 

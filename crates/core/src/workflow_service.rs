@@ -198,34 +198,6 @@ pub struct WorkflowInfo {
     pub next_step_name: Option<String>,
 }
 
-/// Result of a migration operation
-#[derive(Debug, Clone)]
-pub struct MigrationResult {
-    /// Number of tasks successfully migrated
-    pub migrated: usize,
-    /// Number of tasks skipped
-    pub skipped: usize,
-    /// IDs of skipped tasks
-    pub skipped_ids: Vec<String>,
-}
-
-impl MigrationResult {
-    /// Check if any tasks were migrated
-    pub fn has_migrations(&self) -> bool {
-        self.migrated > 0
-    }
-
-    /// Check if any tasks were skipped
-    pub fn has_skipped(&self) -> bool {
-        self.skipped > 0
-    }
-
-    /// Total number of tasks processed
-    pub fn total(&self) -> usize {
-        self.migrated + self.skipped
-    }
-}
-
 /// Service trait for workflow management operations
 ///
 /// This trait defines the interface for all workflow-related business logic.
@@ -309,14 +281,6 @@ pub trait WorkflowService: Send + Sync {
         workflow_id: &str,
         current_step_id: Option<&str>,
     ) -> ServiceResult<WorkflowInfo>;
-
-    /// Migrate tasks to the default workflow
-    ///
-    /// Finds all tasks without a workflow assignment and assigns them to the
-    /// default workflow, setting their current_step based on their current status.
-    ///
-    /// If `dry_run` is true, returns what would be migrated without making changes.
-    async fn migrate_to_default_workflow(&self, dry_run: bool) -> ServiceResult<MigrationResult>;
 
     // =========================================================================
     // Workflow Transition Operations

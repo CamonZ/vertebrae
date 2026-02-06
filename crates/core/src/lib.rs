@@ -50,13 +50,12 @@ pub use orchestrator::{
     orchestrator_agent_config, orchestrator_output_schema, orchestrator_prompt,
 };
 pub use service::{
-    CreateTaskOptions, MutationCallback, MutationEvent, TaskService, TransitionResult,
-    UnblockedTask, UpdateTaskOptions,
+    CreateTaskOptions, MutationCallback, MutationEvent, TaskService, UpdateTaskOptions,
 };
 pub use services::VertebraeServices;
 pub use step_service::StepService;
 pub use workflow_service::{
-    AssignResult, CreateWorkflowOptions, MigrationResult, UpdateWorkflowOptions, WorkflowInfo,
+    AssignResult, CreateWorkflowOptions, UpdateWorkflowOptions, WorkflowInfo,
     WorkflowMutationCallback, WorkflowMutationEvent, WorkflowService, WorkflowStepInput,
     WorkflowSummary,
 };

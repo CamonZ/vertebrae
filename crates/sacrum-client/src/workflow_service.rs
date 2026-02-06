@@ -10,11 +10,10 @@ use vertebrae_core::WorkflowSummary;
 use vertebrae_core::error::{ServiceError, ServiceResult};
 use vertebrae_core::models::{Workflow, WorkflowTransition};
 use vertebrae_core::workflow_service::{
-    AssignResult, CreateWorkflowOptions, MigrationResult, UpdateWorkflowOptions, WorkflowInfo,
-    WorkflowService,
+    AssignResult, CreateWorkflowOptions, UpdateWorkflowOptions, WorkflowInfo, WorkflowService,
 };
 
-use crate::api_types::WorkflowResponse;
+use crate::api_types::{WorkflowResponse, WorkflowTransitionResponse};
 use crate::client::SacrumClient;
 
 /// Query param helper for project_id
@@ -250,22 +249,37 @@ impl WorkflowService for SacrumWorkflowService {
         })
     }
 
-    async fn migrate_to_default_workflow(&self, _dry_run: bool) -> ServiceResult<MigrationResult> {
-        Err(ServiceError::InvalidInput(
-            "Migration not supported via HTTP client".to_string(),
-        ))
-    }
-
     async fn create_workflow_transition(
         &self,
-        _from_workflow_id: &str,
-        _to_workflow_id: &str,
-        _label: &str,
-        _target_step_id: Option<&str>,
+        from_workflow_id: &str,
+        to_workflow_id: &str,
+        label: &str,
+        target_step_id: Option<&str>,
     ) -> ServiceResult<WorkflowTransition> {
-        Err(ServiceError::InvalidInput(
-            "Transitions not supported via HTTP client".to_string(),
-        ))
+        let path = format!("/api/workflows/{}/transitions", from_workflow_id);
+
+        let mut request = json!({
+            "to_workflow_id": to_workflow_id,
+        });
+
+        if !label.is_empty() {
+            request["label"] = json!(label);
+        }
+
+        if let Some(step_id) = target_step_id {
+            request["target_step_id"] = json!(step_id);
+        }
+
+        let response: WorkflowTransitionResponse = self.client.post(&path, &request).await?;
+
+        Ok(WorkflowTransition {
+            id: Some(response.id),
+            from_workflow: from_workflow_id.to_string(),
+            to_workflow: response.to_workflow_id,
+            label: response.label.unwrap_or_default(),
+            target_step: response.target_step_id,
+            created_at: None,
+        })
     }
 
     async fn list_workflow_transitions(
@@ -300,20 +314,45 @@ impl WorkflowService for SacrumWorkflowService {
 
     async fn delete_workflow_transition(
         &self,
-        _from_workflow_id: &str,
-        _to_workflow_id: &str,
+        from_workflow_id: &str,
+        to_workflow_id: &str,
     ) -> ServiceResult<()> {
-        Err(ServiceError::InvalidInput(
-            "Transitions not supported via HTTP client".to_string(),
-        ))
+        // Find the transition ID by looking at transitions on the source workflow
+        let workflow = self.get_workflow(from_workflow_id).await?;
+        let transition = workflow
+            .transitions
+            .iter()
+            .find(|t| t.to_workflow == to_workflow_id)
+            .ok_or_else(|| {
+                ServiceError::InvalidInput(format!(
+                    "No transition found from workflow {} to {}",
+                    from_workflow_id, to_workflow_id
+                ))
+            })?;
+
+        let transition_id = transition
+            .id
+            .as_ref()
+            .ok_or_else(|| ServiceError::InvalidInput("Transition has no ID".to_string()))?;
+
+        let path = format!(
+            "/api/workflows/{}/transitions/{}",
+            from_workflow_id, transition_id
+        );
+        self.client.delete(&path).await?;
+        Ok(())
     }
 
     async fn workflow_transition_exists(
         &self,
-        _from_workflow_id: &str,
-        _to_workflow_id: &str,
+        from_workflow_id: &str,
+        to_workflow_id: &str,
     ) -> ServiceResult<bool> {
-        Ok(false)
+        let workflow = self.get_workflow(from_workflow_id).await?;
+        Ok(workflow
+            .transitions
+            .iter()
+            .any(|t| t.to_workflow == to_workflow_id))
     }
 }
 
@@ -577,5 +616,192 @@ mod tests {
         assert_eq!(result[1].to_workflow, "wf-3");
         assert_eq!(result[2].from_workflow, "wf-2");
         assert_eq!(result[2].to_workflow, "wf-1");
+    }
+
+    // =========================================================================
+    // Wiremock integration tests for workflow transition HTTP methods
+    // =========================================================================
+
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn create_wiremock_service(server_url: &str) -> SacrumWorkflowService {
+        let client = SacrumClient::new(crate::config::SacrumConfig::new(
+            server_url.to_string(),
+            "test-token".to_string(),
+            "test-proj".to_string(),
+        ));
+        SacrumWorkflowService::new(client)
+    }
+
+    #[tokio::test]
+    async fn test_create_workflow_transition_with_all_fields() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/workflows/wf-source/transitions"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+                "data": {
+                    "id": "t-new",
+                    "to_workflow_id": "wf-target",
+                    "label": "promote",
+                    "target_step_id": "step-5"
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let result = service
+            .create_workflow_transition("wf-source", "wf-target", "promote", Some("step-5"))
+            .await
+            .unwrap();
+
+        assert_eq!(result.id, Some("t-new".to_string()));
+        assert_eq!(result.from_workflow, "wf-source");
+        assert_eq!(result.to_workflow, "wf-target");
+        assert_eq!(result.label, "promote");
+        assert_eq!(result.target_step, Some("step-5".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_create_workflow_transition_minimal() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/workflows/wf-a/transitions"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+                "data": {
+                    "id": "t-1",
+                    "to_workflow_id": "wf-b",
+                    "label": null,
+                    "target_step_id": null
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let result = service
+            .create_workflow_transition("wf-a", "wf-b", "", None)
+            .await
+            .unwrap();
+
+        assert_eq!(result.id, Some("t-1".to_string()));
+        assert_eq!(result.from_workflow, "wf-a");
+        assert_eq!(result.to_workflow, "wf-b");
+        assert_eq!(result.label, "");
+        assert_eq!(result.target_step, None);
+    }
+
+    #[tokio::test]
+    async fn test_delete_workflow_transition_success() {
+        let server = MockServer::start().await;
+
+        // GET workflow to find the transition ID
+        Mock::given(method("GET"))
+            .and(path("/api/workflows/wf-source"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "id": "wf-source",
+                    "name": "Source",
+                    "transitions": [
+                        { "id": "t-99", "to_workflow_id": "wf-target", "label": "go", "target_step_id": null }
+                    ]
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        // DELETE the transition
+        Mock::given(method("DELETE"))
+            .and(path("/api/workflows/wf-source/transitions/t-99"))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let result = service
+            .delete_workflow_transition("wf-source", "wf-target")
+            .await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_delete_workflow_transition_not_found() {
+        let server = MockServer::start().await;
+
+        // GET workflow with no matching transition
+        Mock::given(method("GET"))
+            .and(path("/api/workflows/wf-source"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "id": "wf-source",
+                    "name": "Source",
+                    "transitions": []
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let result = service
+            .delete_workflow_transition("wf-source", "wf-nonexistent")
+            .await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_workflow_transition_exists_true() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/workflows/wf-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "id": "wf-1",
+                    "name": "Source",
+                    "transitions": [
+                        { "id": "t-1", "to_workflow_id": "wf-2", "label": null, "target_step_id": null }
+                    ]
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let exists = service
+            .workflow_transition_exists("wf-1", "wf-2")
+            .await
+            .unwrap();
+
+        assert!(exists);
+    }
+
+    #[tokio::test]
+    async fn test_workflow_transition_exists_false() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/workflows/wf-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "id": "wf-1",
+                    "name": "Source",
+                    "transitions": []
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let exists = service
+            .workflow_transition_exists("wf-1", "wf-999")
+            .await
+            .unwrap();
+
+        assert!(!exists);
     }
 }
