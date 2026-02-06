@@ -12,9 +12,7 @@ use vertebrae_core::models::Task;
 use vertebrae_core::models::{
     BlockerNode, CodeRef, Level, Priority, Section, SectionType, TaskFilter,
 };
-use vertebrae_core::service::{
-    CreateTaskOptions, TaskService, TransitionResult, UpdateTaskOptions,
-};
+use vertebrae_core::service::{CreateTaskOptions, TaskService, UpdateTaskOptions};
 
 use crate::api_types::{
     CodeRefResponse, SectionResponse, TaskResponse, WorkflowResponse, WorkflowStepResponse,
@@ -265,8 +263,11 @@ impl TaskService for SacrumTaskService {
         Ok(())
     }
 
-    async fn set_current_step(&self, _task_id: &str, _step_id: &str) -> ServiceResult<()> {
-        unimplemented!("Current step setting not yet implemented for Sacrum HTTP client")
+    async fn set_current_step(&self, task_id: &str, step_id: &str) -> ServiceResult<()> {
+        let path = format!("/api/tasks/{}/move-to", task_id);
+        let request = json!({ "step_id": step_id });
+        let _response: TaskResponse = self.client.post(&path, &request).await?;
+        Ok(())
     }
 
     async fn delete_task(&self, id: &str, _cascade: bool) -> ServiceResult<()> {
@@ -334,10 +335,6 @@ impl TaskService for SacrumTaskService {
                 self.response_to_task_with_lookups(t, Some(&workflow_names), Some(&step_names))
             })
             .collect())
-    }
-
-    async fn transition_to(&self, _id: &str, _target: &str) -> ServiceResult<TransitionResult> {
-        unimplemented!("Task status transition not yet implemented for Sacrum HTTP client")
     }
 
     async fn set_parent(&self, _child_id: &str, _parent_id: &str) -> ServiceResult<()> {
@@ -792,5 +789,497 @@ mod tests {
         assert_eq!(task.needs_human_review, Some(false));
         assert_eq!(task.revision_feedback.as_deref(), Some("feedback"));
         assert_eq!(task.rejection_reason.as_deref(), Some("reason"));
+    }
+
+    // =========================================================================
+    // Wiremock integration tests for task service HTTP methods
+    // =========================================================================
+
+    use wiremock::matchers::{method, path, query_param};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn create_wiremock_service(server_url: &str) -> SacrumTaskService {
+        let client = SacrumClient::new(crate::config::SacrumConfig::new(
+            server_url.to_string(),
+            "test-token".to_string(),
+            "test-project".to_string(),
+        ));
+        SacrumTaskService::new(client)
+    }
+
+    fn task_json(id: &str, title: &str) -> serde_json::Value {
+        json!({
+            "id": id,
+            "project_id": "test-project",
+            "title": title,
+            "tags": [],
+            "dependency_ids": [],
+            "sections": [],
+            "code_refs": []
+        })
+    }
+
+    /// Mount empty workflow and step lookup mocks (used by get_task, list_tasks, etc.)
+    async fn mount_empty_lookups(server: &MockServer) {
+        Mock::given(method("GET"))
+            .and(path("/api/workflows"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "data": [] })))
+            .mount(server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/workflow-steps"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "data": [] })))
+            .mount(server)
+            .await;
+    }
+
+    #[tokio::test]
+    async fn test_create_task_success() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/tasks"))
+            .respond_with(
+                ResponseTemplate::new(201)
+                    .set_body_json(json!({ "data": task_json("task-new", "New Task") })),
+            )
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let id = service
+            .create_task(CreateTaskOptions::new("New Task"))
+            .await
+            .unwrap();
+
+        assert_eq!(id, "task-new");
+    }
+
+    #[tokio::test]
+    async fn test_create_task_empty_title_rejected() {
+        let server = MockServer::start().await;
+        let service = create_wiremock_service(&server.uri());
+
+        let result = service.create_task(CreateTaskOptions::new("  ")).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_get_task_success() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/tasks/task-1"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({ "data": task_json("task-1", "My Task") })),
+            )
+            .mount(&server)
+            .await;
+        mount_empty_lookups(&server).await;
+
+        let service = create_wiremock_service(&server.uri());
+        let task = service.get_task("task-1").await.unwrap();
+
+        assert_eq!(task.id, "task-1");
+        assert_eq!(task.title, "My Task");
+    }
+
+    #[tokio::test]
+    async fn test_get_task_resolves_workflow_and_step_names() {
+        let server = MockServer::start().await;
+
+        let mut task_data = task_json("task-1", "My Task");
+        task_data["workflow_id"] = json!("wf-1");
+        task_data["current_step_id"] = json!("step-1");
+
+        Mock::given(method("GET"))
+            .and(path("/api/tasks/task-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "data": task_data })))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/workflows"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": [{ "id": "wf-1", "name": "Development" }]
+            })))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/workflow-steps"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": [{ "id": "step-1", "name": "in_progress", "workflow_id": "wf-1", "step_order": 0, "agents": [], "skills": [] }]
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let task = service.get_task("task-1").await.unwrap();
+
+        assert_eq!(task.workflow_name.as_deref(), Some("Development"));
+        assert_eq!(task.step_name.as_deref(), Some("in_progress"));
+    }
+
+    #[tokio::test]
+    async fn test_update_task_success() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("PUT"))
+            .and(path("/api/tasks/task-1"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({ "data": task_json("task-1", "Updated") })),
+            )
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let opts = UpdateTaskOptions::new().with_title("Updated");
+        let result = service.update_task("task-1", opts).await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_delete_task_success() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("DELETE"))
+            .and(path("/api/tasks/task-1"))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let result = service.delete_task("task-1", false).await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_set_current_step_success() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/tasks/task-1/move-to"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(json!({ "data": task_json("task-1", "Moved") })),
+            )
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let result = service.set_current_step("task-1", "step-2").await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_list_tasks_success() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/tasks"))
+            .and(query_param("project_id", "test-project"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": [
+                    task_json("task-1", "First"),
+                    task_json("task-2", "Second")
+                ]
+            })))
+            .mount(&server)
+            .await;
+        mount_empty_lookups(&server).await;
+
+        let service = create_wiremock_service(&server.uri());
+        let tasks = service.list_tasks(&TaskFilter::default()).await.unwrap();
+
+        assert_eq!(tasks.len(), 2);
+        assert_eq!(tasks[0].title, "First");
+        assert_eq!(tasks[1].title, "Second");
+    }
+
+    #[tokio::test]
+    async fn test_list_ready_success() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/tasks/ready"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": [task_json("task-1", "Ready Task")]
+            })))
+            .mount(&server)
+            .await;
+        mount_empty_lookups(&server).await;
+
+        let service = create_wiremock_service(&server.uri());
+        let tasks = service.list_ready("todo").await.unwrap();
+
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].title, "Ready Task");
+    }
+
+    #[tokio::test]
+    async fn test_add_dependency_success() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/tasks/task-1/dependencies/task-2"))
+            .respond_with(ResponseTemplate::new(201))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let result = service.add_dependency("task-1", "task-2").await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_remove_dependency_success() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("DELETE"))
+            .and(path("/api/tasks/task-1/dependencies/task-2"))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let result = service.remove_dependency("task-1", "task-2").await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_get_blockers_success() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/tasks/task-1/blockers"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": [
+                    { "id": "task-2", "title": "Blocker", "level": "task", "step_name": null, "children": [] }
+                ]
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let blockers = service.get_blockers("task-1").await.unwrap();
+
+        assert_eq!(blockers.len(), 1);
+        assert_eq!(blockers[0].id, "task-2");
+    }
+
+    #[tokio::test]
+    async fn test_find_path_success() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/tasks/task-1/path"))
+            .and(query_param("to", "task-3"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": ["task-1", "task-2", "task-3"]
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let path_result = service.find_path("task-1", "task-3").await.unwrap();
+
+        assert_eq!(
+            path_result,
+            Some(vec![
+                "task-1".to_string(),
+                "task-2".to_string(),
+                "task-3".to_string()
+            ])
+        );
+    }
+
+    #[tokio::test]
+    async fn test_get_children_success() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/tasks"))
+            .and(query_param("parent_id", "epic-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": [
+                    task_json("ticket-1", "Child 1"),
+                    task_json("ticket-2", "Child 2")
+                ]
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let children = service.get_children("epic-1").await.unwrap();
+
+        assert_eq!(children, vec!["ticket-1", "ticket-2"]);
+    }
+
+    #[tokio::test]
+    async fn test_add_section_success() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/tasks/task-1/sections"))
+            .respond_with(ResponseTemplate::new(201))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let section = Section {
+            section_type: SectionType::Step,
+            content: "Do this first".to_string(),
+            order: Some(1),
+            done: None,
+            done_at: None,
+            refs: vec![],
+        };
+        let result = service.add_section("task-1", section).await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_edit_section_by_ordinal_success() {
+        let server = MockServer::start().await;
+
+        // GET task to find section ID
+        let mut task_data = task_json("task-1", "Task");
+        task_data["sections"] = json!([
+            { "id": "sec-1", "section_type": "step", "content": "old", "section_order": 1 }
+        ]);
+        Mock::given(method("GET"))
+            .and(path("/api/tasks/task-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "data": task_data })))
+            .mount(&server)
+            .await;
+
+        // PATCH the section
+        Mock::given(method("PATCH"))
+            .and(path("/api/tasks/task-1/sections/sec-1"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let result = service
+            .edit_section_by_ordinal("task-1", SectionType::Step, 1, "updated content")
+            .await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_remove_section_by_ordinal_success() {
+        let server = MockServer::start().await;
+
+        // GET task to find section ID
+        let mut task_data = task_json("task-1", "Task");
+        task_data["sections"] = json!([
+            { "id": "sec-1", "section_type": "constraint", "content": "old", "section_order": 0 }
+        ]);
+        Mock::given(method("GET"))
+            .and(path("/api/tasks/task-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "data": task_data })))
+            .mount(&server)
+            .await;
+
+        // DELETE the section
+        Mock::given(method("DELETE"))
+            .and(path("/api/tasks/task-1/sections/sec-1"))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let result = service
+            .remove_section_by_ordinal("task-1", SectionType::Constraint, 0)
+            .await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_add_code_ref_success() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/tasks/task-1/refs"))
+            .respond_with(
+                ResponseTemplate::new(201).set_body_json(json!({ "data": { "id": "ref-new" } })),
+            )
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let code_ref = CodeRef {
+            path: "src/main.rs".to_string(),
+            line_start: Some(10),
+            line_end: Some(20),
+            name: Some("main".to_string()),
+            description: None,
+        };
+        let result = service.add_code_ref("task-1", code_ref).await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_remove_code_refs_by_index() {
+        let server = MockServer::start().await;
+
+        // GET task to find ref IDs
+        let mut task_data = task_json("task-1", "Task");
+        task_data["code_refs"] = json!([
+            { "id": "ref-0", "task_id": "task-1", "path": "a.rs" },
+            { "id": "ref-1", "task_id": "task-1", "path": "b.rs" }
+        ]);
+        Mock::given(method("GET"))
+            .and(path("/api/tasks/task-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "data": task_data })))
+            .mount(&server)
+            .await;
+
+        // DELETE the second ref
+        Mock::given(method("DELETE"))
+            .and(path("/api/tasks/task-1/refs/ref-1"))
+            .respond_with(ResponseTemplate::new(204))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let result = service.remove_code_refs("task-1", Some(vec![1])).await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_get_dependents_filters_client_side() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/tasks"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": [
+                    { "id": "t-1", "project_id": "p", "title": "A", "tags": [], "dependency_ids": ["blocker-1"], "sections": [], "code_refs": [] },
+                    { "id": "t-2", "project_id": "p", "title": "B", "tags": [], "dependency_ids": [], "sections": [], "code_refs": [] },
+                    { "id": "t-3", "project_id": "p", "title": "C", "tags": [], "dependency_ids": ["blocker-1", "other"], "sections": [], "code_refs": [] }
+                ]
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let dependents = service.get_dependents("blocker-1").await.unwrap();
+
+        assert_eq!(dependents, vec!["t-1", "t-3"]);
     }
 }

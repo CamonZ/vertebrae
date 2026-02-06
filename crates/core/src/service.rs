@@ -210,28 +210,6 @@ impl UpdateTaskOptions {
     }
 }
 
-/// Summary of an unblocked task
-#[derive(Debug, Clone)]
-pub struct UnblockedTask {
-    /// Task ID
-    pub id: String,
-    /// Task title
-    pub title: String,
-}
-
-/// Result of a status transition
-#[derive(Debug)]
-pub struct TransitionResult {
-    /// The task ID that was transitioned
-    pub task_id: String,
-    /// The previous status
-    pub from_step: String,
-    /// The new status
-    pub to_step: String,
-    /// Tasks that are now unblocked (for statuses with unblocks_dependents=true)
-    pub unblocked_tasks: Vec<UnblockedTask>,
-}
-
 /// Service trait for task management operations
 ///
 /// This trait defines the interface for all task-related business logic.
@@ -300,15 +278,6 @@ pub trait TaskService: Send + Sync {
 
     /// Get tasks ready for work at a given status
     async fn list_ready(&self, status: &str) -> ServiceResult<Vec<Task>>;
-
-    // =========================================================================
-    // Status Transitions
-    // =========================================================================
-
-    /// Transition a task to a new status
-    ///
-    /// Validates the transition and performs any associated actions.
-    async fn transition_to(&self, id: &str, target: &str) -> ServiceResult<TransitionResult>;
 
     // =========================================================================
     // Relationships
