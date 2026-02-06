@@ -226,6 +226,53 @@ pub struct SessionLogResponse {
     pub updated_at: Option<String>,
 }
 
+/// Request to create a new step execution
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateExecutionRequest {
+    pub step_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transition_result: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_provider: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input_tokens: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_tokens: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workflow_id: Option<String>,
+}
+
+/// Request to update an existing step execution
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateExecutionRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transition_result: Option<String>,
+}
+
+/// Request to create a new session log
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateLogRequest {
+    pub content: String,
+}
+
 /// Error response from Sacrum API
 ///
 /// The API returns errors in two shapes:
@@ -575,5 +622,99 @@ mod tests {
         let json = r#"{"data": [{"id": "1", "title": "T", "project_id": "p"}]}"#;
         let envelope: DataEnvelope<Vec<serde_json::Value>> = serde_json::from_str(json).unwrap();
         assert_eq!(envelope.data.len(), 1);
+    }
+
+    #[test]
+    fn test_create_execution_request_serialization() {
+        let request = CreateExecutionRequest {
+            step_name: "review".to_string(),
+            status: Some("in_progress".to_string()),
+            context: Some("ctx".to_string()),
+            prompt: Some("prompt".to_string()),
+            output: None,
+            transition_result: None,
+            model: Some("claude-opus".to_string()),
+            model_provider: None,
+            input_tokens: Some(100),
+            output_tokens: Some(50),
+            cost: Some(0.05),
+            duration_ms: Some(1500),
+            workflow_id: Some("wf-1".to_string()),
+        };
+
+        let json = serde_json::to_string(&request).unwrap();
+        assert!(json.contains("review"));
+        assert!(json.contains("in_progress"));
+        assert!(json.contains("claude-opus"));
+        assert!(json.contains("wf-1"));
+        // None fields should be skipped
+        assert!(!json.contains("\"output\""));
+        assert!(!json.contains("transition_result"));
+        assert!(!json.contains("model_provider"));
+    }
+
+    #[test]
+    fn test_create_execution_request_roundtrip() {
+        let request = CreateExecutionRequest {
+            step_name: "implement".to_string(),
+            status: None,
+            context: None,
+            prompt: None,
+            output: None,
+            transition_result: None,
+            model: None,
+            model_provider: None,
+            input_tokens: None,
+            output_tokens: None,
+            cost: None,
+            duration_ms: None,
+            workflow_id: None,
+        };
+
+        let json = serde_json::to_string(&request).unwrap();
+        let deserialized: CreateExecutionRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.step_name, "implement");
+        assert!(deserialized.status.is_none());
+    }
+
+    #[test]
+    fn test_update_execution_request_serialization() {
+        let request = UpdateExecutionRequest {
+            status: Some("completed".to_string()),
+            output: Some("Done".to_string()),
+            transition_result: Some("advance".to_string()),
+        };
+
+        let json = serde_json::to_string(&request).unwrap();
+        assert!(json.contains("completed"));
+        assert!(json.contains("Done"));
+        assert!(json.contains("advance"));
+    }
+
+    #[test]
+    fn test_update_execution_request_partial() {
+        let request = UpdateExecutionRequest {
+            status: None,
+            output: Some("partial output".to_string()),
+            transition_result: None,
+        };
+
+        let json = serde_json::to_string(&request).unwrap();
+        assert!(json.contains("partial output"));
+        assert!(!json.contains("status"));
+        assert!(!json.contains("transition_result"));
+    }
+
+    #[test]
+    fn test_create_log_request_serialization() {
+        let request = CreateLogRequest {
+            content: "Step completed".to_string(),
+        };
+
+        let json = serde_json::to_string(&request).unwrap();
+        assert!(json.contains("Step completed"));
+
+        let deserialized: CreateLogRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.content, "Step completed");
     }
 }
