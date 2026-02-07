@@ -99,9 +99,10 @@ impl GraphqlClient {
         field: &str,
     ) -> SacrumClientResult<T> {
         let request_body = GraphqlRequest { query, variables };
+        let op = extract_operation_name(query);
 
         let start = std::time::Instant::now();
-        log::info!("[GQL] POST {} (field: {})", self.endpoint, field);
+        log::info!("[GQL] {} (field: {})", op, field);
 
         let response = self
             .client
@@ -115,8 +116,8 @@ impl GraphqlClient {
             let status_code = status.as_u16();
             let message = response.text().await.unwrap_or_default();
             log::info!(
-                "[GQL] POST {} -> {} ({}ms)",
-                self.endpoint,
+                "[GQL] {} -> {} ({}ms)",
+                op,
                 status_code,
                 start.elapsed().as_millis()
             );
@@ -130,8 +131,8 @@ impl GraphqlClient {
         let gql_response: GraphqlResponse<Value> = serde_json::from_slice(&bytes)?;
 
         log::info!(
-            "[GQL] POST {} -> {} ({}ms)",
-            self.endpoint,
+            "[GQL] {} -> {} ({}ms)",
+            op,
             status.as_u16(),
             start.elapsed().as_millis()
         );
@@ -178,9 +179,10 @@ impl GraphqlClient {
     /// * `variables` - Query variables as a serde_json::Value
     pub async fn execute_void(&self, query: &str, variables: Value) -> SacrumClientResult<()> {
         let request_body = GraphqlRequest { query, variables };
+        let op = extract_operation_name(query);
 
         let start = std::time::Instant::now();
-        log::info!("[GQL] POST {} (void)", self.endpoint);
+        log::info!("[GQL] {} (void)", op);
 
         let response = self
             .client
@@ -194,8 +196,8 @@ impl GraphqlClient {
             let status_code = status.as_u16();
             let message = response.text().await.unwrap_or_default();
             log::info!(
-                "[GQL] POST {} -> {} ({}ms)",
-                self.endpoint,
+                "[GQL] {} -> {} ({}ms)",
+                op,
                 status_code,
                 start.elapsed().as_millis()
             );
@@ -209,8 +211,8 @@ impl GraphqlClient {
         let gql_response: GraphqlResponse<Value> = serde_json::from_slice(&bytes)?;
 
         log::info!(
-            "[GQL] POST {} -> {} ({}ms)",
-            self.endpoint,
+            "[GQL] {} -> {} ({}ms)",
+            op,
             status.as_u16(),
             start.elapsed().as_millis()
         );
@@ -243,6 +245,28 @@ pub fn with_fragments(query: &str, fragments: &[&str]) -> String {
     let mut parts: Vec<&str> = fragments.to_vec();
     parts.push(query);
     parts.join("\n")
+}
+
+/// Extract the operation name from a GraphQL query string.
+///
+/// Looks for patterns like `query GetTask(...)` or `mutation UpdateTask(...)`.
+/// Returns a formatted string like `"query GetTask"` or `"mutation UpdateTask"`.
+/// Falls back to `"unknown operation"` if no operation name is found.
+fn extract_operation_name(query: &str) -> String {
+    for token in ["query", "mutation", "subscription"] {
+        if let Some(pos) = query.find(token) {
+            let after = &query[pos + token.len()..];
+            let name: String = after
+                .trim_start()
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
+            if !name.is_empty() {
+                return format!("{} {}", token, name);
+            }
+        }
+    }
+    "unknown operation".to_string()
 }
 
 #[cfg(test)]
@@ -497,5 +521,31 @@ mod tests {
 
         // Verify direct field access works (pub(crate) visibility)
         assert_eq!(client.project_id, "direct-access-project");
+    }
+
+    #[test]
+    fn test_extract_operation_name_query() {
+        let query = r#"query GetTask($id: Uuid4!) { task(id: $id) { id title } }"#;
+        assert_eq!(extract_operation_name(query), "query GetTask");
+    }
+
+    #[test]
+    fn test_extract_operation_name_mutation() {
+        let query = r#"mutation UpdateTask($id: Uuid4!, $title: String) { update_task(id: $id, title: $title) { id } }"#;
+        assert_eq!(extract_operation_name(query), "mutation UpdateTask");
+    }
+
+    #[test]
+    fn test_extract_operation_name_with_leading_whitespace() {
+        let query = r#"
+            mutation CreateTask($title: String!) { create_task(title: $title) { id } }
+        "#;
+        assert_eq!(extract_operation_name(query), "mutation CreateTask");
+    }
+
+    #[test]
+    fn test_extract_operation_name_unknown() {
+        let query = "{ tasks { id } }";
+        assert_eq!(extract_operation_name(query), "unknown operation");
     }
 }
