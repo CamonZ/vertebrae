@@ -111,7 +111,7 @@ impl SacrumWorkflowService {
             id: response.id.clone(),
             name: response.name.clone(),
             description: response.description.clone(),
-            step_count: 0, // Step count not included in list response; fetched separately
+            step_count: response.workflow_steps.len(),
         }
     }
 

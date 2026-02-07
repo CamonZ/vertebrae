@@ -6,7 +6,7 @@
 
 use super::mock::mock_services;
 use vertebrae_cli::commands::workflow::*;
-use vertebrae_core::{CreateWorkflowOptions, VertebraeServices};
+use vertebrae_core::{CreateWorkflowOptions, Step, VertebraeServices};
 
 // ============================================================================
 // Helper functions
@@ -118,13 +118,32 @@ async fn test_workflow_list_multiple_workflows() {
 #[tokio::test]
 async fn test_workflow_list_includes_step_count() {
     let services = mock_services();
-    let _wf_id = create_workflow(&services, "Counted Workflow", None).await;
+    let wf_id = create_workflow(&services, "Counted Workflow", None).await;
+
+    // Create two steps for the workflow
+    for name in ["Review", "Deploy"] {
+        let step = Step {
+            id: None,
+            name: name.to_string(),
+            workflow_id: wf_id.clone(),
+            goal: None,
+            agents: vec![],
+            skills: vec![],
+            agent_config: Default::default(),
+            is_final: false,
+            transitions_to: vec![],
+            order: 0,
+            created_at: None,
+            updated_at: None,
+        };
+        services.steps().create_step(&step).await.unwrap();
+    }
 
     let cmd = WorkflowListCommand {};
     let output = cmd.execute(services.workflows()).await.unwrap();
 
-    // Output should show step count
-    assert!(output.contains("steps"));
+    // Output should show accurate step count
+    assert!(output.contains("2 steps"));
 }
 
 // ============================================================================

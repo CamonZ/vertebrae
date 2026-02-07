@@ -641,11 +641,19 @@ impl WorkflowService for MockWorkflowService {
         let s = self.state.lock().unwrap();
         Ok(s.workflows
             .values()
-            .map(|w| WorkflowSummary {
-                id: w.id.clone().unwrap_or_default(),
-                name: w.name.clone(),
-                description: w.description.clone(),
-                step_count: 0,
+            .map(|w| {
+                let wf_id = w.id.clone().unwrap_or_default();
+                let step_count = s
+                    .steps
+                    .values()
+                    .filter(|st| st.workflow_id == wf_id)
+                    .count();
+                WorkflowSummary {
+                    id: wf_id,
+                    name: w.name.clone(),
+                    description: w.description.clone(),
+                    step_count,
+                }
             })
             .collect())
     }
