@@ -235,7 +235,7 @@ impl TaskService for MockTaskService {
         Ok(tasks)
     }
 
-    async fn list_ready(&self, _status: &str) -> ServiceResult<Vec<Task>> {
+    async fn list_ready(&self) -> ServiceResult<Vec<Task>> {
         let all = self.list_tasks(&TaskFilter::default()).await?;
         let s = self.state.lock().unwrap();
         Ok(all

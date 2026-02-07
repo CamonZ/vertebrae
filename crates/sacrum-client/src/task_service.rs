@@ -485,11 +485,10 @@ impl TaskService for SacrumTaskService {
             .collect())
     }
 
-    async fn list_ready(&self, status: &str) -> ServiceResult<Vec<Task>> {
+    async fn list_ready(&self) -> ServiceResult<Vec<Task>> {
         let query = with_fragments(tasks::READY_TASKS, &[tasks::TASK_FIELDS]);
         let variables = json!({
             "project_id": self.client.project_id,
-            "status": status,
         });
 
         let responses: Vec<TaskResponse> =
@@ -1331,7 +1330,7 @@ mod tests {
         mount_empty_lookups(&server).await;
 
         let service = create_wiremock_service(&server.uri());
-        let tasks = service.list_ready("todo").await.unwrap();
+        let tasks = service.list_ready().await.unwrap();
 
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].title, "Ready Task");

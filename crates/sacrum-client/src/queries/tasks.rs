@@ -92,8 +92,8 @@ pub const GET_TASK: &str = r#"
 /// List tasks that are ready (unblocked).
 /// NOTE: Prepend TASK_FIELDS when sending.
 pub const READY_TASKS: &str = r#"
-    query ReadyTasks($project_id: ID!, $status: String) {
-        list_ready(project_id: $project_id, status: $status) {
+    query ReadyTasks($project_id: ID!) {
+        list_ready(project_id: $project_id) {
             ...TaskFields
         }
     }

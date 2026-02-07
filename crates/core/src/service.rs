@@ -277,7 +277,7 @@ pub trait TaskService: Send + Sync {
     }
 
     /// Get tasks ready for work at a given status
-    async fn list_ready(&self, status: &str) -> ServiceResult<Vec<Task>>;
+    async fn list_ready(&self) -> ServiceResult<Vec<Task>>;
 
     // =========================================================================
     // Relationships

@@ -426,7 +426,7 @@ mod query_tests {
         let _b_id = b.execute(&services).await.unwrap();
 
         // list_ready should return A (no blockers) but not B (blocked by A)
-        let ready = services.tasks().list_ready("backlog").await.unwrap();
+        let ready = services.tasks().list_ready().await.unwrap();
 
         let ready_ids: Vec<&str> = ready.iter().map(|t| t.id.as_str()).collect();
         assert!(ready_ids.contains(&a_id.as_str()));
