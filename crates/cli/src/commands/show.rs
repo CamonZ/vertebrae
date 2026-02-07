@@ -85,6 +85,9 @@ struct TaskRow {
     parent_id: Option<String>,
     sections: Vec<SectionRow>,
     code_refs: Vec<CodeRefRow>,
+    blockers: Vec<vertebrae_core::Task>,
+    dependents: Vec<vertebrae_core::Task>,
+    children: Vec<vertebrae_core::Task>,
 }
 
 /// Section row from database
@@ -156,16 +159,26 @@ impl ShowCommand {
         // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
 
-        // Fetch the main task using service layer
+        // Fetch the main task using service layer (includes blockers, dependents, children)
         let task = self.fetch_task(services, &id).await?;
 
-        // Fetch related data in parallel-ish manner
+        // Fetch parent separately (not included in GET_TASK response)
         let parent = self
             .fetch_parent(services, task.parent_id.as_deref())
             .await?;
-        let children = self.fetch_children(services).await?;
-        let blocked_by = self.fetch_blocked_by(services).await?;
-        let blocks = self.fetch_blocks(services).await?;
+
+        // Convert embedded relationships to TaskSummary
+        let children: Vec<TaskSummary> = task.children.iter().map(task_to_summary).collect();
+
+        // Blockers: filter for incomplete only (step_name != "done")
+        let blocked_by: Vec<TaskSummary> = task
+            .blockers
+            .iter()
+            .filter(|t| t.step_name.as_deref() != Some("done"))
+            .map(task_to_summary)
+            .collect();
+
+        let blocks: Vec<TaskSummary> = task.dependents.iter().map(task_to_summary).collect();
 
         // Fetch workflow info if task is assigned to a workflow
         let workflow = self
@@ -337,6 +350,9 @@ impl ShowCommand {
                     description: r.description,
                 })
                 .collect(),
+            blockers: task.blockers,
+            dependents: task.dependents,
+            children: task.children,
         })
     }
 
@@ -366,96 +382,6 @@ impl ShowCommand {
         }))
     }
 
-    /// Fetch children tasks using the service layer.
-    async fn fetch_children(
-        &self,
-        services: &VertebraeServices,
-    ) -> Result<Vec<TaskSummary>, ServiceError> {
-        // Use service method to get child IDs
-        let child_ids = services
-            .tasks()
-            .get_children(&self.id.to_lowercase())
-            .await?;
-
-        let mut children = Vec::new();
-        for child_id in child_ids {
-            let task = services.tasks().get_task(&child_id).await?;
-
-            children.push(TaskSummary {
-                id: child_id,
-                title: task.title,
-                level: task.level.as_str().to_string(),
-                workflow_name: task.workflow_name,
-                step_name: task.step_name,
-                priority: task.priority.map(|p| p.as_str().to_string()),
-                tags: task.tags,
-                needs_human_review: task.needs_human_review,
-                parent_id: None,
-            });
-        }
-
-        Ok(children)
-    }
-
-    /// Fetch tasks that this task depends on (blocked by).
-    /// Only returns incomplete blockers (status != done).
-    async fn fetch_blocked_by(
-        &self,
-        services: &VertebraeServices,
-    ) -> Result<Vec<TaskSummary>, ServiceError> {
-        // Use the service layer method to get incomplete blockers with details
-        let blockers = services
-            .tasks()
-            .get_incomplete_blockers_with_details(&self.id.to_lowercase())
-            .await?;
-
-        Ok(blockers
-            .into_iter()
-            .map(|task| TaskSummary {
-                id: task.id,
-                title: task.title,
-                level: task.level.as_str().to_string(),
-                workflow_name: task.workflow_name,
-                step_name: task.step_name,
-                priority: task.priority.map(|p| p.as_str().to_string()),
-                tags: task.tags,
-                needs_human_review: task.needs_human_review,
-                parent_id: None,
-            })
-            .collect())
-    }
-
-    /// Fetch tasks that are blocked by this task.
-    async fn fetch_blocks(
-        &self,
-        services: &VertebraeServices,
-    ) -> Result<Vec<TaskSummary>, ServiceError> {
-        // Use service method to get dependent task IDs (tasks blocked by this one)
-        let dependent_ids = services
-            .tasks()
-            .get_dependents(&self.id.to_lowercase())
-            .await?;
-
-        let mut blocks = Vec::new();
-        for dependent_id in dependent_ids {
-            let task = services.tasks().get_task(&dependent_id).await?;
-
-            blocks.push(TaskSummary {
-                id: dependent_id,
-                title: task.title,
-                level: task.level.as_str().to_string(),
-                workflow_name: task.workflow_name,
-                step_name: task.step_name,
-                priority: task.priority.map(|p| p.as_str().to_string()),
-                tags: task.tags,
-                needs_human_review: task.needs_human_review,
-                parent_id: None,
-            });
-        }
-
-        Ok(blocks)
-    }
-
     /// Fetch workflow information for a task assigned to a workflow.
     async fn fetch_workflow_info(
         &self,
@@ -473,6 +399,21 @@ impl ShowCommand {
             .get_workflow_info(workflow_id, current_step_id)
             .await?;
         Ok(Some(info))
+    }
+}
+
+/// Convert a core Task to a TaskSummary for display in relationships.
+fn task_to_summary(task: &vertebrae_core::Task) -> TaskSummary {
+    TaskSummary {
+        id: task.id.clone(),
+        title: task.title.clone(),
+        level: task.level.as_str().to_string(),
+        workflow_name: task.workflow_name.clone(),
+        step_name: task.step_name.clone(),
+        priority: task.priority.as_ref().map(|p| p.as_str().to_string()),
+        tags: task.tags.clone(),
+        needs_human_review: task.needs_human_review,
+        parent_id: task.parent_id.clone(),
     }
 }
 

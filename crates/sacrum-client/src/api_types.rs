@@ -10,6 +10,7 @@ pub struct TaskResponse {
     pub id: String,
     #[serde(default)]
     pub short_id: Option<String>,
+    #[serde(default)]
     pub project_id: String,
     pub title: String,
     #[serde(default)]
@@ -41,11 +42,11 @@ pub struct TaskResponse {
     #[serde(default)]
     pub code_refs: Vec<CodeRefResponse>,
     #[serde(default)]
-    pub blockers: Vec<BlockerTaskResponse>,
+    pub blockers: Vec<TaskResponse>,
     #[serde(default)]
-    pub dependents: Vec<BlockerTaskResponse>,
+    pub dependents: Vec<TaskResponse>,
     #[serde(default)]
-    pub children: Vec<ChildTaskResponse>,
+    pub children: Vec<TaskResponse>,
     #[serde(default)]
     pub started_at: Option<String>,
     #[serde(default)]
@@ -96,6 +97,13 @@ pub struct CodeRefResponse {
     pub updated_at: Option<String>,
 }
 
+/// Workflow step summary returned by the WORKFLOW_FIELDS fragment.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkflowStepSummary {
+    pub id: String,
+    pub name: String,
+}
+
 /// Workflow response from Sacrum API (matches WorkflowJSON.data/1)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkflowResponse {
@@ -115,6 +123,8 @@ pub struct WorkflowResponse {
     pub initial_step_id: Option<String>,
     #[serde(default)]
     pub project_id: Option<String>,
+    #[serde(default)]
+    pub workflow_steps: Vec<WorkflowStepSummary>,
     #[serde(default)]
     pub transitions: Option<Vec<WorkflowTransitionResponse>>,
     #[serde(default)]

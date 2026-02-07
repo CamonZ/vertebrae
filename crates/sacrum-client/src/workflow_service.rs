@@ -476,6 +476,7 @@ mod tests {
             metadata: None,
             initial_step_id: None,
             project_id: Some("test-proj".to_string()),
+            workflow_steps: vec![],
             transitions: None,
             inserted_at: None,
             updated_at: None,

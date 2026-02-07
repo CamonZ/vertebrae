@@ -29,45 +29,27 @@ impl SacrumTaskService {
         Self { client }
     }
 
-    /// Fetch all workflows and return a map of workflow_id -> workflow_name
-    async fn fetch_workflow_names(&self) -> ServiceResult<HashMap<String, String>> {
-        let query = with_fragments(wf_queries::LIST_WORKFLOWS, &[wf_queries::WORKFLOW_FIELDS]);
-        let variables = json!({ "project_id": self.client.project_id });
-        let workflows: Vec<WorkflowResponse> =
-            self.client.execute(&query, variables, "workflows").await?;
-        Ok(workflows.into_iter().map(|w| (w.id, w.name)).collect())
-    }
-
-    /// Fetch all steps across all workflows and return a map of step_id -> step_name
-    async fn fetch_step_names(&self) -> ServiceResult<HashMap<String, String>> {
-        // First get all workflows, then get steps for each via GET_WORKFLOW which includes nested steps
+    /// Fetch all workflows (with embedded steps) in a single query and return
+    /// both workflow_id → workflow_name and step_id → step_name maps.
+    async fn fetch_lookups(
+        &self,
+    ) -> ServiceResult<(HashMap<String, String>, HashMap<String, String>)> {
         let query = with_fragments(wf_queries::LIST_WORKFLOWS, &[wf_queries::WORKFLOW_FIELDS]);
         let variables = json!({ "project_id": self.client.project_id });
         let workflows: Vec<WorkflowResponse> =
             self.client.execute(&query, variables, "workflows").await?;
 
+        let mut workflow_names = HashMap::new();
         let mut step_names = HashMap::new();
-        for wf in &workflows {
-            let get_query =
-                with_fragments(wf_queries::GET_WORKFLOW, &[wf_queries::WORKFLOW_FIELDS]);
-            let get_vars = json!({ "id": wf.id });
-            // GET_WORKFLOW returns a single workflow with embedded workflow_steps
-            let wf_detail: Value = self
-                .client
-                .execute(&get_query, get_vars, "workflow")
-                .await?;
-            if let Some(steps) = wf_detail.get("workflow_steps").and_then(|v| v.as_array()) {
-                for step_val in steps {
-                    if let (Some(id), Some(name)) = (
-                        step_val.get("id").and_then(|v| v.as_str()),
-                        step_val.get("name").and_then(|v| v.as_str()),
-                    ) {
-                        step_names.insert(id.to_string(), name.to_string());
-                    }
-                }
+
+        for wf in workflows {
+            for step in &wf.workflow_steps {
+                step_names.insert(step.id.clone(), step.name.clone());
             }
+            workflow_names.insert(wf.id, wf.name);
         }
-        Ok(step_names)
+
+        Ok((workflow_names, step_names))
     }
 
     /// Convert Sacrum TaskResponse to vertebrae_core Task model
@@ -146,6 +128,23 @@ impl SacrumTaskService {
             response.dependency_ids.clone()
         };
 
+        // Convert nested relationship responses to Task models (1 level deep only)
+        let blockers = response
+            .blockers
+            .iter()
+            .map(|r| self.response_to_task_with_lookups(r, workflow_names, step_names))
+            .collect();
+        let dependents = response
+            .dependents
+            .iter()
+            .map(|r| self.response_to_task_with_lookups(r, workflow_names, step_names))
+            .collect();
+        let children = response
+            .children
+            .iter()
+            .map(|r| self.response_to_task_with_lookups(r, workflow_names, step_names))
+            .collect();
+
         Task {
             id: response.id.clone(),
             title: response.title.clone(),
@@ -165,6 +164,9 @@ impl SacrumTaskService {
             dependency_ids,
             sections,
             code_refs,
+            blockers,
+            dependents,
+            children,
             created_at,
             updated_at,
             started_at,
@@ -301,8 +303,7 @@ impl TaskService for SacrumTaskService {
         let response = self.fetch_task_response(id).await?;
 
         // Fetch lookups to resolve workflow_name and step_name
-        let workflow_names = self.fetch_workflow_names().await.unwrap_or_default();
-        let step_names = self.fetch_step_names().await.unwrap_or_default();
+        let (workflow_names, step_names) = self.fetch_lookups().await.unwrap_or_default();
 
         Ok(self.response_to_task_with_lookups(&response, Some(&workflow_names), Some(&step_names)))
     }
@@ -432,8 +433,7 @@ impl TaskService for SacrumTaskService {
         let responses: Vec<TaskResponse> = self.client.execute(&query, variables, "tasks").await?;
 
         // Fetch lookups once for all tasks
-        let workflow_names = self.fetch_workflow_names().await.unwrap_or_default();
-        let step_names = self.fetch_step_names().await.unwrap_or_default();
+        let (workflow_names, step_names) = self.fetch_lookups().await.unwrap_or_default();
 
         Ok(responses
             .iter()
@@ -496,8 +496,7 @@ impl TaskService for SacrumTaskService {
             self.client.execute(&query, variables, "list_ready").await?;
 
         // Fetch lookups once for all tasks
-        let workflow_names = self.fetch_workflow_names().await.unwrap_or_default();
-        let step_names = self.fetch_step_names().await.unwrap_or_default();
+        let (workflow_names, step_names) = self.fetch_lookups().await.unwrap_or_default();
 
         Ok(responses
             .iter()
@@ -874,7 +873,7 @@ impl TaskService for SacrumTaskService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api_types::{BlockerTaskResponse, ChildTaskResponse, TaskResponse};
+    use crate::api_types::TaskResponse;
 
     fn create_test_client() -> GraphqlClient {
         GraphqlClient::new(crate::config::SacrumConfig::new(
@@ -1002,7 +1001,6 @@ mod tests {
             inserted_at: None,
             updated_at: None,
         }];
-
         let task = service.response_to_task(&response);
         assert_eq!(task.code_refs.len(), 1);
         assert_eq!(task.code_refs[0].path, "src/main.rs");
@@ -1109,16 +1107,8 @@ mod tests {
 
         let mut response = make_task_response("task-deps", "With Blockers");
         response.blockers = vec![
-            BlockerTaskResponse {
-                id: "blocker-1".to_string(),
-                short_id: None,
-                title: "Blocker 1".to_string(),
-            },
-            BlockerTaskResponse {
-                id: "blocker-2".to_string(),
-                short_id: None,
-                title: "Blocker 2".to_string(),
-            },
+            make_task_response("blocker-1", "Blocker 1"),
+            make_task_response("blocker-2", "Blocker 2"),
         ];
 
         let task = service.response_to_task(&response);
@@ -1131,26 +1121,16 @@ mod tests {
         let service = SacrumTaskService::new(client);
 
         let mut response = make_task_response("task-parent", "Parent Task");
-        response.children = vec![
-            ChildTaskResponse {
-                id: "child-1".to_string(),
-                short_id: None,
-                title: "Child 1".to_string(),
-                level: Some("task".to_string()),
-                priority: None,
-            },
-            ChildTaskResponse {
-                id: "child-2".to_string(),
-                short_id: None,
-                title: "Child 2".to_string(),
-                level: None,
-                priority: None,
-            },
-        ];
+        let mut child1 = make_task_response("child-1", "Child 1");
+        child1.level = Some("task".to_string());
+        let child2 = make_task_response("child-2", "Child 2");
+        response.children = vec![child1, child2];
 
-        // Children don't affect the Task model directly via response_to_task
         let task = service.response_to_task(&response);
         assert_eq!(task.id, "task-parent");
+        assert_eq!(task.children.len(), 2);
+        assert_eq!(task.children[0].id, "child-1");
+        assert_eq!(task.children[1].id, "child-2");
     }
 
     // =========================================================================

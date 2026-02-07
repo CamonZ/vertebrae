@@ -82,9 +82,9 @@ pub const GET_TASK: &str = r#"
     query GetTask($id: ID!) {
         task(id: $id) {
             ...TaskFields
-            blockers { id short_id title }
-            dependents { id short_id title }
-            children { id short_id title level priority }
+            blockers { ...TaskFields }
+            dependents { ...TaskFields }
+            children { ...TaskFields }
         }
     }
 "#;

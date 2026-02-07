@@ -72,6 +72,9 @@ impl TaskService for MockTaskService {
             completed_at: None,
             sections: vec![],
             code_refs: vec![],
+            blockers: vec![],
+            dependents: vec![],
+            children: vec![],
             needs_human_review: if options.needs_review {
                 Some(true)
             } else {
@@ -113,10 +116,37 @@ impl TaskService for MockTaskService {
 
     async fn get_task(&self, id: &str) -> ServiceResult<Task> {
         let s = self.state.lock().unwrap();
-        s.tasks
+        let mut task = s
+            .tasks
             .get(id)
             .cloned()
-            .ok_or_else(|| ServiceError::task_not_found(id))
+            .ok_or_else(|| ServiceError::task_not_found(id))?;
+
+        // Populate children from parent relationships
+        task.children = s
+            .parents
+            .iter()
+            .filter(|(_, p)| *p == id)
+            .filter_map(|(c, _)| s.tasks.get(c).cloned())
+            .collect();
+
+        // Populate blockers from dependencies
+        if let Some(blocker_ids) = s.dependencies.get(id) {
+            task.blockers = blocker_ids
+                .iter()
+                .filter_map(|bid| s.tasks.get(bid).cloned())
+                .collect();
+        }
+
+        // Populate dependents (tasks that depend on this one)
+        task.dependents = s
+            .dependencies
+            .iter()
+            .filter(|(_, blockers)| blockers.contains(id))
+            .filter_map(|(tid, _)| s.tasks.get(tid).cloned())
+            .collect();
+
+        Ok(task)
     }
 
     async fn update_task(&self, id: &str, options: UpdateTaskOptions) -> ServiceResult<()> {

@@ -819,6 +819,18 @@ pub struct Task {
     #[serde(default, rename = "refs")]
     pub code_refs: Vec<CodeRef>,
 
+    /// Blocker tasks (populated by get_task, empty by default)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub blockers: Vec<Task>,
+
+    /// Dependent tasks (populated by get_task, empty by default)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dependents: Vec<Task>,
+
+    /// Child tasks (populated by get_task, empty by default)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub children: Vec<Task>,
+
     /// Creation timestamp
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_at: Option<DateTime<Utc>>,
@@ -858,6 +870,9 @@ impl Task {
             dependency_ids: Vec::new(),
             sections: Vec::new(),
             code_refs: Vec::new(),
+            blockers: Vec::new(),
+            dependents: Vec::new(),
+            children: Vec::new(),
             created_at: None,
             updated_at: None,
             started_at: None,

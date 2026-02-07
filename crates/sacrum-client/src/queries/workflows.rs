@@ -15,6 +15,10 @@ pub const WORKFLOW_FIELDS: &str = r#"
         on_reject_workflow_id
         inserted_at
         updated_at
+        workflow_steps {
+            id
+            name
+        }
         transitions {
             id
             to_workflow_id
