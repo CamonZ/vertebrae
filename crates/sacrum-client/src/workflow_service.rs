@@ -1,10 +1,9 @@
-//! WorkflowService implementation for Sacrum HTTP API
+//! WorkflowService implementation for Sacrum GraphQL API
 //!
-//! Implements the WorkflowService trait by making HTTP calls to the Sacrum REST API.
-//! Uses flat /api/... routes with project_id as a query parameter.
+//! Implements the WorkflowService trait by making GraphQL calls to the Sacrum API.
+//! Uses the GraphqlClient with query strings from crate::queries::workflows.
 
 use async_trait::async_trait;
-use serde::Serialize;
 use serde_json::json;
 use vertebrae_core::WorkflowSummary;
 use vertebrae_core::error::{ServiceError, ServiceResult};
@@ -13,23 +12,40 @@ use vertebrae_core::workflow_service::{
     AssignResult, CreateWorkflowOptions, UpdateWorkflowOptions, WorkflowInfo, WorkflowService,
 };
 
-use crate::api_types::{WorkflowResponse, WorkflowTransitionResponse};
-use crate::client::SacrumClient;
+use crate::api_types::{WorkflowResponse, WorkflowStepResponse, WorkflowTransitionResponse};
+use crate::client::{GraphqlClient, with_fragments};
+use crate::queries::tasks::{ASSIGN_WORKFLOW, UNASSIGN_WORKFLOW};
+use crate::queries::workflows::{
+    CREATE_WORKFLOW, CREATE_WORKFLOW_TRANSITION, DELETE_WORKFLOW, DELETE_WORKFLOW_TRANSITION,
+    GET_WORKFLOW, LIST_WORKFLOWS, UPDATE_WORKFLOW, WORKFLOW_FIELDS,
+};
 
-/// Query param helper for project_id
-#[derive(Serialize)]
-struct ProjectQuery<'a> {
-    project_id: &'a str,
+/// Intermediate type for deserializing GET_WORKFLOW responses that include workflow_steps.
+#[derive(Debug, Clone, serde::Deserialize)]
+struct WorkflowWithSteps {
+    #[serde(flatten)]
+    workflow: WorkflowResponse,
+    #[serde(default)]
+    workflow_steps: Vec<WorkflowStepResponse>,
 }
 
-/// WorkflowService implementation for Sacrum HTTP client
+/// Intermediate type for deserializing ASSIGN_WORKFLOW responses.
+#[derive(Debug, Clone, serde::Deserialize)]
+struct AssignWorkflowResponse {
+    id: String,
+    workflow_id: Option<String>,
+    #[allow(dead_code)]
+    current_step_id: Option<String>,
+}
+
+/// WorkflowService implementation for Sacrum GraphQL client
 pub struct SacrumWorkflowService {
-    client: SacrumClient,
+    client: GraphqlClient,
 }
 
 impl SacrumWorkflowService {
     /// Create a new SacrumWorkflowService
-    pub fn new(client: SacrumClient) -> Self {
+    pub fn new(client: GraphqlClient) -> Self {
         Self { client }
     }
 
@@ -95,7 +111,7 @@ impl SacrumWorkflowService {
             id: response.id.clone(),
             name: response.name.clone(),
             description: response.description.clone(),
-            step_count: 0, // Step count not included in workflow response; fetched separately
+            step_count: 0, // Step count not included in list response; fetched separately
         }
     }
 
@@ -134,28 +150,42 @@ impl WorkflowService for SacrumWorkflowService {
             return Err(ServiceError::validation_failed("Name cannot be empty"));
         }
 
-        let request = json!({
+        let query = with_fragments(CREATE_WORKFLOW, &[WORKFLOW_FIELDS]);
+        let variables = json!({
+            "project_id": self.client.project_id(),
             "name": options.name,
             "description": options.description,
-            "project_id": self.client.project_id(),
+            "auto_advance": options.auto_advance,
+            "display_order": options.order,
         });
 
-        let response: WorkflowResponse = self.client.post("/api/workflows", &request).await?;
+        #[derive(serde::Deserialize)]
+        struct IdResponse {
+            id: String,
+        }
 
+        let response: IdResponse = self
+            .client
+            .execute(&query, variables, "create_workflow")
+            .await?;
         Ok(response.id)
     }
 
     async fn get_workflow(&self, id: &str) -> ServiceResult<Workflow> {
-        let path = format!("/api/workflows/{}", id);
-        let response: WorkflowResponse = self.client.get(&path, &()).await?;
-        Ok(self.response_to_workflow(&response))
+        let query = with_fragments(GET_WORKFLOW, &[WORKFLOW_FIELDS]);
+        let variables = json!({ "id": id });
+
+        let response: WorkflowWithSteps =
+            self.client.execute(&query, variables, "workflow").await?;
+        Ok(self.response_to_workflow(&response.workflow))
     }
 
     async fn list_workflows(&self) -> ServiceResult<Vec<WorkflowSummary>> {
-        let query = ProjectQuery {
-            project_id: self.client.project_id(),
-        };
-        let workflows: Vec<WorkflowResponse> = self.client.get("/api/workflows", &query).await?;
+        let query = with_fragments(LIST_WORKFLOWS, &[WORKFLOW_FIELDS]);
+        let variables = json!({ "project_id": self.client.project_id() });
+
+        let workflows: Vec<WorkflowResponse> =
+            self.client.execute(&query, variables, "workflows").await?;
 
         Ok(workflows
             .iter()
@@ -164,10 +194,11 @@ impl WorkflowService for SacrumWorkflowService {
     }
 
     async fn list_workflows_full(&self) -> ServiceResult<Vec<Workflow>> {
-        let query = ProjectQuery {
-            project_id: self.client.project_id(),
-        };
-        let workflows: Vec<WorkflowResponse> = self.client.get("/api/workflows", &query).await?;
+        let query = with_fragments(LIST_WORKFLOWS, &[WORKFLOW_FIELDS]);
+        let variables = json!({ "project_id": self.client.project_id() });
+
+        let workflows: Vec<WorkflowResponse> =
+            self.client.execute(&query, variables, "workflows").await?;
 
         Ok(workflows
             .iter()
@@ -176,25 +207,31 @@ impl WorkflowService for SacrumWorkflowService {
     }
 
     async fn update_workflow(&self, id: &str, options: UpdateWorkflowOptions) -> ServiceResult<()> {
-        let mut request = json!({});
+        let query = with_fragments(UPDATE_WORKFLOW, &[WORKFLOW_FIELDS]);
+        let mut variables = json!({ "id": id });
 
         if let Some(name) = &options.name {
-            request["name"] = json!(name);
+            variables["name"] = json!(name);
         }
-
         if let Some(desc) = &options.description {
-            request["description"] = json!(desc);
+            variables["description"] = json!(desc);
+        }
+        if let Some(auto_advance) = options.auto_advance {
+            variables["auto_advance"] = json!(auto_advance);
+        }
+        if let Some(order) = options.order {
+            variables["display_order"] = json!(order);
         }
 
-        let path = format!("/api/workflows/{}", id);
-        let _response: WorkflowResponse = self.client.put(&path, &request).await?;
-
+        self.client.execute_void(&query, variables).await?;
         Ok(())
     }
 
     async fn delete_workflow(&self, id: &str) -> ServiceResult<()> {
-        let path = format!("/api/workflows/{}", id);
-        self.client.delete(&path).await?;
+        let query = with_fragments(DELETE_WORKFLOW, &[WORKFLOW_FIELDS]);
+        let variables = json!({ "id": id });
+
+        self.client.execute_void(&query, variables).await?;
         Ok(())
     }
 
@@ -202,6 +239,7 @@ impl WorkflowService for SacrumWorkflowService {
         match self.get_workflow(id).await {
             Ok(_) => Ok(true),
             Err(ServiceError::WorkflowNotFound { workflow_id: _ }) => Ok(false),
+            Err(ServiceError::TaskNotFound { task_id: _ }) => Ok(false),
             Err(e) => Err(e),
         }
     }
@@ -211,41 +249,92 @@ impl WorkflowService for SacrumWorkflowService {
         task_id: &str,
         workflow_id: &str,
     ) -> ServiceResult<AssignResult> {
-        let request = json!({
-            "workflow_id": workflow_id
+        let variables = json!({
+            "task_id": task_id,
+            "workflow_id": workflow_id,
         });
-        let path = format!("/api/tasks/{}/assign-workflow", task_id);
-        let _response: serde_json::Value = self.client.post(&path, &request).await?;
+
+        let response: AssignWorkflowResponse = self
+            .client
+            .execute(ASSIGN_WORKFLOW, variables, "assign_workflow")
+            .await?;
 
         Ok(AssignResult {
-            task_id: task_id.to_string(),
-            workflow_id: workflow_id.to_string(),
+            task_id: response.id,
+            workflow_id: response
+                .workflow_id
+                .unwrap_or_else(|| workflow_id.to_string()),
             first_step_name: String::new(),
         })
     }
 
     async fn unassign_workflow(&self, task_id: &str) -> ServiceResult<()> {
-        let path = format!("/api/tasks/{}/assign-workflow", task_id);
-        self.client.delete(&path).await?;
+        let variables = json!({ "task_id": task_id });
+
+        self.client
+            .execute_void(UNASSIGN_WORKFLOW, variables)
+            .await?;
         Ok(())
     }
 
     async fn get_workflow_info(
         &self,
         workflow_id: &str,
-        _current_step_id: Option<&str>,
+        current_step_id: Option<&str>,
     ) -> ServiceResult<WorkflowInfo> {
-        let workflow = self.get_workflow(workflow_id).await?;
+        let query = with_fragments(GET_WORKFLOW, &[WORKFLOW_FIELDS]);
+        let variables = json!({ "id": workflow_id });
+
+        let response: WorkflowWithSteps =
+            self.client.execute(&query, variables, "workflow").await?;
+
+        let workflow = self.response_to_workflow(&response.workflow);
+        let steps = &response.workflow_steps;
+        let total_steps = steps.len();
+
+        // Find current step index and names
+        let mut current_step_index = 0;
+        let mut current_step_name = String::new();
+        let mut current_step_id_resolved = None;
+        let mut prev_step_name = None;
+        let mut next_step_name = None;
+
+        // Sort steps by step_order for proper navigation
+        let mut sorted_steps: Vec<&WorkflowStepResponse> = steps.iter().collect();
+        sorted_steps.sort_by_key(|s| s.step_order);
+
+        if let Some(step_id) = current_step_id {
+            for (i, step) in sorted_steps.iter().enumerate() {
+                if step.id == step_id {
+                    current_step_index = i;
+                    current_step_name = step.name.clone();
+                    current_step_id_resolved = Some(step.id.clone());
+                    if i > 0 {
+                        prev_step_name = Some(sorted_steps[i - 1].name.clone());
+                    }
+                    if i + 1 < sorted_steps.len() {
+                        next_step_name = Some(sorted_steps[i + 1].name.clone());
+                    }
+                    break;
+                }
+            }
+        } else if let Some(first_step) = sorted_steps.first() {
+            current_step_name = first_step.name.clone();
+            current_step_id_resolved = Some(first_step.id.clone());
+            if sorted_steps.len() > 1 {
+                next_step_name = Some(sorted_steps[1].name.clone());
+            }
+        }
 
         Ok(WorkflowInfo {
             id: workflow.id.unwrap_or_default(),
             name: workflow.name,
-            current_step_id: None,
-            current_step_name: String::new(),
-            current_step_index: 0,
-            total_steps: 0,
-            prev_step_name: None,
-            next_step_name: None,
+            current_step_id: current_step_id_resolved,
+            current_step_name,
+            current_step_index,
+            total_steps,
+            prev_step_name,
+            next_step_name,
         })
     }
 
@@ -256,21 +345,27 @@ impl WorkflowService for SacrumWorkflowService {
         label: &str,
         target_step_id: Option<&str>,
     ) -> ServiceResult<WorkflowTransition> {
-        let path = format!("/api/workflows/{}/transitions", from_workflow_id);
-
-        let mut request = json!({
+        let mut variables = json!({
+            "from_workflow_id": from_workflow_id,
             "to_workflow_id": to_workflow_id,
         });
 
         if !label.is_empty() {
-            request["label"] = json!(label);
+            variables["label"] = json!(label);
         }
 
         if let Some(step_id) = target_step_id {
-            request["target_step_id"] = json!(step_id);
+            variables["target_step_id"] = json!(step_id);
         }
 
-        let response: WorkflowTransitionResponse = self.client.post(&path, &request).await?;
+        let response: WorkflowTransitionResponse = self
+            .client
+            .execute(
+                CREATE_WORKFLOW_TRANSITION,
+                variables,
+                "create_workflow_transition",
+            )
+            .await?;
 
         Ok(WorkflowTransition {
             id: Some(response.id),
@@ -286,10 +381,11 @@ impl WorkflowService for SacrumWorkflowService {
         &self,
         from_workflow_id: Option<&str>,
     ) -> ServiceResult<Vec<WorkflowTransition>> {
-        let query = ProjectQuery {
-            project_id: self.client.project_id(),
-        };
-        let workflows: Vec<WorkflowResponse> = self.client.get("/api/workflows", &query).await?;
+        let query = with_fragments(LIST_WORKFLOWS, &[WORKFLOW_FIELDS]);
+        let variables = json!({ "project_id": self.client.project_id() });
+
+        let workflows: Vec<WorkflowResponse> =
+            self.client.execute(&query, variables, "workflows").await?;
 
         Ok(Self::extract_transitions(&workflows, from_workflow_id))
     }
@@ -335,11 +431,10 @@ impl WorkflowService for SacrumWorkflowService {
             .as_ref()
             .ok_or_else(|| ServiceError::InvalidInput("Transition has no ID".to_string()))?;
 
-        let path = format!(
-            "/api/workflows/{}/transitions/{}",
-            from_workflow_id, transition_id
-        );
-        self.client.delete(&path).await?;
+        let variables = json!({ "id": transition_id });
+        self.client
+            .execute_void(DELETE_WORKFLOW_TRANSITION, variables)
+            .await?;
         Ok(())
     }
 
@@ -360,9 +455,10 @@ impl WorkflowService for SacrumWorkflowService {
 mod tests {
     use super::*;
     use crate::api_types::WorkflowTransitionResponse;
+    use crate::config::SacrumConfig;
 
-    fn create_test_client() -> SacrumClient {
-        crate::client::SacrumClient::new(crate::config::SacrumConfig::new(
+    fn create_test_client() -> GraphqlClient {
+        GraphqlClient::new(SacrumConfig::new(
             "http://localhost:4000".to_string(),
             "test-token".to_string(),
             "test-proj".to_string(),
@@ -619,14 +715,14 @@ mod tests {
     }
 
     // =========================================================================
-    // Wiremock integration tests for workflow transition HTTP methods
+    // Wiremock integration tests for workflow GraphQL methods
     // =========================================================================
 
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn create_wiremock_service(server_url: &str) -> SacrumWorkflowService {
-        let client = SacrumClient::new(crate::config::SacrumConfig::new(
+        let client = GraphqlClient::new(SacrumConfig::new(
             server_url.to_string(),
             "test-token".to_string(),
             "test-proj".to_string(),
@@ -635,17 +731,246 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_create_workflow_success() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "create_workflow": {
+                        "id": "wf-new"
+                    }
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let opts = CreateWorkflowOptions::new("Test Workflow", vec![]);
+        let id = service.create_workflow(opts).await.unwrap();
+
+        assert_eq!(id, "wf-new");
+    }
+
+    #[tokio::test]
+    async fn test_create_workflow_empty_name_rejected() {
+        let server = MockServer::start().await;
+        let service = create_wiremock_service(&server.uri());
+
+        let opts = CreateWorkflowOptions::new("  ", vec![]);
+        let result = service.create_workflow(opts).await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_get_workflow_success() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "workflow": {
+                        "id": "wf-1",
+                        "name": "Dev Workflow",
+                        "description": "Development process",
+                        "auto_advance": true,
+                        "display_order": 1,
+                        "initial_step_id": "step-1",
+                        "workflow_steps": [
+                            {
+                                "id": "step-1",
+                                "name": "backlog",
+                                "step_order": 0,
+                                "is_final": false,
+                                "workflow_id": "wf-1",
+                                "agents": [],
+                                "skills": []
+                            }
+                        ]
+                    }
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let workflow = service.get_workflow("wf-1").await.unwrap();
+
+        assert_eq!(workflow.id, Some("wf-1".to_string()));
+        assert_eq!(workflow.name, "Dev Workflow");
+        assert_eq!(
+            workflow.description,
+            Some("Development process".to_string())
+        );
+        assert!(workflow.auto_advance);
+        assert_eq!(workflow.order, 1);
+    }
+
+    #[tokio::test]
+    async fn test_list_workflows_success() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "workflows": [
+                        { "id": "wf-1", "name": "First" },
+                        { "id": "wf-2", "name": "Second", "description": "The second one" }
+                    ]
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let summaries = service.list_workflows().await.unwrap();
+
+        assert_eq!(summaries.len(), 2);
+        assert_eq!(summaries[0].id, "wf-1");
+        assert_eq!(summaries[0].name, "First");
+        assert_eq!(summaries[1].id, "wf-2");
+        assert_eq!(summaries[1].name, "Second");
+        assert_eq!(summaries[1].description, Some("The second one".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_list_workflows_full_success() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "workflows": [
+                        {
+                            "id": "wf-1",
+                            "name": "Full Workflow",
+                            "auto_advance": true,
+                            "display_order": 2,
+                            "transitions": [
+                                { "id": "t-1", "to_workflow_id": "wf-2", "label": "on_done" }
+                            ]
+                        }
+                    ]
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let workflows = service.list_workflows_full().await.unwrap();
+
+        assert_eq!(workflows.len(), 1);
+        assert_eq!(workflows[0].name, "Full Workflow");
+        assert!(workflows[0].auto_advance);
+        assert_eq!(workflows[0].order, 2);
+        assert_eq!(workflows[0].transitions.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_update_workflow_success() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "update_workflow": { "id": "wf-1" }
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let opts = UpdateWorkflowOptions::new().with_name("Updated Name");
+        let result = service.update_workflow("wf-1", opts).await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_delete_workflow_success() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "delete_workflow": { "id": "wf-1" }
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let result = service.delete_workflow("wf-1").await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_assign_workflow_success() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "assign_workflow": {
+                        "id": "task-1",
+                        "workflow_id": "wf-1",
+                        "current_step_id": "step-1"
+                    }
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let result = service.assign_workflow("task-1", "wf-1").await.unwrap();
+
+        assert_eq!(result.task_id, "task-1");
+        assert_eq!(result.workflow_id, "wf-1");
+    }
+
+    #[tokio::test]
+    async fn test_unassign_workflow_success() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "unassign_workflow": { "id": "task-1" }
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let result = service.unassign_workflow("task-1").await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
     async fn test_create_workflow_transition_with_all_fields() {
         let server = MockServer::start().await;
 
         Mock::given(method("POST"))
-            .and(path("/api/workflows/wf-source/transitions"))
-            .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "data": {
-                    "id": "t-new",
-                    "to_workflow_id": "wf-target",
-                    "label": "promote",
-                    "target_step_id": "step-5"
+                    "create_workflow_transition": {
+                        "id": "t-new",
+                        "to_workflow_id": "wf-target",
+                        "label": "promote",
+                        "target_step_id": "step-5"
+                    }
                 }
             })))
             .mount(&server)
@@ -669,13 +994,15 @@ mod tests {
         let server = MockServer::start().await;
 
         Mock::given(method("POST"))
-            .and(path("/api/workflows/wf-a/transitions"))
-            .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "data": {
-                    "id": "t-1",
-                    "to_workflow_id": "wf-b",
-                    "label": null,
-                    "target_step_id": null
+                    "create_workflow_transition": {
+                        "id": "t-1",
+                        "to_workflow_id": "wf-b",
+                        "label": null,
+                        "target_step_id": null
+                    }
                 }
             })))
             .mount(&server)
@@ -698,25 +1025,34 @@ mod tests {
     async fn test_delete_workflow_transition_success() {
         let server = MockServer::start().await;
 
-        // GET workflow to find the transition ID
-        Mock::given(method("GET"))
-            .and(path("/api/workflows/wf-source"))
+        // First call: GET workflow to find the transition ID
+        // Second call: DELETE the transition
+        // Both go to /graphql as POST, so we use respond sequentially
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "data": {
-                    "id": "wf-source",
-                    "name": "Source",
-                    "transitions": [
-                        { "id": "t-99", "to_workflow_id": "wf-target", "label": "go", "target_step_id": null }
-                    ]
+                    "workflow": {
+                        "id": "wf-source",
+                        "name": "Source",
+                        "transitions": [
+                            { "id": "t-99", "to_workflow_id": "wf-target", "label": "go", "target_step_id": null }
+                        ],
+                        "workflow_steps": []
+                    }
                 }
             })))
+            .up_to_n_times(1)
             .mount(&server)
             .await;
 
-        // DELETE the transition
-        Mock::given(method("DELETE"))
-            .and(path("/api/workflows/wf-source/transitions/t-99"))
-            .respond_with(ResponseTemplate::new(204))
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "delete_workflow_transition": { "id": "t-99" }
+                }
+            })))
             .mount(&server)
             .await;
 
@@ -732,14 +1068,16 @@ mod tests {
     async fn test_delete_workflow_transition_not_found() {
         let server = MockServer::start().await;
 
-        // GET workflow with no matching transition
-        Mock::given(method("GET"))
-            .and(path("/api/workflows/wf-source"))
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "data": {
-                    "id": "wf-source",
-                    "name": "Source",
-                    "transitions": []
+                    "workflow": {
+                        "id": "wf-source",
+                        "name": "Source",
+                        "transitions": [],
+                        "workflow_steps": []
+                    }
                 }
             })))
             .mount(&server)
@@ -757,15 +1095,18 @@ mod tests {
     async fn test_workflow_transition_exists_true() {
         let server = MockServer::start().await;
 
-        Mock::given(method("GET"))
-            .and(path("/api/workflows/wf-1"))
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "data": {
-                    "id": "wf-1",
-                    "name": "Source",
-                    "transitions": [
-                        { "id": "t-1", "to_workflow_id": "wf-2", "label": null, "target_step_id": null }
-                    ]
+                    "workflow": {
+                        "id": "wf-1",
+                        "name": "Source",
+                        "transitions": [
+                            { "id": "t-1", "to_workflow_id": "wf-2", "label": null, "target_step_id": null }
+                        ],
+                        "workflow_steps": []
+                    }
                 }
             })))
             .mount(&server)
@@ -784,13 +1125,16 @@ mod tests {
     async fn test_workflow_transition_exists_false() {
         let server = MockServer::start().await;
 
-        Mock::given(method("GET"))
-            .and(path("/api/workflows/wf-1"))
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "data": {
-                    "id": "wf-1",
-                    "name": "Source",
-                    "transitions": []
+                    "workflow": {
+                        "id": "wf-1",
+                        "name": "Source",
+                        "transitions": [],
+                        "workflow_steps": []
+                    }
                 }
             })))
             .mount(&server)
@@ -803,5 +1147,110 @@ mod tests {
             .unwrap();
 
         assert!(!exists);
+    }
+
+    #[tokio::test]
+    async fn test_get_workflow_info_with_steps() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "workflow": {
+                        "id": "wf-1",
+                        "name": "Dev Flow",
+                        "workflow_steps": [
+                            { "id": "s-1", "name": "backlog", "step_order": 0, "is_final": false, "workflow_id": "wf-1", "agents": [], "skills": [] },
+                            { "id": "s-2", "name": "in_progress", "step_order": 1, "is_final": false, "workflow_id": "wf-1", "agents": [], "skills": [] },
+                            { "id": "s-3", "name": "done", "step_order": 2, "is_final": true, "workflow_id": "wf-1", "agents": [], "skills": [] }
+                        ]
+                    }
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let info = service
+            .get_workflow_info("wf-1", Some("s-2"))
+            .await
+            .unwrap();
+
+        assert_eq!(info.id, "wf-1");
+        assert_eq!(info.name, "Dev Flow");
+        assert_eq!(info.current_step_name, "in_progress");
+        assert_eq!(info.current_step_index, 1);
+        assert_eq!(info.total_steps, 3);
+        assert_eq!(info.prev_step_name, Some("backlog".to_string()));
+        assert_eq!(info.next_step_name, Some("done".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_get_workflow_info_no_current_step() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "workflow": {
+                        "id": "wf-1",
+                        "name": "Dev Flow",
+                        "workflow_steps": [
+                            { "id": "s-1", "name": "backlog", "step_order": 0, "is_final": false, "workflow_id": "wf-1", "agents": [], "skills": [] },
+                            { "id": "s-2", "name": "done", "step_order": 1, "is_final": true, "workflow_id": "wf-1", "agents": [], "skills": [] }
+                        ]
+                    }
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let info = service.get_workflow_info("wf-1", None).await.unwrap();
+
+        assert_eq!(info.id, "wf-1");
+        assert_eq!(info.current_step_name, "backlog");
+        assert_eq!(info.current_step_index, 0);
+        assert_eq!(info.total_steps, 2);
+        assert!(info.prev_step_name.is_none());
+        assert_eq!(info.next_step_name, Some("done".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_list_workflow_transitions_success() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "workflows": [
+                        {
+                            "id": "wf-1",
+                            "name": "First",
+                            "transitions": [
+                                { "id": "t-1", "to_workflow_id": "wf-2", "label": "on_done" }
+                            ]
+                        },
+                        {
+                            "id": "wf-2",
+                            "name": "Second",
+                            "transitions": []
+                        }
+                    ]
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let transitions = service.list_workflow_transitions(None).await.unwrap();
+
+        assert_eq!(transitions.len(), 1);
+        assert_eq!(transitions[0].from_workflow, "wf-1");
+        assert_eq!(transitions[0].to_workflow, "wf-2");
+        assert_eq!(transitions[0].label, "on_done");
     }
 }

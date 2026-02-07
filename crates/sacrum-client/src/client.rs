@@ -1,52 +1,79 @@
-//! HTTP client for Sacrum API
+//! GraphQL client for Sacrum API
 //!
 //! Provides a wrapper around reqwest::Client that handles:
 //! - Bearer token authentication (via default headers)
-//! - Automatic response deserialization with DataEnvelope unwrapping
-//! - Standard HTTP methods (GET, POST, PUT, DELETE)
-//! - Query parameter support on GET requests
+//! - GraphQL query execution with variable support
+//! - Automatic response parsing and error extraction
+//! - Fragment concatenation for reusable query parts
 
-use crate::api_types::DataEnvelope;
 use crate::config::SacrumConfig;
 use crate::error::{SacrumClientError, SacrumClientResult};
 use reqwest::Client;
-use serde::Serialize;
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
-/// HTTP client for Sacrum API
-///
-/// Wraps reqwest::Client and manages authentication, base URLs,
-/// and automatic response envelope unwrapping.
-///
-/// Bearer auth is set once via default headers in the constructor,
-/// so individual requests don't need to attach the token.
-#[derive(Clone)]
-pub struct SacrumClient {
-    client: Client,
-    base_url: String,
-    project_id: String,
+/// GraphQL response envelope
+#[derive(Debug, Deserialize)]
+struct GraphqlResponse<T> {
+    data: Option<T>,
+    errors: Option<Vec<GraphqlErrorItem>>,
 }
 
-impl SacrumClient {
-    /// Create a new SacrumClient from configuration
+/// Individual GraphQL error
+#[derive(Debug, Deserialize)]
+struct GraphqlErrorItem {
+    message: String,
+    #[allow(dead_code)]
+    path: Option<Vec<String>>,
+    #[allow(dead_code)]
+    extensions: Option<Value>,
+}
+
+/// GraphQL request body
+#[derive(Serialize)]
+struct GraphqlRequest<'a> {
+    query: &'a str,
+    variables: Value,
+}
+
+/// GraphQL client for Sacrum API
+///
+/// Wraps reqwest::Client and manages authentication and the
+/// GraphQL endpoint URL. Bearer auth is set once via default
+/// headers in the constructor.
+#[derive(Clone)]
+pub struct GraphqlClient {
+    client: Client,
+    endpoint: String,
+    pub(crate) project_id: String,
+}
+
+impl GraphqlClient {
+    /// Create a new GraphqlClient from configuration
     ///
-    /// Sets the bearer token as a default header on the underlying reqwest::Client.
+    /// Sets the bearer token and content-type as default headers on
+    /// the underlying reqwest::Client. Builds the endpoint as
+    /// `{base_url}/graphql`.
     pub fn new(config: SacrumConfig) -> Self {
-        use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
+        use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 
         let mut default_headers = HeaderMap::new();
         if let Ok(val) = HeaderValue::from_str(&format!("Bearer {}", config.api_token)) {
             default_headers.insert(AUTHORIZATION, val);
         }
+        default_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
         let client = Client::builder()
             .default_headers(default_headers)
             .build()
             .expect("Failed to build reqwest client");
 
-        SacrumClient {
+        let endpoint = format!("{}/graphql", config.base_url);
+
+        GraphqlClient {
             client,
-            base_url: config.base_url,
+            endpoint,
             project_id: config.project_id,
         }
     }
@@ -56,224 +83,166 @@ impl SacrumClient {
         &self.project_id
     }
 
-    /// Perform a GET request and deserialize the response
+    /// Execute a GraphQL query and extract a typed field from the response data
     ///
     /// # Arguments
-    /// * `path` - The API path (relative to base_url, should start with /)
-    /// * `query` - Query parameters to serialize. Pass `&()` for no params.
+    /// * `query` - The GraphQL query string
+    /// * `variables` - Query variables as a serde_json::Value
+    /// * `field` - The top-level field name to extract from the `data` object
     ///
     /// # Returns
-    /// The deserialized response data (unwrapped from DataEnvelope)
-    pub async fn get<T: DeserializeOwned, Q: Serialize>(
+    /// The deserialized value of `data.{field}`
+    pub async fn execute<T: DeserializeOwned>(
         &self,
-        path: &str,
-        query: &Q,
+        query: &str,
+        variables: Value,
+        field: &str,
     ) -> SacrumClientResult<T> {
-        let url = format!("{}{}", self.base_url, path);
+        let request_body = GraphqlRequest { query, variables };
+
         let start = std::time::Instant::now();
-        log::info!("[HTTP] GET {}", url);
+        log::info!("[GQL] POST {} (field: {})", self.endpoint, field);
 
-        let response = self.client.get(&url).query(query).send().await?;
-        let send_time = start.elapsed().as_millis();
-
-        let status = response.status();
-        let result = self.handle_response::<T>(response).await;
-        let total_time = start.elapsed().as_millis();
-
-        log::info!(
-            "[HTTP] GET {} -> {} (send: {}ms, parse: {}ms, total: {}ms)",
-            url,
-            status.as_u16(),
-            send_time,
-            total_time - send_time,
-            total_time
-        );
-        result
-    }
-
-    /// Perform a POST request and deserialize the response
-    ///
-    /// # Arguments
-    /// * `path` - The API path (relative to base_url, should start with /)
-    /// * `body` - The request body to serialize and send
-    ///
-    /// # Returns
-    /// The deserialized response data (unwrapped from DataEnvelope)
-    pub async fn post<T: DeserializeOwned, B: Serialize>(
-        &self,
-        path: &str,
-        body: &B,
-    ) -> SacrumClientResult<T> {
-        let url = format!("{}{}", self.base_url, path);
-        let start = std::time::Instant::now();
-        log::info!("[HTTP] POST {}", url);
-
-        let response = self.client.post(&url).json(body).send().await?;
-        let status = response.status();
-        let result = self.handle_response::<T>(response).await;
-
-        log::info!(
-            "[HTTP] POST {} -> {} ({}ms)",
-            url,
-            status.as_u16(),
-            start.elapsed().as_millis()
-        );
-        result
-    }
-
-    /// Perform a POST request that doesn't return data
-    ///
-    /// # Arguments
-    /// * `path` - The API path (relative to base_url, should start with /)
-    /// * `body` - The request body to serialize and send
-    pub async fn post_void<B: Serialize>(&self, path: &str, body: &B) -> SacrumClientResult<()> {
-        let url = format!("{}{}", self.base_url, path);
-        let start = std::time::Instant::now();
-        log::info!("[HTTP] POST {}", url);
-
-        let response = self.client.post(&url).json(body).send().await?;
+        let response = self
+            .client
+            .post(&self.endpoint)
+            .json(&request_body)
+            .send()
+            .await?;
         let status = response.status();
 
-        let result = if response.status().is_success() {
-            Ok(())
-        } else {
-            let status_code = response.status().as_u16();
-            let message = response.text().await.unwrap_or_default();
-            Err(SacrumClientError::ApiError {
-                status: status_code,
-                message,
-            })
-        };
-
-        log::info!(
-            "[HTTP] POST {} -> {} ({}ms)",
-            url,
-            status.as_u16(),
-            start.elapsed().as_millis()
-        );
-        result
-    }
-
-    /// Perform a PUT request and deserialize the response
-    ///
-    /// # Arguments
-    /// * `path` - The API path (relative to base_url, should start with /)
-    /// * `body` - The request body to serialize and send
-    ///
-    /// # Returns
-    /// The deserialized response data (unwrapped from DataEnvelope)
-    pub async fn put<T: DeserializeOwned, B: Serialize>(
-        &self,
-        path: &str,
-        body: &B,
-    ) -> SacrumClientResult<T> {
-        let url = format!("{}{}", self.base_url, path);
-        let start = std::time::Instant::now();
-        log::info!("[HTTP] PUT {}", url);
-
-        let response = self.client.put(&url).json(body).send().await?;
-        let status = response.status();
-        let result = self.handle_response::<T>(response).await;
-
-        log::info!(
-            "[HTTP] PUT {} -> {} ({}ms)",
-            url,
-            status.as_u16(),
-            start.elapsed().as_millis()
-        );
-        result
-    }
-
-    /// Perform a PATCH request that doesn't return data
-    ///
-    /// # Arguments
-    /// * `path` - The API path (relative to base_url, should start with /)
-    /// * `body` - The request body to serialize and send
-    pub async fn patch<B: Serialize>(&self, path: &str, body: &B) -> SacrumClientResult<()> {
-        let url = format!("{}{}", self.base_url, path);
-        let start = std::time::Instant::now();
-        log::info!("[HTTP] PATCH {}", url);
-
-        let response = self.client.patch(&url).json(body).send().await?;
-        let status = response.status();
-
-        let result = if response.status().is_success() {
-            Ok(())
-        } else {
-            let status_code = response.status().as_u16();
-            let message = response.text().await.unwrap_or_default();
-            Err(SacrumClientError::ApiError {
-                status: status_code,
-                message,
-            })
-        };
-
-        log::info!(
-            "[HTTP] PATCH {} -> {} ({}ms)",
-            url,
-            status.as_u16(),
-            start.elapsed().as_millis()
-        );
-        result
-    }
-
-    /// Perform a DELETE request
-    ///
-    /// # Arguments
-    /// * `path` - The API path (relative to base_url, should start with /)
-    pub async fn delete(&self, path: &str) -> SacrumClientResult<()> {
-        let url = format!("{}{}", self.base_url, path);
-        let start = std::time::Instant::now();
-        log::info!("[HTTP] DELETE {}", url);
-
-        let response = self.client.delete(&url).send().await?;
-        let status = response.status();
-
-        // For DELETE, we just check the status code
-        let result = if response.status().is_success() {
-            Ok(())
-        } else {
-            let status_code = response.status().as_u16();
-            let message = response.text().await.unwrap_or_default();
-            Err(SacrumClientError::ApiError {
-                status: status_code,
-                message,
-            })
-        };
-
-        log::info!(
-            "[HTTP] DELETE {} -> {} ({}ms)",
-            url,
-            status.as_u16(),
-            start.elapsed().as_millis()
-        );
-        result
-    }
-
-    /// Handle HTTP response, unwrapping DataEnvelope and converting errors
-    async fn handle_response<T: DeserializeOwned>(
-        &self,
-        response: reqwest::Response,
-    ) -> SacrumClientResult<T> {
-        let status = response.status();
-
-        if status.is_success() {
-            let bytes = response.bytes().await?;
-            log::debug!("[HTTP] Response body: {} bytes", bytes.len());
-            let envelope: DataEnvelope<T> = serde_json::from_slice(&bytes)?;
-            Ok(envelope.into_inner())
-        } else {
+        if !status.is_success() {
             let status_code = status.as_u16();
-            let message = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
-            Err(SacrumClientError::ApiError {
+            let message = response.text().await.unwrap_or_default();
+            log::info!(
+                "[GQL] POST {} -> {} ({}ms)",
+                self.endpoint,
+                status_code,
+                start.elapsed().as_millis()
+            );
+            return Err(SacrumClientError::ApiError {
                 status: status_code,
                 message,
-            })
+            });
         }
+
+        let bytes = response.bytes().await?;
+        let gql_response: GraphqlResponse<Value> = serde_json::from_slice(&bytes)?;
+
+        log::info!(
+            "[GQL] POST {} -> {} ({}ms)",
+            self.endpoint,
+            status.as_u16(),
+            start.elapsed().as_millis()
+        );
+
+        // Check for GraphQL-level errors
+        if let Some(errors) = gql_response.errors
+            && !errors.is_empty()
+        {
+            let messages: Vec<String> = errors.into_iter().map(|e| e.message).collect();
+            let message = messages.join("; ");
+            return Err(SacrumClientError::GraphqlError { messages, message });
+        }
+
+        // Extract the requested field from data
+        let data = gql_response
+            .data
+            .ok_or_else(|| SacrumClientError::GraphqlError {
+                messages: vec!["No data in response".to_string()],
+                message: "No data in response".to_string(),
+            })?;
+
+        let field_value = data
+            .get(field)
+            .ok_or_else(|| {
+                let msg = format!("Field '{}' not found in response", field);
+                SacrumClientError::GraphqlError {
+                    messages: vec![msg.clone()],
+                    message: msg,
+                }
+            })?
+            .clone();
+
+        let result: T = serde_json::from_value(field_value)?;
+        Ok(result)
     }
+
+    /// Execute a GraphQL mutation that doesn't need to return data
+    ///
+    /// Checks for HTTP errors and GraphQL-level errors but doesn't
+    /// extract any field from the response data.
+    ///
+    /// # Arguments
+    /// * `query` - The GraphQL query/mutation string
+    /// * `variables` - Query variables as a serde_json::Value
+    pub async fn execute_void(&self, query: &str, variables: Value) -> SacrumClientResult<()> {
+        let request_body = GraphqlRequest { query, variables };
+
+        let start = std::time::Instant::now();
+        log::info!("[GQL] POST {} (void)", self.endpoint);
+
+        let response = self
+            .client
+            .post(&self.endpoint)
+            .json(&request_body)
+            .send()
+            .await?;
+        let status = response.status();
+
+        if !status.is_success() {
+            let status_code = status.as_u16();
+            let message = response.text().await.unwrap_or_default();
+            log::info!(
+                "[GQL] POST {} -> {} ({}ms)",
+                self.endpoint,
+                status_code,
+                start.elapsed().as_millis()
+            );
+            return Err(SacrumClientError::ApiError {
+                status: status_code,
+                message,
+            });
+        }
+
+        let bytes = response.bytes().await?;
+        let gql_response: GraphqlResponse<Value> = serde_json::from_slice(&bytes)?;
+
+        log::info!(
+            "[GQL] POST {} -> {} ({}ms)",
+            self.endpoint,
+            status.as_u16(),
+            start.elapsed().as_millis()
+        );
+
+        // Check for GraphQL-level errors
+        if let Some(errors) = gql_response.errors
+            && !errors.is_empty()
+        {
+            let messages: Vec<String> = errors.into_iter().map(|e| e.message).collect();
+            let message = messages.join("; ");
+            return Err(SacrumClientError::GraphqlError { messages, message });
+        }
+
+        Ok(())
+    }
+}
+
+/// Concatenate GraphQL fragments before a query string
+///
+/// Joins all fragment definitions with the main query, separated by newlines.
+/// This allows reusing common fragment definitions across multiple queries.
+///
+/// # Arguments
+/// * `query` - The main GraphQL query/mutation string
+/// * `fragments` - Slice of fragment definition strings to prepend
+///
+/// # Returns
+/// A single string with all fragments followed by the query
+pub fn with_fragments(query: &str, fragments: &[&str]) -> String {
+    let mut parts: Vec<&str> = fragments.to_vec();
+    parts.push(query);
+    parts.join("\n")
 }
 
 #[cfg(test)]
@@ -281,61 +250,34 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_sacrum_client_creation() {
+    fn test_graphql_client_creation() {
         let config = SacrumConfig::new(
             "http://localhost:4000".to_string(),
             "test-token".to_string(),
             "test-project".to_string(),
         );
-        let client = SacrumClient::new(config);
+        let client = GraphqlClient::new(config);
 
         assert_eq!(client.project_id(), "test-project");
     }
 
     #[test]
-    fn test_client_with_different_base_urls() {
-        let config1 = SacrumConfig::new(
-            "http://localhost:3000".to_string(),
+    fn test_client_endpoint_construction() {
+        let config = SacrumConfig::new(
+            "http://localhost:4000".to_string(),
             "token".to_string(),
             "proj".to_string(),
         );
-        let client1 = SacrumClient::new(config1);
-        assert_eq!(client1.base_url, "http://localhost:3000");
+        let client = GraphqlClient::new(config);
+        assert_eq!(client.endpoint, "http://localhost:4000/graphql");
 
         let config2 = SacrumConfig::new(
             "https://api.example.com".to_string(),
             "token".to_string(),
             "proj".to_string(),
         );
-        let client2 = SacrumClient::new(config2);
-        assert_eq!(client2.base_url, "https://api.example.com");
-    }
-
-    #[test]
-    fn test_client_preserves_config_values() {
-        let config = SacrumConfig::new(
-            "http://my-server:5000".to_string(),
-            "my-secret-token".to_string(),
-            "my-project-id".to_string(),
-        );
-        let client = SacrumClient::new(config);
-
-        assert_eq!(client.base_url, "http://my-server:5000");
-        assert_eq!(client.project_id(), "my-project-id");
-    }
-
-    #[test]
-    fn test_client_cloning() {
-        let config = SacrumConfig::new(
-            "http://localhost:4000".to_string(),
-            "test-token".to_string(),
-            "test-project".to_string(),
-        );
-        let client1 = SacrumClient::new(config);
-        let client2 = client1.clone();
-
-        assert_eq!(client1.project_id(), client2.project_id());
-        assert_eq!(client1.base_url, client2.base_url);
+        let client2 = GraphqlClient::new(config2);
+        assert_eq!(client2.endpoint, "https://api.example.com/graphql");
     }
 
     #[test]
@@ -345,11 +287,38 @@ mod tests {
             "token".to_string(),
             "my-special-project".to_string(),
         );
-        let client = SacrumClient::new(config);
+        let client = GraphqlClient::new(config);
 
         let project_id = client.project_id();
         assert_eq!(project_id, "my-special-project");
         assert_eq!(project_id.len(), 18);
+    }
+
+    #[test]
+    fn test_client_cloning() {
+        let config = SacrumConfig::new(
+            "http://localhost:4000".to_string(),
+            "test-token".to_string(),
+            "test-project".to_string(),
+        );
+        let client1 = GraphqlClient::new(config);
+        let client2 = client1.clone();
+
+        assert_eq!(client1.project_id(), client2.project_id());
+        assert_eq!(client1.endpoint, client2.endpoint);
+    }
+
+    #[test]
+    fn test_client_preserves_config_values() {
+        let config = SacrumConfig::new(
+            "http://my-server:5000".to_string(),
+            "my-secret-token".to_string(),
+            "my-project-id".to_string(),
+        );
+        let client = GraphqlClient::new(config);
+
+        assert_eq!(client.endpoint, "http://my-server:5000/graphql");
+        assert_eq!(client.project_id(), "my-project-id");
     }
 
     #[test]
@@ -365,30 +334,36 @@ mod tests {
             "project2".to_string(),
         );
 
-        let client1 = SacrumClient::new(config1);
-        let client2 = SacrumClient::new(config2);
+        let client1 = GraphqlClient::new(config1);
+        let client2 = GraphqlClient::new(config2);
 
         assert_eq!(client1.project_id(), "project1");
         assert_eq!(client2.project_id(), "project2");
-        assert_ne!(client1.base_url, client2.base_url);
+        assert_ne!(client1.endpoint, client2.endpoint);
     }
 
     #[test]
     fn test_client_with_various_base_urls() {
         let urls = vec![
-            "http://localhost:3000",
-            "http://localhost:4000",
-            "http://localhost:5000",
-            "http://api.example.com",
-            "https://api.example.com",
-            "https://staging-api.example.com",
+            ("http://localhost:3000", "http://localhost:3000/graphql"),
+            ("http://localhost:4000", "http://localhost:4000/graphql"),
+            ("http://localhost:5000", "http://localhost:5000/graphql"),
+            ("http://api.example.com", "http://api.example.com/graphql"),
+            ("https://api.example.com", "https://api.example.com/graphql"),
+            (
+                "https://staging-api.example.com",
+                "https://staging-api.example.com/graphql",
+            ),
         ];
 
-        for url in urls {
-            let config =
-                SacrumConfig::new(url.to_string(), "token".to_string(), "proj".to_string());
-            let client = SacrumClient::new(config);
-            assert_eq!(client.base_url, url);
+        for (base_url, expected_endpoint) in urls {
+            let config = SacrumConfig::new(
+                base_url.to_string(),
+                "token".to_string(),
+                "proj".to_string(),
+            );
+            let client = GraphqlClient::new(config);
+            assert_eq!(client.endpoint, expected_endpoint);
         }
     }
 
@@ -399,12 +374,12 @@ mod tests {
             "test-token".to_string(),
             "test-project".to_string(),
         );
-        let client = SacrumClient::new(config);
+        let client = GraphqlClient::new(config);
 
         assert_eq!(client.project_id(), "test-project");
         assert_eq!(client.project_id(), "test-project");
-        assert_eq!(client.base_url, "http://localhost:4000");
-        assert_eq!(client.base_url, "http://localhost:4000");
+        assert_eq!(client.endpoint, "http://localhost:4000/graphql");
+        assert_eq!(client.endpoint, "http://localhost:4000/graphql");
     }
 
     #[test]
@@ -414,11 +389,11 @@ mod tests {
             "test-token".to_string(),
             "test-project".to_string(),
         );
-        let client1 = SacrumClient::new(config);
+        let client1 = GraphqlClient::new(config);
         let client2 = client1.clone();
 
         assert_eq!(client1.project_id(), client2.project_id());
-        assert_eq!(client1.base_url, client2.base_url);
+        assert_eq!(client1.endpoint, client2.endpoint);
     }
 
     #[test]
@@ -438,7 +413,7 @@ mod tests {
                 "token".to_string(),
                 project_id.to_string(),
             );
-            let client = SacrumClient::new(config);
+            let client = GraphqlClient::new(config);
             assert_eq!(client.project_id(), project_id);
         }
     }
@@ -456,11 +431,11 @@ mod tests {
             "proj".to_string(),
         );
 
-        let client1 = SacrumClient::new(config1);
-        let client2 = SacrumClient::new(config2);
+        let client1 = GraphqlClient::new(config1);
+        let client2 = GraphqlClient::new(config2);
 
         assert_eq!(client1.project_id(), client2.project_id());
-        assert_eq!(client1.base_url, client2.base_url);
+        assert_eq!(client1.endpoint, client2.endpoint);
     }
 
     #[test]
@@ -476,11 +451,51 @@ mod tests {
             "proj".to_string(),
         );
 
-        let localhost_client = SacrumClient::new(localhost_config);
-        let remote_client = SacrumClient::new(remote_config);
+        let localhost_client = GraphqlClient::new(localhost_config);
+        let remote_client = GraphqlClient::new(remote_config);
 
-        assert!(localhost_client.base_url.contains("localhost"));
-        assert!(remote_client.base_url.contains("production"));
-        assert_ne!(localhost_client.base_url, remote_client.base_url);
+        assert!(localhost_client.endpoint.contains("localhost"));
+        assert!(remote_client.endpoint.contains("production"));
+        assert_ne!(localhost_client.endpoint, remote_client.endpoint);
+    }
+
+    #[test]
+    fn test_with_fragments_single() {
+        let fragment = "fragment TaskFields on Task { id name }";
+        let query = "query { tasks { ...TaskFields } }";
+        let result = with_fragments(query, &[fragment]);
+        assert!(result.contains(fragment));
+        assert!(result.contains(query));
+    }
+
+    #[test]
+    fn test_with_fragments_multiple() {
+        let frag1 = "fragment A on Task { id }";
+        let frag2 = "fragment B on Task { name }";
+        let query = "query { tasks { ...A ...B } }";
+        let result = with_fragments(query, &[frag1, frag2]);
+        assert!(result.contains(frag1));
+        assert!(result.contains(frag2));
+        assert!(result.contains(query));
+    }
+
+    #[test]
+    fn test_with_fragments_empty() {
+        let query = "query { tasks { id } }";
+        let result = with_fragments(query, &[]);
+        assert_eq!(result, query);
+    }
+
+    #[test]
+    fn test_project_id_pub_crate_access() {
+        let config = SacrumConfig::new(
+            "http://localhost:4000".to_string(),
+            "token".to_string(),
+            "direct-access-project".to_string(),
+        );
+        let client = GraphqlClient::new(config);
+
+        // Verify direct field access works (pub(crate) visibility)
+        assert_eq!(client.project_id, "direct-access-project");
     }
 }

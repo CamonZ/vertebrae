@@ -121,11 +121,15 @@ pub async fn add_project(
         api_token,
         "temp".to_string(),
     );
-    let client = vertebrae_sacrum_client::SacrumClient::new(temp_config);
+    let client = vertebrae_sacrum_client::GraphqlClient::new(temp_config);
 
     // Try to find existing project by slug, or create a new one
     let project = match client
-        .get::<Vec<vertebrae_sacrum_client::ProjectResponse>, _>("/api/projects", &())
+        .execute::<Vec<vertebrae_sacrum_client::ProjectResponse>>(
+            vertebrae_sacrum_client::queries::projects::LIST_PROJECTS,
+            serde_json::json!({}),
+            "projects",
+        )
         .await
     {
         Ok(projects) => {
@@ -133,12 +137,15 @@ pub async fn add_project(
                 existing.clone()
             } else {
                 // Create new project
-                let req = vertebrae_sacrum_client::CreateProjectRequest {
-                    name: folder_name.clone(),
-                    slug: project_slug.clone(),
-                };
                 client
-                    .post::<vertebrae_sacrum_client::ProjectResponse, _>("/api/projects", &req)
+                    .execute::<vertebrae_sacrum_client::ProjectResponse>(
+                        vertebrae_sacrum_client::queries::projects::CREATE_PROJECT,
+                        serde_json::json!({
+                            "name": folder_name.clone(),
+                            "slug": project_slug.clone(),
+                        }),
+                        "create_project",
+                    )
                     .await
                     .map_err(|e| CommandError {
                         message: format!("Failed to create project in Sacrum: {}", e),
@@ -270,7 +277,7 @@ pub async fn set_current_project(
 
         match vertebrae_sacrum_client::SacrumConfig::load(&project_slug) {
             Ok(config) => {
-                let client = vertebrae_sacrum_client::SacrumClient::new(config);
+                let client = vertebrae_sacrum_client::GraphqlClient::new(config);
                 let client_arc = std::sync::Arc::new(client);
                 let services = crate::sacrum::from_sacrum(client_arc);
                 let mut service_lock = state.services.write().await;

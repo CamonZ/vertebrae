@@ -14,8 +14,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
 use vertebrae_sacrum_client::{
-    CreateProjectRequest, ProjectResponse, ProjectSection, SacrumClient, SacrumConfig,
-    load_config_file, save_config_file,
+    GraphqlClient, ProjectResponse, ProjectSection, SacrumConfig, load_config_file,
+    save_config_file,
 };
 
 /// Embedded skills directory at compile time
@@ -229,7 +229,7 @@ impl InitCommand {
 
         // Create Sacrum client and check/create project
         let config = SacrumConfig::new(self.url.clone(), api_token, "temp".to_string());
-        let client = SacrumClient::new(config);
+        let client = GraphqlClient::new(config);
 
         let (project, created) = self
             .get_or_create_project(&client, &folder_name, &project_slug)
@@ -317,13 +317,19 @@ impl InitCommand {
     /// Get existing project or create a new one
     async fn get_or_create_project(
         &self,
-        client: &SacrumClient,
+        client: &GraphqlClient,
         name: &str,
         slug: &str,
     ) -> Result<(ProjectResponse, bool), InitError> {
+        use vertebrae_sacrum_client::queries::projects;
+
         // Try to find existing project by slug
         match client
-            .get::<Vec<ProjectResponse>, _>("/api/projects", &())
+            .execute::<Vec<ProjectResponse>>(
+                projects::LIST_PROJECTS,
+                serde_json::json!({}),
+                "projects",
+            )
             .await
         {
             Ok(projects) => {
@@ -339,13 +345,15 @@ impl InitCommand {
         }
 
         // Project not found, create it
-        let req = CreateProjectRequest {
-            name: name.to_string(),
-            slug: slug.to_string(),
-        };
-
         match client
-            .post::<ProjectResponse, _>("/api/projects", &req)
+            .execute::<ProjectResponse>(
+                projects::CREATE_PROJECT,
+                serde_json::json!({
+                    "name": name,
+                    "slug": slug,
+                }),
+                "create_project",
+            )
             .await
         {
             Ok(project) => Ok((project, true)),

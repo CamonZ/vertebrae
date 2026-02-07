@@ -20,6 +20,13 @@ pub enum SacrumClientError {
     #[error("API error ({status}): {message}")]
     ApiError { status: u16, message: String },
 
+    /// GraphQL error response
+    #[error("GraphQL error: {message}")]
+    GraphqlError {
+        messages: Vec<String>,
+        message: String,
+    },
+
     /// Configuration error
     #[error("Configuration error: {0}")]
     ConfigError(String),
@@ -31,7 +38,20 @@ pub enum SacrumClientError {
 
 impl From<SacrumClientError> for ServiceError {
     fn from(err: SacrumClientError) -> Self {
-        ServiceError::InvalidInput(err.to_string())
+        match &err {
+            SacrumClientError::ApiError { status: 404, .. } => ServiceError::TaskNotFound {
+                task_id: err.to_string(),
+            },
+            SacrumClientError::GraphqlError { messages, .. } => {
+                let msg = messages.join("; ");
+                if msg.contains("not_found") || msg.contains("Not Found") {
+                    ServiceError::TaskNotFound { task_id: msg }
+                } else {
+                    ServiceError::InvalidInput(msg)
+                }
+            }
+            _ => ServiceError::InvalidInput(err.to_string()),
+        }
     }
 }
 
@@ -100,6 +120,7 @@ mod tests {
         let service_error: ServiceError = sacrum_error.into();
         let error_msg = service_error.to_string();
         assert!(error_msg.contains("Test error"));
+        assert!(matches!(service_error, ServiceError::InvalidInput(_)));
     }
 
     #[test]
@@ -111,5 +132,58 @@ mod tests {
         let service_error: ServiceError = sacrum_error.into();
         let error_msg = service_error.to_string();
         assert!(error_msg.contains("Rate limited"));
+        assert!(matches!(service_error, ServiceError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn test_graphql_error_creation_and_display() {
+        let error = SacrumClientError::GraphqlError {
+            messages: vec!["field is required".to_string()],
+            message: "field is required".to_string(),
+        };
+        let msg = error.to_string();
+        assert!(msg.contains("GraphQL error"));
+        assert!(msg.contains("field is required"));
+    }
+
+    #[test]
+    fn test_graphql_error_not_found_converts_to_task_not_found() {
+        let error = SacrumClientError::GraphqlError {
+            messages: vec!["not_found".to_string()],
+            message: "not_found".to_string(),
+        };
+        let service_error: ServiceError = error.into();
+        assert!(matches!(service_error, ServiceError::TaskNotFound { .. }));
+    }
+
+    #[test]
+    fn test_graphql_error_not_found_variant_converts_to_task_not_found() {
+        let error = SacrumClientError::GraphqlError {
+            messages: vec!["Not Found".to_string()],
+            message: "Not Found".to_string(),
+        };
+        let service_error: ServiceError = error.into();
+        assert!(matches!(service_error, ServiceError::TaskNotFound { .. }));
+    }
+
+    #[test]
+    fn test_graphql_error_other_converts_to_invalid_input() {
+        let error = SacrumClientError::GraphqlError {
+            messages: vec!["validation failed".to_string()],
+            message: "validation failed".to_string(),
+        };
+        let service_error: ServiceError = error.into();
+        assert!(matches!(service_error, ServiceError::InvalidInput(_)));
+        assert!(service_error.to_string().contains("validation failed"));
+    }
+
+    #[test]
+    fn test_api_error_404_converts_to_task_not_found() {
+        let error = SacrumClientError::ApiError {
+            status: 404,
+            message: "Resource not found".to_string(),
+        };
+        let service_error: ServiceError = error.into();
+        assert!(matches!(service_error, ServiceError::TaskNotFound { .. }));
     }
 }

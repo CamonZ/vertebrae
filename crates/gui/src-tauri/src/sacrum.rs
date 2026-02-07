@@ -6,24 +6,24 @@
 use std::sync::Arc;
 use vertebrae_core::VertebraeServices;
 use vertebrae_sacrum_client::{
-    SacrumClient, SacrumExecutionService, SacrumStepService, SacrumTaskService,
+    GraphqlClient, SacrumExecutionService, SacrumStepService, SacrumTaskService,
     SacrumWorkflowService,
 };
 
-/// Create a new VertebraeServices container from a Sacrum HTTP client.
+/// Create a new VertebraeServices container from a Sacrum GraphQL client.
 ///
 /// Instantiates all service implementations (SacrumTaskService, SacrumWorkflowService,
-/// SacrumExecutionService, SacrumStepService) from the provided SacrumClient.
+/// SacrumExecutionService, SacrumStepService) from the provided GraphqlClient.
 /// No mutation callbacks are installed.
 ///
 /// # Arguments
 ///
-/// * `client` - An Arc-wrapped SacrumClient instance
+/// * `client` - An Arc-wrapped GraphqlClient instance
 ///
 /// # Returns
 ///
 /// A new VertebraeServices container with all Sacrum services initialized
-pub fn from_sacrum(client: Arc<SacrumClient>) -> VertebraeServices {
+pub fn from_sacrum(client: Arc<GraphqlClient>) -> VertebraeServices {
     let task_service = SacrumTaskService::new((*client).clone());
     let workflow_service = SacrumWorkflowService::new((*client).clone());
     let execution_service = SacrumExecutionService::new((*client).clone());
@@ -49,7 +49,7 @@ mod tests {
             "test-token".to_string(),
             "test-project".to_string(),
         );
-        let client = SacrumClient::new(config);
+        let client = GraphqlClient::new(config);
         let client_arc = Arc::new(client);
 
         let services = from_sacrum(client_arc);
@@ -68,7 +68,7 @@ mod tests {
             "test-token".to_string(),
             "test-project".to_string(),
         );
-        let client = SacrumClient::new(config);
+        let client = GraphqlClient::new(config);
         let client_arc = Arc::new(client);
 
         let services = from_sacrum(client_arc);

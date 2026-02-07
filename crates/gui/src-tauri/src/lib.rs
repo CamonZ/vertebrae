@@ -18,7 +18,7 @@ use tokio::sync::RwLock;
 use specta_typescript::Typescript;
 use tauri::Manager;
 use tauri_specta::{collect_commands, collect_events, Builder};
-use vertebrae_sacrum_client::{SacrumClient, SacrumConfig};
+use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig};
 
 use claude_session::{
     ClaudePermissionRequestEvent, ClaudeSessionEndEvent, ClaudeSessionErrorEvent,
@@ -169,7 +169,7 @@ pub fn run() {
                 tauri::async_runtime::block_on(async {
                     match SacrumConfig::load(&slug) {
                         Ok(config) => {
-                            let client = SacrumClient::new(config);
+                            let client = GraphqlClient::new(config);
                             let client_arc = Arc::new(client);
                             Some(crate::sacrum::from_sacrum(client_arc))
                         }

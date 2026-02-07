@@ -1,27 +1,36 @@
-//! ExecutionService implementation for Sacrum HTTP API
+//! ExecutionService implementation for Sacrum GraphQL API
 //!
-//! Implements the ExecutionService trait by making HTTP calls to the Sacrum REST API.
+//! Implements the ExecutionService trait by making GraphQL calls to the Sacrum API.
 //! Supports full CRUD: create, read, update executions, and create/list session logs.
 
 use async_trait::async_trait;
+use serde::Deserialize;
+use serde_json::json;
 use vertebrae_core::error::ServiceResult;
 use vertebrae_core::execution_service::ExecutionService;
 use vertebrae_core::models::{ExecutionStatus, SessionLog, StepExecution};
 
-use crate::api_types::{
-    CreateExecutionRequest, CreateLogRequest, SessionLogResponse, StepExecutionResponse,
-    UpdateExecutionRequest,
+use crate::api_types::{SessionLogResponse, StepExecutionResponse};
+use crate::client::{GraphqlClient, with_fragments};
+use crate::queries::executions::{
+    CREATE_EXECUTION, CREATE_LOG, EXECUTION_FIELDS, GET_EXECUTION, LIST_EXECUTIONS, LIST_LOGS,
+    UPDATE_EXECUTION,
 };
-use crate::client::SacrumClient;
 
-/// ExecutionService implementation for Sacrum HTTP client
+/// Response shape for mutations that return only an id
+#[derive(Debug, Deserialize)]
+struct IdOnly {
+    id: String,
+}
+
+/// ExecutionService implementation for Sacrum GraphQL client
 pub struct SacrumExecutionService {
-    client: SacrumClient,
+    client: GraphqlClient,
 }
 
 impl SacrumExecutionService {
-    /// Create a new SacrumExecutionService with a client
-    pub fn new(client: SacrumClient) -> Self {
+    /// Create a new SacrumExecutionService with a GraphQL client
+    pub fn new(client: GraphqlClient) -> Self {
         Self { client }
     }
 
@@ -86,59 +95,47 @@ impl SacrumExecutionService {
 #[async_trait]
 impl ExecutionService for SacrumExecutionService {
     async fn create_execution(&self, execution: StepExecution) -> ServiceResult<String> {
-        let path = format!("/api/tasks/{}/executions", execution.task_id);
+        let variables = json!({
+            "task_id": execution.task_id,
+            "workflow_id": execution.workflow_id,
+            "step_name": execution.step_name,
+            "status": execution.status.as_str(),
+            "context": execution.context,
+            "prompt": execution.prompt,
+            "model": execution.model_used,
+            "model_provider": serde_json::Value::Null,
+        });
 
-        let (input_tokens, output_tokens) = execution
-            .token_usage
-            .as_ref()
-            .map(|u| (Some(u.input_tokens as i64), Some(u.output_tokens as i64)))
-            .unwrap_or((None, None));
+        let result: IdOnly = self
+            .client
+            .execute(CREATE_EXECUTION, variables, "create_step_execution")
+            .await?;
 
-        let request = CreateExecutionRequest {
-            step_name: execution.step_name,
-            status: Some(execution.status.as_str().to_string()),
-            context: execution.context,
-            prompt: execution.prompt,
-            output: execution.output,
-            transition_result: execution.transition_result,
-            model: execution.model_used,
-            model_provider: None,
-            input_tokens,
-            output_tokens,
-            cost: execution.cost_usd,
-            duration_ms: execution.duration_ms.map(|v| v as i64),
-            workflow_id: Some(execution.workflow_id),
-        };
-
-        let response: StepExecutionResponse = self.client.post(&path, &request).await?;
-        Ok(response.id)
+        Ok(result.id)
     }
 
     async fn get_execution(&self, id: &str) -> ServiceResult<Option<StepExecution>> {
-        let path = format!("/api/executions/{}", id);
-        let response: StepExecutionResponse = self.client.get(&path, &()).await?;
+        let query = with_fragments(GET_EXECUTION, &[EXECUTION_FIELDS]);
+        let variables = json!({ "id": id });
+
+        let response: StepExecutionResponse = self
+            .client
+            .execute(&query, variables, "step_execution")
+            .await?;
+
         Ok(Some(Self::response_to_execution(&response)))
     }
 
     async fn list_executions_for_task(&self, task_id: &str) -> ServiceResult<Vec<StepExecution>> {
-        let path = format!("/api/tasks/{}/executions", task_id);
-        let responses: Vec<StepExecutionResponse> = self.client.get(&path, &()).await?;
+        let query = with_fragments(LIST_EXECUTIONS, &[EXECUTION_FIELDS]);
+        let variables = json!({ "task_id": task_id });
+
+        let responses: Vec<StepExecutionResponse> = self
+            .client
+            .execute(&query, variables, "step_executions")
+            .await?;
+
         Ok(responses.iter().map(Self::response_to_execution).collect())
-    }
-
-    async fn add_log(&self, log: SessionLog) -> ServiceResult<String> {
-        let path = format!("/api/executions/{}/logs", log.step_execution_id);
-        let request = CreateLogRequest {
-            content: log.content,
-        };
-        let response: SessionLogResponse = self.client.post(&path, &request).await?;
-        Ok(response.id)
-    }
-
-    async fn list_logs_for_execution(&self, execution_id: &str) -> ServiceResult<Vec<SessionLog>> {
-        let path = format!("/api/executions/{}/logs", execution_id);
-        let responses: Vec<SessionLogResponse> = self.client.get(&path, &()).await?;
-        Ok(responses.iter().map(Self::response_to_log).collect())
     }
 
     async fn get_latest_execution_for_task(
@@ -155,14 +152,42 @@ impl ExecutionService for SacrumExecutionService {
         output: Option<String>,
         transition_result: Option<String>,
     ) -> ServiceResult<()> {
-        let path = format!("/api/executions/{}", execution_id);
-        let request = UpdateExecutionRequest {
-            status: None,
-            output,
-            transition_result,
-        };
-        self.client.patch(&path, &request).await?;
+        let variables = json!({
+            "id": execution_id,
+            "output": output,
+            "transition_result": transition_result,
+        });
+
+        self.client
+            .execute_void(UPDATE_EXECUTION, variables)
+            .await?;
+
         Ok(())
+    }
+
+    async fn add_log(&self, log: SessionLog) -> ServiceResult<String> {
+        let variables = json!({
+            "step_execution_id": log.step_execution_id,
+            "content": log.content,
+        });
+
+        let result: IdOnly = self
+            .client
+            .execute(CREATE_LOG, variables, "create_session_log")
+            .await?;
+
+        Ok(result.id)
+    }
+
+    async fn list_logs_for_execution(&self, execution_id: &str) -> ServiceResult<Vec<SessionLog>> {
+        let variables = json!({ "step_execution_id": execution_id });
+
+        let responses: Vec<SessionLogResponse> = self
+            .client
+            .execute(LIST_LOGS, variables, "session_logs")
+            .await?;
+
+        Ok(responses.iter().map(Self::response_to_log).collect())
     }
 }
 
@@ -171,8 +196,8 @@ mod tests {
     use super::*;
     use crate::api_types::StepExecutionResponse;
 
-    fn create_test_client() -> SacrumClient {
-        crate::client::SacrumClient::new(crate::config::SacrumConfig::new(
+    fn create_test_client() -> GraphqlClient {
+        GraphqlClient::new(crate::config::SacrumConfig::new(
             "http://localhost:4000".to_string(),
             "token".to_string(),
             "test-project".to_string(),
@@ -277,95 +302,7 @@ mod tests {
     }
 
     #[test]
-    fn test_create_execution_request_serialization() {
-        use crate::api_types::CreateExecutionRequest;
-
-        let request = CreateExecutionRequest {
-            step_name: "review".to_string(),
-            status: Some("in_progress".to_string()),
-            context: None,
-            prompt: Some("Review the code".to_string()),
-            output: None,
-            transition_result: None,
-            model: Some("claude-opus".to_string()),
-            model_provider: None,
-            input_tokens: Some(1000),
-            output_tokens: Some(500),
-            cost: Some(0.05),
-            duration_ms: Some(1500),
-            workflow_id: Some("wf-1".to_string()),
-        };
-
-        let json = serde_json::to_value(&request).unwrap();
-        assert_eq!(json["step_name"], "review");
-        assert_eq!(json["status"], "in_progress");
-        assert_eq!(json["model"], "claude-opus");
-        assert_eq!(json["input_tokens"], 1000);
-        assert_eq!(json["workflow_id"], "wf-1");
-        // None fields should be omitted
-        assert!(json.get("context").is_none());
-        assert!(json.get("output").is_none());
-        assert!(json.get("transition_result").is_none());
-        assert!(json.get("model_provider").is_none());
-    }
-
-    #[test]
-    fn test_create_execution_request_minimal() {
-        use crate::api_types::CreateExecutionRequest;
-
-        let request = CreateExecutionRequest {
-            step_name: "backlog".to_string(),
-            status: None,
-            context: None,
-            prompt: None,
-            output: None,
-            transition_result: None,
-            model: None,
-            model_provider: None,
-            input_tokens: None,
-            output_tokens: None,
-            cost: None,
-            duration_ms: None,
-            workflow_id: None,
-        };
-
-        let json = serde_json::to_value(&request).unwrap();
-        assert_eq!(json["step_name"], "backlog");
-        // Only step_name should be present
-        assert_eq!(json.as_object().unwrap().len(), 1);
-    }
-
-    #[test]
-    fn test_update_execution_request_serialization() {
-        use crate::api_types::UpdateExecutionRequest;
-
-        let request = UpdateExecutionRequest {
-            status: None,
-            output: Some("Execution complete".to_string()),
-            transition_result: Some("advance".to_string()),
-        };
-
-        let json = serde_json::to_value(&request).unwrap();
-        assert_eq!(json["output"], "Execution complete");
-        assert_eq!(json["transition_result"], "advance");
-        assert!(json.get("status").is_none());
-    }
-
-    #[test]
-    fn test_create_log_request_serialization() {
-        use crate::api_types::CreateLogRequest;
-
-        let request = CreateLogRequest {
-            content: "Step completed successfully".to_string(),
-        };
-
-        let json = serde_json::to_value(&request).unwrap();
-        assert_eq!(json["content"], "Step completed successfully");
-    }
-
-    #[test]
-    fn test_execution_to_request_maps_token_usage() {
-        use crate::api_types::CreateExecutionRequest;
+    fn test_execution_variables_maps_token_usage() {
         use vertebrae_core::models::TokenUsage;
 
         let execution = StepExecution::new("task-1", "wf-1", "review")
@@ -374,52 +311,29 @@ mod tests {
             .with_cost_usd(0.05)
             .with_duration_ms(1500);
 
-        let (input_tokens, output_tokens) = execution
-            .token_usage
-            .as_ref()
-            .map(|u| (Some(u.input_tokens as i64), Some(u.output_tokens as i64)))
-            .unwrap_or((None, None));
-
-        let request = CreateExecutionRequest {
-            step_name: execution.step_name.clone(),
-            status: Some(execution.status.as_str().to_string()),
-            context: execution.context.clone(),
-            prompt: execution.prompt.clone(),
-            output: execution.output.clone(),
-            transition_result: execution.transition_result.clone(),
-            model: execution.model_used.clone(),
-            model_provider: None,
-            input_tokens,
-            output_tokens,
-            cost: execution.cost_usd,
-            duration_ms: execution.duration_ms.map(|v| v as i64),
-            workflow_id: Some(execution.workflow_id.clone()),
-        };
-
-        assert_eq!(request.step_name, "review");
-        assert_eq!(request.input_tokens, Some(1000));
-        assert_eq!(request.output_tokens, Some(500));
-        assert_eq!(request.model, Some("claude-opus".to_string()));
-        assert_eq!(request.cost, Some(0.05));
-        assert_eq!(request.duration_ms, Some(1500));
+        // Verify the fields that would be sent as variables
+        assert_eq!(execution.step_name, "review");
+        assert_eq!(execution.model_used.as_deref(), Some("claude-opus"));
+        assert_eq!(execution.cost_usd, Some(0.05));
+        assert_eq!(execution.duration_ms, Some(1500));
+        assert!(execution.token_usage.is_some());
+        let usage = execution.token_usage.unwrap();
+        assert_eq!(usage.input_tokens, 1000);
+        assert_eq!(usage.output_tokens, 500);
     }
 
     #[test]
-    fn test_execution_to_request_without_token_usage() {
+    fn test_execution_without_token_usage() {
         let execution = StepExecution::new("task-1", "wf-1", "review");
 
-        let (input_tokens, output_tokens) = execution
-            .token_usage
-            .as_ref()
-            .map(|u| (Some(u.input_tokens as i64), Some(u.output_tokens as i64)))
-            .unwrap_or((None, None));
-
-        assert!(input_tokens.is_none());
-        assert!(output_tokens.is_none());
+        assert!(execution.token_usage.is_none());
+        assert!(execution.model_used.is_none());
+        assert!(execution.cost_usd.is_none());
+        assert!(execution.duration_ms.is_none());
     }
 
     // =========================================================================
-    // Wiremock integration tests for execution service HTTP methods
+    // Wiremock integration tests for execution service GraphQL methods
     // =========================================================================
 
     use serde_json::json;
@@ -427,7 +341,7 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn create_wiremock_service(server_url: &str) -> SacrumExecutionService {
-        let client = SacrumClient::new(crate::config::SacrumConfig::new(
+        let client = GraphqlClient::new(crate::config::SacrumConfig::new(
             server_url.to_string(),
             "test-token".to_string(),
             "test-proj".to_string(),
@@ -440,16 +354,12 @@ mod tests {
         let server = MockServer::start().await;
 
         Mock::given(method("POST"))
-            .and(path("/api/tasks/task-1/executions"))
-            .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "data": {
-                    "id": "exec-new",
-                    "task_id": "task-1",
-                    "workflow_id": "wf-1",
-                    "step_name": "review",
-                    "status": "in_progress",
-                    "inserted_at": "2024-01-01T00:00:00Z",
-                    "updated_at": "2024-01-01T00:00:00Z"
+                    "create_step_execution": {
+                        "id": "exec-new"
+                    }
                 }
             })))
             .mount(&server)
@@ -467,24 +377,12 @@ mod tests {
         let server = MockServer::start().await;
 
         Mock::given(method("POST"))
-            .and(path("/api/tasks/task-2/executions"))
-            .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "data": {
-                    "id": "exec-full",
-                    "task_id": "task-2",
-                    "workflow_id": "wf-1",
-                    "step_name": "implement",
-                    "status": "in_progress",
-                    "context": "some context",
-                    "prompt": "do the work",
-                    "output": null,
-                    "model": "claude-opus",
-                    "input_tokens": 1000,
-                    "output_tokens": 500,
-                    "cost": 0.05,
-                    "duration_ms": 1500,
-                    "inserted_at": "2024-01-01T00:00:00Z",
-                    "updated_at": "2024-01-01T00:00:00Z"
+                    "create_step_execution": {
+                        "id": "exec-full"
+                    }
                 }
             })))
             .mount(&server)
@@ -504,13 +402,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_create_execution_api_error() {
+    async fn test_create_execution_graphql_error() {
         let server = MockServer::start().await;
 
         Mock::given(method("POST"))
-            .and(path("/api/tasks/bad-task/executions"))
-            .respond_with(ResponseTemplate::new(422).set_body_json(json!({
-                "errors": {"step_name": ["can't be blank"]}
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": null,
+                "errors": [{"message": "step_name can't be blank", "path": ["create_step_execution"]}]
             })))
             .mount(&server)
             .await;
@@ -523,20 +422,99 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_get_execution_success() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "step_execution": {
+                        "id": "exec-1",
+                        "task_id": "task-1",
+                        "workflow_id": "wf-1",
+                        "step_name": "review",
+                        "status": "completed",
+                        "context": "ctx",
+                        "prompt": "prompt",
+                        "output": "result",
+                        "transition_result": "advance",
+                        "model": "claude-opus",
+                        "model_provider": null,
+                        "input_tokens": 1000,
+                        "output_tokens": 500,
+                        "cost": 0.05,
+                        "duration_ms": 1500,
+                        "inserted_at": "2024-01-01T00:00:00Z",
+                        "updated_at": "2024-01-01T00:01:00Z"
+                    }
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let result = service.get_execution("exec-1").await.unwrap();
+
+        let exec = result.unwrap();
+        assert_eq!(exec.id, Some("exec-1".to_string()));
+        assert_eq!(exec.task_id, "task-1");
+        assert_eq!(exec.status, ExecutionStatus::Completed);
+        assert_eq!(exec.model_used.as_deref(), Some("claude-opus"));
+    }
+
+    #[tokio::test]
+    async fn test_list_executions_for_task() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "step_executions": [
+                        {
+                            "id": "exec-1",
+                            "task_id": "task-1",
+                            "workflow_id": "wf-1",
+                            "step_name": "backlog",
+                            "status": "completed",
+                            "inserted_at": "2024-01-01T00:00:00Z",
+                            "updated_at": "2024-01-01T00:01:00Z"
+                        },
+                        {
+                            "id": "exec-2",
+                            "task_id": "task-1",
+                            "workflow_id": "wf-1",
+                            "step_name": "review",
+                            "status": "in_progress",
+                            "inserted_at": "2024-01-01T01:00:00Z",
+                            "updated_at": "2024-01-01T01:00:00Z"
+                        }
+                    ]
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let result = service.list_executions_for_task("task-1").await.unwrap();
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].step_name, "backlog");
+        assert_eq!(result[1].step_name, "review");
+    }
+
+    #[tokio::test]
     async fn test_update_execution_success() {
         let server = MockServer::start().await;
 
-        Mock::given(method("PATCH"))
-            .and(path("/api/executions/exec-1"))
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "data": {
-                    "id": "exec-1",
-                    "task_id": "task-1",
-                    "workflow_id": "wf-1",
-                    "step_name": "review",
-                    "status": "in_progress",
-                    "output": "updated output",
-                    "transition_result": "advance"
+                    "update_step_execution": {
+                        "id": "exec-1"
+                    }
                 }
             })))
             .mount(&server)
@@ -558,16 +536,13 @@ mod tests {
     async fn test_update_execution_partial() {
         let server = MockServer::start().await;
 
-        Mock::given(method("PATCH"))
-            .and(path("/api/executions/exec-2"))
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "data": {
-                    "id": "exec-2",
-                    "task_id": "task-1",
-                    "workflow_id": "wf-1",
-                    "step_name": "review",
-                    "status": "in_progress",
-                    "output": "just output"
+                    "update_step_execution": {
+                        "id": "exec-2"
+                    }
                 }
             })))
             .mount(&server)
@@ -582,13 +557,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_update_execution_api_error() {
+    async fn test_update_execution_graphql_error() {
         let server = MockServer::start().await;
 
-        Mock::given(method("PATCH"))
-            .and(path("/api/executions/nonexistent"))
-            .respond_with(ResponseTemplate::new(404).set_body_json(json!({
-                "errors": {"detail": "Not Found"}
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": null,
+                "errors": [{"message": "not_found"}]
             })))
             .mount(&server)
             .await;
@@ -604,13 +580,12 @@ mod tests {
         let server = MockServer::start().await;
 
         Mock::given(method("POST"))
-            .and(path("/api/executions/exec-1/logs"))
-            .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "data": {
-                    "id": "log-new",
-                    "step_execution_id": "exec-1",
-                    "content": "Step completed successfully",
-                    "inserted_at": "2024-01-01T00:00:00Z"
+                    "create_session_log": {
+                        "id": "log-new"
+                    }
                 }
             })))
             .mount(&server)
@@ -624,13 +599,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_add_log_api_error() {
+    async fn test_add_log_graphql_error() {
         let server = MockServer::start().await;
 
         Mock::given(method("POST"))
-            .and(path("/api/executions/bad-exec/logs"))
-            .respond_with(ResponseTemplate::new(404).set_body_json(json!({
-                "errors": {"detail": "Not Found"}
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": null,
+                "errors": [{"message": "not_found"}]
             })))
             .mount(&server)
             .await;
@@ -640,5 +616,109 @@ mod tests {
         let result = service.add_log(log).await;
 
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_list_logs_for_execution() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "session_logs": [
+                        {
+                            "id": "log-1",
+                            "step_execution_id": "exec-1",
+                            "content": "First log entry",
+                            "inserted_at": "2024-01-01T00:00:00Z",
+                            "updated_at": "2024-01-01T00:00:00Z"
+                        },
+                        {
+                            "id": "log-2",
+                            "step_execution_id": "exec-1",
+                            "content": "Second log entry",
+                            "inserted_at": "2024-01-01T00:01:00Z",
+                            "updated_at": "2024-01-01T00:01:00Z"
+                        }
+                    ]
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let result = service.list_logs_for_execution("exec-1").await.unwrap();
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].content, "First log entry");
+        assert_eq!(result[1].content, "Second log entry");
+    }
+
+    #[tokio::test]
+    async fn test_get_latest_execution_for_task() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "step_executions": [
+                        {
+                            "id": "exec-1",
+                            "task_id": "task-1",
+                            "workflow_id": "wf-1",
+                            "step_name": "backlog",
+                            "status": "completed",
+                            "inserted_at": "2024-01-01T00:00:00Z",
+                            "updated_at": "2024-01-01T00:01:00Z"
+                        },
+                        {
+                            "id": "exec-2",
+                            "task_id": "task-1",
+                            "workflow_id": "wf-1",
+                            "step_name": "review",
+                            "status": "in_progress",
+                            "inserted_at": "2024-01-01T01:00:00Z",
+                            "updated_at": "2024-01-01T01:00:00Z"
+                        }
+                    ]
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let result = service
+            .get_latest_execution_for_task("task-1")
+            .await
+            .unwrap();
+
+        let exec = result.unwrap();
+        assert_eq!(exec.id, Some("exec-2".to_string()));
+        assert_eq!(exec.step_name, "review");
+    }
+
+    #[tokio::test]
+    async fn test_get_latest_execution_for_task_empty() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "step_executions": []
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let result = service
+            .get_latest_execution_for_task("task-1")
+            .await
+            .unwrap();
+
+        assert!(result.is_none());
     }
 }

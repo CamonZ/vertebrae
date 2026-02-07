@@ -75,7 +75,7 @@ async fn run_with_args(args: &Args) -> Result<(), ServiceError> {
     })?;
 
     // Initialize Sacrum HTTP client
-    let client = vertebrae_sacrum_client::SacrumClient::new(config);
+    let client = vertebrae_sacrum_client::GraphqlClient::new(config);
     let client_arc = Arc::new(client);
 
     // Create services using Sacrum backend

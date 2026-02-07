@@ -93,6 +93,8 @@ struct SectionRow {
     section_type: Option<String>,
     content: Option<String>,
     order: Option<u32>,
+    done: Option<bool>,
+    done_at: Option<chrono::DateTime<chrono::Utc>>,
     refs: Vec<CodeRefRow>,
 }
 
@@ -212,6 +214,8 @@ impl ShowCommand {
                 } else {
                     Section::new(section_type, content)
                 };
+                section.done = s.done;
+                section.done_at = s.done_at;
                 section.refs = section_refs;
                 Some(section)
             })
@@ -307,6 +311,8 @@ impl ShowCommand {
                     section_type: Some(s.section_type.as_str().to_string()),
                     content: Some(s.content),
                     order: s.order,
+                    done: s.done,
+                    done_at: s.done_at,
                     refs: s
                         .refs
                         .into_iter()

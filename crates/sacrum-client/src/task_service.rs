@@ -1,11 +1,10 @@
-//! TaskService implementation for Sacrum HTTP API
+//! TaskService implementation for Sacrum GraphQL API
 //!
-//! Implements the TaskService trait by making HTTP calls to the Sacrum REST API.
-//! Uses flat /api/... routes with project_id as a query parameter.
+//! Implements the TaskService trait by making GraphQL calls to the Sacrum API.
+//! Uses the GraphqlClient for all communication.
 
 use async_trait::async_trait;
-use serde::Serialize;
-use serde_json::json;
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use vertebrae_core::error::{ServiceError, ServiceResult};
 use vertebrae_core::models::Task;
@@ -14,48 +13,61 @@ use vertebrae_core::models::{
 };
 use vertebrae_core::service::{CreateTaskOptions, TaskService, UpdateTaskOptions};
 
-use crate::api_types::{
-    CodeRefResponse, SectionResponse, TaskResponse, WorkflowResponse, WorkflowStepResponse,
-};
-use crate::client::SacrumClient;
+use crate::api_types::{CodeRefResponse, SectionResponse, TaskResponse, WorkflowResponse};
+use crate::client::{GraphqlClient, with_fragments};
+use crate::queries::tasks;
+use crate::queries::workflows as wf_queries;
 
-/// Query param helper for project_id
-#[derive(Serialize)]
-struct ProjectQuery<'a> {
-    project_id: &'a str,
-}
-
-/// Query param helper for project_id with parent_id filter
-#[derive(Serialize)]
-struct ChildrenQuery<'a> {
-    project_id: &'a str,
-    parent_id: &'a str,
-}
-
-/// TaskService implementation for Sacrum HTTP client
+/// TaskService implementation for Sacrum GraphQL client
 pub struct SacrumTaskService {
-    client: SacrumClient,
+    client: GraphqlClient,
 }
 
 impl SacrumTaskService {
     /// Create a new SacrumTaskService
-    pub fn new(client: SacrumClient) -> Self {
+    pub fn new(client: GraphqlClient) -> Self {
         Self { client }
     }
 
     /// Fetch all workflows and return a map of workflow_id -> workflow_name
     async fn fetch_workflow_names(&self) -> ServiceResult<HashMap<String, String>> {
-        let query = ProjectQuery {
-            project_id: self.client.project_id(),
-        };
-        let workflows: Vec<WorkflowResponse> = self.client.get("/api/workflows", &query).await?;
+        let query = with_fragments(wf_queries::LIST_WORKFLOWS, &[wf_queries::WORKFLOW_FIELDS]);
+        let variables = json!({ "project_id": self.client.project_id });
+        let workflows: Vec<WorkflowResponse> =
+            self.client.execute(&query, variables, "workflows").await?;
         Ok(workflows.into_iter().map(|w| (w.id, w.name)).collect())
     }
 
-    /// Fetch all steps and return a map of step_id -> step_name
+    /// Fetch all steps across all workflows and return a map of step_id -> step_name
     async fn fetch_step_names(&self) -> ServiceResult<HashMap<String, String>> {
-        let steps: Vec<WorkflowStepResponse> = self.client.get("/api/workflow-steps", &()).await?;
-        Ok(steps.into_iter().map(|s| (s.id, s.name)).collect())
+        // First get all workflows, then get steps for each via GET_WORKFLOW which includes nested steps
+        let query = with_fragments(wf_queries::LIST_WORKFLOWS, &[wf_queries::WORKFLOW_FIELDS]);
+        let variables = json!({ "project_id": self.client.project_id });
+        let workflows: Vec<WorkflowResponse> =
+            self.client.execute(&query, variables, "workflows").await?;
+
+        let mut step_names = HashMap::new();
+        for wf in &workflows {
+            let get_query =
+                with_fragments(wf_queries::GET_WORKFLOW, &[wf_queries::WORKFLOW_FIELDS]);
+            let get_vars = json!({ "id": wf.id });
+            // GET_WORKFLOW returns a single workflow with embedded workflow_steps
+            let wf_detail: Value = self
+                .client
+                .execute(&get_query, get_vars, "workflow")
+                .await?;
+            if let Some(steps) = wf_detail.get("workflow_steps").and_then(|v| v.as_array()) {
+                for step_val in steps {
+                    if let (Some(id), Some(name)) = (
+                        step_val.get("id").and_then(|v| v.as_str()),
+                        step_val.get("name").and_then(|v| v.as_str()),
+                    ) {
+                        step_names.insert(id.to_string(), name.to_string());
+                    }
+                }
+            }
+        }
+        Ok(step_names)
     }
 
     /// Convert Sacrum TaskResponse to vertebrae_core Task model
@@ -127,6 +139,13 @@ impl SacrumTaskService {
             .as_ref()
             .and_then(|step_id| step_names.and_then(|m| m.get(step_id).cloned()));
 
+        // Extract dependency_ids from blockers if available, otherwise from dependency_ids field
+        let dependency_ids = if !response.blockers.is_empty() {
+            response.blockers.iter().map(|b| b.id.clone()).collect()
+        } else {
+            response.dependency_ids.clone()
+        };
+
         Task {
             id: response.id.clone(),
             title: response.title.clone(),
@@ -143,7 +162,7 @@ impl SacrumTaskService {
             revision_feedback: response.revision_feedback.clone(),
             rejection_reason: response.rejection_reason.clone(),
             parent_id: response.parent_id.clone(),
-            dependency_ids: response.dependency_ids.clone(),
+            dependency_ids,
             sections,
             code_refs,
             created_at,
@@ -151,6 +170,14 @@ impl SacrumTaskService {
             started_at,
             completed_at,
         }
+    }
+
+    /// Fetch a single task by ID (internal helper, returns TaskResponse)
+    async fn fetch_task_response(&self, id: &str) -> ServiceResult<TaskResponse> {
+        let query = with_fragments(tasks::GET_TASK, &[tasks::TASK_FIELDS]);
+        let variables = json!({ "id": id });
+        let response: TaskResponse = self.client.execute(&query, variables, "task").await?;
+        Ok(response)
     }
 }
 
@@ -220,24 +247,58 @@ impl TaskService for SacrumTaskService {
             return Err(ServiceError::validation_failed("Title cannot be empty"));
         }
 
-        let request = json!({
+        let level_str = options.level.as_ref().map(|l| l.as_str().to_string());
+        let priority_str = options.priority.as_ref().map(|p| p.as_str().to_string());
+
+        let mut variables = json!({
+            "project_id": self.client.project_id,
             "title": options.title,
-            "description": options.description,
-            "level": format!("{:?}", options.level),
-            "priority": options.priority,
-            "tags": options.tags,
-            "parent_id": options.parent_id,
-            "project_id": self.client.project_id(),
         });
 
-        let response: TaskResponse = self.client.post("/api/tasks", &request).await?;
+        if let Some(ref desc) = options.description {
+            variables["description"] = json!(desc);
+        }
+        if let Some(ref level) = level_str {
+            variables["level"] = json!(level);
+        }
+        if let Some(ref priority) = priority_str {
+            variables["priority"] = json!(priority);
+        }
+        if !options.tags.is_empty() {
+            variables["tags"] = json!(options.tags);
+        }
+        if let Some(ref parent_id) = options.parent_id {
+            variables["parent_id"] = json!(parent_id);
+        }
 
-        Ok(response.id.clone())
+        #[derive(serde::Deserialize)]
+        struct IdResponse {
+            id: String,
+        }
+
+        let result: IdResponse = self
+            .client
+            .execute(tasks::CREATE_TASK, variables, "create_task")
+            .await?;
+
+        let task_id = result.id;
+
+        // If there are dependencies, set them via update
+        if !options.depends_on.is_empty() {
+            let update_vars = json!({
+                "id": task_id,
+                "depends_on_ids": options.depends_on,
+            });
+            self.client
+                .execute_void(tasks::UPDATE_TASK, update_vars)
+                .await?;
+        }
+
+        Ok(task_id)
     }
 
     async fn get_task(&self, id: &str) -> ServiceResult<Task> {
-        let path = format!("/api/tasks/{}", id);
-        let response: TaskResponse = self.client.get(&path, &()).await?;
+        let response = self.fetch_task_response(id).await?;
 
         // Fetch lookups to resolve workflow_name and step_name
         let workflow_names = self.fetch_workflow_names().await.unwrap_or_default();
@@ -247,54 +308,134 @@ impl TaskService for SacrumTaskService {
     }
 
     async fn update_task(&self, id: &str, options: UpdateTaskOptions) -> ServiceResult<()> {
-        let mut update_json = json!({});
+        let mut variables = json!({ "id": id });
 
-        if let Some(title) = &options.title {
-            update_json["title"] = json!(title);
+        if let Some(ref title) = options.title {
+            variables["title"] = json!(title);
         }
 
-        if let Some(desc_opt) = &options.description {
-            update_json["description"] = json!(desc_opt);
+        if let Some(ref desc_opt) = options.description {
+            match desc_opt {
+                Some(desc) => variables["description"] = json!(desc),
+                None => variables["description"] = Value::Null,
+            }
         }
 
-        let path = format!("/api/tasks/{}", id);
-        let _response: TaskResponse = self.client.put(&path, &update_json).await?;
+        if let Some(ref priority_opt) = options.priority {
+            match priority_opt {
+                Some(p) => variables["priority"] = json!(p.as_str()),
+                None => variables["priority"] = Value::Null,
+            }
+        }
 
+        if let Some(ref level) = options.level {
+            variables["level"] = json!(level);
+        }
+
+        if let Some(needs_review) = options.needs_human_review {
+            variables["needs_human_review"] = json!(needs_review);
+        }
+
+        if let Some(ref revision_feedback_opt) = options.revision_feedback {
+            match revision_feedback_opt {
+                Some(feedback) => variables["revision_feedback"] = json!(feedback),
+                None => variables["revision_feedback"] = Value::Null,
+            }
+        }
+
+        if let Some(ref parent_opt) = options.parent_id {
+            match parent_opt {
+                Some(parent_id) => variables["parent_id"] = json!(parent_id),
+                None => variables["parent_id"] = Value::Null,
+            }
+        }
+
+        // Handle tags: fetch current task, compute new tag set
+        if !options.add_tags.is_empty() || !options.remove_tags.is_empty() {
+            let task_response = self.fetch_task_response(id).await?;
+            let mut tags: Vec<String> = task_response.tags;
+            for tag in &options.add_tags {
+                if !tags.contains(tag) {
+                    tags.push(tag.clone());
+                }
+            }
+            tags.retain(|t| !options.remove_tags.contains(t));
+            variables["tags"] = json!(tags);
+        }
+
+        self.client
+            .execute_void(tasks::UPDATE_TASK, variables)
+            .await?;
         Ok(())
     }
 
     async fn set_current_step(&self, task_id: &str, step_id: &str) -> ServiceResult<()> {
-        let path = format!("/api/tasks/{}/move-to", task_id);
-        let request = json!({ "step_id": step_id });
-        let _response: TaskResponse = self.client.post(&path, &request).await?;
+        let variables = json!({
+            "task_id": task_id,
+            "step_id": step_id,
+        });
+        self.client
+            .execute_void(tasks::MOVE_TO_STEP, variables)
+            .await?;
         Ok(())
     }
 
-    async fn delete_task(&self, id: &str, _cascade: bool) -> ServiceResult<()> {
-        let path = format!("/api/tasks/{}", id);
-        self.client.delete(&path).await?;
+    async fn delete_task(&self, id: &str, cascade: bool) -> ServiceResult<()> {
+        let variables = json!({
+            "id": id,
+            "cascade": cascade,
+        });
+        self.client
+            .execute_void(tasks::DELETE_TASK, variables)
+            .await?;
         Ok(())
     }
 
     async fn task_exists(&self, id: &str) -> ServiceResult<bool> {
-        match self.get_task(id).await {
+        match self.fetch_task_response(id).await {
             Ok(_) => Ok(true),
             Err(ServiceError::TaskNotFound { task_id: _ }) => Ok(false),
             Err(e) => Err(e),
         }
     }
 
-    async fn list_tasks(&self, _filter: &TaskFilter) -> ServiceResult<Vec<Task>> {
-        let query = ProjectQuery {
-            project_id: self.client.project_id(),
-        };
-        let tasks: Vec<TaskResponse> = self.client.get("/api/tasks", &query).await?;
+    async fn list_tasks(&self, filter: &TaskFilter) -> ServiceResult<Vec<Task>> {
+        let query = with_fragments(tasks::LIST_TASKS, &[tasks::TASK_FIELDS]);
+
+        let mut variables = json!({
+            "project_id": self.client.project_id,
+        });
+
+        // Apply filter fields as GQL variables
+        if let Some(level) = filter.levels.first() {
+            variables["level"] = json!(level.as_str());
+        }
+        if let Some(ref parent_id) = filter.children_of {
+            variables["parent_id"] = json!(parent_id);
+        }
+        if let Some(ref step_name) = filter.step_names.first() {
+            variables["status"] = json!(step_name);
+        }
+        if !filter.tags.is_empty() {
+            variables["tags"] = json!(filter.tags);
+        }
+        if let Some(ref search) = filter.search {
+            variables["search"] = json!(search);
+        }
+        if let Some(ref workflow_id) = filter.workflow_id {
+            variables["workflow_id"] = json!(workflow_id);
+        }
+        if filter.root_only {
+            variables["root_only"] = json!(true);
+        }
+
+        let responses: Vec<TaskResponse> = self.client.execute(&query, variables, "tasks").await?;
 
         // Fetch lookups once for all tasks
         let workflow_names = self.fetch_workflow_names().await.unwrap_or_default();
         let step_names = self.fetch_step_names().await.unwrap_or_default();
 
-        Ok(tasks
+        Ok(responses
             .iter()
             .map(|t| {
                 self.response_to_task_with_lookups(t, Some(&workflow_names), Some(&step_names))
@@ -304,32 +445,61 @@ impl TaskService for SacrumTaskService {
 
     async fn list_tasks_with_lookups(
         &self,
-        _filter: &TaskFilter,
+        filter: &TaskFilter,
         workflow_names: Option<&HashMap<String, String>>,
         step_names: Option<&HashMap<String, String>>,
     ) -> ServiceResult<Vec<Task>> {
-        let query = ProjectQuery {
-            project_id: self.client.project_id(),
-        };
-        let tasks: Vec<TaskResponse> = self.client.get("/api/tasks", &query).await?;
+        let query = with_fragments(tasks::LIST_TASKS, &[tasks::TASK_FIELDS]);
 
-        Ok(tasks
+        let mut variables = json!({
+            "project_id": self.client.project_id,
+        });
+
+        if let Some(level) = filter.levels.first() {
+            variables["level"] = json!(level.as_str());
+        }
+        if let Some(ref parent_id) = filter.children_of {
+            variables["parent_id"] = json!(parent_id);
+        }
+        if let Some(ref step_name) = filter.step_names.first() {
+            variables["status"] = json!(step_name);
+        }
+        if !filter.tags.is_empty() {
+            variables["tags"] = json!(filter.tags);
+        }
+        if let Some(ref search) = filter.search {
+            variables["search"] = json!(search);
+        }
+        if let Some(ref workflow_id) = filter.workflow_id {
+            variables["workflow_id"] = json!(workflow_id);
+        }
+        if filter.root_only {
+            variables["root_only"] = json!(true);
+        }
+
+        let responses: Vec<TaskResponse> = self.client.execute(&query, variables, "tasks").await?;
+
+        Ok(responses
             .iter()
             .map(|t| self.response_to_task_with_lookups(t, workflow_names, step_names))
             .collect())
     }
 
-    async fn list_ready(&self, _status: &str) -> ServiceResult<Vec<Task>> {
-        let query = ProjectQuery {
-            project_id: self.client.project_id(),
-        };
-        let tasks: Vec<TaskResponse> = self.client.get("/api/tasks/ready", &query).await?;
+    async fn list_ready(&self, status: &str) -> ServiceResult<Vec<Task>> {
+        let query = with_fragments(tasks::READY_TASKS, &[tasks::TASK_FIELDS]);
+        let variables = json!({
+            "project_id": self.client.project_id,
+            "status": status,
+        });
+
+        let responses: Vec<TaskResponse> =
+            self.client.execute(&query, variables, "list_ready").await?;
 
         // Fetch lookups once for all tasks
         let workflow_names = self.fetch_workflow_names().await.unwrap_or_default();
         let step_names = self.fetch_step_names().await.unwrap_or_default();
 
-        Ok(tasks
+        Ok(responses
             .iter()
             .map(|t| {
                 self.response_to_task_with_lookups(t, Some(&workflow_names), Some(&step_names))
@@ -337,110 +507,166 @@ impl TaskService for SacrumTaskService {
             .collect())
     }
 
-    async fn set_parent(&self, _child_id: &str, _parent_id: &str) -> ServiceResult<()> {
-        unimplemented!("Parent assignment not yet implemented for Sacrum HTTP client")
+    async fn set_parent(&self, child_id: &str, parent_id: &str) -> ServiceResult<()> {
+        let variables = json!({
+            "id": child_id,
+            "parent_id": parent_id,
+        });
+        self.client
+            .execute_void(tasks::UPDATE_TASK, variables)
+            .await?;
+        Ok(())
     }
 
-    async fn remove_parent(&self, _child_id: &str) -> ServiceResult<()> {
-        unimplemented!("Parent removal not yet implemented for Sacrum HTTP client")
+    async fn remove_parent(&self, child_id: &str) -> ServiceResult<()> {
+        let variables = json!({
+            "id": child_id,
+            "parent_id": Value::Null,
+        });
+        self.client
+            .execute_void(tasks::UPDATE_TASK, variables)
+            .await?;
+        Ok(())
     }
 
     async fn add_dependency(&self, task_id: &str, depends_on_id: &str) -> ServiceResult<()> {
-        let path = format!("/api/tasks/{}/dependencies/{}", task_id, depends_on_id);
-        self.client.post_void(&path, &()).await?;
+        let variables = json!({
+            "task_id": task_id,
+            "depends_on_id": depends_on_id,
+        });
+        self.client
+            .execute_void(tasks::CREATE_DEPENDENCY, variables)
+            .await?;
         Ok(())
     }
 
     async fn remove_dependency(&self, task_id: &str, depends_on_id: &str) -> ServiceResult<()> {
-        let path = format!("/api/tasks/{}/dependencies/{}", task_id, depends_on_id);
-        self.client.delete(&path).await?;
+        let variables = json!({
+            "task_id": task_id,
+            "depends_on_id": depends_on_id,
+        });
+        self.client
+            .execute_void(tasks::DELETE_DEPENDENCY, variables)
+            .await?;
         Ok(())
     }
 
     async fn get_blockers(&self, id: &str) -> ServiceResult<Vec<BlockerNode>> {
-        let path = format!("/api/tasks/{}/blockers", id);
-        Ok(self.client.get(&path, &()).await?)
+        // Use GET_TASK which returns nested blockers, then convert to BlockerNode
+        let response = self.fetch_task_response(id).await?;
+        let blockers = response
+            .blockers
+            .iter()
+            .map(|b| BlockerNode {
+                id: b.id.clone(),
+                title: b.title.clone(),
+                level: "task".to_string(),
+                step_name: None,
+                children: vec![],
+            })
+            .collect();
+        Ok(blockers)
     }
 
     async fn get_incomplete_blockers_with_details(&self, id: &str) -> ServiceResult<Vec<Task>> {
-        // Get the task to access its dependency_ids
         let task = self.get_task(id).await?;
-
-        // Fetch each blocker and filter out completed ones
         let mut blockers = Vec::new();
         for dep_id in task.dependency_ids {
-            if let Ok(blocker) = self.get_task(&dep_id).await {
-                // Filter out done tasks
-                if blocker.step_name.as_deref() != Some("done") {
-                    blockers.push(blocker);
-                }
+            if let Ok(blocker) = self.get_task(&dep_id).await
+                && blocker.step_name.as_deref() != Some("done")
+            {
+                blockers.push(blocker);
             }
         }
-
         Ok(blockers)
     }
 
     async fn find_path(&self, from_id: &str, to_id: &str) -> ServiceResult<Option<Vec<String>>> {
-        #[derive(Serialize)]
-        struct PathQuery<'a> {
-            to: &'a str,
+        let variables = json!({
+            "from_id": from_id,
+            "to_id": to_id,
+        });
+        let path: Vec<String> = self
+            .client
+            .execute(tasks::FIND_PATH, variables, "find_path")
+            .await?;
+        if path.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(path))
         }
-        let path = format!("/api/tasks/{}/path", from_id);
-        let query = PathQuery { to: to_id };
-        Ok(self.client.get(&path, &query).await?)
     }
 
     async fn get_parent(&self, task_id: &str) -> ServiceResult<Option<String>> {
-        let task = self.get_task(task_id).await?;
-        Ok(task.parent_id)
+        let response = self.fetch_task_response(task_id).await?;
+        Ok(response.parent_id)
     }
 
     async fn get_children(&self, task_id: &str) -> ServiceResult<Vec<String>> {
-        let query = ChildrenQuery {
-            project_id: self.client.project_id(),
-            parent_id: task_id,
-        };
-        let tasks: Vec<TaskResponse> = self.client.get("/api/tasks", &query).await?;
-        Ok(tasks.into_iter().map(|t| t.id).collect())
+        // Use GET_TASK which returns nested children
+        let response = self.fetch_task_response(task_id).await?;
+        Ok(response.children.iter().map(|c| c.id.clone()).collect())
     }
 
-    async fn get_dependencies(&self, _task_id: &str) -> ServiceResult<Vec<String>> {
-        unimplemented!("Dependencies retrieval not yet implemented for Sacrum HTTP client")
+    async fn get_dependencies(&self, task_id: &str) -> ServiceResult<Vec<String>> {
+        let response = self.fetch_task_response(task_id).await?;
+        Ok(response.blockers.iter().map(|b| b.id.clone()).collect())
     }
 
     async fn get_dependents(&self, task_id: &str) -> ServiceResult<Vec<String>> {
-        // No backend filter for dependents, so fetch all tasks and filter client-side
-        let query = ProjectQuery {
-            project_id: self.client.project_id(),
-        };
-        let tasks: Vec<TaskResponse> = self.client.get("/api/tasks", &query).await?;
-
-        // Filter tasks whose dependency_ids contain task_id
-        Ok(tasks
-            .into_iter()
-            .filter(|t| t.dependency_ids.contains(&task_id.to_string()))
-            .map(|t| t.id)
-            .collect())
+        let response = self.fetch_task_response(task_id).await?;
+        Ok(response.dependents.iter().map(|d| d.id.clone()).collect())
     }
 
     async fn add_section(&self, id: &str, section: Section) -> ServiceResult<()> {
-        let path = format!("/api/tasks/{}/sections", id);
-        let request = serde_json::json!({
+        let variables = json!({
+            "task_id": id,
             "section_type": section.section_type.as_str(),
             "content": section.content,
             "section_order": section.order.unwrap_or(0),
+            "done": section.done,
         });
-        self.client.post_void(&path, &request).await?;
+        self.client
+            .execute_void(tasks::CREATE_SECTION, variables)
+            .await?;
         Ok(())
     }
 
     async fn remove_sections(
         &self,
-        _id: &str,
-        _section_type: SectionType,
-        _indices: Option<Vec<usize>>,
+        id: &str,
+        section_type: SectionType,
+        indices: Option<Vec<usize>>,
     ) -> ServiceResult<()> {
-        unimplemented!("Bulk section removal not yet implemented for Sacrum HTTP client")
+        let response = self.fetch_task_response(id).await?;
+        let matching_sections: Vec<&SectionResponse> = response
+            .sections
+            .iter()
+            .filter(|s| s.section_type == section_type.as_str())
+            .collect();
+
+        match indices {
+            Some(indices) => {
+                for idx in indices {
+                    if let Some(section) = matching_sections.get(idx) {
+                        let vars = json!({ "id": section.id });
+                        self.client
+                            .execute_void(tasks::DELETE_SECTION, vars)
+                            .await?;
+                    }
+                }
+            }
+            None => {
+                // Remove all sections of this type
+                for section in matching_sections {
+                    let vars = json!({ "id": section.id });
+                    self.client
+                        .execute_void(tasks::DELETE_SECTION, vars)
+                        .await?;
+                }
+            }
+        }
+        Ok(())
     }
 
     async fn edit_section_by_ordinal(
@@ -450,11 +676,8 @@ impl TaskService for SacrumTaskService {
         ordinal: u32,
         new_content: &str,
     ) -> ServiceResult<()> {
-        // Fetch the task to get section IDs
-        let path = format!("/api/tasks/{}", task_id);
-        let response: TaskResponse = self.client.get(&path, &()).await?;
+        let response = self.fetch_task_response(task_id).await?;
 
-        // Find the section matching type and order
         let section = response
             .sections
             .iter()
@@ -467,12 +690,13 @@ impl TaskService for SacrumTaskService {
                 ))
             })?;
 
-        // PATCH the section by ID
-        let patch_path = format!("/api/tasks/{}/sections/{}", task_id, section.id);
-        let request = serde_json::json!({
+        let variables = json!({
+            "id": section.id,
             "content": new_content,
         });
-        self.client.patch(&patch_path, &request).await?;
+        self.client
+            .execute_void(tasks::UPDATE_SECTION, variables)
+            .await?;
         Ok(())
     }
 
@@ -482,11 +706,8 @@ impl TaskService for SacrumTaskService {
         section_type: SectionType,
         ordinal: u32,
     ) -> ServiceResult<()> {
-        // Fetch the task to get section IDs
-        let path = format!("/api/tasks/{}", task_id);
-        let response: TaskResponse = self.client.get(&path, &()).await?;
+        let response = self.fetch_task_response(task_id).await?;
 
-        // Find the section matching type and order
         let section = response
             .sections
             .iter()
@@ -499,42 +720,102 @@ impl TaskService for SacrumTaskService {
                 ))
             })?;
 
-        // Delete by ID
-        let delete_path = format!("/api/tasks/{}/sections/{}", task_id, section.id);
-        self.client.delete(&delete_path).await?;
+        let variables = json!({ "id": section.id });
+        self.client
+            .execute_void(tasks::DELETE_SECTION, variables)
+            .await?;
         Ok(())
     }
 
-    async fn mark_step_done(&self, _id: &str, _step_index: usize) -> ServiceResult<()> {
-        unimplemented!("Mark step done not yet implemented for Sacrum HTTP client")
+    async fn mark_step_done(&self, id: &str, step_index: usize) -> ServiceResult<()> {
+        let response = self.fetch_task_response(id).await?;
+        let step_sections: Vec<&SectionResponse> = response
+            .sections
+            .iter()
+            .filter(|s| s.section_type == "step")
+            .collect();
+
+        // step_index is 1-based
+        let section = step_sections.get(step_index - 1).ok_or_else(|| {
+            ServiceError::validation_failed(format!(
+                "Step section at index {} not found",
+                step_index
+            ))
+        })?;
+
+        let now = chrono::Utc::now().to_rfc3339();
+        let variables = json!({
+            "id": section.id,
+            "done": true,
+            "done_at": now,
+        });
+        self.client
+            .execute_void(tasks::UPDATE_SECTION, variables)
+            .await?;
+        Ok(())
     }
 
-    async fn toggle_step_done(&self, _id: &str, _ordinal: u32) -> ServiceResult<()> {
-        unimplemented!("Toggle step done not yet implemented for Sacrum HTTP client")
+    async fn toggle_step_done(&self, id: &str, ordinal: u32) -> ServiceResult<()> {
+        let response = self.fetch_task_response(id).await?;
+        let step_sections: Vec<&SectionResponse> = response
+            .sections
+            .iter()
+            .filter(|s| s.section_type == "step")
+            .collect();
+
+        // ordinal is 0-based
+        let section = step_sections.get(ordinal as usize).ok_or_else(|| {
+            ServiceError::validation_failed(format!(
+                "Step section at ordinal {} not found",
+                ordinal
+            ))
+        })?;
+
+        let currently_done = section.done.unwrap_or(false);
+        let new_done = !currently_done;
+
+        let mut variables = json!({
+            "id": section.id,
+            "done": new_done,
+        });
+
+        if new_done {
+            let now = chrono::Utc::now().to_rfc3339();
+            variables["done_at"] = json!(now);
+        } else {
+            variables["done_at"] = Value::Null;
+        }
+
+        self.client
+            .execute_void(tasks::UPDATE_SECTION, variables)
+            .await?;
+        Ok(())
     }
 
     async fn add_code_ref(&self, id: &str, code_ref: CodeRef) -> ServiceResult<()> {
-        let path = format!("/api/tasks/{}/refs", id);
-        let request = json!({
+        let variables = json!({
+            "task_id": id,
             "path": code_ref.path,
             "line_start": code_ref.line_start,
             "line_end": code_ref.line_end,
             "name": code_ref.name,
             "description": code_ref.description,
         });
-        let _response: serde_json::Value = self.client.post(&path, &request).await?;
+        self.client
+            .execute_void(tasks::CREATE_CODE_REF, variables)
+            .await?;
         Ok(())
     }
 
     async fn remove_code_refs(&self, id: &str, indices: Option<Vec<usize>>) -> ServiceResult<()> {
         if let Some(indices) = indices {
-            // Get current refs to find the ref IDs at the given indices
-            let task_path = format!("/api/tasks/{}", id);
-            let response: TaskResponse = self.client.get(&task_path, &()).await?;
+            let response = self.fetch_task_response(id).await?;
             for idx in indices {
                 if let Some(ref_response) = response.code_refs.get(idx) {
-                    let path = format!("/api/tasks/{}/refs/{}", id, ref_response.id);
-                    self.client.delete(&path).await?;
+                    let variables = json!({ "id": ref_response.id });
+                    self.client
+                        .execute_void(tasks::DELETE_CODE_REF, variables)
+                        .await?;
                 }
             }
         }
@@ -547,29 +828,56 @@ impl TaskService for SacrumTaskService {
 
     async fn append_section_ref(
         &self,
-        _id: &str,
-        _section_index: usize,
-        _code_ref: &CodeRef,
+        id: &str,
+        section_index: usize,
+        code_ref: &CodeRef,
     ) -> ServiceResult<()> {
-        unimplemented!("Section code reference append not yet implemented for Sacrum HTTP client")
+        let response = self.fetch_task_response(id).await?;
+        let section = response.sections.get(section_index).ok_or_else(|| {
+            ServiceError::validation_failed(format!("Section at index {} not found", section_index))
+        })?;
+
+        let variables = json!({
+            "section_id": section.id,
+            "path": code_ref.path,
+            "line_start": code_ref.line_start,
+            "line_end": code_ref.line_end,
+            "name": code_ref.name,
+            "description": code_ref.description,
+        });
+        self.client
+            .execute_void(tasks::CREATE_CODE_REF, variables)
+            .await?;
+        Ok(())
     }
 
-    async fn assign_workflow(&self, _task_id: &str, _workflow_id: &str) -> ServiceResult<()> {
-        unimplemented!("Workflow assignment not yet implemented for Sacrum HTTP client")
+    async fn assign_workflow(&self, task_id: &str, workflow_id: &str) -> ServiceResult<()> {
+        let variables = json!({
+            "task_id": task_id,
+            "workflow_id": workflow_id,
+        });
+        self.client
+            .execute_void(tasks::ASSIGN_WORKFLOW, variables)
+            .await?;
+        Ok(())
     }
 
-    async fn unassign_workflow(&self, _task_id: &str) -> ServiceResult<()> {
-        unimplemented!("Workflow unassignment not yet implemented for Sacrum HTTP client")
+    async fn unassign_workflow(&self, task_id: &str) -> ServiceResult<()> {
+        let variables = json!({ "task_id": task_id });
+        self.client
+            .execute_void(tasks::UNASSIGN_WORKFLOW, variables)
+            .await?;
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api_types::TaskResponse;
+    use crate::api_types::{BlockerTaskResponse, ChildTaskResponse, TaskResponse};
 
-    fn create_test_client() -> SacrumClient {
-        crate::client::SacrumClient::new(crate::config::SacrumConfig::new(
+    fn create_test_client() -> GraphqlClient {
+        GraphqlClient::new(crate::config::SacrumConfig::new(
             "http://localhost:4000".to_string(),
             "token".to_string(),
             "test-project".to_string(),
@@ -596,6 +904,9 @@ mod tests {
             dependency_ids: vec![],
             sections: vec![],
             code_refs: vec![],
+            blockers: vec![],
+            dependents: vec![],
+            children: vec![],
             started_at: None,
             completed_at: None,
             inserted_at: None,
@@ -791,15 +1102,66 @@ mod tests {
         assert_eq!(task.rejection_reason.as_deref(), Some("reason"));
     }
 
+    #[test]
+    fn test_response_to_task_dependency_ids_from_blockers() {
+        let client = create_test_client();
+        let service = SacrumTaskService::new(client);
+
+        let mut response = make_task_response("task-deps", "With Blockers");
+        response.blockers = vec![
+            BlockerTaskResponse {
+                id: "blocker-1".to_string(),
+                short_id: None,
+                title: "Blocker 1".to_string(),
+            },
+            BlockerTaskResponse {
+                id: "blocker-2".to_string(),
+                short_id: None,
+                title: "Blocker 2".to_string(),
+            },
+        ];
+
+        let task = service.response_to_task(&response);
+        assert_eq!(task.dependency_ids, vec!["blocker-1", "blocker-2"]);
+    }
+
+    #[test]
+    fn test_response_to_task_children_populated() {
+        let client = create_test_client();
+        let service = SacrumTaskService::new(client);
+
+        let mut response = make_task_response("task-parent", "Parent Task");
+        response.children = vec![
+            ChildTaskResponse {
+                id: "child-1".to_string(),
+                short_id: None,
+                title: "Child 1".to_string(),
+                level: Some("task".to_string()),
+                priority: None,
+            },
+            ChildTaskResponse {
+                id: "child-2".to_string(),
+                short_id: None,
+                title: "Child 2".to_string(),
+                level: None,
+                priority: None,
+            },
+        ];
+
+        // Children don't affect the Task model directly via response_to_task
+        let task = service.response_to_task(&response);
+        assert_eq!(task.id, "task-parent");
+    }
+
     // =========================================================================
-    // Wiremock integration tests for task service HTTP methods
+    // Wiremock integration tests for task service GraphQL methods
     // =========================================================================
 
-    use wiremock::matchers::{method, path, query_param};
+    use wiremock::matchers::{body_string_contains, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn create_wiremock_service(server_url: &str) -> SacrumTaskService {
-        let client = SacrumClient::new(crate::config::SacrumConfig::new(
+        let client = GraphqlClient::new(crate::config::SacrumConfig::new(
             server_url.to_string(),
             "test-token".to_string(),
             "test-project".to_string(),
@@ -807,7 +1169,7 @@ mod tests {
         SacrumTaskService::new(client)
     }
 
-    fn task_json(id: &str, title: &str) -> serde_json::Value {
+    fn gql_task_data(id: &str, title: &str) -> serde_json::Value {
         json!({
             "id": id,
             "project_id": "test-project",
@@ -815,20 +1177,22 @@ mod tests {
             "tags": [],
             "dependency_ids": [],
             "sections": [],
-            "code_refs": []
+            "code_refs": [],
+            "blockers": [],
+            "dependents": [],
+            "children": []
         })
     }
 
-    /// Mount empty workflow and step lookup mocks (used by get_task, list_tasks, etc.)
+    /// Mount empty workflow lookup mocks for GraphQL
     async fn mount_empty_lookups(server: &MockServer) {
-        Mock::given(method("GET"))
-            .and(path("/api/workflows"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "data": [] })))
-            .mount(server)
-            .await;
-        Mock::given(method("GET"))
-            .and(path("/api/workflow-steps"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "data": [] })))
+        // Mock for LIST_WORKFLOWS
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("ListWorkflows"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "workflows": [] }
+            })))
             .mount(server)
             .await;
     }
@@ -838,11 +1202,11 @@ mod tests {
         let server = MockServer::start().await;
 
         Mock::given(method("POST"))
-            .and(path("/api/tasks"))
-            .respond_with(
-                ResponseTemplate::new(201)
-                    .set_body_json(json!({ "data": task_json("task-new", "New Task") })),
-            )
+            .and(path("/graphql"))
+            .and(body_string_contains("CreateTask"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "create_task": { "id": "task-new" } }
+            })))
             .mount(&server)
             .await;
 
@@ -868,12 +1232,12 @@ mod tests {
     async fn test_get_task_success() {
         let server = MockServer::start().await;
 
-        Mock::given(method("GET"))
-            .and(path("/api/tasks/task-1"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_json(json!({ "data": task_json("task-1", "My Task") })),
-            )
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("GetTask"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "task": gql_task_data("task-1", "My Task") }
+            })))
             .mount(&server)
             .await;
         mount_empty_lookups(&server).await;
@@ -886,52 +1250,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_get_task_resolves_workflow_and_step_names() {
-        let server = MockServer::start().await;
-
-        let mut task_data = task_json("task-1", "My Task");
-        task_data["workflow_id"] = json!("wf-1");
-        task_data["current_step_id"] = json!("step-1");
-
-        Mock::given(method("GET"))
-            .and(path("/api/tasks/task-1"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "data": task_data })))
-            .mount(&server)
-            .await;
-
-        Mock::given(method("GET"))
-            .and(path("/api/workflows"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "data": [{ "id": "wf-1", "name": "Development" }]
-            })))
-            .mount(&server)
-            .await;
-
-        Mock::given(method("GET"))
-            .and(path("/api/workflow-steps"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "data": [{ "id": "step-1", "name": "in_progress", "workflow_id": "wf-1", "step_order": 0, "agents": [], "skills": [] }]
-            })))
-            .mount(&server)
-            .await;
-
-        let service = create_wiremock_service(&server.uri());
-        let task = service.get_task("task-1").await.unwrap();
-
-        assert_eq!(task.workflow_name.as_deref(), Some("Development"));
-        assert_eq!(task.step_name.as_deref(), Some("in_progress"));
-    }
-
-    #[tokio::test]
     async fn test_update_task_success() {
         let server = MockServer::start().await;
 
-        Mock::given(method("PUT"))
-            .and(path("/api/tasks/task-1"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_json(json!({ "data": task_json("task-1", "Updated") })),
-            )
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("UpdateTask"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "update_task": { "id": "task-1" } }
+            })))
             .mount(&server)
             .await;
 
@@ -946,9 +1273,12 @@ mod tests {
     async fn test_delete_task_success() {
         let server = MockServer::start().await;
 
-        Mock::given(method("DELETE"))
-            .and(path("/api/tasks/task-1"))
-            .respond_with(ResponseTemplate::new(204))
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("DeleteTask"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "delete_task": { "id": "task-1" } }
+            })))
             .mount(&server)
             .await;
 
@@ -963,11 +1293,11 @@ mod tests {
         let server = MockServer::start().await;
 
         Mock::given(method("POST"))
-            .and(path("/api/tasks/task-1/move-to"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_json(json!({ "data": task_json("task-1", "Moved") })),
-            )
+            .and(path("/graphql"))
+            .and(body_string_contains("MoveToStep"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "move_to_step": { "id": "task-1", "current_step_id": "step-2" } }
+            })))
             .mount(&server)
             .await;
 
@@ -981,14 +1311,16 @@ mod tests {
     async fn test_list_tasks_success() {
         let server = MockServer::start().await;
 
-        Mock::given(method("GET"))
-            .and(path("/api/tasks"))
-            .and(query_param("project_id", "test-project"))
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("ListTasks"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "data": [
-                    task_json("task-1", "First"),
-                    task_json("task-2", "Second")
-                ]
+                "data": {
+                    "tasks": [
+                        gql_task_data("task-1", "First"),
+                        gql_task_data("task-2", "Second")
+                    ]
+                }
             })))
             .mount(&server)
             .await;
@@ -1006,10 +1338,13 @@ mod tests {
     async fn test_list_ready_success() {
         let server = MockServer::start().await;
 
-        Mock::given(method("GET"))
-            .and(path("/api/tasks/ready"))
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("ReadyTasks"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "data": [task_json("task-1", "Ready Task")]
+                "data": {
+                    "list_ready": [gql_task_data("task-1", "Ready Task")]
+                }
             })))
             .mount(&server)
             .await;
@@ -1027,8 +1362,11 @@ mod tests {
         let server = MockServer::start().await;
 
         Mock::given(method("POST"))
-            .and(path("/api/tasks/task-1/dependencies/task-2"))
-            .respond_with(ResponseTemplate::new(201))
+            .and(path("/graphql"))
+            .and(body_string_contains("CreateTaskDependency"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "create_task_dependency": { "id": "dep-1" } }
+            })))
             .mount(&server)
             .await;
 
@@ -1042,9 +1380,12 @@ mod tests {
     async fn test_remove_dependency_success() {
         let server = MockServer::start().await;
 
-        Mock::given(method("DELETE"))
-            .and(path("/api/tasks/task-1/dependencies/task-2"))
-            .respond_with(ResponseTemplate::new(204))
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("DeleteTaskDependency"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "delete_task_dependency": { "id": "dep-1" } }
+            })))
             .mount(&server)
             .await;
 
@@ -1058,12 +1399,16 @@ mod tests {
     async fn test_get_blockers_success() {
         let server = MockServer::start().await;
 
-        Mock::given(method("GET"))
-            .and(path("/api/tasks/task-1/blockers"))
+        let mut task_data = gql_task_data("task-1", "My Task");
+        task_data["blockers"] = json!([
+            { "id": "task-2", "short_id": "t-2", "title": "Blocker" }
+        ]);
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("GetTask"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "data": [
-                    { "id": "task-2", "title": "Blocker", "level": "task", "step_name": null, "children": [] }
-                ]
+                "data": { "task": task_data }
             })))
             .mount(&server)
             .await;
@@ -1079,11 +1424,11 @@ mod tests {
     async fn test_find_path_success() {
         let server = MockServer::start().await;
 
-        Mock::given(method("GET"))
-            .and(path("/api/tasks/task-1/path"))
-            .and(query_param("to", "task-3"))
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("FindPath"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "data": ["task-1", "task-2", "task-3"]
+                "data": { "find_path": ["task-1", "task-2", "task-3"] }
             })))
             .mount(&server)
             .await;
@@ -1102,17 +1447,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_find_path_empty_returns_none() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("FindPath"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "find_path": [] }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let path_result = service.find_path("task-1", "task-3").await.unwrap();
+
+        assert_eq!(path_result, None);
+    }
+
+    #[tokio::test]
     async fn test_get_children_success() {
         let server = MockServer::start().await;
 
-        Mock::given(method("GET"))
-            .and(path("/api/tasks"))
-            .and(query_param("parent_id", "epic-1"))
+        let mut task_data = gql_task_data("epic-1", "Epic");
+        task_data["children"] = json!([
+            { "id": "ticket-1", "short_id": "t-1", "title": "Child 1", "level": "ticket", "priority": "high" },
+            { "id": "ticket-2", "short_id": "t-2", "title": "Child 2", "level": "ticket" }
+        ]);
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("GetTask"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "data": [
-                    task_json("ticket-1", "Child 1"),
-                    task_json("ticket-2", "Child 2")
-                ]
+                "data": { "task": task_data }
             })))
             .mount(&server)
             .await;
@@ -1124,12 +1491,65 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_get_dependents_success() {
+        let server = MockServer::start().await;
+
+        let mut task_data = gql_task_data("task-1", "My Task");
+        task_data["dependents"] = json!([
+            { "id": "t-1", "title": "Dep A" },
+            { "id": "t-3", "title": "Dep C" }
+        ]);
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("GetTask"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "task": task_data }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let dependents = service.get_dependents("task-1").await.unwrap();
+
+        assert_eq!(dependents, vec!["t-1", "t-3"]);
+    }
+
+    #[tokio::test]
+    async fn test_get_dependencies_success() {
+        let server = MockServer::start().await;
+
+        let mut task_data = gql_task_data("task-1", "My Task");
+        task_data["blockers"] = json!([
+            { "id": "blocker-1", "title": "B1" },
+            { "id": "blocker-2", "title": "B2" }
+        ]);
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("GetTask"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "task": task_data }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let deps = service.get_dependencies("task-1").await.unwrap();
+
+        assert_eq!(deps, vec!["blocker-1", "blocker-2"]);
+    }
+
+    #[tokio::test]
     async fn test_add_section_success() {
         let server = MockServer::start().await;
 
         Mock::given(method("POST"))
-            .and(path("/api/tasks/task-1/sections"))
-            .respond_with(ResponseTemplate::new(201))
+            .and(path("/graphql"))
+            .and(body_string_contains("CreateSection"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "create_section": { "id": "sec-new" } }
+            })))
             .mount(&server)
             .await;
 
@@ -1151,21 +1571,28 @@ mod tests {
     async fn test_edit_section_by_ordinal_success() {
         let server = MockServer::start().await;
 
-        // GET task to find section ID
-        let mut task_data = task_json("task-1", "Task");
+        let mut task_data = gql_task_data("task-1", "Task");
         task_data["sections"] = json!([
             { "id": "sec-1", "section_type": "step", "content": "old", "section_order": 1 }
         ]);
-        Mock::given(method("GET"))
-            .and(path("/api/tasks/task-1"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "data": task_data })))
+
+        // GET_TASK mock
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("GetTask"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "task": task_data }
+            })))
             .mount(&server)
             .await;
 
-        // PATCH the section
-        Mock::given(method("PATCH"))
-            .and(path("/api/tasks/task-1/sections/sec-1"))
-            .respond_with(ResponseTemplate::new(200))
+        // UPDATE_SECTION mock
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("UpdateSection"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "update_section": { "id": "sec-1", "done": false, "done_at": null } }
+            })))
             .mount(&server)
             .await;
 
@@ -1181,21 +1608,28 @@ mod tests {
     async fn test_remove_section_by_ordinal_success() {
         let server = MockServer::start().await;
 
-        // GET task to find section ID
-        let mut task_data = task_json("task-1", "Task");
+        let mut task_data = gql_task_data("task-1", "Task");
         task_data["sections"] = json!([
             { "id": "sec-1", "section_type": "constraint", "content": "old", "section_order": 0 }
         ]);
-        Mock::given(method("GET"))
-            .and(path("/api/tasks/task-1"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "data": task_data })))
+
+        // GET_TASK mock
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("GetTask"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "task": task_data }
+            })))
             .mount(&server)
             .await;
 
-        // DELETE the section
-        Mock::given(method("DELETE"))
-            .and(path("/api/tasks/task-1/sections/sec-1"))
-            .respond_with(ResponseTemplate::new(204))
+        // DELETE_SECTION mock
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("DeleteSection"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "delete_section": { "id": "sec-1" } }
+            })))
             .mount(&server)
             .await;
 
@@ -1212,10 +1646,11 @@ mod tests {
         let server = MockServer::start().await;
 
         Mock::given(method("POST"))
-            .and(path("/api/tasks/task-1/refs"))
-            .respond_with(
-                ResponseTemplate::new(201).set_body_json(json!({ "data": { "id": "ref-new" } })),
-            )
+            .and(path("/graphql"))
+            .and(body_string_contains("CreateCodeRef"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "create_code_ref": { "id": "ref-new" } }
+            })))
             .mount(&server)
             .await;
 
@@ -1236,22 +1671,29 @@ mod tests {
     async fn test_remove_code_refs_by_index() {
         let server = MockServer::start().await;
 
-        // GET task to find ref IDs
-        let mut task_data = task_json("task-1", "Task");
+        let mut task_data = gql_task_data("task-1", "Task");
         task_data["code_refs"] = json!([
             { "id": "ref-0", "task_id": "task-1", "path": "a.rs" },
             { "id": "ref-1", "task_id": "task-1", "path": "b.rs" }
         ]);
-        Mock::given(method("GET"))
-            .and(path("/api/tasks/task-1"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "data": task_data })))
+
+        // GET_TASK mock
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("GetTask"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "task": task_data }
+            })))
             .mount(&server)
             .await;
 
-        // DELETE the second ref
-        Mock::given(method("DELETE"))
-            .and(path("/api/tasks/task-1/refs/ref-1"))
-            .respond_with(ResponseTemplate::new(204))
+        // DELETE_CODE_REF mock
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("DeleteCodeRef"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "delete_code_ref": { "id": "ref-1" } }
+            })))
             .mount(&server)
             .await;
 
@@ -1262,24 +1704,245 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_get_dependents_filters_client_side() {
+    async fn test_set_parent_success() {
         let server = MockServer::start().await;
 
-        Mock::given(method("GET"))
-            .and(path("/api/tasks"))
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("UpdateTask"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "data": [
-                    { "id": "t-1", "project_id": "p", "title": "A", "tags": [], "dependency_ids": ["blocker-1"], "sections": [], "code_refs": [] },
-                    { "id": "t-2", "project_id": "p", "title": "B", "tags": [], "dependency_ids": [], "sections": [], "code_refs": [] },
-                    { "id": "t-3", "project_id": "p", "title": "C", "tags": [], "dependency_ids": ["blocker-1", "other"], "sections": [], "code_refs": [] }
-                ]
+                "data": { "update_task": { "id": "child-1" } }
             })))
             .mount(&server)
             .await;
 
         let service = create_wiremock_service(&server.uri());
-        let dependents = service.get_dependents("blocker-1").await.unwrap();
+        let result = service.set_parent("child-1", "parent-1").await;
 
-        assert_eq!(dependents, vec!["t-1", "t-3"]);
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_remove_parent_success() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("UpdateTask"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "update_task": { "id": "child-1" } }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let result = service.remove_parent("child-1").await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_assign_workflow_success() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("AssignWorkflow"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "assign_workflow": { "id": "task-1", "workflow_id": "wf-1", "current_step_id": "step-1" } }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let result = service.assign_workflow("task-1", "wf-1").await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_unassign_workflow_success() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("UnassignWorkflow"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "unassign_workflow": { "id": "task-1" } }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let result = service.unassign_workflow("task-1").await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_remove_sections_by_type() {
+        let server = MockServer::start().await;
+
+        let mut task_data = gql_task_data("task-1", "Task");
+        task_data["sections"] = json!([
+            { "id": "sec-1", "section_type": "step", "content": "A", "section_order": 0 },
+            { "id": "sec-2", "section_type": "step", "content": "B", "section_order": 1 },
+            { "id": "sec-3", "section_type": "constraint", "content": "C", "section_order": 0 }
+        ]);
+
+        // GET_TASK mock
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("GetTask"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "task": task_data }
+            })))
+            .mount(&server)
+            .await;
+
+        // DELETE_SECTION mock
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("DeleteSection"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "delete_section": { "id": "sec-1" } }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        // Remove only the first step section (index 0)
+        let result = service
+            .remove_sections("task-1", SectionType::Step, Some(vec![0]))
+            .await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_mark_step_done_success() {
+        let server = MockServer::start().await;
+
+        let mut task_data = gql_task_data("task-1", "Task");
+        task_data["sections"] = json!([
+            { "id": "sec-1", "section_type": "step", "content": "First", "section_order": 0 },
+            { "id": "sec-2", "section_type": "step", "content": "Second", "section_order": 1 }
+        ]);
+
+        // GET_TASK mock
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("GetTask"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "task": task_data }
+            })))
+            .mount(&server)
+            .await;
+
+        // UPDATE_SECTION mock
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("UpdateSection"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "update_section": { "id": "sec-1", "done": true, "done_at": "2024-01-01T00:00:00Z" } }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        // mark_step_done uses 1-based indexing
+        let result = service.mark_step_done("task-1", 1).await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_toggle_step_done_success() {
+        let server = MockServer::start().await;
+
+        let mut task_data = gql_task_data("task-1", "Task");
+        task_data["sections"] = json!([
+            { "id": "sec-1", "section_type": "step", "content": "First", "section_order": 0, "done": false }
+        ]);
+
+        // GET_TASK mock
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("GetTask"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "task": task_data }
+            })))
+            .mount(&server)
+            .await;
+
+        // UPDATE_SECTION mock
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("UpdateSection"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "update_section": { "id": "sec-1", "done": true, "done_at": "2024-01-01T00:00:00Z" } }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let result = service.toggle_step_done("task-1", 0).await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_append_section_ref_success() {
+        let server = MockServer::start().await;
+
+        let mut task_data = gql_task_data("task-1", "Task");
+        task_data["sections"] = json!([
+            { "id": "sec-1", "section_type": "testing_criterion", "content": "Verify X", "section_order": 0 }
+        ]);
+
+        // GET_TASK mock
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("GetTask"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "task": task_data }
+            })))
+            .mount(&server)
+            .await;
+
+        // CREATE_CODE_REF mock
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("CreateCodeRef"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "create_code_ref": { "id": "ref-new" } }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let code_ref = CodeRef::file("tests/test.rs");
+        let result = service.append_section_ref("task-1", 0, &code_ref).await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_delete_task_with_cascade() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("DeleteTask"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "delete_task": { "id": "task-1" } }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let result = service.delete_task("task-1", true).await;
+
+        assert!(result.is_ok());
     }
 }

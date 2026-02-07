@@ -1,25 +1,8 @@
 //! API types for Sacrum responses
 //!
-//! Defines structures for deserializing Sacrum JSON responses.
-//! All Sacrum API responses use a {data: ...} envelope format.
+//! Defines structures for deserializing Sacrum API responses.
 
 use serde::{Deserialize, Serialize};
-
-/// Standard Sacrum API response envelope
-///
-/// All Sacrum API responses wrap the actual data in this envelope.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DataEnvelope<T> {
-    /// The actual response data
-    pub data: T,
-}
-
-impl<T> DataEnvelope<T> {
-    /// Extract the inner data from the envelope
-    pub fn into_inner(self) -> T {
-        self.data
-    }
-}
 
 /// Task response from Sacrum API (matches TaskJSON.data/1)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,6 +40,12 @@ pub struct TaskResponse {
     pub sections: Vec<SectionResponse>,
     #[serde(default)]
     pub code_refs: Vec<CodeRefResponse>,
+    #[serde(default)]
+    pub blockers: Vec<BlockerTaskResponse>,
+    #[serde(default)]
+    pub dependents: Vec<BlockerTaskResponse>,
+    #[serde(default)]
+    pub children: Vec<ChildTaskResponse>,
     #[serde(default)]
     pub started_at: Option<String>,
     #[serde(default)]
@@ -226,51 +215,26 @@ pub struct SessionLogResponse {
     pub updated_at: Option<String>,
 }
 
-/// Request to create a new step execution
+/// Blocker/dependent task summary from GraphQL nested fields
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CreateExecutionRequest {
-    pub step_name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub context: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub prompt: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub output: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub transition_result: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub model_provider: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub input_tokens: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub output_tokens: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cost: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub duration_ms: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub workflow_id: Option<String>,
+pub struct BlockerTaskResponse {
+    pub id: String,
+    #[serde(default)]
+    pub short_id: Option<String>,
+    pub title: String,
 }
 
-/// Request to update an existing step execution
+/// Child task summary from GraphQL nested fields
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UpdateExecutionRequest {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub status: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub output: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub transition_result: Option<String>,
-}
-
-/// Request to create a new session log
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CreateLogRequest {
-    pub content: String,
+pub struct ChildTaskResponse {
+    pub id: String,
+    #[serde(default)]
+    pub short_id: Option<String>,
+    pub title: String,
+    #[serde(default)]
+    pub level: Option<String>,
+    #[serde(default)]
+    pub priority: Option<String>,
 }
 
 /// Error response from Sacrum API
@@ -306,32 +270,9 @@ pub struct ProjectListResponse {
     pub projects: Vec<ProjectResponse>,
 }
 
-/// Move-to request body for advancing/retreating task workflow step
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MoveToRequest {
-    pub step_id: String,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_data_envelope_deserialization() {
-        let json = r#"{"data": {"id": "123", "name": "test"}}"#;
-        let envelope: DataEnvelope<serde_json::Value> = serde_json::from_str(json).unwrap();
-        assert_eq!(envelope.data["id"], "123");
-        assert_eq!(envelope.data["name"], "test");
-    }
-
-    #[test]
-    fn test_data_envelope_into_inner() {
-        let envelope = DataEnvelope {
-            data: "test_data".to_string(),
-        };
-        let inner = envelope.into_inner();
-        assert_eq!(inner, "test_data");
-    }
 
     #[test]
     fn test_task_response_deserialization() {
@@ -560,15 +501,6 @@ mod tests {
     }
 
     #[test]
-    fn test_move_to_request_serialization() {
-        let req = MoveToRequest {
-            step_id: "step-123".to_string(),
-        };
-        let json = serde_json::to_string(&req).unwrap();
-        assert!(json.contains("step-123"));
-    }
-
-    #[test]
     fn test_project_response_complete() {
         let json = r#"{
             "id": "proj-123",
@@ -597,124 +529,90 @@ mod tests {
     }
 
     #[test]
-    fn test_data_envelope_with_complex_data() {
-        #[derive(serde::Serialize, serde::Deserialize)]
-        struct ComplexData {
-            id: String,
-            value: i32,
-        }
+    fn test_blocker_task_response_deserialization() {
+        let json = r#"{
+            "id": "blocker-1",
+            "short_id": "b-1",
+            "title": "Blocking Task"
+        }"#;
 
-        let complex = ComplexData {
-            id: "test".to_string(),
-            value: 42,
-        };
-
-        let envelope = DataEnvelope { data: complex };
-
-        let json = serde_json::to_string(&envelope).unwrap();
-        let deserialized: DataEnvelope<ComplexData> = serde_json::from_str(&json).unwrap();
-        assert_eq!(deserialized.data.id, "test");
-        assert_eq!(deserialized.data.value, 42);
+        let blocker: BlockerTaskResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(blocker.id, "blocker-1");
+        assert_eq!(blocker.short_id.as_deref(), Some("b-1"));
+        assert_eq!(blocker.title, "Blocking Task");
     }
 
     #[test]
-    fn test_data_envelope_with_vec() {
-        let json = r#"{"data": [{"id": "1", "title": "T", "project_id": "p"}]}"#;
-        let envelope: DataEnvelope<Vec<serde_json::Value>> = serde_json::from_str(json).unwrap();
-        assert_eq!(envelope.data.len(), 1);
+    fn test_blocker_task_response_minimal() {
+        let json = r#"{
+            "id": "blocker-2",
+            "title": "Minimal Blocker"
+        }"#;
+
+        let blocker: BlockerTaskResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(blocker.id, "blocker-2");
+        assert!(blocker.short_id.is_none());
+        assert_eq!(blocker.title, "Minimal Blocker");
     }
 
     #[test]
-    fn test_create_execution_request_serialization() {
-        let request = CreateExecutionRequest {
-            step_name: "review".to_string(),
-            status: Some("in_progress".to_string()),
-            context: Some("ctx".to_string()),
-            prompt: Some("prompt".to_string()),
-            output: None,
-            transition_result: None,
-            model: Some("claude-opus".to_string()),
-            model_provider: None,
-            input_tokens: Some(100),
-            output_tokens: Some(50),
-            cost: Some(0.05),
-            duration_ms: Some(1500),
-            workflow_id: Some("wf-1".to_string()),
-        };
+    fn test_child_task_response_deserialization() {
+        let json = r#"{
+            "id": "child-1",
+            "short_id": "c-1",
+            "title": "Child Task",
+            "level": "ticket",
+            "priority": "high"
+        }"#;
 
-        let json = serde_json::to_string(&request).unwrap();
-        assert!(json.contains("review"));
-        assert!(json.contains("in_progress"));
-        assert!(json.contains("claude-opus"));
-        assert!(json.contains("wf-1"));
-        // None fields should be skipped
-        assert!(!json.contains("\"output\""));
-        assert!(!json.contains("transition_result"));
-        assert!(!json.contains("model_provider"));
+        let child: ChildTaskResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(child.id, "child-1");
+        assert_eq!(child.short_id.as_deref(), Some("c-1"));
+        assert_eq!(child.title, "Child Task");
+        assert_eq!(child.level.as_deref(), Some("ticket"));
+        assert_eq!(child.priority.as_deref(), Some("high"));
     }
 
     #[test]
-    fn test_create_execution_request_roundtrip() {
-        let request = CreateExecutionRequest {
-            step_name: "implement".to_string(),
-            status: None,
-            context: None,
-            prompt: None,
-            output: None,
-            transition_result: None,
-            model: None,
-            model_provider: None,
-            input_tokens: None,
-            output_tokens: None,
-            cost: None,
-            duration_ms: None,
-            workflow_id: None,
-        };
+    fn test_child_task_response_minimal() {
+        let json = r#"{
+            "id": "child-2",
+            "title": "Minimal Child"
+        }"#;
 
-        let json = serde_json::to_string(&request).unwrap();
-        let deserialized: CreateExecutionRequest = serde_json::from_str(&json).unwrap();
-        assert_eq!(deserialized.step_name, "implement");
-        assert!(deserialized.status.is_none());
+        let child: ChildTaskResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(child.id, "child-2");
+        assert!(child.short_id.is_none());
+        assert_eq!(child.title, "Minimal Child");
+        assert!(child.level.is_none());
+        assert!(child.priority.is_none());
     }
 
     #[test]
-    fn test_update_execution_request_serialization() {
-        let request = UpdateExecutionRequest {
-            status: Some("completed".to_string()),
-            output: Some("Done".to_string()),
-            transition_result: Some("advance".to_string()),
-        };
+    fn test_task_response_with_nested_relations() {
+        let json = r#"{
+            "id": "task-rel",
+            "title": "Task with relations",
+            "project_id": "proj-1",
+            "blockers": [
+                {"id": "b-1", "short_id": "s-1", "title": "Blocker 1"}
+            ],
+            "dependents": [
+                {"id": "d-1", "title": "Dependent 1"}
+            ],
+            "children": [
+                {"id": "c-1", "title": "Child 1", "level": "task", "priority": "medium"}
+            ]
+        }"#;
 
-        let json = serde_json::to_string(&request).unwrap();
-        assert!(json.contains("completed"));
-        assert!(json.contains("Done"));
-        assert!(json.contains("advance"));
-    }
-
-    #[test]
-    fn test_update_execution_request_partial() {
-        let request = UpdateExecutionRequest {
-            status: None,
-            output: Some("partial output".to_string()),
-            transition_result: None,
-        };
-
-        let json = serde_json::to_string(&request).unwrap();
-        assert!(json.contains("partial output"));
-        assert!(!json.contains("status"));
-        assert!(!json.contains("transition_result"));
-    }
-
-    #[test]
-    fn test_create_log_request_serialization() {
-        let request = CreateLogRequest {
-            content: "Step completed".to_string(),
-        };
-
-        let json = serde_json::to_string(&request).unwrap();
-        assert!(json.contains("Step completed"));
-
-        let deserialized: CreateLogRequest = serde_json::from_str(&json).unwrap();
-        assert_eq!(deserialized.content, "Step completed");
+        let task: TaskResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(task.blockers.len(), 1);
+        assert_eq!(task.blockers[0].id, "b-1");
+        assert_eq!(task.blockers[0].title, "Blocker 1");
+        assert_eq!(task.dependents.len(), 1);
+        assert_eq!(task.dependents[0].id, "d-1");
+        assert_eq!(task.children.len(), 1);
+        assert_eq!(task.children[0].id, "c-1");
+        assert_eq!(task.children[0].level.as_deref(), Some("task"));
     }
 }

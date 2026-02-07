@@ -29,15 +29,15 @@
 //! # Example Usage
 //!
 //! ```no_run
-//! use vertebrae_sacrum_client::{SacrumClient, SacrumConfig};
+//! use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig};
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let config = SacrumConfig::load("my-project")?;
-//!     let client = SacrumClient::new(config);
+//!     let client = GraphqlClient::new(config);
 //!
-//!     // Make API calls
-//!     // let task = client.get::<TaskResponse>("/api/tasks/123", &()).await?;
+//!     // Make GraphQL queries via service layers
+//!     // e.g., SacrumTaskService::new(client).get_task("id").await?;
 //!
 //!     Ok(())
 //! }
@@ -48,17 +48,17 @@ pub mod client;
 pub mod config;
 pub mod error;
 pub mod execution_service;
+pub mod queries;
 pub mod step_service;
 pub mod task_service;
 pub mod workflow_service;
 
 pub use api_types::{
-    CodeRefResponse, CreateProjectRequest, DataEnvelope, ErrorResponse, MoveToRequest,
-    ProjectListResponse, ProjectResponse, SectionResponse, SessionLogResponse,
-    StepExecutionResponse, StepTransitionResponse, TaskResponse, WorkflowResponse,
-    WorkflowStepResponse, WorkflowTransitionResponse,
+    CodeRefResponse, CreateProjectRequest, ErrorResponse, ProjectListResponse, ProjectResponse,
+    SectionResponse, SessionLogResponse, StepExecutionResponse, StepTransitionResponse,
+    TaskResponse, WorkflowResponse, WorkflowStepResponse, WorkflowTransitionResponse,
 };
-pub use client::SacrumClient;
+pub use client::{GraphqlClient, with_fragments};
 pub use config::{
     GlobalSacrumSection, ProjectSection, SacrumConfig, VertebraeConfigFile, config_path,
     load_config_file, save_config_file,
