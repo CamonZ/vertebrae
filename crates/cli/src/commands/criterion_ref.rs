@@ -14,7 +14,7 @@ use vertebrae_core::{ServiceError, VertebraeServices};
 #[derive(Debug, Args)]
 pub struct CriterionRefCommand {
     /// Task ID containing the testing criterion (case-insensitive)
-    #[arg(required = true)]
+    #[arg(required = true, value_parser = crate::commands::parse_uuid("task ID"))]
     pub id: String,
 
     /// Testing criterion index (1-based) to add the reference to

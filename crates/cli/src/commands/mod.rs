@@ -58,7 +58,43 @@ pub use workflow::WorkflowCommand;
 
 use crate::output::{format_task_table, format_task_tree};
 use clap::Subcommand;
+use clap::builder::ValueParser;
 use vertebrae_core::{ServiceError, VertebraeServices};
+
+/// Build a UUID validator for a named field.
+///
+/// Returns a [`ValueParser`] for clap that rejects non-UUID strings with an
+/// error naming the field and showing the expected format.
+pub fn parse_uuid(field_name: &'static str) -> ValueParser {
+    ValueParser::from(move |s: &str| -> Result<String, String> {
+        uuid::Uuid::parse_str(s).map_err(|_| {
+            format!(
+                "{field_name} '{s}' is not a valid UUID \
+                 (expected format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)"
+            )
+        })?;
+        Ok(s.to_lowercase())
+    })
+}
+
+/// Like [`parse_uuid`] but the returned validator also accepts an empty string.
+///
+/// Used for arguments where an empty string has a special meaning
+/// (e.g., `--parent ""` clears the parent relationship).
+pub fn parse_uuid_or_empty(field_name: &'static str) -> ValueParser {
+    ValueParser::from(move |s: &str| -> Result<String, String> {
+        if s.is_empty() {
+            return Ok(s.to_string());
+        }
+        uuid::Uuid::parse_str(s).map_err(|_| {
+            format!(
+                "{field_name} '{s}' is not a valid UUID \
+                 (expected format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)"
+            )
+        })?;
+        Ok(s.to_lowercase())
+    })
+}
 
 /// Available CLI commands
 #[derive(Debug, Subcommand)]
@@ -356,11 +392,20 @@ mod tests {
 
     #[test]
     fn test_command_add_with_parent() {
-        let cli = TestCli::try_parse_from(["test", "add", "Child", "--parent", "abc123"]);
+        let cli = TestCli::try_parse_from([
+            "test",
+            "add",
+            "Child",
+            "--parent",
+            "a1b2c3d4-0000-4000-8000-000000000001",
+        ]);
         assert!(cli.is_ok());
         match cli.unwrap().command {
             Command::Add(cmd) => {
-                assert_eq!(cmd.parent, Some("abc123".to_string()));
+                assert_eq!(
+                    cmd.parent,
+                    Some("a1b2c3d4-0000-4000-8000-000000000001".to_string())
+                );
             }
             _ => panic!("Expected Add command"),
         }
@@ -373,14 +418,20 @@ mod tests {
             "add",
             "Dependent",
             "--depends-on",
-            "xyz789",
+            "a1b2c3d4-0000-4000-8000-000000000002",
             "--depends-on",
-            "abc123",
+            "a1b2c3d4-0000-4000-8000-000000000001",
         ]);
         assert!(cli.is_ok());
         match cli.unwrap().command {
             Command::Add(cmd) => {
-                assert_eq!(cmd.depends_on, vec!["xyz789", "abc123"]);
+                assert_eq!(
+                    cmd.depends_on,
+                    vec![
+                        "a1b2c3d4-0000-4000-8000-000000000002",
+                        "a1b2c3d4-0000-4000-8000-000000000001"
+                    ]
+                );
             }
             _ => panic!("Expected Add command"),
         }
@@ -422,9 +473,9 @@ mod tests {
             "-t",
             "backend",
             "--parent",
-            "parent1",
+            "a1b2c3d4-0000-4000-8000-000000000004",
             "--depends-on",
-            "dep1",
+            "a1b2c3d4-0000-4000-8000-000000000005",
             "--description",
             "Full description",
         ]);
@@ -437,8 +488,11 @@ mod tests {
         assert_eq!(cmd.level.unwrap().as_str(), "epic");
         assert_eq!(cmd.priority.unwrap().as_str(), "critical");
         assert_eq!(cmd.tags, vec!["urgent", "backend"]);
-        assert_eq!(cmd.parent, Some("parent1".to_string()));
-        assert_eq!(cmd.depends_on, vec!["dep1"]);
+        assert_eq!(
+            cmd.parent,
+            Some("a1b2c3d4-0000-4000-8000-000000000004".to_string())
+        );
+        assert_eq!(cmd.depends_on, vec!["a1b2c3d4-0000-4000-8000-000000000005"]);
         assert_eq!(cmd.description, Some("Full description".to_string()));
     }
 
@@ -545,11 +599,19 @@ mod tests {
 
     #[test]
     fn test_command_list_with_parent() {
-        let cli = TestCli::try_parse_from(["test", "list", "--parent", "abc123"]);
+        let cli = TestCli::try_parse_from([
+            "test",
+            "list",
+            "--parent",
+            "a1b2c3d4-0000-4000-8000-000000000001",
+        ]);
         assert!(cli.is_ok());
         match cli.unwrap().command {
             Command::List(cmd) => {
-                assert_eq!(cmd.parent, Some("abc123".to_string()));
+                assert_eq!(
+                    cmd.parent,
+                    Some("a1b2c3d4-0000-4000-8000-000000000001".to_string())
+                );
             }
             _ => panic!("Expected List command"),
         }
@@ -596,11 +658,11 @@ mod tests {
 
     #[test]
     fn test_command_show_parses() {
-        let cli = TestCli::try_parse_from(["test", "show", "abc123"]);
+        let cli = TestCli::try_parse_from(["test", "show", "a1b2c3d4-0000-4000-8000-000000000001"]);
         assert!(cli.is_ok());
         match cli.unwrap().command {
             Command::Show(cmd) => {
-                assert_eq!(cmd.id, "abc123");
+                assert_eq!(cmd.id, "a1b2c3d4-0000-4000-8000-000000000001");
             }
             _ => panic!("Expected Show command"),
         }
@@ -614,21 +676,24 @@ mod tests {
 
     #[test]
     fn test_command_show_debug() {
-        let cli = TestCli::try_parse_from(["test", "show", "test123"]).unwrap();
+        let cli = TestCli::try_parse_from(["test", "show", "a1b2c3d4-0000-4000-8000-000000000003"])
+            .unwrap();
         let debug_str = format!("{:?}", cli.command);
         assert!(
-            debug_str.contains("Show") && debug_str.contains("test123"),
+            debug_str.contains("Show")
+                && debug_str.contains("a1b2c3d4-0000-4000-8000-000000000003"),
             "Debug output should contain Show variant and id field value"
         );
     }
 
     #[test]
     fn test_command_update_parses() {
-        let cli = TestCli::try_parse_from(["test", "update", "abc123"]);
+        let cli =
+            TestCli::try_parse_from(["test", "update", "a1b2c3d4-0000-4000-8000-000000000001"]);
         assert!(cli.is_ok());
         match cli.unwrap().command {
             Command::Update(cmd) => {
-                assert_eq!(cmd.id, "abc123");
+                assert_eq!(cmd.id, "a1b2c3d4-0000-4000-8000-000000000001");
             }
             _ => panic!("Expected Update command"),
         }
@@ -642,11 +707,17 @@ mod tests {
 
     #[test]
     fn test_command_update_with_title() {
-        let cli = TestCli::try_parse_from(["test", "update", "abc123", "--title", "New Title"]);
+        let cli = TestCli::try_parse_from([
+            "test",
+            "update",
+            "a1b2c3d4-0000-4000-8000-000000000001",
+            "--title",
+            "New Title",
+        ]);
         assert!(cli.is_ok());
         match cli.unwrap().command {
             Command::Update(cmd) => {
-                assert_eq!(cmd.id, "abc123");
+                assert_eq!(cmd.id, "a1b2c3d4-0000-4000-8000-000000000001");
                 assert_eq!(cmd.title, Some("New Title".to_string()));
             }
             _ => panic!("Expected Update command"),
@@ -655,7 +726,13 @@ mod tests {
 
     #[test]
     fn test_command_update_with_priority() {
-        let cli = TestCli::try_parse_from(["test", "update", "abc123", "--priority", "high"]);
+        let cli = TestCli::try_parse_from([
+            "test",
+            "update",
+            "a1b2c3d4-0000-4000-8000-000000000001",
+            "--priority",
+            "high",
+        ]);
         assert!(cli.is_ok());
         match cli.unwrap().command {
             Command::Update(cmd) => {
@@ -670,7 +747,13 @@ mod tests {
 
     #[test]
     fn test_command_update_with_add_tag() {
-        let cli = TestCli::try_parse_from(["test", "update", "abc123", "--add-tag", "urgent"]);
+        let cli = TestCli::try_parse_from([
+            "test",
+            "update",
+            "a1b2c3d4-0000-4000-8000-000000000001",
+            "--add-tag",
+            "urgent",
+        ]);
         assert!(cli.is_ok());
         match cli.unwrap().command {
             Command::Update(cmd) => {
@@ -685,7 +768,7 @@ mod tests {
         let cli = TestCli::try_parse_from([
             "test",
             "update",
-            "abc123",
+            "a1b2c3d4-0000-4000-8000-000000000001",
             "--add-tag",
             "urgent",
             "--add-tag",
@@ -702,7 +785,13 @@ mod tests {
 
     #[test]
     fn test_command_update_with_remove_tag() {
-        let cli = TestCli::try_parse_from(["test", "update", "abc123", "--remove-tag", "old"]);
+        let cli = TestCli::try_parse_from([
+            "test",
+            "update",
+            "a1b2c3d4-0000-4000-8000-000000000001",
+            "--remove-tag",
+            "old",
+        ]);
         assert!(cli.is_ok());
         match cli.unwrap().command {
             Command::Update(cmd) => {
@@ -714,11 +803,20 @@ mod tests {
 
     #[test]
     fn test_command_update_with_parent() {
-        let cli = TestCli::try_parse_from(["test", "update", "abc123", "--parent", "xyz789"]);
+        let cli = TestCli::try_parse_from([
+            "test",
+            "update",
+            "a1b2c3d4-0000-4000-8000-000000000001",
+            "--parent",
+            "a1b2c3d4-0000-4000-8000-000000000002",
+        ]);
         assert!(cli.is_ok());
         match cli.unwrap().command {
             Command::Update(cmd) => {
-                assert_eq!(cmd.parent, Some("xyz789".to_string()));
+                assert_eq!(
+                    cmd.parent,
+                    Some("a1b2c3d4-0000-4000-8000-000000000002".to_string())
+                );
             }
             _ => panic!("Expected Update command"),
         }
@@ -726,7 +824,13 @@ mod tests {
 
     #[test]
     fn test_command_update_with_empty_parent() {
-        let cli = TestCli::try_parse_from(["test", "update", "abc123", "--parent", ""]);
+        let cli = TestCli::try_parse_from([
+            "test",
+            "update",
+            "a1b2c3d4-0000-4000-8000-000000000001",
+            "--parent",
+            "",
+        ]);
         assert!(cli.is_ok());
         match cli.unwrap().command {
             Command::Update(cmd) => {
@@ -738,7 +842,13 @@ mod tests {
 
     #[test]
     fn test_command_update_invalid_priority() {
-        let result = TestCli::try_parse_from(["test", "update", "abc123", "--priority", "invalid"]);
+        let result = TestCli::try_parse_from([
+            "test",
+            "update",
+            "a1b2c3d4-0000-4000-8000-000000000001",
+            "--priority",
+            "invalid",
+        ]);
         assert!(result.is_err());
     }
 
@@ -747,7 +857,7 @@ mod tests {
         let cli = TestCli::try_parse_from([
             "test",
             "update",
-            "abc123",
+            "a1b2c3d4-0000-4000-8000-000000000001",
             "--title",
             "New Title",
             "--priority",
@@ -757,14 +867,14 @@ mod tests {
             "--remove-tag",
             "old",
             "--parent",
-            "xyz789",
+            "a1b2c3d4-0000-4000-8000-000000000002",
         ]);
         assert!(cli.is_ok());
         let cmd = match cli.unwrap().command {
             Command::Update(cmd) => cmd,
             _ => panic!("Expected Update command"),
         };
-        assert_eq!(cmd.id, "abc123");
+        assert_eq!(cmd.id, "a1b2c3d4-0000-4000-8000-000000000001");
         assert_eq!(cmd.title, Some("New Title".to_string()));
         assert_eq!(
             cmd.priority.map(|p| p.as_str().to_string()),
@@ -772,26 +882,33 @@ mod tests {
         );
         assert_eq!(cmd.add_tags, vec!["urgent"]);
         assert_eq!(cmd.remove_tags, vec!["old"]);
-        assert_eq!(cmd.parent, Some("xyz789".to_string()));
+        assert_eq!(
+            cmd.parent,
+            Some("a1b2c3d4-0000-4000-8000-000000000002".to_string())
+        );
     }
 
     #[test]
     fn test_command_update_debug() {
-        let cli = TestCli::try_parse_from(["test", "update", "test123"]).unwrap();
+        let cli =
+            TestCli::try_parse_from(["test", "update", "a1b2c3d4-0000-4000-8000-000000000003"])
+                .unwrap();
         let debug_str = format!("{:?}", cli.command);
         assert!(
-            debug_str.contains("Update") && debug_str.contains("test123"),
+            debug_str.contains("Update")
+                && debug_str.contains("a1b2c3d4-0000-4000-8000-000000000003"),
             "Debug output should contain Update variant and id field value"
         );
     }
 
     #[test]
     fn test_command_delete_parses() {
-        let cli = TestCli::try_parse_from(["test", "delete", "abc123"]);
+        let cli =
+            TestCli::try_parse_from(["test", "delete", "a1b2c3d4-0000-4000-8000-000000000001"]);
         assert!(cli.is_ok());
         match cli.unwrap().command {
             Command::Delete(cmd) => {
-                assert_eq!(cmd.id, "abc123");
+                assert_eq!(cmd.id, "a1b2c3d4-0000-4000-8000-000000000001");
                 assert!(!cmd.cascade);
                 assert!(!cmd.force);
             }
@@ -807,11 +924,16 @@ mod tests {
 
     #[test]
     fn test_command_delete_with_cascade() {
-        let cli = TestCli::try_parse_from(["test", "delete", "abc123", "--cascade"]);
+        let cli = TestCli::try_parse_from([
+            "test",
+            "delete",
+            "a1b2c3d4-0000-4000-8000-000000000001",
+            "--cascade",
+        ]);
         assert!(cli.is_ok());
         match cli.unwrap().command {
             Command::Delete(cmd) => {
-                assert_eq!(cmd.id, "abc123");
+                assert_eq!(cmd.id, "a1b2c3d4-0000-4000-8000-000000000001");
                 assert!(cmd.cascade);
                 assert!(!cmd.force);
             }
@@ -821,11 +943,16 @@ mod tests {
 
     #[test]
     fn test_command_delete_with_force() {
-        let cli = TestCli::try_parse_from(["test", "delete", "abc123", "--force"]);
+        let cli = TestCli::try_parse_from([
+            "test",
+            "delete",
+            "a1b2c3d4-0000-4000-8000-000000000001",
+            "--force",
+        ]);
         assert!(cli.is_ok());
         match cli.unwrap().command {
             Command::Delete(cmd) => {
-                assert_eq!(cmd.id, "abc123");
+                assert_eq!(cmd.id, "a1b2c3d4-0000-4000-8000-000000000001");
                 assert!(!cmd.cascade);
                 assert!(cmd.force);
             }
@@ -835,7 +962,12 @@ mod tests {
 
     #[test]
     fn test_command_delete_with_force_short() {
-        let cli = TestCli::try_parse_from(["test", "delete", "abc123", "-f"]);
+        let cli = TestCli::try_parse_from([
+            "test",
+            "delete",
+            "a1b2c3d4-0000-4000-8000-000000000001",
+            "-f",
+        ]);
         assert!(cli.is_ok());
         match cli.unwrap().command {
             Command::Delete(cmd) => {
@@ -847,11 +979,17 @@ mod tests {
 
     #[test]
     fn test_command_delete_with_cascade_and_force() {
-        let cli = TestCli::try_parse_from(["test", "delete", "abc123", "--cascade", "--force"]);
+        let cli = TestCli::try_parse_from([
+            "test",
+            "delete",
+            "a1b2c3d4-0000-4000-8000-000000000001",
+            "--cascade",
+            "--force",
+        ]);
         assert!(cli.is_ok());
         match cli.unwrap().command {
             Command::Delete(cmd) => {
-                assert_eq!(cmd.id, "abc123");
+                assert_eq!(cmd.id, "a1b2c3d4-0000-4000-8000-000000000001");
                 assert!(cmd.cascade);
                 assert!(cmd.force);
             }
@@ -861,21 +999,25 @@ mod tests {
 
     #[test]
     fn test_command_delete_debug() {
-        let cli = TestCli::try_parse_from(["test", "delete", "test123"]).unwrap();
+        let cli =
+            TestCli::try_parse_from(["test", "delete", "a1b2c3d4-0000-4000-8000-000000000003"])
+                .unwrap();
         let debug_str = format!("{:?}", cli.command);
         assert!(
-            debug_str.contains("Delete") && debug_str.contains("test123"),
+            debug_str.contains("Delete")
+                && debug_str.contains("a1b2c3d4-0000-4000-8000-000000000003"),
             "Debug output should contain Delete variant and id field value"
         );
     }
 
     #[test]
     fn test_command_sections_parses() {
-        let cli = TestCli::try_parse_from(["test", "sections", "abc123"]);
+        let cli =
+            TestCli::try_parse_from(["test", "sections", "a1b2c3d4-0000-4000-8000-000000000001"]);
         assert!(cli.is_ok());
         match cli.unwrap().command {
             Command::Sections(cmd) => {
-                assert_eq!(cmd.id, "abc123");
+                assert_eq!(cmd.id, "a1b2c3d4-0000-4000-8000-000000000001");
                 assert!(cmd.section_type.is_none());
             }
             _ => panic!("Expected Sections command"),
@@ -890,11 +1032,17 @@ mod tests {
 
     #[test]
     fn test_command_sections_with_type_filter() {
-        let cli = TestCli::try_parse_from(["test", "sections", "abc123", "--type", "step"]);
+        let cli = TestCli::try_parse_from([
+            "test",
+            "sections",
+            "a1b2c3d4-0000-4000-8000-000000000001",
+            "--type",
+            "step",
+        ]);
         assert!(cli.is_ok());
         match cli.unwrap().command {
             Command::Sections(cmd) => {
-                assert_eq!(cmd.id, "abc123");
+                assert_eq!(cmd.id, "a1b2c3d4-0000-4000-8000-000000000001");
                 assert!(cmd.section_type.is_some());
                 assert_eq!(cmd.section_type.unwrap().as_str(), "step");
             }
@@ -904,7 +1052,13 @@ mod tests {
 
     #[test]
     fn test_command_sections_with_anti_pattern_filter() {
-        let cli = TestCli::try_parse_from(["test", "sections", "abc123", "--type", "anti_pattern"]);
+        let cli = TestCli::try_parse_from([
+            "test",
+            "sections",
+            "a1b2c3d4-0000-4000-8000-000000000001",
+            "--type",
+            "anti_pattern",
+        ]);
         assert!(cli.is_ok());
         match cli.unwrap().command {
             Command::Sections(cmd) => {
@@ -916,27 +1070,41 @@ mod tests {
 
     #[test]
     fn test_command_sections_invalid_type() {
-        let result = TestCli::try_parse_from(["test", "sections", "abc123", "--type", "invalid"]);
+        let result = TestCli::try_parse_from([
+            "test",
+            "sections",
+            "a1b2c3d4-0000-4000-8000-000000000001",
+            "--type",
+            "invalid",
+        ]);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_command_sections_debug() {
-        let cli = TestCli::try_parse_from(["test", "sections", "test123"]).unwrap();
+        let cli =
+            TestCli::try_parse_from(["test", "sections", "a1b2c3d4-0000-4000-8000-000000000003"])
+                .unwrap();
         let debug_str = format!("{:?}", cli.command);
         assert!(
-            debug_str.contains("Sections") && debug_str.contains("test123"),
+            debug_str.contains("Sections")
+                && debug_str.contains("a1b2c3d4-0000-4000-8000-000000000003"),
             "Debug output should contain Sections variant and id field value"
         );
     }
 
     #[test]
     fn test_command_transition_to_parses() {
-        let cli = TestCli::try_parse_from(["test", "transition-to", "abc123", "default"]);
+        let cli = TestCli::try_parse_from([
+            "test",
+            "transition-to",
+            "a1b2c3d4-0000-4000-8000-000000000001",
+            "default",
+        ]);
         assert!(cli.is_ok());
         match cli.unwrap().command {
             Command::TransitionTo(cmd) => {
-                assert_eq!(cmd.id, "abc123");
+                assert_eq!(cmd.id, "a1b2c3d4-0000-4000-8000-000000000001");
                 assert_eq!(cmd.target, "default");
             }
             _ => panic!("Expected TransitionTo command"),
@@ -951,7 +1119,11 @@ mod tests {
 
     #[test]
     fn test_command_transition_to_requires_target() {
-        let result = TestCli::try_parse_from(["test", "transition-to", "abc123"]);
+        let result = TestCli::try_parse_from([
+            "test",
+            "transition-to",
+            "a1b2c3d4-0000-4000-8000-000000000001",
+        ]);
         assert!(result.is_err());
     }
 
@@ -960,18 +1132,28 @@ mod tests {
         // Test valid workflow names as targets
         let targets = ["default", "implementation", "review", "backlog:todo"];
         for target in targets {
-            let cli = TestCli::try_parse_from(["test", "transition-to", "abc123", target]);
+            let cli = TestCli::try_parse_from([
+                "test",
+                "transition-to",
+                "a1b2c3d4-0000-4000-8000-000000000001",
+                target,
+            ]);
             assert!(cli.is_ok(), "Failed to parse target: {}", target);
         }
     }
 
     #[test]
     fn test_command_transition_to_with_step() {
-        let cli = TestCli::try_parse_from(["test", "transition-to", "abc123", "review:approved"]);
+        let cli = TestCli::try_parse_from([
+            "test",
+            "transition-to",
+            "a1b2c3d4-0000-4000-8000-000000000001",
+            "review:approved",
+        ]);
         assert!(cli.is_ok());
         match cli.unwrap().command {
             Command::TransitionTo(cmd) => {
-                assert_eq!(cmd.id, "abc123");
+                assert_eq!(cmd.id, "a1b2c3d4-0000-4000-8000-000000000001");
                 assert_eq!(cmd.target, "review:approved");
             }
             _ => panic!("Expected TransitionTo command"),
@@ -983,7 +1165,7 @@ mod tests {
         let cli = TestCli::try_parse_from([
             "test",
             "transition-to",
-            "abc123",
+            "a1b2c3d4-0000-4000-8000-000000000001",
             "implementation",
             "--skip-validation",
         ]);
@@ -998,10 +1180,17 @@ mod tests {
 
     #[test]
     fn test_command_transition_to_debug() {
-        let cli = TestCli::try_parse_from(["test", "transition-to", "test123", "default"]).unwrap();
+        let cli = TestCli::try_parse_from([
+            "test",
+            "transition-to",
+            "a1b2c3d4-0000-4000-8000-000000000003",
+            "default",
+        ])
+        .unwrap();
         let debug_str = format!("{:?}", cli.command);
         assert!(
-            debug_str.contains("TransitionTo") && debug_str.contains("test123"),
+            debug_str.contains("TransitionTo")
+                && debug_str.contains("a1b2c3d4-0000-4000-8000-000000000003"),
             "Debug output should contain TransitionTo variant and id field value"
         );
     }

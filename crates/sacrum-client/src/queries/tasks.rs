@@ -50,13 +50,13 @@ pub const TASK_FIELDS: &str = r#"
 /// NOTE: Prepend TASK_FIELDS when sending.
 pub const LIST_TASKS: &str = r#"
     query ListTasks(
-        $project_id: ID!,
+        $project_id: Uuid4!,
         $level: String,
-        $parent_id: ID,
+        $parent_id: Uuid4,
         $status: String,
         $tags: [String!],
         $search: String,
-        $workflow_id: ID,
+        $workflow_id: Uuid4,
         $root_only: Boolean,
         $blocked: Boolean
     ) {
@@ -79,7 +79,7 @@ pub const LIST_TASKS: &str = r#"
 /// Get a single task by ID with nested blockers, dependents, and children.
 /// NOTE: Prepend TASK_FIELDS when sending.
 pub const GET_TASK: &str = r#"
-    query GetTask($id: ID!) {
+    query GetTask($id: Uuid4!) {
         task(id: $id) {
             ...TaskFields
             blockers { ...TaskFields }
@@ -92,7 +92,7 @@ pub const GET_TASK: &str = r#"
 /// List tasks that are ready (unblocked).
 /// NOTE: Prepend TASK_FIELDS when sending.
 pub const READY_TASKS: &str = r#"
-    query ReadyTasks($project_id: ID!) {
+    query ReadyTasks($project_id: Uuid4!) {
         list_ready(project_id: $project_id) {
             ...TaskFields
         }
@@ -102,20 +102,20 @@ pub const READY_TASKS: &str = r#"
 /// Find dependency path between two tasks.
 /// Returns a flat list of task IDs.
 pub const FIND_PATH: &str = r#"
-    query FindPath($from_id: ID!, $to_id: ID!) {
+    query FindPath($from_id: Uuid4!, $to_id: Uuid4!) {
         find_path(from_id: $from_id, to_id: $to_id)
     }
 "#;
 
 pub const CREATE_TASK: &str = r#"
     mutation CreateTask(
-        $project_id: ID!,
+        $project_id: Uuid4!,
         $title: String!,
         $description: String,
         $level: String,
         $priority: String,
         $tags: [String!],
-        $parent_id: ID,
+        $parent_id: Uuid4,
         $sections: [TaskSectionInput!]
     ) {
         create_task(
@@ -135,7 +135,7 @@ pub const CREATE_TASK: &str = r#"
 
 pub const UPDATE_TASK: &str = r#"
     mutation UpdateTask(
-        $id: ID!,
+        $id: Uuid4!,
         $title: String,
         $description: String,
         $level: String,
@@ -143,8 +143,8 @@ pub const UPDATE_TASK: &str = r#"
         $tags: [String!],
         $needs_human_review: Boolean,
         $revision_feedback: String,
-        $parent_id: ID,
-        $depends_on_ids: [ID!]
+        $parent_id: Uuid4,
+        $depends_on_ids: [Uuid4!]
     ) {
         update_task(
             id: $id,
@@ -164,7 +164,7 @@ pub const UPDATE_TASK: &str = r#"
 "#;
 
 pub const DELETE_TASK: &str = r#"
-    mutation DeleteTask($id: ID!, $cascade: Boolean) {
+    mutation DeleteTask($id: Uuid4!, $cascade: Boolean) {
         delete_task(id: $id, cascade: $cascade) {
             id
         }
@@ -174,7 +174,7 @@ pub const DELETE_TASK: &str = r#"
 // -- Dependencies --
 
 pub const CREATE_DEPENDENCY: &str = r#"
-    mutation CreateTaskDependency($task_id: ID!, $depends_on_id: ID!) {
+    mutation CreateTaskDependency($task_id: Uuid4!, $depends_on_id: Uuid4!) {
         create_task_dependency(task_id: $task_id, depends_on_id: $depends_on_id) {
             id
         }
@@ -182,7 +182,7 @@ pub const CREATE_DEPENDENCY: &str = r#"
 "#;
 
 pub const DELETE_DEPENDENCY: &str = r#"
-    mutation DeleteTaskDependency($task_id: ID!, $depends_on_id: ID!) {
+    mutation DeleteTaskDependency($task_id: Uuid4!, $depends_on_id: Uuid4!) {
         delete_task_dependency(task_id: $task_id, depends_on_id: $depends_on_id) {
             id
         }
@@ -192,7 +192,7 @@ pub const DELETE_DEPENDENCY: &str = r#"
 // -- Workflow Assignment --
 
 pub const ASSIGN_WORKFLOW: &str = r#"
-    mutation AssignWorkflow($task_id: ID!, $workflow_id: ID!) {
+    mutation AssignWorkflow($task_id: Uuid4!, $workflow_id: Uuid4!) {
         assign_workflow(task_id: $task_id, workflow_id: $workflow_id) {
             id workflow_id current_step_id
         }
@@ -200,7 +200,7 @@ pub const ASSIGN_WORKFLOW: &str = r#"
 "#;
 
 pub const UNASSIGN_WORKFLOW: &str = r#"
-    mutation UnassignWorkflow($task_id: ID!) {
+    mutation UnassignWorkflow($task_id: Uuid4!) {
         unassign_workflow(task_id: $task_id) {
             id
         }
@@ -208,7 +208,7 @@ pub const UNASSIGN_WORKFLOW: &str = r#"
 "#;
 
 pub const MOVE_TO_STEP: &str = r#"
-    mutation MoveToStep($task_id: ID!, $step_id: ID!) {
+    mutation MoveToStep($task_id: Uuid4!, $step_id: Uuid4!) {
         move_to_step(task_id: $task_id, step_id: $step_id) {
             id current_step_id
         }
@@ -219,7 +219,7 @@ pub const MOVE_TO_STEP: &str = r#"
 
 pub const CREATE_SECTION: &str = r#"
     mutation CreateSection(
-        $task_id: ID!,
+        $task_id: Uuid4!,
         $section_type: String!,
         $content: String!,
         $section_order: Int,
@@ -239,7 +239,7 @@ pub const CREATE_SECTION: &str = r#"
 
 pub const UPDATE_SECTION: &str = r#"
     mutation UpdateSection(
-        $id: ID!,
+        $id: Uuid4!,
         $content: String,
         $done: Boolean,
         $done_at: Datetime
@@ -256,7 +256,7 @@ pub const UPDATE_SECTION: &str = r#"
 "#;
 
 pub const DELETE_SECTION: &str = r#"
-    mutation DeleteSection($id: ID!) {
+    mutation DeleteSection($id: Uuid4!) {
         delete_section(id: $id) {
             id
         }
@@ -267,8 +267,8 @@ pub const DELETE_SECTION: &str = r#"
 
 pub const CREATE_CODE_REF: &str = r#"
     mutation CreateCodeRef(
-        $task_id: ID,
-        $section_id: ID,
+        $task_id: Uuid4,
+        $section_id: Uuid4,
         $path: String!,
         $line_start: Int,
         $line_end: Int,
@@ -290,7 +290,7 @@ pub const CREATE_CODE_REF: &str = r#"
 "#;
 
 pub const DELETE_CODE_REF: &str = r#"
-    mutation DeleteCodeRef($id: ID!) {
+    mutation DeleteCodeRef($id: Uuid4!) {
         delete_code_ref(id: $id) {
             id
         }

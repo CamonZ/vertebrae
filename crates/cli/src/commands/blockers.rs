@@ -9,8 +9,8 @@ use vertebrae_core::{ServiceError, VertebraeServices};
 /// Show all tasks blocking a given task
 #[derive(Debug, Args)]
 pub struct BlockersCommand {
-    /// Task ID to find blockers for (case-insensitive)
-    #[arg(required = true)]
+    /// Task ID to show blockers for (case-insensitive)
+    #[arg(required = true, value_parser = crate::commands::parse_uuid("task ID"))]
     pub id: String,
 
     /// Maximum depth to traverse (default: unlimited)

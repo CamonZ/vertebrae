@@ -10,8 +10,8 @@ use vertebrae_core::{ServiceError, VertebraeServices};
 /// List all code references for a task
 #[derive(Debug, Args)]
 pub struct RefsCommand {
-    /// Task ID to show references for (case-insensitive)
-    #[arg(required = true)]
+    /// Task ID to list code references for (case-insensitive)
+    #[arg(required = true, value_parser = crate::commands::parse_uuid("task ID"))]
     pub id: String,
 }
 

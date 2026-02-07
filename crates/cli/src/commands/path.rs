@@ -10,11 +10,11 @@ use vertebrae_core::{ServiceError, VertebraeServices};
 #[derive(Debug, Args)]
 pub struct PathCommand {
     /// Source task ID (case-insensitive)
-    #[arg(required = true)]
+    #[arg(required = true, value_parser = crate::commands::parse_uuid("from task ID"))]
     pub from_id: String,
 
     /// Target task ID (case-insensitive)
-    #[arg(required = true)]
+    #[arg(required = true, value_parser = crate::commands::parse_uuid("to task ID"))]
     pub to_id: String,
 }
 

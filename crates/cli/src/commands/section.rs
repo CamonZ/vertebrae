@@ -13,7 +13,7 @@ use vertebrae_core::{ServiceError, VertebraeServices};
 #[derive(Debug, Args)]
 pub struct SectionCommand {
     /// Task ID to add section to (case-insensitive)
-    #[arg(required = true)]
+    #[arg(required = true, value_parser = crate::commands::parse_uuid("task ID"))]
     pub id: String,
 
     /// Section type (goal, context, current_behavior, desired_behavior, step,

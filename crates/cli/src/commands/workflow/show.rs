@@ -8,7 +8,7 @@ use vertebrae_core::{ServiceError, VertebraeServices};
 #[derive(Debug, Args)]
 pub struct WorkflowShowCommand {
     /// Workflow ID to show (case-insensitive)
-    #[arg(required = true)]
+    #[arg(required = true, value_parser = crate::commands::parse_uuid("workflow ID"))]
     pub id: String,
 }
 

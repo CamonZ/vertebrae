@@ -11,7 +11,7 @@ use vertebrae_core::{ServiceError, VertebraeServices};
 #[derive(Debug, Args)]
 pub struct DeleteCommand {
     /// Task ID to delete (case-insensitive)
-    #[arg(required = true)]
+    #[arg(required = true, value_parser = crate::commands::parse_uuid("task ID"))]
     pub id: String,
 
     /// Also delete all children recursively

@@ -6,12 +6,12 @@ use vertebrae_core::{ServiceError, WorkflowService};
 /// Assign a task to a workflow
 #[derive(Debug, Args)]
 pub struct WorkflowAssignCommand {
-    /// Task ID to assign (case-insensitive)
-    #[arg(required = true)]
+    /// Task ID to assign workflow to (case-insensitive)
+    #[arg(required = true, value_parser = crate::commands::parse_uuid("task ID"))]
     pub task_id: String,
 
-    /// Workflow ID to assign to (case-insensitive)
-    #[arg(required = true)]
+    /// Workflow ID to assign
+    #[arg(required = true, value_parser = crate::commands::parse_uuid("workflow ID"))]
     pub workflow_id: String,
 }
 

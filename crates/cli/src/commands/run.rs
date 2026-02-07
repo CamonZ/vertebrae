@@ -4,7 +4,8 @@ use vertebrae_core::{ServiceError, VertebraeServices};
 
 #[derive(Debug, Args)]
 pub struct RunCommand {
-    /// Task ID to run workflow for
+    /// Task ID to run the workflow for
+    #[arg(required = true, value_parser = crate::commands::parse_uuid("task ID"))]
     pub task_id: String,
 }
 

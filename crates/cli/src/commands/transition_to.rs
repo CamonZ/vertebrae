@@ -10,7 +10,7 @@ use vertebrae_core::{ServiceError, VertebraeServices};
 #[derive(Debug, Args)]
 pub struct TransitionToCommand {
     /// Task ID to transition (case-insensitive)
-    #[arg(required = true)]
+    #[arg(required = true, value_parser = crate::commands::parse_uuid("task ID"))]
     pub id: String,
 
     /// Target workflow or workflow:step (e.g., 'implementation' or 'review:approved')

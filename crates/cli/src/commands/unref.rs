@@ -9,8 +9,8 @@ use vertebrae_core::{ServiceError, VertebraeServices};
 /// Remove code references from a task
 #[derive(Debug, Args)]
 pub struct UnrefCommand {
-    /// Task ID to remove references from (case-insensitive)
-    #[arg(required = true)]
+    /// Task ID to remove reference from (case-insensitive)
+    #[arg(required = true, value_parser = crate::commands::parse_uuid("task ID"))]
     pub id: String,
 
     /// File path to remove references for (removes all refs to that file)

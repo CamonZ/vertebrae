@@ -13,11 +13,11 @@ use vertebrae_core::{ServiceError, VertebraeServices};
 #[derive(Debug, Args)]
 pub struct DependCommand {
     /// Task ID that will depend on another task (case-insensitive)
-    #[arg(required = true)]
+    #[arg(required = true, value_parser = crate::commands::parse_uuid("task ID"))]
     pub id: String,
 
-    /// Task ID that this task depends on (the blocker)
-    #[arg(long = "on", required = true)]
+    /// ID of the blocking task
+    #[arg(long = "on", required = true, value_parser = crate::commands::parse_uuid("blocker ID"))]
     pub blocker_id: String,
 }
 

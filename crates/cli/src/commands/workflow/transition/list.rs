@@ -7,7 +7,7 @@ use vertebrae_core::{ServiceError, WorkflowService};
 #[derive(Debug, Args)]
 pub struct TransitionListCommand {
     /// Filter by source workflow ID (case-insensitive)
-    #[arg(short, long)]
+    #[arg(short, long, value_parser = crate::commands::parse_uuid("workflow ID"))]
     pub workflow_id: Option<String>,
 }
 

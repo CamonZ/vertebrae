@@ -7,11 +7,11 @@ use vertebrae_core::{ServiceError, WorkflowService};
 #[derive(Debug, Args)]
 pub struct TransitionDeleteCommand {
     /// Source workflow ID (case-insensitive)
-    #[arg(required = true)]
+    #[arg(required = true, value_parser = crate::commands::parse_uuid("source workflow ID"))]
     pub from_workflow_id: String,
 
     /// Target workflow ID (case-insensitive)
-    #[arg(required = true)]
+    #[arg(required = true, value_parser = crate::commands::parse_uuid("target workflow ID"))]
     pub to_workflow_id: String,
 }
 

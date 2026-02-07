@@ -239,7 +239,8 @@ mod tests {
 
     #[test]
     fn test_args_with_show_command() {
-        let args = Args::try_parse_from(["vtb", "show", "task-id"]).unwrap();
+        let args =
+            Args::try_parse_from(["vtb", "show", "a1b2c3d4-0000-4000-8000-000000000001"]).unwrap();
         assert!(args.command.is_some());
     }
 
@@ -251,20 +252,34 @@ mod tests {
 
     #[test]
     fn test_args_with_delete_command() {
-        let args = Args::try_parse_from(["vtb", "delete", "task-id"]).unwrap();
+        let args = Args::try_parse_from(["vtb", "delete", "a1b2c3d4-0000-4000-8000-000000000001"])
+            .unwrap();
         assert!(args.command.is_some());
     }
 
     #[test]
     fn test_args_with_update_command() {
-        let args =
-            Args::try_parse_from(["vtb", "update", "task-id", "--title", "New title"]).unwrap();
+        let args = Args::try_parse_from([
+            "vtb",
+            "update",
+            "a1b2c3d4-0000-4000-8000-000000000001",
+            "--title",
+            "New title",
+        ])
+        .unwrap();
         assert!(args.command.is_some());
     }
 
     #[test]
     fn test_args_with_depend_command() {
-        let args = Args::try_parse_from(["vtb", "depend", "task1", "--on", "task2"]).unwrap();
+        let args = Args::try_parse_from([
+            "vtb",
+            "depend",
+            "a1b2c3d4-0000-4000-8000-000000000001",
+            "--on",
+            "a1b2c3d4-0000-4000-8000-000000000002",
+        ])
+        .unwrap();
         assert!(args.command.is_some());
     }
 
@@ -286,10 +301,10 @@ mod tests {
         let commands = vec![
             vec!["vtb", "add", "Task"],
             vec!["vtb", "list"],
-            vec!["vtb", "show", "id"],
-            vec!["vtb", "delete", "id"],
+            vec!["vtb", "show", "a1b2c3d4-0000-4000-8000-000000000001"],
+            vec!["vtb", "delete", "a1b2c3d4-0000-4000-8000-000000000001"],
             vec!["vtb", "ready"],
-            vec!["vtb", "blockers", "id"],
+            vec!["vtb", "blockers", "a1b2c3d4-0000-4000-8000-000000000001"],
         ];
 
         for cmd in &commands {
@@ -337,13 +352,15 @@ mod tests {
 
     #[test]
     fn test_args_show_command() {
-        let args = Args::try_parse_from(["vtb", "show", "some-task-id"]).unwrap();
+        let args =
+            Args::try_parse_from(["vtb", "show", "a1b2c3d4-0000-4000-8000-000000000003"]).unwrap();
         assert!(args.command.is_some());
     }
 
     #[test]
     fn test_args_delete_command() {
-        let args = Args::try_parse_from(["vtb", "delete", "some-task-id"]).unwrap();
+        let args = Args::try_parse_from(["vtb", "delete", "a1b2c3d4-0000-4000-8000-000000000003"])
+            .unwrap();
         assert!(args.command.is_some());
     }
 
@@ -367,27 +384,48 @@ mod tests {
 
     #[test]
     fn test_args_update_basic() {
-        let args =
-            Args::try_parse_from(["vtb", "update", "task-id", "--title", "New Title"]).unwrap();
+        let args = Args::try_parse_from([
+            "vtb",
+            "update",
+            "a1b2c3d4-0000-4000-8000-000000000001",
+            "--title",
+            "New Title",
+        ])
+        .unwrap();
         assert!(args.command.is_some());
     }
 
     #[test]
     fn test_args_update_with_priority() {
-        let args =
-            Args::try_parse_from(["vtb", "update", "task-id", "--priority", "high"]).unwrap();
+        let args = Args::try_parse_from([
+            "vtb",
+            "update",
+            "a1b2c3d4-0000-4000-8000-000000000001",
+            "--priority",
+            "high",
+        ])
+        .unwrap();
         assert!(args.command.is_some());
     }
 
     #[test]
     fn test_args_depend_command() {
-        let args = Args::try_parse_from(["vtb", "depend", "task1", "--on", "task2"]).unwrap();
+        let args = Args::try_parse_from([
+            "vtb",
+            "depend",
+            "a1b2c3d4-0000-4000-8000-000000000001",
+            "--on",
+            "a1b2c3d4-0000-4000-8000-000000000002",
+        ])
+        .unwrap();
         assert!(args.command.is_some());
     }
 
     #[test]
     fn test_args_blockers_command() {
-        let args = Args::try_parse_from(["vtb", "blockers", "some-task"]).unwrap();
+        let args =
+            Args::try_parse_from(["vtb", "blockers", "a1b2c3d4-0000-4000-8000-000000000001"])
+                .unwrap();
         assert!(args.command.is_some());
     }
 
@@ -458,7 +496,13 @@ mod tests {
 
     #[test]
     fn test_args_workflow_show() {
-        let args = Args::try_parse_from(["vtb", "workflow", "show", "workflow-id"]).unwrap();
+        let args = Args::try_parse_from([
+            "vtb",
+            "workflow",
+            "show",
+            "a1b2c3d4-0000-4000-8000-000000000006",
+        ])
+        .unwrap();
         assert!(args.command.is_some());
     }
 }

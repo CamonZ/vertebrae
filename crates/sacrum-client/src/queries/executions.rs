@@ -25,7 +25,7 @@ pub const EXECUTION_FIELDS: &str = r#"
 /// List all executions for a task.
 /// NOTE: Prepend EXECUTION_FIELDS when sending.
 pub const LIST_EXECUTIONS: &str = r#"
-    query ListExecutions($task_id: ID!) {
+    query ListExecutions($task_id: Uuid4!) {
         step_executions(task_id: $task_id) {
             ...ExecutionFields
         }
@@ -35,7 +35,7 @@ pub const LIST_EXECUTIONS: &str = r#"
 /// Get a single execution by ID.
 /// NOTE: Prepend EXECUTION_FIELDS when sending.
 pub const GET_EXECUTION: &str = r#"
-    query GetExecution($id: ID!) {
+    query GetExecution($id: Uuid4!) {
         step_execution(id: $id) {
             ...ExecutionFields
         }
@@ -44,8 +44,8 @@ pub const GET_EXECUTION: &str = r#"
 
 pub const CREATE_EXECUTION: &str = r#"
     mutation CreateExecution(
-        $task_id: ID!,
-        $workflow_id: ID!,
+        $task_id: Uuid4!,
+        $workflow_id: Uuid4!,
         $step_name: String!,
         $status: String,
         $context: JSON,
@@ -70,7 +70,7 @@ pub const CREATE_EXECUTION: &str = r#"
 
 pub const UPDATE_EXECUTION: &str = r#"
     mutation UpdateExecution(
-        $id: ID!,
+        $id: Uuid4!,
         $status: String,
         $output: String,
         $transition_result: String,
@@ -96,7 +96,7 @@ pub const UPDATE_EXECUTION: &str = r#"
 
 /// List session logs for a step execution.
 pub const LIST_LOGS: &str = r#"
-    query ListLogs($step_execution_id: ID!) {
+    query ListLogs($step_execution_id: Uuid4!) {
         session_logs(step_execution_id: $step_execution_id) {
             id
             step_execution_id
@@ -108,7 +108,7 @@ pub const LIST_LOGS: &str = r#"
 "#;
 
 pub const CREATE_LOG: &str = r#"
-    mutation CreateLog($step_execution_id: ID!, $content: String!) {
+    mutation CreateLog($step_execution_id: Uuid4!, $content: String!) {
         create_session_log(
             step_execution_id: $step_execution_id,
             content: $content

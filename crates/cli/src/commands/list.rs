@@ -49,7 +49,7 @@ pub struct ListCommand {
     pub tags: Vec<String>,
 
     /// Filter by workflow ID (tasks assigned to a specific workflow)
-    #[arg(short = 'w', long = "workflow")]
+    #[arg(short = 'w', long = "workflow", value_parser = crate::commands::parse_uuid("workflow ID"))]
     pub workflow: Option<String>,
 
     /// Filter by current step name within the workflow
@@ -61,7 +61,7 @@ pub struct ListCommand {
     pub root: bool,
 
     /// Show children of a specific parent task
-    #[arg(long)]
+    #[arg(long, value_parser = crate::commands::parse_uuid("parent ID"))]
     pub parent: Option<String>,
 
     /// Include done items (excluded by default)

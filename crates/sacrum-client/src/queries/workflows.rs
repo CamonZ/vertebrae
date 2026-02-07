@@ -31,7 +31,7 @@ pub const WORKFLOW_FIELDS: &str = r#"
 /// List all workflows for a project.
 /// NOTE: Prepend WORKFLOW_FIELDS when sending.
 pub const LIST_WORKFLOWS: &str = r#"
-    query ListWorkflows($project_id: ID!) {
+    query ListWorkflows($project_id: Uuid4!) {
         workflows(project_id: $project_id) {
             ...WorkflowFields
         }
@@ -41,7 +41,7 @@ pub const LIST_WORKFLOWS: &str = r#"
 /// Get a single workflow by ID with nested steps and their transitions.
 /// NOTE: Prepend WORKFLOW_FIELDS when sending.
 pub const GET_WORKFLOW: &str = r#"
-    query GetWorkflow($id: ID!) {
+    query GetWorkflow($id: Uuid4!) {
         workflow(id: $id) {
             ...WorkflowFields
             workflow_steps {
@@ -55,7 +55,7 @@ pub const GET_WORKFLOW: &str = r#"
 
 pub const CREATE_WORKFLOW: &str = r#"
     mutation CreateWorkflow(
-        $project_id: ID!,
+        $project_id: Uuid4!,
         $name: String!,
         $description: String,
         $auto_advance: Boolean,
@@ -77,15 +77,15 @@ pub const CREATE_WORKFLOW: &str = r#"
 
 pub const UPDATE_WORKFLOW: &str = r#"
     mutation UpdateWorkflow(
-        $id: ID!,
+        $id: Uuid4!,
         $name: String,
         $description: String,
         $auto_advance: Boolean,
         $display_order: Int,
         $is_default: Boolean,
-        $initial_step_id: ID,
-        $on_done_workflow_id: ID,
-        $on_reject_workflow_id: ID
+        $initial_step_id: Uuid4,
+        $on_done_workflow_id: Uuid4,
+        $on_reject_workflow_id: Uuid4
     ) {
         update_workflow(
             id: $id,
@@ -104,7 +104,7 @@ pub const UPDATE_WORKFLOW: &str = r#"
 "#;
 
 pub const DELETE_WORKFLOW: &str = r#"
-    mutation DeleteWorkflow($id: ID!) {
+    mutation DeleteWorkflow($id: Uuid4!) {
         delete_workflow(id: $id) {
             id
         }
@@ -113,10 +113,10 @@ pub const DELETE_WORKFLOW: &str = r#"
 
 pub const CREATE_WORKFLOW_TRANSITION: &str = r#"
     mutation CreateWorkflowTransition(
-        $from_workflow_id: ID!,
-        $to_workflow_id: ID!,
+        $from_workflow_id: Uuid4!,
+        $to_workflow_id: Uuid4!,
         $label: String,
-        $target_step_id: ID
+        $target_step_id: Uuid4
     ) {
         create_workflow_transition(
             from_workflow_id: $from_workflow_id,
@@ -130,7 +130,7 @@ pub const CREATE_WORKFLOW_TRANSITION: &str = r#"
 "#;
 
 pub const DELETE_WORKFLOW_TRANSITION: &str = r#"
-    mutation DeleteWorkflowTransition($id: ID!) {
+    mutation DeleteWorkflowTransition($id: Uuid4!) {
         delete_workflow_transition(id: $id) {
             id
         }
@@ -139,7 +139,7 @@ pub const DELETE_WORKFLOW_TRANSITION: &str = r#"
 
 pub const SYNC_WORKFLOW_TRANSITIONS: &str = r#"
     mutation SyncWorkflowTransitions(
-        $id: ID!,
+        $id: Uuid4!,
         $transitions: [WorkflowTransitionInput!]!
     ) {
         sync_workflow_transitions(id: $id, transitions: $transitions) {

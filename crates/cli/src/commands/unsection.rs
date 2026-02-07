@@ -12,7 +12,7 @@ use vertebrae_core::{ServiceError, VertebraeServices};
 #[derive(Debug, Args)]
 pub struct UnsectionCommand {
     /// Task ID to remove section from (case-insensitive)
-    #[arg(required = true)]
+    #[arg(required = true, value_parser = crate::commands::parse_uuid("task ID"))]
     pub id: String,
 
     /// Section type to remove (goal, context, current_behavior, desired_behavior, step,

@@ -12,7 +12,7 @@ use vertebrae_core::{ServiceError, VertebraeServices, WorkflowInfo, WorkflowServ
 #[derive(Debug, Args)]
 pub struct ShowCommand {
     /// Task ID to show (case-insensitive)
-    #[arg(required = true)]
+    #[arg(required = true, value_parser = crate::commands::parse_uuid("task ID"))]
     pub id: String,
 }
 

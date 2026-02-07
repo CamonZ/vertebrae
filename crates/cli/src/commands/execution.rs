@@ -46,8 +46,8 @@ impl ExecutionCommand {
 /// Create a new step execution for a task
 #[derive(Debug, Args)]
 pub struct ExecutionCreateCommand {
-    /// Task ID (short or full) to create execution for
-    #[arg(required = true)]
+    /// Task ID to create execution for
+    #[arg(required = true, value_parser = crate::commands::parse_uuid("task ID"))]
     pub task_id: String,
 
     /// JSON context data about the task (must be valid JSON)
@@ -143,7 +143,7 @@ impl ExecutionCreateCommand {
 #[derive(Debug, Args)]
 pub struct ExecutionUpdateCommand {
     /// Execution ID to update
-    #[arg(required = true)]
+    #[arg(required = true, value_parser = crate::commands::parse_uuid("execution ID"))]
     pub execution_id: String,
 
     /// Output text from the execution
@@ -200,8 +200,8 @@ impl ExecutionUpdateCommand {
 /// List all executions for a task
 #[derive(Debug, Args)]
 pub struct ExecutionListCommand {
-    /// Task ID (short or full) to list executions for
-    #[arg(required = true)]
+    /// Task ID to list executions for
+    #[arg(required = true, value_parser = crate::commands::parse_uuid("task ID"))]
     pub task_id: String,
 }
 
@@ -284,8 +284,8 @@ impl ExecutionListCommand {
 /// Show details of a specific execution
 #[derive(Debug, Args)]
 pub struct ExecutionShowCommand {
-    /// Execution ID (short or full) to show details for
-    #[arg(required = true)]
+    /// Execution ID to show
+    #[arg(required = true, value_parser = crate::commands::parse_uuid("execution ID"))]
     pub execution_id: String,
 }
 
@@ -443,8 +443,8 @@ impl ExecutionShowCommand {
 /// Add a log entry to an execution
 #[derive(Debug, Args)]
 pub struct ExecutionLogCommand {
-    /// Execution ID to add the log to
-    #[arg(required = true)]
+    /// Execution ID to add log to
+    #[arg(required = true, value_parser = crate::commands::parse_uuid("execution ID"))]
     pub execution_id: String,
 
     /// Log content (can be multiline text from stdin or shell)

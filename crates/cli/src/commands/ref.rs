@@ -11,8 +11,8 @@ use vertebrae_core::{ServiceError, VertebraeServices};
 /// Add a code reference to a task
 #[derive(Debug, Args)]
 pub struct RefCommand {
-    /// Task ID to add reference to (case-insensitive)
-    #[arg(required = true)]
+    /// Task ID to add code reference to (case-insensitive)
+    #[arg(required = true, value_parser = crate::commands::parse_uuid("task ID"))]
     pub id: String,
 
     /// File specification (file:Lstart-end, file:Lstart, or file)

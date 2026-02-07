@@ -30,11 +30,11 @@ pub struct AddCommand {
     pub tags: Vec<String>,
 
     /// Parent task ID (creates child_of relationship)
-    #[arg(long)]
+    #[arg(long, value_parser = crate::commands::parse_uuid("parent ID"))]
     pub parent: Option<String>,
 
     /// Dependency task ID (can be specified multiple times)
-    #[arg(long = "depends-on")]
+    #[arg(long = "depends-on", value_parser = crate::commands::parse_uuid("dependency ID"))]
     pub depends_on: Vec<String>,
 
     /// Mark task as needing human review before completion
@@ -42,7 +42,7 @@ pub struct AddCommand {
     pub needs_review: bool,
 
     /// Workflow ID to assign task to (defaults to 'default')
-    #[arg(long)]
+    #[arg(long, value_parser = crate::commands::parse_uuid("workflow ID"))]
     pub workflow: Option<String>,
 }
 

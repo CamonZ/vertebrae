@@ -6,8 +6,8 @@ use vertebrae_core::{ServiceError, WorkflowService};
 /// Remove workflow assignment from a task
 #[derive(Debug, Args)]
 pub struct WorkflowUnassignCommand {
-    /// Task ID to unassign (case-insensitive)
-    #[arg(required = true)]
+    /// Task ID to unassign workflow from (case-insensitive)
+    #[arg(required = true, value_parser = crate::commands::parse_uuid("task ID"))]
     pub task_id: String,
 }
 

@@ -11,7 +11,7 @@ use vertebrae_core::{ServiceError, UpdateTaskOptions, VertebraeServices};
 #[derive(Debug, Args)]
 pub struct UpdateCommand {
     /// Task ID to update (case-insensitive)
-    #[arg(required = true)]
+    #[arg(required = true, value_parser = crate::commands::parse_uuid("task ID"))]
     pub id: String,
 
     /// New title for the task
@@ -35,7 +35,7 @@ pub struct UpdateCommand {
     pub remove_tags: Vec<String>,
 
     /// Parent task ID (use empty string "" to remove parent)
-    #[arg(long)]
+    #[arg(long, value_parser = crate::commands::parse_uuid_or_empty("parent ID"))]
     pub parent: Option<String>,
 
     /// Edit a section: <type> <ordinal> <new-content>

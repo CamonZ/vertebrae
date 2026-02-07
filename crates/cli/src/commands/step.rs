@@ -50,11 +50,11 @@ pub struct StepAddCommand {
     pub name: String,
 
     /// ID of the workflow this step belongs to
-    #[arg(long, short = 'w', required = true)]
+    #[arg(long, short = 'w', required = true, value_parser = crate::commands::parse_uuid("workflow ID"))]
     pub workflow: String,
 
     /// Optional step ID (auto-generated if not provided)
-    #[arg(long)]
+    #[arg(long, value_parser = crate::commands::parse_uuid("step ID"))]
     pub id: Option<String>,
 
     /// Goal describing what this step should accomplish
@@ -82,7 +82,7 @@ pub struct StepAddCommand {
     pub r#final: bool,
 
     /// IDs of steps this step can transition to (can be specified multiple times)
-    #[arg(long = "transition-to", short = 't')]
+    #[arg(long = "transition-to", short = 't', value_parser = crate::commands::parse_uuid("transition target ID"))]
     pub transitions_to: Vec<String>,
 }
 
@@ -167,7 +167,7 @@ impl StepAddCommand {
 #[derive(Debug, Args)]
 pub struct StepListCommand {
     /// ID of the workflow to list steps for
-    #[arg(required = true)]
+    #[arg(required = true, value_parser = crate::commands::parse_uuid("workflow ID"))]
     pub workflow: String,
 }
 
@@ -223,7 +223,7 @@ impl StepListCommand {
 #[derive(Debug, Args)]
 pub struct StepShowCommand {
     /// Step ID to show (case-insensitive)
-    #[arg(required = true)]
+    #[arg(required = true, value_parser = crate::commands::parse_uuid("step ID"))]
     pub id: String,
 }
 
@@ -322,7 +322,7 @@ Updated:       {}"#,
 #[derive(Debug, Args)]
 pub struct StepUpdateCommand {
     /// Step ID to update (case-insensitive)
-    #[arg(required = true)]
+    #[arg(required = true, value_parser = crate::commands::parse_uuid("step ID"))]
     pub id: String,
 
     /// New name for the step
@@ -362,7 +362,7 @@ pub struct StepUpdateCommand {
     pub r#final: Option<bool>,
 
     /// New transitions_to list (replaces existing)
-    #[arg(long = "transition-to", short = 't')]
+    #[arg(long = "transition-to", short = 't', value_parser = crate::commands::parse_uuid("transition target ID"))]
     pub transitions_to: Vec<String>,
 
     /// Clear all transitions
@@ -454,7 +454,7 @@ impl StepUpdateCommand {
 #[derive(Debug, Args)]
 pub struct StepDeleteCommand {
     /// Step ID to delete (case-insensitive)
-    #[arg(required = true)]
+    #[arg(required = true, value_parser = crate::commands::parse_uuid("step ID"))]
     pub id: String,
 
     /// Force deletion without confirmation
@@ -504,12 +504,18 @@ mod tests {
 
     #[test]
     fn test_step_add_parses() {
-        let cli = TestCli::try_parse_from(["test", "add", "Review", "--workflow", "default"]);
+        let cli = TestCli::try_parse_from([
+            "test",
+            "add",
+            "Review",
+            "--workflow",
+            "a1b2c3d4-0000-4000-8000-000000000006",
+        ]);
         assert!(cli.is_ok());
         match cli.unwrap().command {
             StepCommand::Add(cmd) => {
                 assert_eq!(cmd.name, "Review");
-                assert_eq!(cmd.workflow, "default");
+                assert_eq!(cmd.workflow, "a1b2c3d4-0000-4000-8000-000000000006");
                 assert_eq!(cmd.order, 0);
                 assert!(!cmd.r#final);
             }
@@ -524,29 +530,38 @@ mod tests {
             "add",
             "Deploy",
             "--workflow",
-            "ci-cd",
+            "a1b2c3d4-0000-4000-8000-000000000007",
             "--id",
-            "deploy-step",
+            "a1b2c3d4-0000-4000-8000-000000000008",
             "--model",
             "sonnet",
             "--order",
             "3",
             "--final",
             "--transition-to",
-            "done",
+            "a1b2c3d4-0000-4000-8000-000000000009",
             "--transition-to",
-            "rollback",
+            "a1b2c3d4-0000-4000-8000-00000000000a",
         ]);
         assert!(cli.is_ok());
         match cli.unwrap().command {
             StepCommand::Add(cmd) => {
                 assert_eq!(cmd.name, "Deploy");
-                assert_eq!(cmd.workflow, "ci-cd");
-                assert_eq!(cmd.id, Some("deploy-step".to_string()));
+                assert_eq!(cmd.workflow, "a1b2c3d4-0000-4000-8000-000000000007");
+                assert_eq!(
+                    cmd.id,
+                    Some("a1b2c3d4-0000-4000-8000-000000000008".to_string())
+                );
                 assert_eq!(cmd.model, Some("sonnet".to_string()));
                 assert_eq!(cmd.order, 3);
                 assert!(cmd.r#final);
-                assert_eq!(cmd.transitions_to, vec!["done", "rollback"]);
+                assert_eq!(
+                    cmd.transitions_to,
+                    vec![
+                        "a1b2c3d4-0000-4000-8000-000000000009",
+                        "a1b2c3d4-0000-4000-8000-00000000000a"
+                    ]
+                );
             }
             _ => panic!("Expected Add command"),
         }
@@ -559,7 +574,7 @@ mod tests {
             "add",
             "Code Review",
             "--workflow",
-            "default",
+            "a1b2c3d4-0000-4000-8000-000000000006",
             "--goal",
             "Review code for best practices",
             "--agent",
@@ -588,7 +603,12 @@ mod tests {
 
     #[test]
     fn test_step_add_requires_name() {
-        let result = TestCli::try_parse_from(["test", "add", "--workflow", "default"]);
+        let result = TestCli::try_parse_from([
+            "test",
+            "add",
+            "--workflow",
+            "a1b2c3d4-0000-4000-8000-000000000006",
+        ]);
         assert!(result.is_err());
     }
 
@@ -600,11 +620,11 @@ mod tests {
 
     #[test]
     fn test_step_list_parses() {
-        let cli = TestCli::try_parse_from(["test", "list", "default"]);
+        let cli = TestCli::try_parse_from(["test", "list", "a1b2c3d4-0000-4000-8000-000000000006"]);
         assert!(cli.is_ok());
         match cli.unwrap().command {
             StepCommand::List(cmd) => {
-                assert_eq!(cmd.workflow, "default");
+                assert_eq!(cmd.workflow, "a1b2c3d4-0000-4000-8000-000000000006");
             }
             _ => panic!("Expected List command"),
         }
@@ -618,11 +638,11 @@ mod tests {
 
     #[test]
     fn test_step_show_parses() {
-        let cli = TestCli::try_parse_from(["test", "show", "review-step"]);
+        let cli = TestCli::try_parse_from(["test", "show", "a1b2c3d4-0000-4000-8000-00000000000b"]);
         assert!(cli.is_ok());
         match cli.unwrap().command {
             StepCommand::Show(cmd) => {
-                assert_eq!(cmd.id, "review-step");
+                assert_eq!(cmd.id, "a1b2c3d4-0000-4000-8000-00000000000b");
             }
             _ => panic!("Expected Show command"),
         }
@@ -636,11 +656,12 @@ mod tests {
 
     #[test]
     fn test_step_update_parses() {
-        let cli = TestCli::try_parse_from(["test", "update", "review-step"]);
+        let cli =
+            TestCli::try_parse_from(["test", "update", "a1b2c3d4-0000-4000-8000-00000000000b"]);
         assert!(cli.is_ok());
         match cli.unwrap().command {
             StepCommand::Update(cmd) => {
-                assert_eq!(cmd.id, "review-step");
+                assert_eq!(cmd.id, "a1b2c3d4-0000-4000-8000-00000000000b");
                 assert!(cmd.name.is_none());
                 assert!(cmd.model.is_none());
                 assert!(cmd.order.is_none());
@@ -655,7 +676,7 @@ mod tests {
         let cli = TestCli::try_parse_from([
             "test",
             "update",
-            "review-step",
+            "a1b2c3d4-0000-4000-8000-00000000000b",
             "--name",
             "Code Review",
             "--model",
@@ -665,17 +686,20 @@ mod tests {
             "--final",
             "true",
             "--transition-to",
-            "deploy",
+            "a1b2c3d4-0000-4000-8000-00000000000c",
         ]);
         assert!(cli.is_ok());
         match cli.unwrap().command {
             StepCommand::Update(cmd) => {
-                assert_eq!(cmd.id, "review-step");
+                assert_eq!(cmd.id, "a1b2c3d4-0000-4000-8000-00000000000b");
                 assert_eq!(cmd.name, Some("Code Review".to_string()));
                 assert_eq!(cmd.model, Some("opus".to_string()));
                 assert_eq!(cmd.order, Some(5));
                 assert_eq!(cmd.r#final, Some(true));
-                assert_eq!(cmd.transitions_to, vec!["deploy"]);
+                assert_eq!(
+                    cmd.transitions_to,
+                    vec!["a1b2c3d4-0000-4000-8000-00000000000c"]
+                );
             }
             _ => panic!("Expected Update command"),
         }
@@ -683,7 +707,12 @@ mod tests {
 
     #[test]
     fn test_step_update_with_clear_transitions() {
-        let cli = TestCli::try_parse_from(["test", "update", "review-step", "--clear-transitions"]);
+        let cli = TestCli::try_parse_from([
+            "test",
+            "update",
+            "a1b2c3d4-0000-4000-8000-00000000000b",
+            "--clear-transitions",
+        ]);
         assert!(cli.is_ok());
         match cli.unwrap().command {
             StepCommand::Update(cmd) => {
@@ -698,7 +727,7 @@ mod tests {
         let cli = TestCli::try_parse_from([
             "test",
             "update",
-            "review-step",
+            "a1b2c3d4-0000-4000-8000-00000000000b",
             "--goal",
             "Updated goal",
             "--agent",
@@ -722,7 +751,7 @@ mod tests {
         let cli = TestCli::try_parse_from([
             "test",
             "update",
-            "review-step",
+            "a1b2c3d4-0000-4000-8000-00000000000b",
             "--clear-agents",
             "--clear-skills",
         ]);
@@ -738,11 +767,12 @@ mod tests {
 
     #[test]
     fn test_step_delete_parses() {
-        let cli = TestCli::try_parse_from(["test", "delete", "review-step"]);
+        let cli =
+            TestCli::try_parse_from(["test", "delete", "a1b2c3d4-0000-4000-8000-00000000000b"]);
         assert!(cli.is_ok());
         match cli.unwrap().command {
             StepCommand::Delete(cmd) => {
-                assert_eq!(cmd.id, "review-step");
+                assert_eq!(cmd.id, "a1b2c3d4-0000-4000-8000-00000000000b");
                 assert!(!cmd.force);
             }
             _ => panic!("Expected Delete command"),
@@ -751,7 +781,12 @@ mod tests {
 
     #[test]
     fn test_step_delete_with_force() {
-        let cli = TestCli::try_parse_from(["test", "delete", "review-step", "--force"]);
+        let cli = TestCli::try_parse_from([
+            "test",
+            "delete",
+            "a1b2c3d4-0000-4000-8000-00000000000b",
+            "--force",
+        ]);
         assert!(cli.is_ok());
         match cli.unwrap().command {
             StepCommand::Delete(cmd) => {
@@ -769,8 +804,14 @@ mod tests {
 
     #[test]
     fn test_step_command_debug() {
-        let cli =
-            TestCli::try_parse_from(["test", "add", "Test Step", "--workflow", "default"]).unwrap();
+        let cli = TestCli::try_parse_from([
+            "test",
+            "add",
+            "Test Step",
+            "--workflow",
+            "a1b2c3d4-0000-4000-8000-000000000006",
+        ])
+        .unwrap();
         let debug_str = format!("{:?}", cli.command);
         assert!(
             debug_str.contains("Add") && debug_str.contains("Test Step"),

@@ -7,11 +7,11 @@ use vertebrae_core::{ServiceError, WorkflowService};
 #[derive(Debug, Args)]
 pub struct TransitionAddCommand {
     /// Source workflow ID (case-insensitive)
-    #[arg(required = true)]
+    #[arg(required = true, value_parser = crate::commands::parse_uuid("source workflow ID"))]
     pub from_workflow_id: String,
 
     /// Target workflow ID (case-insensitive)
-    #[arg(required = true)]
+    #[arg(required = true, value_parser = crate::commands::parse_uuid("target workflow ID"))]
     pub to_workflow_id: String,
 
     /// Label for the transition (e.g., "approve", "reject", "escalate")
@@ -19,7 +19,7 @@ pub struct TransitionAddCommand {
     pub label: String,
 
     /// Optional target step ID in the destination workflow
-    #[arg(short, long)]
+    #[arg(short, long, value_parser = crate::commands::parse_uuid("target step ID"))]
     pub target_step: Option<String>,
 }
 

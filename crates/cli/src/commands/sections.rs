@@ -10,8 +10,8 @@ use vertebrae_core::{ServiceError, VertebraeServices};
 /// List all sections for a task
 #[derive(Debug, Args)]
 pub struct SectionsCommand {
-    /// Task ID to show sections for (case-insensitive)
-    #[arg(required = true)]
+    /// Task ID to list sections for (case-insensitive)
+    #[arg(required = true, value_parser = crate::commands::parse_uuid("task ID"))]
     pub id: String,
 
     /// Filter by section type (optional)

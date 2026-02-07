@@ -23,7 +23,7 @@ pub const STEP_FIELDS: &str = r#"
 /// List all steps for a workflow.
 /// NOTE: Prepend STEP_FIELDS when sending.
 pub const LIST_STEPS: &str = r#"
-    query ListSteps($workflow_id: ID!) {
+    query ListSteps($workflow_id: Uuid4!) {
         workflow_steps(workflow_id: $workflow_id) {
             ...StepFields
         }
@@ -33,7 +33,7 @@ pub const LIST_STEPS: &str = r#"
 /// Get a single step by ID.
 /// NOTE: Prepend STEP_FIELDS when sending.
 pub const GET_STEP: &str = r#"
-    query GetStep($id: ID!) {
+    query GetStep($id: Uuid4!) {
         workflow_step(id: $id) {
             ...StepFields
         }
@@ -42,7 +42,7 @@ pub const GET_STEP: &str = r#"
 
 pub const CREATE_STEP: &str = r#"
     mutation CreateStep(
-        $workflow_id: ID!,
+        $workflow_id: Uuid4!,
         $name: String!,
         $goal: String,
         $agents: [String!],
@@ -68,7 +68,7 @@ pub const CREATE_STEP: &str = r#"
 
 pub const UPDATE_STEP: &str = r#"
     mutation UpdateStep(
-        $id: ID!,
+        $id: Uuid4!,
         $name: String,
         $goal: String,
         $agents: [String!],
@@ -93,7 +93,7 @@ pub const UPDATE_STEP: &str = r#"
 "#;
 
 pub const DELETE_STEP: &str = r#"
-    mutation DeleteStep($id: ID!) {
+    mutation DeleteStep($id: Uuid4!) {
         delete_workflow_step(id: $id) {
             id
         }
@@ -102,7 +102,7 @@ pub const DELETE_STEP: &str = r#"
 
 pub const SYNC_STEP_TRANSITIONS: &str = r#"
     mutation SyncStepTransitions(
-        $id: ID!,
+        $id: Uuid4!,
         $transitions: [StepTransitionInput!]!
     ) {
         sync_step_transitions(id: $id, transitions: $transitions) {
