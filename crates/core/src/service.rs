@@ -241,6 +241,33 @@ pub trait TaskService: Send + Sync {
     /// This updates the task's `current_step_id` field to the specified step.
     async fn set_current_step(&self, task_id: &str, step_id: &str) -> ServiceResult<()>;
 
+    /// Start a workflow step for a task
+    ///
+    /// Marks the current step as started.
+    async fn start_step(&self, task_id: &str) -> ServiceResult<()>;
+
+    /// Complete a workflow step for a task
+    ///
+    /// Marks the current step as completed and transitions to the next step.
+    async fn complete_step(&self, task_id: &str) -> ServiceResult<()>;
+
+    /// Reject a workflow step with feedback
+    ///
+    /// Rejects the current step and transitions the task to a target step,
+    /// optionally including feedback about the rejection.
+    ///
+    /// # Arguments
+    ///
+    /// * `task_id` - The task ID
+    /// * `target_step_id` - The step to transition to (e.g., a previous step for revision)
+    /// * `feedback` - Optional feedback about why the step was rejected
+    async fn reject_step(
+        &self,
+        task_id: &str,
+        target_step_id: &str,
+        feedback: Option<&str>,
+    ) -> ServiceResult<()>;
+
     /// Delete a task
     ///
     /// If `cascade` is true, also delete all children.

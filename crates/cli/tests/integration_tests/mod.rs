@@ -15,6 +15,7 @@ mod run_tests;
 mod sections_tests;
 mod show_tests;
 mod step_done_tests;
+mod step_lifecycle_tests;
 mod step_tests;
 mod unref_tests;
 mod unsection_tests;

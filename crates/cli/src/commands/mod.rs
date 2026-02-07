@@ -6,6 +6,7 @@
 
 pub mod add;
 pub mod blockers;
+pub mod complete_step;
 pub mod criterion_ref;
 pub mod delete;
 pub mod depend;
@@ -16,11 +17,13 @@ pub mod path;
 pub mod ready;
 pub mod r#ref;
 pub mod refs;
+pub mod reject_step;
 pub mod review;
 pub mod run;
 pub mod section;
 pub mod sections;
 pub mod show;
+pub mod start_step;
 pub mod step;
 pub mod step_done;
 pub mod transition_to;
@@ -32,6 +35,7 @@ pub mod workflow;
 
 pub use add::AddCommand;
 pub use blockers::BlockersCommand;
+pub use complete_step::CompleteStepCommand;
 pub use criterion_ref::CriterionRefCommand;
 pub use delete::DeleteCommand;
 pub use depend::DependCommand;
@@ -42,11 +46,13 @@ pub use path::PathCommand;
 pub use ready::ReadyCommand;
 pub use r#ref::RefCommand;
 pub use refs::RefsCommand;
+pub use reject_step::RejectStepCommand;
 pub use review::ReviewCommand;
 pub use run::RunCommand;
 pub use section::SectionCommand;
 pub use sections::SectionsCommand;
 pub use show::ShowCommand;
+pub use start_step::StartStepCommand;
 pub use step::StepCommand;
 pub use step_done::StepDoneCommand;
 pub use transition_to::TransitionToCommand;
@@ -103,6 +109,9 @@ pub enum Command {
     Add(AddCommand),
     /// Show all tasks blocking a given task (recursive)
     Blockers(BlockersCommand),
+    /// Complete a workflow step for a task
+    #[command(name = "complete-step")]
+    CompleteStep(CompleteStepCommand),
     /// Add a code reference to a testing criterion
     #[command(name = "criterion-ref")]
     CriterionRef(CriterionRefCommand),
@@ -121,6 +130,9 @@ pub enum Command {
     Path(PathCommand),
     /// Show highest-level actionable items (entry points for work/triage)
     Ready(ReadyCommand),
+    /// Reject a workflow step with optional feedback
+    #[command(name = "reject-step")]
+    RejectStep(RejectStepCommand),
     /// Add a code reference to a task
     Ref(RefCommand),
     /// List all code references for a task
@@ -135,6 +147,9 @@ pub enum Command {
     Sections(SectionsCommand),
     /// Show full details of a task
     Show(ShowCommand),
+    /// Start a workflow step for a task
+    #[command(name = "start-step")]
+    StartStep(StartStepCommand),
     /// Remove a dependency relationship between tasks
     Undepend(UndependCommand),
     /// Remove code references from a task
@@ -197,6 +212,10 @@ impl Command {
                 let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
+            Command::CompleteStep(cmd) => {
+                let result = cmd.execute(services).await?;
+                Ok(CommandResult::Message(format!("{}", result)))
+            }
             Command::CriterionRef(cmd) => {
                 // Service handles notification via callback
                 let result = cmd.execute(services).await?;
@@ -247,6 +266,10 @@ impl Command {
                 let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
+            Command::RejectStep(cmd) => {
+                let result = cmd.execute(services).await?;
+                Ok(CommandResult::Message(format!("{}", result)))
+            }
             Command::Ref(cmd) => {
                 // Service handles notification via callback
                 let result = cmd.execute(services).await?;
@@ -278,6 +301,10 @@ impl Command {
                 // Service handles notification via callback if needed
                 let detail = cmd.execute(services).await?;
                 Ok(CommandResult::Message(format!("{}", detail)))
+            }
+            Command::StartStep(cmd) => {
+                let result = cmd.execute(services).await?;
+                Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Undepend(cmd) => {
                 // Service handles notification via callback

@@ -138,6 +138,9 @@ See `skills/` for detailed command guides:
 **Status and workflows:**
 - `/workflow` - Manage workflows (add, list, show, assign, advance, retreat)
 - `/step` - Manage workflow steps
+- `/start-step` - Start a workflow step for a task
+- `/complete-step` - Complete a workflow step for a task
+- `/reject-step` - Reject a workflow step with optional feedback
 - `/review` - Toggle human review flag
 - `/step-done` - Mark implementation steps complete
 
@@ -299,6 +302,9 @@ vertebrae/
 │   ├── list.md             # /list - Filter and list tasks
 │   ├── workflow.md         # /workflow - Manage workflows
 │   ├── step.md             # /step - Manage workflow steps
+│   ├── start-step.md       # /start-step - Start a workflow step
+│   ├── complete-step.md    # /complete-step - Complete a workflow step
+│   ├── reject-step.md      # /reject-step - Reject a workflow step
 │   ├── step-done.md        # /step-done - Mark steps complete
 │   ├── review.md           # /review - Toggle human review
 │   ├── depend.md           # /depend - Manage dependencies
