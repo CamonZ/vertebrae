@@ -3,19 +3,18 @@
 //! Implements the `vtb init` command to:
 //! 1. Check SACRUM_API_TOKEN environment variable is set
 //! 2. Accept --url flag for Sacrum API endpoint (default localhost:4000)
-//! 3. Derive project slug from git root folder name (or use --slug override)
+//! 3. Derive project slug from current directory name
 //! 4. Check if project exists in Sacrum API, create if needed
-//! 5. Upsert project entry into ~/.config/vertebrae/config.toml
+//! 5. Create .vtb/config.toml in the current directory
 //! 6. Write embedded skills to .claude/skills/
 
 use clap::Args;
 use include_dir::{Dir, include_dir};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command as StdCommand;
 use vertebrae_sacrum_client::{
-    GraphqlClient, ProjectResponse, ProjectSection, SacrumConfig, load_config_file,
-    save_config_file,
+    GraphqlClient, LocalProjectConfig, LocalSacrumSection, ProjectSettings, SacrumConfig,
+    save_local_config,
 };
 
 /// Embedded skills directory at compile time
@@ -27,10 +26,6 @@ pub struct InitCommand {
     /// Sacrum API base URL (default: http://localhost:4000)
     #[arg(long, default_value = "http://localhost:4000")]
     pub url: String,
-
-    /// Override the auto-derived project slug
-    #[arg(long)]
-    pub slug: Option<String>,
 
     /// Target directory for skills (defaults to ".claude/skills/")
     #[arg(long, default_value = ".claude/skills")]
@@ -91,12 +86,10 @@ impl std::fmt::Display for InitResult {
 pub enum InitError {
     /// Missing SACRUM_API_TOKEN environment variable
     MissingToken(String),
-    /// Failed to get git root
-    GitRoot { reason: String },
+    /// Failed to get current directory
+    CurrentDir { reason: String },
     /// Failed to derive project slug
     SlugDerive { reason: String },
-    /// Duplicate slug in config
-    DuplicateSlug { slug: String },
     /// Failed to communicate with Sacrum API
     SacrumApi { reason: String },
     /// Failed to create directory
@@ -119,18 +112,11 @@ impl std::fmt::Display for InitError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             InitError::MissingToken(reason) => write!(f, "{}", reason),
-            InitError::GitRoot { reason } => {
-                write!(f, "Failed to get git root directory: {}", reason)
+            InitError::CurrentDir { reason } => {
+                write!(f, "Failed to get current directory: {}", reason)
             }
             InitError::SlugDerive { reason } => {
                 write!(f, "Failed to derive project slug: {}", reason)
-            }
-            InitError::DuplicateSlug { slug } => {
-                write!(
-                    f,
-                    "Project slug '{}' already exists in config. Use --slug to specify a different slug.",
-                    slug
-                )
             }
             InitError::SacrumApi { reason } => {
                 write!(f, "Failed to communicate with Sacrum API: {}", reason)
@@ -185,10 +171,10 @@ impl InitCommand {
     /// Execute the init command.
     ///
     /// 1. Checks SACRUM_API_TOKEN is set
-    /// 2. Gets git root directory
-    /// 3. Derives project slug from folder name (or uses --slug override)
+    /// 2. Gets current directory
+    /// 3. Derives project slug from folder name
     /// 4. Checks if project exists in Sacrum, creates if not
-    /// 5. Upserts project entry into ~/.config/vertebrae/config.toml
+    /// 5. Creates .vtb/config.toml in the current directory
     /// 6. Copies skills from source to target directory
     pub async fn execute(&self) -> Result<InitResult, InitError> {
         // Check SACRUM_API_TOKEN is set
@@ -200,12 +186,13 @@ impl InitCommand {
             )
         })?;
 
-        // Get git root directory
-        let git_root = self.get_git_root()?;
-        let base_path = &git_root;
+        // Get current directory
+        let current_dir = std::env::current_dir().map_err(|e| InitError::CurrentDir {
+            reason: e.to_string(),
+        })?;
 
-        // Derive project slug from folder name
-        let folder_name = base_path
+        // Derive project slug from current directory name
+        let folder_name = current_dir
             .file_name()
             .and_then(|n| n.to_str())
             .ok_or_else(|| InitError::SlugDerive {
@@ -213,19 +200,7 @@ impl InitCommand {
             })?
             .to_string();
 
-        let project_slug = match &self.slug {
-            Some(s) => self.derive_slug(s)?,
-            None => self.derive_slug(&folder_name)?,
-        };
-
-        // Load existing config and check for duplicate slug
-        let mut config_file = load_config_file().map_err(|e| InitError::ConfigError {
-            reason: e.to_string(),
-        })?;
-
-        if config_file.projects.contains_key(&project_slug) {
-            return Err(InitError::DuplicateSlug { slug: project_slug });
-        }
+        let project_slug = self.derive_slug(&folder_name)?;
 
         // Create Sacrum client and check/create project
         let config = SacrumConfig::new(self.url.clone(), api_token, "temp".to_string());
@@ -235,35 +210,26 @@ impl InitCommand {
             .get_or_create_project(&client, &folder_name, &project_slug)
             .await?;
 
-        // Upsert project entry into config file
-        let url_override =
-            if self.url != "http://localhost:4000" && self.url != config_file.sacrum.url {
-                Some(self.url.clone())
-            } else {
-                None
-            };
-
-        config_file.projects.insert(
-            project_slug.clone(),
-            ProjectSection {
-                project_id: project.id.clone(),
-                url: url_override,
-                path: Some(git_root.to_string_lossy().to_string()),
+        // Create local config structure
+        let local_config = LocalProjectConfig {
+            project: ProjectSettings {
+                id: Some(project.id.clone()),
+                slug: Some(project_slug.clone()),
             },
-        );
+            sacrum: LocalSacrumSection {
+                url: self.url.clone(),
+            },
+        };
 
-        let config_path =
-            vertebrae_sacrum_client::config_path().ok_or_else(|| InitError::ConfigError {
-                reason: "Could not determine config directory".to_string(),
-            })?;
-
-        save_config_file(&config_file).map_err(|e| InitError::WriteConfig {
+        // Write .vtb/config.toml
+        let config_path = current_dir.join(".vtb").join("config.toml");
+        save_local_config(&config_path, &local_config).map_err(|e| InitError::WriteConfig {
             path: config_path.clone(),
             reason: e.to_string(),
         })?;
 
         // Copy skills
-        let skills_target = base_path.join(&self.skills_target);
+        let skills_target = current_dir.join(&self.skills_target);
         self.create_dir_if_not_exists(&skills_target)?;
         let skills_copied = self.copy_skills(&SKILLS_DIR, &skills_target)?;
 
@@ -275,31 +241,6 @@ impl InitCommand {
             skills_copied,
             project_created: created,
         })
-    }
-
-    /// Get the git root directory
-    fn get_git_root(&self) -> Result<PathBuf, InitError> {
-        let output = StdCommand::new("git")
-            .args(["rev-parse", "--show-toplevel"])
-            .output()
-            .map_err(|e| InitError::GitRoot {
-                reason: format!("Failed to run git command: {}", e),
-            })?;
-
-        if !output.status.success() {
-            return Err(InitError::GitRoot {
-                reason: "Not a git repository or git not installed".to_string(),
-            });
-        }
-
-        let path = String::from_utf8(output.stdout)
-            .map_err(|e| InitError::GitRoot {
-                reason: format!("Invalid UTF-8 from git: {}", e),
-            })?
-            .trim()
-            .to_string();
-
-        Ok(PathBuf::from(path))
     }
 
     /// Derive a URL-friendly slug from a folder name
@@ -320,12 +261,12 @@ impl InitCommand {
         client: &GraphqlClient,
         name: &str,
         slug: &str,
-    ) -> Result<(ProjectResponse, bool), InitError> {
+    ) -> Result<(vertebrae_sacrum_client::ProjectResponse, bool), InitError> {
         use vertebrae_sacrum_client::queries::projects;
 
         // Try to find existing project by slug
         match client
-            .execute::<Vec<ProjectResponse>>(
+            .execute::<Vec<vertebrae_sacrum_client::ProjectResponse>>(
                 projects::LIST_PROJECTS,
                 serde_json::json!({}),
                 "projects",
@@ -346,7 +287,7 @@ impl InitCommand {
 
         // Project not found, create it
         match client
-            .execute::<ProjectResponse>(
+            .execute::<vertebrae_sacrum_client::ProjectResponse>(
                 projects::CREATE_PROJECT,
                 serde_json::json!({
                     "name": name,
@@ -431,7 +372,6 @@ mod tests {
     fn default_cmd() -> InitCommand {
         InitCommand {
             url: "http://localhost:4000".to_string(),
-            slug: None,
             skills_target: PathBuf::from(".claude/skills"),
         }
     }
@@ -572,7 +512,7 @@ mod tests {
     #[test]
     fn test_init_result_display() {
         let result = InitResult {
-            config_path: PathBuf::from("/home/user/.config/vertebrae/config.toml"),
+            config_path: PathBuf::from("/home/user/.vtb/config.toml"),
             project_slug: "my-project".to_string(),
             project_id: "proj-123".to_string(),
             project_name: "My Project".to_string(),
@@ -582,7 +522,7 @@ mod tests {
 
         let output = format!("{}", result);
         assert!(output.contains("Vertebrae initialized successfully"));
-        assert!(output.contains(".config/vertebrae/config.toml"));
+        assert!(output.contains(".vtb/config.toml"));
         assert!(output.contains("my-project"));
         assert!(output.contains("proj-123"));
         assert!(output.contains("My Project"));
@@ -592,7 +532,7 @@ mod tests {
     #[test]
     fn test_init_result_display_existing_project() {
         let result = InitResult {
-            config_path: PathBuf::from("/home/user/.config/vertebrae/config.toml"),
+            config_path: PathBuf::from("/home/user/.vtb/config.toml"),
             project_slug: "vertebrae".to_string(),
             project_id: "proj-456".to_string(),
             project_name: "Vertebrae".to_string(),
@@ -613,13 +553,13 @@ mod tests {
     }
 
     #[test]
-    fn test_init_error_git_root() {
-        let err = InitError::GitRoot {
-            reason: "Not a git repo".to_string(),
+    fn test_init_error_current_dir() {
+        let err = InitError::CurrentDir {
+            reason: "Permission denied".to_string(),
         };
         let output = format!("{}", err);
-        assert!(output.contains("Failed to get git root directory"));
-        assert!(output.contains("Not a git repo"));
+        assert!(output.contains("Failed to get current directory"));
+        assert!(output.contains("Permission denied"));
     }
 
     #[test]
@@ -633,20 +573,9 @@ mod tests {
     }
 
     #[test]
-    fn test_init_error_duplicate_slug() {
-        let err = InitError::DuplicateSlug {
-            slug: "my-project".to_string(),
-        };
-        let output = format!("{}", err);
-        assert!(output.contains("my-project"));
-        assert!(output.contains("already exists"));
-        assert!(output.contains("--slug"));
-    }
-
-    #[test]
     fn test_init_error_config_error() {
         let err = InitError::ConfigError {
-            reason: "Could not determine config directory".to_string(),
+            reason: "Could not serialize config".to_string(),
         };
         let output = format!("{}", err);
         assert!(output.contains("Config error"));
@@ -658,15 +587,5 @@ mod tests {
         let debug_str = format!("{:?}", cmd);
         assert!(debug_str.contains("InitCommand"));
         assert!(debug_str.contains("url"));
-    }
-
-    #[test]
-    fn test_init_command_with_slug_override() {
-        let cmd = InitCommand {
-            url: "http://localhost:4000".to_string(),
-            slug: Some("custom-slug".to_string()),
-            skills_target: PathBuf::from(".claude/skills"),
-        };
-        assert_eq!(cmd.slug.as_deref(), Some("custom-slug"));
     }
 }
