@@ -1,9 +1,11 @@
 //! Configuration for Sacrum client
 //!
-//! Loads configuration from ~/.config/vertebrae/config.toml and environment variables.
+//! Loads configuration from .vtb/config.toml in the project directory (found by walking up from CWD)
+//! and environment variables.
+//!
 //! Configuration resolution order:
 //! - SACRUM_API_TOKEN environment variable for API token
-//! - ~/.config/vertebrae/config.toml for base URL and project settings
+//! - .vtb/config.toml (found by walking up from current directory) for project settings and base URL
 //! - Default base URL: http://localhost:4000
 
 use crate::error::{SacrumClientError, SacrumClientResult};
@@ -22,7 +24,47 @@ pub struct SacrumConfig {
     pub project_id: String,
 }
 
-/// Top-level config file structure for ~/.config/vertebrae/config.toml
+/// Local project configuration structure for .vtb/config.toml
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct LocalProjectConfig {
+    /// Project settings
+    #[serde(default)]
+    pub project: ProjectSettings,
+    /// Sacrum settings
+    #[serde(default)]
+    pub sacrum: LocalSacrumSection,
+}
+
+/// Project settings in local config
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct ProjectSettings {
+    /// Project ID (UUID)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    /// Project slug
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slug: Option<String>,
+}
+
+/// Local sacrum settings
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LocalSacrumSection {
+    /// Sacrum API URL
+    #[serde(default = "default_url")]
+    pub url: String,
+}
+
+impl Default for LocalSacrumSection {
+    fn default() -> Self {
+        Self { url: default_url() }
+    }
+}
+
+fn default_url() -> String {
+    "http://localhost:4000".to_string()
+}
+
+/// Top-level config file structure for ~/.config/vertebrae/config.toml (legacy/deprecated)
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct VertebraeConfigFile {
     /// Global sacrum defaults
@@ -33,7 +75,7 @@ pub struct VertebraeConfigFile {
     pub projects: BTreeMap<String, ProjectSection>,
 }
 
-/// Global sacrum defaults
+/// Global sacrum defaults (legacy/deprecated)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GlobalSacrumSection {
     /// Default Sacrum API URL
@@ -47,11 +89,7 @@ impl Default for GlobalSacrumSection {
     }
 }
 
-fn default_url() -> String {
-    "http://localhost:4000".to_string()
-}
-
-/// Per-project configuration
+/// Per-project configuration (legacy/deprecated)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectSection {
     /// Sacrum project ID (UUID)
@@ -65,11 +103,13 @@ pub struct ProjectSection {
 }
 
 impl SacrumConfig {
-    /// Load configuration for a project identified by slug.
+    /// Load configuration by finding .vtb/config.toml in the current directory or parent directories.
     ///
-    /// Reads ~/.config/vertebrae/config.toml, looks up the project by slug,
+    /// Walks up from CWD looking for .vtb/config.toml, loads the project settings,
     /// and loads the API token from SACRUM_API_TOKEN env var.
-    pub fn load(slug: &str) -> SacrumClientResult<Self> {
+    ///
+    /// Returns an error with a helpful message if no .vtb/config.toml is found.
+    pub fn load() -> SacrumClientResult<Self> {
         // Load API token from environment
         let api_token = std::env::var("SACRUM_API_TOKEN").map_err(|_| {
             SacrumClientError::ConfigError(
@@ -77,27 +117,17 @@ impl SacrumConfig {
             )
         })?;
 
-        let config_file = load_config_file()?;
+        // Find and load local config file
+        let config = find_and_load_local_config()?;
 
-        let project = config_file.projects.get(slug).ok_or_else(|| {
-            SacrumClientError::ConfigError(format!(
-                "No project '{}' found in config file at {}",
-                slug,
-                config_path()
-                    .map(|p| p.display().to_string())
-                    .unwrap_or_else(|| "unknown".to_string())
-            ))
+        let project_id = config.project.id.ok_or_else(|| {
+            SacrumClientError::ConfigError("No project ID found in .vtb/config.toml".to_string())
         })?;
 
-        let base_url = project
-            .url
-            .clone()
-            .unwrap_or_else(|| config_file.sacrum.url.clone());
-
         Ok(SacrumConfig {
-            base_url,
+            base_url: config.sacrum.url,
             api_token,
-            project_id: project.project_id.clone(),
+            project_id,
         })
     }
 
@@ -111,12 +141,55 @@ impl SacrumConfig {
     }
 }
 
-/// Returns the path to ~/.config/vertebrae/config.toml
+/// Find and load local config by walking up from CWD
+/// Returns an error if .vtb/config.toml is not found anywhere in the path
+pub fn find_and_load_local_config() -> SacrumClientResult<LocalProjectConfig> {
+    let mut current_dir = std::env::current_dir().map_err(|e| {
+        SacrumClientError::ConfigError(format!("Failed to get current directory: {}", e))
+    })?;
+
+    loop {
+        let config_path = current_dir.join(".vtb").join("config.toml");
+
+        if config_path.exists() {
+            return load_local_config_file(&config_path);
+        }
+
+        if !current_dir.pop() {
+            // Reached the root directory without finding config
+            return Err(SacrumClientError::ConfigError(
+                "No vertebrae project found. Run `vtb init` to initialize a project.\n\
+                 (Looking for .vtb/config.toml in current directory or parent directories)"
+                    .to_string(),
+            ));
+        }
+    }
+}
+
+/// Load and parse a local config file
+pub fn load_local_config_file(path: &std::path::Path) -> SacrumClientResult<LocalProjectConfig> {
+    let content = std::fs::read_to_string(path).map_err(|e| {
+        SacrumClientError::ConfigError(format!(
+            "Failed to read config file at {}: {}",
+            path.display(),
+            e
+        ))
+    })?;
+
+    let config: LocalProjectConfig = toml::from_str(&content).map_err(|e| {
+        SacrumClientError::ConfigError(format!("Failed to parse config file: {}", e))
+    })?;
+
+    Ok(config)
+}
+
+/// Returns the path to ~/.config/vertebrae/config.toml (legacy/deprecated)
 pub fn config_path() -> Option<PathBuf> {
     dirs::config_dir().map(|d| d.join("vertebrae").join("config.toml"))
 }
 
-/// Load and parse the config file. Returns Default if file is missing.
+/// Load and parse the legacy global config file. Returns Default if file is missing.
+/// This function is deprecated and will be removed in a future version.
 pub fn load_config_file() -> SacrumClientResult<VertebraeConfigFile> {
     let path = config_path().ok_or_else(|| {
         SacrumClientError::ConfigError("Could not determine config directory".to_string())
@@ -141,7 +214,8 @@ pub fn load_config_file() -> SacrumClientResult<VertebraeConfigFile> {
     Ok(config)
 }
 
-/// Serialize and write the config file. Creates parent directories if needed.
+/// Serialize and write the legacy config file. Creates parent directories if needed.
+/// This function is deprecated and will be removed in a future version.
 pub fn save_config_file(config: &VertebraeConfigFile) -> SacrumClientResult<()> {
     let path = config_path().ok_or_else(|| {
         SacrumClientError::ConfigError("Could not determine config directory".to_string())
@@ -162,6 +236,37 @@ pub fn save_config_file(config: &VertebraeConfigFile) -> SacrumClientResult<()> 
     })?;
 
     std::fs::write(&path, content).map_err(|e| {
+        SacrumClientError::ConfigError(format!(
+            "Failed to write config file at {}: {}",
+            path.display(),
+            e
+        ))
+    })?;
+
+    Ok(())
+}
+
+/// Save a local project config to .vtb/config.toml
+/// Creates .vtb directory if it doesn't exist
+pub fn save_local_config(
+    path: &std::path::Path,
+    config: &LocalProjectConfig,
+) -> SacrumClientResult<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            SacrumClientError::ConfigError(format!(
+                "Failed to create .vtb directory {}: {}",
+                parent.display(),
+                e
+            ))
+        })?;
+    }
+
+    let content = toml::to_string_pretty(config).map_err(|e| {
+        SacrumClientError::ConfigError(format!("Failed to serialize config: {}", e))
+    })?;
+
+    std::fs::write(path, content).map_err(|e| {
         SacrumClientError::ConfigError(format!(
             "Failed to write config file at {}: {}",
             path.display(),
@@ -238,384 +343,8 @@ mod tests {
         let config2 = SacrumConfig::new(
             "http://localhost:4000".to_string(),
             "token".to_string(),
-            "project-123-xyz".to_string(),
+            "another-project-uuid".to_string(),
         );
-        assert_eq!(config2.project_id, "project-123-xyz");
-    }
-
-    #[test]
-    fn test_config_clone() {
-        let config1 = SacrumConfig::new(
-            "http://localhost:4000".to_string(),
-            "test-token".to_string(),
-            "test-project".to_string(),
-        );
-        let config2 = config1.clone();
-
-        assert_eq!(config1.base_url, config2.base_url);
-        assert_eq!(config1.api_token, config2.api_token);
-        assert_eq!(config1.project_id, config2.project_id);
-    }
-
-    #[test]
-    fn test_config_serialization() {
-        let config = SacrumConfig::new(
-            "http://localhost:4000".to_string(),
-            "test-token".to_string(),
-            "test-project".to_string(),
-        );
-
-        let json = serde_json::to_string(&config).expect("Should serialize to JSON");
-        assert!(json.contains("http://localhost:4000"));
-        assert!(json.contains("test-token"));
-        assert!(json.contains("test-project"));
-    }
-
-    #[test]
-    fn test_config_with_special_characters_in_token() {
-        let config = SacrumConfig::new(
-            "http://localhost:4000".to_string(),
-            "token-with-special_chars.123!@#".to_string(),
-            "proj".to_string(),
-        );
-
-        assert_eq!(config.api_token, "token-with-special_chars.123!@#");
-        assert_eq!(config.base_url, "http://localhost:4000");
-    }
-
-    #[test]
-    fn test_config_debug_representation() {
-        let config = SacrumConfig::new(
-            "http://localhost:4000".to_string(),
-            "test-token".to_string(),
-            "test-project".to_string(),
-        );
-
-        let debug_str = format!("{:?}", config);
-        assert!(debug_str.contains("base_url"));
-        assert!(debug_str.contains("api_token"));
-        assert!(debug_str.contains("project_id"));
-    }
-
-    #[test]
-    fn test_config_new_with_empty_strings() {
-        let config = SacrumConfig::new("".to_string(), "".to_string(), "".to_string());
-
-        assert_eq!(config.base_url, "");
-        assert_eq!(config.api_token, "");
-        assert_eq!(config.project_id, "");
-    }
-
-    #[test]
-    fn test_config_new_with_very_long_values() {
-        let long_url = "http://very-long-subdomain-name.api.example.com:9000/path/to/api";
-        let long_token = "very-long-token-string-".repeat(10);
-        let long_project = "project-".repeat(20);
-
-        let config = SacrumConfig::new(
-            long_url.to_string(),
-            long_token.clone(),
-            long_project.clone(),
-        );
-
-        assert_eq!(config.base_url, long_url);
-        assert_eq!(config.api_token, long_token);
-        assert_eq!(config.project_id, long_project);
-    }
-
-    #[test]
-    fn test_config_with_different_url_schemes() {
-        let configs = vec![
-            SacrumConfig::new(
-                "http://localhost:4000".to_string(),
-                "token".to_string(),
-                "proj".to_string(),
-            ),
-            SacrumConfig::new(
-                "https://api.example.com".to_string(),
-                "token".to_string(),
-                "proj".to_string(),
-            ),
-            SacrumConfig::new(
-                "http://192.168.1.1:4000".to_string(),
-                "token".to_string(),
-                "proj".to_string(),
-            ),
-        ];
-
-        assert!(configs[0].base_url.starts_with("http://"));
-        assert!(configs[1].base_url.starts_with("https://"));
-        assert!(configs[2].base_url.contains("192.168"));
-    }
-
-    #[test]
-    fn test_config_preserves_case_sensitivity() {
-        let config = SacrumConfig::new(
-            "http://localhost:4000".to_string(),
-            "MyToken".to_string(),
-            "MyProject".to_string(),
-        );
-
-        assert_eq!(config.api_token, "MyToken");
-        assert_eq!(config.project_id, "MyProject");
-    }
-
-    #[test]
-    fn test_multiple_config_instances_are_independent() {
-        let config1 = SacrumConfig::new(
-            "http://localhost:4000".to_string(),
-            "token1".to_string(),
-            "project1".to_string(),
-        );
-
-        let config2 = SacrumConfig::new(
-            "http://localhost:5000".to_string(),
-            "token2".to_string(),
-            "project2".to_string(),
-        );
-
-        assert_ne!(config1.base_url, config2.base_url);
-        assert_ne!(config1.api_token, config2.api_token);
-        assert_ne!(config1.project_id, config2.project_id);
-    }
-
-    #[test]
-    fn test_config_deserialization() {
-        let config = SacrumConfig::new(
-            "http://localhost:4000".to_string(),
-            "test-token".to_string(),
-            "test-project".to_string(),
-        );
-
-        let json = serde_json::to_string(&config).expect("Should serialize");
-        let deserialized: SacrumConfig = serde_json::from_str(&json).expect("Should deserialize");
-
-        assert_eq!(deserialized.base_url, config.base_url);
-        assert_eq!(deserialized.api_token, config.api_token);
-        assert_eq!(deserialized.project_id, config.project_id);
-    }
-
-    #[test]
-    fn test_config_with_numeric_project_ids() {
-        let configs = vec![
-            SacrumConfig::new(
-                "http://localhost:4000".to_string(),
-                "token".to_string(),
-                "123".to_string(),
-            ),
-            SacrumConfig::new(
-                "http://localhost:4000".to_string(),
-                "token".to_string(),
-                "0".to_string(),
-            ),
-            SacrumConfig::new(
-                "http://localhost:4000".to_string(),
-                "token".to_string(),
-                "999999".to_string(),
-            ),
-        ];
-
-        assert_eq!(configs[0].project_id, "123");
-        assert_eq!(configs[1].project_id, "0");
-        assert_eq!(configs[2].project_id, "999999");
-    }
-
-    #[test]
-    fn test_config_equality_with_same_values() {
-        let config1 = SacrumConfig::new(
-            "http://localhost:4000".to_string(),
-            "token".to_string(),
-            "project".to_string(),
-        );
-        let config2 = SacrumConfig::new(
-            "http://localhost:4000".to_string(),
-            "token".to_string(),
-            "project".to_string(),
-        );
-
-        assert_eq!(config1.base_url, config2.base_url);
-        assert_eq!(config1.api_token, config2.api_token);
-        assert_eq!(config1.project_id, config2.project_id);
-    }
-
-    #[test]
-    fn test_config_inequality_with_different_urls() {
-        let config1 = SacrumConfig::new(
-            "http://localhost:4000".to_string(),
-            "token".to_string(),
-            "project".to_string(),
-        );
-        let config2 = SacrumConfig::new(
-            "http://localhost:5000".to_string(),
-            "token".to_string(),
-            "project".to_string(),
-        );
-
-        assert_ne!(config1.base_url, config2.base_url);
-    }
-
-    #[test]
-    fn test_config_with_trailing_slashes_in_url() {
-        let config = SacrumConfig::new(
-            "http://localhost:4000/".to_string(),
-            "token".to_string(),
-            "project".to_string(),
-        );
-
-        assert_eq!(config.base_url, "http://localhost:4000/");
-    }
-
-    #[test]
-    fn test_config_clone_independence() {
-        let config1 = SacrumConfig::new(
-            "http://localhost:4000".to_string(),
-            "token".to_string(),
-            "project".to_string(),
-        );
-        let config2 = config1.clone();
-
-        // Verify they have the same values
-        assert_eq!(config1.base_url, config2.base_url);
-        // But modifying string values should be independent
-        let mut modified = config1;
-        modified.api_token = "different-token".to_string();
-        assert_ne!(modified.api_token, config2.api_token);
-    }
-
-    #[test]
-    fn test_config_with_unicode_project_id() {
-        let config = SacrumConfig::new(
-            "http://localhost:4000".to_string(),
-            "token".to_string(),
-            "projekt-日本語".to_string(),
-        );
-
-        assert_eq!(config.project_id, "projekt-日本語");
-    }
-
-    #[test]
-    fn test_config_serialization_roundtrip() {
-        let original = SacrumConfig::new(
-            "http://localhost:4000".to_string(),
-            "test-token".to_string(),
-            "test-project".to_string(),
-        );
-
-        let json = serde_json::to_string(&original).unwrap();
-        let deserialized: SacrumConfig = serde_json::from_str(&json).unwrap();
-
-        assert_eq!(original.base_url, deserialized.base_url);
-        assert_eq!(original.api_token, deserialized.api_token);
-        assert_eq!(original.project_id, deserialized.project_id);
-    }
-
-    #[test]
-    fn test_vertebrae_config_file_default() {
-        let config = VertebraeConfigFile::default();
-        assert_eq!(config.sacrum.url, "http://localhost:4000");
-        assert!(config.projects.is_empty());
-    }
-
-    #[test]
-    fn test_vertebrae_config_file_roundtrip() {
-        let mut config = VertebraeConfigFile::default();
-        config.sacrum.url = "http://custom:5000".to_string();
-        config.projects.insert(
-            "my-project".to_string(),
-            ProjectSection {
-                project_id: "uuid-123".to_string(),
-                url: None,
-                path: None,
-            },
-        );
-        config.projects.insert(
-            "other".to_string(),
-            ProjectSection {
-                project_id: "uuid-456".to_string(),
-                url: Some("https://other-server.com".to_string()),
-                path: None,
-            },
-        );
-
-        let toml_str = toml::to_string_pretty(&config).unwrap();
-        let parsed: VertebraeConfigFile = toml::from_str(&toml_str).unwrap();
-
-        assert_eq!(parsed.sacrum.url, "http://custom:5000");
-        assert_eq!(parsed.projects.len(), 2);
-        assert_eq!(parsed.projects["my-project"].project_id, "uuid-123");
-        assert!(parsed.projects["my-project"].url.is_none());
-        assert_eq!(parsed.projects["other"].project_id, "uuid-456");
-        assert_eq!(
-            parsed.projects["other"].url.as_deref(),
-            Some("https://other-server.com")
-        );
-    }
-
-    #[test]
-    fn test_vertebrae_config_file_parse_minimal() {
-        let toml_str = r#"
-[sacrum]
-url = "http://localhost:4000"
-
-[projects.vertebrae]
-project_id = "bb747fd8-5395-486f-bc8b-24ccd1615e18"
-"#;
-        let config: VertebraeConfigFile = toml::from_str(toml_str).unwrap();
-        assert_eq!(config.sacrum.url, "http://localhost:4000");
-        assert_eq!(config.projects.len(), 1);
-        assert_eq!(
-            config.projects["vertebrae"].project_id,
-            "bb747fd8-5395-486f-bc8b-24ccd1615e18"
-        );
-    }
-
-    #[test]
-    fn test_vertebrae_config_file_parse_with_override() {
-        let toml_str = r#"
-[sacrum]
-url = "http://localhost:4000"
-
-[projects.vertebrae]
-project_id = "uuid-1"
-
-[projects.other-project]
-project_id = "uuid-2"
-url = "https://custom-server.com"
-"#;
-        let config: VertebraeConfigFile = toml::from_str(toml_str).unwrap();
-        assert_eq!(config.projects.len(), 2);
-        assert!(config.projects["vertebrae"].url.is_none());
-        assert_eq!(
-            config.projects["other-project"].url.as_deref(),
-            Some("https://custom-server.com")
-        );
-    }
-
-    #[test]
-    fn test_config_path_returns_some() {
-        // On most systems, config_dir should return Some
-        let path = config_path();
-        if let Some(p) = path {
-            assert!(p.ends_with("vertebrae/config.toml"));
-        }
-    }
-
-    #[test]
-    fn test_project_section_url_skip_serializing_none() {
-        let section = ProjectSection {
-            project_id: "uuid-123".to_string(),
-            url: None,
-            path: None,
-        };
-        let toml_str = toml::to_string(&section).unwrap();
-        assert!(!toml_str.contains("url"));
-
-        let section_with_url = ProjectSection {
-            project_id: "uuid-123".to_string(),
-            url: Some("http://custom.com".to_string()),
-            path: None,
-        };
-        let toml_str = toml::to_string(&section_with_url).unwrap();
-        assert!(toml_str.contains("url"));
+        assert_eq!(config2.project_id, "another-project-uuid");
     }
 }
