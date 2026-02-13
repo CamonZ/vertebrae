@@ -158,31 +158,24 @@ pub fn run() {
             // Initialize project configuration
             let project_config = ProjectConfig::new().expect("Failed to initialize project config");
 
-            // Check if there's a current project selected (stored as slug)
-            let current_project_slug = project_config.get_current_project();
-            let service = if let Some(slug) = current_project_slug.clone() {
-                log::info!(
-                    "Attempting to connect to Sacrum backend for project: {}",
-                    slug
-                );
-
-                tauri::async_runtime::block_on(async {
-                    match SacrumConfig::load(&slug) {
-                        Ok(config) => {
-                            let client = GraphqlClient::new(config);
-                            let client_arc = Arc::new(client);
-                            Some(crate::sacrum::from_sacrum(client_arc))
-                        }
-                        Err(e) => {
-                            log::error!("Failed to load Sacrum configuration: {}", e);
-                            None
-                        }
+            // Try to load Sacrum config from local .vtb/config.toml (found by walking up from CWD)
+            let service = tauri::async_runtime::block_on(async {
+                match SacrumConfig::load() {
+                    Ok(config) => {
+                        log::info!("Found Sacrum config with project ID: {}", config.project_id);
+                        let client = GraphqlClient::new(config);
+                        let client_arc = Arc::new(client);
+                        Some(crate::sacrum::from_sacrum(client_arc))
                     }
-                })
-            } else {
-                log::info!("No project selected, starting without Sacrum connection");
-                None
-            };
+                    Err(e) => {
+                        log::info!(
+                            "No Sacrum config found (expected if not in a vertebrae project): {}",
+                            e
+                        );
+                        None
+                    }
+                }
+            });
 
             // Manage application state with optional services
             app.manage(AppState {
@@ -195,25 +188,17 @@ pub fn run() {
             log::info!("[STARTUP] Claude session manager initialized");
 
             // Start WebSocket connection to Sacrum for real-time updates
-            let ws_slug = app.state::<AppState>().project_config.get_current_project();
-            let socket = if let Some(slug) = ws_slug {
-                if let Ok(config) = SacrumConfig::load(&slug) {
-                    log::info!("[STARTUP] Starting WebSocket connection to Sacrum");
-                    let socket = websocket_client::SacrumSocket::new(
-                        config.base_url.clone(),
-                        config.api_token.clone(),
-                        config.project_id.clone(),
-                    );
-                    socket.connect(app.handle());
-                    socket
-                } else {
-                    log::warn!(
-                        "[STARTUP] Failed to load Sacrum config, WebSocket connection skipped"
-                    );
-                    websocket_client::SacrumSocket::disconnected()
-                }
+            let socket = if let Ok(config) = SacrumConfig::load() {
+                log::info!("[STARTUP] Starting WebSocket connection to Sacrum");
+                let socket = websocket_client::SacrumSocket::new(
+                    config.base_url.clone(),
+                    config.api_token.clone(),
+                    config.project_id.clone(),
+                );
+                socket.connect(app.handle());
+                socket
             } else {
-                log::info!("[STARTUP] No project selected, WebSocket starts disconnected");
+                log::info!("[STARTUP] No Sacrum config found, WebSocket starts disconnected");
                 websocket_client::SacrumSocket::disconnected()
             };
             // Always manage socket so the command can access it

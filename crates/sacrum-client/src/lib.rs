@@ -8,22 +8,23 @@
 //! It handles:
 //! - Bearer token authentication
 //! - Automatic response envelope unwrapping
-//! - Configuration management from ~/.config/vertebrae/config.toml and environment variables
+//! - Configuration management from .vtb/config.toml and environment variables
 //! - Serialization/deserialization of API types
 //!
 //! # Configuration
 //!
 //! Configuration is loaded from:
 //! 1. `SACRUM_API_TOKEN` environment variable (required for API token)
-//! 2. `~/.config/vertebrae/config.toml` for base URL and project settings
+//! 2. `.vtb/config.toml` in the project directory or parent directories (found by walking up from CWD)
 //!
-//! Example ~/.config/vertebrae/config.toml:
+//! Example .vtb/config.toml:
 //! ```toml
+//! [project]
+//! id = "uuid-here"
+//! slug = "my-project"
+//!
 //! [sacrum]
 //! url = "http://localhost:4000"
-//!
-//! [projects.my-project]
-//! project_id = "uuid-here"
 //! ```
 //!
 //! # Example Usage
@@ -33,7 +34,7 @@
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let config = SacrumConfig::load("my-project")?;
+//!     let config = SacrumConfig::load()?;
 //!     let client = GraphqlClient::new(config);
 //!
 //!     // Make GraphQL queries via service layers
@@ -60,8 +61,9 @@ pub use api_types::{
 };
 pub use client::{GraphqlClient, with_fragments};
 pub use config::{
-    GlobalSacrumSection, ProjectSection, SacrumConfig, VertebraeConfigFile, config_path,
-    load_config_file, save_config_file,
+    GlobalSacrumSection, LocalProjectConfig, LocalSacrumSection, ProjectSection, ProjectSettings,
+    SacrumConfig, VertebraeConfigFile, config_path, find_and_load_local_config, load_config_file,
+    load_local_config_file, save_config_file, save_local_config,
 };
 pub use error::{SacrumClientError, SacrumClientResult};
 pub use execution_service::SacrumExecutionService;

@@ -271,27 +271,21 @@ pub async fn set_current_project(
         .set_current_project(slug.clone())
         .map_err(|e| CommandError { message: e })?;
 
-    // Connect to Sacrum backend and create service if a project is selected
-    if let Some(project_slug) = slug {
-        log::info!("Attempting to connect to Sacrum backend");
-
-        match vertebrae_sacrum_client::SacrumConfig::load(&project_slug) {
-            Ok(config) => {
-                let client = vertebrae_sacrum_client::GraphqlClient::new(config);
-                let client_arc = std::sync::Arc::new(client);
-                let services = crate::sacrum::from_sacrum(client_arc);
-                let mut service_lock = state.services.write().await;
-                *service_lock = Some(services);
-            }
-            Err(e) => {
-                return Err(CommandError {
-                    message: format!("Failed to load Sacrum configuration: {}", e),
-                });
-            }
+    // Connect to Sacrum backend and create service
+    // Note: The config is now loaded from .vtb/config.toml (found by walking up from CWD)
+    match vertebrae_sacrum_client::SacrumConfig::load() {
+        Ok(config) => {
+            let client = vertebrae_sacrum_client::GraphqlClient::new(config);
+            let client_arc = std::sync::Arc::new(client);
+            let services = crate::sacrum::from_sacrum(client_arc);
+            let mut service_lock = state.services.write().await;
+            *service_lock = Some(services);
         }
-    } else {
-        let mut service_lock = state.services.write().await;
-        *service_lock = None;
+        Err(e) => {
+            return Err(CommandError {
+                message: format!("Failed to load Sacrum configuration: {}", e),
+            });
+        }
     }
 
     Ok(())
