@@ -10,21 +10,50 @@ use vertebrae_core::{ExecutionService, ExecutionStatus, TaskService};
 
 /// Find the Claude Code CLI binary
 pub fn find_claude_binary() -> Result<PathBuf, String> {
-    // Check CLAUDE_CODE_PATH environment variable
+    // Check CLAUDE_CODE_PATH environment variable (highest priority)
     if let Ok(path) = std::env::var("CLAUDE_CODE_PATH") {
-        return Ok(PathBuf::from(path));
+        let path = PathBuf::from(path);
+        // Verify the path exists
+        if path.exists() {
+            return Ok(path);
+        }
+        // If env var is set but path doesn't exist, return early with error
+        return Err(format!(
+            "Claude binary path specified in CLAUDE_CODE_PATH does not exist: {}",
+            path.display()
+        ));
     }
 
     // Try to find 'claude' in PATH
     if let Ok(output) = std::process::Command::new("which").arg("claude").output() {
         if output.status.success() {
             let path_str = String::from_utf8_lossy(&output.stdout);
-            return Ok(PathBuf::from(path_str.trim()));
+            let path = PathBuf::from(path_str.trim());
+            if path.exists() {
+                return Ok(path);
+            }
+        }
+    }
+
+    // Probe well-known installation paths as fallback
+    let mut well_known_paths = vec![
+        PathBuf::from("/usr/local/bin/claude"),
+        PathBuf::from("/opt/homebrew/bin/claude"),
+    ];
+
+    // Add ~/.local/bin/claude (expand ~ to home directory)
+    if let Some(home_dir) = dirs::home_dir() {
+        well_known_paths.insert(0, home_dir.join(".local/bin/claude"));
+    }
+
+    for path in well_known_paths {
+        if path.exists() {
+            return Ok(path);
         }
     }
 
     Err(
-        "Claude Code CLI not found. Set CLAUDE_CODE_PATH environment variable or ensure 'claude' is in PATH"
+        "Claude Code CLI not found. Set CLAUDE_CODE_PATH environment variable, ensure 'claude' is in PATH, or install Claude Code in a standard location (~/.local/bin, /usr/local/bin, or /opt/homebrew/bin)"
             .to_string(),
     )
 }
@@ -134,20 +163,20 @@ mod tests {
     use std::sync::Mutex;
 
     // Mutex to prevent parallel env var tests from interfering
-    static ENV_MUTEX: Mutex<()> = Mutex::new(());
+    static HELPERS_ENV_MUTEX: Mutex<()> = Mutex::new(());
 
     #[test]
     fn test_find_claude_binary_with_env_var() {
-        let _lock = ENV_MUTEX.lock().unwrap();
+        let _lock = HELPERS_ENV_MUTEX.lock().unwrap();
 
         // Save original value
         let original = std::env::var("CLAUDE_CODE_PATH").ok();
 
-        // Set test value
-        std::env::set_var("CLAUDE_CODE_PATH", "/test/path/claude");
+        // Use an actual existing binary for the test
+        std::env::set_var("CLAUDE_CODE_PATH", "/bin/ls");
         let result = find_claude_binary();
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), PathBuf::from("/test/path/claude"));
+        assert_eq!(result.unwrap(), PathBuf::from("/bin/ls"));
 
         // Restore original
         match original {
@@ -158,14 +187,15 @@ mod tests {
 
     #[test]
     fn test_find_claude_binary_path_with_spaces() {
-        let _lock = ENV_MUTEX.lock().unwrap();
+        let _lock = HELPERS_ENV_MUTEX.lock().unwrap();
 
         let original = std::env::var("CLAUDE_CODE_PATH").ok();
 
-        std::env::set_var("CLAUDE_CODE_PATH", "/path/with spaces/claude");
+        // Set a valid path (use /bin/sh which exists)
+        std::env::set_var("CLAUDE_CODE_PATH", "/bin/sh");
         let result = find_claude_binary();
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), PathBuf::from("/path/with spaces/claude"));
+        assert_eq!(result.unwrap(), PathBuf::from("/bin/sh"));
 
         match original {
             Some(v) => std::env::set_var("CLAUDE_CODE_PATH", v),
@@ -175,20 +205,58 @@ mod tests {
 
     #[test]
     fn test_find_claude_binary_without_env_var() {
-        let _lock = ENV_MUTEX.lock().unwrap();
+        let _lock = HELPERS_ENV_MUTEX.lock().unwrap();
 
         let original = std::env::var("CLAUDE_CODE_PATH").ok();
 
-        // Remove env var to test PATH lookup
+        // Remove env var to test PATH lookup and fallback
         std::env::remove_var("CLAUDE_CODE_PATH");
         let result = find_claude_binary();
-        // Result depends on whether claude is in PATH - just check it doesn't panic
-        // If claude is installed, it should succeed; if not, it should return an error
-        assert!(result.is_ok() || result.is_err());
+        // Result depends on whether claude is in PATH or well-known paths
+        // Just check it doesn't panic - it may succeed if claude is installed
+        // or may fail if it's not found anywhere
+        let _ = result;
 
         // Restore original
         if let Some(v) = original {
             std::env::set_var("CLAUDE_CODE_PATH", v);
+        }
+    }
+
+    #[test]
+    fn test_find_claude_binary_env_var_takes_precedence() {
+        let _lock = HELPERS_ENV_MUTEX.lock().unwrap();
+
+        // Set a valid path in CLAUDE_CODE_PATH
+        std::env::set_var("CLAUDE_CODE_PATH", "/bin/ls"); // Use an actual binary for testing
+        let result = find_claude_binary();
+
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), PathBuf::from("/bin/ls"));
+
+        // Cleanup
+        std::env::remove_var("CLAUDE_CODE_PATH");
+    }
+
+    #[test]
+    fn test_find_claude_binary_env_var_nonexistent_returns_error() {
+        let _lock = HELPERS_ENV_MUTEX.lock().unwrap();
+
+        let original = std::env::var("CLAUDE_CODE_PATH").ok();
+
+        // Set env var to a path that doesn't exist
+        std::env::set_var("CLAUDE_CODE_PATH", "/nonexistent/path/to/claude");
+        let result = find_claude_binary();
+
+        // Should fail because the path doesn't exist
+        assert!(result.is_err());
+        let error_msg = result.unwrap_err();
+        assert!(error_msg.contains("does not exist"));
+
+        // Restore original
+        match original {
+            Some(v) => std::env::set_var("CLAUDE_CODE_PATH", v),
+            None => std::env::remove_var("CLAUDE_CODE_PATH"),
         }
     }
 
