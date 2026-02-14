@@ -4,11 +4,29 @@ import { RouterProvider } from "react-router-dom";
 import "./index.css";
 import { router } from "./router";
 import { SplashScreen } from "./components";
+import { DebugConsole } from "./components/DebugConsole";
 import { commands } from "./bindings";
+import { useDebugLogger } from "./hooks/useDebugLogger";
+import { useDebugStore } from "./stores/debugStore";
 
 function App() {
   const [booting, setBooting] = useState(true);
   const [status, setStatus] = useState("Loading configuration...");
+
+  // Subscribe to Rust backend logs for the debug console
+  useDebugLogger();
+
+  // Global Cmd+Shift+D to toggle debug console
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.metaKey && e.shiftKey && e.code === "KeyD") {
+        e.preventDefault();
+        useDebugStore.getState().toggleDebugPanel();
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   useEffect(() => {
     async function bootstrap() {
@@ -29,10 +47,20 @@ function App() {
   }, []);
 
   if (booting) {
-    return <SplashScreen status={status} />;
+    return (
+      <>
+        <SplashScreen status={status} />
+        <DebugConsole />
+      </>
+    );
   }
 
-  return <RouterProvider router={router} />;
+  return (
+    <>
+      <RouterProvider router={router} />
+      <DebugConsole />
+    </>
+  );
 }
 
 createRoot(document.getElementById("root")!).render(

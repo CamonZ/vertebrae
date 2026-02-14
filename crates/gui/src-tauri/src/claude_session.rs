@@ -359,6 +359,7 @@ impl ClaudeSessionManager {
 
         let mut stdin = child.stdin.take().unwrap();
         let stdout = child.stdout.take().unwrap();
+        let stderr = child.stderr.take().unwrap();
 
         // Send initial prompt if provided
         if let Some(prompt) = initial_prompt {
@@ -414,6 +415,36 @@ impl ClaudeSessionManager {
             }
 
             let _ = exit_tx.send(());
+        });
+
+        // Spawn stderr reader thread
+        let session_id_for_stderr = session_id.clone();
+        let app_handle_for_stderr = app_handle.clone();
+        thread::spawn(move || {
+            use std::io::BufRead;
+            let reader = std::io::BufReader::new(stderr);
+
+            for line in reader.lines() {
+                match line {
+                    Ok(line) if !line.is_empty() => {
+                        log::warn!(
+                            "[Claude stderr] session={} {}",
+                            &session_id_for_stderr[..8.min(session_id_for_stderr.len())],
+                            &line[..500.min(line.len())]
+                        );
+                        let _ = ClaudeSessionErrorEvent {
+                            session_id: session_id_for_stderr.clone(),
+                            error: format!("[stderr] {}", line),
+                        }
+                        .emit(&app_handle_for_stderr);
+                    }
+                    Err(e) => {
+                        log::error!("Error reading stderr: {}", e);
+                        break;
+                    }
+                    _ => {}
+                }
+            }
         });
 
         // Forward commands to stdin using sync channel
