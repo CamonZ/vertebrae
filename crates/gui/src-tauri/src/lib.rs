@@ -17,6 +17,7 @@ use tokio::sync::RwLock;
 
 use specta_typescript::Typescript;
 use tauri::Manager;
+use tauri_plugin_log::{Target, TargetKind};
 use tauri_specta::{collect_commands, collect_events, Builder};
 use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig};
 
@@ -143,10 +144,13 @@ pub fn run() {
     let tauri_app_builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_window_state::Builder::new().build())
-        // TODO: Remove this after debugging - enable logging in production temporarily
         .plugin(
             tauri_plugin_log::Builder::default()
                 .level(log::LevelFilter::Info)
+                .targets([
+                    Target::new(TargetKind::Stdout),
+                    Target::new(TargetKind::Webview),
+                ])
                 .build(),
         );
 

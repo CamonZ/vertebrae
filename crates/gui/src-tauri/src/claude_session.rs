@@ -12,8 +12,11 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::thread;
+use tauri::Emitter;
 use tauri_specta::Event;
 use tokio::sync::{mpsc, oneshot, RwLock};
+
+use crate::workflow_runner::find_claude_binary;
 
 // ============================================================================
 // Events emitted to the frontend
@@ -270,10 +273,24 @@ impl ClaudeSessionManager {
         app_handle: tauri::AppHandle,
         sessions: Arc<RwLock<HashMap<String, SessionHandle>>>,
     ) {
-        // TODO: Make claude binary path configurable
-        // For now, hardcode the path since GUI apps don't inherit shell PATH
-        let claude_binary = std::env::var("CLAUDE_BINARY")
-            .unwrap_or_else(|_| "/Users/camonz/.local/bin/claude".to_string());
+        // Find the Claude Code CLI binary using unified discovery logic
+        let claude_binary = match find_claude_binary() {
+            Ok(path) => path.to_string_lossy().to_string(),
+            Err(e) => {
+                log::error!("Failed to find Claude Code CLI: {}", e);
+                // Notify frontend of initialization failure
+                let _ = app_handle.emit(
+                    "claude-session-init-event",
+                    ClaudeSessionInitEvent {
+                        session_id: session_id.clone(),
+                        claude_conversation_id: None,
+                        model: String::new(),
+                        tools: vec![],
+                    },
+                );
+                return;
+            }
+        };
 
         log::info!(
             "Starting Claude session: id={}, working_dir={:?}, resume={:?}, claude_binary={}",
@@ -342,6 +359,7 @@ impl ClaudeSessionManager {
 
         let mut stdin = child.stdin.take().unwrap();
         let stdout = child.stdout.take().unwrap();
+        let stderr = child.stderr.take().unwrap();
 
         // Send initial prompt if provided
         if let Some(prompt) = initial_prompt {
@@ -397,6 +415,36 @@ impl ClaudeSessionManager {
             }
 
             let _ = exit_tx.send(());
+        });
+
+        // Spawn stderr reader thread
+        let session_id_for_stderr = session_id.clone();
+        let app_handle_for_stderr = app_handle.clone();
+        thread::spawn(move || {
+            use std::io::BufRead;
+            let reader = std::io::BufReader::new(stderr);
+
+            for line in reader.lines() {
+                match line {
+                    Ok(line) if !line.is_empty() => {
+                        log::warn!(
+                            "[Claude stderr] session={} {}",
+                            &session_id_for_stderr[..8.min(session_id_for_stderr.len())],
+                            &line[..500.min(line.len())]
+                        );
+                        let _ = ClaudeSessionErrorEvent {
+                            session_id: session_id_for_stderr.clone(),
+                            error: format!("[stderr] {}", line),
+                        }
+                        .emit(&app_handle_for_stderr);
+                    }
+                    Err(e) => {
+                        log::error!("Error reading stderr: {}", e);
+                        break;
+                    }
+                    _ => {}
+                }
+            }
         });
 
         // Forward commands to stdin using sync channel

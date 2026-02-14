@@ -128,7 +128,7 @@ mod tests {
     fn with_claude_path<F: FnOnce()>(f: F) {
         let _lock = ENV_MUTEX.lock().unwrap();
         let original = std::env::var("CLAUDE_CODE_PATH").ok();
-        std::env::set_var("CLAUDE_CODE_PATH", "/fake/claude");
+        std::env::set_var("CLAUDE_CODE_PATH", "/bin/ls");
         f();
         match original {
             Some(v) => std::env::set_var("CLAUDE_CODE_PATH", v),
