@@ -10,3 +10,6 @@ export type { UIStore } from "./uiStore";
 
 export { useToastStore } from "./toastStore";
 export type { ToastStore } from "./toastStore";
+
+export { useDebugStore } from "./debugStore";
+export type { DebugStore } from "./debugStore";
