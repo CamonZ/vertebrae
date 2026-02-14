@@ -193,7 +193,9 @@ impl ServiceError {
                 Some("hint: This would create a circular dependency chain.".to_string())
             }
             ServiceError::ApiError { status, .. } => match *status {
-                401 => Some("hint: Check your SACRUM_API_TOKEN environment variable.".to_string()),
+                401 => Some(
+                    "hint: Check [sacrum].token in ~/.config/vertebrae/config.toml".to_string(),
+                ),
                 404 => Some("hint: Resource not found on the server.".to_string()),
                 422 => Some("hint: Invalid request data sent to the server.".to_string()),
                 500..=599 => Some("hint: Server error. Try again later.".to_string()),
@@ -360,7 +362,7 @@ mod tests {
         assert!(err.to_string().contains("Unauthorized"));
         let hint = err.hint();
         assert!(hint.is_some());
-        assert!(hint.unwrap().contains("SACRUM_API_TOKEN"));
+        assert!(hint.unwrap().contains("config.toml"));
     }
 
     #[test]

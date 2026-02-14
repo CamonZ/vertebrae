@@ -8,24 +8,25 @@
 //! It handles:
 //! - Bearer token authentication
 //! - Automatic response envelope unwrapping
-//! - Configuration management from .vtb/config.toml and environment variables
+//! - Configuration management from ~/.config/vertebrae/config.toml
 //! - Serialization/deserialization of API types
 //!
 //! # Configuration
 //!
-//! Configuration is loaded from:
-//! 1. `SACRUM_API_TOKEN` environment variable (required for API token)
-//! 2. `.vtb/config.toml` in the project directory or parent directories (found by walking up from CWD)
+//! Configuration is loaded from `~/.config/vertebrae/config.toml`:
 //!
-//! Example .vtb/config.toml:
 //! ```toml
-//! [project]
-//! id = "uuid-here"
-//! slug = "my-project"
-//!
 //! [sacrum]
+//! token = "sac_your_token_here"
 //! url = "http://localhost:4000"
+//!
+//! [projects.my-project]
+//! id = "uuid-here"
+//! path = "/path/to/project"
 //! ```
+//!
+//! The CLI resolves the active project by matching CWD against project paths.
+//! The GUI uses explicit project name lookup via `SacrumConfig::load_for_project()`.
 //!
 //! # Example Usage
 //!
@@ -61,9 +62,8 @@ pub use api_types::{
 };
 pub use client::{GraphqlClient, with_fragments};
 pub use config::{
-    GlobalSacrumSection, LocalProjectConfig, LocalSacrumSection, ProjectSection, ProjectSettings,
-    SacrumConfig, VertebraeConfigFile, config_path, find_and_load_local_config, load_config_file,
-    load_local_config_file, save_config_file, save_local_config,
+    GlobalSacrumSection, ProjectSection, SacrumConfig, VertebraeConfigFile, config_path,
+    load_config_file, register_project, save_config_file, unregister_project,
 };
 pub use error::{SacrumClientError, SacrumClientResult};
 pub use execution_service::SacrumExecutionService;

@@ -14,12 +14,8 @@ pub struct SavedProject {
     pub slug: String,
     /// Sacrum project ID (UUID)
     pub project_id: String,
-    /// Optional per-project URL override
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub url: Option<String>,
-    /// Optional git root path for the project
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub path: Option<String>,
+    /// Git root path for the project
+    pub path: String,
 }
 
 /// The persisted project configuration
@@ -87,8 +83,7 @@ impl ProjectConfig {
                 .into_iter()
                 .map(|(slug, project_section)| SavedProject {
                     slug,
-                    project_id: project_section.project_id,
-                    url: project_section.url,
+                    project_id: project_section.id,
                     path: project_section.path,
                 })
                 .collect(),
