@@ -69,7 +69,7 @@ pub async fn get_projects(state: State<'_, AppState>) -> Result<Vec<SavedProject
 /// Add a project to the saved list
 ///
 /// Takes a directory path, derives a slug from the folder name,
-/// creates the project in Sacrum API if needed, and saves to config.toml.
+/// creates the project in Sacrum API if needed, and registers in global config.
 #[tauri::command]
 #[specta::specta]
 pub async fn add_project(
@@ -95,16 +95,10 @@ pub async fn add_project(
         });
     }
 
-    // Read API token from environment
-    let api_token = std::env::var("SACRUM_API_TOKEN").map_err(|_| CommandError {
-        message: "SACRUM_API_TOKEN environment variable not set".to_string(),
-    })?;
-
     // Load config file and check for duplicate slug
-    let mut config_file =
-        vertebrae_sacrum_client::load_config_file().map_err(|e| CommandError {
-            message: format!("Failed to load config file: {}", e),
-        })?;
+    let config_file = vertebrae_sacrum_client::load_config_file().map_err(|e| CommandError {
+        message: format!("Failed to load config file: {}", e),
+    })?;
 
     if config_file.projects.contains_key(&project_slug) {
         return Err(CommandError {
@@ -114,6 +108,16 @@ pub async fn add_project(
             ),
         });
     }
+
+    // Read API token from global config
+    let api_token = config_file
+        .sacrum
+        .token
+        .clone()
+        .ok_or_else(|| CommandError {
+            message: "No API token found. Set [sacrum].token in ~/.config/vertebrae/config.toml"
+                .to_string(),
+        })?;
 
     // Create temporary Sacrum client to get-or-create the project
     let temp_config = vertebrae_sacrum_client::SacrumConfig::new(
@@ -159,25 +163,17 @@ pub async fn add_project(
         }
     };
 
-    // Insert project into config file
-    config_file.projects.insert(
-        project_slug.clone(),
-        vertebrae_sacrum_client::ProjectSection {
-            project_id: project.id.clone(),
-            url: None,
-            path: None,
-        },
-    );
-
-    vertebrae_sacrum_client::save_config_file(&config_file).map_err(|e| CommandError {
-        message: format!("Failed to save config file: {}", e),
+    // Register project in global config
+    vertebrae_sacrum_client::register_project(&project_slug, &project.id, &path).map_err(|e| {
+        CommandError {
+            message: format!("Failed to save config file: {}", e),
+        }
     })?;
 
     Ok(SavedProject {
         slug: project_slug,
         project_id: project.id,
-        url: None,
-        path: None,
+        path,
     })
 }
 
@@ -190,23 +186,16 @@ pub async fn add_project(
 pub async fn remove_project(state: State<'_, AppState>, slug: String) -> Result<(), CommandError> {
     log::info!("remove_project called with slug: {}", slug);
 
-    // Load config file
-    let mut config_file =
-        vertebrae_sacrum_client::load_config_file().map_err(|e| CommandError {
-            message: format!("Failed to load config file: {}", e),
-        })?;
+    // Remove project from global config
+    let removed = vertebrae_sacrum_client::unregister_project(&slug).map_err(|e| CommandError {
+        message: format!("Failed to update config file: {}", e),
+    })?;
 
-    // Remove project by slug
-    if config_file.projects.remove(&slug).is_none() {
+    if !removed {
         return Err(CommandError {
             message: format!("Project '{}' not found in config", slug),
         });
     }
-
-    // Save updated config
-    vertebrae_sacrum_client::save_config_file(&config_file).map_err(|e| CommandError {
-        message: format!("Failed to save config file: {}", e),
-    })?;
 
     // If the removed project was the current one, clear selection and services
     if state.project_config.get_current_project().as_deref() == Some(&slug) {
@@ -251,7 +240,7 @@ pub async fn get_current_project_path(
         message: format!("Failed to load config: {}", e),
     })?;
 
-    let path = config_file.projects.get(&slug).and_then(|p| p.path.clone());
+    let path = config_file.projects.get(&slug).map(|p| p.path.clone());
 
     Ok(path)
 }
@@ -271,21 +260,25 @@ pub async fn set_current_project(
         .set_current_project(slug.clone())
         .map_err(|e| CommandError { message: e })?;
 
-    // Connect to Sacrum backend and create service
-    // Note: The config is now loaded from .vtb/config.toml (found by walking up from CWD)
-    match vertebrae_sacrum_client::SacrumConfig::load() {
-        Ok(config) => {
-            let client = vertebrae_sacrum_client::GraphqlClient::new(config);
-            let client_arc = std::sync::Arc::new(client);
-            let services = crate::sacrum::from_sacrum(client_arc);
-            let mut service_lock = state.services.write().await;
-            *service_lock = Some(services);
+    // Connect to Sacrum backend if a project is selected
+    if let Some(ref project_slug) = slug {
+        match vertebrae_sacrum_client::SacrumConfig::load_for_project(project_slug) {
+            Ok(config) => {
+                let client = vertebrae_sacrum_client::GraphqlClient::new(config);
+                let client_arc = std::sync::Arc::new(client);
+                let services = crate::sacrum::from_sacrum(client_arc);
+                let mut service_lock = state.services.write().await;
+                *service_lock = Some(services);
+            }
+            Err(e) => {
+                return Err(CommandError {
+                    message: format!("Failed to load Sacrum configuration: {}", e),
+                });
+            }
         }
-        Err(e) => {
-            return Err(CommandError {
-                message: format!("Failed to load Sacrum configuration: {}", e),
-            });
-        }
+    } else {
+        let mut service_lock = state.services.write().await;
+        *service_lock = None;
     }
 
     Ok(())
