@@ -66,7 +66,7 @@ async fn run_with_args(args: &Args) -> Result<(), ServiceError> {
         return Ok(());
     }
 
-    // Load Sacrum configuration from .vtb/config.toml (found by walking up from CWD)
+    // Load Sacrum configuration from ~/.config/vertebrae/config.toml
     let config = SacrumConfig::load().map_err(|e| {
         ServiceError::config_error(format!("Failed to load Sacrum configuration: {}", e))
     })?;

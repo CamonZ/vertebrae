@@ -1,20 +1,20 @@
 //! Init command for initializing vertebrae in a project
 //!
 //! Implements the `vtb init` command to:
-//! 1. Check SACRUM_API_TOKEN environment variable is set
-//! 2. Accept --url flag for Sacrum API endpoint (default localhost:4000)
-//! 3. Derive project slug from current directory name
-//! 4. Check if project exists in Sacrum API, create if needed
-//! 5. Create .vtb/config.toml in the current directory
-//! 6. Write embedded skills to .claude/skills/
+//! 1. Read or bootstrap global config at ~/.config/vertebrae/config.toml
+//! 2. Accept --token flag for first-time setup (sets [sacrum].token)
+//! 3. Accept --url flag for Sacrum API endpoint (default from config or localhost:4000)
+//! 4. Derive project slug from current directory name
+//! 5. Check if project exists in Sacrum API, create if needed
+//! 6. Register the project in global config
+//! 7. Write embedded skills to .claude/skills/
 
 use clap::Args;
 use include_dir::{Dir, include_dir};
 use std::fs;
 use std::path::{Path, PathBuf};
 use vertebrae_sacrum_client::{
-    GraphqlClient, LocalProjectConfig, LocalSacrumSection, ProjectSettings, SacrumConfig,
-    save_local_config,
+    GraphqlClient, SacrumConfig, config_path, load_config_file, register_project, save_config_file,
 };
 
 /// Embedded skills directory at compile time
@@ -23,9 +23,13 @@ const SKILLS_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/../../skills");
 /// Initialize vertebrae in the current project
 #[derive(Debug, Args)]
 pub struct InitCommand {
-    /// Sacrum API base URL (default: http://localhost:4000)
-    #[arg(long, default_value = "http://localhost:4000")]
-    pub url: String,
+    /// Sacrum API base URL (overrides config file value)
+    #[arg(long)]
+    pub url: Option<String>,
+
+    /// API token for Sacrum authentication (saved to config file)
+    #[arg(long)]
+    pub token: Option<String>,
 
     /// Target directory for skills (defaults to ".claude/skills/")
     #[arg(long, default_value = ".claude/skills")]
@@ -84,7 +88,7 @@ impl std::fmt::Display for InitResult {
 /// Error type for init command failures
 #[derive(Debug)]
 pub enum InitError {
-    /// Missing SACRUM_API_TOKEN environment variable
+    /// Missing API token (not in config and not provided via --token)
     MissingToken(String),
     /// Failed to get current directory
     CurrentDir { reason: String },
@@ -170,21 +174,49 @@ impl std::error::Error for InitError {}
 impl InitCommand {
     /// Execute the init command.
     ///
-    /// 1. Checks SACRUM_API_TOKEN is set
-    /// 2. Gets current directory
-    /// 3. Derives project slug from folder name
-    /// 4. Checks if project exists in Sacrum, creates if not
-    /// 5. Creates .vtb/config.toml in the current directory
-    /// 6. Copies skills from source to target directory
+    /// 1. Loads or bootstraps global config
+    /// 2. Resolves API token (from --token flag or existing config)
+    /// 3. Gets current directory
+    /// 4. Derives project slug from folder name
+    /// 5. Checks if project exists in Sacrum, creates if not
+    /// 6. Registers project in global config
+    /// 7. Copies skills from source to target directory
     pub async fn execute(&self) -> Result<InitResult, InitError> {
-        // Check SACRUM_API_TOKEN is set
-        let api_token = std::env::var("SACRUM_API_TOKEN").map_err(|_| {
-            InitError::MissingToken(
-                "Error: SACRUM_API_TOKEN environment variable not set\n\
-                 Hint: Export your Sacrum API token: export SACRUM_API_TOKEN=your_token_here"
-                    .to_string(),
-            )
+        // Load existing global config (or default if none exists)
+        let mut config_file = load_config_file().map_err(|e| InitError::ConfigError {
+            reason: e.to_string(),
         })?;
+
+        // Resolve API token: --token flag takes precedence, then existing config
+        let api_token = if let Some(ref token) = self.token {
+            // Update config with the provided token
+            config_file.sacrum.token = Some(token.clone());
+            token.clone()
+        } else {
+            config_file.sacrum.token.clone().ok_or_else(|| {
+                InitError::MissingToken(
+                    "No API token found.\n\
+                     Hint: Run `vtb init --token <your_token>` to set up authentication,\n\
+                     or add [sacrum].token to ~/.config/vertebrae/config.toml"
+                        .to_string(),
+                )
+            })?
+        };
+
+        // Update URL if provided via --url flag
+        if let Some(ref url) = self.url {
+            config_file.sacrum.url = url.clone();
+        }
+
+        let base_url = config_file.sacrum.url.clone();
+
+        // Save config if --token or --url were provided (bootstrap the [sacrum] section)
+        if self.token.is_some() || self.url.is_some() {
+            save_config_file(&config_file).map_err(|e| InitError::WriteConfig {
+                path: config_path().unwrap_or_default(),
+                reason: e.to_string(),
+            })?;
+        }
 
         // Get current directory
         let current_dir = std::env::current_dir().map_err(|e| InitError::CurrentDir {
@@ -203,29 +235,25 @@ impl InitCommand {
         let project_slug = self.derive_slug(&folder_name)?;
 
         // Create Sacrum client and check/create project
-        let config = SacrumConfig::new(self.url.clone(), api_token, "temp".to_string());
+        let config = SacrumConfig::new(base_url, api_token, "temp".to_string());
         let client = GraphqlClient::new(config);
 
         let (project, created) = self
             .get_or_create_project(&client, &folder_name, &project_slug)
             .await?;
 
-        // Create local config structure
-        let local_config = LocalProjectConfig {
-            project: ProjectSettings {
-                id: Some(project.id.clone()),
-                slug: Some(project_slug.clone()),
-            },
-            sacrum: LocalSacrumSection {
-                url: self.url.clone(),
-            },
-        };
+        // Register project in global config
+        let project_path = current_dir
+            .canonicalize()
+            .unwrap_or(current_dir.clone())
+            .to_string_lossy()
+            .to_string();
 
-        // Write .vtb/config.toml
-        let config_path = current_dir.join(".vtb").join("config.toml");
-        save_local_config(&config_path, &local_config).map_err(|e| InitError::WriteConfig {
-            path: config_path.clone(),
-            reason: e.to_string(),
+        register_project(&project_slug, &project.id, &project_path).map_err(|e| {
+            InitError::WriteConfig {
+                path: config_path().unwrap_or_default(),
+                reason: e.to_string(),
+            }
         })?;
 
         // Copy skills
@@ -234,7 +262,7 @@ impl InitCommand {
         let skills_copied = self.copy_skills(&SKILLS_DIR, &skills_target)?;
 
         Ok(InitResult {
-            config_path,
+            config_path: config_path().unwrap_or_default(),
             project_slug,
             project_id: project.id,
             project_name: project.name,
@@ -371,7 +399,8 @@ mod tests {
 
     fn default_cmd() -> InitCommand {
         InitCommand {
-            url: "http://localhost:4000".to_string(),
+            url: None,
+            token: None,
             skills_target: PathBuf::from(".claude/skills"),
         }
     }
@@ -512,7 +541,7 @@ mod tests {
     #[test]
     fn test_init_result_display() {
         let result = InitResult {
-            config_path: PathBuf::from("/home/user/.vtb/config.toml"),
+            config_path: PathBuf::from("/home/user/.config/vertebrae/config.toml"),
             project_slug: "my-project".to_string(),
             project_id: "proj-123".to_string(),
             project_name: "My Project".to_string(),
@@ -522,7 +551,7 @@ mod tests {
 
         let output = format!("{}", result);
         assert!(output.contains("Vertebrae initialized successfully"));
-        assert!(output.contains(".vtb/config.toml"));
+        assert!(output.contains("config.toml"));
         assert!(output.contains("my-project"));
         assert!(output.contains("proj-123"));
         assert!(output.contains("My Project"));
@@ -532,7 +561,7 @@ mod tests {
     #[test]
     fn test_init_result_display_existing_project() {
         let result = InitResult {
-            config_path: PathBuf::from("/home/user/.vtb/config.toml"),
+            config_path: PathBuf::from("/home/user/.config/vertebrae/config.toml"),
             project_slug: "vertebrae".to_string(),
             project_id: "proj-456".to_string(),
             project_name: "Vertebrae".to_string(),
@@ -586,6 +615,5 @@ mod tests {
         let cmd = default_cmd();
         let debug_str = format!("{:?}", cmd);
         assert!(debug_str.contains("InitCommand"));
-        assert!(debug_str.contains("url"));
     }
 }

@@ -157,24 +157,30 @@ pub fn run() {
 
             // Initialize project configuration
             let project_config = ProjectConfig::new().expect("Failed to initialize project config");
+            let current_slug = project_config.get_current_project();
 
-            // Try to load Sacrum config from local .vtb/config.toml (found by walking up from CWD)
-            let service = tauri::async_runtime::block_on(async {
-                match SacrumConfig::load() {
+            // Try to load Sacrum config for the current project from global config
+            let sacrum_config = current_slug.as_deref().and_then(|slug| {
+                match SacrumConfig::load_for_project(slug) {
                     Ok(config) => {
-                        log::info!("Found Sacrum config with project ID: {}", config.project_id);
-                        let client = GraphqlClient::new(config);
-                        let client_arc = Arc::new(client);
-                        Some(crate::sacrum::from_sacrum(client_arc))
+                        log::info!(
+                            "Found Sacrum config for project '{}' with ID: {}",
+                            slug,
+                            config.project_id
+                        );
+                        Some(config)
                     }
                     Err(e) => {
-                        log::info!(
-                            "No Sacrum config found (expected if not in a vertebrae project): {}",
-                            e
-                        );
+                        log::info!("Failed to load config for project '{}': {}", slug, e);
                         None
                     }
                 }
+            });
+
+            let service = sacrum_config.as_ref().map(|config| {
+                let client = GraphqlClient::new(config.clone());
+                let client_arc = Arc::new(client);
+                crate::sacrum::from_sacrum(client_arc)
             });
 
             // Manage application state with optional services
@@ -188,17 +194,17 @@ pub fn run() {
             log::info!("[STARTUP] Claude session manager initialized");
 
             // Start WebSocket connection to Sacrum for real-time updates
-            let socket = if let Ok(config) = SacrumConfig::load() {
+            let socket = if let Some(config) = sacrum_config {
                 log::info!("[STARTUP] Starting WebSocket connection to Sacrum");
                 let socket = websocket_client::SacrumSocket::new(
-                    config.base_url.clone(),
-                    config.api_token.clone(),
-                    config.project_id.clone(),
+                    config.base_url,
+                    config.api_token,
+                    config.project_id,
                 );
                 socket.connect(app.handle());
                 socket
             } else {
-                log::info!("[STARTUP] No Sacrum config found, WebSocket starts disconnected");
+                log::info!("[STARTUP] No project config available, WebSocket starts disconnected");
                 websocket_client::SacrumSocket::disconnected()
             };
             // Always manage socket so the command can access it
