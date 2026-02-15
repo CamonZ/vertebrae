@@ -47,7 +47,7 @@ pub const CREATE_STEP: &str = r#"
         $goal: String,
         $agents: [String!],
         $skills: [String!],
-        $agent_config: JSON,
+        $agent_config: Json,
         $is_final: Boolean,
         $step_order: Int
     ) {
@@ -73,7 +73,7 @@ pub const UPDATE_STEP: &str = r#"
         $goal: String,
         $agents: [String!],
         $skills: [String!],
-        $agent_config: JSON,
+        $agent_config: Json,
         $is_final: Boolean,
         $step_order: Int
     ) {
