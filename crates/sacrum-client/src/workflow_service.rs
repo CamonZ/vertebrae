@@ -14,6 +14,7 @@ use vertebrae_core::workflow_service::{
 
 use crate::api_types::{WorkflowResponse, WorkflowStepResponse, WorkflowTransitionResponse};
 use crate::client::{GraphqlClient, with_fragments};
+use crate::queries::steps::{CREATE_STEP, STEP_FIELDS};
 use crate::queries::tasks::{ASSIGN_WORKFLOW, UNASSIGN_WORKFLOW};
 use crate::queries::workflows::{
     CREATE_WORKFLOW, CREATE_WORKFLOW_TRANSITION, DELETE_WORKFLOW, DELETE_WORKFLOW_TRANSITION,
@@ -150,7 +151,7 @@ impl WorkflowService for SacrumWorkflowService {
             return Err(ServiceError::validation_failed("Name cannot be empty"));
         }
 
-        let query = with_fragments(CREATE_WORKFLOW, &[WORKFLOW_FIELDS]);
+        let query = CREATE_WORKFLOW;
         let variables = json!({
             "project_id": self.client.project_id(),
             "name": options.name,
@@ -166,8 +167,31 @@ impl WorkflowService for SacrumWorkflowService {
 
         let response: IdResponse = self
             .client
-            .execute(&query, variables, "create_workflow")
+            .execute(query, variables, "create_workflow")
             .await?;
+
+        let workflow_id = &response.id;
+
+        // Create steps if any were provided
+        if !options.steps.is_empty() {
+            let step_query = with_fragments(CREATE_STEP, &[STEP_FIELDS]);
+            for (i, step) in options.steps.iter().enumerate() {
+                let agent_config =
+                    serde_json::to_string(&json!({ "model": step.model })).unwrap_or_default();
+                let step_variables = json!({
+                    "workflow_id": workflow_id,
+                    "name": step.name,
+                    "agent_config": agent_config,
+                    "step_order": i as i32,
+                });
+
+                let _: serde_json::Value = self
+                    .client
+                    .execute(&step_query, step_variables, "create_workflow_step")
+                    .await?;
+            }
+        }
+
         Ok(response.id)
     }
 
@@ -207,7 +231,7 @@ impl WorkflowService for SacrumWorkflowService {
     }
 
     async fn update_workflow(&self, id: &str, options: UpdateWorkflowOptions) -> ServiceResult<()> {
-        let query = with_fragments(UPDATE_WORKFLOW, &[WORKFLOW_FIELDS]);
+        let query = UPDATE_WORKFLOW;
         let mut variables = json!({ "id": id });
 
         if let Some(name) = &options.name {
@@ -223,15 +247,15 @@ impl WorkflowService for SacrumWorkflowService {
             variables["display_order"] = json!(order);
         }
 
-        self.client.execute_void(&query, variables).await?;
+        self.client.execute_void(query, variables).await?;
         Ok(())
     }
 
     async fn delete_workflow(&self, id: &str) -> ServiceResult<()> {
-        let query = with_fragments(DELETE_WORKFLOW, &[WORKFLOW_FIELDS]);
+        let query = DELETE_WORKFLOW;
         let variables = json!({ "id": id });
 
-        self.client.execute_void(&query, variables).await?;
+        self.client.execute_void(query, variables).await?;
         Ok(())
     }
 
@@ -456,6 +480,7 @@ mod tests {
     use super::*;
     use crate::api_types::WorkflowTransitionResponse;
     use crate::config::SacrumConfig;
+    use vertebrae_core::WorkflowStepInput;
 
     fn create_test_client() -> GraphqlClient {
         GraphqlClient::new(SacrumConfig::new(
@@ -752,6 +777,61 @@ mod tests {
         let id = service.create_workflow(opts).await.unwrap();
 
         assert_eq!(id, "wf-new");
+    }
+
+    #[tokio::test]
+    async fn test_create_workflow_with_steps() {
+        let server = MockServer::start().await;
+
+        // First call: create_workflow returns the workflow ID
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "create_workflow": {
+                        "id": "wf-with-steps"
+                    }
+                }
+            })))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        // Subsequent calls: create_workflow_step returns step data
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "create_workflow_step": {
+                        "id": "step-1",
+                        "name": "implement",
+                        "goal": null,
+                        "agents": [],
+                        "skills": [],
+                        "agent_config": {"model": "sonnet"},
+                        "is_final": false,
+                        "step_order": 0,
+                        "workflow_id": "wf-with-steps",
+                        "project_id": "test-proj",
+                        "inserted_at": "2026-01-01T00:00:00Z",
+                        "updated_at": "2026-01-01T00:00:00Z",
+                        "transitions": []
+                    }
+                }
+            })))
+            .expect(2)
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let steps = vec![
+            WorkflowStepInput::new("implement", "sonnet"),
+            WorkflowStepInput::new("review", "haiku"),
+        ];
+        let opts = CreateWorkflowOptions::new("Workflow With Steps", steps);
+        let id = service.create_workflow(opts).await.unwrap();
+
+        assert_eq!(id, "wf-with-steps");
     }
 
     #[tokio::test]
