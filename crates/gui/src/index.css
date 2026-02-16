@@ -283,17 +283,17 @@ body {
     border-color: inherit;
     box-shadow: none;
   }
-  25% {
-    border-color: rgb(249, 115, 22);
-    box-shadow: 0 0 12px rgba(249, 115, 22, 0.4);
+  20% {
+    border-color: var(--color-warning);
+    box-shadow: 0 0 14px var(--color-warning-dim);
   }
-  50% {
+  45% {
     border-color: inherit;
     box-shadow: none;
   }
-  75% {
-    border-color: rgb(249, 115, 22);
-    box-shadow: 0 0 12px rgba(249, 115, 22, 0.4);
+  65% {
+    border-color: var(--color-warning);
+    box-shadow: 0 0 14px var(--color-warning-dim);
   }
   100% {
     border-color: inherit;
@@ -307,7 +307,7 @@ body {
 }
 
 .animate-flash-border {
-  animation: flash-border 1.5s ease-in-out;
+  animation: flash-border 2s ease-in-out;
 }
 
 .animate-signal-flow {
