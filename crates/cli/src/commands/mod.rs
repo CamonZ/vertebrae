@@ -162,7 +162,7 @@ pub enum Command {
     /// Mark a step as done within a task
     #[command(name = "step-done")]
     StepDone(StepDoneCommand),
-    /// Transition a task to a specific status
+    /// Transition a task to a specific workflow step
     #[command(name = "transition-to")]
     TransitionTo(TransitionToCommand),
     /// Update an existing task
@@ -1126,13 +1126,13 @@ mod tests {
             "test",
             "transition-to",
             "a1b2c3d4-0000-4000-8000-000000000001",
-            "default",
+            "b2c3d4e5-0000-4000-8000-000000000002",
         ]);
         assert!(cli.is_ok());
         match cli.unwrap().command {
             Command::TransitionTo(cmd) => {
                 assert_eq!(cmd.id, "a1b2c3d4-0000-4000-8000-000000000001");
-                assert_eq!(cmd.target, "default");
+                assert_eq!(cmd.target, "b2c3d4e5-0000-4000-8000-000000000002");
             }
             _ => panic!("Expected TransitionTo command"),
         }
@@ -1155,36 +1155,14 @@ mod tests {
     }
 
     #[test]
-    fn test_command_transition_to_workflow_targets() {
-        // Test valid workflow names as targets
-        let targets = ["default", "implementation", "review", "backlog:todo"];
-        for target in targets {
-            let cli = TestCli::try_parse_from([
-                "test",
-                "transition-to",
-                "a1b2c3d4-0000-4000-8000-000000000001",
-                target,
-            ]);
-            assert!(cli.is_ok(), "Failed to parse target: {}", target);
-        }
-    }
-
-    #[test]
-    fn test_command_transition_to_with_step() {
-        let cli = TestCli::try_parse_from([
+    fn test_command_transition_to_rejects_non_uuid_target() {
+        let result = TestCli::try_parse_from([
             "test",
             "transition-to",
             "a1b2c3d4-0000-4000-8000-000000000001",
-            "review:approved",
+            "not-a-uuid",
         ]);
-        assert!(cli.is_ok());
-        match cli.unwrap().command {
-            Command::TransitionTo(cmd) => {
-                assert_eq!(cmd.id, "a1b2c3d4-0000-4000-8000-000000000001");
-                assert_eq!(cmd.target, "review:approved");
-            }
-            _ => panic!("Expected TransitionTo command"),
-        }
+        assert!(result.is_err());
     }
 
     #[test]
@@ -1193,7 +1171,7 @@ mod tests {
             "test",
             "transition-to",
             "a1b2c3d4-0000-4000-8000-000000000001",
-            "implementation",
+            "b2c3d4e5-0000-4000-8000-000000000002",
             "--skip-validation",
         ]);
         assert!(cli.is_ok());
@@ -1211,7 +1189,7 @@ mod tests {
             "test",
             "transition-to",
             "a1b2c3d4-0000-4000-8000-000000000003",
-            "default",
+            "b2c3d4e5-0000-4000-8000-000000000004",
         ])
         .unwrap();
         let debug_str = format!("{:?}", cli.command);
