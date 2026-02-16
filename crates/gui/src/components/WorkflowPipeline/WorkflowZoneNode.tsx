@@ -21,6 +21,7 @@ export type WorkflowZoneNodeData = {
   isWorkflowSelected?: boolean;
   /** When true, renders as a compact card without internal details */
   isCollapsed?: boolean;
+  isFlashing?: boolean;
 };
 
 export type WorkflowZoneNodeType = Node<WorkflowZoneNodeData, "workflowZoneNode">;
@@ -42,6 +43,7 @@ function WorkflowZoneNodeComponent({
     onWorkflowClick,
     isWorkflowSelected,
     isCollapsed = false,
+    isFlashing = false,
   } = data;
 
   const handleWorkflowClick = () => {
@@ -93,7 +95,7 @@ function WorkflowZoneNodeComponent({
   // Expanded view - full zone with dashed border
   return (
     <div
-      className="relative rounded-xl bg-bg-secondary/30 transition-all"
+      className={`relative rounded-xl bg-bg-secondary/30 transition-all ${isFlashing ? 'animate-flash-border' : ''}`}
       style={{
         width: `${width}px`,
         height: `${height}px`,
