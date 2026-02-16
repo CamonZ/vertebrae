@@ -102,6 +102,10 @@ function AllWorkflowsPipelineInner() {
   // State for collapsed view toggle (press 'c' to toggle)
   const [isCollapsed, setIsCollapsed] = useState(false);
 
+  // Track IDs that should flash (workflow zone + step node)
+  const [flashingWorkflowIds, setFlashingWorkflowIds] = useState<Set<string>>(new Set());
+  const [flashingStepIds, setFlashingStepIds] = useState<Set<string>>(new Set());
+
   // Task selection handlers
   const handleTaskClick = useCallback((taskId: string) => {
     setSelectedTaskId(taskId);
@@ -311,6 +315,32 @@ function AllWorkflowsPipelineInner() {
 
           return next;
         });
+
+        // Trigger flash animation on workflow and step assignment
+        const wfId = updatedTask.workflow_id;
+        const stepId = updatedTask.current_step_id;
+
+        if (wfId) {
+          setFlashingWorkflowIds((prev) => new Set(prev).add(wfId));
+          setTimeout(() => {
+            setFlashingWorkflowIds((prev) => {
+              const next = new Set(prev);
+              next.delete(wfId);
+              return next;
+            });
+          }, 1500);
+        }
+
+        if (stepId) {
+          setFlashingStepIds((prev) => new Set(prev).add(stepId));
+          setTimeout(() => {
+            setFlashingStepIds((prev) => {
+              const next = new Set(prev);
+              next.delete(stepId);
+              return next;
+            });
+          }, 1500);
+        }
       } catch {
         // Fallback to full refetch on error
         schedulePipelineRefetch();
@@ -451,6 +481,7 @@ function AllWorkflowsPipelineInner() {
           onWorkflowClick: handleWorkflowClick,
           isWorkflowSelected: selectedWorkflow?.id === workflowId,
           isCollapsed,
+          isFlashing: flashingWorkflowIds.has(workflowId),
         } as WorkflowZoneNodeData,
         draggable: false,
         selectable: false,
@@ -493,6 +524,7 @@ function AllWorkflowsPipelineInner() {
               onStepClick: handleStepClick,
               isSelected: isStepSelected,
               taskCounts,
+              isFlashing: step.id ? flashingStepIds.has(step.id) : false,
             } as StepNodeData,
             draggable: false,
           });
@@ -516,6 +548,8 @@ function AllWorkflowsPipelineInner() {
     handleWorkflowClick,
     selectedWorkflow,
     isCollapsed,
+    flashingWorkflowIds,
+    flashingStepIds,
   ]);
 
   // Generate edges for step transitions

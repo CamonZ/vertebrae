@@ -277,9 +277,37 @@ body {
   }
 }
 
+/* Flash border animation for task assignment highlight */
+@keyframes flash-border {
+  0% {
+    border-color: inherit;
+    box-shadow: none;
+  }
+  25% {
+    border-color: rgb(249, 115, 22);
+    box-shadow: 0 0 12px rgba(249, 115, 22, 0.4);
+  }
+  50% {
+    border-color: inherit;
+    box-shadow: none;
+  }
+  75% {
+    border-color: rgb(249, 115, 22);
+    box-shadow: 0 0 12px rgba(249, 115, 22, 0.4);
+  }
+  100% {
+    border-color: inherit;
+    box-shadow: none;
+  }
+}
+
 /* Utility classes for animations */
 .animate-pulse-glow {
   animation: pulse-glow var(--transition-pulse) ease-in-out infinite;
+}
+
+.animate-flash-border {
+  animation: flash-border 1.5s ease-in-out;
 }
 
 .animate-signal-flow {

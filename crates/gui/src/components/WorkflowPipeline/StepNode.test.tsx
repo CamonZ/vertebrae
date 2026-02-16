@@ -290,4 +290,37 @@ describe("StepNode", () => {
       expect(taskCountDivs.length).toBe(0);
     });
   });
+
+  describe("flash animation", () => {
+    it("applies flash animation class when isFlashing is true", () => {
+      const props = createStepNodeProps({
+        isFlashing: true,
+      });
+
+      const { container } = render(<StepNode {...props} />);
+      const button = container.querySelector("button");
+
+      expect(button).toHaveClass("animate-flash-border");
+    });
+
+    it("does not apply flash animation class when isFlashing is false", () => {
+      const props = createStepNodeProps({
+        isFlashing: false,
+      });
+
+      const { container } = render(<StepNode {...props} />);
+      const button = container.querySelector("button");
+
+      expect(button).not.toHaveClass("animate-flash-border");
+    });
+
+    it("does not apply flash animation class when isFlashing is undefined", () => {
+      const props = createStepNodeProps();
+
+      const { container } = render(<StepNode {...props} />);
+      const button = container.querySelector("button");
+
+      expect(button).not.toHaveClass("animate-flash-border");
+    });
+  });
 });

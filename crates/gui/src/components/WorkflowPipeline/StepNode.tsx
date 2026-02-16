@@ -15,6 +15,7 @@ export type StepNodeData = {
   onStepClick?: (step: Step) => void;
   isSelected?: boolean;
   taskCounts?: { epic: number; ticket: number; task: number };
+  isFlashing?: boolean;
 };
 
 export type StepNodeType = Node<StepNodeData, 'stepNode'>;
@@ -24,7 +25,7 @@ export type StepNodeType = Node<StepNodeData, 'stepNode'>;
  * Features neural-pathway-inspired design with glowing connections.
  */
 function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
-  const { step, isFirst, isLast, onStepClick, isSelected, taskCounts } = data;
+  const { step, isFirst, isLast, onStepClick, isSelected, taskCounts, isFlashing } = data;
 
   const handleClick = () => {
     onStepClick?.(step);
@@ -43,6 +44,8 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
       type="button"
       onClick={handleClick}
       className={`relative ${NODE_SIZING.widthClass} ${NODE_SIZING.stepHeightClass} ${NODE_SIZING.borderRadiusClass} border bg-bg-secondary ${NODE_SIZING.paddingClass} ${NODE_SIZING.overflowClass} flex flex-col transition-all duration-200 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primary text-left ${
+        isFlashing ? 'animate-flash-border' : ''
+      } ${
         isNodeSelected
           ? 'border-primary shadow-glow ring-1 ring-primary/50'
           : 'border-border hover:border-primary/50 hover:shadow-glow-sm'
