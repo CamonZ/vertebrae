@@ -18,13 +18,13 @@ import "@xyflow/react/dist/style.css";
 
 import {
   commands,
+  events,
   type Task,
   type Step,
   type Workflow,
   type WorkflowTransition,
 } from "../bindings";
-import { useWorkflowChangeListener } from "../hooks/useWorkflowChangeListener";
-import { useTaskChangeListener } from "../hooks/useTaskChangeListener";
+import { useStepChangeListener } from "../hooks/useStepChangeListener";
 import { useElkLayout, type LayoutNode, type LayoutEdge } from "../hooks";
 import { useToastStore } from "../stores";
 import { useTaskStore } from "../stores";
@@ -88,6 +88,9 @@ function AllWorkflowsPipelineInner() {
   >([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Shared debounce timer for pipeline refetch - coalesces all WS event listeners
+  const refetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // State for selected task (for detail panel)
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
@@ -205,6 +208,17 @@ function AllWorkflowsPipelineInner() {
     }
   }, [addToast]);
 
+  // Debounced refetch - for structural changes (workflow/step CRUD)
+  const schedulePipelineRefetch = useCallback(() => {
+    if (refetchTimerRef.current) {
+      clearTimeout(refetchTimerRef.current);
+    }
+    refetchTimerRef.current = setTimeout(() => {
+      refetchTimerRef.current = null;
+      fetchPipelineData();
+    }, 200);
+  }, [fetchPipelineData]);
+
   // Store fetchPipelineData in a ref to avoid dependency cycles
   const fetchPipelineDataRef = useRef(fetchPipelineData);
   useEffect(() => {
@@ -227,14 +241,97 @@ function AllWorkflowsPipelineInner() {
     fetchPipelineData();
   }, [fetchPipelineData]);
 
-  // Subscribe to workflow change events for automatic refresh
-  useWorkflowChangeListener({
-    onWorkflowListChange: fetchPipelineData,
-  });
+  // Handle individual task changes - fetch only the changed task and patch local state
+  useEffect(() => {
+    const unlistenPromise = events.taskChangedEvent.listen(async (event) => {
+      const { task_id, change_type } = event.payload;
 
-  // Subscribe to task change events - reload all data when any task changes
-  useTaskChangeListener({
-    onTaskListChange: fetchPipelineData,
+      if (change_type === "Deleted") {
+        // Remove task from the map
+        setWorkflowTasksMap((prev) => {
+          const next = new Map(prev);
+          for (const [wfId, tasks] of next) {
+            const filtered = tasks.filter((t) => t.id !== task_id);
+            if (filtered.length !== tasks.length) {
+              next.set(wfId, filtered);
+            }
+          }
+          return next;
+        });
+        return;
+      }
+
+      // Fetch just the changed task
+      try {
+        const result = await commands.getTask(task_id);
+        if (result.status !== "ok") return;
+        const updatedTask = result.data;
+
+        // Update the task store for detail panel
+        const store = useTaskStore.getState();
+        const updatedTasks = store.tasks.map((t) =>
+          t.id === task_id ? updatedTask : t
+        );
+        // If task wasn't in the list (newly created), add it
+        if (!store.tasks.some((t) => t.id === task_id)) {
+          updatedTasks.push(updatedTask);
+        }
+        store.setTasks(updatedTasks);
+
+        // Patch the workflowTasksMap
+        setWorkflowTasksMap((prev) => {
+          const next = new Map(prev);
+
+          // Remove task from its old workflow bucket (if it moved)
+          for (const [wfId, tasks] of next) {
+            const idx = tasks.findIndex((t) => t.id === task_id);
+            if (idx !== -1) {
+              const updated = [...tasks];
+              updated.splice(idx, 1);
+              next.set(wfId, updated);
+            }
+          }
+
+          // Add task to its current workflow bucket
+          const wfId = updatedTask.workflow_id;
+          if (wfId) {
+            const bucket = next.get(wfId) || [];
+            next.set(wfId, [...bucket, updatedTask]);
+          }
+
+          return next;
+        });
+      } catch {
+        // Fallback to full refetch on error
+        schedulePipelineRefetch();
+      }
+    });
+
+    return () => {
+      unlistenPromise.then((unlisten) => unlisten());
+    };
+  }, [schedulePipelineRefetch]);
+
+  // Subscribe to workflow change events - only refetch for known workflows
+  useEffect(() => {
+    const unlistenPromise = events.workflowChangedEvent.listen((event) => {
+      const { workflow_id } = event.payload;
+      // Ignore events where the ID doesn't match any known workflow
+      // (backend bug: sometimes sends task_id as workflow_id)
+      const isKnownWorkflow = workflows.some((w) => w.id === workflow_id);
+      if (isKnownWorkflow) {
+        schedulePipelineRefetch();
+      }
+    });
+
+    return () => {
+      unlistenPromise.then((unlisten) => unlisten());
+    };
+  }, [workflows, schedulePipelineRefetch]);
+
+  // Subscribe to step change events - reload pipeline when steps are added/updated/deleted
+  useStepChangeListener(null, {
+    onWorkflowStepsChange: schedulePipelineRefetch,
   });
 
   // Calculate workflow zone dimensions for ELK layout

@@ -22,6 +22,9 @@ vi.mock("./bindings", () => ({
     taskChangedEvent: {
       listen: vi.fn(() => Promise.resolve(() => {})),
     },
+    stepChangedEvent: {
+      listen: vi.fn(() => Promise.resolve(() => {})),
+    },
   },
 }));
 
