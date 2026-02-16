@@ -1,4 +1,4 @@
-import { memo, useMemo } from "react";
+import { useMemo } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
 import type { TaskLevel, Task, Step } from "../../bindings";
 import { getStatusColor, getStatusIcon, getLevelDotColor } from "./taskUtils";
@@ -26,7 +26,7 @@ export type TaskZoneNodeType = Node<TaskZoneNodeData, "taskZoneNode">;
 /**
  * Custom zone node component - scrollable container for tasks
  */
-export const TaskZoneNode = memo(function TaskZoneNode({
+export const TaskZoneNode = function TaskZoneNode({
   data,
 }: NodeProps<Node<TaskZoneNodeData>>) {
   const {
@@ -167,4 +167,4 @@ export const TaskZoneNode = memo(function TaskZoneNode({
       </div>
     </div>
   );
-});
+};
