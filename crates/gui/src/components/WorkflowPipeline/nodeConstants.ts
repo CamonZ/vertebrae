@@ -35,8 +35,6 @@ export const LAYOUT_CONSTANTS = {
   NODE_SPACING_X: 320,
   /** Y offset for step nodes within workflow zone */
   STEP_Y_OFFSET: 80,
-  /** Y offset for task zones within workflow zone */
-  TASK_ZONE_Y_OFFSET: 220,
   /** Padding around workflow zone content */
   WORKFLOW_ZONE_PADDING: 40,
   /** Height reserved for workflow header */
@@ -62,8 +60,8 @@ export function calculateWorkflowZoneWidth(stepCount: number): number {
 export function calculateWorkflowZoneHeight(): number {
   return (
     LAYOUT_CONSTANTS.WORKFLOW_ZONE_HEADER_HEIGHT +
-    LAYOUT_CONSTANTS.TASK_ZONE_Y_OFFSET +
-    280 +
+    LAYOUT_CONSTANTS.STEP_Y_OFFSET +
+    130 +
     LAYOUT_CONSTANTS.WORKFLOW_ZONE_PADDING
   );
 }
