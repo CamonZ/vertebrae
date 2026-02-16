@@ -1,20 +1,24 @@
 //! Transition-to command for workflow-based transitions
 //!
-//! Implements the `vtb transition-to` command to transition tasks between workflows
-//! and steps. Validates transitions against the workflow_transitions edge table.
+//! Implements the `vtb transition-to` command to transition tasks between
+//! workflow steps. Validates transitions against the step transitions graph.
 
 use clap::Args;
 use vertebrae_core::{ServiceError, VertebraeServices};
 
-/// Transition a task to a workflow/step
+/// Transition a task to a specific workflow step
+///
+/// Both arguments are UUIDs. The target step must belong to the same workflow
+/// the task is currently assigned to, and must be a valid transition from the
+/// task's current step (unless --skip-validation is used).
 #[derive(Debug, Args)]
 pub struct TransitionToCommand {
-    /// Task ID to transition (case-insensitive)
+    /// Task UUID to transition
     #[arg(required = true, value_parser = crate::commands::parse_uuid("task ID"))]
     pub id: String,
 
-    /// Target workflow or workflow:step (e.g., 'implementation' or 'review:approved')
-    #[arg(required = true)]
+    /// Target step UUID to transition the task to
+    #[arg(required = true, value_parser = crate::commands::parse_uuid("step ID"))]
     pub target: String,
 
     /// Override warnings (but not errors) when transitioning
@@ -26,52 +30,15 @@ pub struct TransitionToCommand {
     pub skip_validation: bool,
 }
 
-/// Parsed target representing either a workflow or workflow:step combination
-#[derive(Debug, Clone)]
-pub struct ParsedTarget {
-    /// The target workflow name or ID
-    pub workflow: String,
-    /// Optional target step name within the workflow
-    pub step: Option<String>,
-}
-
-impl ParsedTarget {
-    /// Parse a target string into workflow and optional step.
-    ///
-    /// Formats:
-    /// - "workflow" -> workflow only, use initial step
-    /// - "workflow:step" -> specific step in workflow
-    pub fn parse(target: &str) -> Self {
-        if let Some((workflow, step)) = target.split_once(':') {
-            Self {
-                workflow: workflow.to_string(),
-                step: Some(step.to_string()),
-            }
-        } else {
-            Self {
-                workflow: target.to_string(),
-                step: None,
-            }
-        }
-    }
-}
-
 /// Result of the transition-to command execution
 #[derive(Debug)]
 pub struct TransitionToResult {
-    /// The task ID that was transitioned
     pub id: String,
-    /// The target workflow
     pub target_workflow: String,
-    /// The target step (if specified or determined)
     pub target_step: Option<String>,
-    /// The previous workflow (if any)
     pub from_workflow: Option<String>,
-    /// The previous step (if any)
     pub from_step: Option<String>,
-    /// List of tasks that are now unblocked
-    pub unblocked_tasks: Vec<(String, String)>, // (id, title)
-    /// Whether validation was skipped
+    pub unblocked_tasks: Vec<(String, String)>,
     pub validation_skipped: bool,
 }
 
@@ -128,30 +95,15 @@ impl std::fmt::Display for TransitionToResult {
 impl TransitionToCommand {
     /// Execute the transition-to command.
     ///
-    /// Transitions a task to a workflow/step with proper validation against
-    /// the workflow_transitions edge table.
-    ///
-    /// # Arguments
-    ///
-    /// * `services` - Reference to the vertebrae services
-    ///
-    /// # Errors
-    ///
-    /// Returns `ServiceError` if:
-    /// - The task with the given ID does not exist
-    /// - The target workflow does not exist
-    /// - The transition is not allowed (no workflow_transitions edge)
-    /// - Database operations fail
+    /// Transitions a task to a target step within the same workflow,
+    /// validating the transition against the step's transitions_to graph.
     #[allow(deprecated)]
     pub async fn execute(
         &self,
         services: &VertebraeServices,
     ) -> Result<TransitionToResult, ServiceError> {
-        // Normalize ID to lowercase for case-insensitive lookup
         let id = self.id.to_lowercase();
-
-        // Parse target into workflow and optional step
-        let parsed = ParsedTarget::parse(&self.target);
+        let target_step_id = self.target.to_lowercase();
 
         // Get the task
         let task = services.tasks().get_task(&id).await?;
@@ -160,168 +112,113 @@ impl TransitionToCommand {
         let from_workflow = task.workflow_id.clone();
         let from_step = task.current_step_id.clone();
 
-        // Get workflow service for workflow operations
-        let workflow_service = services.workflows();
+        // Resolve target step - validate it exists
+        let target_step = services
+            .steps()
+            .get_step(&target_step_id)
+            .await?
+            .ok_or_else(|| {
+                ServiceError::InvalidInput(format!(
+                    "Step '{}' not found. Use 'vtb step list <workflow-id>' to see available steps.",
+                    target_step_id
+                ))
+            })?;
 
-        // Resolve target workflow - validate it exists
-        let _ = workflow_service.get_workflow(&parsed.workflow).await?;
+        let target_workflow_id = target_step.workflow_id.clone();
 
-        let target_workflow_id = parsed.workflow.clone();
+        // Validate the task is assigned to the same workflow
+        if let Some(current_wf_id) = &from_workflow {
+            if current_wf_id != &target_workflow_id {
+                return Err(ServiceError::InvalidInput(format!(
+                    "Target step belongs to workflow '{}' but task is in workflow '{}'. \
+                     Use 'vtb workflow assign' to change workflows first.",
+                    target_workflow_id, current_wf_id
+                )));
+            }
+        } else {
+            return Err(ServiceError::InvalidInput(format!(
+                "Task '{}' is not assigned to any workflow. \
+                 Use 'vtb workflow assign' first.",
+                id
+            )));
+        }
 
         // Validate the transition if not skipped
         if !self.skip_validation
-            && let Some(current_wf_id) = &from_workflow
+            && let Some(current_step_id) = &from_step
         {
-            // Check if transition is allowed
-            let transitions = workflow_service
-                .get_transitions_from_workflow(current_wf_id)
-                .await?;
-            let allowed = transitions
-                .iter()
-                .any(|t| t.to_workflow == target_workflow_id);
-
-            if current_wf_id != &target_workflow_id && !allowed {
-                return Err(ServiceError::InvalidInput(format!(
-                    "Transition from workflow '{}' to '{}' is not allowed. \
-                     Use --skip-validation to bypass this check.",
-                    current_wf_id, target_workflow_id
-                )));
-            }
-
-            // If staying within the same workflow, validate step transition
-            if current_wf_id == &target_workflow_id
-                && let Some(target_step_name) = &parsed.step
-            {
-                // Query steps for this workflow
-                let steps = services
-                    .steps()
-                    .list_steps_for_workflow(current_wf_id.as_str())
-                    .await?;
-
-                // Invariant: task always has current_step_id
-                let current_step_id = task.current_step_id.as_ref().ok_or_else(|| {
+            let current_step = services
+                .steps()
+                .get_step(current_step_id)
+                .await?
+                .ok_or_else(|| {
                     ServiceError::InvalidInput(format!(
-                        "Task {} is missing current_step_id (invariant violation)",
-                        id
+                        "Task's current step '{}' not found (invariant violation)",
+                        current_step_id
                     ))
                 })?;
-                let current_step = steps
+
+            let is_valid_transition = current_step
+                .transitions_to
+                .iter()
+                .any(|t| t == &target_step_id);
+
+            let is_same_step = current_step_id == &target_step_id;
+
+            if !is_valid_transition && !is_same_step {
+                // Get valid transition names for the error message
+                let steps = services
+                    .steps()
+                    .list_steps_for_workflow(&target_workflow_id)
+                    .await?;
+                let valid_transitions: Vec<String> = current_step
+                    .transitions_to
                     .iter()
-                    .find(|s| s.id.as_ref() == Some(current_step_id));
+                    .filter_map(|t| steps.iter().find(|s| s.id.as_ref() == Some(t)))
+                    .map(|s| format!("{} ({})", s.name, s.id.as_deref().unwrap_or("?")))
+                    .collect();
 
-                // Find target step
-                let target_step = steps.iter().find(|s| s.name == *target_step_name);
+                let hint = if valid_transitions.is_empty() {
+                    "This step has no valid transitions (terminal state).".to_string()
+                } else {
+                    format!(
+                        "Valid transitions from '{}': {}",
+                        current_step.name,
+                        valid_transitions.join(", ")
+                    )
+                };
 
-                // Check if target step exists
-                if target_step.is_none() {
-                    return Err(ServiceError::InvalidInput(format!(
-                        "Step '{}' not found in workflow '{}'",
-                        target_step_name, target_workflow_id
-                    )));
-                }
-
-                if let (Some(current), Some(target)) = (current_step, target_step) {
-                    // Check if target is in current step's transitions_to
-                    let target_id = target.id.as_ref();
-                    let is_valid_transition = target_id.is_some()
-                        && current
-                            .transitions_to
-                            .iter()
-                            .any(|t| Some(t.as_str()) == target_id.map(|s| s.as_str()));
-
-                    // Also allow transitioning to the same step
-                    let is_same_step = current.name == target.name;
-
-                    if !is_valid_transition && !is_same_step {
-                        // Get valid transition names for the error message
-                        let valid_transitions: Vec<String> = current
-                            .transitions_to
-                            .iter()
-                            .filter_map(|t| steps.iter().find(|s| s.id.as_ref() == Some(t)))
-                            .map(|s| s.name.clone())
-                            .collect();
-
-                        let hint = if valid_transitions.is_empty() {
-                            "This step has no valid transitions (terminal state). Use 'vtb list' to see other tasks.".to_string()
-                        } else {
-                            format!(
-                                "Valid transitions from '{}': {}",
-                                current.name,
-                                valid_transitions.join(", ")
-                            )
-                        };
-
-                        return Err(ServiceError::InvalidInput(format!(
-                            "Invalid step transition from '{}' to '{}'. {}",
-                            current.name, target_step_name, hint
-                        )));
-                    }
-                }
+                return Err(ServiceError::InvalidInput(format!(
+                    "Invalid step transition from '{}' to '{}'. {}",
+                    current_step.name, target_step.name, hint
+                )));
             }
         }
 
-        // Determine target step
-        let target_step_name = if let Some(step_name) = &parsed.step {
-            Some(step_name.clone())
-        } else {
-            // Use initial step of the workflow - query the first step by order
-            let steps = services
-                .steps()
-                .list_steps_for_workflow(&target_workflow_id)
-                .await?;
-            steps.first().map(|s| s.name.clone())
-        };
-
-        // Perform the transition - assign workflow and set step
-        let _ = workflow_service
-            .assign_workflow(&id, &target_workflow_id)
+        // Perform the transition
+        services
+            .tasks()
+            .set_current_step(&id, &target_step_id)
             .await?;
 
-        // Set the step if specified
-        if let Some(step_name) = &parsed.step {
-            let steps = services
-                .steps()
-                .list_steps_for_workflow(&target_workflow_id)
-                .await?;
-            if let Some(step) = steps.iter().find(|s| s.name == *step_name)
-                && let Some(step_id) = &step.id
-            {
-                services.tasks().set_current_step(&id, step_id).await?;
-            }
-        } else if let Some(ref step_name) = target_step_name {
-            // If we have a target step from initial step resolution, find and set the step ID
-            let steps = services
-                .steps()
-                .list_steps_for_workflow(&target_workflow_id)
-                .await?;
-            if let Some(step) = steps.iter().find(|s| &s.name == step_name)
-                && let Some(step_id) = &step.id
-            {
-                services.tasks().set_current_step(&id, step_id).await?;
-            }
-        }
+        // Resolve target step name for display
+        let target_step_name = Some(target_step.name.clone());
 
         // Get unblocked tasks (for done/terminal steps)
         let mut unblocked_tasks = vec![];
-        if let Some(step_name) = &target_step_name {
-            // Terminal steps: done, rejected
-            if step_name == "done" || step_name == "rejected" {
-                // Find tasks that depend on this task
-                let dependents = services.tasks().get_dependents(&id).await?;
+        if target_step.is_final {
+            let dependents = services.tasks().get_dependents(&id).await?;
 
-                for dependent_id in dependents {
-                    // Check if this dependent has any remaining incomplete blockers
-                    let blockers = services
-                        .tasks()
-                        .get_incomplete_blockers_with_details(&dependent_id)
-                        .await?;
+            for dependent_id in dependents {
+                let blockers = services
+                    .tasks()
+                    .get_incomplete_blockers_with_details(&dependent_id)
+                    .await?;
 
-                    if blockers.is_empty() {
-                        // This task is now unblocked
-                        if let Ok(task) = services.tasks().get_task(&dependent_id).await {
-                            unblocked_tasks.push((dependent_id, task.title));
-                        }
-                    }
+                if blockers.is_empty()
+                    && let Ok(task) = services.tasks().get_task(&dependent_id).await
+                {
+                    unblocked_tasks.push((dependent_id, task.title));
                 }
             }
         }
@@ -341,68 +238,6 @@ impl TransitionToCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // ==================== ParsedTarget::parse tests ====================
-
-    #[test]
-    fn test_parse_target_workflow_only() {
-        let target = ParsedTarget::parse("implementation");
-        assert_eq!(target.workflow, "implementation");
-        assert!(target.step.is_none());
-    }
-
-    #[test]
-    fn test_parse_target_workflow_and_step() {
-        let target = ParsedTarget::parse("review:approved");
-        assert_eq!(target.workflow, "review");
-        assert_eq!(target.step, Some("approved".to_string()));
-    }
-
-    #[test]
-    fn test_parse_target_with_underscore() {
-        let target = ParsedTarget::parse("in_progress:coding_done");
-        assert_eq!(target.workflow, "in_progress");
-        assert_eq!(target.step, Some("coding_done".to_string()));
-    }
-
-    #[test]
-    fn test_parse_target_empty_string() {
-        let target = ParsedTarget::parse("");
-        assert_eq!(target.workflow, "");
-        assert!(target.step.is_none());
-    }
-
-    #[test]
-    fn test_parse_target_colon_only() {
-        let target = ParsedTarget::parse(":");
-        assert_eq!(target.workflow, "");
-        assert_eq!(target.step, Some("".to_string()));
-    }
-
-    #[test]
-    fn test_parse_target_multiple_colons() {
-        // split_once only splits on first colon
-        let target = ParsedTarget::parse("a:b:c");
-        assert_eq!(target.workflow, "a");
-        assert_eq!(target.step, Some("b:c".to_string()));
-    }
-
-    #[test]
-    fn test_parse_target_clone() {
-        let target = ParsedTarget::parse("review:approved");
-        let cloned = target.clone();
-        assert_eq!(target.workflow, cloned.workflow);
-        assert_eq!(target.step, cloned.step);
-    }
-
-    #[test]
-    fn test_parse_target_debug() {
-        let target = ParsedTarget::parse("review:approved");
-        let debug = format!("{:?}", target);
-        assert!(debug.contains("ParsedTarget"));
-        assert!(debug.contains("review"));
-        assert!(debug.contains("approved"));
-    }
 
     // ==================== TransitionToResult Display tests ====================
 
@@ -534,21 +369,21 @@ mod tests {
     fn test_transition_to_command_debug() {
         let cmd = TransitionToCommand {
             id: "task1".to_string(),
-            target: "review:approved".to_string(),
+            target: "step-uuid-123".to_string(),
             force: true,
             skip_validation: false,
         };
         let debug = format!("{:?}", cmd);
         assert!(debug.contains("TransitionToCommand"));
         assert!(debug.contains("task1"));
-        assert!(debug.contains("review:approved"));
+        assert!(debug.contains("step-uuid-123"));
     }
 
     #[test]
     fn test_transition_to_command_defaults() {
         let cmd = TransitionToCommand {
             id: "task1".to_string(),
-            target: "default".to_string(),
+            target: "step-uuid-456".to_string(),
             force: false,
             skip_validation: false,
         };
