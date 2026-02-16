@@ -34,8 +34,6 @@ import {
   type StepNodeData,
   WorkflowZoneNode,
   type WorkflowZoneNodeData,
-  TaskZoneNode,
-  type TaskZoneNodeData,
   ElkRoutedEdge,
   type ElkRoutedEdgeData,
   LAYOUT_CONSTANTS,
@@ -47,14 +45,12 @@ import {
 import { TaskDetailPanel } from "../components/TaskDetail";
 import { StepDetailPanel } from "../components/StepDetail";
 import { WorkflowDetailPanel } from "../components/WorkflowDetail";
-import { FilteredTasksPanel } from "../components/FilteredTasks/FilteredTasksPanel";
 
 /**
  * Node type mapping for React Flow
  */
 const nodeTypes: NodeTypes = {
   stepNode: StepNode,
-  taskZoneNode: TaskZoneNode,
   workflowZoneNode: WorkflowZoneNode,
 };
 
@@ -103,12 +99,6 @@ function AllWorkflowsPipelineInner() {
     null
   );
 
-  // State for selected zone (workflow ID + step for filtered tasks panel)
-  const [selectedZone, setSelectedZone] = useState<{
-    workflowId: string;
-    step: Step;
-  } | null>(null);
-
   // State for collapsed view toggle (press 'c' to toggle)
   const [isCollapsed, setIsCollapsed] = useState(false);
 
@@ -139,7 +129,6 @@ function AllWorkflowsPipelineInner() {
     setSelectedWorkflow(workflow);
     setSelectedTaskId(null); // Clear task selection
     setSelectedStepId(null); // Clear step selection
-    setSelectedZone(null); // Clear zone selection
   }, []);
 
   const handleCloseWorkflowPanel = useCallback(() => {
@@ -150,16 +139,37 @@ function AllWorkflowsPipelineInner() {
     setSelectedStepId(null);
   }, []);
 
-  // Zone selection handlers (for filtered tasks panel)
-  const handleZoneClick = useCallback((workflowId: string, step: Step) => {
-    setSelectedZone({ workflowId, step });
-    setSelectedTaskId(null); // Clear task selection
-    setSelectedStepId(null); // Clear step config selection
-  }, []);
+  // Compute stepTasks when selectedStepId changes
+  const stepTasksData = useMemo(() => {
+    if (!selectedStepId) return { stepTasks: [], workflowId: "" };
 
-  const handleCloseZonePanel = useCallback(() => {
-    setSelectedZone(null);
-  }, []);
+    // Find which workflow the selected step belongs to
+    let workflowId = "";
+    for (const [wfId, steps] of workflowStepsMap) {
+      if (steps.some((s) => s.id === selectedStepId)) {
+        workflowId = wfId;
+        break;
+      }
+    }
+
+    if (!workflowId) return { stepTasks: [], workflowId: "" };
+
+    // Get tasks for this workflow
+    const workflowTasks = workflowTasksMap.get(workflowId) || [];
+    const workflowSteps = workflowStepsMap.get(workflowId) || [];
+
+    if (workflowSteps.length === 0) {
+      return { stepTasks: [], workflowId };
+    }
+
+    // Group tasks by step and get tasks for the selected step
+    const tasksByStep = groupTasksByStep(workflowTasks, workflowSteps);
+    const selectedStep = workflowSteps.find((s) => s.id === selectedStepId);
+    const stepName = selectedStep?.name.toLowerCase();
+    const stepTasks = stepName ? tasksByStep.get(stepName) || [] : [];
+
+    return { stepTasks, workflowId };
+  }, [selectedStepId, workflowStepsMap, workflowTasksMap]);
 
   // Single fetch function that loads all pipeline data in one command
   const fetchPipelineData = useCallback(async () => {
@@ -414,8 +424,6 @@ function AllWorkflowsPipelineInner() {
       const workflowSteps = workflowStepsMap.get(workflowId) || [];
       const sortedSteps = [...workflowSteps].sort((a, b) => a.order - b.order);
       const workflowTasks = workflowTasksMap.get(workflowId) || [];
-      const tasksByStep = groupTasksByStep(workflowTasks, workflowSteps);
-
       // Use collapsed or expanded dimensions based on toggle
       const zoneWidth = isCollapsed
         ? COLLAPSED_WORKFLOW_WIDTH
@@ -475,44 +483,6 @@ function AllWorkflowsPipelineInner() {
             } as StepNodeData,
             draggable: false,
           });
-
-          // Add task zone node below each step
-          const stepTasks = tasksByStep.get(step.name.toLowerCase()) || [];
-          const isZoneActive =
-            selectedZone?.workflowId === workflowId &&
-            selectedZone?.step.order === step.order;
-          nodes.push({
-            id: `task-zone-${workflowId}-${step.order}`,
-            type: "taskZoneNode",
-            position: {
-              x:
-                zoneX +
-                LAYOUT_CONSTANTS.WORKFLOW_ZONE_PADDING +
-                index * LAYOUT_CONSTANTS.NODE_SPACING_X -
-                9, // Center offset
-              y:
-                zoneY +
-                LAYOUT_CONSTANTS.WORKFLOW_ZONE_HEADER_HEIGHT +
-                LAYOUT_CONSTANTS.TASK_ZONE_Y_OFFSET,
-            },
-            data: {
-              label: `${step.name} (${stepTasks.length})`,
-              tasks: stepTasks,
-              onTaskClick: handleTaskClick,
-              selectedTaskId,
-              step,
-              onZoneClick: () => handleZoneClick(workflowId, step),
-              isZoneActive,
-            } as TaskZoneNodeData,
-            style: {
-              background: "rgba(15, 15, 18, 0.8)",
-              border: "1px solid rgba(100, 116, 139, 0.3)",
-              borderRadius: "8px",
-              padding: "8px",
-            },
-            draggable: false,
-            selectable: true,
-          });
         });
       }
 
@@ -530,8 +500,6 @@ function AllWorkflowsPipelineInner() {
     selectedTaskId,
     handleStepClick,
     selectedStepId,
-    handleZoneClick,
-    selectedZone,
     handleWorkflowClick,
     selectedWorkflow,
     isCollapsed,
@@ -832,6 +800,9 @@ function AllWorkflowsPipelineInner() {
         <StepDetailPanel
           stepId={selectedStepId}
           allSteps={Array.from(workflowStepsMap.values()).flat()}
+          tasks={stepTasksData.stepTasks}
+          onTaskSelect={handleRelatedTaskSelect}
+          selectedTaskId={selectedTaskId}
           onClose={handleCloseStepPanel}
           onUpdated={handleStepUpdated}
           onDeleted={handleStepDeleted}
@@ -854,34 +825,6 @@ function AllWorkflowsPipelineInner() {
           onClose={handleCloseWorkflowPanel}
         />
       )}
-
-      {/* Filtered Tasks Panel */}
-      {selectedZone &&
-        (() => {
-          const allWorkflowTasks =
-            workflowTasksMap.get(selectedZone.workflowId) || [];
-          // Get steps for this workflow
-          const workflowSteps =
-            workflowStepsMap.get(selectedZone.workflowId) || [];
-          if (workflowSteps.length === 0) return null;
-
-          // Group tasks by step
-          const tasksByStep = groupTasksByStep(allWorkflowTasks, workflowSteps);
-          // Get tasks for selected step
-          const stepTasks =
-            tasksByStep.get(selectedZone.step.name.toLowerCase()) || [];
-
-          return (
-            <FilteredTasksPanel
-              step={selectedZone.step}
-              tasks={stepTasks}
-              workflowId={selectedZone.workflowId}
-              onClose={handleCloseZonePanel}
-              onTaskSelect={handleRelatedTaskSelect}
-              selectedTaskId={selectedTaskId}
-            />
-          );
-        })()}
     </div>
   );
 }

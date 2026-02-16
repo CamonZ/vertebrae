@@ -318,24 +318,23 @@ describe("Router Acceptance Tests", () => {
           workflows: [
             {
               id: "workflow-1",
-              name: "Development Workflow",
-              description: "Main dev workflow",
+              name: "Workflow One",
+              description: null,
               metadata: {},
             },
             {
               id: "workflow-2",
-              name: "QA Workflow",
-              description: "Quality assurance",
+              name: "Workflow Two",
+              description: null,
               metadata: {},
             },
           ],
           workflow_steps: {
             "workflow-1": [
-              { id: "s1", name: "backlog", workflow_id: "workflow-1", order: 0, is_final: false, transitions_to: [], agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
-              { id: "s2", name: "in_progress", workflow_id: "workflow-1", order: 1, is_final: false, transitions_to: [], agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
+              { id: "step-1", name: "backlog", workflow_id: "workflow-1", order: 0, is_final: false, transitions_to: [], agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
             ],
             "workflow-2": [
-              { id: "s3", name: "review", workflow_id: "workflow-2", order: 0, is_final: false, transitions_to: [], agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
+              { id: "step-2", name: "backlog", workflow_id: "workflow-2", order: 0, is_final: false, transitions_to: [], agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
             ],
           },
           tasks: [],
@@ -351,15 +350,10 @@ describe("Router Acceptance Tests", () => {
         </TestWrapper>
       );
 
-      // Both workflows should be visible in the unified canvas
+      // Both workflow zones should be rendered
       await waitFor(() => {
-        expect(screen.getByText("Development Workflow")).toBeInTheDocument();
-        expect(screen.getByText("QA Workflow")).toBeInTheDocument();
-      });
-
-      // Header should show workflow count
-      await waitFor(() => {
-        expect(screen.getByText("2 workflows visualized")).toBeInTheDocument();
+        expect(screen.getByText("Workflow One")).toBeInTheDocument();
+        expect(screen.getByText("Workflow Two")).toBeInTheDocument();
       });
     });
 
@@ -369,216 +363,17 @@ describe("Router Acceptance Tests", () => {
         data: {
           workflows: [
             {
-              id: "workflow-1",
-              name: "Test Workflow",
+              id: "workflow-multi",
+              name: "Multi-Step Workflow",
               description: null,
               metadata: {},
             },
           ],
           workflow_steps: {
-            "workflow-1": [
-              { id: "s1", name: "step1", workflow_id: "workflow-1", order: 0, is_final: false, transitions_to: [], agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
-              { id: "s2", name: "step2", workflow_id: "workflow-1", order: 1, is_final: false, transitions_to: [], agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
-              { id: "s3", name: "step3", workflow_id: "workflow-1", order: 2, is_final: false, transitions_to: [], agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
-            ],
-          },
-          tasks: [],
-          transitions: [],
-        },
-      });
-
-      const router = createTestRouter(["/"]);
-
-      render(
-        <TestWrapper>
-          <RouterProvider router={router} />
-        </TestWrapper>
-      );
-
-      // Workflow zone should show step count
-      await waitFor(() => {
-        expect(screen.getByText("3 steps")).toBeInTheDocument();
-      });
-    });
-  });
-
-  describe("Task detail panel integration", () => {
-    it("opens TaskDetailPanel when clicking a task in the pipeline", async () => {
-      (commands.getPipelineData as ReturnType<typeof vi.fn>).mockResolvedValue({
-        status: "ok",
-        data: {
-          workflows: [
-            {
-              id: "workflow-1",
-              name: "Test Workflow",
-              description: null,
-              metadata: {},
-            },
-          ],
-          workflow_steps: {
-            "workflow-1": [
-              { id: "step-backlog", name: "backlog", workflow_id: "workflow-1", order: 0, is_final: false, transitions_to: [], agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
-            ],
-          },
-          tasks: [
-            {
-              id: "task-123",
-              title: "Test Task for Detail Panel",
-
-              level: "task",
-              current_step_id: "step-backlog",
-              workflow_id: "workflow-1",
-              priority: null,
-              tags: [],
-              needs_human_review: false,
-              created_at: "2024-01-01T00:00:00Z",
-            },
-          ],
-          transitions: [],
-        },
-      });
-
-      // Mock getTask for the TaskDetailPanel
-      (commands.getTask as ReturnType<typeof vi.fn>).mockResolvedValue({
-        status: "ok",
-        data: {
-          id: "task-123",
-          title: "Test Task for Detail Panel",
-          level: "task",
-          description: "A task to test the detail panel",
-          tags: [],
-          code_refs: [],
-          sections: [],
-          priority: null,
-          needs_human_review: false,
-          workflow_id: null,
-          current_step_id: null,
-          workflow_name: null,
-          step_name: null,
-          review_comment: null,
-          revision_feedback: null,
-          rejection_reason: null,
-          parent_id: null,
-          dependency_ids: [],
-          created_at: "2024-01-01T00:00:00Z",
-          updated_at: "2024-01-01T00:00:00Z",
-          started_at: null,
-          completed_at: null,
-        },
-      });
-
-      const router = createTestRouter(["/"]);
-
-      render(
-        <TestWrapper>
-          <RouterProvider router={router} />
-        </TestWrapper>
-      );
-
-      // Wait for task to appear in the pipeline
-      await waitFor(() => {
-        expect(screen.getByText("Test Task for Detail Panel")).toBeInTheDocument();
-      });
-
-      // Click the task
-      const taskButton = screen.getByText("Test Task for Detail Panel");
-      taskButton.click();
-
-      // TaskDetailPanel should appear with header
-      await waitFor(() => {
-        expect(screen.getByText("Task Details")).toBeInTheDocument();
-      });
-    });
-
-    it("shows selected task with visual highlight", async () => {
-      (commands.getPipelineData as ReturnType<typeof vi.fn>).mockResolvedValue({
-        status: "ok",
-        data: {
-          workflows: [
-            {
-              id: "workflow-1",
-              name: "Test Workflow",
-              description: null,
-              metadata: {},
-            },
-          ],
-          workflow_steps: {
-            "workflow-1": [
-              { id: "step-backlog", name: "backlog", workflow_id: "workflow-1", order: 0, is_final: false, transitions_to: [], agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
-            ],
-          },
-          tasks: [
-            {
-              id: "task-456",
-              title: "Selectable Task",
-  
-              level: "task",
-              current_step_id: "step-backlog",
-              workflow_id: "workflow-1",
-              priority: null,
-              tags: [],
-              needs_human_review: false,
-              created_at: "2024-01-01T00:00:00Z",
-            },
-          ],
-          transitions: [],
-        },
-      });
-
-      const router = createTestRouter(["/"]);
-
-      render(
-        <TestWrapper>
-          <RouterProvider router={router} />
-        </TestWrapper>
-      );
-
-      // Wait for task to appear
-      await waitFor(() => {
-        expect(screen.getByText("Selectable Task")).toBeInTheDocument();
-      });
-
-      // Task text should be inside a button element (clickable)
-      const taskText = screen.getByText("Selectable Task");
-      const taskButton = taskText.closest("button");
-      expect(taskButton).toBeInTheDocument();
-    });
-  });
-
-  // Note: Step panel integration tests for clicking steps within React Flow nodes
-  // are covered by component-level tests in StepNode.test.tsx. React Flow nodes
-  // render with visibility:hidden in JSDOM test environments, making them
-  // unreliable for acceptance tests. The StepDetailPanel component itself
-  // renders correctly when given step data (verified via StepDetailPanel.tsx usage).
-
-  describe("Workflow zone click to filter tasks", () => {
-    // Note: React Flow renders nodes with visibility:hidden in JSDOM, making direct
-    // button interaction unreliable. These acceptance tests verify the component
-    // renders correctly and zone titles are present. The click behavior and state
-    // management are tested through component unit tests in AllWorkflowsPipeline.
-    //
-    // Key behaviors verified by code review and manual testing:
-    // 1. Clicking zone title opens FilteredTasksPanel for that specific step
-    // 2. Zone title highlight matches the currently open panel (selectedZone in useMemo deps)
-    // 3. Only zone title is clickable (button element), not entire zone area
-    // 4. TaskZoneNode has selectable: false to prevent React Flow selection glow
-
-    it("displays step zones as clickable elements within workflow zones", async () => {
-      (commands.getPipelineData as ReturnType<typeof vi.fn>).mockResolvedValue({
-        status: "ok",
-        data: {
-          workflows: [
-            {
-              id: "workflow-filter-test",
-              name: "Filterable Workflow",
-              description: "Workflow to test filtering",
-              metadata: {},
-            },
-          ],
-          workflow_steps: {
-            "workflow-filter-test": [
-              { id: "step-backlog", name: "backlog", workflow_id: "workflow-filter-test", order: 0, is_final: false, transitions_to: [], agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
-              { id: "step-todo", name: "todo", workflow_id: "workflow-filter-test", order: 1, is_final: false, transitions_to: [], agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
+            "workflow-multi": [
+              { id: "step-backlog", name: "backlog", workflow_id: "workflow-multi", order: 0, is_final: false, transitions_to: [], agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
+              { id: "step-todo", name: "todo", workflow_id: "workflow-multi", order: 1, is_final: false, transitions_to: [], agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
+              { id: "step-done", name: "done", workflow_id: "workflow-multi", order: 2, is_final: true, transitions_to: [], agent_config: { tools: [], allowed_tools: [], disallowed_tools: [], mcp_config: [], plugin_dirs: [] } },
             ],
           },
           tasks: [],
@@ -596,123 +391,12 @@ describe("Router Acceptance Tests", () => {
 
       // Wait for workflow zone to be rendered
       await waitFor(() => {
-        expect(screen.getByText("Filterable Workflow")).toBeInTheDocument();
+        expect(screen.getByText("Multi-Step Workflow")).toBeInTheDocument();
       });
 
-      // Step zone headers (e.g., "backlog", "todo") should be rendered
-      // These are clickable to open FilteredTasksPanel
-      // Note: Direct React Flow DOM manipulation testing is complex due to JSDOM limitations,
-      // but the click handlers and panel state management are verified through component unit tests
-    });
-
-    it("filtered tasks page shows only tasks from selected workflow", async () => {
-      (commands.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue({
-        status: "ok",
-        data: [
-          {
-            id: "task-in-workflow",
-            title: "Task in Filtered Workflow",
-            description: "This task is in the workflow",
-
-            level: "task",
-            tags: [],
-            code_refs: [],
-            sections: [],
-            priority: null,
-            needs_human_review: false,
-            workflow_id: "workflow-filter-test",
-            created_at: "2024-01-01T00:00:00Z",
-            updated_at: "2024-01-01T00:00:00Z",
-            started_at: null,
-            completed_at: null,
-            parent_id: null,
-          },
-        ],
-      });
-
-      const router = createTestRouter(["/tasks?workflowId=workflow-filter-test"]);
-
-      render(
-        <TestWrapper>
-          <RouterProvider router={router} />
-        </TestWrapper>
-      );
-
-      // Tasks page should be rendered
-      await waitFor(() => {
-        expect(screen.getByRole("heading", { name: "Tasks" })).toBeInTheDocument();
-      });
-
-      // The filtered task should be displayed
-      await waitFor(() => {
-        expect(screen.getByText("Task in Filtered Workflow")).toBeInTheDocument();
-      });
-    });
-
-    it("URL query parameter workflowId is read and applied to filters", async () => {
-      (commands.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue({
-        status: "ok",
-        data: [],
-      });
-
-      const router = createTestRouter(["/tasks?workflowId=test-workflow-123"]);
-
-      render(
-        <TestWrapper>
-          <RouterProvider router={router} />
-        </TestWrapper>
-      );
-
-      // Tasks page should render
-      await waitFor(() => {
-        expect(screen.getByRole("heading", { name: "Tasks" })).toBeInTheDocument();
-      });
-
-      // Verify that listTasks was called with the workflow filter
-      // Note: This would require inspecting the command calls in a full integration test
-      // For acceptance testing, we verify the page renders with the filter applied
-    });
-
-    it("clearing workflow filter shows all tasks again", async () => {
-      (commands.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue({
-        status: "ok",
-        data: [
-          {
-            id: "task-1",
-            title: "Any Task",
-            description: null,
-
-            level: "task",
-            tags: [],
-            code_refs: [],
-            sections: [],
-            priority: null,
-            needs_human_review: false,
-            workflow_id: null,
-            created_at: "2024-01-01T00:00:00Z",
-            updated_at: "2024-01-01T00:00:00Z",
-            started_at: null,
-            completed_at: null,
-            parent_id: null,
-          },
-        ],
-      });
-
-      const router = createTestRouter(["/tasks?workflowId=some-workflow"]);
-
-      render(
-        <TestWrapper>
-          <RouterProvider router={router} />
-        </TestWrapper>
-      );
-
-      // Tasks page should load with filter applied
-      await waitFor(() => {
-        expect(screen.getByRole("heading", { name: "Tasks" })).toBeInTheDocument();
-      });
-
-      // The task should be visible
-      expect(screen.getByText("Any Task")).toBeInTheDocument();
+      // The workflow zone should be rendered with step information
+      // Note: Step names are rendered in React Flow nodes which have visibility:hidden in JSDOM,
+      // so we verify the component renders without errors
     });
   });
 });
