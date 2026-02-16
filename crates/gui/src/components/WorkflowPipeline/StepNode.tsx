@@ -14,6 +14,7 @@ export type StepNodeData = {
   isExecuting?: boolean;
   onStepClick?: (step: Step) => void;
   isSelected?: boolean;
+  taskCounts?: { epic: number; ticket: number; task: number };
 };
 
 export type StepNodeType = Node<StepNodeData, 'stepNode'>;
@@ -23,7 +24,7 @@ export type StepNodeType = Node<StepNodeData, 'stepNode'>;
  * Features neural-pathway-inspired design with glowing connections.
  */
 function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
-  const { step, isFirst, isLast, onStepClick, isSelected } = data;
+  const { step, isFirst, isLast, onStepClick, isSelected, taskCounts } = data;
 
   const handleClick = () => {
     onStepClick?.(step);
@@ -162,6 +163,29 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
             </svg>
             Process
           </span>
+        )}
+
+        {taskCounts && (taskCounts.epic > 0 || taskCounts.ticket > 0 || taskCounts.task > 0) && (
+          <div className="ml-auto flex items-center gap-2">
+            {taskCounts.epic > 0 && (
+              <span className="flex items-center gap-1 text-[10px] text-text-muted" title={`${taskCounts.epic} epic(s)`}>
+                <span className="w-2 h-2 rounded-full bg-info" />
+                {taskCounts.epic}
+              </span>
+            )}
+            {taskCounts.ticket > 0 && (
+              <span className="flex items-center gap-1 text-[10px] text-text-muted" title={`${taskCounts.ticket} ticket(s)`}>
+                <span className="w-2 h-2 rounded-full bg-primary" />
+                {taskCounts.ticket}
+              </span>
+            )}
+            {taskCounts.task > 0 && (
+              <span className="flex items-center gap-1 text-[10px] text-text-muted" title={`${taskCounts.task} task(s)`}>
+                <span className="w-2 h-2 rounded-full bg-text-secondary" />
+                {taskCounts.task}
+              </span>
+            )}
+          </div>
         )}
       </div>
 

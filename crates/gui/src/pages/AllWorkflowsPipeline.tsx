@@ -459,8 +459,20 @@ function AllWorkflowsPipelineInner() {
       // Only add step and task nodes when expanded (not collapsed)
       if (!isCollapsed) {
         // Add step nodes within this workflow zone
+        const tasksByStep = groupTasksByStep(workflowTasks, sortedSteps);
+
         sortedSteps.forEach((step, index) => {
           const isStepSelected = selectedStepId === step.id;
+          
+          // Compute task counts for this step
+          const stepTasks = tasksByStep.get(step.name.toLowerCase()) || [];
+          const taskCounts = { epic: 0, ticket: 0, task: 0 };
+          stepTasks.forEach((t) => {
+            if (t.level === "epic") taskCounts.epic++;
+            else if (t.level === "ticket") taskCounts.ticket++;
+            else taskCounts.task++;
+          });
+
           nodes.push({
             id: `step-${workflowId}-${step.order}`,
             type: "stepNode",
@@ -480,6 +492,7 @@ function AllWorkflowsPipelineInner() {
               isLast: index === sortedSteps.length - 1,
               onStepClick: handleStepClick,
               isSelected: isStepSelected,
+              taskCounts,
             } as StepNodeData,
             draggable: false,
           });
