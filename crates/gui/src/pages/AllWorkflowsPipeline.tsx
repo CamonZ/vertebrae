@@ -328,7 +328,7 @@ function AllWorkflowsPipelineInner() {
               next.delete(wfId);
               return next;
             });
-          }, 1500);
+          }, 2000);
         }
 
         if (stepId) {
@@ -339,7 +339,7 @@ function AllWorkflowsPipelineInner() {
               next.delete(stepId);
               return next;
             });
-          }, 1500);
+          }, 2000);
         }
       } catch {
         // Fallback to full refetch on error
