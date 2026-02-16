@@ -225,4 +225,69 @@ describe("StepNode", () => {
       expect(node).toBeInTheDocument();
     });
   });
+
+  describe("task count badges", () => {
+    it("renders task count badges when taskCounts provided", () => {
+      const props = createStepNodeProps({
+        taskCounts: { epic: 2, ticket: 3, task: 1 },
+      });
+
+      render(<StepNode {...props} />);
+
+      // Check for title attributes which are unique to task count badges
+      expect(screen.getByTitle("2 epic(s)")).toBeInTheDocument();
+      expect(screen.getByTitle("3 ticket(s)")).toBeInTheDocument();
+      expect(screen.getByTitle("1 task(s)")).toBeInTheDocument();
+    });
+
+    it("does not render task count badges when taskCounts not provided", () => {
+      const props = createStepNodeProps();
+
+      const { container } = render(<StepNode {...props} />);
+      const taskCountContainer = container.querySelector(".ml-auto.flex.gap-2");
+      expect(taskCountContainer).not.toBeInTheDocument();
+    });
+
+    it("only shows non-zero task counts", () => {
+      const props = createStepNodeProps({
+        taskCounts: { epic: 2, ticket: 0, task: 0 },
+      });
+
+      render(<StepNode {...props} />);
+
+      // Check for epic badge
+      expect(screen.getByTitle("2 epic(s)")).toBeInTheDocument();
+      // Ticket and task should not have title attributes since counts are 0
+      expect(screen.queryByTitle("0 ticket(s)")).not.toBeInTheDocument();
+      expect(screen.queryByTitle("0 task(s)")).not.toBeInTheDocument();
+    });
+
+    it("shows correct title attributes on task count badges", () => {
+      const props = createStepNodeProps({
+        taskCounts: { epic: 2, ticket: 3, task: 1 },
+      });
+
+      render(<StepNode {...props} />);
+
+      // Check for correct title attributes
+      const epicBadge = screen.getByTitle("2 epic(s)");
+      expect(epicBadge).toBeInTheDocument();
+
+      const ticketBadge = screen.getByTitle("3 ticket(s)");
+      expect(ticketBadge).toBeInTheDocument();
+
+      const taskBadge = screen.getByTitle("1 task(s)");
+      expect(taskBadge).toBeInTheDocument();
+    });
+
+    it("does not render badges when all counts are zero", () => {
+      const props = createStepNodeProps({
+        taskCounts: { epic: 0, ticket: 0, task: 0 },
+      });
+
+      const { container } = render(<StepNode {...props} />);
+      const taskCountDivs = container.querySelectorAll(".ml-auto.flex.gap-2");
+      expect(taskCountDivs.length).toBe(0);
+    });
+  });
 });
