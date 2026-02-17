@@ -14,6 +14,7 @@ vi.mock("./bindings", () => ({
     getTask: vi.fn(),
     listStepsForWorkflow: vi.fn(),
     listWorkflowTransitions: vi.fn(),
+    getTaskExecutions: vi.fn(),
   },
   events: {
     workflowChangedEvent: {
@@ -23,6 +24,9 @@ vi.mock("./bindings", () => ({
       listen: vi.fn(() => Promise.resolve(() => {})),
     },
     stepChangedEvent: {
+      listen: vi.fn(() => Promise.resolve(() => {})),
+    },
+    stepExecutionChangedEvent: {
       listen: vi.fn(() => Promise.resolve(() => {})),
     },
   },

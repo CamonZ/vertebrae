@@ -754,4 +754,148 @@ describe("StepDetailPanel", () => {
       expect(onTaskSelect).not.toHaveBeenCalled();
     });
   });
+
+  describe("execution state tracking", () => {
+    it("accepts taskExecutionStates prop without error", async () => {
+      const user = userEvent.setup();
+      const tasks = [
+        createTask({ id: "task-1", title: "Running Task" }),
+      ];
+      const executionStates = new Map([
+        ["task-1", { status: "Running" as const, stepName: "build" }],
+      ]);
+
+      render(
+        <StepDetailPanel
+          stepId="step-test"
+          allSteps={[]}
+          tasks={tasks}
+          taskExecutionStates={executionStates}
+        />
+      );
+
+      // Switch to Tasks tab
+      await user.click(screen.getByText("Tasks"));
+
+      // Task should be visible
+      expect(screen.getByText("Running Task")).toBeInTheDocument();
+    });
+
+    it("renders execution indicator for running task in tree view", async () => {
+      const user = userEvent.setup();
+      const tasks = [
+        createTask({ id: "task-1", title: "Running Task" }),
+      ];
+      const executionStates = new Map([
+        ["task-1", { status: "Running" as const, stepName: "build" }],
+      ]);
+
+      render(
+        <StepDetailPanel
+          stepId="step-test"
+          allSteps={[]}
+          tasks={tasks}
+          taskExecutionStates={executionStates}
+        />
+      );
+
+      await user.click(screen.getByText("Tasks"));
+
+      // Should show execution indicator
+      expect(screen.getByTitle("Execution: Running")).toBeInTheDocument();
+    });
+
+    it("renders execution indicator for completed task in tree view", async () => {
+      const user = userEvent.setup();
+      const tasks = [
+        createTask({ id: "task-1", title: "Done Task" }),
+      ];
+      const executionStates = new Map([
+        ["task-1", { status: "Completed" as const, stepName: "build" }],
+      ]);
+
+      render(
+        <StepDetailPanel
+          stepId="step-test"
+          allSteps={[]}
+          tasks={tasks}
+          taskExecutionStates={executionStates}
+        />
+      );
+
+      await user.click(screen.getByText("Tasks"));
+
+      expect(screen.getByTitle("Execution: Completed")).toBeInTheDocument();
+    });
+
+    it("renders execution indicator for failed task in tree view", async () => {
+      const user = userEvent.setup();
+      const tasks = [
+        createTask({ id: "task-1", title: "Failed Task" }),
+      ];
+      const executionStates = new Map([
+        ["task-1", { status: "Failed" as const, stepName: "build" }],
+      ]);
+
+      render(
+        <StepDetailPanel
+          stepId="step-test"
+          allSteps={[]}
+          tasks={tasks}
+          taskExecutionStates={executionStates}
+        />
+      );
+
+      await user.click(screen.getByText("Tasks"));
+
+      expect(screen.getByTitle("Execution: Failed")).toBeInTheDocument();
+    });
+
+    it("renders execution indicator in list view", async () => {
+      const user = userEvent.setup();
+      const tasks = [
+        createTask({ id: "task-1", title: "Running Task" }),
+      ];
+      const executionStates = new Map([
+        ["task-1", { status: "Running" as const, stepName: "build" }],
+      ]);
+
+      render(
+        <StepDetailPanel
+          stepId="step-test"
+          allSteps={[]}
+          tasks={tasks}
+          taskExecutionStates={executionStates}
+        />
+      );
+
+      await user.click(screen.getByText("Tasks"));
+      // Switch to list view
+      await user.click(screen.getByLabelText("List view"));
+
+      expect(screen.getByTitle("Execution: Running")).toBeInTheDocument();
+    });
+
+    it("does not render execution indicator for tasks without execution state", async () => {
+      const user = userEvent.setup();
+      const tasks = [
+        createTask({ id: "task-1", title: "Idle Task" }),
+      ];
+      // Empty execution states map
+      const executionStates = new Map<string, { status: "Running" | "Completed" | "Failed" | "Pending"; stepName: string }>();
+
+      render(
+        <StepDetailPanel
+          stepId="step-test"
+          allSteps={[]}
+          tasks={tasks}
+          taskExecutionStates={executionStates}
+        />
+      );
+
+      await user.click(screen.getByText("Tasks"));
+
+      expect(screen.queryByTitle(/^Execution:/)).not.toBeInTheDocument();
+    });
+  });
 });

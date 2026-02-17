@@ -23,8 +23,11 @@ import {
   type Step,
   type Workflow,
   type WorkflowTransition,
+  type StepExecutionStatus,
+  type ExecutionStatus,
 } from "../bindings";
 import { useStepChangeListener } from "../hooks/useStepChangeListener";
+import { useStepExecutionChangeListener } from "../hooks/useStepExecutionChangeListener";
 import { useElkLayout, type LayoutNode, type LayoutEdge } from "../hooks";
 import { useToastStore } from "../stores";
 import { useTaskStore } from "../stores";
@@ -105,6 +108,34 @@ function AllWorkflowsPipelineInner() {
   // Track IDs that should flash (workflow zone + step node)
   const [flashingWorkflowIds, setFlashingWorkflowIds] = useState<Set<string>>(new Set());
   const [flashingStepIds, setFlashingStepIds] = useState<Set<string>>(new Set());
+
+  // Track per-task execution state from StepExecutionChangedEvent
+  const [taskExecutionStates, setTaskExecutionStates] = useState<
+    Map<string, { status: StepExecutionStatus; stepName: string }>
+  >(new Map());
+
+  // Listen for step execution changes and track per-task state
+  useStepExecutionChangeListener({
+    onExecutionCreated: (_executionId, taskId, _workflowId, stepName, status) => {
+      setTaskExecutionStates((prev) => {
+        const next = new Map(prev);
+        next.set(taskId, { status, stepName });
+        return next;
+      });
+    },
+    onExecutionStatusChanged: (_executionId, taskId, newStatus) => {
+      setTaskExecutionStates((prev) => {
+        const next = new Map(prev);
+        const existing = next.get(taskId);
+        if (existing) {
+          next.set(taskId, { ...existing, status: newStatus });
+        } else {
+          next.set(taskId, { status: newStatus, stepName: "" });
+        }
+        return next;
+      });
+    },
+  });
 
   // Task selection handlers
   const handleTaskClick = useCallback((taskId: string) => {
@@ -254,6 +285,57 @@ function AllWorkflowsPipelineInner() {
   useEffect(() => {
     fetchPipelineData();
   }, [fetchPipelineData]);
+
+  // Initialize execution states from API after pipeline data loads
+  useEffect(() => {
+    // Gather all task IDs across all workflows
+    const allTaskIds: string[] = [];
+    for (const tasks of workflowTasksMap.values()) {
+      for (const task of tasks) {
+        allTaskIds.push(task.id);
+      }
+    }
+
+    if (allTaskIds.length === 0) return;
+
+    // Map API ExecutionStatus to frontend StepExecutionStatus
+    const mapStatus = (status: ExecutionStatus): StepExecutionStatus => {
+      switch (status) {
+        case "in_progress": return "Running";
+        case "completed": return "Completed";
+        case "failed": return "Failed";
+        default: return "Pending";
+      }
+    };
+
+    // Fetch latest execution for each task in parallel
+    Promise.allSettled(
+      allTaskIds.map((taskId) => commands.getTaskExecutions(taskId).then((result) => ({ taskId, result })))
+    ).then((outcomes) => {
+      const newStates = new Map<string, { status: StepExecutionStatus; stepName: string }>();
+      for (const outcome of outcomes) {
+        if (outcome.status !== "fulfilled") continue;
+        const { taskId, result } = outcome.value;
+        if (result.status !== "ok" || result.data.length === 0) continue;
+        // Latest execution is the last one in the chronological list
+        const latest = result.data[result.data.length - 1];
+        newStates.set(taskId, {
+          status: mapStatus(latest.status),
+          stepName: latest.step_name,
+        });
+      }
+      if (newStates.size > 0) {
+        setTaskExecutionStates((prev) => {
+          // Merge: API data as base, keep any newer WebSocket updates
+          const merged = new Map(newStates);
+          for (const [k, v] of prev) {
+            merged.set(k, v);
+          }
+          return merged;
+        });
+      }
+    });
+  }, [workflowTasksMap]);
 
   // Handle individual task changes - fetch only the changed task and patch local state
   useEffect(() => {
@@ -504,6 +586,17 @@ function AllWorkflowsPipelineInner() {
             else taskCounts.task++;
           });
 
+          // Compute execution counts for this step
+          const executionCounts = { running: 0, completed: 0, failed: 0 };
+          stepTasks.forEach((t) => {
+            const execState = taskExecutionStates.get(t.id);
+            if (execState) {
+              if (execState.status === "Running") executionCounts.running++;
+              else if (execState.status === "Completed") executionCounts.completed++;
+              else if (execState.status === "Failed") executionCounts.failed++;
+            }
+          });
+
           nodes.push({
             id: `step-${workflowId}-${step.order}`,
             type: "stepNode",
@@ -524,6 +617,7 @@ function AllWorkflowsPipelineInner() {
               onStepClick: handleStepClick,
               isSelected: isStepSelected,
               taskCounts,
+              executionCounts,
               isFlashing: step.id ? flashingStepIds.has(step.id) : false,
             } as StepNodeData,
             draggable: false,
@@ -550,6 +644,7 @@ function AllWorkflowsPipelineInner() {
     isCollapsed,
     flashingWorkflowIds,
     flashingStepIds,
+    taskExecutionStates,
   ]);
 
   // Generate edges for step transitions
@@ -853,6 +948,7 @@ function AllWorkflowsPipelineInner() {
           onClose={handleCloseStepPanel}
           onUpdated={handleStepUpdated}
           onDeleted={handleStepDeleted}
+          taskExecutionStates={taskExecutionStates}
         />
       )}
 

@@ -51,23 +51,23 @@ describe("nodeConstants", () => {
   describe("calculateWorkflowZoneHeight", () => {
     it("should calculate height without task zone", () => {
       // After removal of TaskZoneNodes, height should be:
-      // 80 (HEADER) + 80 (STEP_Y_OFFSET) + 130 (step height) + 40 (PADDING)
-      // = 330
+      // 80 (HEADER) + 80 (STEP_Y_OFFSET) + 170 (step height) + 40 (PADDING)
+      // = 370
       const height = calculateWorkflowZoneHeight();
-      expect(height).toBe(330);
+      expect(height).toBe(370);
     });
 
-    it("should be approximately 330px (not ~620px with task zone)", () => {
+    it("should be approximately 370px (not ~620px with task zone)", () => {
       const height = calculateWorkflowZoneHeight();
-      // Verify it's in the expected range (~330px)
-      expect(height).toBeGreaterThanOrEqual(320);
-      expect(height).toBeLessThanOrEqual(340);
+      // Verify it's in the expected range (~370px)
+      expect(height).toBeGreaterThanOrEqual(360);
+      expect(height).toBeLessThanOrEqual(380);
     });
 
-    it("should accommodate step node of 130px height plus spacing", () => {
-      // STEP_Y_OFFSET (80) + step height (130) + margins should fit within the zone
+    it("should accommodate step node of 170px height plus spacing", () => {
+      // STEP_Y_OFFSET (80) + step height (170) + margins should fit within the zone
       const height = calculateWorkflowZoneHeight();
-      const stepNodeHeightNeeded = LAYOUT_CONSTANTS.STEP_Y_OFFSET + 130;
+      const stepNodeHeightNeeded = LAYOUT_CONSTANTS.STEP_Y_OFFSET + 170;
 
       // The height should be sufficient for step nodes
       expect(height).toBeGreaterThan(stepNodeHeightNeeded);
@@ -78,11 +78,11 @@ describe("nodeConstants", () => {
       const expectedHeight =
         LAYOUT_CONSTANTS.WORKFLOW_ZONE_HEADER_HEIGHT +
         LAYOUT_CONSTANTS.STEP_Y_OFFSET +
-        130 +
+        170 +
         LAYOUT_CONSTANTS.WORKFLOW_ZONE_PADDING;
 
       expect(height).toBe(expectedHeight);
-      expect(height).toBe(330);
+      expect(height).toBe(370);
     });
   });
 });
