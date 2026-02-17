@@ -1,4 +1,4 @@
-import type { Task, TaskLevel, TaskPriority } from '../../bindings';
+import type { Task, TaskLevel, TaskPriority, StepExecutionStatus } from '../../bindings';
 import { RelativeTime } from '../RelativeTime';
 
 interface TaskRowProps {
@@ -7,6 +7,7 @@ interface TaskRowProps {
   onClick?: (task: Task) => void;
   columnWidths?: Record<string, number>;
   hideStatus?: boolean;
+  executionStatus?: StepExecutionStatus | null;
 }
 
 /**
@@ -101,6 +102,25 @@ function getPriorityIndicator(priority: TaskPriority | null): { icon: string; co
 }
 
 /**
+ * Get execution status indicator styling
+ */
+function getExecutionIndicator(status: StepExecutionStatus | null | undefined): { dot: string; label: string } | null {
+  if (!status) return null;
+  switch (status) {
+    case 'Running':
+      return { dot: 'bg-warning animate-pulse', label: 'Running' };
+    case 'Completed':
+      return { dot: 'bg-success', label: 'Completed' };
+    case 'Failed':
+      return { dot: 'bg-error', label: 'Failed' };
+    case 'Pending':
+      return { dot: 'bg-text-muted animate-pulse', label: 'Pending' };
+    default:
+      return null;
+  }
+}
+
+/**
  * Truncate task ID for display (show first 6 characters)
  */
 function truncateId(id: string): string {
@@ -111,7 +131,7 @@ function truncateId(id: string): string {
  * TaskRow component displays a single task in the task list.
  * Features neural-inspired styling with glowing active states and resizable columns.
  */
-export function TaskRow({ task, isSelected = false, onClick, columnWidths = {}, hideStatus = false }: TaskRowProps) {
+export function TaskRow({ task, isSelected = false, onClick, columnWidths = {}, hideStatus = false, executionStatus }: TaskRowProps) {
   const handleClick = () => {
     onClick?.(task);
   };
@@ -164,6 +184,16 @@ export function TaskRow({ task, isSelected = false, onClick, columnWidths = {}, 
         className="px-4 py-3"
       >
         <div className="flex items-center gap-2 overflow-hidden">
+          {/* Execution status indicator */}
+          {executionStatus && (() => {
+            const indicator = getExecutionIndicator(executionStatus);
+            return indicator ? (
+              <span
+                className={`w-2 h-2 shrink-0 rounded-full ${indicator.dot}`}
+                title={`Execution: ${indicator.label}`}
+              />
+            ) : null;
+          })()}
           <span className={`break-words text-sm font-medium ${isSelected ? 'text-text-primary' : 'text-text-primary group-hover:text-text-primary'}`}>
             {task.title}
           </span>

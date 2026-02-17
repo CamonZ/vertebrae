@@ -323,4 +323,67 @@ describe("StepNode", () => {
       expect(button).not.toHaveClass("animate-flash-border");
     });
   });
+
+  describe("execution counts", () => {
+    it("renders execution activity bar when there are running tasks", () => {
+      const props = createStepNodeProps({
+        executionCounts: { running: 2, completed: 0, failed: 0 },
+      });
+
+      render(<StepNode {...props} />);
+
+      expect(screen.getByText("Exec")).toBeInTheDocument();
+      expect(screen.getByTitle("2 running")).toBeInTheDocument();
+    });
+
+    it("renders execution activity bar with completed tasks", () => {
+      const props = createStepNodeProps({
+        executionCounts: { running: 0, completed: 3, failed: 0 },
+      });
+
+      render(<StepNode {...props} />);
+
+      expect(screen.getByTitle("3 completed")).toBeInTheDocument();
+    });
+
+    it("renders execution activity bar with failed tasks", () => {
+      const props = createStepNodeProps({
+        executionCounts: { running: 0, completed: 0, failed: 1 },
+      });
+
+      render(<StepNode {...props} />);
+
+      expect(screen.getByTitle("1 failed")).toBeInTheDocument();
+    });
+
+    it("renders all execution count types together", () => {
+      const props = createStepNodeProps({
+        executionCounts: { running: 1, completed: 2, failed: 1 },
+      });
+
+      render(<StepNode {...props} />);
+
+      expect(screen.getByTitle("1 running")).toBeInTheDocument();
+      expect(screen.getByTitle("2 completed")).toBeInTheDocument();
+      expect(screen.getByTitle("1 failed")).toBeInTheDocument();
+    });
+
+    it("does not render execution bar when all counts are zero", () => {
+      const props = createStepNodeProps({
+        executionCounts: { running: 0, completed: 0, failed: 0 },
+      });
+
+      render(<StepNode {...props} />);
+
+      expect(screen.queryByText("Exec")).not.toBeInTheDocument();
+    });
+
+    it("does not render execution bar when executionCounts not provided", () => {
+      const props = createStepNodeProps();
+
+      render(<StepNode {...props} />);
+
+      expect(screen.queryByText("Exec")).not.toBeInTheDocument();
+    });
+  });
 });

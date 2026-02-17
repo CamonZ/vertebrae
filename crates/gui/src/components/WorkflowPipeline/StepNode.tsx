@@ -15,6 +15,7 @@ export type StepNodeData = {
   onStepClick?: (step: Step) => void;
   isSelected?: boolean;
   taskCounts?: { epic: number; ticket: number; task: number };
+  executionCounts?: { running: number; completed: number; failed: number };
   isFlashing?: boolean;
 };
 
@@ -25,7 +26,7 @@ export type StepNodeType = Node<StepNodeData, 'stepNode'>;
  * Features neural-pathway-inspired design with glowing connections.
  */
 function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
-  const { step, isFirst, isLast, onStepClick, isSelected, taskCounts, isFlashing } = data;
+  const { step, isFirst, isLast, onStepClick, isSelected, taskCounts, executionCounts, isFlashing } = data;
 
   const handleClick = () => {
     onStepClick?.(step);
@@ -191,6 +192,33 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
           </div>
         )}
       </div>
+
+      {/* Execution activity bar */}
+      {executionCounts && (executionCounts.running > 0 || executionCounts.completed > 0 || executionCounts.failed > 0) && (
+        <div className="mt-2 flex items-center gap-2 border-t border-border pt-2">
+          <span className="font-mono text-[10px] uppercase tracking-wider text-text-muted">Exec</span>
+          <div className="flex items-center gap-1.5 ml-auto">
+            {executionCounts.running > 0 && (
+              <span className="flex items-center gap-1 text-[10px] text-warning" title={`${executionCounts.running} running`}>
+                <span className="w-2 h-2 rounded-full bg-warning animate-pulse" />
+                {executionCounts.running}
+              </span>
+            )}
+            {executionCounts.completed > 0 && (
+              <span className="flex items-center gap-1 text-[10px] text-success" title={`${executionCounts.completed} completed`}>
+                <span className="w-2 h-2 rounded-full bg-success" />
+                {executionCounts.completed}
+              </span>
+            )}
+            {executionCounts.failed > 0 && (
+              <span className="flex items-center gap-1 text-[10px] text-error" title={`${executionCounts.failed} failed`}>
+                <span className="w-2 h-2 rounded-full bg-error" />
+                {executionCounts.failed}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Output handle - hidden for last step */}
       {!isLast && (

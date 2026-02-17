@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo } from "react";
-import type { Step, Task } from "../../bindings";
+import type { Step, Task, StepExecutionStatus } from "../../bindings";
 import { commands } from "../../bindings";
 import { useStep, useStepChangeListener, useExpandedNodes } from "../../hooks";
 import { DeleteConfirmation } from "../DeleteConfirmation";
@@ -20,6 +20,7 @@ interface StepDetailPanelProps {
   onClose?: () => void;
   onUpdated?: () => void;
   onDeleted?: () => void;
+  taskExecutionStates?: Map<string, { status: StepExecutionStatus; stepName: string }>;
 }
 
 type TabType = "config" | "tasks";
@@ -68,6 +69,7 @@ export function StepDetailPanel({
   onClose,
   onUpdated,
   onDeleted,
+  taskExecutionStates,
 }: StepDetailPanelProps) {
   const [activeTab, setActiveTab] = useState<TabType>("config");
   const [isDeleting, setIsDeleting] = useState(false);
@@ -604,6 +606,7 @@ export function StepDetailPanel({
                 onTaskSelect={(task) => onTaskSelect?.(task.id)}
                 expandedNodes={expandedNodes}
                 hideStatus
+                taskExecutionStates={taskExecutionStates}
               />
             ) : (
               <TaskList
@@ -613,6 +616,7 @@ export function StepDetailPanel({
                 selectedTaskId={selectedTaskId}
                 onTaskSelect={(task) => onTaskSelect?.(task.id)}
                 hideStatus
+                taskExecutionStates={taskExecutionStates}
               />
             )}
           </div>

@@ -1,4 +1,4 @@
-import type { Task } from "../../bindings";
+import type { Task, StepExecutionStatus } from "../../bindings";
 import type { TaskTreeNode as TaskTreeNodeType } from "../../types/ui";
 import { TaskTreeNode } from "./TaskTreeNode";
 import type { useExpandedNodes } from "../../hooks/useExpandedNodes";
@@ -11,6 +11,7 @@ interface TaskTreeViewProps {
   onTaskSelect?: (task: Task) => void;
   expandedNodes?: ReturnType<typeof useExpandedNodes>;
   hideStatus?: boolean;
+  taskExecutionStates?: Map<string, { status: StepExecutionStatus; stepName: string }>;
 }
 
 /**
@@ -139,6 +140,7 @@ export function TaskTreeView({
   onTaskSelect,
   expandedNodes,
   hideStatus,
+  taskExecutionStates,
 }: TaskTreeViewProps) {
   if (error) {
     return <ErrorState error={error} />;
@@ -174,6 +176,7 @@ export function TaskTreeView({
             onTaskSelect={onTaskSelect}
             expandedNodes={expandedNodes}
             hideStatus={hideStatus}
+            taskExecutionStates={taskExecutionStates}
           />
         ))}
       </div>
