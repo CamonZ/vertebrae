@@ -290,4 +290,58 @@ describe("WorkflowDetailPanel", () => {
       expect(screen.queryByLabelText("Close panel")).not.toBeInTheDocument();
     });
   });
+
+  describe("back button", () => {
+    it("renders back button when onBack is provided", () => {
+      const workflow = createWorkflow();
+      render(<WorkflowDetailPanel workflow={workflow} onBack={vi.fn()} />);
+
+      expect(screen.getByLabelText("Go back")).toBeInTheDocument();
+    });
+
+    it("calls onBack when back button is clicked", async () => {
+      const user = userEvent.setup();
+      const workflow = createWorkflow();
+      const onBack = vi.fn();
+      render(<WorkflowDetailPanel workflow={workflow} onBack={onBack} />);
+
+      await user.click(screen.getByLabelText("Go back"));
+
+      expect(onBack).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not render back button when onBack is not provided", () => {
+      const workflow = createWorkflow();
+      render(<WorkflowDetailPanel workflow={workflow} />);
+
+      expect(screen.queryByLabelText("Go back")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("step selection", () => {
+    it("calls onStepSelect when a step is clicked", async () => {
+      const user = userEvent.setup();
+      const workflow = createWorkflow();
+      const onStepSelect = vi.fn();
+      const steps = [
+        createStep({ id: "step-1", name: "todo", order: 0 }),
+        createStep({ id: "step-2", name: "done", order: 1 }),
+      ];
+
+      render(
+        <WorkflowDetailPanel
+          workflow={workflow}
+          steps={steps}
+          onStepSelect={onStepSelect}
+        />
+      );
+
+      await user.click(screen.getByText("todo"));
+
+      expect(onStepSelect).toHaveBeenCalledTimes(1);
+      expect(onStepSelect).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "step-1", name: "todo" })
+      );
+    });
+  });
 });

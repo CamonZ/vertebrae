@@ -11,6 +11,7 @@ interface WorkflowDetailPanelProps {
   onClose?: () => void;
   onStepSelect?: (step: Step) => void;
   onStepCreated?: () => void;
+  onBack?: () => void;
 }
 
 /**
@@ -75,6 +76,7 @@ export function WorkflowDetailPanel({
   onClose,
   onStepSelect,
   onStepCreated,
+  onBack,
 }: WorkflowDetailPanelProps) {
   const [isRunning, setIsRunning] = useState(false);
   const [runProgress, setRunProgress] = useState({ current: 0, total: 0 });
@@ -123,9 +125,23 @@ export function WorkflowDetailPanel({
     >
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
-        <h2 className="font-mono text-xs font-medium uppercase tracking-wider text-text-muted">
-          Workflow Details
-        </h2>
+        <div className="flex items-center gap-2">
+          {onBack && (
+            <button
+              type="button"
+              onClick={onBack}
+              className="cursor-pointer rounded-lg p-1.5 text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              aria-label="Go back"
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+          )}
+          <h2 className="font-mono text-xs font-medium uppercase tracking-wider text-text-muted">
+            Workflow Details
+          </h2>
+        </div>
         <div className="flex items-center gap-2">
           {/* Run All Button - only show if there are tasks */}
           {tasks.length > 0 && (

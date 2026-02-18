@@ -14,6 +14,9 @@ export type StepNodeData = {
   isExecuting?: boolean;
   onStepClick?: (step: Step) => void;
   isSelected?: boolean;
+  taskCounts?: { epic: number; ticket: number; task: number };
+  executionCounts?: { running: number; completed: number; failed: number };
+  isFlashing?: boolean;
 };
 
 export type StepNodeType = Node<StepNodeData, 'stepNode'>;
@@ -23,7 +26,7 @@ export type StepNodeType = Node<StepNodeData, 'stepNode'>;
  * Features neural-pathway-inspired design with glowing connections.
  */
 function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
-  const { step, isFirst, isLast, onStepClick, isSelected } = data;
+  const { step, isFirst, isLast, onStepClick, isSelected, taskCounts, executionCounts, isFlashing } = data;
 
   const handleClick = () => {
     onStepClick?.(step);
@@ -42,6 +45,8 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
       type="button"
       onClick={handleClick}
       className={`relative ${NODE_SIZING.widthClass} ${NODE_SIZING.stepHeightClass} ${NODE_SIZING.borderRadiusClass} border bg-bg-secondary ${NODE_SIZING.paddingClass} ${NODE_SIZING.overflowClass} flex flex-col transition-all duration-200 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-primary text-left ${
+        isFlashing ? 'animate-flash-border' : ''
+      } ${
         isNodeSelected
           ? 'border-primary shadow-glow ring-1 ring-primary/50'
           : 'border-border hover:border-primary/50 hover:shadow-glow-sm'
@@ -163,7 +168,57 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
             Process
           </span>
         )}
+
+        {taskCounts && (taskCounts.epic > 0 || taskCounts.ticket > 0 || taskCounts.task > 0) && (
+          <div className="ml-auto flex items-center gap-2">
+            {taskCounts.epic > 0 && (
+              <span className="flex items-center gap-1 text-[10px] text-text-muted" title={`${taskCounts.epic} epic(s)`}>
+                <span className="w-2 h-2 rounded-full bg-info" />
+                {taskCounts.epic}
+              </span>
+            )}
+            {taskCounts.ticket > 0 && (
+              <span className="flex items-center gap-1 text-[10px] text-text-muted" title={`${taskCounts.ticket} ticket(s)`}>
+                <span className="w-2 h-2 rounded-full bg-primary" />
+                {taskCounts.ticket}
+              </span>
+            )}
+            {taskCounts.task > 0 && (
+              <span className="flex items-center gap-1 text-[10px] text-text-muted" title={`${taskCounts.task} task(s)`}>
+                <span className="w-2 h-2 rounded-full bg-text-secondary" />
+                {taskCounts.task}
+              </span>
+            )}
+          </div>
+        )}
       </div>
+
+      {/* Execution activity bar */}
+      {executionCounts && (executionCounts.running > 0 || executionCounts.completed > 0 || executionCounts.failed > 0) && (
+        <div className="mt-2 flex items-center gap-2 border-t border-border pt-2">
+          <span className="font-mono text-[10px] uppercase tracking-wider text-text-muted">Exec</span>
+          <div className="flex items-center gap-1.5 ml-auto">
+            {executionCounts.running > 0 && (
+              <span className="flex items-center gap-1 text-[10px] text-warning" title={`${executionCounts.running} running`}>
+                <span className="w-2 h-2 rounded-full bg-warning animate-pulse" />
+                {executionCounts.running}
+              </span>
+            )}
+            {executionCounts.completed > 0 && (
+              <span className="flex items-center gap-1 text-[10px] text-success" title={`${executionCounts.completed} completed`}>
+                <span className="w-2 h-2 rounded-full bg-success" />
+                {executionCounts.completed}
+              </span>
+            )}
+            {executionCounts.failed > 0 && (
+              <span className="flex items-center gap-1 text-[10px] text-error" title={`${executionCounts.failed} failed`}>
+                <span className="w-2 h-2 rounded-full bg-error" />
+                {executionCounts.failed}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Output handle - hidden for last step */}
       {!isLast && (

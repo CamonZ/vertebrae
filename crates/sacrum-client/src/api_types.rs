@@ -188,7 +188,7 @@ pub struct StepExecutionResponse {
     pub step_name: String,
     pub status: String,
     #[serde(default)]
-    pub context: Option<String>,
+    pub context: Option<serde_json::Value>,
     #[serde(default)]
     pub prompt: Option<String>,
     #[serde(default)]

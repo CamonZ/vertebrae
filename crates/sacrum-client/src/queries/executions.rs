@@ -48,7 +48,7 @@ pub const CREATE_EXECUTION: &str = r#"
         $workflow_id: Uuid4!,
         $step_name: String!,
         $status: String,
-        $context: JSON,
+        $context: Json,
         $prompt: String,
         $model: String,
         $model_provider: String
