@@ -363,6 +363,32 @@ describe("StepDetailPanel", () => {
     });
   });
 
+  describe("back button", () => {
+    it("renders back button when onBack is provided", () => {
+      render(
+        <StepDetailPanel stepId="step-test" allSteps={[]} onBack={vi.fn()} />
+      );
+      expect(screen.getByLabelText("Go back")).toBeInTheDocument();
+    });
+
+    it("calls onBack when back button is clicked", async () => {
+      const user = userEvent.setup();
+      const onBack = vi.fn();
+      render(
+        <StepDetailPanel stepId="step-test" allSteps={[]} onBack={onBack} />
+      );
+
+      await user.click(screen.getByLabelText("Go back"));
+
+      expect(onBack).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not render back button when onBack is not provided", () => {
+      render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
+      expect(screen.queryByLabelText("Go back")).not.toBeInTheDocument();
+    });
+  });
+
   describe("tabbed interface", () => {
     it("renders Configuration and Tasks tabs", () => {
       render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
