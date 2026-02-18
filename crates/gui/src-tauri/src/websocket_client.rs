@@ -516,7 +516,7 @@ impl SacrumSocket {
             .to_string();
 
         let status = match payload.get("status").and_then(|v| v.as_str()) {
-            Some("running") => StepExecutionStatus::Running,
+            Some("running") | Some("started") => StepExecutionStatus::Running,
             Some("completed") => StepExecutionStatus::Completed,
             Some("failed") => StepExecutionStatus::Failed,
             _ => StepExecutionStatus::Pending,

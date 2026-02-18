@@ -3,6 +3,7 @@ import type {
   Task,
   TaskLevel,
   TaskPriority,
+  StepExecutionStatus,
 } from "../../bindings";
 import type { TaskTreeNode as TaskTreeNodeType } from "../../types/ui";
 import type { useExpandedNodes } from "../../hooks/useExpandedNodes";
@@ -16,6 +17,7 @@ interface TaskTreeNodeProps {
   onTaskSelect?: (task: Task) => void;
   expandedNodes?: ReturnType<typeof useExpandedNodes>;
   hideStatus?: boolean;
+  taskExecutionStates?: Map<string, { status: StepExecutionStatus; stepName: string }>;
 }
 
 /**
@@ -132,6 +134,25 @@ function getPriorityIndicator(
 }
 
 /**
+ * Get execution status indicator styling
+ */
+function getExecutionIndicator(status: StepExecutionStatus | null | undefined): { dot: string; label: string } | null {
+  if (!status) return null;
+  switch (status) {
+    case 'Running':
+      return { dot: 'bg-warning animate-pulse', label: 'Running' };
+    case 'Completed':
+      return { dot: 'bg-success', label: 'Completed' };
+    case 'Failed':
+      return { dot: 'bg-error', label: 'Failed' };
+    case 'Pending':
+      return { dot: 'bg-text-muted animate-pulse', label: 'Pending' };
+    default:
+      return null;
+  }
+}
+
+/**
  * Truncate task ID for display (show first 6 characters)
  */
 function truncateId(id: string): string {
@@ -149,6 +170,7 @@ export function TaskTreeNode({
   onTaskSelect,
   expandedNodes,
   hideStatus,
+  taskExecutionStates,
 }: TaskTreeNodeProps) {
   const task = node.task;
   const hasChildren = node.children.length > 0;
@@ -193,6 +215,9 @@ export function TaskTreeNode({
   const stepStyles = getStepStyles(task.step_name);
   const levelStyles = getLevelStyles(task.level);
   const priorityIndicator = getPriorityIndicator(task.priority);
+
+  const executionState = taskExecutionStates?.get(task.id);
+  const executionIndicator = getExecutionIndicator(executionState?.status);
 
   // Calculate indentation based on depth
   const indentPx = depth * 24;
@@ -278,6 +303,13 @@ export function TaskTreeNode({
 
         {/* Title */}
         <div className="flex min-w-0 flex-1 items-center gap-2">
+          {/* Execution status indicator */}
+          {executionIndicator && (
+            <span
+              className={`w-2 h-2 shrink-0 rounded-full ${executionIndicator.dot}`}
+              title={`Execution: ${executionIndicator.label}`}
+            />
+          )}
           <span
             className={`truncate text-sm font-medium ${
               isSelected
@@ -367,6 +399,7 @@ export function TaskTreeNode({
               onTaskSelect={onTaskSelect}
               expandedNodes={expandedNodes}
               hideStatus={hideStatus}
+              taskExecutionStates={taskExecutionStates}
             />
           ))}
         </div>

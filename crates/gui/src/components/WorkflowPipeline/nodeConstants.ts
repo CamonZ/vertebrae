@@ -7,7 +7,7 @@
 export const NODE_SIZING = {
   widthClass: "w-[280px]", // Explicit fixed width for all nodes
   heightClass: "h-[100px]", // Explicit fixed height for task nodes
-  stepHeightClass: "h-[130px]", // Taller height for step nodes to accommodate more content
+  stepHeightClass: "h-[170px]", // Taller height for step nodes to accommodate execution counts bar
   paddingClass: "p-4", // Unified padding: 16px on all sides
   borderRadiusClass: "rounded-lg", // Unified border radius
   overflowClass: "overflow-hidden", // Ensure content is truncated
@@ -35,8 +35,6 @@ export const LAYOUT_CONSTANTS = {
   NODE_SPACING_X: 320,
   /** Y offset for step nodes within workflow zone */
   STEP_Y_OFFSET: 80,
-  /** Y offset for task zones within workflow zone */
-  TASK_ZONE_Y_OFFSET: 220,
   /** Padding around workflow zone content */
   WORKFLOW_ZONE_PADDING: 40,
   /** Height reserved for workflow header */
@@ -62,8 +60,8 @@ export function calculateWorkflowZoneWidth(stepCount: number): number {
 export function calculateWorkflowZoneHeight(): number {
   return (
     LAYOUT_CONSTANTS.WORKFLOW_ZONE_HEADER_HEIGHT +
-    LAYOUT_CONSTANTS.TASK_ZONE_Y_OFFSET +
-    280 +
+    LAYOUT_CONSTANTS.STEP_Y_OFFSET +
+    170 +
     LAYOUT_CONSTANTS.WORKFLOW_ZONE_PADDING
   );
 }
