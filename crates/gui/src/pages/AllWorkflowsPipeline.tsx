@@ -70,6 +70,12 @@ const edgeTypes: EdgeTypes = {
  * Features neural-pathway-inspired design with real-time updates.
  * Press 'c' to toggle collapsed/expanded view.
  */
+
+type PanelEntry =
+  | { type: 'task'; id: string }
+  | { type: 'step'; id: string }
+  | { type: 'workflow'; data: Workflow };
+
 function AllWorkflowsPipelineInner() {
   const addToast = useToastStore((state) => state.addToast);
   const { fitView } = useReactFlow();
@@ -101,6 +107,9 @@ function AllWorkflowsPipelineInner() {
   const [selectedWorkflow, setSelectedWorkflow] = useState<Workflow | null>(
     null
   );
+
+  // Panel navigation history stack
+  const [panelHistory, setPanelHistory] = useState<PanelEntry[]>([]);
 
   // State for collapsed view toggle (press 'c' to toggle)
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -137,26 +146,43 @@ function AllWorkflowsPipelineInner() {
     },
   });
 
+  // Helper to capture current panel state
+  function currentPanelEntry(): PanelEntry | null {
+    if (selectedTaskId) return { type: 'task', id: selectedTaskId };
+    if (selectedStepId) return { type: 'step', id: selectedStepId };
+    if (selectedWorkflow) return { type: 'workflow', data: selectedWorkflow };
+    return null;
+  }
+
   // Task selection handlers
   const handleTaskClick = useCallback((taskId: string) => {
     setSelectedTaskId(taskId);
     setSelectedStepId(null); // Clear step selection when task is selected
+    setPanelHistory([]); // Canvas click — fresh navigation
   }, []);
 
   const handleCloseTaskPanel = useCallback(() => {
     setSelectedTaskId(null);
+    setPanelHistory([]); // Explicit close — clear history
   }, []);
 
   const handleRelatedTaskSelect = useCallback((taskId: string) => {
+    // Push current panel onto history before switching (in-panel navigation)
+    const current = currentPanelEntry();
+    if (current) {
+      setPanelHistory(prev => [...prev, current]);
+    }
     setSelectedTaskId(taskId);
     setSelectedStepId(null);
-  }, []);
+    setSelectedWorkflow(null);
+  }, [selectedTaskId, selectedStepId, selectedWorkflow]);
 
   // Step selection handlers
   const handleStepClick = useCallback((step: Step) => {
     setSelectedStepId(step.id || null);
     setSelectedTaskId(null); // Clear task selection when step is selected
     setSelectedWorkflow(null); // Clear workflow selection
+    setPanelHistory([]); // Canvas click — fresh navigation
   }, []);
 
   // Workflow selection handlers
@@ -164,14 +190,54 @@ function AllWorkflowsPipelineInner() {
     setSelectedWorkflow(workflow);
     setSelectedTaskId(null); // Clear task selection
     setSelectedStepId(null); // Clear step selection
+    setPanelHistory([]); // Canvas click — fresh navigation
   }, []);
 
   const handleCloseWorkflowPanel = useCallback(() => {
     setSelectedWorkflow(null);
+    setPanelHistory([]); // Explicit close — clear history
   }, []);
 
   const handleCloseStepPanel = useCallback(() => {
     setSelectedStepId(null);
+    setPanelHistory([]); // Explicit close — clear history
+  }, []);
+
+  // Handle step selection from workflow detail panel (in-panel navigation)
+  const handleWorkflowStepSelect = useCallback((step: Step) => {
+    // Push current workflow panel onto history
+    if (selectedWorkflow) {
+      setPanelHistory(prev => [...prev, { type: 'workflow', data: selectedWorkflow }]);
+    }
+    setSelectedStepId(step.id || null);
+    setSelectedWorkflow(null);
+    setSelectedTaskId(null);
+  }, [selectedWorkflow]);
+
+  // Navigate back through panel history
+  const handleBack = useCallback(() => {
+    setPanelHistory(prev => {
+      const newHistory = [...prev];
+      const entry = newHistory.pop();
+      if (!entry) return prev;
+
+      // Restore the previous panel
+      if (entry.type === 'task') {
+        setSelectedTaskId(entry.id);
+        setSelectedStepId(null);
+        setSelectedWorkflow(null);
+      } else if (entry.type === 'step') {
+        setSelectedStepId(entry.id);
+        setSelectedTaskId(null);
+        setSelectedWorkflow(null);
+      } else if (entry.type === 'workflow') {
+        setSelectedWorkflow(entry.data);
+        setSelectedTaskId(null);
+        setSelectedStepId(null);
+      }
+
+      return newHistory;
+    });
   }, []);
 
   // Compute stepTasks when selectedStepId changes
@@ -934,6 +1000,7 @@ function AllWorkflowsPipelineInner() {
           taskId={selectedTaskId}
           onClose={handleCloseTaskPanel}
           onTaskSelect={handleRelatedTaskSelect}
+          onBack={panelHistory.length > 0 ? handleBack : undefined}
         />
       )}
 
@@ -949,6 +1016,7 @@ function AllWorkflowsPipelineInner() {
           onUpdated={handleStepUpdated}
           onDeleted={handleStepDeleted}
           taskExecutionStates={taskExecutionStates}
+          onBack={panelHistory.length > 0 ? handleBack : undefined}
         />
       )}
 
@@ -966,6 +1034,8 @@ function AllWorkflowsPipelineInner() {
               ?.map((t) => ({ id: t.id, title: t.title })) || []
           }
           onClose={handleCloseWorkflowPanel}
+          onStepSelect={handleWorkflowStepSelect}
+          onBack={panelHistory.length > 0 ? handleBack : undefined}
         />
       )}
     </div>

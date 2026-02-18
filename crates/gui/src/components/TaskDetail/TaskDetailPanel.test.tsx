@@ -141,6 +141,48 @@ describe("TaskDetailPanel - Edit Integration", () => {
     });
   });
 
+  describe("Back button", () => {
+    it("renders back button when onBack is provided", () => {
+      render(
+        <TaskDetailPanel
+          taskId={mockTaskData.id}
+          onClose={vi.fn()}
+          onBack={vi.fn()}
+        />
+      );
+
+      expect(screen.getByRole("button", { name: /go back/i })).toBeInTheDocument();
+    });
+
+    it("calls onBack when back button is clicked", () => {
+      const mockOnBack = vi.fn();
+
+      render(
+        <TaskDetailPanel
+          taskId={mockTaskData.id}
+          onClose={vi.fn()}
+          onBack={mockOnBack}
+        />
+      );
+
+      const backButton = screen.getByRole("button", { name: /go back/i });
+      fireEvent.click(backButton);
+
+      expect(mockOnBack).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not render back button when onBack is not provided", () => {
+      render(
+        <TaskDetailPanel
+          taskId={mockTaskData.id}
+          onClose={vi.fn()}
+        />
+      );
+
+      expect(screen.queryByRole("button", { name: /go back/i })).not.toBeInTheDocument();
+    });
+  });
+
   describe("Header buttons interaction", () => {
     it("renders Delete and Close buttons in header", () => {
       render(
