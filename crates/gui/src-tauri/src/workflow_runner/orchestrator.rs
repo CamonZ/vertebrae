@@ -105,6 +105,7 @@ mod tests {
     use super::*;
     use crate::mock::mock_services;
     use crate::workflow_runner::command_runner::{MockCommandRunner, ProcessOutput};
+    use crate::workflow_runner::helpers::tests::CLAUDE_ENV_MUTEX;
     use vertebrae_core::{ExecutionStatus, OrchestratorOutput, Step, StepExecution};
 
     async fn setup_execution(executions: &Arc<dyn ExecutionService>) -> String {
@@ -131,6 +132,9 @@ mod tests {
 
     #[tokio::test]
     async fn success_valid_jsonl_produces_correct_output() {
+        let _lock = CLAUDE_ENV_MUTEX.lock().unwrap();
+        std::env::set_var("CLAUDE_CODE_PATH", "/bin/ls");
+
         let services = mock_services();
         let executions = services.executions_arc();
         let exec_id = setup_execution(&executions).await;
@@ -167,6 +171,9 @@ mod tests {
 
     #[tokio::test]
     async fn failure_non_zero_exit_propagates_error() {
+        let _lock = CLAUDE_ENV_MUTEX.lock().unwrap();
+        std::env::set_var("CLAUDE_CODE_PATH", "/bin/ls");
+
         let services = mock_services();
         let executions = services.executions_arc();
         let exec_id = setup_execution(&executions).await;
@@ -187,6 +194,9 @@ mod tests {
 
     #[tokio::test]
     async fn failure_invalid_json_produces_parse_error() {
+        let _lock = CLAUDE_ENV_MUTEX.lock().unwrap();
+        std::env::set_var("CLAUDE_CODE_PATH", "/bin/ls");
+
         let services = mock_services();
         let executions = services.executions_arc();
         let exec_id = setup_execution(&executions).await;
@@ -206,6 +216,9 @@ mod tests {
 
     #[tokio::test]
     async fn execution_record_updated_with_raw_output_and_prompt() {
+        let _lock = CLAUDE_ENV_MUTEX.lock().unwrap();
+        std::env::set_var("CLAUDE_CODE_PATH", "/bin/ls");
+
         let services = mock_services();
         let executions = services.executions_arc();
         let exec_id = setup_execution(&executions).await;
