@@ -393,6 +393,7 @@ mod tests {
     use super::*;
     use crate::mock::mock_services;
     use crate::workflow_runner::command_runner::{MockCommandRunner, ProcessOutput};
+    use crate::workflow_runner::helpers::tests::CLAUDE_ENV_MUTEX;
     use vertebrae_core::{OrchestratorOutput, Step};
 
     fn build_test_app() -> tauri::App<tauri::test::MockRuntime> {
@@ -430,6 +431,9 @@ mod tests {
 
     #[tokio::test]
     async fn success_on_first_attempt() {
+        let _lock = CLAUDE_ENV_MUTEX.lock().unwrap();
+        std::env::set_var("CLAUDE_CODE_PATH", "/bin/ls");
+
         tokio::time::pause();
 
         let services = mock_services();
@@ -455,6 +459,9 @@ mod tests {
 
     #[tokio::test]
     async fn retry_orchestrator_fails_twice_succeeds_third() {
+        let _lock = CLAUDE_ENV_MUTEX.lock().unwrap();
+        std::env::set_var("CLAUDE_CODE_PATH", "/bin/ls");
+
         tokio::time::pause();
 
         let services = mock_services();
@@ -482,6 +489,9 @@ mod tests {
 
     #[tokio::test]
     async fn retry_executor_fails_once_succeeds_second() {
+        let _lock = CLAUDE_ENV_MUTEX.lock().unwrap();
+        std::env::set_var("CLAUDE_CODE_PATH", "/bin/ls");
+
         tokio::time::pause();
 
         let services = mock_services();
@@ -510,6 +520,9 @@ mod tests {
 
     #[tokio::test]
     async fn all_retries_exhausted_returns_error() {
+        let _lock = CLAUDE_ENV_MUTEX.lock().unwrap();
+        std::env::set_var("CLAUDE_CODE_PATH", "/bin/ls");
+
         tokio::time::pause();
 
         let services = mock_services();
