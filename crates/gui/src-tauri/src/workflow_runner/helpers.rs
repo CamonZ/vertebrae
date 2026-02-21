@@ -158,16 +158,26 @@ pub async fn update_execution_status<R: Runtime>(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::sync::Mutex;
 
-    // Mutex to prevent parallel env var tests from interfering
-    static HELPERS_ENV_MUTEX: Mutex<()> = Mutex::new(());
+    pub(crate) static CLAUDE_ENV_MUTEX: Mutex<()> = Mutex::new(());
+
+    pub(crate) fn with_claude_path<F: FnOnce()>(f: F) {
+        let _lock = CLAUDE_ENV_MUTEX.lock().unwrap();
+        let original = std::env::var("CLAUDE_CODE_PATH").ok();
+        std::env::set_var("CLAUDE_CODE_PATH", "/bin/ls");
+        f();
+        match original {
+            Some(v) => std::env::set_var("CLAUDE_CODE_PATH", v),
+            None => std::env::remove_var("CLAUDE_CODE_PATH"),
+        }
+    }
 
     #[test]
     fn test_find_claude_binary_with_env_var() {
-        let _lock = HELPERS_ENV_MUTEX.lock().unwrap();
+        let _lock = CLAUDE_ENV_MUTEX.lock().unwrap();
 
         // Save original value
         let original = std::env::var("CLAUDE_CODE_PATH").ok();
@@ -187,7 +197,7 @@ mod tests {
 
     #[test]
     fn test_find_claude_binary_path_with_spaces() {
-        let _lock = HELPERS_ENV_MUTEX.lock().unwrap();
+        let _lock = CLAUDE_ENV_MUTEX.lock().unwrap();
 
         let original = std::env::var("CLAUDE_CODE_PATH").ok();
 
@@ -205,7 +215,7 @@ mod tests {
 
     #[test]
     fn test_find_claude_binary_without_env_var() {
-        let _lock = HELPERS_ENV_MUTEX.lock().unwrap();
+        let _lock = CLAUDE_ENV_MUTEX.lock().unwrap();
 
         let original = std::env::var("CLAUDE_CODE_PATH").ok();
 
@@ -225,7 +235,7 @@ mod tests {
 
     #[test]
     fn test_find_claude_binary_env_var_takes_precedence() {
-        let _lock = HELPERS_ENV_MUTEX.lock().unwrap();
+        let _lock = CLAUDE_ENV_MUTEX.lock().unwrap();
 
         // Set a valid path in CLAUDE_CODE_PATH
         std::env::set_var("CLAUDE_CODE_PATH", "/bin/ls"); // Use an actual binary for testing
@@ -240,7 +250,7 @@ mod tests {
 
     #[test]
     fn test_find_claude_binary_env_var_nonexistent_returns_error() {
-        let _lock = HELPERS_ENV_MUTEX.lock().unwrap();
+        let _lock = CLAUDE_ENV_MUTEX.lock().unwrap();
 
         let original = std::env::var("CLAUDE_CODE_PATH").ok();
 

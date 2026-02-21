@@ -120,21 +120,7 @@ You MUST follow these requirements exactly. Use the specified commands - do NOT 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
-
-    // Mutex to prevent parallel env var tests from interfering
-    static ENV_MUTEX: Mutex<()> = Mutex::new(());
-
-    fn with_claude_path<F: FnOnce()>(f: F) {
-        let _lock = ENV_MUTEX.lock().unwrap();
-        let original = std::env::var("CLAUDE_CODE_PATH").ok();
-        std::env::set_var("CLAUDE_CODE_PATH", "/bin/ls");
-        f();
-        match original {
-            Some(v) => std::env::set_var("CLAUDE_CODE_PATH", v),
-            None => std::env::remove_var("CLAUDE_CODE_PATH"),
-        }
-    }
+    use crate::workflow_runner::helpers::tests::with_claude_path;
 
     fn make_step(goal: Option<&str>) -> Step {
         let mut step = Step::new("test-step", "wf1");
