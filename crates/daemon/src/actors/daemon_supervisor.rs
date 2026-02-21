@@ -8,10 +8,12 @@
 //! - Uses OneForOne supervision: project failures are isolated
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use ractor::{Actor, ActorProcessingErr, ActorRef, SupervisionEvent};
 use tokio_tungstenite::tungstenite::Message;
+use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig};
 
 use crate::actors::project_supervisor::{ProjectConfig, ProjectMessage, ProjectSupervisor};
 use crate::phoenix::{PhoenixMessage, PhoenixSocket};
@@ -372,10 +374,17 @@ impl DaemonSupervisor {
 
         tracing::info!("Joined channel for project {}", project_id);
 
+        let sacrum_config = SacrumConfig::new(
+            state.config.base_url.clone(),
+            state.config.api_token.clone(),
+            project_id.to_string(),
+        );
+        let client = Arc::new(GraphqlClient::new(sacrum_config));
+        let services = Arc::new(vertebrae_sacrum_client::from_sacrum(client));
+
         let project_config = ProjectConfig {
             project_id: project_id.to_string(),
-            base_url: state.config.base_url.clone(),
-            api_token: state.config.api_token.clone(),
+            services,
         };
 
         let (child_ref, _handle) = Actor::spawn_linked(

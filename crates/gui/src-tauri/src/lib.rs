@@ -4,7 +4,6 @@ pub mod claude_session;
 pub mod commands;
 pub mod events;
 pub mod project_config;
-pub mod sacrum;
 pub mod types;
 pub mod websocket_client;
 pub mod workflow_runner;
@@ -184,7 +183,7 @@ pub fn run() {
             let service = sacrum_config.as_ref().map(|config| {
                 let client = GraphqlClient::new(config.clone());
                 let client_arc = Arc::new(client);
-                crate::sacrum::from_sacrum(client_arc)
+                vertebrae_sacrum_client::from_sacrum(client_arc)
             });
 
             // Manage application state with optional services
