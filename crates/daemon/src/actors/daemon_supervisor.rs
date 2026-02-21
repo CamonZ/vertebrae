@@ -13,6 +13,7 @@ use std::time::Duration;
 use ractor::{Actor, ActorProcessingErr, ActorRef, SupervisionEvent};
 use tokio_tungstenite::tungstenite::Message;
 
+use crate::actors::project_supervisor::{ProjectConfig, ProjectMessage, ProjectSupervisor};
 use crate::phoenix::{PhoenixMessage, PhoenixSocket};
 
 /// Result of classifying an incoming channel message.
@@ -35,9 +36,10 @@ pub enum ChannelAction {
 /// Classify an incoming channel message into an action the supervisor should take.
 ///
 /// This is a pure function so it can be tested without an actor or socket.
-fn classify_channel_message(
+/// Accepts any `HashMap<String, V>` so tests can use a lightweight value type.
+fn classify_channel_message<V>(
     msg: &PhoenixMessage,
-    known_projects: &HashMap<String, ProjectEntry>,
+    known_projects: &HashMap<String, V>,
 ) -> ChannelAction {
     let Some(project_id) = msg.project_id() else {
         return ChannelAction::NonProjectTopic;
@@ -131,20 +133,14 @@ impl std::fmt::Debug for DaemonMessage {
     }
 }
 
-/// Tracks a registered project and its associated child actor.
-///
-/// Currently a marker entry. When `ProjectSupervisor` is implemented,
-/// this will hold an `ActorRef<ProjectMessage>` for routing.
-struct ProjectEntry;
-
 /// Runtime state held by the DaemonSupervisor actor.
 pub struct DaemonState {
     /// The Phoenix WebSocket connection.
     socket: PhoenixSocket,
     /// Saved config (needed for reconnection).
     config: DaemonConfig,
-    /// Map from project_id to project tracking entry.
-    projects: HashMap<String, ProjectEntry>,
+    /// Map from project_id to its ProjectSupervisor actor ref.
+    projects: HashMap<String, ActorRef<ProjectMessage>>,
     /// Handle to the WebSocket reader pump task.
     reader_handle: Option<tokio::task::JoinHandle<()>>,
     /// Handle to an in-flight reconnection task, if any.
@@ -205,7 +201,7 @@ impl Actor for DaemonSupervisor {
     ) -> Result<(), ActorProcessingErr> {
         match message {
             DaemonMessage::AddProject { project_id } => {
-                self.handle_add_project(&project_id, state).await?;
+                self.handle_add_project(&myself, &project_id, state).await?;
             }
             DaemonMessage::RemoveProject { project_id } => {
                 self.handle_remove_project(&project_id, state).await?;
@@ -355,9 +351,10 @@ impl DaemonSupervisor {
         let _ = myself.cast(DaemonMessage::ConnectionLost);
     }
 
-    /// Handle AddProject: join the project channel on the WebSocket.
+    /// Handle AddProject: join the project channel and spawn a ProjectSupervisor.
     async fn handle_add_project(
         &self,
+        myself: &ActorRef<DaemonMessage>,
         project_id: &str,
         state: &mut DaemonState,
     ) -> Result<(), ActorProcessingErr> {
@@ -375,35 +372,44 @@ impl DaemonSupervisor {
 
         tracing::info!("Joined channel for project {}", project_id);
 
-        // TODO: When ProjectSupervisor is implemented, spawn it here as a linked child:
-        //   let (child_ref, _handle) = myself.spawn_linked(
-        //       Some(format!("project-{project_id}")),
-        //       ProjectSupervisor,
-        //       ProjectConfig { project_id: project_id.to_string() },
-        //   ).await?;
+        let project_config = ProjectConfig {
+            project_id: project_id.to_string(),
+            base_url: state.config.base_url.clone(),
+            api_token: state.config.api_token.clone(),
+        };
 
-        state.projects.insert(project_id.to_string(), ProjectEntry);
+        let (child_ref, _handle) = Actor::spawn_linked(
+            Some(format!("project-{project_id}")),
+            ProjectSupervisor,
+            project_config,
+            myself.get_cell(),
+        )
+        .await
+        .map_err(|e| format!("Failed to spawn ProjectSupervisor for {project_id}: {e}"))?;
+
+        state.projects.insert(project_id.to_string(), child_ref);
 
         Ok(())
     }
 
-    /// Handle RemoveProject: leave the channel and clean up.
+    /// Handle RemoveProject: stop the child actor, leave the channel, and clean up.
     async fn handle_remove_project(
         &self,
         project_id: &str,
         state: &mut DaemonState,
     ) -> Result<(), ActorProcessingErr> {
-        if state.projects.remove(project_id).is_none() {
+        let Some(actor_ref) = state.projects.remove(project_id) else {
             tracing::warn!("Project {} not registered, nothing to remove", project_id);
             return Ok(());
-        }
+        };
+
+        // Stop the ProjectSupervisor child actor.
+        actor_ref.stop(Some("project removed".to_string()));
 
         let topic = format!("project:{}", project_id);
         if let Err(e) = state.socket.leave(&topic).await {
             tracing::warn!("Failed to leave channel {topic}: {e}");
         }
-
-        // TODO: When ProjectSupervisor exists, stop the child actor here.
 
         tracing::info!("Removed project {}", project_id);
         Ok(())
@@ -413,16 +419,16 @@ impl DaemonSupervisor {
     fn handle_channel_message(&self, msg: PhoenixMessage, state: &mut DaemonState) {
         match classify_channel_message(&msg, &state.projects) {
             ChannelAction::RouteToProject(project_id) => {
-                // TODO: When ProjectSupervisor is implemented, forward the message:
-                //   if let Some(entry) = state.projects.get(&project_id) {
-                //       entry.actor_ref.cast(ProjectMessage::ChannelEvent(msg));
-                //   }
-                tracing::info!(
-                    "Routing message to project {}: event={}, payload={}",
-                    project_id,
-                    msg.event,
-                    msg.payload
-                );
+                if let Some(actor_ref) = state.projects.get(&project_id) {
+                    if let Err(e) = actor_ref.cast(ProjectMessage::ChannelEvent(msg)) {
+                        tracing::error!("Failed to route message to project {}: {}", project_id, e);
+                    }
+                } else {
+                    tracing::warn!(
+                        "No ProjectSupervisor found for project {} (race condition?)",
+                        project_id,
+                    );
+                }
             }
             ChannelAction::JoinConfirmed(project_id) => {
                 tracing::info!("Channel join confirmed for project {}", project_id);
@@ -433,11 +439,15 @@ impl DaemonSupervisor {
                     project_id,
                     reason.as_deref().unwrap_or("unknown reason")
                 );
-                state.projects.remove(&project_id);
+                if let Some(actor_ref) = state.projects.remove(&project_id) {
+                    actor_ref.stop(Some("channel join failed".to_string()));
+                }
             }
             ChannelAction::ChannelError(project_id) => {
                 tracing::error!("Channel error for project {}, removing", project_id);
-                state.projects.remove(&project_id);
+                if let Some(actor_ref) = state.projects.remove(&project_id) {
+                    actor_ref.stop(Some("channel error".to_string()));
+                }
             }
             ChannelAction::NonProjectTopic => {
                 tracing::debug!("Ignoring message for non-project topic: {}", msg.topic);
@@ -554,15 +564,15 @@ impl DaemonSupervisor {
             handle.abort();
         }
 
-        // Leave all channels
-        let project_ids: Vec<String> = state.projects.keys().cloned().collect();
-        for project_id in &project_ids {
+        // Stop all ProjectSupervisor children and leave channels.
+        let entries: Vec<(String, ActorRef<ProjectMessage>)> = state.projects.drain().collect();
+        for (project_id, actor_ref) in &entries {
+            actor_ref.stop(Some("daemon shutdown".to_string()));
             let topic = format!("project:{}", project_id);
             if let Err(e) = state.socket.leave(&topic).await {
                 tracing::warn!("Failed to leave channel {topic} during shutdown: {e}");
             }
         }
-        state.projects.clear();
 
         // Stop self — this triggers post_stop which cleans up the WebSocket.
         myself.stop(Some("shutdown requested".to_string()));
@@ -589,10 +599,9 @@ mod tests {
     }
 
     /// Build a known-projects map containing the given project IDs.
-    fn known_projects(ids: &[&str]) -> HashMap<String, ProjectEntry> {
-        ids.iter()
-            .map(|id| (id.to_string(), ProjectEntry))
-            .collect()
+    /// Uses () as value since classify_channel_message is generic over the value type.
+    fn known_projects(ids: &[&str]) -> HashMap<String, ()> {
+        ids.iter().map(|id| (id.to_string(), ())).collect()
     }
 
     // ===== classify_channel_message tests =====
