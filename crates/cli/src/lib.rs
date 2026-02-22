@@ -6,6 +6,5 @@
 pub mod commands;
 pub mod error;
 pub mod output;
-pub mod sacrum;
 
 pub use commands::*;

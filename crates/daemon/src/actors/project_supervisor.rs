@@ -5,26 +5,48 @@
 //! - Classifies incoming events and dispatches domain-specific handling
 //! - Uses OneForOne supervision for future per-task child actors
 
-use ractor::{Actor, ActorProcessingErr, ActorRef, SupervisionEvent};
+use std::path::PathBuf;
+use std::sync::Arc;
 
+use ractor::{Actor, ActorProcessingErr, ActorRef, SupervisionEvent};
+use vertebrae_core::VertebraeServices;
+
+use crate::actors::step_executor::{
+    StepConfig, StepExecutor, StepExecutorConfig, StepExecutorMessage, StepResult,
+};
 use crate::phoenix::PhoenixMessage;
 
 /// Configuration needed to start a ProjectSupervisor.
-#[derive(Debug, Clone)]
 pub struct ProjectConfig {
     /// The Sacrum project ID (UUID string).
     pub project_id: String,
-    /// Sacrum base URL (e.g. "http://localhost:4000").
-    pub base_url: String,
-    /// API token for Sacrum authentication.
-    pub api_token: String,
+    /// Per-project Sacrum-backed services (tasks, workflows, executions, steps).
+    pub services: Arc<VertebraeServices>,
 }
 
-/// Messages the ProjectSupervisor can receive.
+impl std::fmt::Debug for ProjectConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProjectConfig")
+            .field("project_id", &self.project_id)
+            .field("services", &"<VertebraeServices>")
+            .finish()
+    }
+}
+
 pub enum ProjectMessage {
-    /// An incoming channel event routed from the DaemonSupervisor.
     ChannelEvent(PhoenixMessage),
-    /// Initiate graceful shutdown of this project actor.
+    /// Spawn a StepExecutor to run a workflow step.
+    ExecuteStep {
+        execution_id: String,
+        task_id: String,
+        step_config: StepConfig,
+        project_root: PathBuf,
+    },
+    StepFinished {
+        execution_id: String,
+        task_id: String,
+        result: StepResult,
+    },
     Shutdown,
 }
 
@@ -35,6 +57,28 @@ impl std::fmt::Debug for ProjectMessage {
                 .debug_struct("ChannelEvent")
                 .field("topic", &msg.topic)
                 .field("event", &msg.event)
+                .finish(),
+            Self::ExecuteStep {
+                execution_id,
+                task_id,
+                step_config,
+                project_root,
+            } => f
+                .debug_struct("ExecuteStep")
+                .field("execution_id", execution_id)
+                .field("task_id", task_id)
+                .field("step_config", step_config)
+                .field("project_root", project_root)
+                .finish(),
+            Self::StepFinished {
+                execution_id,
+                task_id,
+                result,
+            } => f
+                .debug_struct("StepFinished")
+                .field("execution_id", execution_id)
+                .field("task_id", task_id)
+                .field("result", result)
                 .finish(),
             Self::Shutdown => write!(f, "Shutdown"),
         }
@@ -82,6 +126,8 @@ pub fn classify_project_event(msg: &PhoenixMessage) -> ProjectAction {
 pub struct ProjectState {
     /// The project ID this actor manages.
     project_id: String,
+    /// Per-project Sacrum-backed services.
+    services: Arc<VertebraeServices>,
 }
 
 /// Per-project supervisor actor.
@@ -104,6 +150,7 @@ impl Actor for ProjectSupervisor {
 
         Ok(ProjectState {
             project_id: args.project_id,
+            services: args.services,
         })
     }
 
@@ -116,6 +163,30 @@ impl Actor for ProjectSupervisor {
         match message {
             ProjectMessage::ChannelEvent(msg) => {
                 self.handle_channel_event(msg, state);
+            }
+            ProjectMessage::ExecuteStep {
+                execution_id,
+                task_id,
+                step_config,
+                project_root,
+            } => {
+                self.handle_execute_step(
+                    myself.clone(),
+                    &execution_id,
+                    &task_id,
+                    step_config,
+                    project_root,
+                    state,
+                )
+                .await?;
+            }
+            ProjectMessage::StepFinished {
+                execution_id,
+                task_id,
+                result,
+            } => {
+                self.handle_step_finished(&execution_id, &task_id, &result, state)
+                    .await;
             }
             ProjectMessage::Shutdown => {
                 self.handle_shutdown(myself, state);
@@ -217,6 +288,129 @@ impl ProjectSupervisor {
                     event,
                     msg.payload
                 );
+            }
+        }
+    }
+
+    /// Spawn a StepExecutor child actor, marking the step as started in Sacrum first.
+    async fn handle_execute_step(
+        &self,
+        myself: ActorRef<ProjectMessage>,
+        execution_id: &str,
+        task_id: &str,
+        step_config: StepConfig,
+        project_root: PathBuf,
+        state: &mut ProjectState,
+    ) -> Result<(), ActorProcessingErr> {
+        tracing::info!(
+            "[project:{}] Executing step: execution_id={}, task_id={}",
+            state.project_id,
+            execution_id,
+            task_id
+        );
+
+        // Mark the step as started in Sacrum before spawning the executor.
+        if let Err(e) = state.services.tasks().start_step(task_id).await {
+            tracing::error!(
+                "[project:{}] Failed to start step for task {}: {}",
+                state.project_id,
+                task_id,
+                e
+            );
+            return Ok(());
+        }
+
+        let executor_config = StepExecutorConfig {
+            execution_id: execution_id.to_string(),
+            task_id: task_id.to_string(),
+            step_config,
+            project_root,
+            execution_service: state.services.executions_arc(),
+        };
+
+        let actor_name = format!("step-{}-{}", state.project_id, execution_id);
+
+        match Actor::spawn_linked(
+            Some(actor_name),
+            StepExecutor,
+            (executor_config, myself.clone()),
+            myself.get_cell(),
+        )
+        .await
+        {
+            Ok((executor_ref, _handle)) => {
+                if let Err(e) = executor_ref.cast(StepExecutorMessage::Execute) {
+                    tracing::error!(
+                        "[project:{}] Failed to send Execute to StepExecutor: {}",
+                        state.project_id,
+                        e
+                    );
+                }
+            }
+            Err(e) => {
+                tracing::error!(
+                    "[project:{}] Failed to spawn StepExecutor for execution {}: {}",
+                    state.project_id,
+                    execution_id,
+                    e
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn handle_step_finished(
+        &self,
+        execution_id: &str,
+        task_id: &str,
+        result: &StepResult,
+        state: &mut ProjectState,
+    ) {
+        match result {
+            StepResult::Completed { exit_code } => {
+                tracing::info!(
+                    "[project:{}] Step completed: execution_id={}, task_id={}, exit_code={}",
+                    state.project_id,
+                    execution_id,
+                    task_id,
+                    exit_code
+                );
+
+                if let Err(e) = state.services.tasks().complete_step(task_id).await {
+                    tracing::error!(
+                        "[project:{}] Failed to complete step for task {}: {}",
+                        state.project_id,
+                        task_id,
+                        e
+                    );
+                }
+            }
+            StepResult::Failed { exit_code, error } => {
+                tracing::warn!(
+                    "[project:{}] Step failed: execution_id={}, task_id={}, exit_code={:?}, error={}",
+                    state.project_id,
+                    execution_id,
+                    task_id,
+                    exit_code,
+                    error
+                );
+
+                // On failure, reject the step with the error as feedback.
+                // We pass task_id as target_step_id to keep the task on the same step.
+                if let Err(e) = state
+                    .services
+                    .tasks()
+                    .reject_step(task_id, task_id, Some(error))
+                    .await
+                {
+                    tracing::error!(
+                        "[project:{}] Failed to reject step for task {}: {}",
+                        state.project_id,
+                        task_id,
+                        e
+                    );
+                }
             }
         }
     }
@@ -379,29 +573,27 @@ mod tests {
 
     // ===== ProjectConfig tests =====
 
+    fn test_services() -> Arc<VertebraeServices> {
+        use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig};
+
+        let config = SacrumConfig::new(
+            "http://localhost:4000".to_string(),
+            "test-token".to_string(),
+            "test-project".to_string(),
+        );
+        let client = Arc::new(GraphqlClient::new(config));
+        Arc::new(vertebrae_sacrum_client::from_sacrum(client))
+    }
+
     #[test]
     fn project_config_debug_format() {
         let config = ProjectConfig {
             project_id: "proj-123".to_string(),
-            base_url: "http://localhost:4000".to_string(),
-            api_token: "token-abc".to_string(),
+            services: test_services(),
         };
         let debug = format!("{:?}", config);
         assert!(debug.contains("proj-123"));
-        assert!(debug.contains("http://localhost:4000"));
-    }
-
-    #[test]
-    fn project_config_clone() {
-        let config = ProjectConfig {
-            project_id: "proj-123".to_string(),
-            base_url: "http://localhost:4000".to_string(),
-            api_token: "token-abc".to_string(),
-        };
-        let cloned = config.clone();
-        assert_eq!(cloned.project_id, "proj-123");
-        assert_eq!(cloned.base_url, "http://localhost:4000");
-        assert_eq!(cloned.api_token, "token-abc");
+        assert!(debug.contains("VertebraeServices"));
     }
 
     // ===== ProjectMessage debug tests =====
@@ -414,6 +606,56 @@ mod tests {
         assert!(debug.contains("ChannelEvent"));
         assert!(debug.contains("project:proj-1"));
         assert!(debug.contains("task_created"));
+    }
+
+    #[test]
+    fn project_message_debug_execute_step() {
+        let pm = ProjectMessage::ExecuteStep {
+            execution_id: "exec-789".to_string(),
+            task_id: "task-xyz".to_string(),
+            step_config: StepConfig {
+                prompt: "Implement feature".to_string(),
+                model: "claude-sonnet-4-20250514".to_string(),
+            },
+            project_root: PathBuf::from("/home/user/project"),
+        };
+        let debug = format!("{:?}", pm);
+        assert!(debug.contains("ExecuteStep"));
+        assert!(debug.contains("exec-789"));
+        assert!(debug.contains("task-xyz"));
+        assert!(debug.contains("Implement feature"));
+    }
+
+    #[test]
+    fn project_message_debug_step_finished_completed() {
+        let pm = ProjectMessage::StepFinished {
+            execution_id: "exec-123".to_string(),
+            task_id: "task-abc".to_string(),
+            result: StepResult::Completed { exit_code: 0 },
+        };
+        let debug = format!("{:?}", pm);
+        assert!(debug.contains("StepFinished"));
+        assert!(debug.contains("exec-123"));
+        assert!(debug.contains("task-abc"));
+        assert!(debug.contains("Completed"));
+    }
+
+    #[test]
+    fn project_message_debug_step_finished_failed() {
+        let pm = ProjectMessage::StepFinished {
+            execution_id: "exec-456".to_string(),
+            task_id: "task-def".to_string(),
+            result: StepResult::Failed {
+                exit_code: Some(1),
+                error: "process crashed".to_string(),
+            },
+        };
+        let debug = format!("{:?}", pm);
+        assert!(debug.contains("StepFinished"));
+        assert!(debug.contains("exec-456"));
+        assert!(debug.contains("task-def"));
+        assert!(debug.contains("Failed"));
+        assert!(debug.contains("process crashed"));
     }
 
     #[test]

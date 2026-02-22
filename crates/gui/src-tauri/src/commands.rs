@@ -266,7 +266,7 @@ pub async fn set_current_project(
             Ok(config) => {
                 let client = vertebrae_sacrum_client::GraphqlClient::new(config);
                 let client_arc = std::sync::Arc::new(client);
-                let services = crate::sacrum::from_sacrum(client_arc);
+                let services = vertebrae_sacrum_client::from_sacrum(client_arc);
                 let mut service_lock = state.services.write().await;
                 *service_lock = Some(services);
             }

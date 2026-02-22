@@ -77,7 +77,7 @@ async fn run_with_args(args: &Args) -> Result<(), ServiceError> {
 
     // Create services using Sacrum backend
     // Sacrum automatically broadcasts all mutations to connected clients
-    let services = vertebrae_cli::sacrum::from_sacrum(client_arc);
+    let services = vertebrae_sacrum_client::from_sacrum(client_arc);
 
     // Run the command or show welcome message
     match &args.command {
