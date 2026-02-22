@@ -70,3 +70,79 @@ pub use execution_service::SacrumExecutionService;
 pub use step_service::SacrumStepService;
 pub use task_service::SacrumTaskService;
 pub use workflow_service::SacrumWorkflowService;
+
+/// Create a new [`VertebraeServices`] container from a Sacrum GraphQL client.
+///
+/// Instantiates all service implementations ([`SacrumTaskService`], [`SacrumWorkflowService`],
+/// [`SacrumExecutionService`], [`SacrumStepService`]) from the provided [`GraphqlClient`].
+pub fn from_sacrum(client: std::sync::Arc<GraphqlClient>) -> vertebrae_core::VertebraeServices {
+    let task_service = SacrumTaskService::new((*client).clone());
+    let workflow_service = SacrumWorkflowService::new((*client).clone());
+    let execution_service = SacrumExecutionService::new((*client).clone());
+    let step_service = SacrumStepService::new((*client).clone());
+
+    vertebrae_core::VertebraeServices::from_services(
+        std::sync::Arc::new(task_service),
+        std::sync::Arc::new(workflow_service),
+        std::sync::Arc::new(execution_service),
+        std::sync::Arc::new(step_service),
+    )
+}
+
+#[cfg(test)]
+mod from_sacrum_tests {
+    use super::*;
+    use std::sync::Arc;
+
+    #[test]
+    fn creates_valid_services() {
+        let config = SacrumConfig::new(
+            "http://localhost:4000".to_string(),
+            "test-token".to_string(),
+            "test-project".to_string(),
+        );
+        let client = Arc::new(GraphqlClient::new(config));
+        let services = from_sacrum(client);
+
+        let _ = services.tasks();
+        let _ = services.workflows();
+        let _ = services.executions();
+        let _ = services.steps();
+    }
+
+    #[test]
+    fn arc_accessors_work() {
+        let config = SacrumConfig::new(
+            "http://localhost:4000".to_string(),
+            "test-token".to_string(),
+            "test-project".to_string(),
+        );
+        let client = Arc::new(GraphqlClient::new(config));
+        let services = from_sacrum(client);
+
+        let _ = services.tasks_arc();
+        let _ = services.workflows_arc();
+        let _ = services.executions_arc();
+        let _ = services.steps_arc();
+    }
+
+    #[test]
+    fn independent_clients_produce_independent_services() {
+        let config1 = SacrumConfig::new(
+            "http://localhost:4000".to_string(),
+            "token1".to_string(),
+            "project1".to_string(),
+        );
+        let config2 = SacrumConfig::new(
+            "http://localhost:5000".to_string(),
+            "token2".to_string(),
+            "project2".to_string(),
+        );
+
+        let services1 = from_sacrum(Arc::new(GraphqlClient::new(config1)));
+        let services2 = from_sacrum(Arc::new(GraphqlClient::new(config2)));
+
+        let _ = services1.tasks();
+        let _ = services2.tasks();
+    }
+}
