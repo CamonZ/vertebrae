@@ -167,11 +167,20 @@ impl PhoenixSocket {
     }
 
     /// Join a Phoenix channel topic (e.g. "project:{project_id}").
-    pub async fn join(&self, topic: &str, token: &str) -> Result<(), PhoenixError> {
+    ///
+    /// The `client_type` parameter is included in the phx_join payload so Sacrum
+    /// can route events appropriately. Daemon connections should pass `"daemon"` to
+    /// receive only `run_step` and `cancel_step` events.
+    pub async fn join(
+        &self,
+        topic: &str,
+        token: &str,
+        client_type: &str,
+    ) -> Result<(), PhoenixError> {
         let join_ref = self.next_ref();
         let msg_ref = self.next_ref();
 
-        let join_payload = serde_json::json!({ "token": token });
+        let join_payload = serde_json::json!({ "token": token, "client_type": client_type });
         let join_msg = serde_json::json!([join_ref, msg_ref, topic, "phx_join", join_payload]);
 
         tracing::info!("Joining channel: {}", topic);

@@ -956,6 +956,22 @@ impl ExecutionService for MockExecutionService {
         s.executions.insert(id, execution.clone());
         Ok(execution)
     }
+
+    async fn update_execution_status(
+        &self,
+        execution_id: &str,
+        params: vertebrae_core::execution_service::UpdateExecutionStatusParams,
+    ) -> ServiceResult<()> {
+        let mut s = self.state.lock().unwrap();
+        let execution = s.executions.get_mut(execution_id).ok_or_else(|| {
+            ServiceError::validation_failed(format!("execution not found: {}", execution_id))
+        })?;
+        execution.status = params.status;
+        if let Some(out) = params.output {
+            execution.output = Some(out);
+        }
+        Ok(())
+    }
 }
 
 // ============================================================================

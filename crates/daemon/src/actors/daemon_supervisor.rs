@@ -100,6 +100,8 @@ pub enum DaemonMessage {
     AddProject {
         /// The Sacrum project ID (UUID string).
         project_id: String,
+        /// The project root directory (for running Claude Code CLI).
+        project_root: std::path::PathBuf,
     },
     /// Unregister a project, leave its channel, and stop its ProjectSupervisor.
     RemoveProject {
@@ -119,9 +121,13 @@ pub enum DaemonMessage {
 impl std::fmt::Debug for DaemonMessage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::AddProject { project_id } => f
+            Self::AddProject {
+                project_id,
+                project_root,
+            } => f
                 .debug_struct("AddProject")
                 .field("project_id", project_id)
+                .field("project_root", project_root)
                 .finish(),
             Self::RemoveProject { project_id } => f
                 .debug_struct("RemoveProject")
@@ -202,8 +208,12 @@ impl Actor for DaemonSupervisor {
         state: &mut Self::State,
     ) -> Result<(), ActorProcessingErr> {
         match message {
-            DaemonMessage::AddProject { project_id } => {
-                self.handle_add_project(&myself, &project_id, state).await?;
+            DaemonMessage::AddProject {
+                project_id,
+                project_root,
+            } => {
+                self.handle_add_project(&myself, &project_id, &project_root, state)
+                    .await?;
             }
             DaemonMessage::RemoveProject { project_id } => {
                 self.handle_remove_project(&project_id, state).await?;
@@ -358,6 +368,7 @@ impl DaemonSupervisor {
         &self,
         myself: &ActorRef<DaemonMessage>,
         project_id: &str,
+        project_root: &std::path::Path,
         state: &mut DaemonState,
     ) -> Result<(), ActorProcessingErr> {
         if state.projects.contains_key(project_id) {
@@ -368,7 +379,7 @@ impl DaemonSupervisor {
         let topic = format!("project:{}", project_id);
         state
             .socket
-            .join(&topic, &state.config.api_token)
+            .join(&topic, &state.config.api_token, "daemon")
             .await
             .map_err(|e| format!("Failed to join channel {topic}: {e}"))?;
 
@@ -385,6 +396,7 @@ impl DaemonSupervisor {
         let project_config = ProjectConfig {
             project_id: project_id.to_string(),
             services,
+            project_root: project_root.to_path_buf(),
         };
 
         let (child_ref, _handle) = Actor::spawn_linked(
@@ -545,7 +557,11 @@ impl DaemonSupervisor {
         let project_ids: Vec<String> = state.projects.keys().cloned().collect();
         for project_id in &project_ids {
             let topic = format!("project:{}", project_id);
-            if let Err(e) = state.socket.join(&topic, &state.config.api_token).await {
+            if let Err(e) = state
+                .socket
+                .join(&topic, &state.config.api_token, "daemon")
+                .await
+            {
                 tracing::error!("Failed to rejoin channel {topic} after reconnect: {e}");
             }
         }
