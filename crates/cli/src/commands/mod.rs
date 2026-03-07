@@ -284,10 +284,8 @@ impl Command {
                 Ok(CommandResult::Message(result))
             }
             Command::Run(cmd) => {
-                cmd.execute(services).await?;
-                Ok(CommandResult::Message(
-                    "Workflow execution started".to_string(),
-                ))
+                let result = cmd.execute(services).await?;
+                Ok(CommandResult::Message(result))
             }
             Command::Section(cmd) => {
                 let result = cmd.execute(services).await?;

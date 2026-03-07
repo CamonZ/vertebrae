@@ -732,11 +732,13 @@ impl WorkflowService for MockWorkflowService {
         workflow_id: &str,
     ) -> ServiceResult<AssignResult> {
         let mut s = self.state.lock().unwrap();
+        let step_id = s.gen_id();
         let task = s
             .tasks
             .get_mut(task_id)
             .ok_or_else(|| ServiceError::task_not_found(task_id))?;
         task.workflow_id = Some(workflow_id.to_string());
+        task.current_step_id = Some(step_id);
         Ok(AssignResult {
             task_id: task_id.to_string(),
             workflow_id: workflow_id.to_string(),
@@ -923,6 +925,22 @@ impl ExecutionService for MockExecutionService {
         }
         Ok(())
     }
+
+    async fn run_step(
+        &self,
+        task_id: &str,
+        workflow_id: &str,
+        _step_id: &str,
+    ) -> ServiceResult<StepExecution> {
+        let mut s = self.state.lock().unwrap();
+        let id = s.gen_id();
+        let mut execution = StepExecution::new(task_id, workflow_id, "mock_step");
+        execution.id = Some(id.clone());
+        s.executions.insert(id, execution.clone());
+        Ok(execution)
+    }
+
+
 }
 
 // ============================================================================

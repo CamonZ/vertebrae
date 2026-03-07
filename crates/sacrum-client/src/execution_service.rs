@@ -14,7 +14,7 @@ use crate::api_types::{SessionLogResponse, StepExecutionResponse};
 use crate::client::{GraphqlClient, with_fragments};
 use crate::queries::executions::{
     CREATE_EXECUTION, CREATE_LOG, EXECUTION_FIELDS, GET_EXECUTION, LIST_EXECUTIONS, LIST_LOGS,
-    UPDATE_EXECUTION,
+    RUN_STEP, UPDATE_EXECUTION,
 };
 
 /// Response shape for mutations that return only an id
@@ -192,6 +192,27 @@ impl ExecutionService for SacrumExecutionService {
 
         Ok(responses.iter().map(Self::response_to_log).collect())
     }
+
+    async fn run_step(
+        &self,
+        task_id: &str,
+        workflow_id: &str,
+        step_id: &str,
+    ) -> ServiceResult<StepExecution> {
+        let query = with_fragments(RUN_STEP, &[EXECUTION_FIELDS]);
+        let variables = json!({
+            "task_id": task_id,
+            "workflow_id": workflow_id,
+            "step_id": step_id,
+        });
+
+        let response: StepExecutionResponse =
+            self.client.execute(&query, variables, "run_step").await?;
+
+        Ok(Self::response_to_execution(&response))
+    }
+
+
 }
 
 #[cfg(test)]
@@ -724,4 +745,73 @@ mod tests {
 
         assert!(result.is_none());
     }
+
+    #[tokio::test]
+    async fn test_run_step_returns_execution() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "run_step": {
+                        "id": "exec-run-1",
+                        "task_id": "task-1",
+                        "workflow_id": "wf-1",
+                        "step_name": "implement",
+                        "status": "in_progress",
+                        "context": null,
+                        "prompt": null,
+                        "output": null,
+                        "transition_result": null,
+                        "model": null,
+                        "model_provider": null,
+                        "input_tokens": null,
+                        "output_tokens": null,
+                        "cost": null,
+                        "duration_ms": null,
+                        "inserted_at": "2024-06-01T00:00:00Z",
+                        "updated_at": "2024-06-01T00:00:00Z"
+                    }
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let result = service.run_step("task-1", "wf-1", "step-1").await.unwrap();
+
+        assert_eq!(result.id, Some("exec-run-1".to_string()));
+        assert_eq!(result.task_id, "task-1");
+        assert_eq!(result.workflow_id, "wf-1");
+        assert_eq!(result.step_name, "implement");
+        assert_eq!(result.status, ExecutionStatus::InProgress);
+    }
+
+    #[tokio::test]
+    async fn test_run_step_graphql_error() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": null,
+                "errors": [{"message": "no_daemon_connected"}]
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let result = service.run_step("task-1", "wf-1", "step-1").await;
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("no_daemon_connected"),
+            "Expected error about daemon, got: {}",
+            err_msg
+        );
+    }
+
+
 }
