@@ -114,4 +114,27 @@ pub trait ExecutionService: Send + Sync {
         output: Option<String>,
         transition_result: Option<String>,
     ) -> ServiceResult<()>;
+
+    /// Trigger a workflow step execution via the orchestrator (Sacrum).
+    ///
+    /// Sacrum creates a StepExecution record and broadcasts a `run_step` event
+    /// to connected daemon clients on the project channel. The daemon picks up
+    /// the event and executes the step.
+    ///
+    /// # Arguments
+    ///
+    /// * `task_id` - The task to run the step for
+    /// * `workflow_id` - The workflow the step belongs to
+    /// * `step_id` - The specific workflow step to execute
+    ///
+    /// # Returns
+    ///
+    /// The created StepExecution.
+    async fn run_step(
+        &self,
+        task_id: &str,
+        workflow_id: &str,
+        step_id: &str,
+    ) -> ServiceResult<StepExecution>;
+
 }

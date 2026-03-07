@@ -117,3 +117,15 @@ pub const CREATE_LOG: &str = r#"
         }
     }
 "#;
+
+/// Trigger a workflow step execution via the orchestrator.
+/// Sacrum creates a StepExecution and broadcasts run_step to daemon clients.
+/// NOTE: Prepend EXECUTION_FIELDS when sending.
+pub const RUN_STEP: &str = r#"
+    mutation RunStep($task_id: Uuid4!, $workflow_id: Uuid4!, $step_id: Uuid4!) {
+        run_step(task_id: $task_id, workflow_id: $workflow_id, step_id: $step_id) {
+            ...ExecutionFields
+        }
+    }
+"#;
+

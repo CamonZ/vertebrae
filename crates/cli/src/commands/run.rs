@@ -1,5 +1,4 @@
 use clap::Args;
-use std::time::Duration;
 use vertebrae_core::{ServiceError, VertebraeServices};
 
 #[derive(Debug, Args)]
@@ -10,42 +9,64 @@ pub struct RunCommand {
 }
 
 impl RunCommand {
-    pub async fn execute(&self, services: &VertebraeServices) -> Result<(), ServiceError> {
-        // Verify task exists and has workflow
+    pub async fn execute(&self, services: &VertebraeServices) -> Result<String, ServiceError> {
         let task = services.tasks().get_task(&self.task_id).await?;
 
-        if task.workflow_id.is_none() {
-            return Err(ServiceError::ValidationFailed {
-                message: format!("Task {} has no assigned workflow", self.task_id),
-            });
-        }
-
-        // Send HTTP POST to GUI
-        let url = "http://127.0.0.1:17273/api/run-workflow";
-        let payload = serde_json::json!({ "task_id": self.task_id });
-
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(2))
-            .build()
-            .map_err(|e| ServiceError::ValidationFailed {
-                message: format!("HTTP client error: {}", e),
-            })?;
-
-        let response = client.post(url).json(&payload).send().await.map_err(|_| {
-            ServiceError::ValidationFailed {
-                message: "Failed to connect to GUI on port 17273. Is the GUI running?".to_string(),
-            }
+        let workflow_id = task.workflow_id.as_deref().ok_or_else(|| {
+            ServiceError::validation_failed(format!(
+                "Task {} has no assigned workflow",
+                self.task_id
+            ))
         })?;
 
-        if !response.status().is_success() {
-            return Err(ServiceError::ValidationFailed {
-                message: format!("GUI returned error: {}", response.status()),
-            });
+        let step_id = task.current_step_id.as_deref().ok_or_else(|| {
+            ServiceError::validation_failed(format!(
+                "Task {} has no current step. Assign a workflow first.",
+                self.task_id
+            ))
+        })?;
+
+        let execution = services
+            .executions()
+            .run_step(&self.task_id, workflow_id, step_id)
+            .await
+            .map_err(|e| {
+                let msg = e.to_string();
+                if msg.contains("no_daemon_connected") || msg.contains("no daemon") {
+                    ServiceError::validation_failed(
+                        "No daemon is connected to handle step execution. \
+                         Start the daemon with `vtb-daemon` and try again.",
+                    )
+                } else {
+                    e
+                }
+            })?;
+
+        let id = execution.id.as_deref().unwrap_or("unknown");
+        let short_id = if id.len() > 8 { &id[..8] } else { id };
+
+        Ok(format!(
+            "Execution {} started (step: {}, status: {})",
+            short_id, execution.step_name, execution.status
+        ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_run_command_parsing_basic() {
+        use clap::Parser;
+
+        #[derive(Parser)]
+        struct TestCli {
+            #[command(flatten)]
+            run: RunCommand,
         }
 
-        println!("✓ Workflow execution started for task {}", self.task_id);
-        println!("  View progress in the GUI");
-
-        Ok(())
+        let cli = TestCli::parse_from(["test", "a1b2c3d4-0000-4000-8000-000000000001"]);
+        assert_eq!(cli.run.task_id, "a1b2c3d4-0000-4000-8000-000000000001");
     }
 }
