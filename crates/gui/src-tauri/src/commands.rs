@@ -1403,6 +1403,10 @@ pub(crate) async fn update_task_inner(
         update_opts.needs_human_review = Some(review_flag);
     }
 
+    if let Some(archived) = options.archived {
+        update_opts.archived = Some(archived);
+    }
+
     service.tasks().update_task(task_id, update_opts).await?;
     log::info!("Successfully updated task: {}", task_id);
     Ok(())

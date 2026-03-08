@@ -301,6 +301,7 @@ mod query_tests {
             parent: None,
             root: false,
             all: true,
+            include_archived: false,
             search: None,
             flat: true,
         };

@@ -38,6 +38,7 @@ vtb list --root                   # Show only root items (no parent)
 
 ```bash
 vtb list --all                    # Include done items (excluded by default)
+vtb list --include-archived       # Include archived items (excluded by default)
 vtb list --search "auth"          # Search in title and description
 ```
 
@@ -54,6 +55,7 @@ vtb list --search "auth"          # Search in title and description
 | `--root` | | Show only root items |
 | `--parent` | | Show children of task |
 | `--all` | | Include done items |
+| `--include-archived` | | Include archived items |
 | `--search` | | Search in title/description |
 | `--flat` | | Table view instead of tree |
 

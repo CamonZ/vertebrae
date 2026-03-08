@@ -80,6 +80,7 @@ impl TaskService for MockTaskService {
             } else {
                 None
             },
+            archived: false,
             revision_feedback: None,
             rejection_reason: None,
             review_comment: None,
@@ -179,6 +180,9 @@ impl TaskService for MockTaskService {
         }
         if let Some(review) = options.needs_human_review {
             task.needs_human_review = Some(review);
+        }
+        if let Some(archived) = options.archived {
+            task.archived = archived;
         }
         task.updated_at = Some(Utc::now());
         Ok(())

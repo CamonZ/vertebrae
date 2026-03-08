@@ -135,6 +135,7 @@ impl From<RelatedTaskRow> for TaskSummary {
             priority: row.priority,
             tags: row.tags,
             needs_human_review: row.needs_human_review,
+            archived: false,
             parent_id: None,
         }
     }
@@ -378,6 +379,7 @@ impl ShowCommand {
             priority: task.priority.map(|p| p.as_str().to_string()),
             tags: task.tags,
             needs_human_review: task.needs_human_review,
+            archived: task.archived,
             parent_id: None,
         }))
     }
@@ -413,6 +415,7 @@ fn task_to_summary(task: &vertebrae_core::Task) -> TaskSummary {
         priority: task.priority.as_ref().map(|p| p.as_str().to_string()),
         tags: task.tags.clone(),
         needs_human_review: task.needs_human_review,
+        archived: task.archived,
         parent_id: task.parent_id.clone(),
     }
 }

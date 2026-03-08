@@ -127,6 +127,8 @@ pub struct UpdateTaskOptions {
     pub parent_id: Option<Option<String>>,
     /// Human review flag
     pub needs_human_review: Option<bool>,
+    /// Whether the task is archived
+    pub archived: Option<bool>,
     /// New task level (epic, ticket, task)
     pub level: Option<String>,
     /// Revision feedback text
@@ -199,6 +201,12 @@ impl UpdateTaskOptions {
         self
     }
 
+    /// Set the archived flag
+    pub fn with_archived(mut self, value: bool) -> Self {
+        self.archived = Some(value);
+        self
+    }
+
     /// Check if any updates are specified
     pub fn has_updates(&self) -> bool {
         self.title.is_some()
@@ -207,6 +215,7 @@ impl UpdateTaskOptions {
             || !self.add_tags.is_empty()
             || !self.remove_tags.is_empty()
             || self.needs_human_review.is_some()
+            || self.archived.is_some()
     }
 }
 
@@ -515,4 +524,39 @@ pub trait TaskService: Send + Sync {
     ///
     /// Clears both workflow_id and current_step_id fields.
     async fn unassign_workflow(&self, task_id: &str) -> ServiceResult<()>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn update_task_options_with_archived() {
+        let opts = UpdateTaskOptions::new().with_archived(true);
+        assert_eq!(opts.archived, Some(true));
+    }
+
+    #[test]
+    fn update_task_options_with_archived_false() {
+        let opts = UpdateTaskOptions::new().with_archived(false);
+        assert_eq!(opts.archived, Some(false));
+    }
+
+    #[test]
+    fn update_task_options_archived_default_is_none() {
+        let opts = UpdateTaskOptions::new();
+        assert!(opts.archived.is_none());
+    }
+
+    #[test]
+    fn update_task_options_has_updates_includes_archived() {
+        let opts = UpdateTaskOptions::new().with_archived(true);
+        assert!(opts.has_updates());
+    }
+
+    #[test]
+    fn update_task_options_has_updates_empty() {
+        let opts = UpdateTaskOptions::new();
+        assert!(!opts.has_updates());
+    }
 }
