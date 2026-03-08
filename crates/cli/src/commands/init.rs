@@ -350,15 +350,19 @@ impl InitCommand {
 
     /// Copy skill files from source to target directory.
     ///
+    /// Recursively copies the embedded directory structure (e.g., skills/add/SKILL.md).
     /// Returns the number of files copied.
     fn copy_skills(&self, skills_source: &Dir, skills_target: &Path) -> Result<usize, InitError> {
         let mut copied = 0;
 
+        // Copy files at this level
         for file in skills_source.files() {
-            let file_name = file.path().file_name().unwrap().to_str().unwrap();
-            let target_path = skills_target.join(file_name);
+            let target_path = skills_target.join(file.path());
 
-            // Read the embedded file content and write it to the target
+            if let Some(parent) = target_path.parent() {
+                self.create_dir_if_not_exists(parent)?;
+            }
+
             let content = file.contents();
             fs::write(&target_path, content).map_err(|e| InitError::CopyFile {
                 source: file.path().to_path_buf(),
@@ -367,6 +371,25 @@ impl InitCommand {
             })?;
 
             copied += 1;
+        }
+
+        // Recurse into subdirectories
+        for dir in skills_source.dirs() {
+            let dir_target = skills_target.join(dir.path());
+            self.create_dir_if_not_exists(&dir_target)?;
+
+            for file in dir.files() {
+                let target_path = skills_target.join(file.path());
+
+                let content = file.contents();
+                fs::write(&target_path, content).map_err(|e| InitError::CopyFile {
+                    source: file.path().to_path_buf(),
+                    target: target_path.clone(),
+                    reason: e.to_string(),
+                })?;
+
+                copied += 1;
+            }
         }
 
         Ok(copied)
@@ -450,19 +473,19 @@ mod tests {
         let count = result.unwrap();
         assert!(count > 0, "Should have copied at least one skill file");
 
-        // Verify at least one known skill file exists
-        assert!(skills_target.join("plan.md").exists());
+        // Verify at least one known skill folder/file exists
+        assert!(skills_target.join("add/SKILL.md").exists());
 
         cleanup(&temp_dir);
     }
 
     #[test]
     fn test_init_embedded_skills_exist() {
-        // Verify that SKILLS_DIR contains files
-        let file_count = SKILLS_DIR.files().count();
+        // Verify that SKILLS_DIR contains subdirectories with SKILL.md files
+        let dir_count = SKILLS_DIR.dirs().count();
         assert!(
-            file_count > 0,
-            "SKILLS_DIR should contain embedded skill files"
+            dir_count > 0,
+            "SKILLS_DIR should contain embedded skill directories"
         );
     }
 
@@ -500,8 +523,8 @@ mod tests {
         assert!(result.is_ok());
 
         // Verify that written files have content
-        if skills_target.join("plan.md").exists() {
-            let content = fs::read_to_string(skills_target.join("plan.md")).unwrap();
+        if skills_target.join("add/SKILL.md").exists() {
+            let content = fs::read_to_string(skills_target.join("add/SKILL.md")).unwrap();
             assert!(!content.is_empty(), "Skill file should have content");
         }
 
