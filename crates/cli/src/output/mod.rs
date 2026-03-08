@@ -54,7 +54,9 @@ pub fn format_task_table(tasks: &[TaskSummary]) -> String {
     }
 
     // Column headers
-    let headers = ["ID", "Level", "Status", "Priority", "Title", "Tags", "[R]"];
+    let headers = [
+        "ID", "Level", "Status", "Priority", "Title", "Tags", "[R]", "[A]",
+    ];
 
     // Calculate column widths based on content
     let id_width = tasks
@@ -102,11 +104,14 @@ pub fn format_task_table(tasks: &[TaskSummary]) -> String {
     // Review column is fixed width (3 chars for "[R]")
     let review_width = headers[6].len();
 
+    // Archived column is fixed width (3 chars for "[A]")
+    let archived_width = headers[7].len();
+
     let mut output = String::new();
 
     // Header row
     output.push_str(&format!(
-        "{:<id_w$}  {:<level_w$}  {:<status_w$}  {:<priority_w$}  {:<title_w$}  {:<tags_w$}  {:<review_w$}\n",
+        "{:<id_w$}  {:<level_w$}  {:<status_w$}  {:<priority_w$}  {:<title_w$}  {:<tags_w$}  {:<review_w$}  {:<archived_w$}\n",
         headers[0],
         headers[1],
         headers[2],
@@ -114,6 +119,7 @@ pub fn format_task_table(tasks: &[TaskSummary]) -> String {
         headers[4],
         headers[5],
         headers[6],
+        headers[7],
         id_w = id_width,
         level_w = level_width,
         status_w = status_width,
@@ -121,11 +127,13 @@ pub fn format_task_table(tasks: &[TaskSummary]) -> String {
         title_w = title_width,
         tags_w = tags_width,
         review_w = review_width,
+        archived_w = archived_width,
     ));
 
     // Separator row using Unicode box-drawing character
     output.push_str(&format!(
-        "{:->id_w$}  {:->level_w$}  {:->status_w$}  {:->priority_w$}  {:->title_w$}  {:->tags_w$}  {:->review_w$}\n",
+        "{:->id_w$}  {:->level_w$}  {:->status_w$}  {:->priority_w$}  {:->title_w$}  {:->tags_w$}  {:->review_w$}  {:->archived_w$}\n",
+        "",
         "",
         "",
         "",
@@ -140,6 +148,7 @@ pub fn format_task_table(tasks: &[TaskSummary]) -> String {
         title_w = title_width,
         tags_w = tags_width,
         review_w = review_width,
+        archived_w = archived_width,
     ));
 
     // Data rows
@@ -148,10 +157,11 @@ pub fn format_task_table(tasks: &[TaskSummary]) -> String {
         let title_display = truncate(&task.title, MAX_TITLE_WIDTH);
         let tags_display = truncate(&format_tags(&task.tags), MAX_TAGS_WIDTH);
         let review_display = format_review_status(task.needs_human_review);
+        let archived_display = format_archived_status(task.archived);
         let status_display = format_status_display(task);
 
         output.push_str(&format!(
-            "{:<id_w$}  {:<level_w$}  {:<status_w$}  {:<priority_w$}  {:<title_w$}  {:<tags_w$}  {:<review_w$}\n",
+            "{:<id_w$}  {:<level_w$}  {:<status_w$}  {:<priority_w$}  {:<title_w$}  {:<tags_w$}  {:<review_w$}  {:<archived_w$}\n",
             task.id,
             task.level,
             status_display,
@@ -159,6 +169,7 @@ pub fn format_task_table(tasks: &[TaskSummary]) -> String {
             title_display,
             tags_display,
             review_display,
+            archived_display,
             id_w = id_width,
             level_w = level_width,
             status_w = status_width,
@@ -166,6 +177,7 @@ pub fn format_task_table(tasks: &[TaskSummary]) -> String {
             title_w = title_width,
             tags_w = tags_width,
             review_w = review_width,
+            archived_w = archived_width,
         ));
     }
 
@@ -337,11 +349,19 @@ fn render_node(
     } else {
         ""
     };
+    let archived_display = if task.archived { " [A]" } else { "" };
 
     // Write the line
     output.push_str(&format!(
-        "{}{}{:<8} {} {} {}{}",
-        prefix, connector, task.id, level_display, status_display, title_display, review_display
+        "{}{}{:<8} {} {} {}{}{}",
+        prefix,
+        connector,
+        task.id,
+        level_display,
+        status_display,
+        title_display,
+        review_display,
+        archived_display
     ));
     output.push('\n');
 
@@ -389,6 +409,13 @@ fn format_review_status(needs_human_review: Option<bool>) -> &'static str {
     }
 }
 
+/// Format the archived status indicator.
+///
+/// Returns "[A]" if archived is true, otherwise returns an empty string.
+fn format_archived_status(archived: bool) -> &'static str {
+    if archived { "[A]" } else { "" }
+}
+
 /// Format tags as a comma-separated string.
 fn format_tags(tags: &[String]) -> String {
     if tags.is_empty() {
@@ -420,6 +447,7 @@ mod tests {
             priority: Some("high".to_string()),
             tags: vec!["backend".to_string()],
             needs_human_review: None,
+            archived: false,
             parent_id: None,
         }];
 
@@ -433,7 +461,9 @@ mod tests {
         let header_parts: Vec<&str> = lines[0].split_whitespace().collect();
         assert_eq!(
             header_parts,
-            vec!["ID", "Level", "Status", "Priority", "Title", "Tags", "[R]"]
+            vec![
+                "ID", "Level", "Status", "Priority", "Title", "Tags", "[R]", "[A]"
+            ]
         );
 
         // Verify separator line contains dashes
@@ -462,6 +492,7 @@ mod tests {
                 priority: Some("critical".to_string()),
                 tags: vec!["urgent".to_string(), "backend".to_string()],
                 needs_human_review: Some(true),
+                archived: false,
                 parent_id: None,
             },
             TaskSummary {
@@ -473,6 +504,7 @@ mod tests {
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
+                archived: false,
                 parent_id: None,
             },
         ];
@@ -510,6 +542,7 @@ mod tests {
             priority: None,
             tags: vec![],
             needs_human_review: None,
+            archived: false,
             parent_id: None,
         }];
 
@@ -532,6 +565,7 @@ mod tests {
             priority: Some("low".to_string()),
             tags: vec![],
             needs_human_review: None,
+            archived: false,
             parent_id: None,
         }];
 
@@ -601,6 +635,7 @@ mod tests {
             priority: None,
             tags: vec![],
             needs_human_review: None,
+            archived: false,
             parent_id: None,
         }];
         let result = format_task_table(&tasks);
@@ -643,6 +678,7 @@ mod tests {
             priority: None,
             tags: tags_input.clone(),
             needs_human_review: None,
+            archived: false,
             parent_id: None,
         }];
         let result = format_task_table(&tasks);
@@ -670,6 +706,7 @@ mod tests {
                 priority: Some("high".to_string()),
                 tags: vec!["x".to_string()],
                 needs_human_review: None,
+                archived: false,
                 parent_id: None,
             },
             TaskSummary {
@@ -681,6 +718,7 @@ mod tests {
                 priority: Some("critical".to_string()),
                 tags: vec!["backend".to_string(), "api".to_string()],
                 needs_human_review: Some(true),
+                archived: false,
                 parent_id: None,
             },
         ];
@@ -729,6 +767,7 @@ mod tests {
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
+                archived: false,
                 parent_id: None,
             }];
             let result = format_task_table(&tasks);
@@ -750,6 +789,7 @@ mod tests {
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
+                archived: false,
                 parent_id: None,
             }];
             let result = format_task_table(&tasks);
@@ -771,6 +811,7 @@ mod tests {
                 priority: Some(priority.to_string()),
                 tags: vec![],
                 needs_human_review: None,
+                archived: false,
                 parent_id: None,
             }];
             let result = format_task_table(&tasks);
@@ -797,6 +838,7 @@ mod tests {
             priority: None,
             tags: vec![],
             needs_human_review: Some(true),
+            archived: false,
             parent_id: None,
         }];
 
@@ -820,6 +862,7 @@ mod tests {
             priority: None,
             tags: vec![],
             needs_human_review: Some(false),
+            archived: false,
             parent_id: None,
         }];
 
@@ -862,6 +905,7 @@ mod tests {
             priority: None,
             tags: vec![],
             needs_human_review: None,
+            archived: false,
             parent_id: None,
         }];
         let parent_map = HashMap::new();
@@ -888,6 +932,7 @@ mod tests {
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
+                archived: false,
                 parent_id: None,
             },
             TaskSummary {
@@ -899,6 +944,7 @@ mod tests {
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
+                archived: false,
                 parent_id: None,
             },
         ];
@@ -932,6 +978,7 @@ mod tests {
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
+                archived: false,
                 parent_id: None,
             },
             TaskSummary {
@@ -943,6 +990,7 @@ mod tests {
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
+                archived: false,
                 parent_id: None,
             },
             TaskSummary {
@@ -954,6 +1002,7 @@ mod tests {
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
+                archived: false,
                 parent_id: None,
             },
         ];
@@ -986,6 +1035,7 @@ mod tests {
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
+                archived: false,
                 parent_id: None,
             },
             TaskSummary {
@@ -997,6 +1047,7 @@ mod tests {
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
+                archived: false,
                 parent_id: None,
             },
             TaskSummary {
@@ -1008,6 +1059,7 @@ mod tests {
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
+                archived: false,
                 parent_id: None,
             },
         ];
@@ -1038,6 +1090,7 @@ mod tests {
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
+                archived: false,
                 parent_id: None,
             },
             TaskSummary {
@@ -1049,6 +1102,7 @@ mod tests {
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
+                archived: false,
                 parent_id: None,
             },
         ];
@@ -1077,6 +1131,7 @@ mod tests {
             priority: None,
             tags: vec![],
             needs_human_review: None,
+            archived: false,
             parent_id: None,
         }];
 
@@ -1104,6 +1159,7 @@ mod tests {
             priority: None,
             tags: vec![],
             needs_human_review: Some(true),
+            archived: false,
             parent_id: None,
         }];
 
@@ -1133,6 +1189,7 @@ mod tests {
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
+                archived: false,
                 parent_id: None,
             },
             children: vec![],
@@ -1155,6 +1212,7 @@ mod tests {
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
+                archived: false,
                 parent_id: None,
             },
             children: vec![],
@@ -1163,5 +1221,109 @@ mod tests {
         let debug_str = format!("{:?}", node);
         assert!(debug_str.contains("TreeNode"));
         assert!(debug_str.contains("test"));
+    }
+
+    #[test]
+    fn test_format_archived_status() {
+        assert_eq!(format_archived_status(true), "[A]");
+        assert_eq!(format_archived_status(false), "");
+    }
+
+    #[test]
+    fn test_format_task_table_with_archived_indicator() {
+        let tasks = vec![TaskSummary {
+            id: "abc123".to_string(),
+            title: "Archived Task".to_string(),
+            level: "task".to_string(),
+            workflow_name: Some("default".to_string()),
+            step_name: Some("done".to_string()),
+            priority: None,
+            tags: vec![],
+            needs_human_review: None,
+            archived: true,
+            parent_id: None,
+        }];
+
+        let result = format_task_table(&tasks);
+        assert!(
+            result.contains("[A]"),
+            "Output should contain [A] indicator for archived task"
+        );
+    }
+
+    #[test]
+    fn test_format_task_table_without_archived_indicator() {
+        let tasks = vec![TaskSummary {
+            id: "abc123".to_string(),
+            title: "Active Task".to_string(),
+            level: "task".to_string(),
+            workflow_name: Some("default".to_string()),
+            step_name: Some("in_progress".to_string()),
+            priority: None,
+            tags: vec![],
+            needs_human_review: None,
+            archived: false,
+            parent_id: None,
+        }];
+
+        let result = format_task_table(&tasks);
+        let lines: Vec<&str> = result.lines().collect();
+        let data_row = lines[2];
+        let data_parts: Vec<&str> = data_row.split_whitespace().collect();
+        let has_archived_indicator = data_parts.last().is_some_and(|&s| s == "[A]");
+        assert!(
+            !has_archived_indicator,
+            "Data row should not have [A] indicator when archived is false"
+        );
+    }
+
+    #[test]
+    fn test_format_task_tree_with_archived_indicator() {
+        let tasks = vec![TaskSummary {
+            id: "task1".to_string(),
+            title: "Archived Task".to_string(),
+            level: "task".to_string(),
+            workflow_name: Some("default".to_string()),
+            step_name: Some("done".to_string()),
+            priority: None,
+            tags: vec![],
+            needs_human_review: None,
+            archived: true,
+            parent_id: None,
+        }];
+
+        let parent_map = HashMap::new();
+        let result = format_task_tree(&tasks, &parent_map);
+        assert!(
+            result.contains("[A]"),
+            "Tree output should show [A] indicator for archived task"
+        );
+    }
+
+    #[test]
+    fn test_format_task_tree_with_both_review_and_archived() {
+        let tasks = vec![TaskSummary {
+            id: "task1".to_string(),
+            title: "Review and Archived".to_string(),
+            level: "task".to_string(),
+            workflow_name: Some("default".to_string()),
+            step_name: Some("pending_review".to_string()),
+            priority: None,
+            tags: vec![],
+            needs_human_review: Some(true),
+            archived: true,
+            parent_id: None,
+        }];
+
+        let parent_map = HashMap::new();
+        let result = format_task_tree(&tasks, &parent_map);
+        assert!(
+            result.contains("[R]"),
+            "Tree output should show [R] indicator"
+        );
+        assert!(
+            result.contains("[A]"),
+            "Tree output should show [A] indicator"
+        );
     }
 }

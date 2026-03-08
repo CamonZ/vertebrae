@@ -174,6 +174,8 @@ pub struct Task {
     pub step_name: Option<String>,
     /// Whether this task needs human review
     pub needs_human_review: Option<bool>,
+    /// Whether this task is archived
+    pub archived: bool,
     /// Review comment
     pub review_comment: Option<String>,
     /// Feedback to address when a validation gate fails
@@ -213,6 +215,7 @@ impl From<vertebrae_core::Task> for Task {
             workflow_name: task.workflow_name,
             step_name: task.step_name,
             needs_human_review: task.needs_human_review,
+            archived: task.archived,
             review_comment: task.review_comment,
             revision_feedback: task.revision_feedback,
             rejection_reason: task.rejection_reason,
@@ -329,6 +332,8 @@ pub struct UpdateTaskOptions {
     pub level: Option<String>,
     /// Human review flag
     pub needs_human_review: Option<bool>,
+    /// Whether the task is archived
+    pub archived: Option<bool>,
     /// Revision feedback text
     pub revision_feedback: Option<Option<String>>,
 }

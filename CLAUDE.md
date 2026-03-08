@@ -126,6 +126,7 @@ See `skills/` for detailed command guides:
 
 **Task management:**
 - `/add` - Create tasks with hierarchy and dependencies
+- `/archive` - Archive or unarchive tasks
 - `/update` - Modify task fields
 - `/delete` - Remove tasks
 - `/vtb-show` - Display task details
@@ -288,6 +289,7 @@ vertebrae/
 │   └── pre-commit          # Git pre-commit hook script
 ├── skills/                 # Claude Code skills for vtb usage (each skill is a folder with SKILL.md)
 │   ├── add/SKILL.md        # /add - Create tasks
+│   ├── archive/SKILL.md    # /archive - Archive or unarchive tasks
 │   ├── blockers/SKILL.md   # /blockers - Show dependency chain
 │   ├── complete-step/SKILL.md # /complete-step - Complete a workflow step
 │   ├── criterion-ref/SKILL.md # /criterion-ref - Link to test criteria

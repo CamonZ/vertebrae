@@ -5,6 +5,7 @@
 #![allow(deprecated)]
 
 pub mod add;
+pub mod archive;
 pub mod blockers;
 pub mod complete_step;
 pub mod criterion_ref;
@@ -34,6 +35,7 @@ pub mod update;
 pub mod workflow;
 
 pub use add::AddCommand;
+pub use archive::{ArchiveCommand, UnarchiveCommand};
 pub use blockers::BlockersCommand;
 pub use complete_step::CompleteStepCommand;
 pub use criterion_ref::CriterionRefCommand;
@@ -125,6 +127,8 @@ pub fn parse_uuid_or_empty(field_name: &'static str) -> ValueParser {
 pub enum Command {
     /// Create a new task
     Add(AddCommand),
+    /// Archive a task (set archived=true)
+    Archive(ArchiveCommand),
     /// Show all tasks blocking a given task (recursive)
     Blockers(BlockersCommand),
     /// Complete a workflow step for a task
@@ -168,6 +172,8 @@ pub enum Command {
     /// Start a workflow step for a task
     #[command(name = "start-step")]
     StartStep(StartStepCommand),
+    /// Unarchive a task (set archived=false)
+    Unarchive(UnarchiveCommand),
     /// Remove a dependency relationship between tasks
     Undepend(UndependCommand),
     /// Remove code references from a task
@@ -247,6 +253,7 @@ impl Command {
                     }
                 }
             }
+            Command::Archive(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::Blockers(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::CompleteStep(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::CriterionRef(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
@@ -269,6 +276,7 @@ impl Command {
             Command::Sections(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::Show(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::StartStep(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
+            Command::Unarchive(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::Undepend(cmd) => {
                 cmd.id = resolve_id(&cmd.id, services).await?;
                 cmd.blocker_id = resolve_id(&cmd.blocker_id, services).await?;
@@ -303,6 +311,10 @@ impl Command {
             Command::Add(cmd) => {
                 let id = cmd.execute(services).await?;
                 Ok(CommandResult::Message(format!("Created task: {}", id)))
+            }
+            Command::Archive(cmd) => {
+                let result = cmd.execute(services).await?;
+                Ok(CommandResult::Message(result))
             }
             Command::Blockers(cmd) => {
                 let result = cmd.execute(services).await?;
@@ -399,6 +411,10 @@ impl Command {
             Command::StartStep(cmd) => {
                 let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
+            }
+            Command::Unarchive(cmd) => {
+                let result = cmd.execute(services).await?;
+                Ok(CommandResult::Message(result))
             }
             Command::Undepend(cmd) => {
                 // Service handles notification via callback
@@ -1576,6 +1592,104 @@ mod tests {
                 assert_eq!(cmd.blocker_id, "e5f6a7b8");
             }
             _ => panic!("Expected Depend command"),
+        }
+    }
+
+    #[test]
+    fn test_command_archive_parses_with_full_uuid() {
+        let cli =
+            TestCli::try_parse_from(["test", "archive", "a1b2c3d4-0000-4000-8000-000000000001"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Archive(cmd) => {
+                assert_eq!(cmd.id, "a1b2c3d4-0000-4000-8000-000000000001");
+            }
+            _ => panic!("Expected Archive command"),
+        }
+    }
+
+    #[test]
+    fn test_command_archive_parses_with_short_id() {
+        let cli = TestCli::try_parse_from(["test", "archive", "a1b2c3d4"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Archive(cmd) => {
+                assert_eq!(cmd.id, "a1b2c3d4");
+            }
+            _ => panic!("Expected Archive command"),
+        }
+    }
+
+    #[test]
+    fn test_command_archive_requires_id() {
+        let result = TestCli::try_parse_from(["test", "archive"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_command_archive_rejects_invalid_id() {
+        let result = TestCli::try_parse_from(["test", "archive", "not-valid"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_command_unarchive_parses_with_full_uuid() {
+        let cli =
+            TestCli::try_parse_from(["test", "unarchive", "a1b2c3d4-0000-4000-8000-000000000001"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Unarchive(cmd) => {
+                assert_eq!(cmd.id, "a1b2c3d4-0000-4000-8000-000000000001");
+            }
+            _ => panic!("Expected Unarchive command"),
+        }
+    }
+
+    #[test]
+    fn test_command_unarchive_parses_with_short_id() {
+        let cli = TestCli::try_parse_from(["test", "unarchive", "e5f6a7b8"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Unarchive(cmd) => {
+                assert_eq!(cmd.id, "e5f6a7b8");
+            }
+            _ => panic!("Expected Unarchive command"),
+        }
+    }
+
+    #[test]
+    fn test_command_unarchive_requires_id() {
+        let result = TestCli::try_parse_from(["test", "unarchive"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_command_list_include_archived_flag() {
+        let cli = TestCli::try_parse_from(["test", "list", "--include-archived"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::List(cmd) => {
+                assert!(
+                    cmd.include_archived,
+                    "include_archived should be true when --include-archived is passed"
+                );
+            }
+            _ => panic!("Expected List command"),
+        }
+    }
+
+    #[test]
+    fn test_command_list_include_archived_default_false() {
+        let cli = TestCli::try_parse_from(["test", "list"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::List(cmd) => {
+                assert!(
+                    !cmd.include_archived,
+                    "include_archived should be false by default"
+                );
+            }
+            _ => panic!("Expected List command"),
         }
     }
 }

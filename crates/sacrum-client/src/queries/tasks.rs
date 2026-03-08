@@ -16,6 +16,7 @@ pub const TASK_FIELDS: &str = r#"
         review_comment
         rejection_reason
         revision_feedback
+        archived
         parent_id
         started_at
         completed_at
@@ -58,7 +59,8 @@ pub const LIST_TASKS: &str = r#"
         $search: String,
         $workflow_id: Uuid4,
         $root_only: Boolean,
-        $blocked: Boolean
+        $blocked: Boolean,
+        $includeArchived: Boolean
     ) {
         tasks(
             project_id: $project_id,
@@ -69,7 +71,8 @@ pub const LIST_TASKS: &str = r#"
             search: $search,
             workflow_id: $workflow_id,
             root_only: $root_only,
-            blocked: $blocked
+            blocked: $blocked,
+            includeArchived: $includeArchived
         ) {
             ...TaskFields
         }
@@ -154,7 +157,8 @@ pub const UPDATE_TASK: &str = r#"
         $needs_human_review: Boolean,
         $revision_feedback: String,
         $parent_id: Uuid4,
-        $depends_on_ids: [Uuid4!]
+        $depends_on_ids: [Uuid4!],
+        $archived: Boolean
     ) {
         update_task(
             id: $id,
@@ -166,7 +170,8 @@ pub const UPDATE_TASK: &str = r#"
             needs_human_review: $needs_human_review,
             revision_feedback: $revision_feedback,
             parent_id: $parent_id,
-            depends_on_ids: $depends_on_ids
+            depends_on_ids: $depends_on_ids,
+            archived: $archived
         ) {
             id
         }

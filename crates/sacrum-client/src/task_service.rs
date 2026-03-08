@@ -157,6 +157,7 @@ impl SacrumTaskService {
             workflow_name,
             step_name,
             needs_human_review: response.needs_human_review,
+            archived: response.archived,
             review_comment: response.review_comment.clone(),
             revision_feedback: response.revision_feedback.clone(),
             rejection_reason: response.rejection_reason.clone(),
@@ -353,6 +354,10 @@ impl TaskService for SacrumTaskService {
             variables["needs_human_review"] = json!(needs_review);
         }
 
+        if let Some(archived) = options.archived {
+            variables["archived"] = json!(archived);
+        }
+
         if let Some(ref revision_feedback_opt) = options.revision_feedback {
             match revision_feedback_opt {
                 Some(feedback) => variables["revision_feedback"] = json!(feedback),
@@ -482,6 +487,9 @@ impl TaskService for SacrumTaskService {
         if filter.root_only {
             variables["root_only"] = json!(true);
         }
+        if filter.include_archived {
+            variables["includeArchived"] = json!(true);
+        }
 
         let responses: Vec<TaskResponse> = self.client.execute(&query, variables, "tasks").await?;
 
@@ -528,6 +536,9 @@ impl TaskService for SacrumTaskService {
         }
         if filter.root_only {
             variables["root_only"] = json!(true);
+        }
+        if filter.include_archived {
+            variables["includeArchived"] = json!(true);
         }
 
         let responses: Vec<TaskResponse> = self.client.execute(&query, variables, "tasks").await?;
@@ -948,6 +959,7 @@ mod tests {
             workflow_id: None,
             current_step_id: None,
             needs_human_review: None,
+            archived: false,
             review_comment: None,
             rejection_reason: None,
             revision_feedback: None,
