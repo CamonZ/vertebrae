@@ -52,12 +52,12 @@ async fn main() {
 /// Main application logic - separated for testability
 async fn run_app() -> Result<(), ServiceError> {
     let args = Args::parse();
-    run_with_args(&args).await
+    run_with_args(args).await
 }
 
 /// Run the application with the given arguments
-async fn run_with_args(args: &Args) -> Result<(), ServiceError> {
-    if let Some(Command::Init(cmd)) = &args.command {
+async fn run_with_args(args: Args) -> Result<(), ServiceError> {
+    if let Some(Command::Init(ref cmd)) = args.command {
         let result = cmd
             .execute()
             .await
@@ -80,8 +80,9 @@ async fn run_with_args(args: &Args) -> Result<(), ServiceError> {
     let services = vertebrae_sacrum_client::from_sacrum(client_arc);
 
     // Run the command or show welcome message
-    match &args.command {
-        Some(cmd) => {
+    match args.command {
+        Some(mut cmd) => {
+            cmd.resolve_ids(&services).await?;
             let result = cmd.execute(&services).await?;
             println!("{}", result);
         }

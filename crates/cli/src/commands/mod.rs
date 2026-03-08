@@ -67,16 +67,29 @@ use clap::Subcommand;
 use clap::builder::ValueParser;
 use vertebrae_core::{ServiceError, VertebraeServices};
 
-/// Build a UUID validator for a named field.
+/// Check whether a string is a valid short ID prefix (8 hex characters).
+pub fn is_short_id(s: &str) -> bool {
+    s.len() == 8 && s.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// Build a UUID-or-short-ID validator for a named field.
 ///
-/// Returns a [`ValueParser`] for clap that rejects non-UUID strings with an
-/// error naming the field and showing the expected format.
+/// Returns a [`ValueParser`] for clap that accepts either:
+/// - A full UUID (e.g., `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`)
+/// - A short ID prefix (exactly 8 hex characters, the first segment of a UUID)
+///
+/// Short IDs are resolved to full UUIDs at execution time via `resolve_short_id`.
 pub fn parse_uuid(field_name: &'static str) -> ValueParser {
     ValueParser::from(move |s: &str| -> Result<String, String> {
+        // Accept 8-char hex prefix (short ID)
+        if is_short_id(s) {
+            return Ok(s.to_lowercase());
+        }
+        // Accept full UUID
         uuid::Uuid::parse_str(s).map_err(|_| {
             format!(
-                "{field_name} '{s}' is not a valid UUID \
-                 (expected format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)"
+                "{field_name} '{s}' is not a valid UUID or short ID \
+                 (expected: 8 hex characters or xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)"
             )
         })?;
         Ok(s.to_lowercase())
@@ -92,10 +105,15 @@ pub fn parse_uuid_or_empty(field_name: &'static str) -> ValueParser {
         if s.is_empty() {
             return Ok(s.to_string());
         }
+        // Accept 8-char hex prefix (short ID)
+        if is_short_id(s) {
+            return Ok(s.to_lowercase());
+        }
+        // Accept full UUID
         uuid::Uuid::parse_str(s).map_err(|_| {
             format!(
-                "{field_name} '{s}' is not a valid UUID \
-                 (expected format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)"
+                "{field_name} '{s}' is not a valid UUID or short ID \
+                 (expected: 8 hex characters or xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)"
             )
         })?;
         Ok(s.to_lowercase())
@@ -189,7 +207,85 @@ impl std::fmt::Display for CommandResult {
     }
 }
 
+/// Resolve a single ID: if it's a short ID (8 hex chars), resolve via the backend.
+/// Otherwise return it unchanged.
+async fn resolve_id(id: &str, services: &VertebraeServices) -> Result<String, ServiceError> {
+    if is_short_id(id) {
+        services.tasks().resolve_short_id(id).await
+    } else {
+        Ok(id.to_string())
+    }
+}
+
+/// Resolve an optional ID field in place.
+async fn resolve_optional_id(
+    id: &mut Option<String>,
+    services: &VertebraeServices,
+) -> Result<(), ServiceError> {
+    if let Some(val) = id.as_ref()
+        && !val.is_empty()
+        && is_short_id(val)
+    {
+        let resolved = resolve_id(val, services).await?;
+        *id = Some(resolved);
+    }
+    Ok(())
+}
+
 impl Command {
+    /// Resolve any short task ID prefixes to full UUIDs before execution.
+    ///
+    /// Walks through all task ID fields in the command and resolves 8-character
+    /// hex prefixes to full UUIDs via the `resolveShortId` backend query.
+    pub async fn resolve_ids(&mut self, services: &VertebraeServices) -> Result<(), ServiceError> {
+        match self {
+            Command::Add(cmd) => {
+                resolve_optional_id(&mut cmd.parent, services).await?;
+                for dep in &mut cmd.depends_on {
+                    if is_short_id(dep) {
+                        *dep = resolve_id(dep, services).await?;
+                    }
+                }
+            }
+            Command::Blockers(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
+            Command::CompleteStep(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
+            Command::CriterionRef(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
+            Command::Delete(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
+            Command::Depend(cmd) => {
+                cmd.id = resolve_id(&cmd.id, services).await?;
+                cmd.blocker_id = resolve_id(&cmd.blocker_id, services).await?;
+            }
+            Command::Execution(_) | Command::Init(_) | Command::List(_) | Command::Ready(_) => {}
+            Command::Path(cmd) => {
+                cmd.from_id = resolve_id(&cmd.from_id, services).await?;
+                cmd.to_id = resolve_id(&cmd.to_id, services).await?;
+            }
+            Command::RejectStep(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
+            Command::Ref(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
+            Command::Refs(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
+            Command::Review(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
+            Command::Run(cmd) => cmd.task_id = resolve_id(&cmd.task_id, services).await?,
+            Command::Section(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
+            Command::Sections(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
+            Command::Show(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
+            Command::StartStep(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
+            Command::Undepend(cmd) => {
+                cmd.id = resolve_id(&cmd.id, services).await?;
+                cmd.blocker_id = resolve_id(&cmd.blocker_id, services).await?;
+            }
+            Command::Unref(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
+            Command::Unsection(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
+            Command::Step(_) | Command::Workflow(_) => {}
+            Command::StepDone(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
+            Command::TransitionTo(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
+            Command::Update(cmd) => {
+                cmd.id = resolve_id(&cmd.id, services).await?;
+                resolve_optional_id(&mut cmd.parent, services).await?;
+            }
+        }
+        Ok(())
+    }
+
     /// Execute the command with the given task services.tasks().
     ///
     /// # Arguments
@@ -1408,5 +1504,78 @@ mod tests {
             debug_str.contains("Workflow") && debug_str.contains("Test Workflow"),
             "Debug output should contain Workflow variant and name field value"
         );
+    }
+
+    // ─── Short ID tests ────────────────────────────────────────────────
+
+    #[test]
+    fn test_is_short_id_valid() {
+        assert!(is_short_id("a1b2c3d4"));
+        assert!(is_short_id("AABBCCDD"));
+        assert!(is_short_id("00000000"));
+        assert!(is_short_id("ffffffff"));
+        assert!(is_short_id("12345678"));
+    }
+
+    #[test]
+    fn test_is_short_id_invalid() {
+        assert!(!is_short_id("a1b2c3d")); // 7 chars
+        assert!(!is_short_id("a1b2c3d4e")); // 9 chars
+        assert!(!is_short_id("")); // empty
+        assert!(!is_short_id("a1b2c3d4-0000-4000-8000-000000000001")); // full UUID
+        assert!(!is_short_id("zzzzzzzz")); // non-hex
+        assert!(!is_short_id("a1b2-c3d")); // contains dash
+    }
+
+    #[test]
+    fn test_parse_uuid_accepts_short_id() {
+        let cli = TestCli::try_parse_from(["test", "show", "a1b2c3d4"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Show(cmd) => {
+                assert_eq!(cmd.id, "a1b2c3d4");
+            }
+            _ => panic!("Expected Show command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_uuid_accepts_full_uuid() {
+        let cli = TestCli::try_parse_from(["test", "show", "a1b2c3d4-0000-4000-8000-000000000001"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Show(cmd) => {
+                assert_eq!(cmd.id, "a1b2c3d4-0000-4000-8000-000000000001");
+            }
+            _ => panic!("Expected Show command"),
+        }
+    }
+
+    #[test]
+    fn test_parse_uuid_rejects_invalid_input() {
+        // 7 chars - too short for short ID, not a UUID
+        let result = TestCli::try_parse_from(["test", "show", "a1b2c3d"]);
+        assert!(result.is_err());
+
+        // non-hex chars
+        let result = TestCli::try_parse_from(["test", "show", "zzzzzzzz"]);
+        assert!(result.is_err());
+
+        // arbitrary string
+        let result = TestCli::try_parse_from(["test", "show", "not-valid"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_uuid_short_id_in_depend_command() {
+        let cli = TestCli::try_parse_from(["test", "depend", "a1b2c3d4", "--on", "e5f6a7b8"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Depend(cmd) => {
+                assert_eq!(cmd.id, "a1b2c3d4");
+                assert_eq!(cmd.blocker_id, "e5f6a7b8");
+            }
+            _ => panic!("Expected Depend command"),
+        }
     }
 }

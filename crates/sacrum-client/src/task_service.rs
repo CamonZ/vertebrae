@@ -308,6 +308,22 @@ impl TaskService for SacrumTaskService {
         Ok(self.response_to_task_with_lookups(&response, Some(&workflow_names), Some(&step_names)))
     }
 
+    async fn resolve_short_id(&self, prefix: &str) -> ServiceResult<String> {
+        let query = with_fragments(tasks::RESOLVE_SHORT_ID, &[tasks::TASK_FIELDS]);
+        let variables = json!({
+            "project_id": self.client.project_id,
+            "prefix": prefix,
+        });
+
+        let response: TaskResponse = self
+            .client
+            .execute(&query, variables, "resolveShortId")
+            .await
+            .map_err(|_| ServiceError::task_not_found(prefix))?;
+
+        Ok(response.id)
+    }
+
     async fn update_task(&self, id: &str, options: UpdateTaskOptions) -> ServiceResult<()> {
         let mut variables = json!({ "id": id });
 
