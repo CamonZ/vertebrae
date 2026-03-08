@@ -122,10 +122,7 @@ vtb init                                         # Initialize project
 See `skills/` for detailed command guides:
 
 **Workflow guides:**
-- `/plan` - Create implementation plans
 - `/status` - Check current state
-- `/next` - Complete and continue
-- `/triage` - Move backlog items to todo
 
 **Task management:**
 - `/add` - Create tasks with hierarchy and dependencies
@@ -289,36 +286,36 @@ vertebrae/
 │   └── settings.json       # Claude Code hooks configuration
 ├── .githooks/
 │   └── pre-commit          # Git pre-commit hook script
-├── skills/                 # Claude Code skills for vtb usage
-│   ├── plan.md             # /plan - Create implementation plans
-│   ├── status.md           # /status - Check task state
-│   ├── next.md             # /next - Complete and continue
-│   ├── triage.md           # /triage - Move backlog to todo
-│   ├── ready.md            # /ready - Show actionable items
-│   ├── add.md              # /add - Create tasks
-│   ├── update.md           # /update - Modify task fields
-│   ├── delete.md           # /delete - Remove tasks
-│   ├── vtb-show.md         # /vtb-show - Display task details
-│   ├── list.md             # /list - Filter and list tasks
-│   ├── workflow.md         # /workflow - Manage workflows
-│   ├── step.md             # /step - Manage workflow steps
-│   ├── start-step.md       # /start-step - Start a workflow step
-│   ├── complete-step.md    # /complete-step - Complete a workflow step
-│   ├── reject-step.md      # /reject-step - Reject a workflow step
-│   ├── step-done.md        # /step-done - Mark steps complete
-│   ├── review.md           # /review - Toggle human review
-│   ├── depend.md           # /depend - Manage dependencies
-│   ├── blockers.md         # /blockers - Show dependency chain
-│   ├── path.md             # /path - Find dependency path
-│   ├── section.md          # /section - Add structured content
-│   ├── ref.md              # /ref - Link to code locations
-│   ├── criterion-ref.md    # /criterion-ref - Link to test criteria
-│   ├── execution.md        # /execution - Execution history
-│   ├── gate.md             # /gate - Validation gates
-│   ├── export.md           # /export - Export to JSONL
-│   ├── import.md           # /import - Import from JSONL
-│   ├── init.md             # /init - Initialize project
-│   └── run.md              # /run - Execute via GUI
+├── skills/                 # Claude Code skills for vtb usage (each skill is a folder with SKILL.md)
+│   ├── add/SKILL.md        # /add - Create tasks
+│   ├── blockers/SKILL.md   # /blockers - Show dependency chain
+│   ├── complete-step/SKILL.md # /complete-step - Complete a workflow step
+│   ├── criterion-ref/SKILL.md # /criterion-ref - Link to test criteria
+│   ├── delete/SKILL.md     # /delete - Remove tasks
+│   ├── depend/SKILL.md     # /depend - Manage dependencies
+│   ├── execution/SKILL.md  # /execution - Execution history
+│   ├── init/SKILL.md       # /init - Initialize project
+│   ├── list/SKILL.md       # /list - Filter and list tasks
+│   ├── path/SKILL.md       # /path - Find dependency path
+│   ├── ready/SKILL.md      # /ready - Show actionable items
+│   ├── ref/SKILL.md        # /ref - Link to code locations
+│   ├── refs/SKILL.md       # /refs - List code references
+│   ├── reject-step/SKILL.md # /reject-step - Reject a workflow step
+│   ├── review/SKILL.md     # /review - Toggle human review
+│   ├── run/SKILL.md        # /run - Execute via daemon
+│   ├── section/SKILL.md    # /section - Add structured content
+│   ├── sections/SKILL.md   # /sections - List sections
+│   ├── start-step/SKILL.md # /start-step - Start a workflow step
+│   ├── status/SKILL.md     # /status - Check task state
+│   ├── step/SKILL.md       # /step - Manage workflow steps
+│   ├── step-done/SKILL.md  # /step-done - Mark steps complete
+│   ├── transition-to/SKILL.md # /transition-to - Transition to workflow step
+│   ├── undepend/SKILL.md   # /undepend - Remove dependencies
+│   ├── unref/SKILL.md      # /unref - Remove code references
+│   ├── unsection/SKILL.md  # /unsection - Remove sections
+│   ├── update/SKILL.md     # /update - Modify task fields
+│   ├── vtb-show/SKILL.md   # /vtb-show - Display task details
+│   └── workflow/SKILL.md   # /workflow - Manage workflows
 ├── crates/
 │   ├── core/               # vertebrae-core: Shared contract layer
 │   │   └── src/
