@@ -233,6 +233,11 @@ pub trait TaskService: Send + Sync {
     /// Get a task by ID
     async fn get_task(&self, id: &str) -> ServiceResult<Task>;
 
+    /// Resolve a short ID prefix (first 8 hex characters of UUID) to the full task ID.
+    ///
+    /// Returns the full UUID string if exactly one task matches the prefix.
+    async fn resolve_short_id(&self, prefix: &str) -> ServiceResult<String>;
+
     /// Update a task
     async fn update_task(&self, id: &str, options: UpdateTaskOptions) -> ServiceResult<()>;
 

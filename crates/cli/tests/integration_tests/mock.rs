@@ -154,6 +154,19 @@ impl TaskService for MockTaskService {
         Ok(task)
     }
 
+    async fn resolve_short_id(&self, prefix: &str) -> ServiceResult<String> {
+        let s = self.state.lock().unwrap();
+        let matches: Vec<&String> = s.tasks.keys().filter(|id| id.starts_with(prefix)).collect();
+        match matches.len() {
+            0 => Err(ServiceError::task_not_found(prefix)),
+            1 => Ok(matches[0].clone()),
+            _ => Err(ServiceError::validation_failed(format!(
+                "Prefix '{}' matches multiple tasks",
+                prefix
+            ))),
+        }
+    }
+
     async fn update_task(&self, id: &str, options: UpdateTaskOptions) -> ServiceResult<()> {
         let mut s = self.state.lock().unwrap();
         let task = s

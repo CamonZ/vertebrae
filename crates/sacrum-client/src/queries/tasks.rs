@@ -89,6 +89,16 @@ pub const GET_TASK: &str = r#"
     }
 "#;
 
+/// Resolve a short ID prefix to a full task.
+/// NOTE: Prepend TASK_FIELDS when sending.
+pub const RESOLVE_SHORT_ID: &str = r#"
+    query ResolveShortId($project_id: Uuid4!, $prefix: String!) {
+        resolveShortId(project_id: $project_id, prefix: $prefix) {
+            ...TaskFields
+        }
+    }
+"#;
+
 /// List tasks that are ready (unblocked).
 /// NOTE: Prepend TASK_FIELDS when sending.
 pub const READY_TASKS: &str = r#"
