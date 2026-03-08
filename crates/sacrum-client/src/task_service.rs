@@ -157,6 +157,7 @@ impl SacrumTaskService {
             workflow_name,
             step_name,
             needs_human_review: response.needs_human_review,
+            archived: response.archived,
             review_comment: response.review_comment.clone(),
             revision_feedback: response.revision_feedback.clone(),
             rejection_reason: response.rejection_reason.clone(),
@@ -351,6 +352,10 @@ impl TaskService for SacrumTaskService {
 
         if let Some(needs_review) = options.needs_human_review {
             variables["needs_human_review"] = json!(needs_review);
+        }
+
+        if let Some(archived) = options.archived {
+            variables["archived"] = json!(archived);
         }
 
         if let Some(ref revision_feedback_opt) = options.revision_feedback {
@@ -948,6 +953,7 @@ mod tests {
             workflow_id: None,
             current_step_id: None,
             needs_human_review: None,
+            archived: false,
             review_comment: None,
             rejection_reason: None,
             revision_feedback: None,

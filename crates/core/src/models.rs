@@ -372,6 +372,7 @@ pub struct TaskFilter {
     pub root_only: bool,
     pub children_of: Option<String>,
     pub include_done: bool,
+    pub include_archived: bool,
     pub search: Option<String>,
     pub workflow_id: Option<String>,
     pub current_step: Option<String>,
@@ -438,6 +439,11 @@ impl TaskFilter {
 
     pub fn include_done(mut self) -> Self {
         self.include_done = true;
+        self
+    }
+
+    pub fn include_archived(mut self) -> Self {
+        self.include_archived = true;
         self
     }
 
@@ -791,6 +797,10 @@ pub struct Task {
     #[serde(default)]
     pub needs_human_review: Option<bool>,
 
+    /// Whether this task is archived
+    #[serde(default)]
+    pub archived: bool,
+
     /// Review comment
     #[serde(skip_serializing_if = "Option::is_none")]
     pub review_comment: Option<String>,
@@ -863,6 +873,7 @@ impl Task {
             workflow_name: None,
             step_name: None,
             needs_human_review: None,
+            archived: false,
             review_comment: None,
             revision_feedback: None,
             rejection_reason: None,
@@ -1624,6 +1635,7 @@ mod tests {
         assert!(task.workflow_name.is_none());
         assert!(task.step_name.is_none());
         assert!(task.review_comment.is_none());
+        assert!(!task.archived);
     }
 
     #[test]
@@ -2241,6 +2253,7 @@ mod tests {
         assert!(!filter.root_only);
         assert!(filter.children_of.is_none());
         assert!(!filter.include_done);
+        assert!(!filter.include_archived);
         assert!(filter.search.is_none());
         assert!(filter.workflow_id.is_none());
         assert!(filter.current_step.is_none());
@@ -2331,18 +2344,42 @@ mod tests {
     }
 
     #[test]
+    fn task_filter_include_archived() {
+        let filter = TaskFilter::new().include_archived();
+        assert!(filter.include_archived);
+    }
+
+    #[test]
     fn task_filter_chain_multiple() {
         let filter = TaskFilter::new()
             .root_only()
             .with_level(Level::Epic)
             .with_priority(Priority::High)
             .with_search("test")
-            .include_done();
+            .include_done()
+            .include_archived();
         assert!(filter.root_only);
         assert_eq!(filter.levels, vec![Level::Epic]);
         assert_eq!(filter.priorities, vec![Priority::High]);
         assert_eq!(filter.search, Some("test".to_string()));
         assert!(filter.include_done);
+        assert!(filter.include_archived);
+    }
+
+    #[test]
+    fn task_archived_serde_default() {
+        let json = r#"{"id":"1","title":"T","level":"task","tags":[]}"#;
+        let task: Task = serde_json::from_str(json).unwrap();
+        assert!(!task.archived);
+    }
+
+    #[test]
+    fn task_archived_serde_roundtrip() {
+        let mut task = Task::new("T", Level::Task);
+        task.archived = true;
+        let json = serde_json::to_string(&task).unwrap();
+        let parsed: Task = serde_json::from_str(&json).unwrap();
+        assert!(parsed.archived);
     }
 
     // ─── AgentConfig Tests ──────────────────────────────────────────
