@@ -25,6 +25,8 @@ pub struct TaskSummary {
     pub tags: Vec<String>,
     /// Whether this task needs human review
     pub needs_human_review: Option<bool>,
+    /// Whether this task is archived
+    pub archived: bool,
     /// Parent task ID (if any)
     pub parent_id: Option<String>,
 }
@@ -67,6 +69,10 @@ pub struct ListCommand {
     /// Include done items (excluded by default)
     #[arg(long)]
     pub all: bool,
+
+    /// Include archived items (excluded by default)
+    #[arg(long)]
+    pub include_archived: bool,
 
     /// Search text in title and description (case-insensitive)
     #[arg(long)]
@@ -116,6 +122,7 @@ impl From<vertebrae_core::Task> for TaskSummary {
             priority: task.priority.map(|p| p.as_str().to_string()),
             tags: task.tags,
             needs_human_review: task.needs_human_review,
+            archived: task.archived,
             parent_id: task.parent_id,
         }
     }
@@ -210,6 +217,11 @@ impl ListCommand {
         // Include done items if --all is specified
         if self.all {
             filter = filter.include_done();
+        }
+
+        // Include archived items if --include-archived is specified
+        if self.include_archived {
+            filter = filter.include_archived();
         }
 
         // Add search filter
