@@ -487,6 +487,9 @@ impl TaskService for SacrumTaskService {
         if filter.root_only {
             variables["root_only"] = json!(true);
         }
+        if filter.include_archived {
+            variables["includeArchived"] = json!(true);
+        }
 
         let responses: Vec<TaskResponse> = self.client.execute(&query, variables, "tasks").await?;
 
@@ -533,6 +536,9 @@ impl TaskService for SacrumTaskService {
         }
         if filter.root_only {
             variables["root_only"] = json!(true);
+        }
+        if filter.include_archived {
+            variables["includeArchived"] = json!(true);
         }
 
         let responses: Vec<TaskResponse> = self.client.execute(&query, variables, "tasks").await?;
