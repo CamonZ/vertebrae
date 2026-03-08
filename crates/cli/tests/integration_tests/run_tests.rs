@@ -64,7 +64,6 @@ mod run_command_tests {
         let services = mock_services();
         let cmd = RunCommand {
             task_id: "nonexistent-task-id".to_string(),
-
         };
 
         let result = cmd.execute(&services).await;
@@ -96,7 +95,6 @@ mod run_command_tests {
 
         let cmd = RunCommand {
             task_id: task_id.clone(),
-
         };
         let result = cmd.execute(&services).await;
         assert!(result.is_err());
@@ -145,7 +143,6 @@ mod run_command_tests {
 
         let cmd = RunCommand {
             task_id: task_id.clone(),
-
         };
         let result = cmd.execute(&services).await;
         assert!(result.is_err());
@@ -170,10 +167,7 @@ mod run_command_tests {
         assert_eq!(task.workflow_id, Some(wf_id));
         assert!(task.current_step_id.is_some());
 
-        let cmd = RunCommand {
-            task_id,
-
-        };
+        let cmd = RunCommand { task_id };
         let result = cmd.execute(&services).await;
         assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
     }
@@ -191,14 +185,8 @@ mod run_command_tests {
         let t2 = services.tasks().get_task(&task2_id).await.unwrap();
         assert_eq!(t2.workflow_id, Some(wf2_id));
 
-        let cmd1 = RunCommand {
-            task_id: task1_id,
-
-        };
-        let cmd2 = RunCommand {
-            task_id: task2_id,
-
-        };
+        let cmd1 = RunCommand { task_id: task1_id };
+        let cmd2 = RunCommand { task_id: task2_id };
 
         let result1 = cmd1.execute(&services).await;
         let result2 = cmd2.execute(&services).await;
@@ -229,7 +217,6 @@ mod run_command_tests {
 
         let cmd = RunCommand {
             task_id: task_id.clone(),
-
         };
         let result = cmd.execute(&services).await;
 
@@ -278,10 +265,7 @@ mod run_command_tests {
             .await
             .unwrap();
 
-        let cmd = RunCommand {
-            task_id: epic_id,
-
-        };
+        let cmd = RunCommand { task_id: epic_id };
         let result = cmd.execute(&services).await;
         assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
     }
@@ -305,7 +289,6 @@ mod run_command_tests {
 
         let cmd = RunCommand {
             task_id: task_id.clone(),
-
         };
         let result = cmd.execute(&services).await;
 
@@ -365,10 +348,7 @@ mod run_command_tests {
             .await
             .unwrap();
 
-        let cmd = RunCommand {
-            task_id,
-
-        };
+        let cmd = RunCommand { task_id };
         let result = cmd.execute(&services).await;
         assert!(result.is_ok(), "Expected Ok, got: {:?}", result);
     }
@@ -423,10 +403,7 @@ mod run_command_tests {
             .unwrap();
 
         // Parent should be runnable
-        let parent_run = RunCommand {
-            task_id: parent_id,
-
-        };
+        let parent_run = RunCommand { task_id: parent_id };
         let parent_result = parent_run.execute(&services).await;
         assert!(
             parent_result.is_ok(),
@@ -437,7 +414,6 @@ mod run_command_tests {
         // Child has no workflow, should fail
         let child_run = RunCommand {
             task_id: child_id.clone(),
-
         };
         let child_result = child_run.execute(&services).await;
         assert!(child_result.is_err());
@@ -452,7 +428,6 @@ mod run_command_tests {
         let services = mock_services();
         let cmd = RunCommand {
             task_id: "".to_string(),
-
         };
 
         let result = cmd.execute(&services).await;
@@ -464,7 +439,6 @@ mod run_command_tests {
         let services = mock_services();
         let cmd = RunCommand {
             task_id: "   ".to_string(),
-
         };
 
         let result = cmd.execute(&services).await;
@@ -486,7 +460,6 @@ mod run_command_tests {
 
         let cmd = RunCommand {
             task_id: task_id.clone(),
-
         };
         cmd.execute(&services).await.unwrap();
 
