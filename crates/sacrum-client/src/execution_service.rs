@@ -168,6 +168,28 @@ impl ExecutionService for SacrumExecutionService {
         Ok(())
     }
 
+    async fn update_execution_status(
+        &self,
+        execution_id: &str,
+        params: vertebrae_core::execution_service::UpdateExecutionStatusParams,
+    ) -> ServiceResult<()> {
+        let variables = json!({
+            "id": execution_id,
+            "status": params.status.as_str(),
+            "output": params.output,
+            "input_tokens": params.input_tokens,
+            "output_tokens": params.output_tokens,
+            "cost": params.cost,
+            "duration_ms": params.duration_ms,
+        });
+
+        self.client
+            .execute_void(UPDATE_EXECUTION, variables)
+            .await?;
+
+        Ok(())
+    }
+
     async fn add_log(&self, log: SessionLog) -> ServiceResult<String> {
         let variables = json!({
             "step_execution_id": log.step_execution_id,
@@ -809,5 +831,103 @@ mod tests {
             "Expected error about daemon, got: {}",
             err_msg
         );
+    }
+
+    // =========================================================================
+    // update_execution_status tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_update_execution_status_to_running() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "update_step_execution": {
+                        "id": "exec-1"
+                    }
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let params = vertebrae_core::execution_service::UpdateExecutionStatusParams::new(
+            ExecutionStatus::InProgress,
+        );
+        let result = service.update_execution_status("exec-1", params).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_update_execution_status_to_completed() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "update_step_execution": {
+                        "id": "exec-2"
+                    }
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let params = vertebrae_core::execution_service::UpdateExecutionStatusParams::new(
+            ExecutionStatus::Completed,
+        );
+        let result = service.update_execution_status("exec-2", params).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_update_execution_status_to_failed_with_output() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "update_step_execution": {
+                        "id": "exec-3"
+                    }
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let params = vertebrae_core::execution_service::UpdateExecutionStatusParams::new(
+            ExecutionStatus::Failed,
+        )
+        .with_output("Process exited with code 1");
+        let result = service.update_execution_status("exec-3", params).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_update_execution_status_graphql_error() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": null,
+                "errors": [{"message": "not_found"}]
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let params = vertebrae_core::execution_service::UpdateExecutionStatusParams::new(
+            ExecutionStatus::Completed,
+        );
+        let result = service.update_execution_status("nonexistent", params).await;
+        assert!(result.is_err());
     }
 }
