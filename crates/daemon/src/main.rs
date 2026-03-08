@@ -71,6 +71,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         );
         actor_ref.cast(DaemonMessage::AddProject {
             project_id: project.project_id.clone(),
+            project_root: std::path::PathBuf::from(&project.path),
         })?;
     }
 

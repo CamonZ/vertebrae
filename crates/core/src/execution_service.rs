@@ -5,7 +5,7 @@
 //! for both step executions and session logs.
 
 use crate::error::ServiceResult;
-use crate::models::{SessionLog, StepExecution};
+use crate::models::{ExecutionStatus, SessionLog, StepExecution};
 use async_trait::async_trait;
 use std::sync::Arc;
 
@@ -22,6 +22,46 @@ pub enum ExecutionMutationEvent {
 
 /// Callback for execution mutation events - fires after each mutation completes
 pub type ExecutionMutationCallback = Arc<dyn Fn(ExecutionMutationEvent) + Send + Sync>;
+
+/// Parameters for updating execution status with optional metrics.
+///
+/// Used by [`ExecutionService::update_execution_status`] to report
+/// status transitions along with optional output and usage data.
+#[derive(Debug, Clone)]
+pub struct UpdateExecutionStatusParams {
+    /// The new execution status (required).
+    pub status: ExecutionStatus,
+    /// Optional output text.
+    pub output: Option<String>,
+    /// Optional input token count.
+    pub input_tokens: Option<i64>,
+    /// Optional output token count.
+    pub output_tokens: Option<i64>,
+    /// Optional cost in USD.
+    pub cost: Option<f64>,
+    /// Optional duration in milliseconds.
+    pub duration_ms: Option<i64>,
+}
+
+impl UpdateExecutionStatusParams {
+    /// Create params with just a status.
+    pub fn new(status: ExecutionStatus) -> Self {
+        Self {
+            status,
+            output: None,
+            input_tokens: None,
+            output_tokens: None,
+            cost: None,
+            duration_ms: None,
+        }
+    }
+
+    /// Set the output text.
+    pub fn with_output(mut self, output: impl Into<String>) -> Self {
+        self.output = Some(output.into());
+        self
+    }
+}
 
 /// Service trait for step execution management operations
 ///
@@ -136,4 +176,19 @@ pub trait ExecutionService: Send + Sync {
         workflow_id: &str,
         step_id: &str,
     ) -> ServiceResult<StepExecution>;
+
+    /// Update execution status and optional fields in one call
+    ///
+    /// Used by the daemon to report status transitions (pending -> running -> completed/failed)
+    /// along with optional output, cost, duration, and token usage data.
+    ///
+    /// # Arguments
+    ///
+    /// * `execution_id` - The execution ID to update
+    /// * `params` - Status and optional metrics to update
+    async fn update_execution_status(
+        &self,
+        execution_id: &str,
+        params: UpdateExecutionStatusParams,
+    ) -> ServiceResult<()>;
 }
