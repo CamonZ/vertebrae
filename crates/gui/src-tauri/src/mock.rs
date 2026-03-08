@@ -905,8 +905,6 @@ impl ExecutionService for MockExecutionService {
         s.executions.insert(id, execution.clone());
         Ok(execution)
     }
-
-
 }
 
 // ============================================================================

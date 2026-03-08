@@ -136,5 +136,4 @@ pub trait ExecutionService: Send + Sync {
         workflow_id: &str,
         step_id: &str,
     ) -> ServiceResult<StepExecution>;
-
 }

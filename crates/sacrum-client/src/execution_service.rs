@@ -211,8 +211,6 @@ impl ExecutionService for SacrumExecutionService {
 
         Ok(Self::response_to_execution(&response))
     }
-
-
 }
 
 #[cfg(test)]
@@ -812,6 +810,4 @@ mod tests {
             err_msg
         );
     }
-
-
 }
