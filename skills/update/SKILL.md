@@ -32,10 +32,10 @@ vtb update <task-id> --parent <parent-id>
 vtb update <task-id> --parent ""
 
 # Edit a section inline
-vtb update <task-id> --edit-section step 0 "Updated step content"
+vtb update <task-id> --edit-section checklist_item 0 "Updated item content"
 
 # Remove a section inline
-vtb update <task-id> --remove-section step 0
+vtb update <task-id> --remove-section checklist_item 0
 ```
 
 ## Options
