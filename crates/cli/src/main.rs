@@ -66,6 +66,15 @@ async fn run_with_args(args: Args) -> Result<(), ServiceError> {
         return Ok(());
     }
 
+    if let Some(Command::Daemon(ref cmd)) = args.command {
+        let result = cmd
+            .execute()
+            .await
+            .map_err(|e| ServiceError::config_error(e.to_string()))?;
+        println!("{}", result);
+        return Ok(());
+    }
+
     // Load Sacrum configuration from ~/.config/vertebrae/config.toml
     let config = SacrumConfig::load().map_err(|e| {
         ServiceError::config_error(format!("Failed to load Sacrum configuration: {}", e))
@@ -98,6 +107,7 @@ async fn run_with_args(args: Args) -> Result<(), ServiceError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use vertebrae_cli::commands::DaemonCommand;
 
     #[test]
     fn test_args_parsing() {
@@ -469,5 +479,55 @@ mod tests {
         ])
         .unwrap();
         assert!(args.command.is_some());
+    }
+
+    #[test]
+    fn test_args_daemon_install() {
+        let args = Args::try_parse_from(["vtb", "daemon", "install"]).unwrap();
+        assert!(args.command.is_some());
+        match args.command.unwrap() {
+            Command::Daemon(DaemonCommand::Install(_)) => {}
+            other => panic!("Expected Daemon(Install), got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_args_daemon_install_with_binary() {
+        let args = Args::try_parse_from([
+            "vtb",
+            "daemon",
+            "install",
+            "--binary",
+            "/usr/bin/vtb-daemon",
+        ])
+        .unwrap();
+        match args.command.unwrap() {
+            Command::Daemon(DaemonCommand::Install(cmd)) => {
+                assert_eq!(
+                    cmd.binary.as_deref(),
+                    Some("/usr/bin/vtb-daemon"),
+                    "binary flag should be captured"
+                );
+            }
+            other => panic!("Expected Daemon(Install), got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_args_daemon_uninstall() {
+        let args = Args::try_parse_from(["vtb", "daemon", "uninstall"]).unwrap();
+        match args.command.unwrap() {
+            Command::Daemon(DaemonCommand::Uninstall(_)) => {}
+            other => panic!("Expected Daemon(Uninstall), got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_args_daemon_status() {
+        let args = Args::try_parse_from(["vtb", "daemon", "status"]).unwrap();
+        match args.command.unwrap() {
+            Command::Daemon(DaemonCommand::Status(_)) => {}
+            other => panic!("Expected Daemon(Status), got: {:?}", other),
+        }
     }
 }

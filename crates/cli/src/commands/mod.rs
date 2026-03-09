@@ -9,6 +9,7 @@ pub mod archive;
 pub mod blockers;
 pub mod complete_step;
 pub mod criterion_ref;
+pub mod daemon;
 pub mod delete;
 pub mod depend;
 pub mod execution;
@@ -39,6 +40,7 @@ pub use archive::{ArchiveCommand, UnarchiveCommand};
 pub use blockers::BlockersCommand;
 pub use complete_step::CompleteStepCommand;
 pub use criterion_ref::CriterionRefCommand;
+pub use daemon::DaemonCommand;
 pub use delete::DeleteCommand;
 pub use depend::DependCommand;
 pub use execution::ExecutionCommand;
@@ -137,6 +139,9 @@ pub enum Command {
     /// Add a code reference to a testing criterion
     #[command(name = "criterion-ref")]
     CriterionRef(CriterionRefCommand),
+    /// Manage the vtb-daemon launchd service
+    #[command(subcommand)]
+    Daemon(DaemonCommand),
     /// Delete a task (with optional cascade)
     Delete(DeleteCommand),
     /// Create a dependency relationship between tasks
@@ -262,7 +267,11 @@ impl Command {
                 cmd.id = resolve_id(&cmd.id, services).await?;
                 cmd.blocker_id = resolve_id(&cmd.blocker_id, services).await?;
             }
-            Command::Execution(_) | Command::Init(_) | Command::List(_) | Command::Ready(_) => {}
+            Command::Daemon(_)
+            | Command::Execution(_)
+            | Command::Init(_)
+            | Command::List(_)
+            | Command::Ready(_) => {}
             Command::Path(cmd) => {
                 cmd.from_id = resolve_id(&cmd.from_id, services).await?;
                 cmd.to_id = resolve_id(&cmd.to_id, services).await?;
@@ -328,6 +337,13 @@ impl Command {
                 // Service handles notification via callback
                 let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
+            }
+            Command::Daemon(cmd) => {
+                let result = cmd
+                    .execute()
+                    .await
+                    .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
+                Ok(CommandResult::Message(result))
             }
             Command::Delete(cmd) => {
                 let message = cmd.execute(services).await?;
