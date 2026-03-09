@@ -82,7 +82,7 @@ vi.mock("../../bindings", () => ({
     addSection: vi.fn().mockResolvedValue({ status: "ok", data: null }),
     editSection: vi.fn().mockResolvedValue({ status: "ok", data: null }),
     removeSection: vi.fn().mockResolvedValue({ status: "ok", data: null }),
-    markSectionDone: vi.fn().mockResolvedValue({ status: "ok", data: null }),
+    toggleChecklistItemDone: vi.fn().mockResolvedValue({ status: "ok", data: null }),
   },
   events: {
     taskChangedEvent: {
@@ -335,7 +335,7 @@ describe("TaskDetailPanel - Inline Editing Integration", () => {
       await userEvent.click(stepCheckboxes[0]);
 
       await waitFor(() => {
-        expect(eventsModule.commands.markSectionDone).toHaveBeenCalled();
+        expect(eventsModule.commands.toggleChecklistItemDone).toHaveBeenCalled();
       });
     });
   });

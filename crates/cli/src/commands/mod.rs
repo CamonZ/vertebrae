@@ -71,7 +71,7 @@ pub use workflow::WorkflowCommand;
 use crate::output::{format_task_table, format_task_tree};
 use clap::Subcommand;
 use clap::builder::ValueParser;
-use vertebrae_core::{ServiceError, VertebraeServices};
+use vertebrae_core::{SectionType, ServiceError, VertebraeServices};
 
 /// Check whether a string is a valid short ID prefix (8 hex characters).
 pub fn is_short_id(s: &str) -> bool {
@@ -179,6 +179,15 @@ pub enum Command {
     /// Start a workflow step for a task
     #[command(name = "start-step")]
     StartStep(StartStepCommand),
+    /// Mark a checklist item as done within a task
+    #[command(name = "check-item")]
+    CheckItem(CheckItemCommand),
+    /// First-class workflow step management commands
+    #[command(subcommand)]
+    Step(StepCommand),
+    /// Transition a task to a specific workflow step
+    #[command(name = "transition-to")]
+    TransitionTo(TransitionToCommand),
     /// Unarchive a task (set archived=false)
     Unarchive(UnarchiveCommand),
     /// Uncheck a previously checked checklist item
@@ -190,15 +199,6 @@ pub enum Command {
     Unref(UnrefCommand),
     /// Remove sections from a task
     Unsection(UnsectionCommand),
-    /// First-class workflow step management commands
-    #[command(subcommand)]
-    Step(StepCommand),
-    /// Mark a checklist item as done within a task
-    #[command(name = "check-item")]
-    CheckItem(CheckItemCommand),
-    /// Transition a task to a specific workflow step
-    #[command(name = "transition-to")]
-    TransitionTo(TransitionToCommand),
     /// Update an existing task
     Update(UpdateCommand),
     /// Workflow management commands
@@ -246,6 +246,59 @@ async fn resolve_optional_id(
         *id = Some(resolved);
     }
     Ok(())
+}
+
+/// Resolved checklist item details.
+pub(crate) struct ResolvedChecklistItem {
+    pub id: String,
+    pub content: String,
+    pub section_order: u32,
+    pub done: bool,
+}
+
+/// Resolve a checklist item from a task by its 1-based index.
+///
+/// Validates the index, fetches the task, filters to checklist item sections,
+/// sorts by order, and returns the resolved item details.
+pub(crate) async fn resolve_checklist_item(
+    services: &VertebraeServices,
+    id: &str,
+    index: usize,
+) -> Result<ResolvedChecklistItem, ServiceError> {
+    let id = id.to_lowercase();
+
+    if index == 0 {
+        return Err(ServiceError::validation_failed(
+            "Checklist item index must be 1 or greater",
+        ));
+    }
+
+    let task = services.tasks().get_task(&id).await?;
+
+    let mut items: Vec<&vertebrae_core::Section> = task
+        .sections
+        .iter()
+        .filter(|s| s.section_type == SectionType::ChecklistItem)
+        .collect();
+    items.sort_by_key(|s| s.order.unwrap_or(u32::MAX));
+
+    let item_idx = index - 1;
+    if item_idx >= items.len() {
+        return Err(ServiceError::validation_failed(format!(
+            "Checklist item {} not found. Task has {} checklist item(s).",
+            index,
+            items.len()
+        )));
+    }
+
+    let item = items[item_idx];
+
+    Ok(ResolvedChecklistItem {
+        id,
+        content: item.content.clone(),
+        section_order: item.order.unwrap_or(0),
+        done: item.done.unwrap_or(false),
+    })
 }
 
 impl Command {

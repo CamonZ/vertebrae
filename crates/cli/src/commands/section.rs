@@ -16,34 +16,14 @@ pub struct SectionCommand {
     #[arg(required = true, value_parser = crate::commands::parse_uuid("task ID"))]
     pub id: String,
 
-    /// Section type (goal, context, current_behavior, desired_behavior, step,
+    /// Section type (goal, context, current_behavior, desired_behavior, checklist_item,
     /// testing_criterion, anti_pattern, failure_test, constraint)
-    #[arg(required = true, value_parser = parse_section_type)]
+    #[arg(required = true)]
     pub section_type: SectionType,
 
     /// Section content
     #[arg(required = true)]
     pub content: String,
-}
-
-/// Parse a section type string into SectionType enum (case-insensitive)
-fn parse_section_type(s: &str) -> Result<SectionType, String> {
-    match s.to_lowercase().as_str() {
-        "goal" => Ok(SectionType::Goal),
-        "context" => Ok(SectionType::Context),
-        "current_behavior" => Ok(SectionType::CurrentBehavior),
-        "desired_behavior" => Ok(SectionType::DesiredBehavior),
-        "checklist_item" => Ok(SectionType::ChecklistItem),
-        "testing_criterion" => Ok(SectionType::TestingCriterion),
-        "anti_pattern" => Ok(SectionType::AntiPattern),
-        "failure_test" => Ok(SectionType::FailureTest),
-        "constraint" => Ok(SectionType::Constraint),
-        _ => Err(format!(
-            "invalid section type '{}'. Valid types: goal, context, current_behavior, \
-             desired_behavior, checklist_item, testing_criterion, anti_pattern, failure_test, constraint",
-            s
-        )),
-    }
 }
 
 /// Result of the section command execution
@@ -120,7 +100,7 @@ impl SectionCommand {
         let task = services.tasks().get_task(&id).await?;
 
         // Handle single-instance vs multi-instance section types
-        let (ordinal, replaced) = if is_single_instance_type(&self.section_type) {
+        let (ordinal, replaced) = if self.section_type.is_single_instance() {
             // For single-instance types, check if one already exists
             let existing = task
                 .sections
@@ -164,18 +144,4 @@ impl SectionCommand {
             ordinal,
         })
     }
-}
-
-/// Check if a section type is single-instance (can only have one per task).
-///
-/// Single-instance types: goal, context, current_behavior, desired_behavior
-/// Multi-instance types: step, testing_criterion, anti_pattern, failure_test, constraint
-fn is_single_instance_type(section_type: &SectionType) -> bool {
-    matches!(
-        section_type,
-        SectionType::Goal
-            | SectionType::Context
-            | SectionType::CurrentBehavior
-            | SectionType::DesiredBehavior
-    )
 }

@@ -83,7 +83,7 @@ fn create_builder() -> Builder {
             // Section mutation commands
             commands::add_section,
             commands::edit_section,
-            commands::mark_section_done,
+            commands::toggle_checklist_item_done,
             commands::remove_section,
             commands::add_criterion_ref,
             // Code reference commands

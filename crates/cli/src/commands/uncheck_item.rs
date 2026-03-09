@@ -1,6 +1,6 @@
 //! Uncheck-item command for unchecking previously checked checklist items
 //!
-//! Implements the `vtb uncheck-item` command to toggle a previously checked checklist item
+//! Implements the `vtb uncheck-item` command to set a previously checked checklist item
 //! back to done=false, done_at=null.
 
 use clap::Args;
@@ -42,7 +42,8 @@ impl std::fmt::Display for UncheckItemResult {
 impl UncheckItemCommand {
     /// Execute the uncheck-item command.
     ///
-    /// Toggles the specified checklist item back to done=false within the task.
+    /// Sets the specified checklist item to done=false within the task.
+    /// Returns an error if the item is not currently checked.
     ///
     /// # Arguments
     ///
@@ -53,58 +54,30 @@ impl UncheckItemCommand {
     /// Returns `ServiceError` if:
     /// - The task does not exist
     /// - The checklist item index is out of bounds
+    /// - The checklist item is not currently checked
     /// - Service operations fail
     pub async fn execute(
         &self,
         services: &VertebraeServices,
     ) -> Result<UncheckItemResult, ServiceError> {
-        // Normalize ID to lowercase for case-insensitive lookup
-        let id = self.id.to_lowercase();
+        let resolved = super::resolve_checklist_item(services, &self.id, self.index).await?;
 
-        // Validate index is positive
-        if self.index == 0 {
-            return Err(ServiceError::validation_failed(
-                "Checklist item index must be 1 or greater",
-            ));
-        }
-
-        // Fetch task via service to get the checklist item content before updating
-        let task = services.tasks().get_task(&id).await?;
-
-        let sections = task.sections.clone();
-
-        // Filter to only checklist item sections and sort by order
-        let mut items: Vec<(usize, &vertebrae_core::Section)> = sections
-            .iter()
-            .enumerate()
-            .filter(|(_, s)| s.section_type == vertebrae_core::SectionType::ChecklistItem)
-            .collect();
-        items.sort_by_key(|(_, s)| s.order.unwrap_or(u32::MAX));
-
-        // Find the checklist item by index (1-based)
-        let item_idx = self.index - 1;
-        if item_idx >= items.len() {
+        if !resolved.done {
             return Err(ServiceError::validation_failed(format!(
-                "Checklist item {} not found. Task has {} checklist item(s).",
-                self.index,
-                items.len()
+                "Checklist item {} is not checked",
+                self.index
             )));
         }
 
-        let (_, item) = items[item_idx];
-        let item_content = item.content.clone();
-        let ordinal = item.order.unwrap_or(0);
-
-        // Use the service method to toggle checklist item done status
         services
             .tasks()
-            .toggle_checklist_item_done(&id, ordinal)
+            .toggle_checklist_item_done(&resolved.id, resolved.section_order)
             .await?;
 
         Ok(UncheckItemResult {
-            task_id: id,
+            task_id: resolved.id,
             item_index: self.index,
-            item_content,
+            item_content: resolved.content,
         })
     }
 }
