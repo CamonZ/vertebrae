@@ -16,7 +16,7 @@ A task management system written in Rust with CLI and GUI interfaces.
 
 - Persistent task state survives session boundaries
 - Dependency graph ensures correct execution order
-- Sections capture implementation details (steps, constraints, testing criteria)
+- Sections capture implementation details (checklist items, constraints, testing criteria)
 - Code refs link tasks to actual source locations
 - User can see your plan and progress at any time
 - Completing a ticket automatically shows what's unblocked next
@@ -36,7 +36,7 @@ A task management system written in Rust with CLI and GUI interfaces.
 3. **Break into tickets** → `vtb add -l ticket --parent <epic>` for each deliverable
 4. **Break tickets into tasks** → `vtb add --parent <ticket>` for each unit of work
 5. **Set dependencies** → `vtb depend <task> --on <blocker>` to enforce order
-6. **Add details** → `vtb section` for steps, constraints, testing criteria
+6. **Add details** → `vtb section` for checklist items, constraints, testing criteria
 7. **Link code** → `vtb ref` to relevant source locations
 8. **Execute** → Follow the ticket execution workflow below
 9. **Track progress** → `vtb list`, `vtb blockers`, `vtb show`
@@ -47,7 +47,7 @@ For each ticket, follow this workflow using `vtb workflow advance <TICKET_ID>`:
 
 1. **Review ticket** → Use `vtb show <TICKET_ID>` to see ticket details and current step
 2. **Backlog phase** → If the ticket is in `backlog`:
-   - Check if all necessary sections are present (steps, constraints, testing criteria)
+   - Check if all necessary sections are present (checklist items, constraints, testing criteria)
    - If sections are missing, add them with `vtb section`
    - Once complete, advance: `vtb workflow advance <TICKET_ID>` → moves to `todo`
 3. **Todo phase** → When ready to start implementation:
@@ -92,7 +92,7 @@ vtb blockers <task>                              # Show dependency chain
 vtb path <from> <to>                             # Find dependency path
 
 # Sections and references
-vtb section <task> step "Do this first"          # Add implementation step
+vtb section <task> checklist_item "Do this first" # Add checklist item
 vtb section <task> constraint "Must handle X"    # Add constraint
 vtb section <task> testing_criterion "Verify Y"  # Add test criteria
 vtb ref <task> "src/file.rs:L42" --name "func"   # Link to code
@@ -140,7 +140,8 @@ See `skills/` for detailed command guides:
 - `/complete-step` - Complete a workflow step for a task
 - `/reject-step` - Reject a workflow step with optional feedback
 - `/review` - Toggle human review flag
-- `/step-done` - Mark implementation steps complete
+- `/check-item` - Check a checklist item as done
+- `/uncheck-item` - Uncheck a checklist item
 
 **Dependencies:**
 - `/depend` - Create/remove dependencies
@@ -148,7 +149,7 @@ See `skills/` for detailed command guides:
 - `/path` - Find path between tasks
 
 **Content:**
-- `/section` - Add structured content (steps, constraints, criteria)
+- `/section` - Add structured content (checklist items, constraints, criteria)
 - `/ref` - Link tasks to code locations
 - `/criterion-ref` - Link code to testing criteria
 
@@ -291,6 +292,7 @@ vertebrae/
 │   ├── add/SKILL.md        # /add - Create tasks
 │   ├── archive/SKILL.md    # /archive - Archive or unarchive tasks
 │   ├── blockers/SKILL.md   # /blockers - Show dependency chain
+│   ├── check-item/SKILL.md # /check-item - Check checklist items
 │   ├── complete-step/SKILL.md # /complete-step - Complete a workflow step
 │   ├── criterion-ref/SKILL.md # /criterion-ref - Link to test criteria
 │   ├── delete/SKILL.md     # /delete - Remove tasks
@@ -310,8 +312,8 @@ vertebrae/
 │   ├── start-step/SKILL.md # /start-step - Start a workflow step
 │   ├── status/SKILL.md     # /status - Check task state
 │   ├── step/SKILL.md       # /step - Manage workflow steps
-│   ├── step-done/SKILL.md  # /step-done - Mark steps complete
 │   ├── transition-to/SKILL.md # /transition-to - Transition to workflow step
+│   ├── uncheck-item/SKILL.md # /uncheck-item - Uncheck checklist items
 │   ├── undepend/SKILL.md   # /undepend - Remove dependencies
 │   ├── unref/SKILL.md      # /unref - Remove code references
 │   ├── unsection/SKILL.md  # /unsection - Remove sections
