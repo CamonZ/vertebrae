@@ -1,10 +1,14 @@
 //! `vtb daemon install` — write the launchd plist and load the service.
 
 use clap::Args;
-use std::fs;
-use std::process::Command;
 
-use super::{DaemonError, generate_plist, log_dir, plist_path};
+use super::DaemonError;
+#[cfg(target_os = "macos")]
+use {
+    super::{generate_plist, log_dir, plist_path},
+    std::fs,
+    std::process::Command,
+};
 
 /// Install vtb-daemon as a launchd service.
 #[derive(Debug, Args)]
@@ -18,7 +22,7 @@ impl DaemonInstallCommand {
     pub async fn execute(&self) -> Result<String, DaemonError> {
         #[cfg(not(target_os = "macos"))]
         {
-            return Err(DaemonError::UnsupportedPlatform);
+            Err(DaemonError::UnsupportedPlatform)
         }
 
         #[cfg(target_os = "macos")]
