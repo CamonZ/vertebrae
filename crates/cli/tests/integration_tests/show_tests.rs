@@ -204,9 +204,9 @@ mod show_sections_tests {
         let task_id = cmd.execute(&services).await.unwrap();
 
         // Add ordered steps
-        let step1 = Section::with_order(SectionType::Step, "First step", 0);
-        let step2 = Section::with_order(SectionType::Step, "Second step", 1);
-        let step3 = Section::with_order(SectionType::Step, "Third step", 2);
+        let step1 = Section::with_order(SectionType::ChecklistItem, "First step", 0);
+        let step2 = Section::with_order(SectionType::ChecklistItem, "Second step", 1);
+        let step3 = Section::with_order(SectionType::ChecklistItem, "Third step", 2);
 
         services.tasks().add_section(&task_id, step1).await.unwrap();
         services.tasks().add_section(&task_id, step2).await.unwrap();
@@ -220,7 +220,7 @@ mod show_sections_tests {
         let steps: Vec<_> = result
             .sections
             .iter()
-            .filter(|s| s.section_type == SectionType::Step)
+            .filter(|s| s.section_type == SectionType::ChecklistItem)
             .collect();
         assert_eq!(steps.len(), 3);
         assert_eq!(steps[0].order, Some(0));
@@ -768,8 +768,8 @@ mod show_comprehensive_tests {
 
         // Add sections
         let goal = Section::new(SectionType::Goal, "Complete the implementation");
-        let step1 = Section::with_order(SectionType::Step, "Write code", 0);
-        let step2 = Section::with_order(SectionType::Step, "Test code", 1);
+        let step1 = Section::with_order(SectionType::ChecklistItem, "Write code", 0);
+        let step2 = Section::with_order(SectionType::ChecklistItem, "Test code", 1);
         let constraint = Section::new(SectionType::Constraint, "Must pass linting");
 
         services.tasks().add_section(&task_id, goal).await.unwrap();

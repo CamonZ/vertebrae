@@ -1501,22 +1501,9 @@ pub async fn add_section(
         .ok_or_else(CommandError::no_project_selected)?;
 
     // Parse section type
-    let parsed_type = match section_type.to_lowercase().as_str() {
-        "goal" => vertebrae_core::SectionType::Goal,
-        "context" => vertebrae_core::SectionType::Context,
-        "current_behavior" => vertebrae_core::SectionType::CurrentBehavior,
-        "desired_behavior" => vertebrae_core::SectionType::DesiredBehavior,
-        "step" => vertebrae_core::SectionType::Step,
-        "testing_criterion" => vertebrae_core::SectionType::TestingCriterion,
-        "anti_pattern" => vertebrae_core::SectionType::AntiPattern,
-        "failure_test" => vertebrae_core::SectionType::FailureTest,
-        "constraint" => vertebrae_core::SectionType::Constraint,
-        _ => {
-            return Err(CommandError {
-                message: format!("Invalid section type: {}", section_type),
-            })
-        }
-    };
+    let parsed_type = section_type
+        .parse::<vertebrae_core::SectionType>()
+        .map_err(|e| CommandError { message: e })?;
 
     // Get current task to calculate the order
     let task = service.tasks().get_task(&task_id).await?;
@@ -1571,22 +1558,9 @@ pub async fn edit_section(
         .ok_or_else(CommandError::no_project_selected)?;
 
     // Parse section type
-    let parsed_type = match section_type.to_lowercase().as_str() {
-        "goal" => vertebrae_core::SectionType::Goal,
-        "context" => vertebrae_core::SectionType::Context,
-        "current_behavior" => vertebrae_core::SectionType::CurrentBehavior,
-        "desired_behavior" => vertebrae_core::SectionType::DesiredBehavior,
-        "step" => vertebrae_core::SectionType::Step,
-        "testing_criterion" => vertebrae_core::SectionType::TestingCriterion,
-        "anti_pattern" => vertebrae_core::SectionType::AntiPattern,
-        "failure_test" => vertebrae_core::SectionType::FailureTest,
-        "constraint" => vertebrae_core::SectionType::Constraint,
-        _ => {
-            return Err(CommandError {
-                message: format!("Invalid section type: {}", section_type),
-            })
-        }
-    };
+    let parsed_type = section_type
+        .parse::<vertebrae_core::SectionType>()
+        .map_err(|e| CommandError { message: e })?;
 
     service
         .tasks()
@@ -1597,19 +1571,19 @@ pub async fn edit_section(
     Ok(())
 }
 
-/// Toggle the completion status of a step section
+/// Toggle the completion status of a checklist item
 ///
-/// Marks a step section as done or not done by toggling its done flag.
-/// For step sections only (other types will return an error).
+/// Marks a checklist item as done or not done by toggling its done flag.
+/// For checklist item sections only (other types will return an error).
 #[tauri::command]
 #[specta::specta]
-pub async fn mark_section_done(
+pub async fn toggle_checklist_item_done(
     state: State<'_, AppState>,
     task_id: String,
     ordinal: u32,
 ) -> Result<(), CommandError> {
     log::info!(
-        "mark_section_done called with task_id: {}, ordinal: {}",
+        "toggle_checklist_item_done called with task_id: {}, ordinal: {}",
         task_id,
         ordinal
     );
@@ -1619,11 +1593,14 @@ pub async fn mark_section_done(
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    // Use service method to toggle the step done status
-    service.tasks().toggle_step_done(&task_id, ordinal).await?;
+    // Use service method to toggle the checklist item done status
+    service
+        .tasks()
+        .toggle_checklist_item_done(&task_id, ordinal)
+        .await?;
 
     log::info!(
-        "Successfully toggled step section done status for task: {}",
+        "Successfully toggled checklist item done status for task: {}",
         task_id
     );
     Ok(())
@@ -1654,22 +1631,9 @@ pub async fn remove_section(
         .ok_or_else(CommandError::no_project_selected)?;
 
     // Parse section type
-    let parsed_type = match section_type.to_lowercase().as_str() {
-        "goal" => vertebrae_core::SectionType::Goal,
-        "context" => vertebrae_core::SectionType::Context,
-        "current_behavior" => vertebrae_core::SectionType::CurrentBehavior,
-        "desired_behavior" => vertebrae_core::SectionType::DesiredBehavior,
-        "step" => vertebrae_core::SectionType::Step,
-        "testing_criterion" => vertebrae_core::SectionType::TestingCriterion,
-        "anti_pattern" => vertebrae_core::SectionType::AntiPattern,
-        "failure_test" => vertebrae_core::SectionType::FailureTest,
-        "constraint" => vertebrae_core::SectionType::Constraint,
-        _ => {
-            return Err(CommandError {
-                message: format!("Invalid section type: {}", section_type),
-            })
-        }
-    };
+    let parsed_type = section_type
+        .parse::<vertebrae_core::SectionType>()
+        .map_err(|e| CommandError { message: e })?;
 
     service
         .tasks()
@@ -2938,7 +2902,7 @@ mod tests {
         add_section(
             state.clone(),
             id.clone(),
-            "step".to_string(),
+            "checklist_item".to_string(),
             Some("Do the thing".to_string()),
         )
         .await
@@ -2958,7 +2922,7 @@ mod tests {
             .unwrap();
         let result = add_section(state, id, "bad_type".to_string(), None).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().message.contains("Invalid section type"));
+        assert!(result.unwrap_err().message.contains("invalid section type"));
     }
 
     #[tokio::test]
@@ -2974,7 +2938,7 @@ mod tests {
             "context",
             "current_behavior",
             "desired_behavior",
-            "step",
+            "checklist_item",
             "testing_criterion",
             "anti_pattern",
             "failure_test",
@@ -3006,7 +2970,7 @@ mod tests {
         add_section(
             state.clone(),
             id.clone(),
-            "step".to_string(),
+            "checklist_item".to_string(),
             Some("Original".to_string()),
         )
         .await
@@ -3015,7 +2979,7 @@ mod tests {
         edit_section(
             state.clone(),
             id.clone(),
-            "step".to_string(),
+            "checklist_item".to_string(),
             0,
             "Updated content".to_string(),
         )
@@ -3048,13 +3012,13 @@ mod tests {
         add_section(
             state.clone(),
             id.clone(),
-            "step".to_string(),
+            "checklist_item".to_string(),
             Some("Step 1".to_string()),
         )
         .await
         .unwrap();
 
-        remove_section(state.clone(), id.clone(), "step".to_string(), 0)
+        remove_section(state.clone(), id.clone(), "checklist_item".to_string(), 0)
             .await
             .unwrap();
 
@@ -3074,7 +3038,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mark_section_done_toggles_step() {
+    async fn toggle_checklist_item_done_toggles_item() {
         let app = build_app_with_services();
         let state: tauri::State<'_, AppState> = app.state();
         let id = create_task(state.clone(), "Task".to_string(), None, None, None)
@@ -3084,13 +3048,13 @@ mod tests {
         add_section(
             state.clone(),
             id.clone(),
-            "step".to_string(),
+            "checklist_item".to_string(),
             Some("Do it".to_string()),
         )
         .await
         .unwrap();
 
-        mark_section_done(state.clone(), id.clone(), 0)
+        toggle_checklist_item_done(state.clone(), id.clone(), 0)
             .await
             .unwrap();
 

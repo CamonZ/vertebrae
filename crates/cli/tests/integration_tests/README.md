@@ -102,11 +102,11 @@ Tests for task hierarchies and dependencies:
 
 Tests for task metadata sections and code references:
 
-- `test_add_step_section`: Add implementation steps to tasks
+- `test_add_step_section`: Add checklist items to tasks
 - `test_add_constraint_section`: Add constraints (e.g., "must handle errors")
 - `test_add_code_reference`: Link task to source code locations
 - `test_edit_section`: Modify section content
-- `test_mark_step_done`: Mark implementation steps as complete
+- `test_mark_step_done`: Mark checklist items as complete
 - `test_remove_section`: Remove sections and renumber
 
 ### workflow_tests

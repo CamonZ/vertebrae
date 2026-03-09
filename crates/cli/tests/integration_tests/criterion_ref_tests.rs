@@ -287,7 +287,7 @@ async fn test_criterion_ref_mixed_with_other_sections() {
 
     // Add different types of sections
     let step = Section {
-        section_type: SectionType::Step,
+        section_type: SectionType::ChecklistItem,
         content: "Do something".to_string(),
         order: Some(0),
         done: None,
@@ -448,7 +448,7 @@ async fn test_criterion_ref_no_testing_criteria() {
 
     // Add a non-criterion section
     let step = Section {
-        section_type: SectionType::Step,
+        section_type: SectionType::ChecklistItem,
         content: "Step 1".to_string(),
         order: Some(0),
         done: None,

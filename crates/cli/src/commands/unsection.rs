@@ -15,34 +15,14 @@ pub struct UnsectionCommand {
     #[arg(required = true, value_parser = crate::commands::parse_uuid("task ID"))]
     pub id: String,
 
-    /// Section type to remove (goal, context, current_behavior, desired_behavior, step,
+    /// Section type to remove (goal, context, current_behavior, desired_behavior, checklist_item,
     /// testing_criterion, anti_pattern, failure_test, constraint)
-    #[arg(value_parser = parse_section_type, required = true)]
+    #[arg(required = true)]
     pub section_type: SectionType,
 
     /// Remove specific section by ordinal (for multi-instance types)
     #[arg(long, short = 'i')]
     pub index: Option<u32>,
-}
-
-/// Parse a section type string into SectionType enum (case-insensitive)
-fn parse_section_type(s: &str) -> Result<SectionType, String> {
-    match s.to_lowercase().as_str() {
-        "goal" => Ok(SectionType::Goal),
-        "context" => Ok(SectionType::Context),
-        "current_behavior" => Ok(SectionType::CurrentBehavior),
-        "desired_behavior" => Ok(SectionType::DesiredBehavior),
-        "step" => Ok(SectionType::Step),
-        "testing_criterion" => Ok(SectionType::TestingCriterion),
-        "anti_pattern" => Ok(SectionType::AntiPattern),
-        "failure_test" => Ok(SectionType::FailureTest),
-        "constraint" => Ok(SectionType::Constraint),
-        _ => Err(format!(
-            "invalid section type '{}'. Valid types: goal, context, current_behavior, \
-             desired_behavior, step, testing_criterion, anti_pattern, failure_test, constraint",
-            s
-        )),
-    }
 }
 
 /// Result of the unsection command execution
@@ -93,20 +73,6 @@ struct SectionRow {
     content: Option<String>,
     #[serde(default)]
     order: Option<u32>,
-}
-
-/// Check if a section type is single-instance (can only have one per task).
-///
-/// Single-instance types: goal, context, current_behavior, desired_behavior
-/// Multi-instance types: step, testing_criterion, anti_pattern, failure_test, constraint
-fn is_single_instance_type(section_type: &SectionType) -> bool {
-    matches!(
-        section_type,
-        SectionType::Goal
-            | SectionType::Context
-            | SectionType::CurrentBehavior
-            | SectionType::DesiredBehavior
-    )
 }
 
 impl UnsectionCommand {
@@ -167,7 +133,7 @@ impl UnsectionCommand {
 
             // type only (no --index): for single-instance, remove it; for multi-instance, error
             None => {
-                if is_single_instance_type(&self.section_type) {
+                if self.section_type.is_single_instance() {
                     self.remove_single_instance(services, &id, &self.section_type, &task.sections)
                         .await?
                 } else {

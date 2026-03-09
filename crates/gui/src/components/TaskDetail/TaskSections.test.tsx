@@ -14,7 +14,7 @@ vi.mock("../../bindings", async () => {
       addSection: vi.fn(),
       editSection: vi.fn(),
       removeSection: vi.fn(),
-      markSectionDone: vi.fn(),
+      toggleChecklistItemDone: vi.fn(),
     },
   };
 });
@@ -53,27 +53,27 @@ describe("TaskSections", () => {
 
     it("renders section groups for each type with sections", () => {
       const sections = [
-        createSection({ type: "step", content: "Step 1", order: 0 }),
-        createSection({ type: "step", content: "Step 2", order: 1 }),
+        createSection({ type: "checklist_item", content: "Step 1", order: 0 }),
+        createSection({ type: "checklist_item", content: "Step 2", order: 1 }),
         createSection({ type: "constraint", content: "Constraint 1", order: 0 }),
       ];
 
       render(<TaskSections {...defaultProps} sections={sections} />);
 
-      expect(screen.getByText("Steps")).toBeInTheDocument();
+      expect(screen.getByText("Checklist Items")).toBeInTheDocument();
       expect(screen.getByText("Constraints")).toBeInTheDocument();
     });
 
     it("shows count badge for each section type", () => {
       const sections = [
-        createSection({ type: "step", content: "Step 1", order: 0 }),
-        createSection({ type: "step", content: "Step 2", order: 1 }),
+        createSection({ type: "checklist_item", content: "Step 1", order: 0 }),
+        createSection({ type: "checklist_item", content: "Step 2", order: 1 }),
       ];
 
       render(<TaskSections {...defaultProps} sections={sections} />);
 
       // Should show "2" for steps count in the header badge
-      const stepsHeader = screen.getByText("Steps").closest("button");
+      const stepsHeader = screen.getByText("Checklist Items").closest("button");
       expect(stepsHeader).toBeInTheDocument();
       // The count badge is a sibling span
       expect(stepsHeader?.querySelector(".rounded-full")).toHaveTextContent("2");
@@ -87,7 +87,7 @@ describe("TaskSections", () => {
       await userEvent.click(screen.getByText("Add Section"));
 
       expect(screen.getByText("Select type:")).toBeInTheDocument();
-      expect(screen.getByText("Step")).toBeInTheDocument();
+      expect(screen.getByText("Checklist")).toBeInTheDocument();
       expect(screen.getByText("Goal")).toBeInTheDocument();
       expect(screen.getByText("Constraint")).toBeInTheDocument();
     });
@@ -125,7 +125,7 @@ describe("TaskSections", () => {
     it("goal and step sections are open by default", () => {
       const sections = [
         createSection({ type: "goal", content: "The goal", order: 0 }),
-        createSection({ type: "step", content: "Step 1", order: 0 }),
+        createSection({ type: "checklist_item", content: "Step 1", order: 0 }),
       ];
 
       render(<TaskSections {...defaultProps} sections={sections} />);
@@ -138,8 +138,8 @@ describe("TaskSections", () => {
   describe("step sections", () => {
     it("shows numbered checkboxes for steps", async () => {
       const sections = [
-        createSection({ type: "step", content: "Step 1", order: 0 }),
-        createSection({ type: "step", content: "Step 2", order: 1 }),
+        createSection({ type: "checklist_item", content: "Step 1", order: 0 }),
+        createSection({ type: "checklist_item", content: "Step 2", order: 1 }),
       ];
 
       render(<TaskSections {...defaultProps} sections={sections} />);
@@ -153,8 +153,8 @@ describe("TaskSections", () => {
 
     it("shows checkmark for done steps", () => {
       const sections = [
-        createSection({ type: "step", content: "Done step", order: 0, done: true }),
-        createSection({ type: "step", content: "Pending step", order: 1, done: false }),
+        createSection({ type: "checklist_item", content: "Done step", order: 0, done: true }),
+        createSection({ type: "checklist_item", content: "Pending step", order: 1, done: false }),
       ];
 
       render(<TaskSections {...defaultProps} sections={sections} />);
@@ -169,12 +169,12 @@ describe("TaskSections", () => {
       expect(pendingButton).toHaveTextContent("2");
     });
 
-    it("calls markSectionDone when checkbox is clicked", async () => {
+    it("calls toggleChecklistItemDone when checkbox is clicked", async () => {
       const sections = [
-        createSection({ type: "step", content: "Step 1", order: 0 }),
+        createSection({ type: "checklist_item", content: "Step 1", order: 0 }),
       ];
 
-      vi.mocked(bindings.commands.markSectionDone).mockResolvedValue({
+      vi.mocked(bindings.commands.toggleChecklistItemDone).mockResolvedValue({
         status: "ok",
         data: null,
       });
@@ -185,7 +185,7 @@ describe("TaskSections", () => {
       const checkboxButton = screen.getByTitle("Mark as done");
       await userEvent.click(checkboxButton);
 
-      expect(bindings.commands.markSectionDone).toHaveBeenCalledWith("task-123", 0);
+      expect(bindings.commands.toggleChecklistItemDone).toHaveBeenCalledWith("task-123", 0);
     });
   });
 
@@ -209,7 +209,7 @@ describe("TaskSections", () => {
   describe("editing sections", () => {
     it("enters edit mode when section content is clicked", async () => {
       const sections = [
-        createSection({ type: "step", content: "Edit me", order: 0 }),
+        createSection({ type: "checklist_item", content: "Edit me", order: 0 }),
       ];
 
       render(<TaskSections {...defaultProps} sections={sections} />);
@@ -221,7 +221,7 @@ describe("TaskSections", () => {
 
     it("calls editSection when edit is saved", async () => {
       const sections = [
-        createSection({ type: "step", content: "Original", order: 0 }),
+        createSection({ type: "checklist_item", content: "Original", order: 0 }),
       ];
 
       vi.mocked(bindings.commands.editSection).mockResolvedValue({
@@ -245,7 +245,7 @@ describe("TaskSections", () => {
       await waitFor(() => {
         expect(bindings.commands.editSection).toHaveBeenCalledWith(
           "task-123",
-          "step",
+          "checklist_item",
           0,
           "Updated"
         );
@@ -256,7 +256,7 @@ describe("TaskSections", () => {
   describe("deleting sections", () => {
     it("calls removeSection when delete is clicked", async () => {
       const sections = [
-        createSection({ type: "step", content: "Delete me", order: 0 }),
+        createSection({ type: "checklist_item", content: "Delete me", order: 0 }),
       ];
 
       vi.mocked(bindings.commands.removeSection).mockResolvedValue({
@@ -274,7 +274,7 @@ describe("TaskSections", () => {
 
       expect(bindings.commands.removeSection).toHaveBeenCalledWith(
         "task-123",
-        "step",
+        "checklist_item",
         0
       );
     });
@@ -292,24 +292,24 @@ describe("TaskSections", () => {
       // Open type selector
       await userEvent.click(screen.getByText("Add Section"));
 
-      // Select step type
-      await userEvent.click(screen.getByText("Step"));
+      // Select checklist item type
+      await userEvent.click(screen.getByText("Checklist"));
 
       // Find the add input in the expanded section (there will be two inputs now)
       const inputs = screen.getAllByRole("textbox");
       const addInput = inputs.find(input =>
-        input.getAttribute("placeholder")?.includes("step")
+        input.getAttribute("placeholder")?.includes("checklist item")
       );
 
       if (addInput) {
-        await userEvent.type(addInput, "New step");
+        await userEvent.type(addInput, "New item");
         await userEvent.click(screen.getByRole("button", { name: /save/i }));
 
         await waitFor(() => {
           expect(bindings.commands.addSection).toHaveBeenCalledWith(
             "task-123",
-            "step",
-            "New step"
+            "checklist_item",
+            "New item"
           );
         });
       }
@@ -319,12 +319,12 @@ describe("TaskSections", () => {
   describe("callbacks", () => {
     it("calls onSectionsChanged after successful operations", async () => {
       const sections = [
-        createSection({ type: "step", content: "Step 1", order: 0 }),
+        createSection({ type: "checklist_item", content: "Step 1", order: 0 }),
       ];
 
       const onSectionsChanged = vi.fn();
 
-      vi.mocked(bindings.commands.markSectionDone).mockResolvedValue({
+      vi.mocked(bindings.commands.toggleChecklistItemDone).mockResolvedValue({
         status: "ok",
         data: null,
       });

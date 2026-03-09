@@ -461,7 +461,7 @@ mod tests {
     fn test_section_response_deserialization() {
         let json = r#"{
             "id": "sec-1",
-            "section_type": "step",
+            "section_type": "checklist_item",
             "content": "Do this first",
             "section_order": 1,
             "done": true,
@@ -470,7 +470,7 @@ mod tests {
 
         let section: SectionResponse = serde_json::from_str(json).unwrap();
         assert_eq!(section.id, "sec-1");
-        assert_eq!(section.section_type, "step");
+        assert_eq!(section.section_type, "checklist_item");
         assert_eq!(section.content, "Do this first");
         assert_eq!(section.section_order, 1);
         assert_eq!(section.done, Some(true));

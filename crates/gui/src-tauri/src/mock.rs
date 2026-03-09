@@ -492,33 +492,29 @@ impl TaskService for MockTaskService {
         Ok(())
     }
 
-    async fn mark_step_done(&self, id: &str, step_index: usize) -> ServiceResult<()> {
-        let mut s = self.state.lock().unwrap();
-        let task = s
-            .tasks
-            .get_mut(id)
-            .ok_or_else(|| ServiceError::task_not_found(id))?;
-        let steps: Vec<usize> = task
-            .sections
-            .iter()
-            .enumerate()
-            .filter(|(_, s)| s.section_type == SectionType::Step)
-            .map(|(i, _)| i)
-            .collect();
-        if let Some(&idx) = steps.get(step_index.saturating_sub(1)) {
-            task.sections[idx].mark_done();
-        }
-        Ok(())
-    }
-
-    async fn toggle_step_done(&self, id: &str, ordinal: u32) -> ServiceResult<()> {
+    async fn mark_checklist_item_done(&self, id: &str, section_order: u32) -> ServiceResult<()> {
         let mut s = self.state.lock().unwrap();
         let task = s
             .tasks
             .get_mut(id)
             .ok_or_else(|| ServiceError::task_not_found(id))?;
         for sec in &mut task.sections {
-            if sec.section_type == SectionType::Step && sec.order == Some(ordinal) {
+            if sec.section_type == SectionType::ChecklistItem && sec.order == Some(section_order) {
+                sec.mark_done();
+                return Ok(());
+            }
+        }
+        Ok(())
+    }
+
+    async fn toggle_checklist_item_done(&self, id: &str, ordinal: u32) -> ServiceResult<()> {
+        let mut s = self.state.lock().unwrap();
+        let task = s
+            .tasks
+            .get_mut(id)
+            .ok_or_else(|| ServiceError::task_not_found(id))?;
+        for sec in &mut task.sections {
+            if sec.section_type == SectionType::ChecklistItem && sec.order == Some(ordinal) {
                 let currently_done = sec.done.unwrap_or(false);
                 if currently_done {
                     sec.done = Some(false);
@@ -529,7 +525,7 @@ impl TaskService for MockTaskService {
                 return Ok(());
             }
         }
-        Err(ServiceError::validation_failed("Step not found"))
+        Err(ServiceError::validation_failed("Checklist item not found"))
     }
 
     async fn add_code_ref(&self, id: &str, code_ref: CodeRef) -> ServiceResult<()> {

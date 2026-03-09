@@ -16,14 +16,14 @@ const { mockTaskData } = vi.hoisted(() => {
       done_at: null,
     },
     {
-      type: "step" as const,
+      type: "checklist_item" as const,
       content: "First step to do",
       order: 0,
       done: false,
       done_at: null,
     },
     {
-      type: "step" as const,
+      type: "checklist_item" as const,
       content: "Second step to do",
       order: 1,
       done: true,
@@ -82,7 +82,7 @@ vi.mock("../../bindings", () => ({
     addSection: vi.fn().mockResolvedValue({ status: "ok", data: null }),
     editSection: vi.fn().mockResolvedValue({ status: "ok", data: null }),
     removeSection: vi.fn().mockResolvedValue({ status: "ok", data: null }),
-    markSectionDone: vi.fn().mockResolvedValue({ status: "ok", data: null }),
+    toggleChecklistItemDone: vi.fn().mockResolvedValue({ status: "ok", data: null }),
   },
   events: {
     taskChangedEvent: {
@@ -335,7 +335,7 @@ describe("TaskDetailPanel - Inline Editing Integration", () => {
       await userEvent.click(stepCheckboxes[0]);
 
       await waitFor(() => {
-        expect(eventsModule.commands.markSectionDone).toHaveBeenCalled();
+        expect(eventsModule.commands.toggleChecklistItemDone).toHaveBeenCalled();
       });
     });
   });

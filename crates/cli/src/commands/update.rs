@@ -7,6 +7,8 @@ use clap::Args;
 use vertebrae_core::{Priority, SectionType};
 use vertebrae_core::{ServiceError, UpdateTaskOptions, VertebraeServices};
 
+use std::str::FromStr;
+
 /// Update an existing task
 #[derive(Debug, Args)]
 pub struct UpdateCommand {
@@ -58,26 +60,6 @@ fn parse_priority(s: &str) -> Result<Priority, String> {
         "critical" => Ok(Priority::Critical),
         _ => Err(format!(
             "invalid priority '{}'. Valid values: low, medium, high, critical",
-            s
-        )),
-    }
-}
-
-/// Parse a section type string into a SectionType enum
-fn parse_section_type(s: &str) -> Result<SectionType, String> {
-    match s.to_lowercase().as_str() {
-        "goal" => Ok(SectionType::Goal),
-        "context" => Ok(SectionType::Context),
-        "current_behavior" => Ok(SectionType::CurrentBehavior),
-        "desired_behavior" => Ok(SectionType::DesiredBehavior),
-        "step" => Ok(SectionType::Step),
-        "testing_criterion" => Ok(SectionType::TestingCriterion),
-        "anti_pattern" => Ok(SectionType::AntiPattern),
-        "failure_test" => Ok(SectionType::FailureTest),
-        "constraint" => Ok(SectionType::Constraint),
-        _ => Err(format!(
-            "invalid section type '{}'. Valid types: goal, context, current_behavior, \
-             desired_behavior, step, testing_criterion, anti_pattern, failure_test, constraint",
             s
         )),
     }
@@ -184,7 +166,7 @@ impl UpdateCommand {
             }
 
             let section_type =
-                parse_section_type(&args[0]).map_err(ServiceError::validation_failed)?;
+                SectionType::from_str(&args[0]).map_err(ServiceError::validation_failed)?;
 
             let ordinal: u32 = args[1].parse().map_err(|_| {
                 ServiceError::validation_failed(format!(
@@ -209,7 +191,7 @@ impl UpdateCommand {
             }
 
             let section_type =
-                parse_section_type(&args[0]).map_err(ServiceError::validation_failed)?;
+                SectionType::from_str(&args[0]).map_err(ServiceError::validation_failed)?;
 
             let ordinal: u32 = args[1].parse().map_err(|_| {
                 ServiceError::validation_failed(format!(
