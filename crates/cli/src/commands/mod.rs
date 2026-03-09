@@ -7,6 +7,7 @@
 pub mod add;
 pub mod archive;
 pub mod blockers;
+pub mod check_item;
 pub mod complete_step;
 pub mod criterion_ref;
 pub mod daemon;
@@ -27,7 +28,6 @@ pub mod sections;
 pub mod show;
 pub mod start_step;
 pub mod step;
-pub mod step_done;
 pub mod transition_to;
 pub mod undepend;
 pub mod unref;
@@ -38,6 +38,7 @@ pub mod workflow;
 pub use add::AddCommand;
 pub use archive::{ArchiveCommand, UnarchiveCommand};
 pub use blockers::BlockersCommand;
+pub use check_item::CheckItemCommand;
 pub use complete_step::CompleteStepCommand;
 pub use criterion_ref::CriterionRefCommand;
 pub use daemon::DaemonCommand;
@@ -58,7 +59,6 @@ pub use sections::SectionsCommand;
 pub use show::ShowCommand;
 pub use start_step::StartStepCommand;
 pub use step::StepCommand;
-pub use step_done::StepDoneCommand;
 pub use transition_to::TransitionToCommand;
 pub use undepend::UndependCommand;
 pub use unref::UnrefCommand;
@@ -188,9 +188,9 @@ pub enum Command {
     /// First-class workflow step management commands
     #[command(subcommand)]
     Step(StepCommand),
-    /// Mark a step as done within a task
-    #[command(name = "step-done")]
-    StepDone(StepDoneCommand),
+    /// Mark a checklist item as done within a task
+    #[command(name = "check-item")]
+    CheckItem(CheckItemCommand),
     /// Transition a task to a specific workflow step
     #[command(name = "transition-to")]
     TransitionTo(TransitionToCommand),
@@ -293,7 +293,7 @@ impl Command {
             Command::Unref(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::Unsection(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::Step(_) | Command::Workflow(_) => {}
-            Command::StepDone(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
+            Command::CheckItem(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::TransitionTo(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::Update(cmd) => {
                 cmd.id = resolve_id(&cmd.id, services).await?;
@@ -450,7 +450,7 @@ impl Command {
                 let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(result))
             }
-            Command::StepDone(cmd) => {
+            Command::CheckItem(cmd) => {
                 let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
