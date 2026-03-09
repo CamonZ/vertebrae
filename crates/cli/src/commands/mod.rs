@@ -7,6 +7,7 @@
 pub mod add;
 pub mod archive;
 pub mod blockers;
+pub mod check_item;
 pub mod complete_step;
 pub mod criterion_ref;
 pub mod daemon;
@@ -27,8 +28,8 @@ pub mod sections;
 pub mod show;
 pub mod start_step;
 pub mod step;
-pub mod step_done;
 pub mod transition_to;
+pub mod uncheck_item;
 pub mod undepend;
 pub mod unref;
 pub mod unsection;
@@ -38,6 +39,7 @@ pub mod workflow;
 pub use add::AddCommand;
 pub use archive::{ArchiveCommand, UnarchiveCommand};
 pub use blockers::BlockersCommand;
+pub use check_item::CheckItemCommand;
 pub use complete_step::CompleteStepCommand;
 pub use criterion_ref::CriterionRefCommand;
 pub use daemon::DaemonCommand;
@@ -58,8 +60,8 @@ pub use sections::SectionsCommand;
 pub use show::ShowCommand;
 pub use start_step::StartStepCommand;
 pub use step::StepCommand;
-pub use step_done::StepDoneCommand;
 pub use transition_to::TransitionToCommand;
+pub use uncheck_item::UncheckItemCommand;
 pub use undepend::UndependCommand;
 pub use unref::UnrefCommand;
 pub use unsection::UnsectionCommand;
@@ -69,7 +71,7 @@ pub use workflow::WorkflowCommand;
 use crate::output::{format_task_table, format_task_tree};
 use clap::Subcommand;
 use clap::builder::ValueParser;
-use vertebrae_core::{ServiceError, VertebraeServices};
+use vertebrae_core::{SectionType, ServiceError, VertebraeServices};
 
 /// Check whether a string is a valid short ID prefix (8 hex characters).
 pub fn is_short_id(s: &str) -> bool {
@@ -177,23 +179,26 @@ pub enum Command {
     /// Start a workflow step for a task
     #[command(name = "start-step")]
     StartStep(StartStepCommand),
+    /// Mark a checklist item as done within a task
+    #[command(name = "check-item")]
+    CheckItem(CheckItemCommand),
+    /// First-class workflow step management commands
+    #[command(subcommand)]
+    Step(StepCommand),
+    /// Transition a task to a specific workflow step
+    #[command(name = "transition-to")]
+    TransitionTo(TransitionToCommand),
     /// Unarchive a task (set archived=false)
     Unarchive(UnarchiveCommand),
+    /// Uncheck a previously checked checklist item
+    #[command(name = "uncheck-item")]
+    UncheckItem(UncheckItemCommand),
     /// Remove a dependency relationship between tasks
     Undepend(UndependCommand),
     /// Remove code references from a task
     Unref(UnrefCommand),
     /// Remove sections from a task
     Unsection(UnsectionCommand),
-    /// First-class workflow step management commands
-    #[command(subcommand)]
-    Step(StepCommand),
-    /// Mark a step as done within a task
-    #[command(name = "step-done")]
-    StepDone(StepDoneCommand),
-    /// Transition a task to a specific workflow step
-    #[command(name = "transition-to")]
-    TransitionTo(TransitionToCommand),
     /// Update an existing task
     Update(UpdateCommand),
     /// Workflow management commands
@@ -243,6 +248,59 @@ async fn resolve_optional_id(
     Ok(())
 }
 
+/// Resolved checklist item details.
+pub(crate) struct ResolvedChecklistItem {
+    pub id: String,
+    pub content: String,
+    pub section_order: u32,
+    pub done: bool,
+}
+
+/// Resolve a checklist item from a task by its 1-based index.
+///
+/// Validates the index, fetches the task, filters to checklist item sections,
+/// sorts by order, and returns the resolved item details.
+pub(crate) async fn resolve_checklist_item(
+    services: &VertebraeServices,
+    id: &str,
+    index: usize,
+) -> Result<ResolvedChecklistItem, ServiceError> {
+    let id = id.to_lowercase();
+
+    if index == 0 {
+        return Err(ServiceError::validation_failed(
+            "Checklist item index must be 1 or greater",
+        ));
+    }
+
+    let task = services.tasks().get_task(&id).await?;
+
+    let mut items: Vec<&vertebrae_core::Section> = task
+        .sections
+        .iter()
+        .filter(|s| s.section_type == SectionType::ChecklistItem)
+        .collect();
+    items.sort_by_key(|s| s.order.unwrap_or(u32::MAX));
+
+    let item_idx = index - 1;
+    if item_idx >= items.len() {
+        return Err(ServiceError::validation_failed(format!(
+            "Checklist item {} not found. Task has {} checklist item(s).",
+            index,
+            items.len()
+        )));
+    }
+
+    let item = items[item_idx];
+
+    Ok(ResolvedChecklistItem {
+        id,
+        content: item.content.clone(),
+        section_order: item.order.unwrap_or(0),
+        done: item.done.unwrap_or(false),
+    })
+}
+
 impl Command {
     /// Resolve any short task ID prefixes to full UUIDs before execution.
     ///
@@ -286,6 +344,7 @@ impl Command {
             Command::Show(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::StartStep(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::Unarchive(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
+            Command::UncheckItem(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::Undepend(cmd) => {
                 cmd.id = resolve_id(&cmd.id, services).await?;
                 cmd.blocker_id = resolve_id(&cmd.blocker_id, services).await?;
@@ -293,7 +352,7 @@ impl Command {
             Command::Unref(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::Unsection(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::Step(_) | Command::Workflow(_) => {}
-            Command::StepDone(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
+            Command::CheckItem(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::TransitionTo(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::Update(cmd) => {
                 cmd.id = resolve_id(&cmd.id, services).await?;
@@ -432,6 +491,10 @@ impl Command {
                 let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(result))
             }
+            Command::UncheckItem(cmd) => {
+                let result = cmd.execute(services).await?;
+                Ok(CommandResult::Message(format!("{}", result)))
+            }
             Command::Undepend(cmd) => {
                 // Service handles notification via callback
                 let result = cmd.execute(services).await?;
@@ -450,7 +513,7 @@ impl Command {
                 let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(result))
             }
-            Command::StepDone(cmd) => {
+            Command::CheckItem(cmd) => {
                 let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
@@ -1190,14 +1253,14 @@ mod tests {
             "sections",
             "a1b2c3d4-0000-4000-8000-000000000001",
             "--type",
-            "step",
+            "checklist_item",
         ]);
         assert!(cli.is_ok());
         match cli.unwrap().command {
             Command::Sections(cmd) => {
                 assert_eq!(cmd.id, "a1b2c3d4-0000-4000-8000-000000000001");
                 assert!(cmd.section_type.is_some());
-                assert_eq!(cmd.section_type.unwrap().as_str(), "step");
+                assert_eq!(cmd.section_type.unwrap().as_str(), "checklist_item");
             }
             _ => panic!("Expected Sections command"),
         }

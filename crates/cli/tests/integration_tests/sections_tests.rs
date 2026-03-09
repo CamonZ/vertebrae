@@ -54,21 +54,21 @@ mod tests {
         // Add steps (multi-instance, positive space)
         let cmd = SectionCommand {
             id: id.clone(),
-            section_type: SectionType::Step,
+            section_type: SectionType::ChecklistItem,
             content: "Create login endpoint".to_string(),
         };
         cmd.execute(&services).await.unwrap();
 
         let cmd = SectionCommand {
             id: id.clone(),
-            section_type: SectionType::Step,
+            section_type: SectionType::ChecklistItem,
             content: "Implement JWT validation".to_string(),
         };
         cmd.execute(&services).await.unwrap();
 
         let cmd = SectionCommand {
             id: id.clone(),
-            section_type: SectionType::Step,
+            section_type: SectionType::ChecklistItem,
             content: "Add rate limiting".to_string(),
         };
         cmd.execute(&services).await.unwrap();
@@ -133,7 +133,7 @@ mod tests {
             result
                 .sections
                 .iter()
-                .filter(|s| s.section_type == SectionType::Step)
+                .filter(|s| s.section_type == SectionType::ChecklistItem)
                 .count(),
             3
         );
@@ -177,7 +177,7 @@ mod tests {
         let steps: Vec<_> = result
             .sections
             .iter()
-            .filter(|s| s.section_type == SectionType::Step)
+            .filter(|s| s.section_type == SectionType::ChecklistItem)
             .collect();
         assert_eq!(steps.len(), 3);
         assert_eq!(steps[0].order, Some(0));
@@ -231,7 +231,7 @@ mod tests {
         for step in ["Step one", "Step two", "Step three"] {
             let cmd = SectionCommand {
                 id: id.clone(),
-                section_type: SectionType::Step,
+                section_type: SectionType::ChecklistItem,
                 content: step.to_string(),
             };
             cmd.execute(&services).await.unwrap();
@@ -248,18 +248,18 @@ mod tests {
         // Filter by step type
         let cmd = SectionsCommand {
             id: id.clone(),
-            section_type: Some(SectionType::Step),
+            section_type: Some(SectionType::ChecklistItem),
         };
         let result = cmd.execute(&services).await.unwrap();
 
         // Verify only steps are returned
         assert_eq!(result.sections.len(), 3);
-        assert_eq!(result.filter_type, Some(SectionType::Step));
+        assert_eq!(result.filter_type, Some(SectionType::ChecklistItem));
         assert!(
             result
                 .sections
                 .iter()
-                .all(|s| s.section_type == SectionType::Step)
+                .all(|s| s.section_type == SectionType::ChecklistItem)
         );
 
         // Verify content and order
@@ -293,7 +293,7 @@ mod tests {
         // Add a step to verify filtering works
         let cmd = SectionCommand {
             id: id.clone(),
-            section_type: SectionType::Step,
+            section_type: SectionType::ChecklistItem,
             content: "Implement feature".to_string(),
         };
         cmd.execute(&services).await.unwrap();
@@ -338,7 +338,7 @@ mod tests {
         for step in ["Step 1", "Step 2"] {
             let cmd = SectionCommand {
                 id: id.clone(),
-                section_type: SectionType::Step,
+                section_type: SectionType::ChecklistItem,
                 content: step.to_string(),
             };
             cmd.execute(&services).await.unwrap();
@@ -486,7 +486,7 @@ mod tests {
 
         let cmd = SectionCommand {
             id: id.clone(),
-            section_type: SectionType::Step,
+            section_type: SectionType::ChecklistItem,
             content: "Step 1".to_string(),
         };
         cmd.execute(&services).await.unwrap();
@@ -528,7 +528,7 @@ mod tests {
                         | SectionType::Context
                         | SectionType::CurrentBehavior
                         | SectionType::DesiredBehavior
-                        | SectionType::Step
+                        | SectionType::ChecklistItem
                         | SectionType::TestingCriterion
                 )
             })
@@ -569,7 +569,7 @@ mod tests {
             (SectionType::Context, "Context content"),
             (SectionType::CurrentBehavior, "Current behavior content"),
             (SectionType::DesiredBehavior, "Desired behavior content"),
-            (SectionType::Step, "Step content"),
+            (SectionType::ChecklistItem, "Step content"),
             (SectionType::TestingCriterion, "Testing criterion content"),
             (SectionType::AntiPattern, "Anti-pattern content"),
             (SectionType::FailureTest, "Failure test content"),

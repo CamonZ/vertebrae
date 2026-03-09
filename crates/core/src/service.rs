@@ -462,25 +462,25 @@ pub trait TaskService: Send + Sync {
         ordinal: u32,
     ) -> ServiceResult<()>;
 
-    /// Mark a step section as done at a specific index (1-based)
+    /// Mark a checklist item section as done by section_order
     ///
     /// Updates the section's done flag to true and sets done_at to current time.
     ///
     /// # Arguments
     ///
     /// * `id` - The task ID
-    /// * `step_index` - The 1-based index of the step section to mark as done
-    async fn mark_step_done(&self, id: &str, step_index: usize) -> ServiceResult<()>;
+    /// * `section_order` - The section_order value of the checklist item to mark as done
+    async fn mark_checklist_item_done(&self, id: &str, section_order: u32) -> ServiceResult<()>;
 
-    /// Toggle the done status of a step section by ordinal
+    /// Toggle the done status of a checklist item section by section_order
     ///
-    /// Finds step sections and toggles the done status of the step at the given ordinal (0-based).
+    /// Finds the checklist item section matching the given section_order and toggles its done status.
     ///
     /// # Arguments
     ///
     /// * `id` - The task ID
-    /// * `ordinal` - The 0-based ordinal of the step section to toggle
-    async fn toggle_step_done(&self, id: &str, ordinal: u32) -> ServiceResult<()>;
+    /// * `section_order` - The section_order value of the checklist item to toggle
+    async fn toggle_checklist_item_done(&self, id: &str, section_order: u32) -> ServiceResult<()>;
 
     /// Add a code reference to a task
     async fn add_code_ref(&self, id: &str, code_ref: CodeRef) -> ServiceResult<()>;

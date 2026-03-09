@@ -71,7 +71,7 @@ pub enum SectionType {
     Context,
     CurrentBehavior,
     DesiredBehavior,
-    Step,
+    ChecklistItem,
     TestingCriterion,
     AntiPattern,
     FailureTest,
@@ -85,7 +85,7 @@ impl SectionType {
             SectionType::Context => "context",
             SectionType::CurrentBehavior => "current_behavior",
             SectionType::DesiredBehavior => "desired_behavior",
-            SectionType::Step => "step",
+            SectionType::ChecklistItem => "checklist_item",
             SectionType::TestingCriterion => "testing_criterion",
             SectionType::AntiPattern => "anti_pattern",
             SectionType::FailureTest => "failure_test",
@@ -97,6 +97,45 @@ impl SectionType {
 impl std::fmt::Display for SectionType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.as_str())
+    }
+}
+
+impl std::str::FromStr for SectionType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "goal" => Ok(SectionType::Goal),
+            "context" => Ok(SectionType::Context),
+            "current_behavior" => Ok(SectionType::CurrentBehavior),
+            "desired_behavior" => Ok(SectionType::DesiredBehavior),
+            "checklist_item" => Ok(SectionType::ChecklistItem),
+            "testing_criterion" => Ok(SectionType::TestingCriterion),
+            "anti_pattern" => Ok(SectionType::AntiPattern),
+            "failure_test" => Ok(SectionType::FailureTest),
+            "constraint" => Ok(SectionType::Constraint),
+            _ => Err(format!(
+                "invalid section type '{}'. Valid types: goal, context, current_behavior, \
+                 desired_behavior, checklist_item, testing_criterion, anti_pattern, failure_test, constraint",
+                s
+            )),
+        }
+    }
+}
+
+impl SectionType {
+    /// Whether this section type is single-instance (can only have one per task).
+    ///
+    /// Single-instance types: goal, context, current_behavior, desired_behavior
+    /// Multi-instance types: checklist_item, testing_criterion, anti_pattern, failure_test, constraint
+    pub fn is_single_instance(&self) -> bool {
+        matches!(
+            self,
+            SectionType::Goal
+                | SectionType::Context
+                | SectionType::CurrentBehavior
+                | SectionType::DesiredBehavior
+        )
     }
 }
 
@@ -1669,7 +1708,7 @@ mod tests {
     #[test]
     fn task_with_section_and_code_ref() {
         let section = Section {
-            section_type: SectionType::Step,
+            section_type: SectionType::ChecklistItem,
             content: "Do something".into(),
             order: Some(1),
             done: Some(false),
@@ -1948,7 +1987,7 @@ mod tests {
         assert_eq!(SectionType::Context.as_str(), "context");
         assert_eq!(SectionType::CurrentBehavior.as_str(), "current_behavior");
         assert_eq!(SectionType::DesiredBehavior.as_str(), "desired_behavior");
-        assert_eq!(SectionType::Step.as_str(), "step");
+        assert_eq!(SectionType::ChecklistItem.as_str(), "checklist_item");
         assert_eq!(SectionType::TestingCriterion.as_str(), "testing_criterion");
         assert_eq!(SectionType::AntiPattern.as_str(), "anti_pattern");
         assert_eq!(SectionType::FailureTest.as_str(), "failure_test");
@@ -1961,7 +2000,7 @@ mod tests {
         assert_eq!(SectionType::Context.to_string(), "context");
         assert_eq!(SectionType::CurrentBehavior.to_string(), "current_behavior");
         assert_eq!(SectionType::DesiredBehavior.to_string(), "desired_behavior");
-        assert_eq!(SectionType::Step.to_string(), "step");
+        assert_eq!(SectionType::ChecklistItem.to_string(), "checklist_item");
         assert_eq!(
             SectionType::TestingCriterion.to_string(),
             "testing_criterion"
@@ -2082,9 +2121,9 @@ mod tests {
 
     #[test]
     fn section_with_order() {
-        let section = Section::with_order(SectionType::Step, "Step", 5);
-        assert_eq!(section.section_type, SectionType::Step);
-        assert_eq!(section.content, "Step");
+        let section = Section::with_order(SectionType::ChecklistItem, "Checklist item", 5);
+        assert_eq!(section.section_type, SectionType::ChecklistItem);
+        assert_eq!(section.content, "Checklist item");
         assert_eq!(section.order, Some(5));
         assert!(section.done.is_none());
     }

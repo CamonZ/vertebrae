@@ -197,7 +197,7 @@ impl ShowCommand {
             .filter_map(|s| {
                 let section_type_str = s.section_type?;
                 let content = s.content?;
-                let section_type = parse_section_type(&section_type_str);
+                let section_type = section_type_str.parse::<SectionType>().ok()?;
 
                 // Convert section refs
                 let section_refs: Vec<CodeRef> = s
@@ -420,23 +420,6 @@ fn task_to_summary(task: &vertebrae_core::Task) -> TaskSummary {
     }
 }
 
-/// Parse a section type string into SectionType enum
-fn parse_section_type(s: &str) -> SectionType {
-    match s {
-        "goal" => SectionType::Goal,
-        "context" => SectionType::Context,
-        "current_behavior" => SectionType::CurrentBehavior,
-        "desired_behavior" => SectionType::DesiredBehavior,
-        "step" => SectionType::Step,
-        "testing_criterion" => SectionType::TestingCriterion,
-        "anti_pattern" => SectionType::AntiPattern,
-        "failure_test" => SectionType::FailureTest,
-        "constraint" => SectionType::Constraint,
-        // Default to Goal if unknown (should not happen with schema validation)
-        _ => SectionType::Goal,
-    }
-}
-
 /// Format a TaskDetail for display
 impl std::fmt::Display for TaskDetail {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -545,7 +528,7 @@ impl std::fmt::Display for TaskDetail {
             (SectionType::Context, "Context"),
             (SectionType::CurrentBehavior, "Current Behavior"),
             (SectionType::DesiredBehavior, "Desired Behavior"),
-            (SectionType::Step, "Steps"),
+            (SectionType::ChecklistItem, "Checklist Items"),
             (SectionType::TestingCriterion, "Testing Criteria"),
             (SectionType::AntiPattern, "Anti-Patterns"),
             (SectionType::FailureTest, "Failure Tests"),
@@ -643,13 +626,13 @@ fn format_section_with_heading(
     writeln!(f, "{}", label)?;
     writeln!(f, "{}", "-".repeat(40))?;
 
-    // For steps, show with checkboxes
-    let is_step = section_type == SectionType::Step;
+    // For checklist items, show with checkboxes
+    let is_checklist_item = section_type == SectionType::ChecklistItem;
     // For testing criteria, show inline refs
     let is_testing_criterion = section_type == SectionType::TestingCriterion;
 
     if sorted.len() == 1 {
-        if is_step {
+        if is_checklist_item {
             let checkbox = if sorted[0].done.unwrap_or(false) {
                 "[x]"
             } else {
@@ -667,7 +650,7 @@ fn format_section_with_heading(
         }
     } else {
         for (i, section) in sorted.iter().enumerate() {
-            if is_step {
+            if is_checklist_item {
                 let checkbox = if section.done.unwrap_or(false) {
                     "[x]"
                 } else {
