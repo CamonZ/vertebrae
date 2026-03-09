@@ -76,7 +76,7 @@ impl StepDoneCommand {
         let mut steps: Vec<(usize, &vertebrae_core::Section)> = sections
             .iter()
             .enumerate()
-            .filter(|(_, s)| s.section_type == vertebrae_core::SectionType::Step)
+            .filter(|(_, s)| s.section_type == vertebrae_core::SectionType::ChecklistItem)
             .collect();
         steps.sort_by_key(|(_, s)| s.order.unwrap_or(u32::MAX));
 
@@ -95,7 +95,10 @@ impl StepDoneCommand {
 
         // Use the new service method to mark step as done
         // This replaces the direct database access and handles mutation callback
-        services.tasks().mark_step_done(&id, self.index).await?;
+        services
+            .tasks()
+            .mark_checklist_item_done(&id, self.index)
+            .await?;
 
         Ok(StepDoneResult {
             task_id: id,

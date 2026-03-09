@@ -40,7 +40,7 @@ mod tests {
         for step in ["Step one", "Step two", "Step three"] {
             let cmd = SectionCommand {
                 id: id.clone(),
-                section_type: SectionType::Step,
+                section_type: SectionType::ChecklistItem,
                 content: step.to_string(),
             };
             cmd.execute(&services).await.unwrap();
@@ -51,7 +51,7 @@ mod tests {
         assert_eq!(
             task.sections
                 .iter()
-                .filter(|s| s.section_type == SectionType::Step)
+                .filter(|s| s.section_type == SectionType::ChecklistItem)
                 .count(),
             3
         );
@@ -59,7 +59,7 @@ mod tests {
         // Remove step at index 1
         let cmd = UnsectionCommand {
             id: id.clone(),
-            section_type: SectionType::Step,
+            section_type: SectionType::ChecklistItem,
             index: Some(1),
         };
         let result = cmd.execute(&services).await.unwrap();
@@ -67,14 +67,14 @@ mod tests {
         // Verify result
         assert_eq!(result.id, id);
         assert_eq!(result.removed_count, 1);
-        assert_eq!(result.section_type, SectionType::Step);
+        assert_eq!(result.section_type, SectionType::ChecklistItem);
 
         // Verify the step is removed
         let task = services.tasks().get_task(&id).await.unwrap();
         let steps: Vec<_> = task
             .sections
             .iter()
-            .filter(|s| s.section_type == SectionType::Step)
+            .filter(|s| s.section_type == SectionType::ChecklistItem)
             .collect();
         assert_eq!(steps.len(), 2);
         assert_eq!(steps[0].content, "Step one");
@@ -242,7 +242,7 @@ mod tests {
         // Add one step
         let cmd = SectionCommand {
             id: id.clone(),
-            section_type: SectionType::Step,
+            section_type: SectionType::ChecklistItem,
             content: "Step 1".to_string(),
         };
         cmd.execute(&services).await.unwrap();
@@ -250,7 +250,7 @@ mod tests {
         // Try to remove non-existent step at index 5
         let cmd = UnsectionCommand {
             id: id.clone(),
-            section_type: SectionType::Step,
+            section_type: SectionType::ChecklistItem,
             index: Some(5),
         };
         let result = cmd.execute(&services).await;
@@ -269,7 +269,7 @@ mod tests {
 
         let cmd = UnsectionCommand {
             id: "nonexistent_task".to_string(),
-            section_type: SectionType::Step,
+            section_type: SectionType::ChecklistItem,
             index: Some(0),
         };
         let result = cmd.execute(&services).await;
@@ -295,7 +295,7 @@ mod tests {
         // Try to remove a step (which doesn't exist)
         let cmd = UnsectionCommand {
             id: id.clone(),
-            section_type: SectionType::Step,
+            section_type: SectionType::ChecklistItem,
             index: Some(0),
         };
         let result = cmd.execute(&services).await;
@@ -311,7 +311,7 @@ mod tests {
         // Add a step
         let cmd = SectionCommand {
             id: id.clone(),
-            section_type: SectionType::Step,
+            section_type: SectionType::ChecklistItem,
             content: "Step 1".to_string(),
         };
         cmd.execute(&services).await.unwrap();
@@ -319,7 +319,7 @@ mod tests {
         // Try to remove without index (should fail for multi-instance)
         let cmd = UnsectionCommand {
             id: id.clone(),
-            section_type: SectionType::Step,
+            section_type: SectionType::ChecklistItem,
             index: None,
         };
         let result = cmd.execute(&services).await;
@@ -340,7 +340,7 @@ mod tests {
         // Add a step
         let cmd = SectionCommand {
             id: id.clone(),
-            section_type: SectionType::Step,
+            section_type: SectionType::ChecklistItem,
             content: "Test step".to_string(),
         };
         cmd.execute(&services).await.unwrap();
@@ -353,7 +353,7 @@ mod tests {
         let upper_id = id.to_uppercase();
         let cmd = UnsectionCommand {
             id: upper_id,
-            section_type: SectionType::Step,
+            section_type: SectionType::ChecklistItem,
             index: Some(0),
         };
         let result = cmd.execute(&services).await.unwrap();
@@ -382,7 +382,7 @@ mod tests {
         for step in ["Step 1", "Step 2"] {
             let cmd = SectionCommand {
                 id: id.clone(),
-                section_type: SectionType::Step,
+                section_type: SectionType::ChecklistItem,
                 content: step.to_string(),
             };
             cmd.execute(&services).await.unwrap();
@@ -405,7 +405,7 @@ mod tests {
         // Remove step at index 0
         let cmd = UnsectionCommand {
             id: id.clone(),
-            section_type: SectionType::Step,
+            section_type: SectionType::ChecklistItem,
             index: Some(0),
         };
         cmd.execute(&services).await.unwrap();
@@ -425,7 +425,7 @@ mod tests {
         let steps: Vec<_> = task
             .sections
             .iter()
-            .filter(|s| s.section_type == SectionType::Step)
+            .filter(|s| s.section_type == SectionType::ChecklistItem)
             .collect();
         assert_eq!(steps.len(), 1);
         assert_eq!(steps[0].content, "Step 2");
@@ -450,7 +450,7 @@ mod tests {
         for step in ["A", "B", "C", "D"] {
             let cmd = SectionCommand {
                 id: id.clone(),
-                section_type: SectionType::Step,
+                section_type: SectionType::ChecklistItem,
                 content: step.to_string(),
             };
             cmd.execute(&services).await.unwrap();
@@ -459,7 +459,7 @@ mod tests {
         // Remove step at index 1 (B)
         let cmd = UnsectionCommand {
             id: id.clone(),
-            section_type: SectionType::Step,
+            section_type: SectionType::ChecklistItem,
             index: Some(1),
         };
         cmd.execute(&services).await.unwrap();
@@ -468,7 +468,7 @@ mod tests {
         let steps: Vec<_> = task
             .sections
             .iter()
-            .filter(|s| s.section_type == SectionType::Step)
+            .filter(|s| s.section_type == SectionType::ChecklistItem)
             .collect();
         assert_eq!(steps.len(), 3);
         assert_eq!(steps[0].content, "A");
@@ -478,7 +478,7 @@ mod tests {
         // Remove step at index 0 (A)
         let cmd = UnsectionCommand {
             id: id.clone(),
-            section_type: SectionType::Step,
+            section_type: SectionType::ChecklistItem,
             index: Some(0),
         };
         cmd.execute(&services).await.unwrap();
@@ -487,7 +487,7 @@ mod tests {
         let steps: Vec<_> = task
             .sections
             .iter()
-            .filter(|s| s.section_type == SectionType::Step)
+            .filter(|s| s.section_type == SectionType::ChecklistItem)
             .collect();
         assert_eq!(steps.len(), 2);
         assert_eq!(steps[0].content, "C");
@@ -502,7 +502,7 @@ mod tests {
         // Add step
         let cmd = SectionCommand {
             id: id.clone(),
-            section_type: SectionType::Step,
+            section_type: SectionType::ChecklistItem,
             content: "Test".to_string(),
         };
         cmd.execute(&services).await.unwrap();
@@ -510,7 +510,7 @@ mod tests {
         // Remove it
         let cmd = UnsectionCommand {
             id: id.clone(),
-            section_type: SectionType::Step,
+            section_type: SectionType::ChecklistItem,
             index: Some(0),
         };
         let result = cmd.execute(&services).await.unwrap();

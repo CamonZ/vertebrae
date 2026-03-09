@@ -26,14 +26,14 @@ fn parse_section_type(s: &str) -> Result<SectionType, String> {
         "context" => Ok(SectionType::Context),
         "current_behavior" => Ok(SectionType::CurrentBehavior),
         "desired_behavior" => Ok(SectionType::DesiredBehavior),
-        "step" => Ok(SectionType::Step),
+        "checklist_item" => Ok(SectionType::ChecklistItem),
         "testing_criterion" => Ok(SectionType::TestingCriterion),
         "anti_pattern" => Ok(SectionType::AntiPattern),
         "failure_test" => Ok(SectionType::FailureTest),
         "constraint" => Ok(SectionType::Constraint),
         _ => Err(format!(
             "invalid section type '{}'. Valid types: goal, context, current_behavior, \
-             desired_behavior, step, testing_criterion, anti_pattern, failure_test, constraint",
+             desired_behavior, checklist_item, testing_criterion, anti_pattern, failure_test, constraint",
             s
         )),
     }
@@ -95,7 +95,7 @@ impl std::fmt::Display for SectionsResult {
                 SectionType::DesiredBehavior,
                 "Desired Behavior",
             )?;
-            format_section_group(f, &positive, SectionType::Step, "Steps")?;
+            format_section_group(f, &positive, SectionType::ChecklistItem, "Checklist Items")?;
             format_section_group(
                 f,
                 &positive,
@@ -126,7 +126,7 @@ fn is_positive_space(section_type: &SectionType) -> bool {
             | SectionType::Context
             | SectionType::CurrentBehavior
             | SectionType::DesiredBehavior
-            | SectionType::Step
+            | SectionType::ChecklistItem
             | SectionType::TestingCriterion
     )
 }
@@ -289,7 +289,7 @@ fn type_sort_order(section_type: &SectionType) -> u8 {
         SectionType::Context => 1,
         SectionType::CurrentBehavior => 2,
         SectionType::DesiredBehavior => 3,
-        SectionType::Step => 4,
+        SectionType::ChecklistItem => 4,
         SectionType::TestingCriterion => 5,
         // Negative space order
         SectionType::AntiPattern => 6,

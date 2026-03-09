@@ -209,12 +209,12 @@ fn section_response_to_section(r: &SectionResponse) -> Section {
         "context" => SectionType::Context,
         "current_behavior" => SectionType::CurrentBehavior,
         "desired_behavior" => SectionType::DesiredBehavior,
-        "step" => SectionType::Step,
+        "checklist_item" => SectionType::ChecklistItem,
         "testing_criterion" => SectionType::TestingCriterion,
         "anti_pattern" => SectionType::AntiPattern,
         "failure_test" => SectionType::FailureTest,
         "constraint" => SectionType::Constraint,
-        _ => SectionType::Step, // fallback
+        _ => SectionType::ChecklistItem, // fallback
     };
 
     let done_at = r
@@ -789,19 +789,19 @@ impl TaskService for SacrumTaskService {
         Ok(())
     }
 
-    async fn mark_step_done(&self, id: &str, step_index: usize) -> ServiceResult<()> {
+    async fn mark_checklist_item_done(&self, id: &str, item_index: usize) -> ServiceResult<()> {
         let response = self.fetch_task_response(id).await?;
-        let step_sections: Vec<&SectionResponse> = response
+        let checklist_sections: Vec<&SectionResponse> = response
             .sections
             .iter()
-            .filter(|s| s.section_type == "step")
+            .filter(|s| s.section_type == "checklist_item")
             .collect();
 
-        // step_index is 1-based
-        let section = step_sections.get(step_index - 1).ok_or_else(|| {
+        // item_index is 1-based
+        let section = checklist_sections.get(item_index - 1).ok_or_else(|| {
             ServiceError::validation_failed(format!(
-                "Step section at index {} not found",
-                step_index
+                "Checklist item section at index {} not found",
+                item_index
             ))
         })?;
 
@@ -817,18 +817,18 @@ impl TaskService for SacrumTaskService {
         Ok(())
     }
 
-    async fn toggle_step_done(&self, id: &str, ordinal: u32) -> ServiceResult<()> {
+    async fn toggle_checklist_item_done(&self, id: &str, ordinal: u32) -> ServiceResult<()> {
         let response = self.fetch_task_response(id).await?;
-        let step_sections: Vec<&SectionResponse> = response
+        let checklist_sections: Vec<&SectionResponse> = response
             .sections
             .iter()
-            .filter(|s| s.section_type == "step")
+            .filter(|s| s.section_type == "checklist_item")
             .collect();
 
         // ordinal is 0-based
-        let section = step_sections.get(ordinal as usize).ok_or_else(|| {
+        let section = checklist_sections.get(ordinal as usize).ok_or_else(|| {
             ServiceError::validation_failed(format!(
-                "Step section at ordinal {} not found",
+                "Checklist item section at ordinal {} not found",
                 ordinal
             ))
         })?;
@@ -1031,7 +1031,7 @@ mod tests {
         let mut response = make_task_response("task-sec", "With Sections");
         response.sections = vec![SectionResponse {
             id: "sec-1".to_string(),
-            section_type: "step".to_string(),
+            section_type: "checklist_item".to_string(),
             content: "Do this".to_string(),
             section_order: 1,
             done: Some(true),
@@ -1042,7 +1042,7 @@ mod tests {
 
         let task = service.response_to_task(&response);
         assert_eq!(task.sections.len(), 1);
-        assert_eq!(task.sections[0].section_type, SectionType::Step);
+        assert_eq!(task.sections[0].section_type, SectionType::ChecklistItem);
         assert_eq!(task.sections[0].content, "Do this");
         assert_eq!(task.sections[0].done, Some(true));
     }
@@ -1111,7 +1111,7 @@ mod tests {
         let types = vec![
             ("goal", SectionType::Goal),
             ("context", SectionType::Context),
-            ("step", SectionType::Step),
+            ("checklist_item", SectionType::ChecklistItem),
             ("testing_criterion", SectionType::TestingCriterion),
             ("constraint", SectionType::Constraint),
         ];
@@ -1599,7 +1599,7 @@ mod tests {
 
         let service = create_wiremock_service(&server.uri());
         let section = Section {
-            section_type: SectionType::Step,
+            section_type: SectionType::ChecklistItem,
             content: "Do this first".to_string(),
             order: Some(1),
             done: None,
@@ -1617,7 +1617,7 @@ mod tests {
 
         let mut task_data = gql_task_data("task-1", "Task");
         task_data["sections"] = json!([
-            { "id": "sec-1", "section_type": "step", "content": "old", "section_order": 1 }
+            { "id": "sec-1", "section_type": "checklist_item", "content": "old", "section_order": 1 }
         ]);
 
         // GET_TASK mock
@@ -1642,7 +1642,7 @@ mod tests {
 
         let service = create_wiremock_service(&server.uri());
         let result = service
-            .edit_section_by_ordinal("task-1", SectionType::Step, 1, "updated content")
+            .edit_section_by_ordinal("task-1", SectionType::ChecklistItem, 1, "updated content")
             .await;
 
         assert!(result.is_ok());
@@ -1829,8 +1829,8 @@ mod tests {
 
         let mut task_data = gql_task_data("task-1", "Task");
         task_data["sections"] = json!([
-            { "id": "sec-1", "section_type": "step", "content": "A", "section_order": 0 },
-            { "id": "sec-2", "section_type": "step", "content": "B", "section_order": 1 },
+            { "id": "sec-1", "section_type": "checklist_item", "content": "A", "section_order": 0 },
+            { "id": "sec-2", "section_type": "checklist_item", "content": "B", "section_order": 1 },
             { "id": "sec-3", "section_type": "constraint", "content": "C", "section_order": 0 }
         ]);
 
@@ -1857,20 +1857,20 @@ mod tests {
         let service = create_wiremock_service(&server.uri());
         // Remove only the first step section (index 0)
         let result = service
-            .remove_sections("task-1", SectionType::Step, Some(vec![0]))
+            .remove_sections("task-1", SectionType::ChecklistItem, Some(vec![0]))
             .await;
 
         assert!(result.is_ok());
     }
 
     #[tokio::test]
-    async fn test_mark_step_done_success() {
+    async fn test_mark_checklist_item_done_success() {
         let server = MockServer::start().await;
 
         let mut task_data = gql_task_data("task-1", "Task");
         task_data["sections"] = json!([
-            { "id": "sec-1", "section_type": "step", "content": "First", "section_order": 0 },
-            { "id": "sec-2", "section_type": "step", "content": "Second", "section_order": 1 }
+            { "id": "sec-1", "section_type": "checklist_item", "content": "First", "section_order": 0 },
+            { "id": "sec-2", "section_type": "checklist_item", "content": "Second", "section_order": 1 }
         ]);
 
         // GET_TASK mock
@@ -1894,19 +1894,19 @@ mod tests {
             .await;
 
         let service = create_wiremock_service(&server.uri());
-        // mark_step_done uses 1-based indexing
-        let result = service.mark_step_done("task-1", 1).await;
+        // mark_checklist_item_done uses 1-based indexing
+        let result = service.mark_checklist_item_done("task-1", 1).await;
 
         assert!(result.is_ok());
     }
 
     #[tokio::test]
-    async fn test_toggle_step_done_success() {
+    async fn test_toggle_checklist_item_done_success() {
         let server = MockServer::start().await;
 
         let mut task_data = gql_task_data("task-1", "Task");
         task_data["sections"] = json!([
-            { "id": "sec-1", "section_type": "step", "content": "First", "section_order": 0, "done": false }
+            { "id": "sec-1", "section_type": "checklist_item", "content": "First", "section_order": 0, "done": false }
         ]);
 
         // GET_TASK mock
@@ -1930,7 +1930,7 @@ mod tests {
             .await;
 
         let service = create_wiremock_service(&server.uri());
-        let result = service.toggle_step_done("task-1", 0).await;
+        let result = service.toggle_checklist_item_done("task-1", 0).await;
 
         assert!(result.is_ok());
     }

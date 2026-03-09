@@ -427,7 +427,7 @@ fn parse_section_type(s: &str) -> SectionType {
         "context" => SectionType::Context,
         "current_behavior" => SectionType::CurrentBehavior,
         "desired_behavior" => SectionType::DesiredBehavior,
-        "step" => SectionType::Step,
+        "checklist_item" => SectionType::ChecklistItem,
         "testing_criterion" => SectionType::TestingCriterion,
         "anti_pattern" => SectionType::AntiPattern,
         "failure_test" => SectionType::FailureTest,
@@ -545,7 +545,7 @@ impl std::fmt::Display for TaskDetail {
             (SectionType::Context, "Context"),
             (SectionType::CurrentBehavior, "Current Behavior"),
             (SectionType::DesiredBehavior, "Desired Behavior"),
-            (SectionType::Step, "Steps"),
+            (SectionType::ChecklistItem, "Checklist Items"),
             (SectionType::TestingCriterion, "Testing Criteria"),
             (SectionType::AntiPattern, "Anti-Patterns"),
             (SectionType::FailureTest, "Failure Tests"),
@@ -644,7 +644,7 @@ fn format_section_with_heading(
     writeln!(f, "{}", "-".repeat(40))?;
 
     // For steps, show with checkboxes
-    let is_step = section_type == SectionType::Step;
+    let is_step = section_type == SectionType::ChecklistItem;
     // For testing criteria, show inline refs
     let is_testing_criterion = section_type == SectionType::TestingCriterion;
 

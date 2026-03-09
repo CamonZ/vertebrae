@@ -48,8 +48,20 @@ async fn test_update_edit_section_valid_step() {
     let task_id = create_task(&services, "Task with steps").await;
 
     // Add two step sections
-    add_section(&services, &task_id, SectionType::Step, "First step").await;
-    add_section(&services, &task_id, SectionType::Step, "Second step").await;
+    add_section(
+        &services,
+        &task_id,
+        SectionType::ChecklistItem,
+        "First step",
+    )
+    .await;
+    add_section(
+        &services,
+        &task_id,
+        SectionType::ChecklistItem,
+        "Second step",
+    )
+    .await;
 
     // Edit first step (ordinal 0)
     let cmd = UpdateCommand {
@@ -61,7 +73,7 @@ async fn test_update_edit_section_valid_step() {
         remove_tags: vec![],
         parent: None,
         edit_section: Some(vec![
-            "step".to_string(),
+            "checklist_item".to_string(),
             "0".to_string(),
             "Updated first step".to_string(),
         ]),
@@ -75,7 +87,7 @@ async fn test_update_edit_section_valid_step() {
     let steps: Vec<_> = task
         .sections
         .iter()
-        .filter(|s| s.section_type == SectionType::Step)
+        .filter(|s| s.section_type == SectionType::ChecklistItem)
         .collect();
     assert_eq!(steps.len(), 2);
     assert_eq!(steps[0].content, "Updated first step");
@@ -88,9 +100,9 @@ async fn test_update_edit_section_second_ordinal() {
     let task_id = create_task(&services, "Task with multiple steps").await;
 
     // Add three step sections
-    add_section(&services, &task_id, SectionType::Step, "Step 1").await;
-    add_section(&services, &task_id, SectionType::Step, "Step 2").await;
-    add_section(&services, &task_id, SectionType::Step, "Step 3").await;
+    add_section(&services, &task_id, SectionType::ChecklistItem, "Step 1").await;
+    add_section(&services, &task_id, SectionType::ChecklistItem, "Step 2").await;
+    add_section(&services, &task_id, SectionType::ChecklistItem, "Step 3").await;
 
     // Edit second step (ordinal 1)
     let cmd = UpdateCommand {
@@ -102,7 +114,7 @@ async fn test_update_edit_section_second_ordinal() {
         remove_tags: vec![],
         parent: None,
         edit_section: Some(vec![
-            "step".to_string(),
+            "checklist_item".to_string(),
             "1".to_string(),
             "Modified Step 2".to_string(),
         ]),
@@ -116,7 +128,7 @@ async fn test_update_edit_section_second_ordinal() {
     let steps: Vec<_> = task
         .sections
         .iter()
-        .filter(|s| s.section_type == SectionType::Step)
+        .filter(|s| s.section_type == SectionType::ChecklistItem)
         .collect();
     assert_eq!(steps[0].content, "Step 1");
     assert_eq!(steps[1].content, "Modified Step 2");
@@ -181,7 +193,7 @@ async fn test_update_edit_section_invalid_ordinal() {
         remove_tags: vec![],
         parent: None,
         edit_section: Some(vec![
-            "step".to_string(),
+            "checklist_item".to_string(),
             "999".to_string(),
             "Invalid".to_string(),
         ]),
@@ -207,7 +219,7 @@ async fn test_update_edit_section_invalid_ordinal_format() {
         remove_tags: vec![],
         parent: None,
         edit_section: Some(vec![
-            "step".to_string(),
+            "checklist_item".to_string(),
             "not_a_number".to_string(),
             "Content".to_string(),
         ]),
@@ -262,7 +274,7 @@ async fn test_update_edit_section_wrong_arg_count() {
         add_tags: vec![],
         remove_tags: vec![],
         parent: None,
-        edit_section: Some(vec!["step".to_string(), "0".to_string()]),
+        edit_section: Some(vec!["checklist_item".to_string(), "0".to_string()]),
         remove_section: None,
     };
 
@@ -282,8 +294,20 @@ async fn test_update_remove_section_valid_step() {
     let task_id = create_task(&services, "Task with steps").await;
 
     // Add two step sections
-    add_section(&services, &task_id, SectionType::Step, "First step").await;
-    add_section(&services, &task_id, SectionType::Step, "Second step").await;
+    add_section(
+        &services,
+        &task_id,
+        SectionType::ChecklistItem,
+        "First step",
+    )
+    .await;
+    add_section(
+        &services,
+        &task_id,
+        SectionType::ChecklistItem,
+        "Second step",
+    )
+    .await;
 
     // Remove first step
     let cmd = UpdateCommand {
@@ -295,7 +319,7 @@ async fn test_update_remove_section_valid_step() {
         remove_tags: vec![],
         parent: None,
         edit_section: None,
-        remove_section: Some(vec!["step".to_string(), "0".to_string()]),
+        remove_section: Some(vec!["checklist_item".to_string(), "0".to_string()]),
     };
 
     cmd.execute(&services).await.unwrap();
@@ -305,7 +329,7 @@ async fn test_update_remove_section_valid_step() {
     let steps: Vec<_> = task
         .sections
         .iter()
-        .filter(|s| s.section_type == SectionType::Step)
+        .filter(|s| s.section_type == SectionType::ChecklistItem)
         .collect();
     assert_eq!(steps.len(), 1);
     assert_eq!(steps[0].content, "Second step");
@@ -317,9 +341,9 @@ async fn test_update_remove_section_second_ordinal() {
     let task_id = create_task(&services, "Task with steps").await;
 
     // Add three step sections
-    add_section(&services, &task_id, SectionType::Step, "Step 1").await;
-    add_section(&services, &task_id, SectionType::Step, "Step 2").await;
-    add_section(&services, &task_id, SectionType::Step, "Step 3").await;
+    add_section(&services, &task_id, SectionType::ChecklistItem, "Step 1").await;
+    add_section(&services, &task_id, SectionType::ChecklistItem, "Step 2").await;
+    add_section(&services, &task_id, SectionType::ChecklistItem, "Step 3").await;
 
     // Remove middle step (ordinal 1)
     let cmd = UpdateCommand {
@@ -331,7 +355,7 @@ async fn test_update_remove_section_second_ordinal() {
         remove_tags: vec![],
         parent: None,
         edit_section: None,
-        remove_section: Some(vec!["step".to_string(), "1".to_string()]),
+        remove_section: Some(vec!["checklist_item".to_string(), "1".to_string()]),
     };
 
     cmd.execute(&services).await.unwrap();
@@ -341,7 +365,7 @@ async fn test_update_remove_section_second_ordinal() {
     let steps: Vec<_> = task
         .sections
         .iter()
-        .filter(|s| s.section_type == SectionType::Step)
+        .filter(|s| s.section_type == SectionType::ChecklistItem)
         .collect();
     assert_eq!(steps.len(), 2);
     assert_eq!(steps[0].content, "Step 1");
@@ -392,7 +416,7 @@ async fn test_update_remove_section_invalid_ordinal() {
     let task_id = create_task(&services, "Task").await;
 
     // Add a step so we can try to remove a different ordinal
-    add_section(&services, &task_id, SectionType::Step, "Step 0").await;
+    add_section(&services, &task_id, SectionType::ChecklistItem, "Step 0").await;
 
     // Try to remove non-existent ordinal (1 doesn't exist, only 0)
     let cmd = UpdateCommand {
@@ -404,7 +428,7 @@ async fn test_update_remove_section_invalid_ordinal() {
         remove_tags: vec![],
         parent: None,
         edit_section: None,
-        remove_section: Some(vec!["step".to_string(), "999".to_string()]),
+        remove_section: Some(vec!["checklist_item".to_string(), "999".to_string()]),
     };
 
     // Mock's remove_section_by_ordinal just retains sections that don't match,
@@ -416,7 +440,7 @@ async fn test_update_remove_section_invalid_ordinal() {
     let steps: Vec<_> = task
         .sections
         .iter()
-        .filter(|s| s.section_type == SectionType::Step)
+        .filter(|s| s.section_type == SectionType::ChecklistItem)
         .collect();
     assert_eq!(steps.len(), 1);
 }
@@ -436,7 +460,7 @@ async fn test_update_remove_section_invalid_ordinal_format() {
         remove_tags: vec![],
         parent: None,
         edit_section: None,
-        remove_section: Some(vec!["step".to_string(), "abc".to_string()]),
+        remove_section: Some(vec!["checklist_item".to_string(), "abc".to_string()]),
     };
 
     let result = cmd.execute(&services).await;
@@ -484,7 +508,7 @@ async fn test_update_remove_section_wrong_arg_count() {
         remove_tags: vec![],
         parent: None,
         edit_section: None,
-        remove_section: Some(vec!["step".to_string()]),
+        remove_section: Some(vec!["checklist_item".to_string()]),
     };
 
     let result = cmd.execute(&services).await;
@@ -718,7 +742,13 @@ async fn test_update_edit_and_field_change() {
     let task_id = create_task(&services, "Task with steps").await;
 
     // Add a step
-    add_section(&services, &task_id, SectionType::Step, "Original step").await;
+    add_section(
+        &services,
+        &task_id,
+        SectionType::ChecklistItem,
+        "Original step",
+    )
+    .await;
 
     // Update both step content and title
     let cmd = UpdateCommand {
@@ -730,7 +760,7 @@ async fn test_update_edit_and_field_change() {
         remove_tags: vec![],
         parent: None,
         edit_section: Some(vec![
-            "step".to_string(),
+            "checklist_item".to_string(),
             "0".to_string(),
             "Updated step content".to_string(),
         ]),
@@ -744,7 +774,7 @@ async fn test_update_edit_and_field_change() {
     let steps: Vec<_> = task
         .sections
         .iter()
-        .filter(|s| s.section_type == SectionType::Step)
+        .filter(|s| s.section_type == SectionType::ChecklistItem)
         .collect();
     assert_eq!(steps[0].content, "Updated step content");
 }
@@ -801,7 +831,7 @@ async fn test_update_all_fields_at_once() {
     let task_id = create_task(&services, "Original").await;
 
     // Add a section
-    add_section(&services, &task_id, SectionType::Step, "Old step").await;
+    add_section(&services, &task_id, SectionType::ChecklistItem, "Old step").await;
 
     // Update title, description, priority and section
     // (Note: parent update via UpdateCommand calls set_parent internally,
@@ -815,7 +845,7 @@ async fn test_update_all_fields_at_once() {
         remove_tags: vec![],
         parent: None,
         edit_section: Some(vec![
-            "step".to_string(),
+            "checklist_item".to_string(),
             "0".to_string(),
             "New step content".to_string(),
         ]),
@@ -835,7 +865,7 @@ async fn test_update_all_fields_at_once() {
     let steps: Vec<_> = task
         .sections
         .iter()
-        .filter(|s| s.section_type == SectionType::Step)
+        .filter(|s| s.section_type == SectionType::ChecklistItem)
         .collect();
     assert_eq!(steps[0].content, "New step content");
 }

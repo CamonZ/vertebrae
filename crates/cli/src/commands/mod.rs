@@ -1190,14 +1190,14 @@ mod tests {
             "sections",
             "a1b2c3d4-0000-4000-8000-000000000001",
             "--type",
-            "step",
+            "checklist_item",
         ]);
         assert!(cli.is_ok());
         match cli.unwrap().command {
             Command::Sections(cmd) => {
                 assert_eq!(cmd.id, "a1b2c3d4-0000-4000-8000-000000000001");
                 assert!(cmd.section_type.is_some());
-                assert_eq!(cmd.section_type.unwrap().as_str(), "step");
+                assert_eq!(cmd.section_type.unwrap().as_str(), "checklist_item");
             }
             _ => panic!("Expected Sections command"),
         }

@@ -673,7 +673,7 @@ mod section_tests {
 
         let cmd = SectionCommand {
             id: id.clone(),
-            section_type: SectionType::Step,
+            section_type: SectionType::ChecklistItem,
             content: "First step".to_string(),
         };
         let result = cmd.execute(&services).await.unwrap();
@@ -683,7 +683,7 @@ mod section_tests {
         // Add second step
         let cmd2 = SectionCommand {
             id: id.clone(),
-            section_type: SectionType::Step,
+            section_type: SectionType::ChecklistItem,
             content: "Second step".to_string(),
         };
         let result2 = cmd2.execute(&services).await.unwrap();
@@ -751,7 +751,7 @@ mod section_tests {
 
         let cmd = SectionCommand {
             id: id.clone(),
-            section_type: SectionType::Step,
+            section_type: SectionType::ChecklistItem,
             content: "   ".to_string(),
         };
         let result = cmd.execute(&services).await;
@@ -784,7 +784,7 @@ mod section_tests {
 
         let cmd = SectionCommand {
             id: "nonexistent".to_string(),
-            section_type: SectionType::Step,
+            section_type: SectionType::ChecklistItem,
             content: "Something".to_string(),
         };
         let result = cmd.execute(&services).await;

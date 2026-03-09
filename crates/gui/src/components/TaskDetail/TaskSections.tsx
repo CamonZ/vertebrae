@@ -44,8 +44,8 @@ function formatSectionType(type: SectionType): string {
       return 'Current Behavior';
     case 'desired_behavior':
       return 'Desired Behavior';
-    case 'step':
-      return 'Steps';
+    case 'checklist_item':
+      return 'Checklist Items';
     case 'testing_criterion':
       return 'Testing Criteria';
     case 'anti_pattern':
@@ -72,8 +72,8 @@ function getShortLabel(type: SectionType): string {
       return 'Current';
     case 'desired_behavior':
       return 'Desired';
-    case 'step':
-      return 'Step';
+    case 'checklist_item':
+      return 'Checklist';
     case 'testing_criterion':
       return 'Test';
     case 'anti_pattern':
@@ -94,7 +94,7 @@ function getSectionIcon(type: SectionType): string {
   switch (type) {
     case 'goal':
       return '\u{1F3AF}';
-    case 'step':
+    case 'checklist_item':
       return '\u{1F4CB}';
     case 'testing_criterion':
       return '\u{2705}';
@@ -242,7 +242,7 @@ function SectionGroup({
                 onAdd={handleAddSection}
                 onEdit={handleEditSection}
                 onDelete={handleDeleteSection}
-                variant={type === 'step' ? 'step' : 'bullet'}
+                variant={type === 'checklist_item' ? 'step' : 'bullet'}
                 itemStates={itemStates}
                 onToggleDone={handleToggleDone}
               />
@@ -268,7 +268,7 @@ function SectionGroup({
               onAdd={handleAddSection}
               onEdit={handleEditSection}
               onDelete={handleDeleteSection}
-              variant={type === 'step' ? 'step' : 'bullet'}
+              variant={type === 'checklist_item' ? 'step' : 'bullet'}
               itemStates={itemStates}
               onToggleDone={handleToggleDone}
             />
@@ -285,7 +285,7 @@ const ALL_SECTION_TYPES: SectionType[] = [
   'context',
   'current_behavior',
   'desired_behavior',
-  'step',
+  'checklist_item',
   'constraint',
   'testing_criterion',
   'anti_pattern',
@@ -298,7 +298,7 @@ const TYPE_ORDER: SectionType[] = [
   'context',
   'current_behavior',
   'desired_behavior',
-  'step',
+  'checklist_item',
   'constraint',
   'testing_criterion',
   'anti_pattern',
@@ -410,7 +410,7 @@ export function TaskSections({ sections, taskId, onSectionsChanged }: TaskSectio
                 key={type}
                 type={type}
                 sections={groupedSections.get(type) ?? []}
-                defaultOpen={type === 'goal' || type === 'step'}
+                defaultOpen={type === 'goal' || type === 'checklist_item'}
                 taskId={taskId}
                 isAddingNew={addingToType === type}
                 onAddComplete={handleAddComplete}

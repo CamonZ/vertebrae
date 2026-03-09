@@ -28,7 +28,7 @@ async fn create_task_with_steps(
     for i in 1..=num_steps {
         let section = SectionCommand {
             id: task_id.clone(),
-            section_type: SectionType::Step,
+            section_type: SectionType::ChecklistItem,
             content: format!("Step {}", i),
         };
         section.execute(services).await.unwrap();
@@ -59,7 +59,7 @@ async fn test_step_done_marks_step_as_complete() {
     let steps: Vec<_> = task
         .sections
         .iter()
-        .filter(|s| s.section_type == SectionType::Step)
+        .filter(|s| s.section_type == SectionType::ChecklistItem)
         .collect();
 
     assert_eq!(steps.len(), 3);
@@ -100,7 +100,7 @@ async fn test_step_done_with_multiple_steps() {
     let steps: Vec<_> = task
         .sections
         .iter()
-        .filter(|s| s.section_type == SectionType::Step)
+        .filter(|s| s.section_type == SectionType::ChecklistItem)
         .collect();
 
     assert_eq!(steps.len(), 5);
@@ -229,7 +229,7 @@ async fn test_step_done_with_single_step() {
     let steps: Vec<_> = task
         .sections
         .iter()
-        .filter(|s| s.section_type == SectionType::Step)
+        .filter(|s| s.section_type == SectionType::ChecklistItem)
         .collect();
 
     assert_eq!(steps.len(), 1);
@@ -284,7 +284,7 @@ async fn test_step_done_all_steps_sequentially() {
     let steps: Vec<_> = task
         .sections
         .iter()
-        .filter(|s| s.section_type == SectionType::Step)
+        .filter(|s| s.section_type == SectionType::ChecklistItem)
         .collect();
 
     assert_eq!(steps.len(), 4);
@@ -315,7 +315,7 @@ async fn test_step_done_with_constraint_sections() {
     // Add step
     let step1 = SectionCommand {
         id: task_id.clone(),
-        section_type: SectionType::Step,
+        section_type: SectionType::ChecklistItem,
         content: "Step 1".to_string(),
     };
     step1.execute(&services).await.unwrap();
@@ -331,7 +331,7 @@ async fn test_step_done_with_constraint_sections() {
     // Add another step
     let step2 = SectionCommand {
         id: task_id.clone(),
-        section_type: SectionType::Step,
+        section_type: SectionType::ChecklistItem,
         content: "Step 2".to_string(),
     };
     step2.execute(&services).await.unwrap();
@@ -359,7 +359,7 @@ async fn test_step_done_with_constraint_sections() {
     let steps: Vec<_> = task
         .sections
         .iter()
-        .filter(|s| s.section_type == SectionType::Step)
+        .filter(|s| s.section_type == SectionType::ChecklistItem)
         .collect();
 
     assert_eq!(steps.len(), 2);
@@ -410,7 +410,7 @@ async fn test_step_done_with_parent_child_hierarchy() {
     let parent_steps: Vec<_> = parent_task
         .sections
         .iter()
-        .filter(|s| s.section_type == SectionType::Step)
+        .filter(|s| s.section_type == SectionType::ChecklistItem)
         .collect();
     assert_eq!(parent_steps.len(), 0);
 }
