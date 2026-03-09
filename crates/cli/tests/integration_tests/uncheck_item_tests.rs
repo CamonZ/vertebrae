@@ -362,7 +362,7 @@ async fn test_uncheck_item_with_mixed_section_types() {
 }
 
 #[tokio::test]
-async fn test_uncheck_item_check_then_uncheck_then_check() {
+async fn test_uncheck_item_check_then_uncheck_then_recheck() {
     let services = mock_services();
 
     let task_id = create_task_with_checked_items(&services, "Toggle task", 2, &[1]).await;
@@ -383,8 +383,22 @@ async fn test_uncheck_item_check_then_uncheck_then_check() {
         .collect();
     assert_eq!(items[0].done, Some(false));
 
-    // Re-check it using toggle (uncheck-item toggles, so calling again will check it)
-    let recheck = UncheckItemCommand {
+    // Trying to uncheck again should fail since item is already unchecked
+    let uncheck_again = UncheckItemCommand {
+        id: task_id.clone(),
+        index: 1,
+    };
+    let result = uncheck_again.execute(&services).await;
+    assert!(result.is_err());
+    match result {
+        Err(vertebrae_core::ServiceError::ValidationFailed { message }) => {
+            assert_eq!(message, "Checklist item 1 is not checked");
+        }
+        _ => panic!("Expected ValidationFailed error"),
+    }
+
+    // Re-check it using check-item
+    let recheck = CheckItemCommand {
         id: task_id.clone(),
         index: 1,
     };
@@ -399,4 +413,44 @@ async fn test_uncheck_item_check_then_uncheck_then_check() {
         .collect();
     assert_eq!(items[0].done, Some(true));
     assert!(items[0].done_at.is_some());
+}
+
+#[tokio::test]
+async fn test_uncheck_item_already_unchecked_fails() {
+    let services = mock_services();
+
+    // Create task with items but none checked
+    let task = AddCommand {
+        title: "Task with unchecked items".to_string(),
+        level: None,
+        description: None,
+        priority: None,
+        tags: vec![],
+        parent: None,
+        depends_on: vec![],
+        needs_review: false,
+        workflow: None,
+    };
+    let task_id = task.execute(&services).await.unwrap();
+
+    let section = SectionCommand {
+        id: task_id.clone(),
+        section_type: SectionType::ChecklistItem,
+        content: "Unchecked item".to_string(),
+    };
+    section.execute(&services).await.unwrap();
+
+    // Trying to uncheck an item that was never checked should fail
+    let cmd = UncheckItemCommand {
+        id: task_id,
+        index: 1,
+    };
+    let result = cmd.execute(&services).await;
+    assert!(result.is_err());
+    match result {
+        Err(vertebrae_core::ServiceError::ValidationFailed { message }) => {
+            assert_eq!(message, "Checklist item 1 is not checked");
+        }
+        _ => panic!("Expected ValidationFailed error"),
+    }
 }

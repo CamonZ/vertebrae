@@ -142,7 +142,7 @@ function SectionGroup({
     const section = sections[index];
     if (!section) return;
     try {
-      const result = await commands.markSectionDone(taskId, section.order ?? 0);
+      const result = await commands.toggleChecklistItemDone(taskId, section.order ?? 0);
       if (result.status === 'error') {
         console.error('Failed to toggle done:', result.error.message);
       } else {

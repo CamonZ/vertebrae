@@ -530,21 +530,17 @@ impl TaskService for MockTaskService {
         Ok(())
     }
 
-    async fn mark_checklist_item_done(&self, id: &str, item_index: usize) -> ServiceResult<()> {
+    async fn mark_checklist_item_done(&self, id: &str, section_order: u32) -> ServiceResult<()> {
         let mut s = self.state.lock().unwrap();
         let task = s
             .tasks
             .get_mut(id)
             .ok_or_else(|| ServiceError::task_not_found(id))?;
-        let items: Vec<usize> = task
-            .sections
-            .iter()
-            .enumerate()
-            .filter(|(_, s)| s.section_type == SectionType::ChecklistItem)
-            .map(|(i, _)| i)
-            .collect();
-        if let Some(&idx) = items.get(item_index.saturating_sub(1)) {
-            task.sections[idx].mark_done();
+        for sec in &mut task.sections {
+            if sec.section_type == SectionType::ChecklistItem && sec.order == Some(section_order) {
+                sec.mark_done();
+                return Ok(());
+            }
         }
         Ok(())
     }
@@ -567,7 +563,7 @@ impl TaskService for MockTaskService {
                 return Ok(());
             }
         }
-        Err(ServiceError::validation_failed("Step not found"))
+        Err(ServiceError::validation_failed("Checklist item not found"))
     }
 
     async fn add_code_ref(&self, id: &str, code_ref: CodeRef) -> ServiceResult<()> {

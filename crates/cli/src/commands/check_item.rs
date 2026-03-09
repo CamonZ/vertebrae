@@ -57,52 +57,17 @@ impl CheckItemCommand {
         &self,
         services: &VertebraeServices,
     ) -> Result<CheckItemResult, ServiceError> {
-        // Normalize ID to lowercase for case-insensitive lookup
-        let id = self.id.to_lowercase();
+        let item = super::resolve_checklist_item(services, &self.id, self.index).await?;
 
-        // Validate index is positive
-        if self.index == 0 {
-            return Err(ServiceError::validation_failed(
-                "Checklist item index must be 1 or greater",
-            ));
-        }
-
-        // Fetch task via service to get the checklist item content before updating
-        let task = services.tasks().get_task(&id).await?;
-
-        let sections = task.sections.clone();
-
-        // Filter to only checklist item sections and sort by order
-        let mut items: Vec<(usize, &vertebrae_core::Section)> = sections
-            .iter()
-            .enumerate()
-            .filter(|(_, s)| s.section_type == vertebrae_core::SectionType::ChecklistItem)
-            .collect();
-        items.sort_by_key(|(_, s)| s.order.unwrap_or(u32::MAX));
-
-        // Find the checklist item by index (1-based)
-        let item_idx = self.index - 1;
-        if item_idx >= items.len() {
-            return Err(ServiceError::validation_failed(format!(
-                "Checklist item {} not found. Task has {} checklist item(s).",
-                self.index,
-                items.len()
-            )));
-        }
-
-        let (_, item) = items[item_idx];
-        let item_content = item.content.clone();
-
-        // Use the service method to mark checklist item as done
         services
             .tasks()
-            .mark_checklist_item_done(&id, self.index)
+            .mark_checklist_item_done(&item.id, item.section_order)
             .await?;
 
         Ok(CheckItemResult {
-            task_id: id,
+            task_id: item.id,
             item_index: self.index,
-            item_content,
+            item_content: item.content,
         })
     }
 }

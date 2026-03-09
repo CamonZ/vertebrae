@@ -15,28 +15,8 @@ pub struct SectionsCommand {
     pub id: String,
 
     /// Filter by section type (optional)
-    #[arg(long = "type", value_parser = parse_section_type)]
+    #[arg(long = "type")]
     pub section_type: Option<SectionType>,
-}
-
-/// Parse a section type string into SectionType enum (case-insensitive)
-fn parse_section_type(s: &str) -> Result<SectionType, String> {
-    match s.to_lowercase().as_str() {
-        "goal" => Ok(SectionType::Goal),
-        "context" => Ok(SectionType::Context),
-        "current_behavior" => Ok(SectionType::CurrentBehavior),
-        "desired_behavior" => Ok(SectionType::DesiredBehavior),
-        "checklist_item" => Ok(SectionType::ChecklistItem),
-        "testing_criterion" => Ok(SectionType::TestingCriterion),
-        "anti_pattern" => Ok(SectionType::AntiPattern),
-        "failure_test" => Ok(SectionType::FailureTest),
-        "constraint" => Ok(SectionType::Constraint),
-        _ => Err(format!(
-            "invalid section type '{}'. Valid types: goal, context, current_behavior, \
-             desired_behavior, checklist_item, testing_criterion, anti_pattern, failure_test, constraint",
-            s
-        )),
-    }
 }
 
 /// Result of the sections command execution

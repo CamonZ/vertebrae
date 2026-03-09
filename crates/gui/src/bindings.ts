@@ -265,11 +265,11 @@ async editSection(taskId: string, sectionType: string, ordinal: number, newConte
  * Toggle the completion status of a step section
  * 
  * Marks a step section as done or not done by toggling its done flag.
- * For step sections only (other types will return an error).
+ * For checklist item sections only (other types will return an error).
  */
-async markSectionDone(taskId: string, ordinal: number) : Promise<Result<null, CommandError>> {
+async toggleChecklistItemDone(taskId: string, ordinal: number) : Promise<Result<null, CommandError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("mark_section_done", { taskId, ordinal }) };
+    return { status: "ok", data: await TAURI_INVOKE("toggle_checklist_item_done", { taskId, ordinal }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };

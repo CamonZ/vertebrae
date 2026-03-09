@@ -100,6 +100,45 @@ impl std::fmt::Display for SectionType {
     }
 }
 
+impl std::str::FromStr for SectionType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "goal" => Ok(SectionType::Goal),
+            "context" => Ok(SectionType::Context),
+            "current_behavior" => Ok(SectionType::CurrentBehavior),
+            "desired_behavior" => Ok(SectionType::DesiredBehavior),
+            "checklist_item" => Ok(SectionType::ChecklistItem),
+            "testing_criterion" => Ok(SectionType::TestingCriterion),
+            "anti_pattern" => Ok(SectionType::AntiPattern),
+            "failure_test" => Ok(SectionType::FailureTest),
+            "constraint" => Ok(SectionType::Constraint),
+            _ => Err(format!(
+                "invalid section type '{}'. Valid types: goal, context, current_behavior, \
+                 desired_behavior, checklist_item, testing_criterion, anti_pattern, failure_test, constraint",
+                s
+            )),
+        }
+    }
+}
+
+impl SectionType {
+    /// Whether this section type is single-instance (can only have one per task).
+    ///
+    /// Single-instance types: goal, context, current_behavior, desired_behavior
+    /// Multi-instance types: checklist_item, testing_criterion, anti_pattern, failure_test, constraint
+    pub fn is_single_instance(&self) -> bool {
+        matches!(
+            self,
+            SectionType::Goal
+                | SectionType::Context
+                | SectionType::CurrentBehavior
+                | SectionType::DesiredBehavior
+        )
+    }
+}
+
 /// Execution status for a workflow step
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

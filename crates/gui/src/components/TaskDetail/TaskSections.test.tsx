@@ -14,7 +14,7 @@ vi.mock("../../bindings", async () => {
       addSection: vi.fn(),
       editSection: vi.fn(),
       removeSection: vi.fn(),
-      markSectionDone: vi.fn(),
+      toggleChecklistItemDone: vi.fn(),
     },
   };
 });
@@ -169,12 +169,12 @@ describe("TaskSections", () => {
       expect(pendingButton).toHaveTextContent("2");
     });
 
-    it("calls markSectionDone when checkbox is clicked", async () => {
+    it("calls toggleChecklistItemDone when checkbox is clicked", async () => {
       const sections = [
         createSection({ type: "checklist_item", content: "Step 1", order: 0 }),
       ];
 
-      vi.mocked(bindings.commands.markSectionDone).mockResolvedValue({
+      vi.mocked(bindings.commands.toggleChecklistItemDone).mockResolvedValue({
         status: "ok",
         data: null,
       });
@@ -185,7 +185,7 @@ describe("TaskSections", () => {
       const checkboxButton = screen.getByTitle("Mark as done");
       await userEvent.click(checkboxButton);
 
-      expect(bindings.commands.markSectionDone).toHaveBeenCalledWith("task-123", 0);
+      expect(bindings.commands.toggleChecklistItemDone).toHaveBeenCalledWith("task-123", 0);
     });
   });
 
@@ -324,7 +324,7 @@ describe("TaskSections", () => {
 
       const onSectionsChanged = vi.fn();
 
-      vi.mocked(bindings.commands.markSectionDone).mockResolvedValue({
+      vi.mocked(bindings.commands.toggleChecklistItemDone).mockResolvedValue({
         status: "ok",
         data: null,
       });

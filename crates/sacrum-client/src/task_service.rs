@@ -54,7 +54,7 @@ impl SacrumTaskService {
 
     /// Convert Sacrum TaskResponse to vertebrae_core Task model
     #[cfg(test)]
-    fn response_to_task(&self, response: &TaskResponse) -> Task {
+    fn response_to_task(&self, response: &TaskResponse) -> ServiceResult<Task> {
         self.response_to_task_with_lookups(response, None, None)
     }
 
@@ -64,7 +64,7 @@ impl SacrumTaskService {
         response: &TaskResponse,
         workflow_names: Option<&HashMap<String, String>>,
         step_names: Option<&HashMap<String, String>>,
-    ) -> Task {
+    ) -> ServiceResult<Task> {
         let level = response
             .level
             .as_deref()
@@ -73,11 +73,11 @@ impl SacrumTaskService {
 
         let priority = response.priority.as_deref().and_then(parse_priority);
 
-        let sections = response
+        let sections: Vec<Section> = response
             .sections
             .iter()
             .map(section_response_to_section)
-            .collect();
+            .collect::<ServiceResult<Vec<_>>>()?;
 
         let code_refs = response
             .code_refs
@@ -129,23 +129,23 @@ impl SacrumTaskService {
         };
 
         // Convert nested relationship responses to Task models (1 level deep only)
-        let blockers = response
+        let blockers: Vec<Task> = response
             .blockers
             .iter()
             .map(|r| self.response_to_task_with_lookups(r, workflow_names, step_names))
-            .collect();
-        let dependents = response
+            .collect::<ServiceResult<Vec<_>>>()?;
+        let dependents: Vec<Task> = response
             .dependents
             .iter()
             .map(|r| self.response_to_task_with_lookups(r, workflow_names, step_names))
-            .collect();
-        let children = response
+            .collect::<ServiceResult<Vec<_>>>()?;
+        let children: Vec<Task> = response
             .children
             .iter()
             .map(|r| self.response_to_task_with_lookups(r, workflow_names, step_names))
-            .collect();
+            .collect::<ServiceResult<Vec<_>>>()?;
 
-        Task {
+        Ok(Task {
             id: response.id.clone(),
             title: response.title.clone(),
             description: response.description.clone(),
@@ -172,7 +172,7 @@ impl SacrumTaskService {
             updated_at,
             started_at,
             completed_at,
-        }
+        })
     }
 
     /// Fetch a single task by ID (internal helper, returns TaskResponse)
@@ -203,19 +203,13 @@ fn parse_priority(s: &str) -> Option<Priority> {
     }
 }
 
-fn section_response_to_section(r: &SectionResponse) -> Section {
-    let section_type = match r.section_type.as_str() {
-        "goal" => SectionType::Goal,
-        "context" => SectionType::Context,
-        "current_behavior" => SectionType::CurrentBehavior,
-        "desired_behavior" => SectionType::DesiredBehavior,
-        "checklist_item" => SectionType::ChecklistItem,
-        "testing_criterion" => SectionType::TestingCriterion,
-        "anti_pattern" => SectionType::AntiPattern,
-        "failure_test" => SectionType::FailureTest,
-        "constraint" => SectionType::Constraint,
-        _ => SectionType::ChecklistItem, // fallback
-    };
+fn section_response_to_section(r: &SectionResponse) -> ServiceResult<Section> {
+    let section_type = r.section_type.parse::<SectionType>().map_err(|_| {
+        ServiceError::validation_failed(format!(
+            "Unrecognized section type from API: '{}'",
+            r.section_type
+        ))
+    })?;
 
     let done_at = r
         .done_at
@@ -223,14 +217,14 @@ fn section_response_to_section(r: &SectionResponse) -> Section {
         .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
         .map(|dt| dt.with_timezone(&chrono::Utc));
 
-    Section {
+    Ok(Section {
         section_type,
         content: r.content.clone(),
         order: Some(r.section_order as u32),
         done: r.done,
         done_at,
         refs: Vec::new(),
-    }
+    })
 }
 
 fn code_ref_response_to_code_ref(r: &CodeRefResponse) -> CodeRef {
@@ -306,7 +300,7 @@ impl TaskService for SacrumTaskService {
         // Fetch lookups to resolve workflow_name and step_name
         let (workflow_names, step_names) = self.fetch_lookups().await.unwrap_or_default();
 
-        Ok(self.response_to_task_with_lookups(&response, Some(&workflow_names), Some(&step_names)))
+        self.response_to_task_with_lookups(&response, Some(&workflow_names), Some(&step_names))
     }
 
     async fn resolve_short_id(&self, prefix: &str) -> ServiceResult<String> {
@@ -496,12 +490,12 @@ impl TaskService for SacrumTaskService {
         // Fetch lookups once for all tasks
         let (workflow_names, step_names) = self.fetch_lookups().await.unwrap_or_default();
 
-        Ok(responses
+        responses
             .iter()
             .map(|t| {
                 self.response_to_task_with_lookups(t, Some(&workflow_names), Some(&step_names))
             })
-            .collect())
+            .collect()
     }
 
     async fn list_tasks_with_lookups(
@@ -543,10 +537,10 @@ impl TaskService for SacrumTaskService {
 
         let responses: Vec<TaskResponse> = self.client.execute(&query, variables, "tasks").await?;
 
-        Ok(responses
+        responses
             .iter()
             .map(|t| self.response_to_task_with_lookups(t, workflow_names, step_names))
-            .collect())
+            .collect()
     }
 
     async fn list_ready(&self) -> ServiceResult<Vec<Task>> {
@@ -561,12 +555,12 @@ impl TaskService for SacrumTaskService {
         // Fetch lookups once for all tasks
         let (workflow_names, step_names) = self.fetch_lookups().await.unwrap_or_default();
 
-        Ok(responses
+        responses
             .iter()
             .map(|t| {
                 self.response_to_task_with_lookups(t, Some(&workflow_names), Some(&step_names))
             })
-            .collect())
+            .collect()
     }
 
     async fn set_parent(&self, child_id: &str, parent_id: &str) -> ServiceResult<()> {
@@ -789,21 +783,22 @@ impl TaskService for SacrumTaskService {
         Ok(())
     }
 
-    async fn mark_checklist_item_done(&self, id: &str, item_index: usize) -> ServiceResult<()> {
+    async fn mark_checklist_item_done(&self, id: &str, section_order: u32) -> ServiceResult<()> {
         let response = self.fetch_task_response(id).await?;
-        let checklist_sections: Vec<&SectionResponse> = response
+
+        let section = response
             .sections
             .iter()
-            .filter(|s| s.section_type == "checklist_item")
-            .collect();
-
-        // item_index is 1-based
-        let section = checklist_sections.get(item_index - 1).ok_or_else(|| {
-            ServiceError::validation_failed(format!(
-                "Checklist item section at index {} not found",
-                item_index
-            ))
-        })?;
+            .find(|s| {
+                s.section_type == SectionType::ChecklistItem.as_str()
+                    && s.section_order == section_order as i32
+            })
+            .ok_or_else(|| {
+                ServiceError::validation_failed(format!(
+                    "Checklist item section with section_order {} not found",
+                    section_order
+                ))
+            })?;
 
         let now = chrono::Utc::now().to_rfc3339();
         let variables = json!({
@@ -817,21 +812,22 @@ impl TaskService for SacrumTaskService {
         Ok(())
     }
 
-    async fn toggle_checklist_item_done(&self, id: &str, ordinal: u32) -> ServiceResult<()> {
+    async fn toggle_checklist_item_done(&self, id: &str, section_order: u32) -> ServiceResult<()> {
         let response = self.fetch_task_response(id).await?;
-        let checklist_sections: Vec<&SectionResponse> = response
+
+        let section = response
             .sections
             .iter()
-            .filter(|s| s.section_type == "checklist_item")
-            .collect();
-
-        // ordinal is 0-based
-        let section = checklist_sections.get(ordinal as usize).ok_or_else(|| {
-            ServiceError::validation_failed(format!(
-                "Checklist item section at ordinal {} not found",
-                ordinal
-            ))
-        })?;
+            .find(|s| {
+                s.section_type == SectionType::ChecklistItem.as_str()
+                    && s.section_order == section_order as i32
+            })
+            .ok_or_else(|| {
+                ServiceError::validation_failed(format!(
+                    "Checklist item section with section_order {} not found",
+                    section_order
+                ))
+            })?;
 
         let currently_done = section.done.unwrap_or(false);
         let new_done = !currently_done;
@@ -996,7 +992,7 @@ mod tests {
         response.priority = Some("high".to_string());
         response.tags = vec!["rust".to_string()];
 
-        let task = service.response_to_task(&response);
+        let task = service.response_to_task(&response).unwrap();
 
         assert_eq!(task.id, "task-123");
         assert_eq!(task.title, "Test Task");
@@ -1013,7 +1009,7 @@ mod tests {
 
         let response = make_task_response("task-456", "Minimal Task");
 
-        let task = service.response_to_task(&response);
+        let task = service.response_to_task(&response).unwrap();
 
         assert_eq!(task.id, "task-456");
         assert_eq!(task.title, "Minimal Task");
@@ -1040,7 +1036,7 @@ mod tests {
             updated_at: None,
         }];
 
-        let task = service.response_to_task(&response);
+        let task = service.response_to_task(&response).unwrap();
         assert_eq!(task.sections.len(), 1);
         assert_eq!(task.sections[0].section_type, SectionType::ChecklistItem);
         assert_eq!(task.sections[0].content, "Do this");
@@ -1065,7 +1061,7 @@ mod tests {
             inserted_at: None,
             updated_at: None,
         }];
-        let task = service.response_to_task(&response);
+        let task = service.response_to_task(&response).unwrap();
         assert_eq!(task.code_refs.len(), 1);
         assert_eq!(task.code_refs[0].path, "src/main.rs");
         assert_eq!(task.code_refs[0].line_start, Some(42));
@@ -1082,7 +1078,7 @@ mod tests {
         response.updated_at = Some("2024-01-02T00:00:00Z".to_string());
         response.started_at = Some("2024-01-01T12:00:00Z".to_string());
 
-        let task = service.response_to_task(&response);
+        let task = service.response_to_task(&response).unwrap();
         assert!(task.created_at.is_some());
         assert!(task.updated_at.is_some());
         assert!(task.started_at.is_some());
@@ -1127,7 +1123,7 @@ mod tests {
                 inserted_at: None,
                 updated_at: None,
             };
-            let section = section_response_to_section(&response);
+            let section = section_response_to_section(&response).unwrap();
             assert_eq!(section.section_type, expected_type);
         }
     }
@@ -1155,7 +1151,7 @@ mod tests {
         response.revision_feedback = Some("feedback".to_string());
         response.rejection_reason = Some("reason".to_string());
 
-        let task = service.response_to_task(&response);
+        let task = service.response_to_task(&response).unwrap();
 
         assert_eq!(task.workflow_id.as_deref(), Some("wf-123"));
         assert_eq!(task.current_step_id.as_deref(), Some("step-456"));
@@ -1175,7 +1171,7 @@ mod tests {
             make_task_response("blocker-2", "Blocker 2"),
         ];
 
-        let task = service.response_to_task(&response);
+        let task = service.response_to_task(&response).unwrap();
         assert_eq!(task.dependency_ids, vec!["blocker-1", "blocker-2"]);
     }
 
@@ -1190,7 +1186,7 @@ mod tests {
         let child2 = make_task_response("child-2", "Child 2");
         response.children = vec![child1, child2];
 
-        let task = service.response_to_task(&response);
+        let task = service.response_to_task(&response).unwrap();
         assert_eq!(task.id, "task-parent");
         assert_eq!(task.children.len(), 2);
         assert_eq!(task.children[0].id, "child-1");
@@ -1894,8 +1890,8 @@ mod tests {
             .await;
 
         let service = create_wiremock_service(&server.uri());
-        // mark_checklist_item_done uses 1-based indexing
-        let result = service.mark_checklist_item_done("task-1", 1).await;
+        // mark_checklist_item_done uses section_order for lookup
+        let result = service.mark_checklist_item_done("task-1", 0).await;
 
         assert!(result.is_ok());
     }
