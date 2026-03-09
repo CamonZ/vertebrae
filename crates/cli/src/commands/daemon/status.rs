@@ -1,15 +1,19 @@
 //! `vtb daemon status` — check whether the vtb-daemon launchd service is running.
 
 use clap::Args;
-use std::process::Command;
 
-use super::{DaemonError, LAUNCHD_LABEL, plist_path};
+use super::DaemonError;
+#[cfg(any(target_os = "macos", test))]
+use super::LAUNCHD_LABEL;
+#[cfg(target_os = "macos")]
+use {super::plist_path, std::process::Command};
 
 /// Check the status of the vtb-daemon launchd service.
 #[derive(Debug, Args)]
 pub struct DaemonStatusCommand {}
 
 /// Parsed result from `launchctl list`.
+#[cfg(any(target_os = "macos", test))]
 #[derive(Debug, PartialEq)]
 pub enum ServiceStatus {
     /// The service is loaded and running with the given PID.
@@ -21,6 +25,7 @@ pub enum ServiceStatus {
     NotLoaded,
 }
 
+#[cfg(any(target_os = "macos", test))]
 impl std::fmt::Display for ServiceStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -40,7 +45,7 @@ impl DaemonStatusCommand {
     pub async fn execute(&self) -> Result<String, DaemonError> {
         #[cfg(not(target_os = "macos"))]
         {
-            return Err(DaemonError::UnsupportedPlatform);
+            Err(DaemonError::UnsupportedPlatform)
         }
 
         #[cfg(target_os = "macos")]
@@ -104,6 +109,7 @@ fn query_service_status() -> Result<ServiceStatus, DaemonError> {
 ///
 /// However, `launchctl list <label>` on modern macOS actually outputs
 /// a detailed key-value format. We handle both.
+#[cfg(any(target_os = "macos", test))]
 pub fn parse_launchctl_list_output(output: &str) -> Result<ServiceStatus, DaemonError> {
     let trimmed = output.trim();
 
@@ -126,6 +132,7 @@ pub fn parse_launchctl_list_output(output: &str) -> Result<ServiceStatus, Daemon
 }
 
 /// Try to parse a single tab-separated line: `PID\tStatus\tLabel`
+#[cfg(any(target_os = "macos", test))]
 fn try_parse_tabular(output: &str) -> Option<ServiceStatus> {
     // Look for lines with our label
     for line in output.lines() {
@@ -160,6 +167,7 @@ fn try_parse_tabular(output: &str) -> Option<ServiceStatus> {
 ///     "Program" = "/usr/local/bin/vtb-daemon";
 /// };
 /// ```
+#[cfg(any(target_os = "macos", test))]
 fn try_parse_detailed(output: &str) -> Option<ServiceStatus> {
     if !output.contains("Label") || !output.contains(LAUNCHD_LABEL) {
         return None;

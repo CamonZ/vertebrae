@@ -1,10 +1,10 @@
 //! `vtb daemon uninstall` — unload the launchd service and remove the plist.
 
 use clap::Args;
-use std::fs;
-use std::process::Command;
 
-use super::{DaemonError, plist_path};
+use super::DaemonError;
+#[cfg(target_os = "macos")]
+use {super::plist_path, std::fs, std::process::Command};
 
 /// Uninstall the vtb-daemon launchd service.
 #[derive(Debug, Args)]
@@ -14,7 +14,7 @@ impl DaemonUninstallCommand {
     pub async fn execute(&self) -> Result<String, DaemonError> {
         #[cfg(not(target_os = "macos"))]
         {
-            return Err(DaemonError::UnsupportedPlatform);
+            Err(DaemonError::UnsupportedPlatform)
         }
 
         #[cfg(target_os = "macos")]
