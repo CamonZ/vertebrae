@@ -33,14 +33,14 @@ fn parse_section_type(s: &str) -> Result<SectionType, String> {
         "context" => Ok(SectionType::Context),
         "current_behavior" => Ok(SectionType::CurrentBehavior),
         "desired_behavior" => Ok(SectionType::DesiredBehavior),
-        "step" => Ok(SectionType::Step),
+        "checklist_item" => Ok(SectionType::ChecklistItem),
         "testing_criterion" => Ok(SectionType::TestingCriterion),
         "anti_pattern" => Ok(SectionType::AntiPattern),
         "failure_test" => Ok(SectionType::FailureTest),
         "constraint" => Ok(SectionType::Constraint),
         _ => Err(format!(
             "invalid section type '{}'. Valid types: goal, context, current_behavior, \
-             desired_behavior, step, testing_criterion, anti_pattern, failure_test, constraint",
+             desired_behavior, checklist_item, testing_criterion, anti_pattern, failure_test, constraint",
             s
         )),
     }

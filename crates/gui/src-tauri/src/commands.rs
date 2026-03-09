@@ -1506,7 +1506,7 @@ pub async fn add_section(
         "context" => vertebrae_core::SectionType::Context,
         "current_behavior" => vertebrae_core::SectionType::CurrentBehavior,
         "desired_behavior" => vertebrae_core::SectionType::DesiredBehavior,
-        "step" => vertebrae_core::SectionType::Step,
+        "checklist_item" => vertebrae_core::SectionType::ChecklistItem,
         "testing_criterion" => vertebrae_core::SectionType::TestingCriterion,
         "anti_pattern" => vertebrae_core::SectionType::AntiPattern,
         "failure_test" => vertebrae_core::SectionType::FailureTest,
@@ -1576,7 +1576,7 @@ pub async fn edit_section(
         "context" => vertebrae_core::SectionType::Context,
         "current_behavior" => vertebrae_core::SectionType::CurrentBehavior,
         "desired_behavior" => vertebrae_core::SectionType::DesiredBehavior,
-        "step" => vertebrae_core::SectionType::Step,
+        "checklist_item" => vertebrae_core::SectionType::ChecklistItem,
         "testing_criterion" => vertebrae_core::SectionType::TestingCriterion,
         "anti_pattern" => vertebrae_core::SectionType::AntiPattern,
         "failure_test" => vertebrae_core::SectionType::FailureTest,
@@ -1620,7 +1620,10 @@ pub async fn mark_section_done(
         .ok_or_else(CommandError::no_project_selected)?;
 
     // Use service method to toggle the step done status
-    service.tasks().toggle_step_done(&task_id, ordinal).await?;
+    service
+        .tasks()
+        .toggle_checklist_item_done(&task_id, ordinal)
+        .await?;
 
     log::info!(
         "Successfully toggled step section done status for task: {}",
@@ -1659,7 +1662,7 @@ pub async fn remove_section(
         "context" => vertebrae_core::SectionType::Context,
         "current_behavior" => vertebrae_core::SectionType::CurrentBehavior,
         "desired_behavior" => vertebrae_core::SectionType::DesiredBehavior,
-        "step" => vertebrae_core::SectionType::Step,
+        "checklist_item" => vertebrae_core::SectionType::ChecklistItem,
         "testing_criterion" => vertebrae_core::SectionType::TestingCriterion,
         "anti_pattern" => vertebrae_core::SectionType::AntiPattern,
         "failure_test" => vertebrae_core::SectionType::FailureTest,
@@ -2938,7 +2941,7 @@ mod tests {
         add_section(
             state.clone(),
             id.clone(),
-            "step".to_string(),
+            "checklist_item".to_string(),
             Some("Do the thing".to_string()),
         )
         .await
@@ -2974,7 +2977,7 @@ mod tests {
             "context",
             "current_behavior",
             "desired_behavior",
-            "step",
+            "checklist_item",
             "testing_criterion",
             "anti_pattern",
             "failure_test",
@@ -3006,7 +3009,7 @@ mod tests {
         add_section(
             state.clone(),
             id.clone(),
-            "step".to_string(),
+            "checklist_item".to_string(),
             Some("Original".to_string()),
         )
         .await
@@ -3015,7 +3018,7 @@ mod tests {
         edit_section(
             state.clone(),
             id.clone(),
-            "step".to_string(),
+            "checklist_item".to_string(),
             0,
             "Updated content".to_string(),
         )
@@ -3048,13 +3051,13 @@ mod tests {
         add_section(
             state.clone(),
             id.clone(),
-            "step".to_string(),
+            "checklist_item".to_string(),
             Some("Step 1".to_string()),
         )
         .await
         .unwrap();
 
-        remove_section(state.clone(), id.clone(), "step".to_string(), 0)
+        remove_section(state.clone(), id.clone(), "checklist_item".to_string(), 0)
             .await
             .unwrap();
 
@@ -3084,7 +3087,7 @@ mod tests {
         add_section(
             state.clone(),
             id.clone(),
-            "step".to_string(),
+            "checklist_item".to_string(),
             Some("Do it".to_string()),
         )
         .await

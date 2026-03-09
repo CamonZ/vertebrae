@@ -71,7 +71,7 @@ pub enum SectionType {
     Context,
     CurrentBehavior,
     DesiredBehavior,
-    Step,
+    ChecklistItem,
     TestingCriterion,
     AntiPattern,
     FailureTest,
@@ -85,7 +85,7 @@ impl SectionType {
             SectionType::Context => "context",
             SectionType::CurrentBehavior => "current_behavior",
             SectionType::DesiredBehavior => "desired_behavior",
-            SectionType::Step => "step",
+            SectionType::ChecklistItem => "checklist_item",
             SectionType::TestingCriterion => "testing_criterion",
             SectionType::AntiPattern => "anti_pattern",
             SectionType::FailureTest => "failure_test",
@@ -1669,7 +1669,7 @@ mod tests {
     #[test]
     fn task_with_section_and_code_ref() {
         let section = Section {
-            section_type: SectionType::Step,
+            section_type: SectionType::ChecklistItem,
             content: "Do something".into(),
             order: Some(1),
             done: Some(false),
@@ -1948,7 +1948,7 @@ mod tests {
         assert_eq!(SectionType::Context.as_str(), "context");
         assert_eq!(SectionType::CurrentBehavior.as_str(), "current_behavior");
         assert_eq!(SectionType::DesiredBehavior.as_str(), "desired_behavior");
-        assert_eq!(SectionType::Step.as_str(), "step");
+        assert_eq!(SectionType::ChecklistItem.as_str(), "checklist_item");
         assert_eq!(SectionType::TestingCriterion.as_str(), "testing_criterion");
         assert_eq!(SectionType::AntiPattern.as_str(), "anti_pattern");
         assert_eq!(SectionType::FailureTest.as_str(), "failure_test");
@@ -1961,7 +1961,7 @@ mod tests {
         assert_eq!(SectionType::Context.to_string(), "context");
         assert_eq!(SectionType::CurrentBehavior.to_string(), "current_behavior");
         assert_eq!(SectionType::DesiredBehavior.to_string(), "desired_behavior");
-        assert_eq!(SectionType::Step.to_string(), "step");
+        assert_eq!(SectionType::ChecklistItem.to_string(), "checklist_item");
         assert_eq!(
             SectionType::TestingCriterion.to_string(),
             "testing_criterion"
@@ -2082,9 +2082,9 @@ mod tests {
 
     #[test]
     fn section_with_order() {
-        let section = Section::with_order(SectionType::Step, "Step", 5);
-        assert_eq!(section.section_type, SectionType::Step);
-        assert_eq!(section.content, "Step");
+        let section = Section::with_order(SectionType::ChecklistItem, "Checklist item", 5);
+        assert_eq!(section.section_type, SectionType::ChecklistItem);
+        assert_eq!(section.content, "Checklist item");
         assert_eq!(section.order, Some(5));
         assert!(section.done.is_none());
     }

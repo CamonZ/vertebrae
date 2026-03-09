@@ -835,7 +835,7 @@ export type SectionChangedEvent = { section_id: string; task_id: string; change_
 /**
  * Section type - mirrors db::SectionType
  */
-export type SectionType = "goal" | "context" | "current_behavior" | "desired_behavior" | "step" | "testing_criterion" | "anti_pattern" | "failure_test" | "constraint"
+export type SectionType = "goal" | "context" | "current_behavior" | "desired_behavior" | "checklist_item" | "testing_criterion" | "anti_pattern" | "failure_test" | "constraint"
 /**
  * Session log entry - mirrors db::SessionLog
  */

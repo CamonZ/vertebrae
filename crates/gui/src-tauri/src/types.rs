@@ -67,7 +67,7 @@ pub enum SectionType {
     Context,
     CurrentBehavior,
     DesiredBehavior,
-    Step,
+    ChecklistItem,
     TestingCriterion,
     AntiPattern,
     FailureTest,
@@ -81,7 +81,7 @@ impl From<vertebrae_core::SectionType> for SectionType {
             vertebrae_core::SectionType::Context => SectionType::Context,
             vertebrae_core::SectionType::CurrentBehavior => SectionType::CurrentBehavior,
             vertebrae_core::SectionType::DesiredBehavior => SectionType::DesiredBehavior,
-            vertebrae_core::SectionType::Step => SectionType::Step,
+            vertebrae_core::SectionType::ChecklistItem => SectionType::ChecklistItem,
             vertebrae_core::SectionType::TestingCriterion => SectionType::TestingCriterion,
             vertebrae_core::SectionType::AntiPattern => SectionType::AntiPattern,
             vertebrae_core::SectionType::FailureTest => SectionType::FailureTest,
@@ -749,8 +749,8 @@ mod tests {
             SectionType::DesiredBehavior
         );
         assert_eq!(
-            SectionType::from(vertebrae_core::SectionType::Step),
-            SectionType::Step
+            SectionType::from(vertebrae_core::SectionType::ChecklistItem),
+            SectionType::ChecklistItem
         );
         assert_eq!(
             SectionType::from(vertebrae_core::SectionType::TestingCriterion),
@@ -828,10 +828,13 @@ mod tests {
 
     #[test]
     fn section_from_core_with_order() {
-        let core =
-            vertebrae_core::Section::with_order(vertebrae_core::SectionType::Step, "Do this", 5);
+        let core = vertebrae_core::Section::with_order(
+            vertebrae_core::SectionType::ChecklistItem,
+            "Do this",
+            5,
+        );
         let gui = Section::from(core);
-        assert_eq!(gui.section_type, SectionType::Step);
+        assert_eq!(gui.section_type, SectionType::ChecklistItem);
         assert_eq!(gui.order, Some(5));
     }
 
