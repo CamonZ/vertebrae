@@ -29,6 +29,7 @@ pub mod show;
 pub mod start_step;
 pub mod step;
 pub mod transition_to;
+pub mod uncheck_item;
 pub mod undepend;
 pub mod unref;
 pub mod unsection;
@@ -60,6 +61,7 @@ pub use show::ShowCommand;
 pub use start_step::StartStepCommand;
 pub use step::StepCommand;
 pub use transition_to::TransitionToCommand;
+pub use uncheck_item::UncheckItemCommand;
 pub use undepend::UndependCommand;
 pub use unref::UnrefCommand;
 pub use unsection::UnsectionCommand;
@@ -179,6 +181,9 @@ pub enum Command {
     StartStep(StartStepCommand),
     /// Unarchive a task (set archived=false)
     Unarchive(UnarchiveCommand),
+    /// Uncheck a previously checked checklist item
+    #[command(name = "uncheck-item")]
+    UncheckItem(UncheckItemCommand),
     /// Remove a dependency relationship between tasks
     Undepend(UndependCommand),
     /// Remove code references from a task
@@ -286,6 +291,7 @@ impl Command {
             Command::Show(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::StartStep(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::Unarchive(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
+            Command::UncheckItem(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::Undepend(cmd) => {
                 cmd.id = resolve_id(&cmd.id, services).await?;
                 cmd.blocker_id = resolve_id(&cmd.blocker_id, services).await?;
@@ -431,6 +437,10 @@ impl Command {
             Command::Unarchive(cmd) => {
                 let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(result))
+            }
+            Command::UncheckItem(cmd) => {
+                let result = cmd.execute(services).await?;
+                Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Undepend(cmd) => {
                 // Service handles notification via callback
