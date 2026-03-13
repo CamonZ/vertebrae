@@ -13,7 +13,7 @@ use std::sync::Arc;
 use ractor::{Actor, ActorProcessingErr, ActorRef, SupervisionEvent};
 use vertebrae_core::VertebraeServices;
 use vertebrae_core::execution_service::UpdateExecutionStatusParams;
-use vertebrae_core::models::ExecutionStatus;
+use vertebrae_core::models::{AgentConfig, ExecutionStatus};
 
 use crate::actors::step_executor::{
     StepConfig, StepExecutor, StepExecutorConfig, StepExecutorMessage, StepResult,
@@ -47,7 +47,7 @@ pub enum ProjectMessage {
         execution_id: String,
         task_id: String,
         workflow_id: String,
-        step_config: StepConfig,
+        step_config: Box<StepConfig>,
     },
     /// Cancel a running StepExecutor.
     CancelStep {
@@ -205,6 +205,29 @@ pub fn parse_cancel_step_payload(payload: &serde_json::Value) -> Result<CancelSt
         .map_err(|e| format!("Failed to parse cancel_step payload: {e}"))
 }
 
+/// Build a `StepConfig` from a parsed `RunStepPayload`.
+///
+/// This is a pure function so it can be tested without an actor.
+/// - Parses `agent_config` JSON into an `AgentConfig` struct.
+/// - Carries `agents` and `skills` from the payload into the config.
+/// - Falls back to a default prompt when `goal` is absent.
+pub fn build_step_config_from_payload(payload: &RunStepPayload) -> StepConfig {
+    let prompt = payload
+        .goal
+        .clone()
+        .unwrap_or_else(|| format!("Execute step: {}", payload.step_name));
+
+    let agent_config: AgentConfig =
+        serde_json::from_value(payload.agent_config.clone()).unwrap_or_default();
+
+    StepConfig {
+        prompt,
+        agent_config,
+        agents: payload.agents.clone(),
+        skills: payload.skills.clone(),
+    }
+}
+
 /// Runtime state held by the ProjectSupervisor actor.
 pub struct ProjectState {
     /// The project ID this actor manages.
@@ -269,7 +292,7 @@ impl Actor for ProjectSupervisor {
                     &execution_id,
                     &task_id,
                     &workflow_id,
-                    step_config,
+                    *step_config,
                     state,
                 )
                 .await?;
@@ -362,54 +385,39 @@ impl ProjectSupervisor {
         let action = classify_project_event(&msg);
 
         match action {
-            ProjectAction::RunStep => {
-                match parse_run_step_payload(&msg.payload) {
-                    Ok(payload) => {
-                        tracing::info!(
-                            "[project:{}] run_step received: execution_id={}, task_id={}, step_name={}",
-                            state.project_id,
-                            payload.id,
-                            payload.task_id,
-                            payload.step_name
-                        );
+            ProjectAction::RunStep => match parse_run_step_payload(&msg.payload) {
+                Ok(payload) => {
+                    tracing::info!(
+                        "[project:{}] run_step received: execution_id={}, task_id={}, step_name={}",
+                        state.project_id,
+                        payload.id,
+                        payload.task_id,
+                        payload.step_name
+                    );
 
-                        // Build StepConfig from the payload
-                        let prompt = payload
-                            .goal
-                            .unwrap_or_else(|| format!("Execute step: {}", payload.step_name));
-                        let step_config = StepConfig {
-                            prompt,
-                            // Default model; agent_config could override this in the future
-                            model: payload
-                                .agent_config
-                                .get("model")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("claude-sonnet-4-20250514")
-                                .to_string(),
-                        };
+                    let step_config = build_step_config_from_payload(&payload);
 
-                        if let Err(e) = myself.cast(ProjectMessage::ExecuteStep {
-                            execution_id: payload.id,
-                            task_id: payload.task_id,
-                            workflow_id: payload.workflow_id,
-                            step_config,
-                        }) {
-                            tracing::error!(
-                                "[project:{}] Failed to send ExecuteStep message: {}",
-                                state.project_id,
-                                e
-                            );
-                        }
-                    }
-                    Err(e) => {
+                    if let Err(e) = myself.cast(ProjectMessage::ExecuteStep {
+                        execution_id: payload.id,
+                        task_id: payload.task_id,
+                        workflow_id: payload.workflow_id,
+                        step_config: Box::new(step_config),
+                    }) {
                         tracing::error!(
-                            "[project:{}] Failed to parse run_step payload: {}",
+                            "[project:{}] Failed to send ExecuteStep message: {}",
                             state.project_id,
                             e
                         );
                     }
                 }
-            }
+                Err(e) => {
+                    tracing::error!(
+                        "[project:{}] Failed to parse run_step payload: {}",
+                        state.project_id,
+                        e
+                    );
+                }
+            },
             ProjectAction::CancelStep => match parse_cancel_step_payload(&msg.payload) {
                 Ok(payload) => {
                     tracing::info!(
@@ -881,10 +889,12 @@ mod tests {
             execution_id: "exec-789".to_string(),
             task_id: "task-xyz".to_string(),
             workflow_id: "wf-456".to_string(),
-            step_config: StepConfig {
+            step_config: Box::new(StepConfig {
                 prompt: "Implement feature".to_string(),
-                model: "claude-sonnet-4-20250514".to_string(),
-            },
+                agent_config: AgentConfig::new().with_model("claude-sonnet-4-20250514"),
+                agents: Vec::new(),
+                skills: Vec::new(),
+            }),
         };
         let debug = format!("{:?}", pm);
         assert!(debug.contains("ExecuteStep"));
@@ -1075,5 +1085,137 @@ mod tests {
     fn classify_cancel_step_event() {
         let m = msg("project:proj-1", "cancel_step", serde_json::json!({}));
         assert_eq!(classify_project_event(&m), ProjectAction::CancelStep);
+    }
+
+    // ===== build_step_config_from_payload tests =====
+
+    #[test]
+    fn build_step_config_with_full_agent_config() {
+        let payload = parse_run_step_payload(&serde_json::json!({
+            "id": "exec-1",
+            "task_id": "task-1",
+            "workflow_id": "wf-1",
+            "step_name": "implement",
+            "status": "pending",
+            "goal": "Write the feature code",
+            "agents": ["reviewer.md", "coder.md"],
+            "skills": ["WebSearch", "Read"],
+            "agent_config": {
+                "model": "claude-opus-4-20250514",
+                "max_budget_usd": 10.0,
+                "append_system_prompt": "Be thorough",
+                "disallowed_tools": ["Bash(rm*)"]
+            }
+        }))
+        .unwrap();
+
+        let config = build_step_config_from_payload(&payload);
+
+        assert_eq!(config.prompt, "Write the feature code");
+        assert_eq!(
+            config.agent_config.model,
+            Some("claude-opus-4-20250514".to_string())
+        );
+        assert_eq!(config.agent_config.max_budget_usd, Some(10.0));
+        assert_eq!(
+            config.agent_config.append_system_prompt,
+            Some("Be thorough".to_string())
+        );
+        assert_eq!(
+            config.agent_config.disallowed_tools,
+            vec!["Bash(rm*)".to_string()]
+        );
+        assert_eq!(config.agents, vec!["reviewer.md", "coder.md"]);
+        assert_eq!(config.skills, vec!["WebSearch", "Read"]);
+    }
+
+    #[test]
+    fn build_step_config_with_null_agent_config_uses_defaults() {
+        let payload = parse_run_step_payload(&serde_json::json!({
+            "id": "exec-2",
+            "task_id": "task-2",
+            "workflow_id": "wf-2",
+            "step_name": "review",
+            "status": "pending"
+        }))
+        .unwrap();
+
+        let config = build_step_config_from_payload(&payload);
+
+        assert_eq!(config.prompt, "Execute step: review");
+        assert!(config.agent_config.model.is_none());
+        assert!(config.agents.is_empty());
+        assert!(config.skills.is_empty());
+        assert!(config.agent_config.is_empty());
+    }
+
+    #[test]
+    fn build_step_config_goal_overrides_default_prompt() {
+        let payload = parse_run_step_payload(&serde_json::json!({
+            "id": "exec-3",
+            "task_id": "task-3",
+            "workflow_id": "wf-3",
+            "step_name": "deploy",
+            "status": "pending",
+            "goal": "Deploy to production"
+        }))
+        .unwrap();
+
+        let config = build_step_config_from_payload(&payload);
+        assert_eq!(config.prompt, "Deploy to production");
+    }
+
+    #[test]
+    fn build_step_config_model_only_agent_config() {
+        let payload = parse_run_step_payload(&serde_json::json!({
+            "id": "exec-4",
+            "task_id": "task-4",
+            "workflow_id": "wf-4",
+            "step_name": "implement",
+            "status": "pending",
+            "agent_config": {"model": "haiku"}
+        }))
+        .unwrap();
+
+        let config = build_step_config_from_payload(&payload);
+        assert_eq!(config.agent_config.model, Some("haiku".to_string()));
+        assert!(config.agent_config.max_budget_usd.is_none());
+    }
+
+    #[test]
+    fn build_step_config_with_permission_mode() {
+        let payload = parse_run_step_payload(&serde_json::json!({
+            "id": "exec-5",
+            "task_id": "task-5",
+            "workflow_id": "wf-5",
+            "step_name": "review",
+            "status": "pending",
+            "agent_config": {
+                "permission_mode": "plan"
+            }
+        }))
+        .unwrap();
+
+        let config = build_step_config_from_payload(&payload);
+        assert_eq!(
+            config.agent_config.permission_mode,
+            Some(vertebrae_core::models::PermissionMode::Plan)
+        );
+    }
+
+    #[test]
+    fn build_step_config_empty_object_agent_config() {
+        let payload = parse_run_step_payload(&serde_json::json!({
+            "id": "exec-6",
+            "task_id": "task-6",
+            "workflow_id": "wf-6",
+            "step_name": "test",
+            "status": "pending",
+            "agent_config": {}
+        }))
+        .unwrap();
+
+        let config = build_step_config_from_payload(&payload);
+        assert!(config.agent_config.is_empty());
     }
 }

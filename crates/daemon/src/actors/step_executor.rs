@@ -19,14 +19,22 @@ use ractor::{Actor, ActorProcessingErr, ActorRef};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 use vertebrae_core::execution_service::ExecutionService;
-use vertebrae_core::models::SessionLog;
+use vertebrae_core::models::{AgentConfig, PermissionMode, SessionLog};
 
 use crate::actors::project_supervisor::ProjectMessage;
+
+/// Default model used when agent_config does not specify one.
+pub const DEFAULT_MODEL: &str = "claude-sonnet-4-20250514";
 
 #[derive(Debug, Clone)]
 pub struct StepConfig {
     pub prompt: String,
-    pub model: String,
+    /// Full agent configuration (model, allowed_tools, permission_mode, etc.)
+    pub agent_config: AgentConfig,
+    /// Agent file paths/names to pass as --agent flags.
+    pub agents: Vec<String>,
+    /// Skill names to pass as --allowedTools flags.
+    pub skills: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -80,16 +88,52 @@ impl std::fmt::Debug for StepExecutorMessage {
 
 pub fn build_claude_command(config: &StepExecutorConfig) -> Command {
     let mut cmd = Command::new("claude");
+
+    let step = &config.step_config;
+
+    // Ensure a default model when agent_config doesn't specify one.
+    let mut agent_config = step.agent_config.clone();
+    if agent_config.model.is_none() {
+        agent_config = agent_config.with_model(DEFAULT_MODEL);
+    }
+
+    // Merge skills into allowed_tools (skills activate tool access).
+    if !step.skills.is_empty() {
+        let mut tools = agent_config.allowed_tools.clone();
+        for skill in &step.skills {
+            if !tools.contains(skill) {
+                tools.push(skill.clone());
+            }
+        }
+        agent_config = agent_config.with_allowed_tools(tools);
+    }
+
+    // Daemon runs autonomously -- default to bypass permissions.
+    if agent_config.permission_mode.is_none() {
+        agent_config = agent_config.with_permission_mode(PermissionMode::BypassPermissions);
+    }
+
+    // Apply agent_config args (model, allowed_tools, disallowed_tools, etc.)
+    let cli_args = agent_config.to_cli_args();
+    for arg in &cli_args {
+        cmd.arg(arg);
+    }
+
+    // Add --agent flags for each agent path.
+    for agent in &step.agents {
+        cmd.arg("--agent").arg(agent);
+    }
+
+    // Prompt and output format.
     cmd.arg("-p")
-        .arg(&config.step_config.prompt)
-        .arg("--model")
-        .arg(&config.step_config.model)
+        .arg(&step.prompt)
         .arg("--output-format")
         .arg("stream-json")
         .current_dir(&config.project_root)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .stdin(std::process::Stdio::null());
+
     cmd
 }
 
@@ -194,9 +238,9 @@ impl StepExecutor {
         }
 
         tracing::info!(
-            "Spawning Claude Code CLI for execution {}, model={}, project_root={}",
+            "Spawning Claude Code CLI for execution {}, model={:?}, project_root={}",
             state.execution_id,
-            state.config.step_config.model,
+            state.config.step_config.agent_config.model,
             state.config.project_root.display()
         );
 
@@ -406,14 +450,20 @@ mod tests {
         Arc::new(SacrumExecutionService::new(client))
     }
 
+    fn make_step_config(prompt: &str) -> StepConfig {
+        StepConfig {
+            prompt: prompt.to_string(),
+            agent_config: AgentConfig::default(),
+            agents: Vec::new(),
+            skills: Vec::new(),
+        }
+    }
+
     fn test_config(execution_id: &str) -> StepExecutorConfig {
         StepExecutorConfig {
             execution_id: execution_id.to_string(),
             task_id: "task-test".to_string(),
-            step_config: StepConfig {
-                prompt: "test".to_string(),
-                model: "test-model".to_string(),
-            },
+            step_config: make_step_config("test"),
             project_root: PathBuf::from("/tmp"),
             execution_service: test_execution_service(),
         }
@@ -423,22 +473,32 @@ mod tests {
     fn step_config_debug_format() {
         let config = StepConfig {
             prompt: "Implement feature X".to_string(),
-            model: "claude-sonnet-4-20250514".to_string(),
+            agent_config: AgentConfig::new().with_model("claude-sonnet-4-20250514"),
+            agents: vec!["reviewer.md".to_string()],
+            skills: vec!["search".to_string()],
         };
         let debug = format!("{:?}", config);
         assert!(debug.contains("Implement feature X"));
         assert!(debug.contains("claude-sonnet-4-20250514"));
+        assert!(debug.contains("reviewer.md"));
+        assert!(debug.contains("search"));
     }
 
     #[test]
     fn step_config_clone() {
         let config = StepConfig {
             prompt: "Do something".to_string(),
-            model: "claude-sonnet-4-20250514".to_string(),
+            agent_config: AgentConfig::new().with_model("claude-sonnet-4-20250514"),
+            agents: vec!["agent.md".to_string()],
+            skills: Vec::new(),
         };
         let cloned = config.clone();
         assert_eq!(cloned.prompt, "Do something");
-        assert_eq!(cloned.model, "claude-sonnet-4-20250514");
+        assert_eq!(
+            cloned.agent_config.model,
+            Some("claude-sonnet-4-20250514".to_string())
+        );
+        assert_eq!(cloned.agents, vec!["agent.md"]);
     }
 
     #[test]
@@ -446,10 +506,7 @@ mod tests {
         let config = StepExecutorConfig {
             execution_id: "exec-123".to_string(),
             task_id: "task-abc".to_string(),
-            step_config: StepConfig {
-                prompt: "test prompt".to_string(),
-                model: "test-model".to_string(),
-            },
+            step_config: make_step_config("test prompt"),
             project_root: PathBuf::from("/home/user/project"),
             execution_service: test_execution_service(),
         };
@@ -532,10 +589,7 @@ mod tests {
         let config = StepExecutorConfig {
             execution_id: "exec-1".to_string(),
             task_id: "task-1".to_string(),
-            step_config: StepConfig {
-                prompt: "Write tests".to_string(),
-                model: "claude-sonnet-4-20250514".to_string(),
-            },
+            step_config: make_step_config("Write tests"),
             project_root: PathBuf::from("/home/user/myproject"),
             execution_service: test_execution_service(),
         };
@@ -546,27 +600,214 @@ mod tests {
     }
 
     #[test]
-    fn build_command_has_correct_args() {
+    fn build_command_default_config_includes_model_and_permission_mode() {
         let config = StepExecutorConfig {
             execution_id: "exec-1".to_string(),
             task_id: "task-1".to_string(),
-            step_config: StepConfig {
-                prompt: "Implement feature Y".to_string(),
-                model: "claude-sonnet-4-20250514".to_string(),
-            },
+            step_config: make_step_config("Implement feature Y"),
             project_root: PathBuf::from("/projects/test"),
             execution_service: test_execution_service(),
         };
 
         let cmd = build_claude_command(&config);
-        let args: Vec<&std::ffi::OsStr> = cmd.as_std().get_args().collect();
+        let args: Vec<String> = cmd
+            .as_std()
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
 
-        assert_eq!(args[0], "-p");
-        assert_eq!(args[1], "Implement feature Y");
-        assert_eq!(args[2], "--model");
-        assert_eq!(args[3], "claude-sonnet-4-20250514");
-        assert_eq!(args[4], "--output-format");
-        assert_eq!(args[5], "stream-json");
+        // Default model should be applied when agent_config has no model.
+        assert!(args.contains(&"--model".to_string()));
+        assert!(args.contains(&DEFAULT_MODEL.to_string()));
+
+        // Default permission mode should be bypassPermissions.
+        assert!(args.contains(&"--permissionMode".to_string()));
+        assert!(args.contains(&"bypassPermissions".to_string()));
+
+        // Prompt and output format always present.
+        assert!(args.contains(&"-p".to_string()));
+        assert!(args.contains(&"Implement feature Y".to_string()));
+        assert!(args.contains(&"--output-format".to_string()));
+        assert!(args.contains(&"stream-json".to_string()));
+    }
+
+    #[test]
+    fn build_command_with_explicit_model_uses_it() {
+        let config = StepExecutorConfig {
+            execution_id: "exec-1".to_string(),
+            task_id: "task-1".to_string(),
+            step_config: StepConfig {
+                prompt: "test".to_string(),
+                agent_config: AgentConfig::new().with_model("claude-opus-4-20250514"),
+                agents: Vec::new(),
+                skills: Vec::new(),
+            },
+            project_root: PathBuf::from("/tmp"),
+            execution_service: test_execution_service(),
+        };
+
+        let cmd = build_claude_command(&config);
+        let args: Vec<String> = cmd
+            .as_std()
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+
+        assert!(args.contains(&"claude-opus-4-20250514".to_string()));
+        assert!(!args.contains(&DEFAULT_MODEL.to_string()));
+    }
+
+    #[test]
+    fn build_command_with_agents_produces_agent_flags() {
+        let config = StepExecutorConfig {
+            execution_id: "exec-1".to_string(),
+            task_id: "task-1".to_string(),
+            step_config: StepConfig {
+                prompt: "test".to_string(),
+                agent_config: AgentConfig::default(),
+                agents: vec!["reviewer.md".to_string(), "coder.md".to_string()],
+                skills: Vec::new(),
+            },
+            project_root: PathBuf::from("/tmp"),
+            execution_service: test_execution_service(),
+        };
+
+        let cmd = build_claude_command(&config);
+        let args: Vec<String> = cmd
+            .as_std()
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+
+        let agent_indices: Vec<usize> = args
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| *a == "--agent")
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(agent_indices.len(), 2);
+        assert_eq!(args[agent_indices[0] + 1], "reviewer.md");
+        assert_eq!(args[agent_indices[1] + 1], "coder.md");
+    }
+
+    #[test]
+    fn build_command_with_skills_produces_allowed_tools() {
+        let config = StepExecutorConfig {
+            execution_id: "exec-1".to_string(),
+            task_id: "task-1".to_string(),
+            step_config: StepConfig {
+                prompt: "test".to_string(),
+                agent_config: AgentConfig::default(),
+                agents: Vec::new(),
+                skills: vec!["WebSearch".to_string(), "Read".to_string()],
+            },
+            project_root: PathBuf::from("/tmp"),
+            execution_service: test_execution_service(),
+        };
+
+        let cmd = build_claude_command(&config);
+        let args: Vec<String> = cmd
+            .as_std()
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+
+        assert!(args.contains(&"--allowedTools".to_string()));
+        assert!(args.contains(&"WebSearch".to_string()));
+        assert!(args.contains(&"Read".to_string()));
+    }
+
+    #[test]
+    fn build_command_skills_merge_with_existing_allowed_tools() {
+        let config = StepExecutorConfig {
+            execution_id: "exec-1".to_string(),
+            task_id: "task-1".to_string(),
+            step_config: StepConfig {
+                prompt: "test".to_string(),
+                agent_config: AgentConfig::new()
+                    .with_allowed_tools(vec!["Bash".to_string(), "WebSearch".to_string()]),
+                agents: Vec::new(),
+                skills: vec!["WebSearch".to_string(), "Edit".to_string()],
+            },
+            project_root: PathBuf::from("/tmp"),
+            execution_service: test_execution_service(),
+        };
+
+        let cmd = build_claude_command(&config);
+        let args: Vec<String> = cmd
+            .as_std()
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+
+        // WebSearch should appear once (not duplicated).
+        let ws_count = args.iter().filter(|a| *a == "WebSearch").count();
+        assert_eq!(ws_count, 1, "WebSearch should not be duplicated");
+
+        // Both Bash and Edit should be present.
+        assert!(args.contains(&"Bash".to_string()));
+        assert!(args.contains(&"Edit".to_string()));
+    }
+
+    #[test]
+    fn build_command_with_full_agent_config() {
+        let config = StepExecutorConfig {
+            execution_id: "exec-1".to_string(),
+            task_id: "task-1".to_string(),
+            step_config: StepConfig {
+                prompt: "test".to_string(),
+                agent_config: AgentConfig::new()
+                    .with_model("claude-opus-4-20250514")
+                    .with_max_budget_usd(5.0)
+                    .with_append_system_prompt("Be careful".to_string())
+                    .with_disallowed_tools(vec!["Bash(rm*)".to_string()]),
+                agents: Vec::new(),
+                skills: Vec::new(),
+            },
+            project_root: PathBuf::from("/tmp"),
+            execution_service: test_execution_service(),
+        };
+
+        let cmd = build_claude_command(&config);
+        let args: Vec<String> = cmd
+            .as_std()
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+
+        assert!(args.contains(&"claude-opus-4-20250514".to_string()));
+        assert!(args.contains(&"--maxBudgetUsd".to_string()));
+        assert!(args.contains(&"5".to_string()));
+        assert!(args.contains(&"--appendSystemPrompt".to_string()));
+        assert!(args.contains(&"Be careful".to_string()));
+        assert!(args.contains(&"--disallowedTools".to_string()));
+        assert!(args.contains(&"Bash(rm*)".to_string()));
+    }
+
+    #[test]
+    fn build_command_explicit_permission_mode_not_overridden() {
+        let config = StepExecutorConfig {
+            execution_id: "exec-1".to_string(),
+            task_id: "task-1".to_string(),
+            step_config: StepConfig {
+                prompt: "test".to_string(),
+                agent_config: AgentConfig::new().with_permission_mode(PermissionMode::Plan),
+                agents: Vec::new(),
+                skills: Vec::new(),
+            },
+            project_root: PathBuf::from("/tmp"),
+            execution_service: test_execution_service(),
+        };
+
+        let cmd = build_claude_command(&config);
+        let args: Vec<String> = cmd
+            .as_std()
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+
+        assert!(args.contains(&"plan".to_string()));
+        assert!(!args.contains(&"bypassPermissions".to_string()));
     }
 
     #[test]
@@ -574,10 +815,7 @@ mod tests {
         let config = StepExecutorConfig {
             execution_id: "exec-1".to_string(),
             task_id: "task-1".to_string(),
-            step_config: StepConfig {
-                prompt: "Do work".to_string(),
-                model: "test-model".to_string(),
-            },
+            step_config: make_step_config("Do work"),
             project_root: PathBuf::from("/home/user/code"),
             execution_service: test_execution_service(),
         };
@@ -594,40 +832,23 @@ mod tests {
             task_id: "task-1".to_string(),
             step_config: StepConfig {
                 prompt: "Fix the bug in `src/main.rs` where the \"parser\" fails".to_string(),
-                model: "claude-sonnet-4-20250514".to_string(),
+                agent_config: AgentConfig::default(),
+                agents: Vec::new(),
+                skills: Vec::new(),
             },
             project_root: PathBuf::from("/tmp"),
             execution_service: test_execution_service(),
         };
 
         let cmd = build_claude_command(&config);
-        let args: Vec<&std::ffi::OsStr> = cmd.as_std().get_args().collect();
+        let args: Vec<String> = cmd
+            .as_std()
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
 
-        assert_eq!(
-            args[1],
-            "Fix the bug in `src/main.rs` where the \"parser\" fails"
-        );
-    }
-
-    #[test]
-    fn build_command_has_six_args() {
-        let config = StepExecutorConfig {
-            execution_id: "exec-1".to_string(),
-            task_id: "task-1".to_string(),
-            step_config: StepConfig {
-                prompt: "test".to_string(),
-                model: "m".to_string(),
-            },
-            project_root: PathBuf::from("/tmp"),
-            execution_service: test_execution_service(),
-        };
-
-        let cmd = build_claude_command(&config);
-        let args: Vec<&std::ffi::OsStr> = cmd.as_std().get_args().collect();
-        assert_eq!(
-            args.len(),
-            6,
-            "Expected 6 args: -p <prompt> --model <model> --output-format stream-json"
+        assert!(
+            args.contains(&"Fix the bug in `src/main.rs` where the \"parser\" fails".to_string())
         );
     }
 
