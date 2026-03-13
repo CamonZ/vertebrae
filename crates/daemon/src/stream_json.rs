@@ -39,11 +39,19 @@ struct Usage {
     output_tokens: Option<i64>,
 }
 
-/// Attempt to parse a single stream-json line and extract metrics if it is a result message.
+/// Parsed result from a stream-json result line, containing both metrics and result text.
+#[derive(Debug)]
+pub struct ParsedStreamResult {
+    pub metrics: Option<StreamMetrics>,
+    pub result_text: Option<String>,
+}
+
+/// Attempt to parse a single stream-json line as a result message.
 ///
-/// Returns `Some(StreamMetrics)` if the line is a valid result message with usage data,
+/// Returns `Some(ParsedStreamResult)` if the line is a valid result message,
 /// or `None` if it is a non-result message or unparseable.
-pub fn parse_stream_json_line(line: &str) -> Option<StreamMetrics> {
+/// Extracts both metrics and result text in a single deserialization pass.
+pub fn parse_stream_json_line(line: &str) -> Option<ParsedStreamResult> {
     // Fast-path: skip full JSON deserialization for non-result lines.
     if !line.contains("\"type\":\"result\"") {
         return None;
@@ -55,31 +63,24 @@ pub fn parse_stream_json_line(line: &str) -> Option<StreamMetrics> {
         return None;
     }
 
-    let usage = parsed.usage?;
-    let input_tokens = usage.input_tokens.unwrap_or(0);
-    let output_tokens = usage.output_tokens.unwrap_or(0);
-    let cost_usd = parsed.cost_usd.unwrap_or(0.0);
-    let duration_ms = parsed.duration_ms.unwrap_or(0.0) as i64;
+    let metrics = parsed.usage.map(|usage| {
+        let input_tokens = usage.input_tokens.unwrap_or(0);
+        let output_tokens = usage.output_tokens.unwrap_or(0);
+        let cost_usd = parsed.cost_usd.unwrap_or(0.0);
+        let duration_ms = parsed.duration_ms.unwrap_or(0.0) as i64;
 
-    Some(StreamMetrics {
-        input_tokens,
-        output_tokens,
-        cost_usd,
-        duration_ms,
+        StreamMetrics {
+            input_tokens,
+            output_tokens,
+            cost_usd,
+            duration_ms,
+        }
+    });
+
+    Some(ParsedStreamResult {
+        metrics,
+        result_text: parsed.result,
     })
-}
-
-/// Extract the result text from a stream-json result line.
-///
-/// Returns the `result` field if the line is a valid result message, or `None` otherwise.
-pub fn parse_result_text(line: &str) -> Option<String> {
-    let parsed: StreamLine = serde_json::from_str(line).ok()?;
-
-    if parsed.msg_type != "result" {
-        return None;
-    }
-
-    parsed.result
 }
 
 #[cfg(test)]
@@ -90,11 +91,13 @@ mod tests {
     fn parse_valid_result_line_extracts_all_metrics() {
         let line = r#"{"type":"result","subtype":"success","cost_usd":0.003,"duration_ms":5432.1,"duration_api_ms":4500.0,"is_error":false,"num_turns":3,"result":"Done","session_id":"abc123","total_cost_usd":0.003,"usage":{"input_tokens":1500,"output_tokens":800}}"#;
 
-        let metrics = parse_stream_json_line(line).expect("should parse result line");
+        let parsed = parse_stream_json_line(line).expect("should parse result line");
+        let metrics = parsed.metrics.expect("should have metrics");
         assert_eq!(metrics.input_tokens, 1500);
         assert_eq!(metrics.output_tokens, 800);
         assert!((metrics.cost_usd - 0.003).abs() < f64::EPSILON);
         assert_eq!(metrics.duration_ms, 5432);
+        assert_eq!(parsed.result_text.as_deref(), Some("Done"));
     }
 
     #[test]
@@ -126,17 +129,19 @@ mod tests {
     }
 
     #[test]
-    fn parse_result_without_usage_returns_none() {
+    fn parse_result_without_usage_has_no_metrics() {
         let line = r#"{"type":"result","cost_usd":0.001,"duration_ms":100.0}"#;
 
-        assert!(parse_stream_json_line(line).is_none());
+        let parsed = parse_stream_json_line(line).expect("should parse result line");
+        assert!(parsed.metrics.is_none());
     }
 
     #[test]
     fn parse_result_with_partial_usage_defaults_missing_to_zero() {
         let line = r#"{"type":"result","cost_usd":0.002,"duration_ms":200.0,"usage":{"input_tokens":500}}"#;
 
-        let metrics = parse_stream_json_line(line).expect("should parse with partial usage");
+        let parsed = parse_stream_json_line(line).expect("should parse with partial usage");
+        let metrics = parsed.metrics.expect("should have metrics");
         assert_eq!(metrics.input_tokens, 500);
         assert_eq!(metrics.output_tokens, 0);
         assert!((metrics.cost_usd - 0.002).abs() < f64::EPSILON);
@@ -147,7 +152,8 @@ mod tests {
     fn parse_result_with_empty_usage_defaults_all_to_zero() {
         let line = r#"{"type":"result","usage":{}}"#;
 
-        let metrics = parse_stream_json_line(line).expect("should parse with empty usage");
+        let parsed = parse_stream_json_line(line).expect("should parse with empty usage");
+        let metrics = parsed.metrics.expect("should have metrics");
         assert_eq!(metrics.input_tokens, 0);
         assert_eq!(metrics.output_tokens, 0);
         assert!((metrics.cost_usd - 0.0).abs() < f64::EPSILON);
@@ -158,7 +164,8 @@ mod tests {
     fn parse_result_with_zero_values() {
         let line = r#"{"type":"result","cost_usd":0.0,"duration_ms":0.0,"usage":{"input_tokens":0,"output_tokens":0}}"#;
 
-        let metrics = parse_stream_json_line(line).expect("should parse zero-valued result");
+        let parsed = parse_stream_json_line(line).expect("should parse zero-valued result");
+        let metrics = parsed.metrics.expect("should have metrics");
         assert_eq!(metrics.input_tokens, 0);
         assert_eq!(metrics.output_tokens, 0);
         assert!((metrics.cost_usd - 0.0).abs() < f64::EPSILON);
@@ -169,7 +176,8 @@ mod tests {
     fn parse_result_with_large_token_counts() {
         let line = r#"{"type":"result","cost_usd":1.5,"duration_ms":120000.0,"usage":{"input_tokens":200000,"output_tokens":100000}}"#;
 
-        let metrics = parse_stream_json_line(line).expect("should parse large values");
+        let parsed = parse_stream_json_line(line).expect("should parse large values");
+        let metrics = parsed.metrics.expect("should have metrics");
         assert_eq!(metrics.input_tokens, 200_000);
         assert_eq!(metrics.output_tokens, 100_000);
         assert!((metrics.cost_usd - 1.5).abs() < f64::EPSILON);
@@ -180,15 +188,18 @@ mod tests {
     fn parse_result_text_extracts_result_field() {
         let line = r#"{"type":"result","result":"Task completed successfully","cost_usd":0.01,"duration_ms":1000.0,"usage":{"input_tokens":100,"output_tokens":50}}"#;
 
-        let text = parse_result_text(line).expect("should extract result text");
-        assert_eq!(text, "Task completed successfully");
+        let parsed = parse_stream_json_line(line).expect("should parse result line");
+        assert_eq!(
+            parsed.result_text.as_deref(),
+            Some("Task completed successfully")
+        );
     }
 
     #[test]
     fn parse_result_text_returns_none_for_non_result() {
         let line = r#"{"type":"assistant","message":{}}"#;
 
-        assert!(parse_result_text(line).is_none());
+        assert!(parse_stream_json_line(line).is_none());
     }
 
     #[test]
@@ -196,7 +207,8 @@ mod tests {
         let line =
             r#"{"type":"result","cost_usd":0.01,"usage":{"input_tokens":100,"output_tokens":50}}"#;
 
-        assert!(parse_result_text(line).is_none());
+        let parsed = parse_stream_json_line(line).expect("should parse result line");
+        assert!(parsed.result_text.is_none());
     }
 
     #[test]
@@ -221,7 +233,8 @@ mod tests {
     fn parse_json_with_extra_unknown_fields_still_works() {
         let line = r#"{"type":"result","subtype":"success","totally_new_field":"whatever","cost_usd":0.005,"duration_ms":3000.0,"usage":{"input_tokens":2000,"output_tokens":1000,"cache_creation_input_tokens":100}}"#;
 
-        let metrics = parse_stream_json_line(line).expect("should parse despite extra fields");
+        let parsed = parse_stream_json_line(line).expect("should parse despite extra fields");
+        let metrics = parsed.metrics.expect("should have metrics");
         assert_eq!(metrics.input_tokens, 2000);
         assert_eq!(metrics.output_tokens, 1000);
         assert!((metrics.cost_usd - 0.005).abs() < f64::EPSILON);
