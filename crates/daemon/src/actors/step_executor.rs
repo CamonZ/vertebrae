@@ -42,6 +42,7 @@ pub enum StepResult {
     Completed {
         exit_code: i32,
         metrics: Option<crate::stream_json::StreamMetrics>,
+        output: Option<String>,
     },
     Failed {
         exit_code: Option<i32>,
@@ -144,9 +145,9 @@ pub struct StepExecutorState {
     parent: ActorRef<ProjectMessage>,
     child_process: Option<Child>,
     stream_handle: Option<tokio::task::JoinHandle<()>>,
-    /// Shared slot for metrics extracted from the stream-json result line.
+    /// Shared slot for the parsed stream-json result (metrics + result text).
     /// Written by the streaming task, read by the actor on process exit.
-    stream_metrics: std::sync::Arc<std::sync::Mutex<Option<crate::stream_json::StreamMetrics>>>,
+    stream_result: std::sync::Arc<std::sync::Mutex<Option<crate::stream_json::ParsedStreamResult>>>,
 }
 
 pub struct StepExecutor;
@@ -176,7 +177,7 @@ impl Actor for StepExecutor {
             parent,
             child_process: None,
             stream_handle: None,
-            stream_metrics: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            stream_result: std::sync::Arc::new(std::sync::Mutex::new(None)),
         })
     }
 
@@ -258,20 +259,20 @@ impl StepExecutor {
                 let actor_ref = myself;
                 let execution_id = state.execution_id.clone();
                 let execution_service = Arc::clone(&state.config.execution_service);
-                let metrics_slot = Arc::clone(&state.stream_metrics);
+                let result_slot = Arc::clone(&state.stream_result);
 
                 let stream_handle = tokio::spawn(async move {
                     // Stream stdout line by line, posting each as a SessionLog.
-                    // Parse each line for stream-json metrics; retain the last result found.
+                    // Parse each line for stream-json result; retain the last one found.
                     if let Some(stdout) = stdout {
                         let reader = BufReader::new(stdout);
                         let mut lines = reader.lines();
 
                         while let Ok(Some(line)) = lines.next_line().await {
-                            if let Some(m) = crate::stream_json::parse_stream_json_line(&line)
-                                && let Ok(mut slot) = metrics_slot.lock()
+                            if let Some(parsed) = crate::stream_json::parse_stream_json_line(&line)
+                                && let Ok(mut slot) = result_slot.lock()
                             {
-                                *slot = Some(m);
+                                *slot = Some(parsed);
                             }
 
                             let log = SessionLog::new(execution_id.clone(), line);
@@ -366,11 +367,14 @@ impl StepExecutor {
     ) {
         // The streaming task has finished reading stdout/stderr.
         // Now call child.wait() to get the real exit status.
-        let metrics = state
-            .stream_metrics
+        let stream_result = state
+            .stream_result
             .lock()
             .ok()
             .and_then(|mut guard| guard.take());
+
+        let metrics = stream_result.as_ref().and_then(|r| r.metrics.clone());
+        let result_text = stream_result.and_then(|r| r.result_text);
 
         let step_result = if let Some(ref mut child) = state.child_process {
             match child.wait().await {
@@ -378,14 +382,16 @@ impl StepExecutor {
                     let code = status.code().unwrap_or(-1);
                     if status.success() {
                         tracing::info!(
-                            "Process completed successfully for execution {} (exit code {}, metrics={:?})",
+                            "Process completed successfully for execution {} (exit code {}, metrics={:?}, has_output={})",
                             state.execution_id,
                             code,
                             metrics,
+                            result_text.is_some(),
                         );
                         StepResult::Completed {
                             exit_code: code,
                             metrics,
+                            output: result_text,
                         }
                     } else {
                         tracing::warn!(
@@ -523,10 +529,77 @@ mod tests {
         let result = StepResult::Completed {
             exit_code: 0,
             metrics: None,
+            output: None,
         };
         let debug = format!("{:?}", result);
         assert!(debug.contains("Completed"));
         assert!(debug.contains("0"));
+    }
+
+    #[test]
+    fn step_result_completed_with_output_debug() {
+        let result = StepResult::Completed {
+            exit_code: 0,
+            metrics: None,
+            output: Some("Implementation finished".to_string()),
+        };
+        let debug = format!("{:?}", result);
+        assert!(debug.contains("Completed"));
+        assert!(debug.contains("Implementation finished"));
+    }
+
+    #[test]
+    fn step_result_completed_without_output() {
+        let result = StepResult::Completed {
+            exit_code: 0,
+            metrics: Some(crate::stream_json::StreamMetrics {
+                input_tokens: 100,
+                output_tokens: 50,
+                cost_usd: 0.01,
+                duration_ms: 500,
+            }),
+            output: None,
+        };
+        match result {
+            StepResult::Completed {
+                exit_code,
+                metrics,
+                output,
+            } => {
+                assert_eq!(exit_code, 0);
+                assert!(metrics.is_some());
+                assert!(output.is_none());
+            }
+            _ => panic!("Expected Completed"),
+        }
+    }
+
+    #[test]
+    fn step_result_completed_with_metrics_and_output() {
+        let result = StepResult::Completed {
+            exit_code: 0,
+            metrics: Some(crate::stream_json::StreamMetrics {
+                input_tokens: 1500,
+                output_tokens: 800,
+                cost_usd: 0.003,
+                duration_ms: 5432,
+            }),
+            output: Some("All tests pass".to_string()),
+        };
+        match result {
+            StepResult::Completed {
+                exit_code,
+                metrics,
+                output,
+            } => {
+                assert_eq!(exit_code, 0);
+                let m = metrics.expect("metrics should be present");
+                assert_eq!(m.input_tokens, 1500);
+                assert_eq!(m.output_tokens, 800);
+                assert_eq!(output.as_deref(), Some("All tests pass"));
+            }
+            _ => panic!("Expected Completed"),
+        }
     }
 
     #[test]
@@ -556,10 +629,16 @@ mod tests {
         let result = StepResult::Completed {
             exit_code: 42,
             metrics: None,
+            output: Some("test output".to_string()),
         };
         let cloned = result.clone();
         match cloned {
-            StepResult::Completed { exit_code, .. } => assert_eq!(exit_code, 42),
+            StepResult::Completed {
+                exit_code, output, ..
+            } => {
+                assert_eq!(exit_code, 42);
+                assert_eq!(output.as_deref(), Some("test output"));
+            }
             _ => panic!("Expected Completed"),
         }
     }
