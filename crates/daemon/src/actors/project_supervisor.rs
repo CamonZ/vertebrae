@@ -620,17 +620,22 @@ impl ProjectSupervisor {
         state.running_executors.remove(execution_id);
 
         match result {
-            StepResult::Completed { exit_code, metrics } => {
+            StepResult::Completed {
+                exit_code,
+                metrics,
+                output,
+            } => {
                 tracing::info!(
-                    "[project:{}] Step completed: execution_id={}, task_id={}, exit_code={}, metrics={:?}",
+                    "[project:{}] Step completed: execution_id={}, task_id={}, exit_code={}, metrics={:?}, has_output={}",
                     state.project_id,
                     execution_id,
                     task_id,
                     exit_code,
                     metrics,
+                    output.is_some(),
                 );
 
-                // Build update params, populating metrics when available.
+                // Build update params, populating metrics and output when available.
                 let mut params = UpdateExecutionStatusParams::new(ExecutionStatus::Completed);
 
                 if let Some(m) = metrics {
@@ -639,6 +644,10 @@ impl ProjectSupervisor {
                         .with_output_tokens(m.output_tokens)
                         .with_cost(m.cost_usd)
                         .with_duration_ms(m.duration_ms);
+                }
+
+                if let Some(text) = output {
+                    params = params.with_output(text);
                 }
 
                 // Report completed status to Sacrum via updateStepExecution.
@@ -924,6 +933,7 @@ mod tests {
             result: StepResult::Completed {
                 exit_code: 0,
                 metrics: None,
+                output: None,
             },
         };
         let debug = format!("{:?}", pm);
@@ -931,6 +941,22 @@ mod tests {
         assert!(debug.contains("exec-123"));
         assert!(debug.contains("task-abc"));
         assert!(debug.contains("Completed"));
+    }
+
+    #[test]
+    fn project_message_debug_step_finished_completed_with_output() {
+        let pm = ProjectMessage::StepFinished {
+            execution_id: "exec-out-1".to_string(),
+            task_id: "task-out-1".to_string(),
+            result: StepResult::Completed {
+                exit_code: 0,
+                metrics: None,
+                output: Some("Task completed successfully".to_string()),
+            },
+        };
+        let debug = format!("{:?}", pm);
+        assert!(debug.contains("Completed"));
+        assert!(debug.contains("Task completed successfully"));
     }
 
     #[test]
