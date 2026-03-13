@@ -166,6 +166,15 @@ pub struct RunStepPayload {
     /// The goal/prompt for this step execution.
     #[serde(default)]
     pub goal: Option<String>,
+    /// The step's prompt field (takes priority over goal when present).
+    #[serde(default)]
+    pub prompt: Option<String>,
+    /// Evaluation prompt for validating step output.
+    #[serde(default)]
+    pub eval_prompt: Option<String>,
+    /// Execution context containing task metadata (title, description, sections, code refs).
+    #[serde(default)]
+    pub context: Option<serde_json::Value>,
     /// Agent names to use for this step.
     #[serde(default)]
     pub agents: Vec<String>,
@@ -178,6 +187,9 @@ pub struct RunStepPayload {
     /// Whether this is the final step in the workflow.
     #[serde(default)]
     pub is_final: bool,
+    /// Step IDs this step can transition to.
+    #[serde(default)]
+    pub transitions_to: Vec<String>,
 }
 
 /// Parsed payload for a `cancel_step` channel event from Sacrum.
@@ -212,10 +224,7 @@ pub fn parse_cancel_step_payload(payload: &serde_json::Value) -> Result<CancelSt
 /// - Carries `agents` and `skills` from the payload into the config.
 /// - Falls back to a default prompt when `goal` is absent.
 pub fn build_step_config_from_payload(payload: &RunStepPayload) -> StepConfig {
-    let prompt = payload
-        .goal
-        .clone()
-        .unwrap_or_else(|| format!("Execute step: {}", payload.step_name));
+    let prompt = crate::prompt_composer::compose_prompt(payload);
 
     let agent_config: AgentConfig =
         serde_json::from_value(payload.agent_config.clone()).unwrap_or_default();
@@ -1137,7 +1146,8 @@ mod tests {
 
         let config = build_step_config_from_payload(&payload);
 
-        assert_eq!(config.prompt, "Write the feature code");
+        assert!(config.prompt.starts_with("Write the feature code"));
+        assert!(config.prompt.contains("## Workflow Context"));
         assert_eq!(
             config.agent_config.model,
             Some("claude-opus-4-20250514".to_string())
@@ -1168,7 +1178,8 @@ mod tests {
 
         let config = build_step_config_from_payload(&payload);
 
-        assert_eq!(config.prompt, "Execute step: review");
+        assert!(config.prompt.starts_with("Execute step: review"));
+        assert!(config.prompt.contains("## Workflow Context"));
         assert!(config.agent_config.model.is_none());
         assert!(config.agents.is_empty());
         assert!(config.skills.is_empty());
@@ -1188,7 +1199,8 @@ mod tests {
         .unwrap();
 
         let config = build_step_config_from_payload(&payload);
-        assert_eq!(config.prompt, "Deploy to production");
+        assert!(config.prompt.starts_with("Deploy to production"));
+        assert!(config.prompt.contains("## Workflow Context"));
     }
 
     #[test]
