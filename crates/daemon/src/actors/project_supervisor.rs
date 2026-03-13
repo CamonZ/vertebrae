@@ -612,23 +612,32 @@ impl ProjectSupervisor {
         state.running_executors.remove(execution_id);
 
         match result {
-            StepResult::Completed { exit_code } => {
+            StepResult::Completed { exit_code, metrics } => {
                 tracing::info!(
-                    "[project:{}] Step completed: execution_id={}, task_id={}, exit_code={}",
+                    "[project:{}] Step completed: execution_id={}, task_id={}, exit_code={}, metrics={:?}",
                     state.project_id,
                     execution_id,
                     task_id,
-                    exit_code
+                    exit_code,
+                    metrics,
                 );
+
+                // Build update params, populating metrics when available.
+                let mut params = UpdateExecutionStatusParams::new(ExecutionStatus::Completed);
+
+                if let Some(m) = metrics {
+                    params = params
+                        .with_input_tokens(m.input_tokens)
+                        .with_output_tokens(m.output_tokens)
+                        .with_cost(m.cost_usd)
+                        .with_duration_ms(m.duration_ms);
+                }
 
                 // Report completed status to Sacrum via updateStepExecution.
                 if let Err(e) = state
                     .services
                     .executions()
-                    .update_execution_status(
-                        execution_id,
-                        UpdateExecutionStatusParams::new(ExecutionStatus::Completed),
-                    )
+                    .update_execution_status(execution_id, params)
                     .await
                 {
                     tracing::error!(
@@ -902,7 +911,10 @@ mod tests {
         let pm = ProjectMessage::StepFinished {
             execution_id: "exec-123".to_string(),
             task_id: "task-abc".to_string(),
-            result: StepResult::Completed { exit_code: 0 },
+            result: StepResult::Completed {
+                exit_code: 0,
+                metrics: None,
+            },
         };
         let debug = format!("{:?}", pm);
         assert!(debug.contains("StepFinished"));

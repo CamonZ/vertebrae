@@ -1,6 +1,7 @@
 pub mod actors;
 pub mod config;
 pub mod phoenix;
+pub mod stream_json;
 
 pub use actors::project_supervisor::{
     CancelStepPayload, RunStepPayload, parse_cancel_step_payload, parse_run_step_payload,
