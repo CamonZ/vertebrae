@@ -33,6 +33,7 @@ pub struct StepConfig {
 pub enum StepResult {
     Completed {
         exit_code: i32,
+        metrics: Option<crate::stream_json::StreamMetrics>,
     },
     Failed {
         exit_code: Option<i32>,
@@ -99,6 +100,9 @@ pub struct StepExecutorState {
     parent: ActorRef<ProjectMessage>,
     child_process: Option<Child>,
     stream_handle: Option<tokio::task::JoinHandle<()>>,
+    /// Shared slot for metrics extracted from the stream-json result line.
+    /// Written by the streaming task, read by the actor on process exit.
+    stream_metrics: std::sync::Arc<std::sync::Mutex<Option<crate::stream_json::StreamMetrics>>>,
 }
 
 pub struct StepExecutor;
@@ -128,6 +132,7 @@ impl Actor for StepExecutor {
             parent,
             child_process: None,
             stream_handle: None,
+            stream_metrics: std::sync::Arc::new(std::sync::Mutex::new(None)),
         })
     }
 
@@ -209,14 +214,22 @@ impl StepExecutor {
                 let actor_ref = myself;
                 let execution_id = state.execution_id.clone();
                 let execution_service = Arc::clone(&state.config.execution_service);
+                let metrics_slot = Arc::clone(&state.stream_metrics);
 
                 let stream_handle = tokio::spawn(async move {
                     // Stream stdout line by line, posting each as a SessionLog.
+                    // Parse each line for stream-json metrics; retain the last result found.
                     if let Some(stdout) = stdout {
                         let reader = BufReader::new(stdout);
                         let mut lines = reader.lines();
 
                         while let Ok(Some(line)) = lines.next_line().await {
+                            if let Some(m) = crate::stream_json::parse_stream_json_line(&line)
+                                && let Ok(mut slot) = metrics_slot.lock()
+                            {
+                                *slot = Some(m);
+                            }
+
                             let log = SessionLog::new(execution_id.clone(), line);
 
                             if let Err(e) = execution_service.add_log(log).await {
@@ -309,17 +322,27 @@ impl StepExecutor {
     ) {
         // The streaming task has finished reading stdout/stderr.
         // Now call child.wait() to get the real exit status.
+        let metrics = state
+            .stream_metrics
+            .lock()
+            .ok()
+            .and_then(|mut guard| guard.take());
+
         let step_result = if let Some(ref mut child) = state.child_process {
             match child.wait().await {
                 Ok(status) => {
                     let code = status.code().unwrap_or(-1);
                     if status.success() {
                         tracing::info!(
-                            "Process completed successfully for execution {} (exit code {})",
+                            "Process completed successfully for execution {} (exit code {}, metrics={:?})",
                             state.execution_id,
-                            code
+                            code,
+                            metrics,
                         );
-                        StepResult::Completed { exit_code: code }
+                        StepResult::Completed {
+                            exit_code: code,
+                            metrics,
+                        }
                     } else {
                         tracing::warn!(
                             "Process failed for execution {} (exit code {})",
@@ -440,7 +463,10 @@ mod tests {
 
     #[test]
     fn step_result_completed_debug() {
-        let result = StepResult::Completed { exit_code: 0 };
+        let result = StepResult::Completed {
+            exit_code: 0,
+            metrics: None,
+        };
         let debug = format!("{:?}", result);
         assert!(debug.contains("Completed"));
         assert!(debug.contains("0"));
@@ -470,10 +496,13 @@ mod tests {
 
     #[test]
     fn step_result_clone() {
-        let result = StepResult::Completed { exit_code: 42 };
+        let result = StepResult::Completed {
+            exit_code: 42,
+            metrics: None,
+        };
         let cloned = result.clone();
         match cloned {
-            StepResult::Completed { exit_code } => assert_eq!(exit_code, 42),
+            StepResult::Completed { exit_code, .. } => assert_eq!(exit_code, 42),
             _ => panic!("Expected Completed"),
         }
     }
@@ -794,7 +823,7 @@ mod tests {
             StepResult::Failed { error, .. } => {
                 assert!(!error.is_empty());
             }
-            StepResult::Completed { exit_code } => {
+            StepResult::Completed { exit_code, .. } => {
                 assert!(*exit_code >= 0);
             }
         }

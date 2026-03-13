@@ -61,6 +61,30 @@ impl UpdateExecutionStatusParams {
         self.output = Some(output.into());
         self
     }
+
+    /// Set the input token count.
+    pub fn with_input_tokens(mut self, tokens: i64) -> Self {
+        self.input_tokens = Some(tokens);
+        self
+    }
+
+    /// Set the output token count.
+    pub fn with_output_tokens(mut self, tokens: i64) -> Self {
+        self.output_tokens = Some(tokens);
+        self
+    }
+
+    /// Set the cost in USD.
+    pub fn with_cost(mut self, cost: f64) -> Self {
+        self.cost = Some(cost);
+        self
+    }
+
+    /// Set the duration in milliseconds.
+    pub fn with_duration_ms(mut self, duration_ms: i64) -> Self {
+        self.duration_ms = Some(duration_ms);
+        self
+    }
 }
 
 /// Service trait for step execution management operations
@@ -191,4 +215,71 @@ pub trait ExecutionService: Send + Sync {
         execution_id: &str,
         params: UpdateExecutionStatusParams,
     ) -> ServiceResult<()>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_params_has_all_none_optional_fields() {
+        let params = UpdateExecutionStatusParams::new(ExecutionStatus::InProgress);
+        assert_eq!(params.status, ExecutionStatus::InProgress);
+        assert!(params.output.is_none());
+        assert!(params.input_tokens.is_none());
+        assert!(params.output_tokens.is_none());
+        assert!(params.cost.is_none());
+        assert!(params.duration_ms.is_none());
+    }
+
+    #[test]
+    fn with_output_sets_output_field() {
+        let params =
+            UpdateExecutionStatusParams::new(ExecutionStatus::Completed).with_output("some output");
+        assert_eq!(params.output.as_deref(), Some("some output"));
+    }
+
+    #[test]
+    fn with_input_tokens_sets_field() {
+        let params =
+            UpdateExecutionStatusParams::new(ExecutionStatus::Completed).with_input_tokens(1500);
+        assert_eq!(params.input_tokens, Some(1500));
+    }
+
+    #[test]
+    fn with_output_tokens_sets_field() {
+        let params =
+            UpdateExecutionStatusParams::new(ExecutionStatus::Completed).with_output_tokens(800);
+        assert_eq!(params.output_tokens, Some(800));
+    }
+
+    #[test]
+    fn with_cost_sets_field() {
+        let params = UpdateExecutionStatusParams::new(ExecutionStatus::Completed).with_cost(0.003);
+        assert_eq!(params.cost, Some(0.003));
+    }
+
+    #[test]
+    fn with_duration_ms_sets_field() {
+        let params =
+            UpdateExecutionStatusParams::new(ExecutionStatus::Completed).with_duration_ms(5432);
+        assert_eq!(params.duration_ms, Some(5432));
+    }
+
+    #[test]
+    fn chaining_all_builders() {
+        let params = UpdateExecutionStatusParams::new(ExecutionStatus::Completed)
+            .with_output("done")
+            .with_input_tokens(2000)
+            .with_output_tokens(1000)
+            .with_cost(0.05)
+            .with_duration_ms(10000);
+
+        assert_eq!(params.status, ExecutionStatus::Completed);
+        assert_eq!(params.output.as_deref(), Some("done"));
+        assert_eq!(params.input_tokens, Some(2000));
+        assert_eq!(params.output_tokens, Some(1000));
+        assert_eq!(params.cost, Some(0.05));
+        assert_eq!(params.duration_ms, Some(10000));
+    }
 }
