@@ -267,6 +267,7 @@ mod tests {
             agent_config: serde_json::Value::Null,
             is_final: false,
             transitions_to: Vec::new(),
+            auto_advance: false,
         }
     }
 

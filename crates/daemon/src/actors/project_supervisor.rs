@@ -40,14 +40,58 @@ impl std::fmt::Debug for ProjectConfig {
     }
 }
 
+/// Metadata about the step's position in the workflow transition graph.
+/// Carried from `RunStepPayload` through execution so `handle_step_finished`
+/// can determine the transition result and trigger auto-advance.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StepTransitionContext {
+    /// The workflow this step belongs to.
+    pub workflow_id: String,
+    /// Whether this is the final step in the workflow.
+    pub is_final: bool,
+    /// Step IDs this step can transition to.
+    pub transitions_to: Vec<String>,
+    /// Whether the workflow has auto_advance enabled.
+    pub auto_advance: bool,
+    /// Evaluation prompt for validating step output (reserved for future use).
+    pub eval_prompt: Option<String>,
+}
+
+/// Default uses `is_final: true` as a safe fallback -- if the transition
+/// context is unknown we treat the step as final to prevent unintended
+/// auto-advance.
+impl Default for StepTransitionContext {
+    fn default() -> Self {
+        Self {
+            workflow_id: String::new(),
+            is_final: true,
+            transitions_to: Vec::new(),
+            auto_advance: false,
+            eval_prompt: None,
+        }
+    }
+}
+
+impl From<&RunStepPayload> for StepTransitionContext {
+    fn from(payload: &RunStepPayload) -> Self {
+        Self {
+            workflow_id: payload.workflow_id.clone(),
+            is_final: payload.is_final,
+            transitions_to: payload.transitions_to.clone(),
+            auto_advance: payload.auto_advance,
+            eval_prompt: payload.eval_prompt.clone(),
+        }
+    }
+}
+
 pub enum ProjectMessage {
     ChannelEvent(PhoenixMessage),
     /// Spawn a StepExecutor to run a workflow step.
     ExecuteStep {
         execution_id: String,
         task_id: String,
-        workflow_id: String,
         step_config: Box<StepConfig>,
+        transition_ctx: StepTransitionContext,
     },
     /// Cancel a running StepExecutor.
     CancelStep {
@@ -73,14 +117,15 @@ impl std::fmt::Debug for ProjectMessage {
             Self::ExecuteStep {
                 execution_id,
                 task_id,
-                workflow_id,
                 step_config,
+                transition_ctx,
             } => f
                 .debug_struct("ExecuteStep")
                 .field("execution_id", execution_id)
                 .field("task_id", task_id)
-                .field("workflow_id", workflow_id)
+                .field("workflow_id", &transition_ctx.workflow_id)
                 .field("step_config", step_config)
+                .field("auto_advance", &transition_ctx.auto_advance)
                 .finish(),
             Self::CancelStep {
                 step_execution_id,
@@ -190,6 +235,9 @@ pub struct RunStepPayload {
     /// Step IDs this step can transition to.
     #[serde(default)]
     pub transitions_to: Vec<String>,
+    /// Whether the workflow has auto_advance enabled.
+    #[serde(default)]
+    pub auto_advance: bool,
 }
 
 /// Parsed payload for a `cancel_step` channel event from Sacrum.
@@ -237,6 +285,38 @@ pub fn build_step_config_from_payload(payload: &RunStepPayload) -> StepConfig {
     }
 }
 
+/// Determine the transition result (next step ID) for a completed step.
+///
+/// Rules:
+/// - Final step: no transition (returns None).
+/// - No available transitions: no transition (returns None).
+/// - Exactly one transition target: return that step ID.
+/// - Multiple transition targets: scan the output text for a matching step ID.
+///   Returns the first match found, or None if no match is found.
+pub fn determine_transition_result(
+    ctx: &StepTransitionContext,
+    output: Option<&str>,
+) -> Option<String> {
+    if ctx.is_final || ctx.transitions_to.is_empty() {
+        return None;
+    }
+
+    if ctx.transitions_to.len() == 1 {
+        return Some(ctx.transitions_to[0].clone());
+    }
+
+    // Multiple transitions: look for a step ID mentioned in the output.
+    if let Some(text) = output {
+        for step_id in &ctx.transitions_to {
+            if text.contains(step_id.as_str()) {
+                return Some(step_id.clone());
+            }
+        }
+    }
+
+    None
+}
+
 /// Runtime state held by the ProjectSupervisor actor.
 pub struct ProjectState {
     /// The project ID this actor manages.
@@ -248,6 +328,9 @@ pub struct ProjectState {
     /// Map from execution_id to the running StepExecutor actor ref.
     /// Used to route cancel_step events to the correct executor.
     running_executors: HashMap<String, ActorRef<StepExecutorMessage>>,
+    /// Map from execution_id to the step's transition context.
+    /// Stored when a step starts, consumed when it finishes.
+    transition_contexts: HashMap<String, StepTransitionContext>,
 }
 
 /// Per-project supervisor actor.
@@ -277,6 +360,7 @@ impl Actor for ProjectSupervisor {
             services: args.services,
             project_root: args.project_root,
             running_executors: HashMap::new(),
+            transition_contexts: HashMap::new(),
         })
     }
 
@@ -293,15 +377,15 @@ impl Actor for ProjectSupervisor {
             ProjectMessage::ExecuteStep {
                 execution_id,
                 task_id,
-                workflow_id,
                 step_config,
+                transition_ctx,
             } => {
                 self.handle_execute_step(
                     myself.clone(),
                     &execution_id,
                     &task_id,
-                    &workflow_id,
                     *step_config,
+                    transition_ctx,
                     state,
                 )
                 .await?;
@@ -318,7 +402,15 @@ impl Actor for ProjectSupervisor {
                 task_id,
                 result,
             } => {
-                self.handle_step_finished(&execution_id, &task_id, &result, state)
+                // Remove the transition context stored when the step was started.
+                // Use remove() instead of get().cloned() to take ownership without cloning,
+                // since handle_step_finished no longer needs to remove it from the map.
+                let transition_ctx = state
+                    .transition_contexts
+                    .remove(&execution_id)
+                    .unwrap_or_default();
+
+                self.handle_step_finished(&execution_id, &task_id, &result, &transition_ctx, state)
                     .await;
             }
             ProjectMessage::Shutdown => {
@@ -405,12 +497,13 @@ impl ProjectSupervisor {
                     );
 
                     let step_config = build_step_config_from_payload(&payload);
+                    let transition_ctx = StepTransitionContext::from(&payload);
 
                     if let Err(e) = myself.cast(ProjectMessage::ExecuteStep {
                         execution_id: payload.id,
                         task_id: payload.task_id,
-                        workflow_id: payload.workflow_id,
                         step_config: Box::new(step_config),
+                        transition_ctx,
                     }) {
                         tracing::error!(
                             "[project:{}] Failed to send ExecuteStep message: {}",
@@ -500,16 +593,22 @@ impl ProjectSupervisor {
         myself: ActorRef<ProjectMessage>,
         execution_id: &str,
         task_id: &str,
-        _workflow_id: &str,
         step_config: StepConfig,
+        transition_ctx: StepTransitionContext,
         state: &mut ProjectState,
     ) -> Result<(), ActorProcessingErr> {
         tracing::info!(
-            "[project:{}] Executing step: execution_id={}, task_id={}",
+            "[project:{}] Executing step: execution_id={}, task_id={}, auto_advance={}",
             state.project_id,
             execution_id,
-            task_id
+            task_id,
+            transition_ctx.auto_advance,
         );
+
+        // Store transition context so handle_step_finished can use it.
+        state
+            .transition_contexts
+            .insert(execution_id.to_string(), transition_ctx);
 
         // Mark execution as running in Sacrum.
         if let Err(e) = state
@@ -623,9 +722,11 @@ impl ProjectSupervisor {
         execution_id: &str,
         task_id: &str,
         result: &StepResult,
+        transition_ctx: &StepTransitionContext,
         state: &mut ProjectState,
     ) {
-        // Remove from running executors map (it may already be removed by cancel).
+        // Remove from running executors map.
+        // (transition_contexts entry was already removed by the caller via .remove().)
         state.running_executors.remove(execution_id);
 
         match result {
@@ -634,17 +735,20 @@ impl ProjectSupervisor {
                 metrics,
                 output,
             } => {
+                let transition_result =
+                    determine_transition_result(transition_ctx, output.as_deref());
+
                 tracing::info!(
-                    "[project:{}] Step completed: execution_id={}, task_id={}, exit_code={}, metrics={:?}, has_output={}",
+                    "[project:{}] Step completed: execution_id={}, task_id={}, exit_code={}, metrics={:?}, transition_result={:?}",
                     state.project_id,
                     execution_id,
                     task_id,
                     exit_code,
                     metrics,
-                    output.is_some(),
+                    transition_result,
                 );
 
-                // Build update params, populating metrics and output when available.
+                // Build update params, populating metrics, output, and transition_result.
                 let mut params = UpdateExecutionStatusParams::new(ExecutionStatus::Completed);
 
                 if let Some(m) = metrics {
@@ -657,6 +761,10 @@ impl ProjectSupervisor {
 
                 if let Some(text) = output {
                     params = params.with_output(text);
+                }
+
+                if let Some(ref tr) = transition_result {
+                    params = params.with_transition_result(tr);
                 }
 
                 // Report completed status to Sacrum via updateStepExecution.
@@ -672,6 +780,49 @@ impl ProjectSupervisor {
                         execution_id,
                         e
                     );
+                    return;
+                }
+
+                // Auto-advance: trigger the next step if conditions are met.
+                if transition_ctx.auto_advance {
+                    if let Some(ref next_step_id) = transition_result {
+                        tracing::info!(
+                            "[project:{}] Auto-advancing: task_id={}, workflow_id={}, next_step_id={}",
+                            state.project_id,
+                            task_id,
+                            transition_ctx.workflow_id,
+                            next_step_id,
+                        );
+
+                        match state
+                            .services
+                            .executions()
+                            .run_step(task_id, &transition_ctx.workflow_id, next_step_id)
+                            .await
+                        {
+                            Ok(next_exec) => {
+                                tracing::info!(
+                                    "[project:{}] Auto-advance triggered: new execution_id={:?}",
+                                    state.project_id,
+                                    next_exec.id,
+                                );
+                            }
+                            Err(e) => {
+                                tracing::error!(
+                                    "[project:{}] Auto-advance failed for task {}: {}",
+                                    state.project_id,
+                                    task_id,
+                                    e
+                                );
+                            }
+                        }
+                    } else {
+                        tracing::info!(
+                            "[project:{}] Auto-advance skipped: no transition result for execution {}",
+                            state.project_id,
+                            execution_id,
+                        );
+                    }
                 }
             }
             StepResult::Failed { exit_code, error } => {
@@ -901,18 +1052,28 @@ mod tests {
         assert!(debug.contains("task_created"));
     }
 
+    fn test_transition_ctx() -> StepTransitionContext {
+        StepTransitionContext {
+            workflow_id: "wf-456".to_string(),
+            is_final: false,
+            transitions_to: vec!["step-2".to_string()],
+            auto_advance: true,
+            eval_prompt: None,
+        }
+    }
+
     #[test]
     fn project_message_debug_execute_step() {
         let pm = ProjectMessage::ExecuteStep {
             execution_id: "exec-789".to_string(),
             task_id: "task-xyz".to_string(),
-            workflow_id: "wf-456".to_string(),
             step_config: Box::new(StepConfig {
                 prompt: "Implement feature".to_string(),
                 agent_config: AgentConfig::new().with_model("claude-sonnet-4-20250514"),
                 agents: Vec::new(),
                 skills: Vec::new(),
             }),
+            transition_ctx: test_transition_ctx(),
         };
         let debug = format!("{:?}", pm);
         assert!(debug.contains("ExecuteStep"));
@@ -920,6 +1081,7 @@ mod tests {
         assert!(debug.contains("task-xyz"));
         assert!(debug.contains("wf-456"));
         assert!(debug.contains("Implement feature"));
+        assert!(debug.contains("auto_advance: true"));
     }
 
     #[test]
@@ -1255,5 +1417,232 @@ mod tests {
 
         let config = build_step_config_from_payload(&payload);
         assert!(config.agent_config.is_empty());
+    }
+
+    // ===== RunStepPayload auto_advance tests =====
+
+    #[test]
+    fn parse_run_step_auto_advance_true() {
+        let payload = serde_json::json!({
+            "id": "exec-aa-1",
+            "task_id": "task-aa-1",
+            "workflow_id": "wf-aa-1",
+            "step_name": "implement",
+            "status": "pending",
+            "auto_advance": true
+        });
+
+        let result = parse_run_step_payload(&payload).unwrap();
+        assert!(result.auto_advance);
+    }
+
+    #[test]
+    fn parse_run_step_auto_advance_defaults_false() {
+        let payload = serde_json::json!({
+            "id": "exec-aa-2",
+            "task_id": "task-aa-2",
+            "workflow_id": "wf-aa-2",
+            "step_name": "review",
+            "status": "pending"
+        });
+
+        let result = parse_run_step_payload(&payload).unwrap();
+        assert!(!result.auto_advance);
+    }
+
+    #[test]
+    fn parse_run_step_with_transitions_and_auto_advance() {
+        let payload = serde_json::json!({
+            "id": "exec-aa-3",
+            "task_id": "task-aa-3",
+            "workflow_id": "wf-aa-3",
+            "step_name": "review",
+            "status": "pending",
+            "auto_advance": true,
+            "transitions_to": ["step-uuid-implement", "step-uuid-deploy"],
+            "is_final": false
+        });
+
+        let result = parse_run_step_payload(&payload).unwrap();
+        assert!(result.auto_advance);
+        assert_eq!(
+            result.transitions_to,
+            vec!["step-uuid-implement", "step-uuid-deploy"]
+        );
+        assert!(!result.is_final);
+    }
+
+    // ===== StepTransitionContext tests =====
+
+    #[test]
+    fn step_transition_context_debug_format() {
+        let ctx = test_transition_ctx();
+        let debug = format!("{:?}", ctx);
+        assert!(debug.contains("wf-456"));
+        assert!(debug.contains("step-2"));
+        assert!(debug.contains("auto_advance: true"));
+    }
+
+    #[test]
+    fn step_transition_context_clone_and_eq() {
+        let ctx = test_transition_ctx();
+        let cloned = ctx.clone();
+        assert_eq!(ctx, cloned);
+    }
+
+    // ===== determine_transition_result tests =====
+
+    #[test]
+    fn transition_result_final_step_returns_none() {
+        let ctx = StepTransitionContext {
+            workflow_id: "wf-1".to_string(),
+            is_final: true,
+            transitions_to: vec!["step-next".to_string()],
+            auto_advance: true,
+            eval_prompt: None,
+        };
+        assert_eq!(determine_transition_result(&ctx, Some("any output")), None);
+    }
+
+    #[test]
+    fn transition_result_no_transitions_returns_none() {
+        let ctx = StepTransitionContext {
+            workflow_id: "wf-1".to_string(),
+            is_final: false,
+            transitions_to: Vec::new(),
+            auto_advance: true,
+            eval_prompt: None,
+        };
+        assert_eq!(determine_transition_result(&ctx, Some("any output")), None);
+    }
+
+    #[test]
+    fn transition_result_single_target_returns_it() {
+        let ctx = StepTransitionContext {
+            workflow_id: "wf-1".to_string(),
+            is_final: false,
+            transitions_to: vec!["step-review-uuid".to_string()],
+            auto_advance: false,
+            eval_prompt: None,
+        };
+        assert_eq!(
+            determine_transition_result(&ctx, None),
+            Some("step-review-uuid".to_string())
+        );
+    }
+
+    #[test]
+    fn transition_result_single_target_ignores_output() {
+        let ctx = StepTransitionContext {
+            workflow_id: "wf-1".to_string(),
+            is_final: false,
+            transitions_to: vec!["step-review-uuid".to_string()],
+            auto_advance: false,
+            eval_prompt: None,
+        };
+        assert_eq!(
+            determine_transition_result(&ctx, Some("irrelevant output")),
+            Some("step-review-uuid".to_string())
+        );
+    }
+
+    #[test]
+    fn transition_result_multiple_targets_matches_output() {
+        let ctx = StepTransitionContext {
+            workflow_id: "wf-1".to_string(),
+            is_final: false,
+            transitions_to: vec![
+                "step-approve-uuid".to_string(),
+                "step-reject-uuid".to_string(),
+            ],
+            auto_advance: true,
+            eval_prompt: None,
+        };
+        let output = "The review looks good, transitioning to step-approve-uuid";
+        assert_eq!(
+            determine_transition_result(&ctx, Some(output)),
+            Some("step-approve-uuid".to_string())
+        );
+    }
+
+    #[test]
+    fn transition_result_multiple_targets_matches_second() {
+        let ctx = StepTransitionContext {
+            workflow_id: "wf-1".to_string(),
+            is_final: false,
+            transitions_to: vec![
+                "step-approve-uuid".to_string(),
+                "step-reject-uuid".to_string(),
+            ],
+            auto_advance: true,
+            eval_prompt: None,
+        };
+        let output = "Issues found, transition to step-reject-uuid for rework";
+        assert_eq!(
+            determine_transition_result(&ctx, Some(output)),
+            Some("step-reject-uuid".to_string())
+        );
+    }
+
+    #[test]
+    fn transition_result_multiple_targets_no_match_returns_none() {
+        let ctx = StepTransitionContext {
+            workflow_id: "wf-1".to_string(),
+            is_final: false,
+            transitions_to: vec![
+                "step-approve-uuid".to_string(),
+                "step-reject-uuid".to_string(),
+            ],
+            auto_advance: true,
+            eval_prompt: None,
+        };
+        assert_eq!(
+            determine_transition_result(&ctx, Some("output with no step IDs")),
+            None
+        );
+    }
+
+    #[test]
+    fn transition_result_multiple_targets_no_output_returns_none() {
+        let ctx = StepTransitionContext {
+            workflow_id: "wf-1".to_string(),
+            is_final: false,
+            transitions_to: vec![
+                "step-approve-uuid".to_string(),
+                "step-reject-uuid".to_string(),
+            ],
+            auto_advance: true,
+            eval_prompt: None,
+        };
+        assert_eq!(determine_transition_result(&ctx, None), None);
+    }
+
+    #[test]
+    fn transition_result_final_with_empty_transitions_returns_none() {
+        let ctx = StepTransitionContext {
+            workflow_id: "wf-1".to_string(),
+            is_final: true,
+            transitions_to: Vec::new(),
+            auto_advance: true,
+            eval_prompt: None,
+        };
+        assert_eq!(determine_transition_result(&ctx, Some("output")), None);
+    }
+
+    #[test]
+    fn transition_result_multiple_targets_first_match_wins() {
+        let ctx = StepTransitionContext {
+            workflow_id: "wf-1".to_string(),
+            is_final: false,
+            transitions_to: vec!["step-alpha".to_string(), "step-beta".to_string()],
+            auto_advance: true,
+            eval_prompt: None,
+        };
+        // Output mentions both, but first match in transitions_to wins.
+        let output = "Proceeding via step-beta or step-alpha";
+        assert_eq!(
+            determine_transition_result(&ctx, Some(output)),
+            Some("step-alpha".to_string())
+        );
     }
 }

@@ -177,6 +177,7 @@ impl ExecutionService for SacrumExecutionService {
             "id": execution_id,
             "status": params.status.as_str(),
             "output": params.output,
+            "transition_result": params.transition_result,
             "input_tokens": params.input_tokens,
             "output_tokens": params.output_tokens,
             "cost": params.cost,

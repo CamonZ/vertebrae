@@ -41,6 +41,8 @@ pub struct UpdateExecutionStatusParams {
     pub cost: Option<f64>,
     /// Optional duration in milliseconds.
     pub duration_ms: Option<i64>,
+    /// Optional transition result (next step ID or signal).
+    pub transition_result: Option<String>,
 }
 
 impl UpdateExecutionStatusParams {
@@ -53,6 +55,7 @@ impl UpdateExecutionStatusParams {
             output_tokens: None,
             cost: None,
             duration_ms: None,
+            transition_result: None,
         }
     }
 
@@ -83,6 +86,12 @@ impl UpdateExecutionStatusParams {
     /// Set the duration in milliseconds.
     pub fn with_duration_ms(mut self, duration_ms: i64) -> Self {
         self.duration_ms = Some(duration_ms);
+        self
+    }
+
+    /// Set the transition result (next step ID or signal).
+    pub fn with_transition_result(mut self, result: impl Into<String>) -> Self {
+        self.transition_result = Some(result.into());
         self
     }
 }
@@ -230,6 +239,7 @@ mod tests {
         assert!(params.output_tokens.is_none());
         assert!(params.cost.is_none());
         assert!(params.duration_ms.is_none());
+        assert!(params.transition_result.is_none());
     }
 
     #[test]
@@ -267,13 +277,21 @@ mod tests {
     }
 
     #[test]
+    fn with_transition_result_sets_field() {
+        let params = UpdateExecutionStatusParams::new(ExecutionStatus::Completed)
+            .with_transition_result("step-uuid-123");
+        assert_eq!(params.transition_result.as_deref(), Some("step-uuid-123"));
+    }
+
+    #[test]
     fn chaining_all_builders() {
         let params = UpdateExecutionStatusParams::new(ExecutionStatus::Completed)
             .with_output("done")
             .with_input_tokens(2000)
             .with_output_tokens(1000)
             .with_cost(0.05)
-            .with_duration_ms(10000);
+            .with_duration_ms(10000)
+            .with_transition_result("next-step");
 
         assert_eq!(params.status, ExecutionStatus::Completed);
         assert_eq!(params.output.as_deref(), Some("done"));
@@ -281,5 +299,6 @@ mod tests {
         assert_eq!(params.output_tokens, Some(1000));
         assert_eq!(params.cost, Some(0.05));
         assert_eq!(params.duration_ms, Some(10000));
+        assert_eq!(params.transition_result.as_deref(), Some("next-step"));
     }
 }
