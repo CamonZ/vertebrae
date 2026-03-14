@@ -840,6 +840,10 @@ pub struct Task {
     #[serde(default)]
     pub archived: bool,
 
+    /// Optional worktree path for this task
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub worktree: Option<String>,
+
     /// Review comment
     #[serde(skip_serializing_if = "Option::is_none")]
     pub review_comment: Option<String>,
@@ -913,6 +917,7 @@ impl Task {
             step_name: None,
             needs_human_review: None,
             archived: false,
+            worktree: None,
             review_comment: None,
             revision_feedback: None,
             rejection_reason: None,

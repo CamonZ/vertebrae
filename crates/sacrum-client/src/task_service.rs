@@ -158,6 +158,7 @@ impl SacrumTaskService {
             step_name,
             needs_human_review: response.needs_human_review,
             archived: response.archived,
+            worktree: response.worktree.clone(),
             review_comment: response.review_comment.clone(),
             revision_feedback: response.revision_feedback.clone(),
             rejection_reason: response.rejection_reason.clone(),
@@ -363,6 +364,13 @@ impl TaskService for SacrumTaskService {
             match parent_opt {
                 Some(parent_id) => variables["parent_id"] = json!(parent_id),
                 None => variables["parent_id"] = Value::Null,
+            }
+        }
+
+        if let Some(ref worktree_opt) = options.worktree {
+            match worktree_opt {
+                Some(worktree) => variables["worktree"] = json!(worktree),
+                None => variables["worktree"] = Value::Null,
             }
         }
 
@@ -956,6 +964,7 @@ mod tests {
             current_step_id: None,
             needs_human_review: None,
             archived: false,
+            worktree: None,
             review_comment: None,
             rejection_reason: None,
             revision_feedback: None,
@@ -1191,6 +1200,33 @@ mod tests {
         assert_eq!(task.children.len(), 2);
         assert_eq!(task.children[0].id, "child-1");
         assert_eq!(task.children[1].id, "child-2");
+    }
+
+    #[test]
+    fn test_response_to_task_with_worktree() {
+        let client = create_test_client();
+        let service = SacrumTaskService::new(client);
+
+        let mut response = make_task_response("task-wt", "Worktree Task");
+        response.worktree = Some("/home/user/projects/my-worktree".to_string());
+
+        let task = service.response_to_task(&response).unwrap();
+        assert_eq!(task.id, "task-wt");
+        assert_eq!(
+            task.worktree.as_deref(),
+            Some("/home/user/projects/my-worktree")
+        );
+    }
+
+    #[test]
+    fn test_response_to_task_without_worktree() {
+        let client = create_test_client();
+        let service = SacrumTaskService::new(client);
+
+        let response = make_task_response("task-no-wt", "No Worktree");
+
+        let task = service.response_to_task(&response).unwrap();
+        assert!(task.worktree.is_none());
     }
 
     // =========================================================================

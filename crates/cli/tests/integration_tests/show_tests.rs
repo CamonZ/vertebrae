@@ -94,6 +94,91 @@ mod show_basic_tests {
 }
 
 // ============================================================================
+// Show with worktree tests
+// ============================================================================
+
+#[cfg(test)]
+mod show_worktree_tests {
+    use super::*;
+    use vertebrae_core::UpdateTaskOptions;
+
+    #[tokio::test]
+    async fn test_show_task_with_worktree() {
+        let services = mock_services();
+
+        let cmd = AddCommand {
+            title: "Worktree Task".to_string(),
+            level: Some(Level::Task),
+            description: None,
+            priority: None,
+            tags: vec![],
+            parent: None,
+            depends_on: vec![],
+            needs_review: false,
+            workflow: None,
+        };
+        let task_id = cmd.execute(&services).await.unwrap();
+
+        // Set worktree via update
+        let update_opts = UpdateTaskOptions::new().with_worktree("/home/user/projects/my-worktree");
+        services
+            .tasks()
+            .update_task(&task_id, update_opts)
+            .await
+            .unwrap();
+
+        let show_cmd = ShowCommand {
+            id: task_id.clone(),
+        };
+        let result = show_cmd.execute(&services).await.unwrap();
+
+        assert_eq!(
+            result.worktree.as_deref(),
+            Some("/home/user/projects/my-worktree")
+        );
+
+        // Verify display includes worktree
+        let display = format!("{}", result);
+        assert!(
+            display.contains("Worktree: /home/user/projects/my-worktree"),
+            "Display output should contain worktree line"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_show_task_without_worktree() {
+        let services = mock_services();
+
+        let cmd = AddCommand {
+            title: "No Worktree Task".to_string(),
+            level: Some(Level::Task),
+            description: None,
+            priority: None,
+            tags: vec![],
+            parent: None,
+            depends_on: vec![],
+            needs_review: false,
+            workflow: None,
+        };
+        let task_id = cmd.execute(&services).await.unwrap();
+
+        let show_cmd = ShowCommand {
+            id: task_id.clone(),
+        };
+        let result = show_cmd.execute(&services).await.unwrap();
+
+        assert!(result.worktree.is_none());
+
+        // Verify display does NOT include worktree line
+        let display = format!("{}", result);
+        assert!(
+            !display.contains("Worktree:"),
+            "Display output should not contain worktree line when not set"
+        );
+    }
+}
+
+// ============================================================================
 // Show with sections tests
 // ============================================================================
 

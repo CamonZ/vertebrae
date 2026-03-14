@@ -40,6 +40,10 @@ pub struct UpdateCommand {
     #[arg(long, value_parser = crate::commands::parse_uuid_or_empty("parent ID"))]
     pub parent: Option<String>,
 
+    /// Worktree path for this task (use empty string "" to clear)
+    #[arg(long)]
+    pub worktree: Option<String>,
+
     /// Edit a section: <type> <ordinal> <new-content>
     /// Example: --edit-section step 0 "New step content"
     #[arg(long = "edit-section", num_args = 3, value_names = ["TYPE", "ORDINAL", "CONTENT"])]
@@ -145,6 +149,15 @@ impl UpdateCommand {
             options = options.remove_tag(tag.clone());
         }
 
+        // Handle worktree
+        if let Some(worktree) = &self.worktree {
+            if worktree.is_empty() {
+                options = options.clear_worktree();
+            } else {
+                options = options.with_worktree(worktree.clone());
+            }
+        }
+
         // Handle parent
         if let Some(parent_id) = &self.parent {
             if parent_id.is_empty() {
@@ -217,6 +230,7 @@ impl UpdateCommand {
             || !self.add_tags.is_empty()
             || !self.remove_tags.is_empty()
             || self.parent.is_some()
+            || self.worktree.is_some()
             || self.edit_section.is_some()
             || self.remove_section.is_some()
     }
