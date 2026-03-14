@@ -169,9 +169,6 @@ pub struct RunStepPayload {
     /// The step's prompt field (takes priority over goal when present).
     #[serde(default)]
     pub prompt: Option<String>,
-    /// Evaluation prompt for validating step output.
-    #[serde(default)]
-    pub eval_prompt: Option<String>,
     /// Execution context containing task metadata (title, description, sections, code refs).
     #[serde(default)]
     pub context: Option<serde_json::Value>,
@@ -184,12 +181,6 @@ pub struct RunStepPayload {
     /// Additional agent configuration.
     #[serde(default)]
     pub agent_config: serde_json::Value,
-    /// Whether this is the final step in the workflow.
-    #[serde(default)]
-    pub is_final: bool,
-    /// Step IDs this step can transition to.
-    #[serde(default)]
-    pub transitions_to: Vec<String>,
 }
 
 /// Parsed payload for a `cancel_step` channel event from Sacrum.
@@ -1009,8 +1000,7 @@ mod tests {
             "goal": "Write the feature code",
             "agents": ["agent1"],
             "skills": ["skill1", "skill2"],
-            "agent_config": {"model": "claude-opus-4-20250514"},
-            "is_final": false
+            "agent_config": {"model": "claude-opus-4-20250514"}
         });
 
         let result = parse_run_step_payload(&payload).unwrap();
@@ -1026,7 +1016,6 @@ mod tests {
             result.agent_config.get("model").and_then(|v| v.as_str()),
             Some("claude-opus-4-20250514")
         );
-        assert!(!result.is_final);
     }
 
     #[test]
@@ -1046,7 +1035,6 @@ mod tests {
         assert!(result.agents.is_empty());
         assert!(result.skills.is_empty());
         assert_eq!(result.agent_config, serde_json::Value::Null);
-        assert!(!result.is_final);
     }
 
     #[test]
@@ -1067,18 +1055,21 @@ mod tests {
     }
 
     #[test]
-    fn parse_run_step_is_final_true() {
+    fn parse_run_step_ignores_unknown_fields() {
         let payload = serde_json::json!({
             "id": "exec-uuid-4",
             "task_id": "task-uuid-4",
             "workflow_id": "wf-uuid-4",
             "step_name": "deploy",
             "status": "pending",
-            "is_final": true
+            "is_final": true,
+            "transitions_to": ["next-step"],
+            "eval_prompt": "Check output"
         });
 
         let result = parse_run_step_payload(&payload).unwrap();
-        assert!(result.is_final);
+        assert_eq!(result.id, "exec-uuid-4");
+        assert_eq!(result.step_name, "deploy");
     }
 
     // ===== CancelStepPayload tests =====
