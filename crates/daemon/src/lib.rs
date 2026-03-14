@@ -1,7 +1,6 @@
 pub mod actors;
 pub mod config;
 pub mod phoenix;
-pub mod prompt_composer;
 pub mod stream_json;
 
 pub use actors::project_supervisor::{
