@@ -31,6 +31,12 @@ vtb update <task-id> --parent <parent-id>
 # Remove parent (orphan the task)
 vtb update <task-id> --parent ""
 
+# Set worktree path
+vtb update <task-id> --worktree /path/to/worktree
+
+# Clear worktree path
+vtb update <task-id> --worktree ""
+
 # Edit a section inline
 vtb update <task-id> --edit-section checklist_item 0 "Updated item content"
 
@@ -48,6 +54,7 @@ vtb update <task-id> --remove-section checklist_item 0
 | `--add-tag` | Add a tag (repeatable) |
 | `--remove-tag` | Remove a tag (repeatable) |
 | `--parent` | Set parent task (use "" to remove) |
+| `--worktree` | Set worktree path (use "" to clear) |
 | `--edit-section` | Edit section: `<type> <ordinal> <content>` |
 | `--remove-section` | Remove section: `<type> <ordinal>` |
 

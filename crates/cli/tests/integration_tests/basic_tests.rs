@@ -145,6 +145,7 @@ mod lifecycle_tests {
             add_tags: vec![],
             remove_tags: vec![],
             parent: None,
+            worktree: None,
             edit_section: None,
             remove_section: None,
         };
@@ -168,6 +169,7 @@ mod lifecycle_tests {
             add_tags: vec![],
             remove_tags: vec![],
             parent: None,
+            worktree: None,
             edit_section: None,
             remove_section: None,
         };
@@ -1003,6 +1005,7 @@ mod command_dispatch_tests {
             add_tags: vec![],
             remove_tags: vec![],
             parent: None,
+            worktree: None,
             edit_section: None,
             remove_section: None,
         });

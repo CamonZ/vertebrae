@@ -81,6 +81,7 @@ impl TaskService for MockTaskService {
                 None
             },
             archived: false,
+            worktree: None,
             revision_feedback: None,
             rejection_reason: None,
             review_comment: None,
@@ -183,6 +184,9 @@ impl TaskService for MockTaskService {
         }
         if let Some(archived) = options.archived {
             task.archived = archived;
+        }
+        if let Some(worktree) = &options.worktree {
+            task.worktree = worktree.clone();
         }
         task.updated_at = Some(Utc::now());
         Ok(())
