@@ -17,6 +17,7 @@ pub const TASK_FIELDS: &str = r#"
         rejection_reason
         revision_feedback
         archived
+        worktree
         parent_id
         started_at
         completed_at
@@ -158,7 +159,8 @@ pub const UPDATE_TASK: &str = r#"
         $revision_feedback: String,
         $parent_id: Uuid4,
         $depends_on_ids: [Uuid4!],
-        $archived: Boolean
+        $archived: Boolean,
+        $worktree: String
     ) {
         update_task(
             id: $id,
@@ -171,7 +173,8 @@ pub const UPDATE_TASK: &str = r#"
             revision_feedback: $revision_feedback,
             parent_id: $parent_id,
             depends_on_ids: $depends_on_ids,
-            archived: $archived
+            archived: $archived,
+            worktree: $worktree
         ) {
             id
         }

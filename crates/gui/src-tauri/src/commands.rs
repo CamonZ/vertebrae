@@ -1407,6 +1407,10 @@ pub(crate) async fn update_task_inner(
         update_opts.archived = Some(archived);
     }
 
+    if let Some(new_worktree) = options.worktree {
+        update_opts.worktree = Some(new_worktree);
+    }
+
     service.tasks().update_task(task_id, update_opts).await?;
     log::info!("Successfully updated task: {}", task_id);
     Ok(())

@@ -30,6 +30,8 @@ pub struct TaskResponse {
     #[serde(default)]
     pub archived: bool,
     #[serde(default)]
+    pub worktree: Option<String>,
+    #[serde(default)]
     pub review_comment: Option<String>,
     #[serde(default)]
     pub rejection_reason: Option<String>,
@@ -361,6 +363,34 @@ mod tests {
         assert!(task.tags.is_empty());
         assert!(task.sections.is_empty());
         assert!(task.dependency_ids.is_empty());
+        assert!(task.worktree.is_none());
+    }
+
+    #[test]
+    fn test_task_response_with_worktree() {
+        let json = r#"{
+            "id": "task-wt",
+            "title": "Worktree Task",
+            "project_id": "proj-1",
+            "worktree": "/path/to/worktree"
+        }"#;
+
+        let task: TaskResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(task.id, "task-wt");
+        assert_eq!(task.worktree.as_deref(), Some("/path/to/worktree"));
+    }
+
+    #[test]
+    fn test_task_response_with_null_worktree() {
+        let json = r#"{
+            "id": "task-wt-null",
+            "title": "No Worktree",
+            "project_id": "proj-1",
+            "worktree": null
+        }"#;
+
+        let task: TaskResponse = serde_json::from_str(json).unwrap();
+        assert!(task.worktree.is_none());
     }
 
     #[test]
