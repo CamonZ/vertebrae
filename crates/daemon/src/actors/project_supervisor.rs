@@ -161,17 +161,9 @@ pub struct RunStepPayload {
     pub workflow_id: String,
     /// The workflow step name.
     pub step_name: String,
-    /// Current status (typically "pending").
-    pub status: String,
-    /// The goal/prompt for this step execution.
-    #[serde(default)]
-    pub goal: Option<String>,
-    /// The step's prompt field (takes priority over goal when present).
+    /// The composed prompt for this step execution (built by Sacrum).
     #[serde(default)]
     pub prompt: Option<String>,
-    /// Execution context containing task metadata (title, description, sections, code refs).
-    #[serde(default)]
-    pub context: Option<serde_json::Value>,
     /// Agent names to use for this step.
     #[serde(default)]
     pub agents: Vec<String>,
@@ -996,8 +988,7 @@ mod tests {
             "task_id": "task-uuid-1",
             "workflow_id": "wf-uuid-1",
             "step_name": "implement",
-            "status": "pending",
-            "goal": "Write the feature code",
+            "prompt": "Implement the feature",
             "agents": ["agent1"],
             "skills": ["skill1", "skill2"],
             "agent_config": {"model": "claude-opus-4-20250514"}
@@ -1008,8 +999,7 @@ mod tests {
         assert_eq!(result.task_id, "task-uuid-1");
         assert_eq!(result.workflow_id, "wf-uuid-1");
         assert_eq!(result.step_name, "implement");
-        assert_eq!(result.status, "pending");
-        assert_eq!(result.goal.as_deref(), Some("Write the feature code"));
+        assert_eq!(result.prompt.as_deref(), Some("Implement the feature"));
         assert_eq!(result.agents, vec!["agent1"]);
         assert_eq!(result.skills, vec!["skill1", "skill2"]);
         assert_eq!(
@@ -1024,14 +1014,13 @@ mod tests {
             "id": "exec-uuid-2",
             "task_id": "task-uuid-2",
             "workflow_id": "wf-uuid-2",
-            "step_name": "review",
-            "status": "pending"
+            "step_name": "review"
         });
 
         let result = parse_run_step_payload(&payload).unwrap();
         assert_eq!(result.id, "exec-uuid-2");
         assert_eq!(result.task_id, "task-uuid-2");
-        assert!(result.goal.is_none());
+        assert!(result.prompt.is_none());
         assert!(result.agents.is_empty());
         assert!(result.skills.is_empty());
         assert_eq!(result.agent_config, serde_json::Value::Null);
@@ -1042,7 +1031,7 @@ mod tests {
         let payload = serde_json::json!({
             "id": "exec-uuid-3",
             "task_id": "task-uuid-3"
-            // missing workflow_id, step_name, status
+            // missing workflow_id, step_name
         });
 
         let result = parse_run_step_payload(&payload);
@@ -1062,6 +1051,8 @@ mod tests {
             "workflow_id": "wf-uuid-4",
             "step_name": "deploy",
             "status": "pending",
+            "goal": "Deploy to production",
+            "context": {"title": "Some task"},
             "is_final": true,
             "transitions_to": ["next-step"],
             "eval_prompt": "Check output"
@@ -1125,7 +1116,6 @@ mod tests {
             "task_id": "task-1",
             "workflow_id": "wf-1",
             "step_name": "implement",
-            "status": "pending",
             "prompt": "Implement JWT token validation\n\n## Task Context\n**Title:** JWT Auth",
             "agents": ["reviewer.md", "coder.md"],
             "skills": ["WebSearch", "Read"],
@@ -1167,8 +1157,7 @@ mod tests {
             "id": "exec-2",
             "task_id": "task-2",
             "workflow_id": "wf-2",
-            "step_name": "review",
-            "status": "pending"
+            "step_name": "review"
         }))
         .unwrap();
 
@@ -1188,7 +1177,6 @@ mod tests {
             "task_id": "task-3",
             "workflow_id": "wf-3",
             "step_name": "deploy",
-            "status": "pending",
             "prompt": ""
         }))
         .unwrap();
@@ -1198,32 +1186,12 @@ mod tests {
     }
 
     #[test]
-    fn build_step_config_ignores_goal_field() {
-        let payload = parse_run_step_payload(&serde_json::json!({
-            "id": "exec-3b",
-            "task_id": "task-3b",
-            "workflow_id": "wf-3b",
-            "step_name": "deploy",
-            "status": "pending",
-            "goal": "Deploy to production"
-        }))
-        .unwrap();
-
-        let config = build_step_config_from_payload(&payload);
-        assert_eq!(
-            config.prompt, "Execute step: deploy",
-            "Should not use goal field for prompt; goal is ignored by the daemon"
-        );
-    }
-
-    #[test]
     fn build_step_config_model_only_agent_config() {
         let payload = parse_run_step_payload(&serde_json::json!({
             "id": "exec-4",
             "task_id": "task-4",
             "workflow_id": "wf-4",
             "step_name": "implement",
-            "status": "pending",
             "agent_config": {"model": "haiku"}
         }))
         .unwrap();
@@ -1240,7 +1208,6 @@ mod tests {
             "task_id": "task-5",
             "workflow_id": "wf-5",
             "step_name": "review",
-            "status": "pending",
             "agent_config": {
                 "permission_mode": "plan"
             }
@@ -1261,7 +1228,6 @@ mod tests {
             "task_id": "task-6",
             "workflow_id": "wf-6",
             "step_name": "test",
-            "status": "pending",
             "agent_config": {}
         }))
         .unwrap();
