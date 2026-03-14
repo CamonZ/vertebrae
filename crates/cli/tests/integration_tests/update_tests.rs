@@ -72,6 +72,7 @@ async fn test_update_edit_section_valid_step() {
         add_tags: vec![],
         remove_tags: vec![],
         parent: None,
+        worktree: None,
         edit_section: Some(vec![
             "checklist_item".to_string(),
             "0".to_string(),
@@ -113,6 +114,7 @@ async fn test_update_edit_section_second_ordinal() {
         add_tags: vec![],
         remove_tags: vec![],
         parent: None,
+        worktree: None,
         edit_section: Some(vec![
             "checklist_item".to_string(),
             "1".to_string(),
@@ -158,6 +160,7 @@ async fn test_update_edit_constraint_section() {
         add_tags: vec![],
         remove_tags: vec![],
         parent: None,
+        worktree: None,
         edit_section: Some(vec![
             "constraint".to_string(),
             "0".to_string(),
@@ -192,6 +195,7 @@ async fn test_update_edit_section_invalid_ordinal() {
         add_tags: vec![],
         remove_tags: vec![],
         parent: None,
+        worktree: None,
         edit_section: Some(vec![
             "checklist_item".to_string(),
             "999".to_string(),
@@ -218,6 +222,7 @@ async fn test_update_edit_section_invalid_ordinal_format() {
         add_tags: vec![],
         remove_tags: vec![],
         parent: None,
+        worktree: None,
         edit_section: Some(vec![
             "checklist_item".to_string(),
             "not_a_number".to_string(),
@@ -246,6 +251,7 @@ async fn test_update_edit_section_invalid_type() {
         add_tags: vec![],
         remove_tags: vec![],
         parent: None,
+        worktree: None,
         edit_section: Some(vec![
             "invalid_type".to_string(),
             "0".to_string(),
@@ -274,6 +280,7 @@ async fn test_update_edit_section_wrong_arg_count() {
         add_tags: vec![],
         remove_tags: vec![],
         parent: None,
+        worktree: None,
         edit_section: Some(vec!["checklist_item".to_string(), "0".to_string()]),
         remove_section: None,
     };
@@ -318,6 +325,7 @@ async fn test_update_remove_section_valid_step() {
         add_tags: vec![],
         remove_tags: vec![],
         parent: None,
+        worktree: None,
         edit_section: None,
         remove_section: Some(vec!["checklist_item".to_string(), "0".to_string()]),
     };
@@ -354,6 +362,7 @@ async fn test_update_remove_section_second_ordinal() {
         add_tags: vec![],
         remove_tags: vec![],
         parent: None,
+        worktree: None,
         edit_section: None,
         remove_section: Some(vec!["checklist_item".to_string(), "1".to_string()]),
     };
@@ -395,6 +404,7 @@ async fn test_update_remove_constraint_section() {
         add_tags: vec![],
         remove_tags: vec![],
         parent: None,
+        worktree: None,
         edit_section: None,
         remove_section: Some(vec!["constraint".to_string(), "0".to_string()]),
     };
@@ -427,6 +437,7 @@ async fn test_update_remove_section_invalid_ordinal() {
         add_tags: vec![],
         remove_tags: vec![],
         parent: None,
+        worktree: None,
         edit_section: None,
         remove_section: Some(vec!["checklist_item".to_string(), "999".to_string()]),
     };
@@ -459,6 +470,7 @@ async fn test_update_remove_section_invalid_ordinal_format() {
         add_tags: vec![],
         remove_tags: vec![],
         parent: None,
+        worktree: None,
         edit_section: None,
         remove_section: Some(vec!["checklist_item".to_string(), "abc".to_string()]),
     };
@@ -483,6 +495,7 @@ async fn test_update_remove_section_invalid_type() {
         add_tags: vec![],
         remove_tags: vec![],
         parent: None,
+        worktree: None,
         edit_section: None,
         remove_section: Some(vec!["bad_type".to_string(), "0".to_string()]),
     };
@@ -507,6 +520,7 @@ async fn test_update_remove_section_wrong_arg_count() {
         add_tags: vec![],
         remove_tags: vec![],
         parent: None,
+        worktree: None,
         edit_section: None,
         remove_section: Some(vec!["checklist_item".to_string()]),
     };
@@ -535,6 +549,7 @@ async fn test_update_self_parent_fails() {
         add_tags: vec![],
         remove_tags: vec![],
         parent: Some(task_id.clone()),
+        worktree: None,
         edit_section: None,
         remove_section: None,
     };
@@ -559,6 +574,7 @@ async fn test_update_nonexistent_parent_fails() {
         add_tags: vec![],
         remove_tags: vec![],
         parent: Some("nonexistent".to_string()),
+        worktree: None,
         edit_section: None,
         remove_section: None,
     };
@@ -588,6 +604,7 @@ async fn test_update_no_changes_specified() {
         add_tags: vec![],
         remove_tags: vec![],
         parent: None,
+        worktree: None,
         edit_section: None,
         remove_section: None,
     };
@@ -615,6 +632,7 @@ async fn test_update_title_and_description() {
         add_tags: vec![],
         remove_tags: vec![],
         parent: None,
+        worktree: None,
         edit_section: None,
         remove_section: None,
     };
@@ -660,6 +678,7 @@ async fn test_update_clear_description() {
         add_tags: vec![],
         remove_tags: vec![],
         parent: None,
+        worktree: None,
         edit_section: None,
         remove_section: None,
     };
@@ -701,6 +720,7 @@ async fn test_update_tags_combined() {
         add_tags: vec!["tag3".to_string(), "tag4".to_string()],
         remove_tags: vec!["tag1".to_string()],
         parent: None,
+        worktree: None,
         edit_section: None,
         remove_section: None,
     };
@@ -725,6 +745,7 @@ async fn test_update_title_and_priority_and_tags() {
         add_tags: vec!["urgent".to_string()],
         remove_tags: vec![],
         parent: None,
+        worktree: None,
         edit_section: None,
         remove_section: None,
     };
@@ -759,6 +780,7 @@ async fn test_update_edit_and_field_change() {
         add_tags: vec![],
         remove_tags: vec![],
         parent: None,
+        worktree: None,
         edit_section: Some(vec![
             "checklist_item".to_string(),
             "0".to_string(),
@@ -791,6 +813,7 @@ async fn test_update_nonexistent_task_fails() {
         add_tags: vec![],
         remove_tags: vec![],
         parent: None,
+        worktree: None,
         edit_section: None,
         remove_section: None,
     };
@@ -813,6 +836,7 @@ async fn test_update_case_insensitive_id() {
         add_tags: vec![],
         remove_tags: vec![],
         parent: None,
+        worktree: None,
         edit_section: None,
         remove_section: None,
     };
@@ -844,6 +868,7 @@ async fn test_update_all_fields_at_once() {
         add_tags: vec!["important".to_string()],
         remove_tags: vec![],
         parent: None,
+        worktree: None,
         edit_section: Some(vec![
             "checklist_item".to_string(),
             "0".to_string(),
@@ -868,4 +893,77 @@ async fn test_update_all_fields_at_once() {
         .filter(|s| s.section_type == SectionType::ChecklistItem)
         .collect();
     assert_eq!(steps[0].content, "New step content");
+}
+
+// ============================================================================
+// Worktree update tests
+// ============================================================================
+
+#[tokio::test]
+async fn test_update_set_worktree() {
+    let services = mock_services();
+    let task_id = create_task(&services, "Worktree task").await;
+
+    let cmd = UpdateCommand {
+        id: task_id.clone(),
+        title: None,
+        description: None,
+        priority: None,
+        add_tags: vec![],
+        remove_tags: vec![],
+        parent: None,
+        worktree: Some("/home/user/projects/my-worktree".to_string()),
+        edit_section: None,
+        remove_section: None,
+    };
+
+    cmd.execute(&services).await.unwrap();
+
+    let task = services.tasks().get_task(&task_id).await.unwrap();
+    assert_eq!(
+        task.worktree.as_deref(),
+        Some("/home/user/projects/my-worktree")
+    );
+}
+
+#[tokio::test]
+async fn test_update_clear_worktree() {
+    let services = mock_services();
+    let task_id = create_task(&services, "Worktree task").await;
+
+    // First set a worktree
+    let set_cmd = UpdateCommand {
+        id: task_id.clone(),
+        title: None,
+        description: None,
+        priority: None,
+        add_tags: vec![],
+        remove_tags: vec![],
+        parent: None,
+        worktree: Some("/some/path".to_string()),
+        edit_section: None,
+        remove_section: None,
+    };
+    set_cmd.execute(&services).await.unwrap();
+
+    let task = services.tasks().get_task(&task_id).await.unwrap();
+    assert_eq!(task.worktree.as_deref(), Some("/some/path"));
+
+    // Clear it with empty string
+    let clear_cmd = UpdateCommand {
+        id: task_id.clone(),
+        title: None,
+        description: None,
+        priority: None,
+        add_tags: vec![],
+        remove_tags: vec![],
+        parent: None,
+        worktree: Some("".to_string()),
+        edit_section: None,
+        remove_section: None,
+    };
+    clear_cmd.execute(&services).await.unwrap();
+
+    let task = services.tasks().get_task(&task_id).await.unwrap();
+    assert!(task.worktree.is_none());
 }

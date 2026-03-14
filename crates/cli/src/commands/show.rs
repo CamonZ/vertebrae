@@ -43,6 +43,8 @@ pub struct TaskDetail {
     pub completed_at: Option<String>,
     /// Whether this task needs human review
     pub needs_human_review: Option<bool>,
+    /// Optional worktree path
+    pub worktree: Option<String>,
     /// Feedback to address when a validation gate fails
     pub revision_feedback: Option<String>,
     /// Reason why the task was rejected
@@ -78,6 +80,7 @@ struct TaskRow {
     updated_at: Option<chrono::DateTime<chrono::Utc>>,
     completed_at: Option<chrono::DateTime<chrono::Utc>>,
     needs_human_review: Option<bool>,
+    worktree: Option<String>,
     revision_feedback: Option<String>,
     rejection_reason: Option<String>,
     workflow_id: Option<String>,
@@ -278,6 +281,7 @@ impl ShowCommand {
             updated_at: task.updated_at.map(|dt| dt.to_string()),
             completed_at: task.completed_at.map(|dt| dt.to_string()),
             needs_human_review: task.needs_human_review,
+            worktree: task.worktree,
             revision_feedback: task.revision_feedback,
             rejection_reason: task.rejection_reason,
             workflow,
@@ -313,6 +317,7 @@ impl ShowCommand {
             updated_at: task.updated_at,
             completed_at: task.completed_at,
             needs_human_review: task.needs_human_review,
+            worktree: task.worktree,
             revision_feedback: task.revision_feedback,
             rejection_reason: task.rejection_reason,
             workflow_id: task.workflow_id,
@@ -456,7 +461,11 @@ impl std::fmt::Display for TaskDetail {
             Some(false) => "False",
             None => "False",
         };
-        writeln!(f, "Human Review: {}\n\n", review_status)?;
+        writeln!(f, "Human Review: {}", review_status)?;
+        if let Some(ref worktree) = self.worktree {
+            writeln!(f, "Worktree: {}", worktree)?;
+        }
+        writeln!(f, "\n")?;
 
         // Revision feedback (prominently displayed when present)
         if let Some(ref feedback) = self.revision_feedback {

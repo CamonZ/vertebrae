@@ -133,6 +133,8 @@ pub struct UpdateTaskOptions {
     pub level: Option<String>,
     /// Revision feedback text
     pub revision_feedback: Option<Option<String>>,
+    /// Worktree path (Some(Some(x)) to set, Some(None) to clear)
+    pub worktree: Option<Option<String>>,
 }
 
 impl UpdateTaskOptions {
@@ -207,6 +209,18 @@ impl UpdateTaskOptions {
         self
     }
 
+    /// Set a new worktree path
+    pub fn with_worktree(mut self, worktree: impl Into<String>) -> Self {
+        self.worktree = Some(Some(worktree.into()));
+        self
+    }
+
+    /// Clear the worktree path
+    pub fn clear_worktree(mut self) -> Self {
+        self.worktree = Some(None);
+        self
+    }
+
     /// Check if any updates are specified
     pub fn has_updates(&self) -> bool {
         self.title.is_some()
@@ -216,6 +230,7 @@ impl UpdateTaskOptions {
             || !self.remove_tags.is_empty()
             || self.needs_human_review.is_some()
             || self.archived.is_some()
+            || self.worktree.is_some()
     }
 }
 
@@ -558,5 +573,29 @@ mod tests {
     fn update_task_options_has_updates_empty() {
         let opts = UpdateTaskOptions::new();
         assert!(!opts.has_updates());
+    }
+
+    #[test]
+    fn update_task_options_with_worktree() {
+        let opts = UpdateTaskOptions::new().with_worktree("/path/to/worktree");
+        assert_eq!(opts.worktree, Some(Some("/path/to/worktree".to_string())));
+    }
+
+    #[test]
+    fn update_task_options_clear_worktree() {
+        let opts = UpdateTaskOptions::new().clear_worktree();
+        assert_eq!(opts.worktree, Some(None));
+    }
+
+    #[test]
+    fn update_task_options_worktree_default_is_none() {
+        let opts = UpdateTaskOptions::new();
+        assert!(opts.worktree.is_none());
+    }
+
+    #[test]
+    fn update_task_options_has_updates_includes_worktree() {
+        let opts = UpdateTaskOptions::new().with_worktree("/path");
+        assert!(opts.has_updates());
     }
 }
