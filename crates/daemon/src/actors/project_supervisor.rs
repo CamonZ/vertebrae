@@ -220,11 +220,14 @@ pub fn parse_cancel_step_payload(payload: &serde_json::Value) -> Result<CancelSt
 /// Build a `StepConfig` from a parsed `RunStepPayload`.
 ///
 /// This is a pure function so it can be tested without an actor.
+/// - Uses the `prompt` field directly from the payload (composed by Sacrum).
 /// - Parses `agent_config` JSON into an `AgentConfig` struct.
 /// - Carries `agents` and `skills` from the payload into the config.
-/// - Falls back to a default prompt when `goal` is absent.
 pub fn build_step_config_from_payload(payload: &RunStepPayload) -> StepConfig {
-    let prompt = crate::prompt_composer::compose_prompt(payload);
+    let prompt = match payload.prompt.as_deref().filter(|s| !s.is_empty()) {
+        Some(p) => p.to_string(),
+        None => format!("Execute step: {}", payload.step_name),
+    };
 
     let agent_config: AgentConfig =
         serde_json::from_value(payload.agent_config.clone()).unwrap_or_default();
@@ -1125,14 +1128,14 @@ mod tests {
     // ===== build_step_config_from_payload tests =====
 
     #[test]
-    fn build_step_config_with_full_agent_config() {
+    fn build_step_config_passes_prompt_through_directly() {
         let payload = parse_run_step_payload(&serde_json::json!({
             "id": "exec-1",
             "task_id": "task-1",
             "workflow_id": "wf-1",
             "step_name": "implement",
             "status": "pending",
-            "goal": "Write the feature code",
+            "prompt": "Implement JWT token validation\n\n## Task Context\n**Title:** JWT Auth",
             "agents": ["reviewer.md", "coder.md"],
             "skills": ["WebSearch", "Read"],
             "agent_config": {
@@ -1146,8 +1149,10 @@ mod tests {
 
         let config = build_step_config_from_payload(&payload);
 
-        assert!(config.prompt.starts_with("Write the feature code"));
-        assert!(config.prompt.contains("## Workflow Context"));
+        assert_eq!(
+            config.prompt,
+            "Implement JWT token validation\n\n## Task Context\n**Title:** JWT Auth"
+        );
         assert_eq!(
             config.agent_config.model,
             Some("claude-opus-4-20250514".to_string())
@@ -1166,7 +1171,7 @@ mod tests {
     }
 
     #[test]
-    fn build_step_config_with_null_agent_config_uses_defaults() {
+    fn build_step_config_falls_back_to_step_name_when_no_prompt() {
         let payload = parse_run_step_payload(&serde_json::json!({
             "id": "exec-2",
             "task_id": "task-2",
@@ -1178,8 +1183,7 @@ mod tests {
 
         let config = build_step_config_from_payload(&payload);
 
-        assert!(config.prompt.starts_with("Execute step: review"));
-        assert!(config.prompt.contains("## Workflow Context"));
+        assert_eq!(config.prompt, "Execute step: review");
         assert!(config.agent_config.model.is_none());
         assert!(config.agents.is_empty());
         assert!(config.skills.is_empty());
@@ -1187,11 +1191,27 @@ mod tests {
     }
 
     #[test]
-    fn build_step_config_goal_overrides_default_prompt() {
+    fn build_step_config_falls_back_to_step_name_when_prompt_is_empty() {
         let payload = parse_run_step_payload(&serde_json::json!({
             "id": "exec-3",
             "task_id": "task-3",
             "workflow_id": "wf-3",
+            "step_name": "deploy",
+            "status": "pending",
+            "prompt": ""
+        }))
+        .unwrap();
+
+        let config = build_step_config_from_payload(&payload);
+        assert_eq!(config.prompt, "Execute step: deploy");
+    }
+
+    #[test]
+    fn build_step_config_ignores_goal_field() {
+        let payload = parse_run_step_payload(&serde_json::json!({
+            "id": "exec-3b",
+            "task_id": "task-3b",
+            "workflow_id": "wf-3b",
             "step_name": "deploy",
             "status": "pending",
             "goal": "Deploy to production"
@@ -1199,8 +1219,10 @@ mod tests {
         .unwrap();
 
         let config = build_step_config_from_payload(&payload);
-        assert!(config.prompt.starts_with("Deploy to production"));
-        assert!(config.prompt.contains("## Workflow Context"));
+        assert_eq!(
+            config.prompt, "Execute step: deploy",
+            "Should not use goal field for prompt; goal is ignored by the daemon"
+        );
     }
 
     #[test]
