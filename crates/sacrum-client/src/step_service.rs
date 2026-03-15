@@ -5,7 +5,7 @@
 
 use async_trait::async_trait;
 use serde_json::json;
-use vertebrae_core::error::ServiceResult;
+use vertebrae_core::error::{ServiceError, ServiceResult};
 use vertebrae_core::models::{AgentConfig, Step, StepUpdate};
 use vertebrae_core::step_service::StepService;
 
@@ -76,6 +76,8 @@ impl SacrumStepService {
 impl StepService for SacrumStepService {
     async fn create_step(&self, step: &Step) -> ServiceResult<Step> {
         let query = with_fragments(CREATE_STEP, &[STEP_FIELDS]);
+        let agent_config_str = serde_json::to_string(&step.agent_config)
+            .map_err(|e| ServiceError::validation_failed(format!("Invalid agent config: {}", e)))?;
         let variables = json!({
             "workflow_id": step.workflow_id,
             "name": step.name,
@@ -84,6 +86,7 @@ impl StepService for SacrumStepService {
             "eval_prompt": step.eval_prompt,
             "agents": step.agents,
             "skills": step.skills,
+            "agent_config": agent_config_str,
             "is_final": step.is_final,
             "step_order": step.order,
         });
@@ -188,7 +191,10 @@ impl StepService for SacrumStepService {
             variables["skills"] = json!(skills);
         }
         if let Some(agent_config) = &updates.agent_config {
-            variables["agent_config"] = agent_config.clone();
+            variables["agent_config"] =
+                json!(serde_json::to_string(agent_config).map_err(|e| {
+                    ServiceError::validation_failed(format!("Invalid agent config: {}", e))
+                })?);
         }
         if let Some(is_final) = updates.is_final {
             variables["is_final"] = json!(is_final);
