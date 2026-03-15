@@ -76,6 +76,8 @@ function createTask(overrides?: Partial<Task>): Task {
     workflow_name: null,
     step_name: null,
     needs_human_review: null,
+    archived: false,
+    worktree: null,
     review_comment: null,
     revision_feedback: null,
     rejection_reason: null,
@@ -526,7 +528,7 @@ describe("StepDetailPanel", () => {
       ).toBeInTheDocument();
     });
 
-    it("hides prompt section when prompt is null", () => {
+    it("shows prompt section with placeholder when prompt is null", () => {
       const step = createStep({ prompt: null });
       vi.mocked(hooks.useStep).mockReturnValue({
         step,
@@ -536,7 +538,8 @@ describe("StepDetailPanel", () => {
       });
 
       render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
-      expect(screen.queryByText("Prompt")).not.toBeInTheDocument();
+      expect(screen.getByText("Prompt")).toBeInTheDocument();
+      expect(screen.getByText("Click to add prompt...")).toBeInTheDocument();
     });
 
     it("displays eval_prompt when set with distinct styling", () => {
@@ -561,7 +564,7 @@ describe("StepDetailPanel", () => {
       expect(evalLabel).toHaveClass("text-warning");
     });
 
-    it("hides eval_prompt section when eval_prompt is null", () => {
+    it("shows eval_prompt section with placeholder when eval_prompt is null", () => {
       const step = createStep({ eval_prompt: null });
       vi.mocked(hooks.useStep).mockReturnValue({
         step,
@@ -571,7 +574,8 @@ describe("StepDetailPanel", () => {
       });
 
       render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
-      expect(screen.queryByText("Eval Prompt")).not.toBeInTheDocument();
+      expect(screen.getByText("Eval Prompt")).toBeInTheDocument();
+      expect(screen.getByText("Click to add eval prompt...")).toBeInTheDocument();
     });
 
     it("displays both prompt and eval_prompt when both are set", () => {

@@ -3,10 +3,10 @@
 pub mod claude_session;
 pub mod commands;
 pub mod events;
+pub mod helpers;
 pub mod project_config;
 pub mod types;
 pub mod websocket_client;
-pub mod workflow_runner;
 
 #[cfg(test)]
 pub mod mock;
@@ -29,7 +29,6 @@ use commands::AppState;
 use events::{
     SectionChangedEvent, SessionLogCreatedEvent, StepChangedEvent, StepExecutionChangedEvent,
     StepTransitionChangedEvent, TaskChangedEvent, TaskStepChangedEvent, WorkflowChangedEvent,
-    WorkflowExecutionEvent,
 };
 use project_config::ProjectConfig;
 
@@ -107,7 +106,7 @@ fn create_builder() -> Builder {
             commands::update_step,
             commands::delete_step,
             // Workflow execution commands
-            commands::run_workflow,
+            commands::run_step,
             commands::orchestrate_task,
             // Claude session commands (JSONL streaming)
             commands::create_claude_session,
@@ -125,7 +124,6 @@ fn create_builder() -> Builder {
             StepTransitionChangedEvent,
             SessionLogCreatedEvent,
             SectionChangedEvent,
-            WorkflowExecutionEvent,
             // Claude session events
             ClaudeSessionInitEvent,
             ClaudeTextEvent,

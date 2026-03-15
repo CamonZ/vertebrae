@@ -147,7 +147,7 @@ export function ProjectSetupPage() {
                       </span>
                     </div>
                     <div className="mt-1 truncate text-sm text-text-tertiary">
-                      {project.url || project.project_id}
+                      {project.path || project.project_id}
                     </div>
                   </div>
                   <button

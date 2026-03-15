@@ -1,4 +1,3 @@
-import { useState, useCallback } from "react";
 import type { Workflow, Step } from "../../bindings";
 import { commands } from "../../bindings";
 import { ResizablePanel } from "../ResizablePanel";
@@ -7,7 +6,6 @@ interface WorkflowDetailPanelProps {
   workflow: Workflow | null;
   steps?: Step[];
   taskCount?: number;
-  tasks?: { id: string; title: string }[];
   onClose?: () => void;
   onStepSelect?: (step: Step) => void;
   onStepCreated?: () => void;
@@ -72,44 +70,11 @@ export function WorkflowDetailPanel({
   workflow,
   steps = [],
   taskCount = 0,
-  tasks = [],
   onClose,
   onStepSelect,
   onStepCreated,
   onBack,
 }: WorkflowDetailPanelProps) {
-  const [isRunning, setIsRunning] = useState(false);
-  const [runProgress, setRunProgress] = useState({ current: 0, total: 0 });
-  const [runError, setRunError] = useState<string | null>(null);
-
-  // Handle running workflow for all tasks
-  const handleRunAll = useCallback(async () => {
-    if (isRunning || tasks.length === 0) return;
-
-    setIsRunning(true);
-    setRunError(null);
-    setRunProgress({ current: 0, total: tasks.length });
-
-    for (let i = 0; i < tasks.length; i++) {
-      setRunProgress({ current: i + 1, total: tasks.length });
-      const task = tasks[i];
-      try {
-        const result = await commands.runWorkflow(task.id);
-        if (result.status === "error") {
-          setRunError(`${task.id} "${task.title}": ${result.error.message}`);
-          break;
-        }
-      } catch (err) {
-        setRunError(
-          `${task.id} "${task.title}": ${err instanceof Error ? err.message : "Failed"}`
-        );
-        break;
-      }
-    }
-
-    setIsRunning(false);
-  }, [isRunning, tasks]);
-
   if (!workflow) {
     return null;
   }
@@ -143,75 +108,6 @@ export function WorkflowDetailPanel({
           </h2>
         </div>
         <div className="flex items-center gap-2">
-          {/* Run All Button - only show if there are tasks */}
-          {tasks.length > 0 && (
-            <button
-              type="button"
-              onClick={handleRunAll}
-              disabled={isRunning}
-              className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
-                isRunning
-                  ? "cursor-not-allowed bg-primary/20 text-primary/50"
-                  : "bg-primary/10 text-primary hover:bg-primary/20 hover:shadow-glow-sm"
-              }`}
-              aria-label={isRunning ? "Running workflows..." : "Run all tasks"}
-              title={
-                isRunning
-                  ? `Running ${runProgress.current}/${runProgress.total}...`
-                  : `Run workflow for all ${tasks.length} tasks`
-              }
-            >
-              {isRunning ? (
-                <>
-                  <svg
-                    className="h-3.5 w-3.5 animate-spin"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                  >
-                    <circle
-                      className="opacity-25"
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      stroke="currentColor"
-                      strokeWidth="4"
-                    />
-                    <path
-                      className="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                    />
-                  </svg>
-                  <span>
-                    {runProgress.current}/{runProgress.total}
-                  </span>
-                </>
-              ) : (
-                <>
-                  <svg
-                    className="h-3.5 w-3.5"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"
-                    />
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                    />
-                  </svg>
-                  <span>Run All</span>
-                </>
-              )}
-            </button>
-          )}
           {onClose && (
             <button
               type="button"
@@ -236,35 +132,6 @@ export function WorkflowDetailPanel({
           )}
         </div>
       </div>
-
-      {/* Run error banner */}
-      {runError && (
-        <div className="border-b border-error/20 bg-error/5 px-4 py-2">
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-xs text-error">{runError}</p>
-            <button
-              type="button"
-              onClick={() => setRunError(null)}
-              className="rounded p-0.5 text-error/60 hover:bg-error/10 hover:text-error"
-              aria-label="Dismiss error"
-            >
-              <svg
-                className="h-3 w-3"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M6 18L18 6M6 6l12 12"
-                />
-              </svg>
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* Workflow title */}
       <div className="border-b border-border px-4 py-3">

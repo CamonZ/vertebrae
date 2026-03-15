@@ -78,7 +78,6 @@ vi.mock("../../hooks/useTask", () => ({
 vi.mock("../../bindings", () => ({
   commands: {
     updateTask: vi.fn().mockResolvedValue({ status: "ok", data: null }),
-    runWorkflow: vi.fn(),
     addSection: vi.fn().mockResolvedValue({ status: "ok", data: null }),
     editSection: vi.fn().mockResolvedValue({ status: "ok", data: null }),
     removeSection: vi.fn().mockResolvedValue({ status: "ok", data: null }),

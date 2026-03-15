@@ -94,49 +94,6 @@ pub enum StepExecutionChangeType {
     StatusChanged,
 }
 
-/// Event payload for workflow execution progress.
-/// Emitted during workflow step execution to track progress.
-#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
-pub struct WorkflowExecutionEvent {
-    pub task_id: String,
-    pub workflow_id: String,
-    pub event_type: WorkflowExecutionEventType,
-}
-
-/// The type of execution event that occurred.
-#[derive(Debug, Clone, Serialize, Deserialize, Type)]
-pub enum WorkflowExecutionEventType {
-    /// Workflow execution started
-    Started,
-    /// Orchestrator phase started
-    OrchestratorStarted {
-        execution_id: String,
-        step_name: String,
-    },
-    /// Orchestrator phase completed, prompt ready
-    OrchestratorCompleted { execution_id: String },
-    /// Orchestrator phase failed
-    OrchestratorFailed { execution_id: String, error: String },
-    /// A step execution started (execution phase)
-    StepStarted {
-        execution_id: String,
-        step_name: String,
-    },
-    /// Step produced output
-    StepProgress {
-        execution_id: String,
-        output_lines: Vec<String>,
-    },
-    /// A step completed successfully
-    StepCompleted { execution_id: String },
-    /// A step failed
-    StepFailed { execution_id: String, error: String },
-    /// Entire workflow completed successfully
-    Completed,
-    /// Workflow failed
-    Failed { error: String },
-}
-
 /// Event payload for step transition changes.
 /// Emitted when a step transition is created or deleted.
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]

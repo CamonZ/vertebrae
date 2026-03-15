@@ -854,122 +854,56 @@ pub async fn create_step(
 /// Updates the step with the given ID. Only fields that are Some will be updated.
 #[tauri::command]
 #[specta::specta]
-#[allow(clippy::too_many_arguments)]
 pub async fn update_step(
     state: State<'_, AppState>,
     app_handle: tauri::AppHandle,
-    step_id: String,
-    name: Option<String>,
-    goal: Option<String>,
-    agents: Option<Vec<String>>,
-    skills: Option<Vec<String>>,
-    order: Option<i32>,
-    is_final: Option<bool>,
-    transitions_to: Option<Vec<String>>,
+    options: crate::types::UpdateStepOptions,
 ) -> Result<(), CommandError> {
     log::info!(
-        "update_step called with step_id: '{}', name: {:?}, goal: {:?}, agents: {:?}, skills: {:?}, order: {:?}, is_final: {:?}, transitions_to: {:?}",
-        step_id,
-        name,
-        goal,
-        agents,
-        skills,
-        order,
-        is_final,
-        transitions_to
+        "update_step called with step_id: '{}', name: {:?}, goal: {:?}, prompt: {:?}, eval_prompt: {:?}",
+        options.step_id,
+        options.name,
+        options.goal,
+        options.prompt,
+        options.eval_prompt,
     );
+    let step_id = options.step_id.clone();
     let service_guard = state.services.read().await;
     let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    update_step_inner(
-        service,
-        &step_id,
-        name,
-        goal,
-        agents,
-        skills,
-        order,
-        is_final,
-        transitions_to,
-    )
-    .await?;
+    let workflow_id = update_step_inner(service, &step_id, options.into()).await?;
 
-    // Get the step to find its workflow_id
-    if let Some(step) = service.steps().get_step(&step_id).await? {
-        // Emit step changed event for detail panel listeners
-        if let Some(id) = step.id {
-            let _ = app_handle.emit(
-                "step-changed-event",
-                crate::events::StepChangedEvent {
-                    step_id: id.clone(),
-                    workflow_id: step.workflow_id.clone(),
-                    change_type: crate::events::StepChangeType::Updated,
-                },
-            );
-        }
-    }
+    // Emit step changed event for detail panel listeners
+    let _ = app_handle.emit(
+        "step-changed-event",
+        crate::events::StepChangedEvent {
+            step_id: step_id.clone(),
+            workflow_id,
+            change_type: crate::events::StepChangeType::Updated,
+        },
+    );
 
     Ok(())
 }
 
 /// Inner logic for update_step, separated for testability.
-#[allow(clippy::too_many_arguments)]
+/// Returns the step's workflow_id for event emission.
 pub(crate) async fn update_step_inner(
     service: &VertebraeServices,
     step_id: &str,
-    name: Option<String>,
-    goal: Option<String>,
-    agents: Option<Vec<String>>,
-    skills: Option<Vec<String>>,
-    order: Option<i32>,
-    is_final: Option<bool>,
-    transitions_to: Option<Vec<String>>,
-) -> Result<(), CommandError> {
-    // Verify step exists
+    update: vertebrae_core::StepUpdate,
+) -> Result<String, CommandError> {
+    // Verify step exists and get workflow_id
     let existing = service.steps().get_step(step_id).await?;
-    if existing.is_none() {
-        return Err(CommandError {
-            message: format!("Step not found: {}", step_id),
-        });
-    }
-
-    // Build the update
-    let mut update = vertebrae_core::StepUpdate::new();
-
-    if let Some(name) = name {
-        update = update.with_name(&name);
-    }
-
-    if let Some(goal) = goal {
-        update = update.with_goal(&goal);
-    }
-
-    if let Some(agents) = agents {
-        update = update.with_agents(agents);
-    }
-
-    if let Some(skills) = skills {
-        update = update.with_skills(skills);
-    }
-
-    if let Some(order) = order {
-        update = update.with_order(order);
-    }
-
-    if let Some(is_final) = is_final {
-        update = update.with_is_final(is_final);
-    }
-
-    if let Some(transitions) = transitions_to {
-        let transition_ids: Vec<String> = transitions.iter().map(|id| id.to_lowercase()).collect();
-        update = update.with_transitions_to(transition_ids);
-    }
+    let step = existing.ok_or_else(|| CommandError {
+        message: format!("Step not found: {}", step_id),
+    })?;
 
     service.steps().update_step(step_id, &update).await?;
     log::info!("update_step succeeded for step: {}", step_id);
-    Ok(())
+    Ok(step.workflow_id)
 }
 
 /// Delete a step
@@ -1027,62 +961,37 @@ pub(crate) async fn delete_step_inner(
 // Workflow Execution Commands
 // ============================================================================
 
-/// Start a workflow execution for a task
+/// Run a single workflow step for a task via Sacrum
+///
+/// Sacrum creates a StepExecution record and broadcasts a run_step event
+/// to connected daemon clients, which pick up and execute the step.
 #[tauri::command]
 #[specta::specta]
-pub async fn run_workflow(
+pub async fn run_step(
     state: State<'_, AppState>,
-    app_handle: tauri::AppHandle,
     task_id: String,
-) -> Result<(), CommandError> {
-    log::info!("run_workflow called for task: {}", task_id);
+    workflow_id: String,
+    step_id: String,
+) -> Result<crate::types::StepExecution, CommandError> {
+    log::info!(
+        "run_step called for task: {}, workflow: {}, step: {}",
+        task_id,
+        workflow_id,
+        step_id
+    );
 
     let service_guard = state.services.read().await;
     let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    // Verify task has a workflow assigned
-    let task = service
-        .tasks()
-        .get_task(&task_id)
-        .await
-        .map_err(CommandError::from)?;
+    let execution = service
+        .executions()
+        .run_step(&task_id, &workflow_id, &step_id)
+        .await?;
 
-    if task.workflow_id.is_none() {
-        return Err(CommandError {
-            message: format!("Task {} has no assigned workflow", task_id),
-        });
-    }
-
-    // Spawn execution in background
-    tauri::async_runtime::spawn({
-        // Capture individual Arc-wrapped services for the spawned task
-        let tasks = service_guard.as_ref().unwrap().tasks_arc();
-        let workflows = service_guard.as_ref().unwrap().workflows_arc();
-        let executions = service_guard.as_ref().unwrap().executions_arc();
-        let steps = service_guard.as_ref().unwrap().steps_arc();
-        let task_id_clone = task_id.clone();
-        let app_handle_clone = app_handle.clone();
-
-        async move {
-            if let Err(e) = crate::workflow_runner::execute_workflow(
-                task_id_clone,
-                tasks,
-                workflows,
-                executions,
-                steps,
-                app_handle_clone,
-            )
-            .await
-            {
-                log::error!("Workflow execution failed: {}", e);
-            }
-        }
-    });
-
-    log::info!("Workflow execution started for task: {}", task_id);
-    Ok(())
+    log::info!("Step execution started: {:?}", execution.id);
+    Ok(execution.into())
 }
 
 /// Orchestrate a task through its entire workflow via Sacrum's TaskOrchestrator FSM
@@ -2855,36 +2764,20 @@ mod tests {
         let created = services.steps().create_step(&step).await.unwrap();
         let step_id = created.id.unwrap();
 
-        update_step_inner(
-            &services,
-            &step_id,
-            Some("Updated".to_string()),
-            Some("New goal".to_string()),
-            None,
-            None,
-            None,
-            None,
-            None,
-        )
-        .await
-        .unwrap();
+        let update = vertebrae_core::StepUpdate::new()
+            .with_name("Updated")
+            .with_goal("New goal");
+        let wf_id = update_step_inner(&services, &step_id, update)
+            .await
+            .unwrap();
+        assert_eq!(wf_id, "wf-1");
     }
 
     #[tokio::test]
     async fn update_step_inner_nonexistent_returns_error() {
         let services = mock_services();
-        let result = update_step_inner(
-            &services,
-            "nonexistent",
-            Some("Name".to_string()),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-        )
-        .await;
+        let update = vertebrae_core::StepUpdate::new().with_name("Name");
+        let result = update_step_inner(&services, "nonexistent", update).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().message.contains("Step not found"));
     }
