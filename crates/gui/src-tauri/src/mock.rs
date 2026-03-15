@@ -925,6 +925,20 @@ impl ExecutionService for MockExecutionService {
         }
         Ok(())
     }
+
+    async fn orchestrate_task(&self, task_id: &str) -> ServiceResult<()> {
+        let s = self.state.lock().unwrap();
+        let task = s.tasks.values().find(|t| t.id == task_id).ok_or_else(|| {
+            ServiceError::validation_failed(format!("task not found: {}", task_id))
+        })?;
+        if task.workflow_id.is_none() {
+            return Err(ServiceError::validation_failed(format!(
+                "Task {} has no workflow assigned",
+                task_id
+            )));
+        }
+        Ok(())
+    }
 }
 
 // ============================================================================

@@ -23,6 +23,7 @@ pub mod refs;
 pub mod reject_step;
 pub mod review;
 pub mod run;
+pub mod run_workflow;
 pub mod section;
 pub mod sections;
 pub mod show;
@@ -55,6 +56,7 @@ pub use refs::RefsCommand;
 pub use reject_step::RejectStepCommand;
 pub use review::ReviewCommand;
 pub use run::RunCommand;
+pub use run_workflow::RunWorkflowCommand;
 pub use section::SectionCommand;
 pub use sections::SectionsCommand;
 pub use show::ShowCommand;
@@ -168,8 +170,11 @@ pub enum Command {
     Refs(RefsCommand),
     /// Toggle or set the needs_human_review flag on a task
     Review(ReviewCommand),
-    /// Run a workflow for a task
+    /// Run the current step for a task
     Run(RunCommand),
+    /// Orchestrate a task through its entire workflow
+    #[command(name = "run-workflow")]
+    RunWorkflow(RunWorkflowCommand),
     /// Add a typed content section to a task
     Section(SectionCommand),
     /// List all sections for a task
@@ -339,6 +344,7 @@ impl Command {
             Command::Refs(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::Review(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::Run(cmd) => cmd.task_id = resolve_id(&cmd.task_id, services).await?,
+            Command::RunWorkflow(cmd) => cmd.task_id = resolve_id(&cmd.task_id, services).await?,
             Command::Section(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::Sections(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::Show(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
@@ -467,6 +473,10 @@ impl Command {
                 Ok(CommandResult::Message(result))
             }
             Command::Run(cmd) => {
+                let result = cmd.execute(services).await?;
+                Ok(CommandResult::Message(result))
+            }
+            Command::RunWorkflow(cmd) => {
                 let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(result))
             }
