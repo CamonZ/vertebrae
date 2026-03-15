@@ -16,7 +16,7 @@ use tauri::Emitter;
 use tauri_specta::Event;
 use tokio::sync::{mpsc, oneshot, RwLock};
 
-use crate::workflow_runner::find_claude_binary;
+use crate::helpers::find_claude_binary;
 
 // ============================================================================
 // Events emitted to the frontend
@@ -310,6 +310,7 @@ impl ClaudeSessionManager {
             "stream-json",
             "--verbose",
             "--include-partial-messages",
+            "--dangerously-skip-permissions",
         ];
 
         // Store resume_id for arg lifetime
