@@ -47,6 +47,8 @@ impl WorkflowShowCommand {
                     name: s.name,
                     model: s.agent_config.model,
                     order: s.order,
+                    prompt: s.prompt,
+                    eval_prompt: s.eval_prompt,
                 })
                 .collect()
         } else {

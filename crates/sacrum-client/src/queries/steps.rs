@@ -5,6 +5,8 @@ pub const STEP_FIELDS: &str = r#"
         id
         name
         goal
+        prompt
+        eval_prompt
         agents
         skills
         agent_config
@@ -45,6 +47,8 @@ pub const CREATE_STEP: &str = r#"
         $workflow_id: Uuid4!,
         $name: String!,
         $goal: String,
+        $prompt: String,
+        $eval_prompt: String,
         $agents: [String!],
         $skills: [String!],
         $agent_config: Json,
@@ -55,6 +59,8 @@ pub const CREATE_STEP: &str = r#"
             workflow_id: $workflow_id,
             name: $name,
             goal: $goal,
+            prompt: $prompt,
+            eval_prompt: $eval_prompt,
             agents: $agents,
             skills: $skills,
             agent_config: $agent_config,
@@ -71,6 +77,8 @@ pub const UPDATE_STEP: &str = r#"
         $id: Uuid4!,
         $name: String,
         $goal: String,
+        $prompt: String,
+        $eval_prompt: String,
         $agents: [String!],
         $skills: [String!],
         $agent_config: Json,
@@ -81,6 +89,8 @@ pub const UPDATE_STEP: &str = r#"
             id: $id,
             name: $name,
             goal: $goal,
+            prompt: $prompt,
+            eval_prompt: $eval_prompt,
             agents: $agents,
             skills: $skills,
             agent_config: $agent_config,
