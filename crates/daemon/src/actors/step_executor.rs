@@ -58,6 +58,10 @@ pub struct StepExecutorConfig {
     pub project_root: PathBuf,
     /// Optional worktree path override. When set, used as current_dir instead of project_root.
     pub worktree: Option<PathBuf>,
+    /// Resolved absolute path to the Claude Code CLI binary.
+    pub claude_binary: PathBuf,
+    /// The user's full login shell PATH for the child process.
+    pub shell_path: String,
     pub execution_service: Arc<dyn ExecutionService>,
 }
 
@@ -98,7 +102,7 @@ impl std::fmt::Debug for StepExecutorMessage {
 }
 
 pub fn build_claude_command(config: &StepExecutorConfig) -> Command {
-    let mut cmd = Command::new("claude");
+    let mut cmd = Command::new(&config.claude_binary);
 
     let step = &config.step_config;
 
@@ -144,6 +148,10 @@ pub fn build_claude_command(config: &StepExecutorConfig) -> Command {
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .stdin(std::process::Stdio::null());
+
+    // Set PATH from the user's login shell so the child process can find
+    // tools like `mix`, `node`, `vtb`, etc. that aren't in launchd's minimal PATH.
+    cmd.env("PATH", &config.shell_path);
 
     cmd
 }
@@ -482,6 +490,8 @@ mod tests {
             step_config: make_step_config("test"),
             project_root: PathBuf::from("/tmp"),
             worktree: None,
+            claude_binary: PathBuf::from("/usr/local/bin/claude"),
+            shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
             execution_service: test_execution_service(),
         }
     }
@@ -526,6 +536,8 @@ mod tests {
             step_config: make_step_config("test prompt"),
             project_root: PathBuf::from("/home/user/project"),
             worktree: None,
+            claude_binary: PathBuf::from("/usr/local/bin/claude"),
+            shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
             execution_service: test_execution_service(),
         };
         let debug = format!("{:?}", config);
@@ -683,12 +695,14 @@ mod tests {
             step_config: make_step_config("Write tests"),
             project_root: PathBuf::from("/home/user/myproject"),
             worktree: None,
+            claude_binary: PathBuf::from("/usr/local/bin/claude"),
+            shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
             execution_service: test_execution_service(),
         };
 
         let cmd = build_claude_command(&config);
         let program = cmd.as_std().get_program();
-        assert_eq!(program, "claude");
+        assert_eq!(program, "/usr/local/bin/claude");
     }
 
     #[test]
@@ -699,6 +713,8 @@ mod tests {
             step_config: make_step_config("Implement feature Y"),
             project_root: PathBuf::from("/projects/test"),
             worktree: None,
+            claude_binary: PathBuf::from("/usr/local/bin/claude"),
+            shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
             execution_service: test_execution_service(),
         };
 
@@ -714,7 +730,7 @@ mod tests {
         assert!(args.contains(&DEFAULT_MODEL.to_string()));
 
         // Default permission mode should be bypassPermissions.
-        assert!(args.contains(&"--permissionMode".to_string()));
+        assert!(args.contains(&"--permission-mode".to_string()));
         assert!(args.contains(&"bypassPermissions".to_string()));
 
         // Prompt and output format always present.
@@ -737,6 +753,8 @@ mod tests {
             },
             project_root: PathBuf::from("/tmp"),
             worktree: None,
+            claude_binary: PathBuf::from("/usr/local/bin/claude"),
+            shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
             execution_service: test_execution_service(),
         };
 
@@ -764,6 +782,8 @@ mod tests {
             },
             project_root: PathBuf::from("/tmp"),
             worktree: None,
+            claude_binary: PathBuf::from("/usr/local/bin/claude"),
+            shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
             execution_service: test_execution_service(),
         };
 
@@ -798,6 +818,8 @@ mod tests {
             },
             project_root: PathBuf::from("/tmp"),
             worktree: None,
+            claude_binary: PathBuf::from("/usr/local/bin/claude"),
+            shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
             execution_service: test_execution_service(),
         };
 
@@ -808,7 +830,7 @@ mod tests {
             .map(|a| a.to_string_lossy().into_owned())
             .collect();
 
-        assert!(args.contains(&"--allowedTools".to_string()));
+        assert!(args.contains(&"--allowed-tools".to_string()));
         assert!(args.contains(&"WebSearch".to_string()));
         assert!(args.contains(&"Read".to_string()));
     }
@@ -827,6 +849,8 @@ mod tests {
             },
             project_root: PathBuf::from("/tmp"),
             worktree: None,
+            claude_binary: PathBuf::from("/usr/local/bin/claude"),
+            shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
             execution_service: test_execution_service(),
         };
 
@@ -863,6 +887,8 @@ mod tests {
             },
             project_root: PathBuf::from("/tmp"),
             worktree: None,
+            claude_binary: PathBuf::from("/usr/local/bin/claude"),
+            shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
             execution_service: test_execution_service(),
         };
 
@@ -874,11 +900,11 @@ mod tests {
             .collect();
 
         assert!(args.contains(&"claude-opus-4-20250514".to_string()));
-        assert!(args.contains(&"--maxBudgetUsd".to_string()));
+        assert!(args.contains(&"--max-budget-usd".to_string()));
         assert!(args.contains(&"5".to_string()));
-        assert!(args.contains(&"--appendSystemPrompt".to_string()));
+        assert!(args.contains(&"--append-system-prompt".to_string()));
         assert!(args.contains(&"Be careful".to_string()));
-        assert!(args.contains(&"--disallowedTools".to_string()));
+        assert!(args.contains(&"--disallowed-tools".to_string()));
         assert!(args.contains(&"Bash(rm*)".to_string()));
     }
 
@@ -895,6 +921,8 @@ mod tests {
             },
             project_root: PathBuf::from("/tmp"),
             worktree: None,
+            claude_binary: PathBuf::from("/usr/local/bin/claude"),
+            shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
             execution_service: test_execution_service(),
         };
 
@@ -917,6 +945,8 @@ mod tests {
             step_config: make_step_config("Do work"),
             project_root: PathBuf::from("/home/user/code"),
             worktree: None,
+            claude_binary: PathBuf::from("/usr/local/bin/claude"),
+            shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
             execution_service: test_execution_service(),
         };
 
@@ -938,6 +968,8 @@ mod tests {
             },
             project_root: PathBuf::from("/tmp"),
             worktree: None,
+            claude_binary: PathBuf::from("/usr/local/bin/claude"),
+            shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
             execution_service: test_execution_service(),
         };
 
@@ -1334,6 +1366,8 @@ mod tests {
             step_config: make_step_config("Do work in worktree"),
             project_root: PathBuf::from("/home/user/code"),
             worktree: Some(PathBuf::from("/home/user/code-worktree-abc")),
+            claude_binary: PathBuf::from("/usr/local/bin/claude"),
+            shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
             execution_service: test_execution_service(),
         };
 
@@ -1354,6 +1388,8 @@ mod tests {
             step_config: make_step_config("Do work without worktree"),
             project_root: PathBuf::from("/home/user/code"),
             worktree: None,
+            claude_binary: PathBuf::from("/usr/local/bin/claude"),
+            shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
             execution_service: test_execution_service(),
         };
 
@@ -1374,6 +1410,8 @@ mod tests {
             step_config: make_step_config("test"),
             project_root: PathBuf::from("/home/user/project"),
             worktree: Some(PathBuf::from("/home/user/project-wt-abc")),
+            claude_binary: PathBuf::from("/usr/local/bin/claude"),
+            shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
             execution_service: test_execution_service(),
         };
         let debug = format!("{:?}", config);

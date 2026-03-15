@@ -13,6 +13,7 @@ use ractor::Actor;
 use std::process;
 use tracing_subscriber::EnvFilter;
 
+use vertebrae_daemon::helpers::{find_claude_binary, resolve_shell_path};
 use vertebrae_daemon::{DaemonConfig, DaemonMessage, DaemonSupervisor, ResolvedConfig};
 
 /// Initialize structured logging using tracing-subscriber.
@@ -47,10 +48,20 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         "Starting vtb-daemon"
     );
 
+    let shell_path = resolve_shell_path();
+    tracing::info!(shell_path = %shell_path, "Resolved user shell PATH");
+
+    let claude_binary =
+        find_claude_binary(&shell_path).map_err(|e| format!("Cannot start daemon: {e}"))?;
+
+    tracing::info!(claude_binary = %claude_binary.display(), "Resolved Claude Code CLI path");
+
     // Spawn the DaemonSupervisor actor
     let daemon_config = DaemonConfig {
         base_url: config.sacrum_url.clone(),
         api_token: config.api_token.clone(),
+        claude_binary,
+        shell_path,
     };
 
     let (actor_ref, actor_handle) = Actor::spawn(

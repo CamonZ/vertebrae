@@ -28,6 +28,10 @@ pub struct ProjectConfig {
     pub services: Arc<VertebraeServices>,
     /// Project root directory (for running Claude Code CLI).
     pub project_root: PathBuf,
+    /// Resolved absolute path to the Claude Code CLI binary.
+    pub claude_binary: PathBuf,
+    /// The user's full login shell PATH for child processes.
+    pub shell_path: String,
 }
 
 impl std::fmt::Debug for ProjectConfig {
@@ -35,6 +39,8 @@ impl std::fmt::Debug for ProjectConfig {
         f.debug_struct("ProjectConfig")
             .field("project_id", &self.project_id)
             .field("project_root", &self.project_root)
+            .field("claude_binary", &self.claude_binary)
+            .field("shell_path", &"<...>")
             .field("services", &"<VertebraeServices>")
             .finish()
     }
@@ -46,7 +52,6 @@ pub enum ProjectMessage {
     ExecuteStep {
         execution_id: String,
         task_id: String,
-        workflow_id: String,
         step_config: Box<StepConfig>,
         worktree: Option<PathBuf>,
     },
@@ -74,14 +79,12 @@ impl std::fmt::Debug for ProjectMessage {
             Self::ExecuteStep {
                 execution_id,
                 task_id,
-                workflow_id,
                 step_config,
                 worktree,
             } => f
                 .debug_struct("ExecuteStep")
                 .field("execution_id", execution_id)
                 .field("task_id", task_id)
-                .field("workflow_id", workflow_id)
                 .field("step_config", step_config)
                 .field("worktree", worktree)
                 .finish(),
@@ -160,10 +163,6 @@ pub struct RunStepPayload {
     pub id: String,
     /// The task this step belongs to.
     pub task_id: String,
-    /// The workflow this step belongs to.
-    pub workflow_id: String,
-    /// The workflow step name.
-    pub step_name: String,
     /// The composed prompt for this step execution (built by Sacrum).
     #[serde(default)]
     pub prompt: Option<String>,
@@ -216,7 +215,7 @@ pub fn parse_cancel_step_payload(payload: &serde_json::Value) -> Result<CancelSt
 pub fn build_step_config_from_payload(payload: &RunStepPayload) -> StepConfig {
     let prompt = match payload.prompt.as_deref().filter(|s| !s.is_empty()) {
         Some(p) => p.to_string(),
-        None => format!("Execute step: {}", payload.step_name),
+        None => "Execute step".to_string(),
     };
 
     let agent_config: AgentConfig =
@@ -238,6 +237,10 @@ pub struct ProjectState {
     services: Arc<VertebraeServices>,
     /// Project root directory (for running Claude Code CLI).
     project_root: PathBuf,
+    /// Resolved absolute path to the Claude Code CLI binary.
+    claude_binary: PathBuf,
+    /// The user's full login shell PATH for child processes.
+    shell_path: String,
     /// Map from execution_id to the running StepExecutor actor ref.
     /// Used to route cancel_step events to the correct executor.
     running_executors: HashMap<String, ActorRef<StepExecutorMessage>>,
@@ -269,6 +272,8 @@ impl Actor for ProjectSupervisor {
             project_id: args.project_id,
             services: args.services,
             project_root: args.project_root,
+            claude_binary: args.claude_binary,
+            shell_path: args.shell_path,
             running_executors: HashMap::new(),
         })
     }
@@ -286,7 +291,6 @@ impl Actor for ProjectSupervisor {
             ProjectMessage::ExecuteStep {
                 execution_id,
                 task_id,
-                workflow_id: _,
                 step_config,
                 worktree,
             } => {
@@ -391,11 +395,10 @@ impl ProjectSupervisor {
             ProjectAction::RunStep => match parse_run_step_payload(&msg.payload) {
                 Ok(payload) => {
                     tracing::info!(
-                        "[project:{}] run_step received: execution_id={}, task_id={}, step_name={}",
+                        "[project:{}] run_step received: execution_id={}, task_id={}",
                         state.project_id,
                         payload.id,
                         payload.task_id,
-                        payload.step_name
                     );
 
                     let step_config = build_step_config_from_payload(&payload);
@@ -404,7 +407,6 @@ impl ProjectSupervisor {
                     if let Err(e) = myself.cast(ProjectMessage::ExecuteStep {
                         execution_id: payload.id,
                         task_id: payload.task_id,
-                        workflow_id: payload.workflow_id,
                         step_config: Box::new(step_config),
                         worktree,
                     }) {
@@ -532,6 +534,8 @@ impl ProjectSupervisor {
             step_config,
             project_root: state.project_root.clone(),
             worktree,
+            claude_binary: state.claude_binary.clone(),
+            shell_path: state.shell_path.clone(),
             execution_service: state.services.executions_arc(),
         };
 
@@ -648,7 +652,7 @@ impl ProjectSupervisor {
                     params = params
                         .with_input_tokens(m.input_tokens)
                         .with_output_tokens(m.output_tokens)
-                        .with_cost(m.cost_usd)
+                        .with_cost(m.cost_usd.to_string())
                         .with_duration_ms(m.duration_ms);
                 }
 
@@ -879,6 +883,8 @@ mod tests {
             project_id: "proj-123".to_string(),
             services: test_services(),
             project_root: PathBuf::from("/home/user/project"),
+            claude_binary: PathBuf::from("/usr/local/bin/claude"),
+            shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
         };
         let debug = format!("{:?}", config);
         assert!(debug.contains("proj-123"));
@@ -903,7 +909,6 @@ mod tests {
         let pm = ProjectMessage::ExecuteStep {
             execution_id: "exec-789".to_string(),
             task_id: "task-xyz".to_string(),
-            workflow_id: "wf-456".to_string(),
             step_config: Box::new(StepConfig {
                 prompt: "Implement feature".to_string(),
                 agent_config: AgentConfig::new().with_model("claude-sonnet-4-20250514"),
@@ -916,7 +921,6 @@ mod tests {
         assert!(debug.contains("ExecuteStep"));
         assert!(debug.contains("exec-789"));
         assert!(debug.contains("task-xyz"));
-        assert!(debug.contains("wf-456"));
         assert!(debug.contains("Implement feature"));
     }
 
@@ -998,8 +1002,6 @@ mod tests {
         let payload = serde_json::json!({
             "id": "exec-uuid-1",
             "task_id": "task-uuid-1",
-            "workflow_id": "wf-uuid-1",
-            "step_name": "implement",
             "prompt": "Implement the feature",
             "agents": ["agent1"],
             "skills": ["skill1", "skill2"],
@@ -1009,8 +1011,6 @@ mod tests {
         let result = parse_run_step_payload(&payload).unwrap();
         assert_eq!(result.id, "exec-uuid-1");
         assert_eq!(result.task_id, "task-uuid-1");
-        assert_eq!(result.workflow_id, "wf-uuid-1");
-        assert_eq!(result.step_name, "implement");
         assert_eq!(result.prompt.as_deref(), Some("Implement the feature"));
         assert_eq!(result.agents, vec!["agent1"]);
         assert_eq!(result.skills, vec!["skill1", "skill2"]);
@@ -1024,9 +1024,7 @@ mod tests {
     fn parse_run_step_minimal_payload() {
         let payload = serde_json::json!({
             "id": "exec-uuid-2",
-            "task_id": "task-uuid-2",
-            "workflow_id": "wf-uuid-2",
-            "step_name": "review"
+            "task_id": "task-uuid-2"
         });
 
         let result = parse_run_step_payload(&payload).unwrap();
@@ -1041,9 +1039,8 @@ mod tests {
     #[test]
     fn parse_run_step_missing_required_field() {
         let payload = serde_json::json!({
-            "id": "exec-uuid-3",
-            "task_id": "task-uuid-3"
-            // missing workflow_id, step_name
+            "id": "exec-uuid-3"
+            // missing task_id
         });
 
         let result = parse_run_step_payload(&payload);
@@ -1072,7 +1069,6 @@ mod tests {
 
         let result = parse_run_step_payload(&payload).unwrap();
         assert_eq!(result.id, "exec-uuid-4");
-        assert_eq!(result.step_name, "deploy");
     }
 
     // ===== CancelStepPayload tests =====
@@ -1126,8 +1122,6 @@ mod tests {
         let payload = parse_run_step_payload(&serde_json::json!({
             "id": "exec-1",
             "task_id": "task-1",
-            "workflow_id": "wf-1",
-            "step_name": "implement",
             "prompt": "Implement JWT token validation\n\n## Task Context\n**Title:** JWT Auth",
             "agents": ["reviewer.md", "coder.md"],
             "skills": ["WebSearch", "Read"],
@@ -1164,18 +1158,16 @@ mod tests {
     }
 
     #[test]
-    fn build_step_config_falls_back_to_step_name_when_no_prompt() {
+    fn build_step_config_falls_back_when_no_prompt() {
         let payload = parse_run_step_payload(&serde_json::json!({
             "id": "exec-2",
-            "task_id": "task-2",
-            "workflow_id": "wf-2",
-            "step_name": "review"
+            "task_id": "task-2"
         }))
         .unwrap();
 
         let config = build_step_config_from_payload(&payload);
 
-        assert_eq!(config.prompt, "Execute step: review");
+        assert_eq!(config.prompt, "Execute step");
         assert!(config.agent_config.model.is_none());
         assert!(config.agents.is_empty());
         assert!(config.skills.is_empty());
@@ -1183,18 +1175,16 @@ mod tests {
     }
 
     #[test]
-    fn build_step_config_falls_back_to_step_name_when_prompt_is_empty() {
+    fn build_step_config_falls_back_when_prompt_is_empty() {
         let payload = parse_run_step_payload(&serde_json::json!({
             "id": "exec-3",
             "task_id": "task-3",
-            "workflow_id": "wf-3",
-            "step_name": "deploy",
             "prompt": ""
         }))
         .unwrap();
 
         let config = build_step_config_from_payload(&payload);
-        assert_eq!(config.prompt, "Execute step: deploy");
+        assert_eq!(config.prompt, "Execute step");
     }
 
     #[test]
@@ -1202,8 +1192,6 @@ mod tests {
         let payload = parse_run_step_payload(&serde_json::json!({
             "id": "exec-4",
             "task_id": "task-4",
-            "workflow_id": "wf-4",
-            "step_name": "implement",
             "agent_config": {"model": "haiku"}
         }))
         .unwrap();
@@ -1218,8 +1206,6 @@ mod tests {
         let payload = parse_run_step_payload(&serde_json::json!({
             "id": "exec-5",
             "task_id": "task-5",
-            "workflow_id": "wf-5",
-            "step_name": "review",
             "agent_config": {
                 "permission_mode": "plan"
             }
@@ -1238,8 +1224,6 @@ mod tests {
         let payload = parse_run_step_payload(&serde_json::json!({
             "id": "exec-6",
             "task_id": "task-6",
-            "workflow_id": "wf-6",
-            "step_name": "test",
             "agent_config": {}
         }))
         .unwrap();
@@ -1255,8 +1239,6 @@ mod tests {
         let payload = serde_json::json!({
             "id": "exec-wt-1",
             "task_id": "task-wt-1",
-            "workflow_id": "wf-wt-1",
-            "step_name": "implement",
             "worktree": "/home/user/code/project-worktree-abc"
         });
 
@@ -1271,9 +1253,7 @@ mod tests {
     fn parse_run_step_payload_without_worktree() {
         let payload = serde_json::json!({
             "id": "exec-wt-2",
-            "task_id": "task-wt-2",
-            "workflow_id": "wf-wt-2",
-            "step_name": "review"
+            "task_id": "task-wt-2"
         });
 
         let result = parse_run_step_payload(&payload).unwrap();
@@ -1288,8 +1268,6 @@ mod tests {
         let payload = serde_json::json!({
             "id": "exec-wt-3",
             "task_id": "task-wt-3",
-            "workflow_id": "wf-wt-3",
-            "step_name": "deploy",
             "worktree": null
         });
 
@@ -1305,7 +1283,6 @@ mod tests {
         let pm = ProjectMessage::ExecuteStep {
             execution_id: "exec-wt".to_string(),
             task_id: "task-wt".to_string(),
-            workflow_id: "wf-wt".to_string(),
             step_config: Box::new(StepConfig {
                 prompt: "Implement in worktree".to_string(),
                 agent_config: AgentConfig::default(),

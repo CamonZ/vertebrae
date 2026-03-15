@@ -37,8 +37,8 @@ pub struct UpdateExecutionStatusParams {
     pub input_tokens: Option<i64>,
     /// Optional output token count.
     pub output_tokens: Option<i64>,
-    /// Optional cost in USD.
-    pub cost: Option<f64>,
+    /// Optional cost in USD (as decimal string for precision).
+    pub cost: Option<String>,
     /// Optional duration in milliseconds.
     pub duration_ms: Option<i64>,
 }
@@ -74,9 +74,9 @@ impl UpdateExecutionStatusParams {
         self
     }
 
-    /// Set the cost in USD.
-    pub fn with_cost(mut self, cost: f64) -> Self {
-        self.cost = Some(cost);
+    /// Set the cost in USD (as decimal string for precision).
+    pub fn with_cost(mut self, cost: impl Into<String>) -> Self {
+        self.cost = Some(cost.into());
         self
     }
 
@@ -188,18 +188,12 @@ pub trait ExecutionService: Send + Sync {
     /// # Arguments
     ///
     /// * `task_id` - The task to run the step for
-    /// * `workflow_id` - The workflow the step belongs to
     /// * `step_id` - The specific workflow step to execute
     ///
     /// # Returns
     ///
     /// The created StepExecution.
-    async fn run_step(
-        &self,
-        task_id: &str,
-        workflow_id: &str,
-        step_id: &str,
-    ) -> ServiceResult<StepExecution>;
+    async fn run_step(&self, task_id: &str, step_id: &str) -> ServiceResult<StepExecution>;
 
     /// Update execution status and optional fields in one call
     ///
@@ -271,8 +265,9 @@ mod tests {
 
     #[test]
     fn with_cost_sets_field() {
-        let params = UpdateExecutionStatusParams::new(ExecutionStatus::Completed).with_cost(0.003);
-        assert_eq!(params.cost, Some(0.003));
+        let params =
+            UpdateExecutionStatusParams::new(ExecutionStatus::Completed).with_cost("0.003");
+        assert_eq!(params.cost.as_deref(), Some("0.003"));
     }
 
     #[test]
@@ -288,14 +283,14 @@ mod tests {
             .with_output("done")
             .with_input_tokens(2000)
             .with_output_tokens(1000)
-            .with_cost(0.05)
+            .with_cost("0.05")
             .with_duration_ms(10000);
 
         assert_eq!(params.status, ExecutionStatus::Completed);
         assert_eq!(params.output.as_deref(), Some("done"));
         assert_eq!(params.input_tokens, Some(2000));
         assert_eq!(params.output_tokens, Some(1000));
-        assert_eq!(params.cost, Some(0.05));
+        assert_eq!(params.cost.as_deref(), Some("0.05"));
         assert_eq!(params.duration_ms, Some(10000));
     }
 }

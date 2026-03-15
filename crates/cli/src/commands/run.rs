@@ -12,7 +12,7 @@ impl RunCommand {
     pub async fn execute(&self, services: &VertebraeServices) -> Result<String, ServiceError> {
         let task = services.tasks().get_task(&self.task_id).await?;
 
-        let workflow_id = task.workflow_id.as_deref().ok_or_else(|| {
+        let _workflow_id = task.workflow_id.as_deref().ok_or_else(|| {
             ServiceError::validation_failed(format!(
                 "Task {} has no assigned workflow",
                 self.task_id
@@ -28,7 +28,7 @@ impl RunCommand {
 
         let execution = services
             .executions()
-            .run_step(&self.task_id, workflow_id, step_id)
+            .run_step(&self.task_id, step_id)
             .await
             .map_err(|e| {
                 let msg = e.to_string();

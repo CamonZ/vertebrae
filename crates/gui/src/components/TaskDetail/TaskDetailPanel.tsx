@@ -530,6 +530,18 @@ function TaskDetailsTab({
         </div>
       </div>
 
+      {/* Worktree */}
+      {taskData.worktree && (
+        <div className="p-4 border-b border-border">
+          <h3 className="mb-2 font-mono text-[10px] uppercase tracking-wider text-text-muted">
+            Worktree
+          </h3>
+          <p className="font-mono text-xs text-text-secondary break-all">
+            {taskData.worktree}
+          </p>
+        </div>
+      )}
+
       {/* Human Review Toggle */}
       <div className="p-4 border-b border-border">
         <div className="flex items-center justify-between">
@@ -940,11 +952,11 @@ export function TaskDetailPanel({
   }, [taskData?.id, cascade, onClose]);
 
   const handleRunStep = useCallback(async () => {
-    if (!taskData?.id || !taskData.workflow_id || !taskData.current_step_id) return;
+    if (!taskData?.id || !taskData.current_step_id) return;
     setIsRunningStep(true);
     setWorkflowError(null);
     try {
-      const result = await commands.runStep(taskData.id, taskData.workflow_id, taskData.current_step_id);
+      const result = await commands.runStep(taskData.id, taskData.current_step_id);
       if (result.status === "error") {
         setWorkflowError(result.error.message);
       }
@@ -955,7 +967,7 @@ export function TaskDetailPanel({
     } finally {
       setIsRunningStep(false);
     }
-  }, [taskData?.id, taskData?.workflow_id, taskData?.current_step_id]);
+  }, [taskData?.id, taskData?.current_step_id]);
 
   const handleRunWorkflow = useCallback(async () => {
     if (!taskData?.id) return;

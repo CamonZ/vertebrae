@@ -83,6 +83,11 @@ pub struct DaemonConfig {
     pub base_url: String,
     /// API token for Sacrum authentication.
     pub api_token: String,
+    /// Resolved absolute path to the Claude Code CLI binary.
+    pub claude_binary: std::path::PathBuf,
+    /// The user's full login shell PATH, resolved at startup.
+    /// Passed to child processes so they can find tools like `mix`, `node`, `vtb`, etc.
+    pub shell_path: String,
 }
 
 /// Maximum delay between reconnection attempts (30 seconds).
@@ -397,6 +402,8 @@ impl DaemonSupervisor {
             project_id: project_id.to_string(),
             services,
             project_root: project_root.to_path_buf(),
+            claude_binary: state.config.claude_binary.clone(),
+            shell_path: state.config.shell_path.clone(),
         };
 
         let (child_ref, _handle) = Actor::spawn_linked(

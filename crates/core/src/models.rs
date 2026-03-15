@@ -611,15 +611,15 @@ impl AgentConfig {
             args.push(model.clone());
         }
         if let Some(ref model) = self.fallback_model {
-            args.push("--fallbackModel".to_string());
+            args.push("--fallback-model".to_string());
             args.push(model.clone());
         }
         if let Some(ref prompt) = self.system_prompt {
-            args.push("--systemPrompt".to_string());
+            args.push("--system-prompt".to_string());
             args.push(prompt.clone());
         }
         if let Some(ref prompt) = self.append_system_prompt {
-            args.push("--appendSystemPrompt".to_string());
+            args.push("--append-system-prompt".to_string());
             args.push(prompt.clone());
         }
         if let Some(ref agents) = self.agents {
@@ -631,27 +631,27 @@ impl AgentConfig {
             args.extend(self.tools.iter().cloned());
         }
         if !self.allowed_tools.is_empty() {
-            args.push("--allowedTools".to_string());
+            args.push("--allowed-tools".to_string());
             args.extend(self.allowed_tools.iter().cloned());
         }
         if !self.disallowed_tools.is_empty() {
-            args.push("--disallowedTools".to_string());
+            args.push("--disallowed-tools".to_string());
             args.extend(self.disallowed_tools.iter().cloned());
         }
         if let Some(ref mode) = self.permission_mode {
-            args.push("--permissionMode".to_string());
+            args.push("--permission-mode".to_string());
             args.push(mode.as_str().to_string());
         }
         if let Some(budget) = self.max_budget_usd {
-            args.push("--maxBudgetUsd".to_string());
+            args.push("--max-budget-usd".to_string());
             args.push(format_float(budget));
         }
         for config in &self.mcp_config {
-            args.push("--mcpConfig".to_string());
+            args.push("--mcp-config".to_string());
             args.push(config.clone());
         }
         for dir in &self.plugin_dirs {
-            args.push("--pluginDir".to_string());
+            args.push("--plugin-dir".to_string());
             args.push(dir.clone());
         }
         if let Some(ref schema) = self.json_schema {
@@ -2579,15 +2579,15 @@ mod tests {
         let args = config.to_cli_args();
         assert!(args.contains(&"--model".to_string()));
         assert!(args.contains(&"claude-opus".to_string()));
-        assert!(args.contains(&"--fallbackModel".to_string()));
+        assert!(args.contains(&"--fallback-model".to_string()));
         assert!(args.contains(&"claude-sonnet".to_string()));
-        assert!(args.contains(&"--systemPrompt".to_string()));
+        assert!(args.contains(&"--system-prompt".to_string()));
         assert!(args.contains(&"Be helpful".to_string()));
         assert!(args.contains(&"--tools".to_string()));
         assert!(args.contains(&"bash".to_string()));
-        assert!(args.contains(&"--permissionMode".to_string()));
+        assert!(args.contains(&"--permission-mode".to_string()));
         assert!(args.contains(&"plan".to_string()));
-        assert!(args.contains(&"--maxBudgetUsd".to_string()));
+        assert!(args.contains(&"--max-budget-usd".to_string()));
     }
 
     #[test]

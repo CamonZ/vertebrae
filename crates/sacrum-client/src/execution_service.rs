@@ -173,15 +173,25 @@ impl ExecutionService for SacrumExecutionService {
         execution_id: &str,
         params: vertebrae_core::execution_service::UpdateExecutionStatusParams,
     ) -> ServiceResult<()> {
-        let variables = json!({
+        let mut variables = json!({
             "id": execution_id,
             "status": params.status.as_str(),
-            "output": params.output,
-            "input_tokens": params.input_tokens,
-            "output_tokens": params.output_tokens,
-            "cost": params.cost,
-            "duration_ms": params.duration_ms,
         });
+        if let Some(output) = &params.output {
+            variables["output"] = json!(output);
+        }
+        if let Some(input_tokens) = params.input_tokens {
+            variables["input_tokens"] = json!(input_tokens);
+        }
+        if let Some(output_tokens) = params.output_tokens {
+            variables["output_tokens"] = json!(output_tokens);
+        }
+        if let Some(cost) = params.cost {
+            variables["cost"] = json!(cost);
+        }
+        if let Some(duration_ms) = params.duration_ms {
+            variables["duration_ms"] = json!(duration_ms);
+        }
 
         self.client
             .execute_void(UPDATE_EXECUTION, variables)
@@ -215,16 +225,10 @@ impl ExecutionService for SacrumExecutionService {
         Ok(responses.iter().map(Self::response_to_log).collect())
     }
 
-    async fn run_step(
-        &self,
-        task_id: &str,
-        workflow_id: &str,
-        step_id: &str,
-    ) -> ServiceResult<StepExecution> {
+    async fn run_step(&self, task_id: &str, step_id: &str) -> ServiceResult<StepExecution> {
         let query = with_fragments(RUN_STEP, &[EXECUTION_FIELDS]);
         let variables = json!({
             "task_id": task_id,
-            "workflow_id": workflow_id,
             "step_id": step_id,
         });
 
@@ -812,11 +816,10 @@ mod tests {
             .await;
 
         let service = create_wiremock_service(&server.uri());
-        let result = service.run_step("task-1", "wf-1", "step-1").await.unwrap();
+        let result = service.run_step("task-1", "step-1").await.unwrap();
 
         assert_eq!(result.id, Some("exec-run-1".to_string()));
         assert_eq!(result.task_id, "task-1");
-        assert_eq!(result.workflow_id, "wf-1");
         assert_eq!(result.step_name, "implement");
         assert_eq!(result.status, ExecutionStatus::InProgress);
     }
@@ -835,7 +838,7 @@ mod tests {
             .await;
 
         let service = create_wiremock_service(&server.uri());
-        let result = service.run_step("task-1", "wf-1", "step-1").await;
+        let result = service.run_step("task-1", "step-1").await;
 
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();

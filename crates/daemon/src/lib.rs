@@ -1,5 +1,6 @@
 pub mod actors;
 pub mod config;
+pub mod helpers;
 pub mod phoenix;
 pub mod stream_json;
 
