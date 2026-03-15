@@ -643,6 +643,59 @@ pub struct PipelineData {
     pub transitions: Vec<WorkflowTransition>,
 }
 
+/// Options for updating a workflow step.
+/// Only fields that are Some will be updated.
+/// Note: agent_config is intentionally omitted — not editable from the GUI.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct UpdateStepOptions {
+    pub step_id: String,
+    pub name: Option<String>,
+    pub goal: Option<String>,
+    pub prompt: Option<String>,
+    pub eval_prompt: Option<String>,
+    pub agents: Option<Vec<String>>,
+    pub skills: Option<Vec<String>>,
+    pub order: Option<i32>,
+    pub is_final: Option<bool>,
+    pub transitions_to: Option<Vec<String>>,
+}
+
+impl From<UpdateStepOptions> for vertebrae_core::StepUpdate {
+    fn from(opts: UpdateStepOptions) -> Self {
+        let mut update = vertebrae_core::StepUpdate::new();
+        if let Some(name) = opts.name {
+            update = update.with_name(&name);
+        }
+        if let Some(goal) = opts.goal {
+            update = update.with_goal(&goal);
+        }
+        if let Some(prompt) = opts.prompt {
+            update = update.with_prompt(&prompt);
+        }
+        if let Some(eval_prompt) = opts.eval_prompt {
+            update = update.with_eval_prompt(&eval_prompt);
+        }
+        if let Some(agents) = opts.agents {
+            update = update.with_agents(agents);
+        }
+        if let Some(skills) = opts.skills {
+            update = update.with_skills(skills);
+        }
+        if let Some(order) = opts.order {
+            update = update.with_order(order);
+        }
+        if let Some(is_final) = opts.is_final {
+            update = update.with_is_final(is_final);
+        }
+        if let Some(transitions) = opts.transitions_to {
+            let transition_ids: Vec<String> =
+                transitions.iter().map(|id| id.to_lowercase()).collect();
+            update = update.with_transitions_to(transition_ids);
+        }
+        update
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

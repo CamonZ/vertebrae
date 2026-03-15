@@ -14,6 +14,7 @@ import { TaskRelations } from "./TaskRelations";
 import { ExecutionHistory } from "./ExecutionHistory";
 import { DeleteConfirmation } from "../DeleteConfirmation";
 import { ResizablePanel } from "../ResizablePanel";
+import { Spinner } from "../Spinner";
 import { InlineEditField } from "./InlineEditField";
 import { Toggle } from "../Toggle";
 
@@ -674,6 +675,7 @@ export function TaskDetailPanel({
   const [cascade, setCascade] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [isRunningStep, setIsRunningStep] = useState(false);
   const [isRunningWorkflow, setIsRunningWorkflow] = useState(false);
   const [workflowError, setWorkflowError] = useState<string | null>(null);
   const { task: taskData, isLoading, error, refetch } = useTask(taskId);
@@ -801,6 +803,8 @@ export function TaskDetailPanel({
           remove_tags: [],
           level: fieldName === "level" ? editValues.level : taskData.level,
           needs_human_review: taskData.needs_human_review,
+          archived: null as boolean | null,
+          worktree: null as string | null,
           revision_feedback: taskData.revision_feedback,
         };
 
@@ -855,6 +859,8 @@ export function TaskDetailPanel({
         remove_tags: string[];
         level: string;
         needs_human_review: boolean;
+        archived: boolean | null;
+        worktree: string | null;
         revision_feedback: string | null;
       } = {
         title: taskData.title,
@@ -864,6 +870,8 @@ export function TaskDetailPanel({
         remove_tags: [],
         level: taskData.level,
         needs_human_review: taskData.needs_human_review ?? false,
+        archived: null,
+        worktree: null,
         revision_feedback: taskData.revision_feedback,
       };
 
@@ -931,22 +939,36 @@ export function TaskDetailPanel({
     }
   }, [taskData?.id, cascade, onClose]);
 
-  // Run workflow handler
-  const handleRunWorkflow = useCallback(async () => {
-    if (!taskData?.id) return;
-
-    setIsRunningWorkflow(true);
+  const handleRunStep = useCallback(async () => {
+    if (!taskData?.id || !taskData.workflow_id || !taskData.current_step_id) return;
+    setIsRunningStep(true);
     setWorkflowError(null);
-
     try {
-      const result = await commands.runWorkflow(taskData.id);
-
+      const result = await commands.runStep(taskData.id, taskData.workflow_id, taskData.current_step_id);
       if (result.status === "error") {
         setWorkflowError(result.error.message);
       }
     } catch (err) {
       setWorkflowError(
-        err instanceof Error ? err.message : "Failed to run workflow"
+        err instanceof Error ? err.message : "Failed to run step"
+      );
+    } finally {
+      setIsRunningStep(false);
+    }
+  }, [taskData?.id, taskData?.workflow_id, taskData?.current_step_id]);
+
+  const handleRunWorkflow = useCallback(async () => {
+    if (!taskData?.id) return;
+    setIsRunningWorkflow(true);
+    setWorkflowError(null);
+    try {
+      const result = await commands.orchestrateTask(taskData.id);
+      if (result.status === "error") {
+        setWorkflowError(result.error.message);
+      }
+    } catch (err) {
+      setWorkflowError(
+        err instanceof Error ? err.message : "Failed to start workflow"
       );
     } finally {
       setIsRunningWorkflow(false);
@@ -982,40 +1004,45 @@ export function TaskDetailPanel({
           </h2>
         </div>
         <div className="flex items-center gap-2">
-          {/* Run Workflow Button - only show if task has a workflow */}
+          {/* Run Step Button - only when task has a current step */}
+          {taskData?.workflow_id && taskData?.current_step_id && (
+            <button
+              type="button"
+              onClick={handleRunStep}
+              disabled={isRunningStep || isRunningWorkflow}
+              className="cursor-pointer flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary bg-primary/10 text-primary hover:bg-primary/20 hover:shadow-glow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              aria-label="Run current step"
+              title="Run the current workflow step"
+            >
+              {isRunningStep ? (
+                <Spinner />
+              ) : (
+                <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
+                  <path d="M8 5v14l11-7z" />
+                </svg>
+              )}
+              <span>{isRunningStep ? "Running..." : "Run Step"}</span>
+            </button>
+          )}
+          {/* Run Workflow Button */}
           {taskData?.workflow_id && (
             <button
               type="button"
               onClick={handleRunWorkflow}
-              disabled={isRunningWorkflow}
-              className="cursor-pointer flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary bg-primary/10 text-primary hover:bg-primary/20 hover:shadow-glow-sm disabled:opacity-50 disabled:cursor-not-allowed"
-              aria-label="Run workflow"
-              title="Run workflow for this task"
+              disabled={isRunningStep || isRunningWorkflow}
+              className="cursor-pointer flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-accent bg-accent/10 text-accent hover:bg-accent/20 hover:shadow-glow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              aria-label="Run entire workflow"
+              title="Run the entire workflow for this task"
             >
               {isRunningWorkflow ? (
-                <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-primary/30 border-t-primary" />
+                <Spinner />
               ) : (
-                <svg
-                  className="h-3.5 w-3.5"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"
-                  />
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
+                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
               )}
-              <span>{isRunningWorkflow ? "Running..." : "Run"}</span>
+              <span>{isRunningWorkflow ? "Running..." : "Run Workflow"}</span>
             </button>
           )}
           {/* Delete Button */}
@@ -1065,6 +1092,13 @@ export function TaskDetailPanel({
           )}
         </div>
       </div>
+
+      {/* Workflow error banner */}
+      {workflowError && (
+        <div className="mx-4 mt-2 rounded-lg border border-error/30 bg-error/5 px-3 py-2 text-xs text-error">
+          {workflowError}
+        </div>
+      )}
 
       {/* Loading state */}
       {isLoading && (
@@ -1140,24 +1174,6 @@ export function TaskDetailPanel({
               </h3>
             )}
           </div>
-
-          {/* Workflow Error Banner */}
-          {workflowError && (
-            <div className="border-b border-error/20 bg-error/5 px-4 py-2">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-xs text-error">{workflowError}</p>
-                <button
-                  type="button"
-                  onClick={() => setWorkflowError(null)}
-                  className="text-error/60 hover:text-error"
-                >
-                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-          )}
 
           {/* Tabs */}
           <div className="border-b border-border">

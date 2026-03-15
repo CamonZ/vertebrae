@@ -110,6 +110,8 @@ export function StepDetailPanel({
     async (updates: {
       name?: string;
       goal?: string | null;
+      prompt?: string | null;
+      eval_prompt?: string | null;
       agents?: string[];
       skills?: string[];
       order?: number;
@@ -118,16 +120,18 @@ export function StepDetailPanel({
     }) => {
       if (!step || !step.id) return;
 
-      const result = await commands.updateStep(
-        step.id,
-        updates.name ?? null,
-        updates.goal ?? null,
-        updates.agents ?? null,
-        updates.skills ?? null,
-        updates.order ?? null,
-        updates.is_final ?? null,
-        updates.transitions_to ?? null
-      );
+      const result = await commands.updateStep({
+        step_id: step.id,
+        name: updates.name ?? null,
+        goal: updates.goal ?? null,
+        prompt: updates.prompt ?? null,
+        eval_prompt: updates.eval_prompt ?? null,
+        agents: updates.agents ?? null,
+        skills: updates.skills ?? null,
+        order: updates.order ?? null,
+        is_final: updates.is_final ?? null,
+        transitions_to: updates.transitions_to ?? null,
+      });
 
       if (result.status === "error") {
         throw new Error(result.error.message);
@@ -375,27 +379,35 @@ export function StepDetailPanel({
               />
             </div>
 
-            {/* Prompt */}
-            {step.prompt && (
-              <div className="mt-3">
-                <SectionHeader title="Prompt" />
-                <pre className="whitespace-pre-wrap rounded-lg border border-border bg-bg-tertiary p-3 font-mono text-xs text-text-primary">
-                  {step.prompt}
-                </pre>
-              </div>
-            )}
+            {/* Prompt - inline editable */}
+            <div className="mt-3">
+              <SectionHeader title="Prompt" />
+              <InlineEditField
+                value={step.prompt || ""}
+                placeholder="Click to add prompt..."
+                multiline
+                rows={4}
+                onSave={async (value) => {
+                  await handleUpdateField({ prompt: value || null });
+                }}
+              />
+            </div>
 
-            {/* Eval Prompt - visually distinct with warning-style border */}
-            {step.eval_prompt && (
-              <div className="mt-3">
-                <h3 className="mb-2 font-mono text-[10px] uppercase tracking-wider text-warning">
-                  Eval Prompt
-                </h3>
-                <pre className="whitespace-pre-wrap rounded-lg border border-warning/30 bg-warning/5 p-3 font-mono text-xs text-text-primary">
-                  {step.eval_prompt}
-                </pre>
-              </div>
-            )}
+            {/* Eval Prompt - inline editable with warning styling */}
+            <div className="mt-3">
+              <h3 className="mb-2 font-mono text-[10px] uppercase tracking-wider text-warning">
+                Eval Prompt
+              </h3>
+              <InlineEditField
+                value={step.eval_prompt || ""}
+                placeholder="Click to add eval prompt..."
+                multiline
+                rows={4}
+                onSave={async (value) => {
+                  await handleUpdateField({ eval_prompt: value || null });
+                }}
+              />
+            </div>
           </div>
 
           {/* Content */}

@@ -48,9 +48,6 @@ vertebrae-core = { path = "../../core" }
 vertebrae-sacrum-client = { path = "../../sacrum-client" }
 slug = "0.1"
 
-# Actor framework for workflow execution
-ractor = "0.12"
-
 # Async trait support for testing
 async-trait = "0.1"
 

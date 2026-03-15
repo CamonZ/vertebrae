@@ -18,6 +18,8 @@ const createMockTask = (id: string, title: string): Task => ({
   workflow_name: null,
   step_name: null,
   needs_human_review: null,
+  archived: false,
+  worktree: null,
   review_comment: null,
   revision_feedback: null,
   rejection_reason: null,
