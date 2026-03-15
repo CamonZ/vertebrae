@@ -156,6 +156,10 @@ pub struct WorkflowStepResponse {
     #[serde(default)]
     pub goal: Option<String>,
     #[serde(default)]
+    pub prompt: Option<String>,
+    #[serde(default)]
+    pub eval_prompt: Option<String>,
+    #[serde(default)]
     pub agents: Vec<String>,
     #[serde(default)]
     pub skills: Vec<String>,

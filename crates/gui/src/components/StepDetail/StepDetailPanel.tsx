@@ -374,6 +374,28 @@ export function StepDetailPanel({
                 }}
               />
             </div>
+
+            {/* Prompt */}
+            {step.prompt && (
+              <div className="mt-3">
+                <SectionHeader title="Prompt" />
+                <pre className="whitespace-pre-wrap rounded-lg border border-border bg-bg-tertiary p-3 font-mono text-xs text-text-primary">
+                  {step.prompt}
+                </pre>
+              </div>
+            )}
+
+            {/* Eval Prompt - visually distinct with warning-style border */}
+            {step.eval_prompt && (
+              <div className="mt-3">
+                <h3 className="mb-2 font-mono text-[10px] uppercase tracking-wider text-warning">
+                  Eval Prompt
+                </h3>
+                <pre className="whitespace-pre-wrap rounded-lg border border-warning/30 bg-warning/5 p-3 font-mono text-xs text-text-primary">
+                  {step.eval_prompt}
+                </pre>
+              </div>
+            )}
           </div>
 
           {/* Content */}
