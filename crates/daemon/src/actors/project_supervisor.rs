@@ -48,6 +48,7 @@ pub enum ProjectMessage {
         task_id: String,
         workflow_id: String,
         step_config: Box<StepConfig>,
+        worktree: Option<PathBuf>,
     },
     /// Cancel a running StepExecutor.
     CancelStep {
@@ -75,12 +76,14 @@ impl std::fmt::Debug for ProjectMessage {
                 task_id,
                 workflow_id,
                 step_config,
+                worktree,
             } => f
                 .debug_struct("ExecuteStep")
                 .field("execution_id", execution_id)
                 .field("task_id", task_id)
                 .field("workflow_id", workflow_id)
                 .field("step_config", step_config)
+                .field("worktree", worktree)
                 .finish(),
             Self::CancelStep {
                 step_execution_id,
@@ -173,6 +176,10 @@ pub struct RunStepPayload {
     /// Additional agent configuration.
     #[serde(default)]
     pub agent_config: serde_json::Value,
+    /// Optional worktree path override for the execution directory.
+    /// When present, the daemon uses this instead of the project root.
+    #[serde(default)]
+    pub worktree: Option<String>,
 }
 
 /// Parsed payload for a `cancel_step` channel event from Sacrum.
@@ -279,15 +286,16 @@ impl Actor for ProjectSupervisor {
             ProjectMessage::ExecuteStep {
                 execution_id,
                 task_id,
-                workflow_id,
+                workflow_id: _,
                 step_config,
+                worktree,
             } => {
                 self.handle_execute_step(
                     myself.clone(),
                     &execution_id,
                     &task_id,
-                    &workflow_id,
                     *step_config,
+                    worktree,
                     state,
                 )
                 .await?;
@@ -391,12 +399,14 @@ impl ProjectSupervisor {
                     );
 
                     let step_config = build_step_config_from_payload(&payload);
+                    let worktree = payload.worktree.map(PathBuf::from);
 
                     if let Err(e) = myself.cast(ProjectMessage::ExecuteStep {
                         execution_id: payload.id,
                         task_id: payload.task_id,
                         workflow_id: payload.workflow_id,
                         step_config: Box::new(step_config),
+                        worktree,
                     }) {
                         tracing::error!(
                             "[project:{}] Failed to send ExecuteStep message: {}",
@@ -486,8 +496,8 @@ impl ProjectSupervisor {
         myself: ActorRef<ProjectMessage>,
         execution_id: &str,
         task_id: &str,
-        _workflow_id: &str,
         step_config: StepConfig,
+        worktree: Option<PathBuf>,
         state: &mut ProjectState,
     ) -> Result<(), ActorProcessingErr> {
         tracing::info!(
@@ -521,6 +531,7 @@ impl ProjectSupervisor {
             task_id: task_id.to_string(),
             step_config,
             project_root: state.project_root.clone(),
+            worktree,
             execution_service: state.services.executions_arc(),
         };
 
@@ -899,6 +910,7 @@ mod tests {
                 agents: Vec::new(),
                 skills: Vec::new(),
             }),
+            worktree: None,
         };
         let debug = format!("{:?}", pm);
         assert!(debug.contains("ExecuteStep"));
@@ -1234,5 +1246,75 @@ mod tests {
 
         let config = build_step_config_from_payload(&payload);
         assert!(config.agent_config.is_empty());
+    }
+
+    // ===== RunStepPayload worktree tests =====
+
+    #[test]
+    fn parse_run_step_payload_with_worktree() {
+        let payload = serde_json::json!({
+            "id": "exec-wt-1",
+            "task_id": "task-wt-1",
+            "workflow_id": "wf-wt-1",
+            "step_name": "implement",
+            "worktree": "/home/user/code/project-worktree-abc"
+        });
+
+        let result = parse_run_step_payload(&payload).unwrap();
+        assert_eq!(
+            result.worktree.as_deref(),
+            Some("/home/user/code/project-worktree-abc")
+        );
+    }
+
+    #[test]
+    fn parse_run_step_payload_without_worktree() {
+        let payload = serde_json::json!({
+            "id": "exec-wt-2",
+            "task_id": "task-wt-2",
+            "workflow_id": "wf-wt-2",
+            "step_name": "review"
+        });
+
+        let result = parse_run_step_payload(&payload).unwrap();
+        assert!(
+            result.worktree.is_none(),
+            "worktree should default to None when absent"
+        );
+    }
+
+    #[test]
+    fn parse_run_step_payload_with_null_worktree() {
+        let payload = serde_json::json!({
+            "id": "exec-wt-3",
+            "task_id": "task-wt-3",
+            "workflow_id": "wf-wt-3",
+            "step_name": "deploy",
+            "worktree": null
+        });
+
+        let result = parse_run_step_payload(&payload).unwrap();
+        assert!(
+            result.worktree.is_none(),
+            "worktree should be None when explicitly null"
+        );
+    }
+
+    #[test]
+    fn project_message_debug_execute_step_with_worktree() {
+        let pm = ProjectMessage::ExecuteStep {
+            execution_id: "exec-wt".to_string(),
+            task_id: "task-wt".to_string(),
+            workflow_id: "wf-wt".to_string(),
+            step_config: Box::new(StepConfig {
+                prompt: "Implement in worktree".to_string(),
+                agent_config: AgentConfig::default(),
+                agents: Vec::new(),
+                skills: Vec::new(),
+            }),
+            worktree: Some(PathBuf::from("/home/user/code/worktree-abc")),
+        };
+        let debug = format!("{:?}", pm);
+        assert!(debug.contains("worktree-abc"));
     }
 }
