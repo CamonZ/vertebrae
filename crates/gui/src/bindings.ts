@@ -864,51 +864,59 @@ export type SessionLogCreatedEvent = { log_id: string; execution_id: string }
 /**
  * Workflow step entity - mirrors db::Step
  */
-export type Step = { 
+export type Step = {
 /**
  * Step ID (string form)
  */
-id: string | null; 
+id: string | null;
 /**
  * Display name for this step
  */
-name: string; 
+name: string;
 /**
  * Reference to the workflow this step belongs to
  */
-workflow_id: string; 
+workflow_id: string;
 /**
  * What this step should accomplish
  */
-goal: string | null; 
+goal: string | null;
+/**
+ * Prompt sent to the agent when executing this step
+ */
+prompt: string | null;
+/**
+ * Evaluation prompt used to assess step output for branching decisions
+ */
+eval_prompt: string | null;
 /**
  * Paths to .claude/agents/ files for this step
  */
-agents?: string[]; 
+agents?: string[];
 /**
  * Skill names available for this step
  */
-skills?: string[]; 
+skills?: string[];
 /**
  * Agent configuration for this step
  */
-agent_config: AgentConfig; 
+agent_config: AgentConfig;
 /**
  * Whether this is a final step (no outgoing transitions)
  */
-is_final: boolean; 
+is_final: boolean;
 /**
  * List of step IDs this step can transition to
  */
-transitions_to: string[]; 
+transitions_to: string[];
 /**
  * Ordering index for sequential fallback (0-based)
  */
-order: number; 
+order: number;
 /**
  * Creation timestamp (ISO 8601 string)
  */
-created_at: string | null; 
+created_at: string | null;
 /**
  * Last update timestamp (ISO 8601 string)
  */

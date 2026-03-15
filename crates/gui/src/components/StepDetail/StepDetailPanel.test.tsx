@@ -39,6 +39,8 @@ function createStep(overrides?: Partial<Step>): Step {
     agents: [],
     skills: [],
     goal: null,
+    prompt: null,
+    eval_prompt: null,
     created_at: null,
     updated_at: null,
     agent_config: {
@@ -504,6 +506,95 @@ describe("StepDetailPanel", () => {
       render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
       expect(screen.getByText("Review Code")).toBeInTheDocument();
       expect(screen.getByText("Check for security issues")).toBeInTheDocument();
+    });
+
+    it("displays prompt when set", () => {
+      const step = createStep({
+        prompt: "Review the pull request for correctness and style",
+      });
+      vi.mocked(hooks.useStep).mockReturnValue({
+        step,
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
+
+      render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
+      expect(screen.getByText("Prompt")).toBeInTheDocument();
+      expect(
+        screen.getByText("Review the pull request for correctness and style")
+      ).toBeInTheDocument();
+    });
+
+    it("hides prompt section when prompt is null", () => {
+      const step = createStep({ prompt: null });
+      vi.mocked(hooks.useStep).mockReturnValue({
+        step,
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
+
+      render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
+      expect(screen.queryByText("Prompt")).not.toBeInTheDocument();
+    });
+
+    it("displays eval_prompt when set with distinct styling", () => {
+      const step = createStep({
+        eval_prompt: "Did the review identify any critical issues?",
+      });
+      vi.mocked(hooks.useStep).mockReturnValue({
+        step,
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
+
+      render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
+      expect(screen.getByText("Eval Prompt")).toBeInTheDocument();
+      expect(
+        screen.getByText("Did the review identify any critical issues?")
+      ).toBeInTheDocument();
+
+      // Verify eval_prompt label has warning-style color (visually distinct)
+      const evalLabel = screen.getByText("Eval Prompt");
+      expect(evalLabel).toHaveClass("text-warning");
+    });
+
+    it("hides eval_prompt section when eval_prompt is null", () => {
+      const step = createStep({ eval_prompt: null });
+      vi.mocked(hooks.useStep).mockReturnValue({
+        step,
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
+
+      render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
+      expect(screen.queryByText("Eval Prompt")).not.toBeInTheDocument();
+    });
+
+    it("displays both prompt and eval_prompt when both are set", () => {
+      const step = createStep({
+        prompt: "Implement the feature as described",
+        eval_prompt: "Does the implementation match the spec?",
+      });
+      vi.mocked(hooks.useStep).mockReturnValue({
+        step,
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
+
+      render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
+      expect(screen.getByText("Prompt")).toBeInTheDocument();
+      expect(
+        screen.getByText("Implement the feature as described")
+      ).toBeInTheDocument();
+      expect(screen.getByText("Eval Prompt")).toBeInTheDocument();
+      expect(
+        screen.getByText("Does the implementation match the spec?")
+      ).toBeInTheDocument();
     });
   });
 
