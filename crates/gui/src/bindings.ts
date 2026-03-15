@@ -526,9 +526,9 @@ async deleteStep(stepId: string) : Promise<Result<null, CommandError>> {
  * Sacrum creates a StepExecution record and broadcasts a run_step event
  * to connected daemon clients, which pick up and execute the step.
  */
-async runStep(taskId: string, workflowId: string, stepId: string) : Promise<Result<StepExecution, CommandError>> {
+async runStep(taskId: string, stepId: string) : Promise<Result<StepExecution, CommandError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("run_step", { taskId, workflowId, stepId }) };
+    return { status: "ok", data: await TAURI_INVOKE("run_step", { taskId, stepId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };

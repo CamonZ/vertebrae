@@ -970,25 +970,16 @@ pub(crate) async fn delete_step_inner(
 pub async fn run_step(
     state: State<'_, AppState>,
     task_id: String,
-    workflow_id: String,
     step_id: String,
 ) -> Result<crate::types::StepExecution, CommandError> {
-    log::info!(
-        "run_step called for task: {}, workflow: {}, step: {}",
-        task_id,
-        workflow_id,
-        step_id
-    );
+    log::info!("run_step called for task: {}, step: {}", task_id, step_id);
 
     let service_guard = state.services.read().await;
     let service = service_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    let execution = service
-        .executions()
-        .run_step(&task_id, &workflow_id, &step_id)
-        .await?;
+    let execution = service.executions().run_step(&task_id, &step_id).await?;
 
     log::info!("Step execution started: {:?}", execution.id);
     Ok(execution.into())

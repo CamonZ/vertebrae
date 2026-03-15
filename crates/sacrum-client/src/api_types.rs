@@ -2,7 +2,32 @@
 //!
 //! Defines structures for deserializing Sacrum API responses.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+
+/// Deserialize a value that may be either a number or a string representation of a number.
+fn deserialize_optional_f64_from_string<'de, D>(deserializer: D) -> Result<Option<f64>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    use serde::de;
+
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum StringOrNumber {
+        Number(f64),
+        String(String),
+        Null,
+    }
+
+    match StringOrNumber::deserialize(deserializer)? {
+        StringOrNumber::Number(n) => Ok(Some(n)),
+        StringOrNumber::String(s) => s
+            .parse::<f64>()
+            .map(Some)
+            .map_err(|_| de::Error::custom(format!("cannot parse '{s}' as f64"))),
+        StringOrNumber::Null => Ok(None),
+    }
+}
 
 /// Task response from Sacrum API (matches TaskJSON.data/1)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -211,7 +236,7 @@ pub struct StepExecutionResponse {
     pub input_tokens: Option<i64>,
     #[serde(default)]
     pub output_tokens: Option<i64>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_optional_f64_from_string")]
     pub cost: Option<f64>,
     #[serde(default)]
     pub duration_ms: Option<i64>,
