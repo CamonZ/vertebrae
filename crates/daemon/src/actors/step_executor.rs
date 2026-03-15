@@ -11,7 +11,7 @@
 //! Orchestration (step ordering, parallel vs serial, retry logic) lives entirely
 //! in Sacrum/Elixir -- the daemon just executes what it is told.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitStatus;
 use std::sync::Arc;
 
@@ -56,7 +56,16 @@ pub struct StepExecutorConfig {
     pub task_id: String,
     pub step_config: StepConfig,
     pub project_root: PathBuf,
+    /// Optional worktree path override. When set, used as current_dir instead of project_root.
+    pub worktree: Option<PathBuf>,
     pub execution_service: Arc<dyn ExecutionService>,
+}
+
+impl StepExecutorConfig {
+    /// Returns the effective working directory: worktree if set, otherwise project_root.
+    fn working_dir(&self) -> &Path {
+        self.worktree.as_deref().unwrap_or(&self.project_root)
+    }
 }
 
 impl std::fmt::Debug for StepExecutorConfig {
@@ -66,6 +75,7 @@ impl std::fmt::Debug for StepExecutorConfig {
             .field("task_id", &self.task_id)
             .field("step_config", &self.step_config)
             .field("project_root", &self.project_root)
+            .field("worktree", &self.worktree)
             .field("execution_service", &"<ExecutionService>")
             .finish()
     }
@@ -130,7 +140,7 @@ pub fn build_claude_command(config: &StepExecutorConfig) -> Command {
         .arg(&step.prompt)
         .arg("--output-format")
         .arg("stream-json")
-        .current_dir(&config.project_root)
+        .current_dir(config.working_dir())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .stdin(std::process::Stdio::null());
@@ -239,10 +249,10 @@ impl StepExecutor {
         }
 
         tracing::info!(
-            "Spawning Claude Code CLI for execution {}, model={:?}, project_root={}",
+            "Spawning Claude Code CLI for execution {}, model={:?}, working_dir={}",
             state.execution_id,
             state.config.step_config.agent_config.model,
-            state.config.project_root.display()
+            state.config.working_dir().display()
         );
 
         let mut cmd = build_claude_command(&state.config);
@@ -471,6 +481,7 @@ mod tests {
             task_id: "task-test".to_string(),
             step_config: make_step_config("test"),
             project_root: PathBuf::from("/tmp"),
+            worktree: None,
             execution_service: test_execution_service(),
         }
     }
@@ -514,6 +525,7 @@ mod tests {
             task_id: "task-abc".to_string(),
             step_config: make_step_config("test prompt"),
             project_root: PathBuf::from("/home/user/project"),
+            worktree: None,
             execution_service: test_execution_service(),
         };
         let debug = format!("{:?}", config);
@@ -670,6 +682,7 @@ mod tests {
             task_id: "task-1".to_string(),
             step_config: make_step_config("Write tests"),
             project_root: PathBuf::from("/home/user/myproject"),
+            worktree: None,
             execution_service: test_execution_service(),
         };
 
@@ -685,6 +698,7 @@ mod tests {
             task_id: "task-1".to_string(),
             step_config: make_step_config("Implement feature Y"),
             project_root: PathBuf::from("/projects/test"),
+            worktree: None,
             execution_service: test_execution_service(),
         };
 
@@ -722,6 +736,7 @@ mod tests {
                 skills: Vec::new(),
             },
             project_root: PathBuf::from("/tmp"),
+            worktree: None,
             execution_service: test_execution_service(),
         };
 
@@ -748,6 +763,7 @@ mod tests {
                 skills: Vec::new(),
             },
             project_root: PathBuf::from("/tmp"),
+            worktree: None,
             execution_service: test_execution_service(),
         };
 
@@ -781,6 +797,7 @@ mod tests {
                 skills: vec!["WebSearch".to_string(), "Read".to_string()],
             },
             project_root: PathBuf::from("/tmp"),
+            worktree: None,
             execution_service: test_execution_service(),
         };
 
@@ -809,6 +826,7 @@ mod tests {
                 skills: vec!["WebSearch".to_string(), "Edit".to_string()],
             },
             project_root: PathBuf::from("/tmp"),
+            worktree: None,
             execution_service: test_execution_service(),
         };
 
@@ -844,6 +862,7 @@ mod tests {
                 skills: Vec::new(),
             },
             project_root: PathBuf::from("/tmp"),
+            worktree: None,
             execution_service: test_execution_service(),
         };
 
@@ -875,6 +894,7 @@ mod tests {
                 skills: Vec::new(),
             },
             project_root: PathBuf::from("/tmp"),
+            worktree: None,
             execution_service: test_execution_service(),
         };
 
@@ -896,6 +916,7 @@ mod tests {
             task_id: "task-1".to_string(),
             step_config: make_step_config("Do work"),
             project_root: PathBuf::from("/home/user/code"),
+            worktree: None,
             execution_service: test_execution_service(),
         };
 
@@ -916,6 +937,7 @@ mod tests {
                 skills: Vec::new(),
             },
             project_root: PathBuf::from("/tmp"),
+            worktree: None,
             execution_service: test_execution_service(),
         };
 
@@ -1300,5 +1322,64 @@ mod tests {
         }
 
         parent_ref.stop(Some("test done".to_string()));
+    }
+
+    // ===== Worktree override tests =====
+
+    #[test]
+    fn build_command_uses_worktree_as_working_directory_when_set() {
+        let config = StepExecutorConfig {
+            execution_id: "exec-wt-1".to_string(),
+            task_id: "task-wt-1".to_string(),
+            step_config: make_step_config("Do work in worktree"),
+            project_root: PathBuf::from("/home/user/code"),
+            worktree: Some(PathBuf::from("/home/user/code-worktree-abc")),
+            execution_service: test_execution_service(),
+        };
+
+        let cmd = build_claude_command(&config);
+        let cwd = cmd.as_std().get_current_dir().unwrap();
+        assert_eq!(
+            cwd,
+            PathBuf::from("/home/user/code-worktree-abc"),
+            "current_dir should be the worktree path, not the project_root"
+        );
+    }
+
+    #[test]
+    fn build_command_falls_back_to_project_root_when_worktree_is_none() {
+        let config = StepExecutorConfig {
+            execution_id: "exec-wt-2".to_string(),
+            task_id: "task-wt-2".to_string(),
+            step_config: make_step_config("Do work without worktree"),
+            project_root: PathBuf::from("/home/user/code"),
+            worktree: None,
+            execution_service: test_execution_service(),
+        };
+
+        let cmd = build_claude_command(&config);
+        let cwd = cmd.as_std().get_current_dir().unwrap();
+        assert_eq!(
+            cwd,
+            PathBuf::from("/home/user/code"),
+            "current_dir should be the project_root when worktree is None"
+        );
+    }
+
+    #[test]
+    fn step_executor_config_debug_includes_worktree() {
+        let config = StepExecutorConfig {
+            execution_id: "exec-wt-dbg".to_string(),
+            task_id: "task-wt-dbg".to_string(),
+            step_config: make_step_config("test"),
+            project_root: PathBuf::from("/home/user/project"),
+            worktree: Some(PathBuf::from("/home/user/project-wt-abc")),
+            execution_service: test_execution_service(),
+        };
+        let debug = format!("{:?}", config);
+        assert!(
+            debug.contains("project-wt-abc"),
+            "Debug output should include the worktree path"
+        );
     }
 }
