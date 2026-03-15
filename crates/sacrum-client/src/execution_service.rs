@@ -14,7 +14,7 @@ use crate::api_types::{SessionLogResponse, StepExecutionResponse};
 use crate::client::{GraphqlClient, with_fragments};
 use crate::queries::executions::{
     CREATE_EXECUTION, CREATE_LOG, EXECUTION_FIELDS, GET_EXECUTION, LIST_EXECUTIONS, LIST_LOGS,
-    RUN_STEP, UPDATE_EXECUTION,
+    ORCHESTRATE_TASK, RUN_STEP, UPDATE_EXECUTION,
 };
 
 /// Response shape for mutations that return only an id
@@ -232,6 +232,19 @@ impl ExecutionService for SacrumExecutionService {
             self.client.execute(&query, variables, "run_step").await?;
 
         Ok(Self::response_to_execution(&response))
+    }
+
+    async fn orchestrate_task(&self, task_id: &str) -> ServiceResult<()> {
+        let variables = json!({
+            "task_id": task_id,
+        });
+
+        let _: IdOnly = self
+            .client
+            .execute(ORCHESTRATE_TASK, variables, "orchestrate_task")
+            .await?;
+
+        Ok(())
     }
 }
 
@@ -929,5 +942,106 @@ mod tests {
         );
         let result = service.update_execution_status("nonexistent", params).await;
         assert!(result.is_err());
+    }
+
+    // =========================================================================
+    // orchestrate_task tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_orchestrate_task_success() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "orchestrate_task": {
+                        "id": "task-1"
+                    }
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let result = service.orchestrate_task("task-1").await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_orchestrate_task_no_workflow_error() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": null,
+                "errors": [{"message": "Task has no workflow assigned"}]
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let result = service.orchestrate_task("task-no-wf").await;
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("no workflow assigned"),
+            "Expected error about no workflow, got: {}",
+            err_msg
+        );
+    }
+
+    #[tokio::test]
+    async fn test_orchestrate_task_already_completed_error() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": null,
+                "errors": [{"message": "Cannot orchestrate a completed task"}]
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let result = service.orchestrate_task("task-done").await;
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("completed task"),
+            "Expected error about completed task, got: {}",
+            err_msg
+        );
+    }
+
+    #[tokio::test]
+    async fn test_orchestrate_task_already_running_error() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": null,
+                "errors": [{"message": "Orchestration is already running for this task"}]
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let result = service.orchestrate_task("task-running").await;
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("already running"),
+            "Expected error about already running, got: {}",
+            err_msg
+        );
     }
 }

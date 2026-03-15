@@ -128,3 +128,13 @@ pub const RUN_STEP: &str = r#"
         }
     }
 "#;
+
+/// Orchestrate a task through its entire workflow via the TaskOrchestrator FSM.
+/// Sacrum schedules the task and drives it through all steps automatically.
+pub const ORCHESTRATE_TASK: &str = r#"
+    mutation OrchestrateTask($task_id: Uuid4!) {
+        orchestrate_task(task_id: $task_id) {
+            id
+        }
+    }
+"#;
