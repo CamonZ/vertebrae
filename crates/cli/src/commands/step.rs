@@ -424,7 +424,9 @@ impl StepUpdateCommand {
         }
 
         if let Some(model) = &self.model {
-            let agent_config = AgentConfig::new().with_model(model);
+            let existing = existing.as_ref().unwrap();
+            let mut agent_config = existing.agent_config.clone();
+            agent_config.model = Some(model.clone());
             let config_value = serde_json::to_value(&agent_config).map_err(|e| {
                 ServiceError::validation_failed(format!("Invalid agent config: {}", e))
             })?;
