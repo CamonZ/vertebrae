@@ -1085,6 +1085,26 @@ pub async fn run_workflow(
     Ok(())
 }
 
+/// Orchestrate a task through its entire workflow via Sacrum's TaskOrchestrator FSM
+#[tauri::command]
+#[specta::specta]
+pub async fn orchestrate_task(
+    state: State<'_, AppState>,
+    task_id: String,
+) -> Result<(), CommandError> {
+    log::info!("orchestrate_task called for task: {}", task_id);
+
+    let service_guard = state.services.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    service.executions().orchestrate_task(&task_id).await?;
+
+    log::info!("Workflow orchestration started for task: {}", task_id);
+    Ok(())
+}
+
 // ============================================================================
 // Claude Session Commands (JSONL streaming)
 // ============================================================================

@@ -108,6 +108,7 @@ fn create_builder() -> Builder {
             commands::delete_step,
             // Workflow execution commands
             commands::run_workflow,
+            commands::orchestrate_task,
             // Claude session commands (JSONL streaming)
             commands::create_claude_session,
             commands::send_claude_message,

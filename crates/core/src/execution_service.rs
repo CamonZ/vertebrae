@@ -215,6 +215,22 @@ pub trait ExecutionService: Send + Sync {
         execution_id: &str,
         params: UpdateExecutionStatusParams,
     ) -> ServiceResult<()>;
+
+    /// Orchestrate a task through its entire workflow via the backend.
+    ///
+    /// Calls the `orchestrate_task` mutation on Sacrum, which drives the task
+    /// through all workflow steps using the TaskOrchestrator FSM (auto-advance,
+    /// eval prompts, workflow chaining).
+    ///
+    /// # Arguments
+    ///
+    /// * `task_id` - The task to orchestrate
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the task has no workflow assigned, is already completed,
+    /// or if orchestration is already running.
+    async fn orchestrate_task(&self, task_id: &str) -> ServiceResult<()>;
 }
 
 #[cfg(test)]
