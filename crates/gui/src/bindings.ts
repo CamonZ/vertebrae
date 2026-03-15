@@ -29,7 +29,7 @@ async getProjects() : Promise<Result<SavedProject[], CommandError>> {
  * Add a project to the saved list
  * 
  * Takes a directory path, derives a slug from the folder name,
- * creates the project in Sacrum API if needed, and saves to config.toml.
+ * creates the project in Sacrum API if needed, and registers in global config.
  */
 async addProject(path: string) : Promise<Result<SavedProject, CommandError>> {
     try {
@@ -262,9 +262,9 @@ async editSection(taskId: string, sectionType: string, ordinal: number, newConte
 }
 },
 /**
- * Toggle the completion status of a step section
+ * Toggle the completion status of a checklist item
  * 
- * Marks a step section as done or not done by toggling its done flag.
+ * Marks a checklist item as done or not done by toggling its done flag.
  * For checklist item sections only (other types will return an error).
  */
 async toggleChecklistItemDone(taskId: string, ordinal: number) : Promise<Result<null, CommandError>> {
@@ -499,9 +499,9 @@ async createStep(workflowId: string, name: string, goal: string | null, agents: 
  * 
  * Updates the step with the given ID. Only fields that are Some will be updated.
  */
-async updateStep(stepId: string, name: string | null, goal: string | null, agents: string[] | null, skills: string[] | null, order: number | null, isFinal: boolean | null, transitionsTo: string[] | null) : Promise<Result<null, CommandError>> {
+async updateStep(options: UpdateStepOptions) : Promise<Result<null, CommandError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("update_step", { stepId, name, goal, agents, skills, order, isFinal, transitionsTo }) };
+    return { status: "ok", data: await TAURI_INVOKE("update_step", { options }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -521,11 +521,25 @@ async deleteStep(stepId: string) : Promise<Result<null, CommandError>> {
 }
 },
 /**
- * Start a workflow execution for a task
+ * Run a single workflow step for a task via Sacrum
+ * 
+ * Sacrum creates a StepExecution record and broadcasts a run_step event
+ * to connected daemon clients, which pick up and execute the step.
  */
-async runWorkflow(taskId: string) : Promise<Result<null, CommandError>> {
+async runStep(taskId: string, workflowId: string, stepId: string) : Promise<Result<StepExecution, CommandError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("run_workflow", { taskId }) };
+    return { status: "ok", data: await TAURI_INVOKE("run_step", { taskId, workflowId, stepId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Orchestrate a task through its entire workflow via Sacrum's TaskOrchestrator FSM
+ */
+async orchestrateTask(taskId: string) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("orchestrate_task", { taskId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -603,8 +617,7 @@ stepExecutionChangedEvent: StepExecutionChangedEvent,
 stepTransitionChangedEvent: StepTransitionChangedEvent,
 taskChangedEvent: TaskChangedEvent,
 taskStepChangedEvent: TaskStepChangedEvent,
-workflowChangedEvent: WorkflowChangedEvent,
-workflowExecutionEvent: WorkflowExecutionEvent
+workflowChangedEvent: WorkflowChangedEvent
 }>({
 claudePermissionRequestEvent: "claude-permission-request-event",
 claudeSessionEndEvent: "claude-session-end-event",
@@ -620,8 +633,7 @@ stepExecutionChangedEvent: "step-execution-changed-event",
 stepTransitionChangedEvent: "step-transition-changed-event",
 taskChangedEvent: "task-changed-event",
 taskStepChangedEvent: "task-step-changed-event",
-workflowChangedEvent: "workflow-changed-event",
-workflowExecutionEvent: "workflow-execution-event"
+workflowChangedEvent: "workflow-changed-event"
 })
 
 /** user-defined constants **/
@@ -788,13 +800,9 @@ slug: string;
  */
 project_id: string; 
 /**
- * Optional per-project URL override
+ * Git root path for the project
  */
-url?: string | null; 
-/**
- * Optional git root path for the project
- */
-path?: string | null }
+path: string }
 /**
  * Section content within a task
  */
@@ -864,59 +872,59 @@ export type SessionLogCreatedEvent = { log_id: string; execution_id: string }
 /**
  * Workflow step entity - mirrors db::Step
  */
-export type Step = {
+export type Step = { 
 /**
  * Step ID (string form)
  */
-id: string | null;
+id: string | null; 
 /**
  * Display name for this step
  */
-name: string;
+name: string; 
 /**
  * Reference to the workflow this step belongs to
  */
-workflow_id: string;
+workflow_id: string; 
 /**
  * What this step should accomplish
  */
-goal: string | null;
+goal: string | null; 
 /**
  * Prompt sent to the agent when executing this step
  */
-prompt: string | null;
+prompt: string | null; 
 /**
  * Evaluation prompt used to assess step output for branching decisions
  */
-eval_prompt: string | null;
+eval_prompt: string | null; 
 /**
  * Paths to .claude/agents/ files for this step
  */
-agents?: string[];
+agents?: string[]; 
 /**
  * Skill names available for this step
  */
-skills?: string[];
+skills?: string[]; 
 /**
  * Agent configuration for this step
  */
-agent_config: AgentConfig;
+agent_config: AgentConfig; 
 /**
  * Whether this is a final step (no outgoing transitions)
  */
-is_final: boolean;
+is_final: boolean; 
 /**
  * List of step IDs this step can transition to
  */
-transitions_to: string[];
+transitions_to: string[]; 
 /**
  * Ordering index for sequential fallback (0-based)
  */
-order: number;
+order: number; 
 /**
  * Creation timestamp (ISO 8601 string)
  */
-created_at: string | null;
+created_at: string | null; 
 /**
  * Last update timestamp (ISO 8601 string)
  */
@@ -1033,6 +1041,14 @@ step_name: string | null;
  */
 needs_human_review: boolean | null; 
 /**
+ * Whether this task is archived
+ */
+archived: boolean; 
+/**
+ * Optional worktree path
+ */
+worktree: string | null; 
+/**
  * Review comment
  */
 review_comment: string | null; 
@@ -1136,6 +1152,11 @@ export type TaskPriority = "low" | "medium" | "high" | "critical"
  */
 export type TaskStepChangedEvent = { task_id: string; step_id: string; step_name: string }
 /**
+ * Options for updating a workflow step.
+ * Only fields that are Some will be updated.
+ */
+export type UpdateStepOptions = { step_id: string; name: string | null; goal: string | null; prompt: string | null; eval_prompt: string | null; agents: string[] | null; skills: string[] | null; order: number | null; is_final: boolean | null; transitions_to: string[] | null }
+/**
  * Options for updating a task - allows updating multiple fields at once
  */
 export type UpdateTaskOptions = { 
@@ -1168,9 +1189,17 @@ level: string | null;
  */
 needs_human_review: boolean | null; 
 /**
+ * Whether the task is archived
+ */
+archived: boolean | null; 
+/**
  * Revision feedback text
  */
-revision_feedback: string | null }
+revision_feedback: string | null; 
+/**
+ * Worktree path (if provided, null clears it)
+ */
+worktree: string | null }
 /**
  * Workflow - mirrors db::Workflow
  */
@@ -1220,55 +1249,6 @@ export type WorkflowChangeType = "Created" | "Updated" | "Deleted" |
  * Emitted when a workflow is created, updated, or deleted.
  */
 export type WorkflowChangedEvent = { workflow_id: string; change_type: WorkflowChangeType }
-/**
- * Event payload for workflow execution progress.
- * Emitted during workflow step execution to track progress.
- */
-export type WorkflowExecutionEvent = { task_id: string; workflow_id: string; event_type: WorkflowExecutionEventType }
-/**
- * The type of execution event that occurred.
- */
-export type WorkflowExecutionEventType = 
-/**
- * Workflow execution started
- */
-"Started" | 
-/**
- * Orchestrator phase started
- */
-{ OrchestratorStarted: { execution_id: string; step_name: string } } | 
-/**
- * Orchestrator phase completed, prompt ready
- */
-{ OrchestratorCompleted: { execution_id: string } } | 
-/**
- * Orchestrator phase failed
- */
-{ OrchestratorFailed: { execution_id: string; error: string } } | 
-/**
- * A step execution started (execution phase)
- */
-{ StepStarted: { execution_id: string; step_name: string } } | 
-/**
- * Step produced output
- */
-{ StepProgress: { execution_id: string; output_lines: string[] } } | 
-/**
- * A step completed successfully
- */
-{ StepCompleted: { execution_id: string } } | 
-/**
- * A step failed
- */
-{ StepFailed: { execution_id: string; error: string } } | 
-/**
- * Entire workflow completed successfully
- */
-"Completed" | 
-/**
- * Workflow failed
- */
-{ Failed: { error: string } }
 /**
  * Workflow transition - defines allowed transitions between workflows
  */

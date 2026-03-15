@@ -1028,11 +1028,6 @@ function AllWorkflowsPipelineInner() {
           taskCount={
             workflowTasksMap.get(selectedWorkflow.id || "")?.length || 0
           }
-          tasks={
-            workflowTasksMap
-              .get(selectedWorkflow.id || "")
-              ?.map((t) => ({ id: t.id, title: t.title })) || []
-          }
           onClose={handleCloseWorkflowPanel}
           onStepSelect={handleWorkflowStepSelect}
           onBack={panelHistory.length > 0 ? handleBack : undefined}

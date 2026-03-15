@@ -28,6 +28,8 @@ function createStep(overrides?: Partial<Step>): Step {
     is_final: false,
     transitions_to: [],
     goal: null,
+    prompt: null,
+    eval_prompt: null,
     created_at: null,
     updated_at: null,
     agent_config: {
