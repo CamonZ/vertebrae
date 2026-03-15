@@ -434,6 +434,10 @@ pub struct Step {
     pub workflow_id: String,
     /// What this step should accomplish
     pub goal: Option<String>,
+    /// Prompt sent to the agent when executing this step
+    pub prompt: Option<String>,
+    /// Evaluation prompt used to assess step output for branching decisions
+    pub eval_prompt: Option<String>,
     /// Paths to .claude/agents/ files for this step
     #[serde(default)]
     pub agents: Vec<String>,
@@ -461,6 +465,8 @@ impl From<vertebrae_core::Step> for Step {
             name: step.name,
             workflow_id: step.workflow_id,
             goal: step.goal,
+            prompt: step.prompt,
+            eval_prompt: step.eval_prompt,
             agents: step.agents,
             skills: step.skills,
             agent_config: step.agent_config.into(),
@@ -1124,6 +1130,8 @@ mod tests {
         assert_eq!(gui.name, "review");
         assert_eq!(gui.workflow_id, "wf1");
         assert_eq!(gui.goal, None);
+        assert_eq!(gui.prompt, None);
+        assert_eq!(gui.eval_prompt, None);
         assert!(gui.agents.is_empty());
         assert!(gui.skills.is_empty());
         assert!(!gui.is_final);
@@ -1135,6 +1143,8 @@ mod tests {
     fn step_from_core_with_config() {
         let core = vertebrae_core::Step::new("review", "wf1")
             .with_goal("Review code")
+            .with_prompt("Review the PR")
+            .with_eval_prompt("Did it pass?")
             .with_agent("claude")
             .with_skill("code-review")
             .with_is_final(true)
@@ -1142,6 +1152,8 @@ mod tests {
         let gui = Step::from(core);
         assert_eq!(gui.name, "review");
         assert_eq!(gui.goal, Some("Review code".to_string()));
+        assert_eq!(gui.prompt, Some("Review the PR".to_string()));
+        assert_eq!(gui.eval_prompt, Some("Did it pass?".to_string()));
         assert_eq!(gui.agents, vec!["claude"]);
         assert_eq!(gui.skills, vec!["code-review"]);
         assert!(gui.is_final);
