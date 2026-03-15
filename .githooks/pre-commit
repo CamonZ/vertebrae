@@ -26,16 +26,21 @@ GUI_PID=$!
 (cd crates/gui && npm run lint) &
 LINT_PID=$!
 
+(cd crates/gui && npm run typecheck) &
+TYPECHECK_PID=$!
+
 # Wait for all jobs and capture exit codes
 CLIPPY_EXIT=0
 LLVM_COV_EXIT=0
 GUI_EXIT=0
 LINT_EXIT=0
+TYPECHECK_EXIT=0
 
 wait $CLIPPY_PID || CLIPPY_EXIT=$?
 wait $LLVM_COV_PID || LLVM_COV_EXIT=$?
 wait $GUI_PID || GUI_EXIT=$?
 wait $LINT_PID || LINT_EXIT=$?
+wait $TYPECHECK_PID || TYPECHECK_EXIT=$?
 
 # Report failures
 if [ $CLIPPY_EXIT -ne 0 ]; then
@@ -50,9 +55,12 @@ fi
 if [ $LINT_EXIT -ne 0 ]; then
     echo "ERROR: linting failed"
 fi
+if [ $TYPECHECK_EXIT -ne 0 ]; then
+    echo "ERROR: TypeScript type checking failed"
+fi
 
 # Exit with error if any failed
-if [ $CLIPPY_EXIT -ne 0 ] || [ $LLVM_COV_EXIT -ne 0 ] || [ $GUI_EXIT -ne 0 ] || [ $LINT_EXIT -ne 0 ]; then
+if [ $CLIPPY_EXIT -ne 0 ] || [ $LLVM_COV_EXIT -ne 0 ] || [ $GUI_EXIT -ne 0 ] || [ $LINT_EXIT -ne 0 ] || [ $TYPECHECK_EXIT -ne 0 ]; then
     exit 1
 fi
 
