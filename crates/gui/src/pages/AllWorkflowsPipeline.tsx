@@ -29,8 +29,7 @@ import {
 import { useStepChangeListener } from "../hooks/useStepChangeListener";
 import { useStepExecutionChangeListener } from "../hooks/useStepExecutionChangeListener";
 import { useElkLayout, type LayoutNode, type LayoutEdge } from "../hooks";
-import { useToastStore } from "../stores";
-import { useTaskStore } from "../stores";
+import { useToastStore, useTaskStore, useExecutionStore } from "../stores";
 import { groupTasksByStep } from "../utils";
 import {
   StepNode,
@@ -70,6 +69,15 @@ const edgeTypes: EdgeTypes = {
  * Features neural-pathway-inspired design with real-time updates.
  * Press 'c' to toggle collapsed/expanded view.
  */
+
+/** Map API ExecutionStatus to frontend StepExecutionStatus */
+function mapExecutionStatus(status: ExecutionStatus): StepExecutionStatus {
+  switch (status) {
+    case "in_progress": return "Running";
+    case "completed": return "Completed";
+    case "failed": return "Failed";
+  }
+}
 
 type PanelEntry =
   | { type: 'task'; id: string }
@@ -118,33 +126,23 @@ function AllWorkflowsPipelineInner() {
   const [flashingWorkflowIds, setFlashingWorkflowIds] = useState<Set<string>>(new Set());
   const [flashingStepIds, setFlashingStepIds] = useState<Set<string>>(new Set());
 
-  // Track per-task execution state from StepExecutionChangedEvent
-  const [taskExecutionStates, setTaskExecutionStates] = useState<
-    Map<string, { status: StepExecutionStatus; stepName: string }>
-  >(new Map());
+  // Listen for step execution changes - updates execution store directly
+  useStepExecutionChangeListener();
 
-  // Listen for step execution changes and track per-task state
-  useStepExecutionChangeListener({
-    onExecutionCreated: (_executionId, taskId, _workflowId, stepName, status) => {
-      setTaskExecutionStates((prev) => {
-        const next = new Map(prev);
-        next.set(taskId, { status, stepName });
-        return next;
-      });
-    },
-    onExecutionStatusChanged: (_executionId, taskId, newStatus) => {
-      setTaskExecutionStates((prev) => {
-        const next = new Map(prev);
-        const existing = next.get(taskId);
-        if (existing) {
-          next.set(taskId, { ...existing, status: newStatus });
-        } else {
-          next.set(taskId, { status: newStatus, stepName: "" });
-        }
-        return next;
-      });
-    },
-  });
+  // Derive per-task execution state from the execution store
+  const executions = useExecutionStore((state) => state.executions);
+  const taskExecutionStates = useMemo(() => {
+    const map = new Map<string, { status: StepExecutionStatus; stepName: string }>();
+    for (const exec of executions) {
+      if (exec.task_id && exec.status) {
+        map.set(exec.task_id, {
+          status: mapExecutionStatus(exec.status),
+          stepName: exec.step_name ?? "",
+        });
+      }
+    }
+    return map;
+  }, [executions]);
 
   // Helper to capture current panel state
   function currentPanelEntry(): PanelEntry | null {
@@ -352,7 +350,8 @@ function AllWorkflowsPipelineInner() {
     fetchPipelineData();
   }, [fetchPipelineData]);
 
-  // Initialize execution states from API after pipeline data loads
+  // Initialize execution store from API after pipeline data loads
+  const setExecutions = useExecutionStore((state) => state.setExecutions);
   useEffect(() => {
     // Gather all task IDs across all workflows
     const allTaskIds: string[] = [];
@@ -364,44 +363,23 @@ function AllWorkflowsPipelineInner() {
 
     if (allTaskIds.length === 0) return;
 
-    // Map API ExecutionStatus to frontend StepExecutionStatus
-    const mapStatus = (status: ExecutionStatus): StepExecutionStatus => {
-      switch (status) {
-        case "in_progress": return "Running";
-        case "completed": return "Completed";
-        case "failed": return "Failed";
-        default: return "Pending";
-      }
-    };
-
     // Fetch latest execution for each task in parallel
     Promise.allSettled(
       allTaskIds.map((taskId) => commands.getTaskExecutions(taskId).then((result) => ({ taskId, result })))
     ).then((outcomes) => {
-      const newStates = new Map<string, { status: StepExecutionStatus; stepName: string }>();
+      const latestExecutions = [];
       for (const outcome of outcomes) {
         if (outcome.status !== "fulfilled") continue;
-        const { taskId, result } = outcome.value;
+        const { result } = outcome.value;
         if (result.status !== "ok" || result.data.length === 0) continue;
         // Latest execution is the last one in the chronological list
-        const latest = result.data[result.data.length - 1];
-        newStates.set(taskId, {
-          status: latest.status ? mapStatus(latest.status) : "Pending",
-          stepName: latest.step_name ?? "",
-        });
+        latestExecutions.push(result.data[result.data.length - 1]);
       }
-      if (newStates.size > 0) {
-        setTaskExecutionStates((prev) => {
-          // Merge: API data as base, keep any newer WebSocket updates
-          const merged = new Map(newStates);
-          for (const [k, v] of prev) {
-            merged.set(k, v);
-          }
-          return merged;
-        });
+      if (latestExecutions.length > 0) {
+        setExecutions(latestExecutions);
       }
     });
-  }, [workflowTasksMap]);
+  }, [workflowTasksMap, setExecutions]);
 
   // Handle individual task changes - fetch only the changed task and patch local state
   useEffect(() => {
@@ -517,10 +495,8 @@ function AllWorkflowsPipelineInner() {
     };
   }, [workflows, schedulePipelineRefetch]);
 
-  // Subscribe to step change events - reload pipeline when steps are added/updated/deleted
-  useStepChangeListener(null, {
-    onWorkflowStepsChange: schedulePipelineRefetch,
-  });
+  // Subscribe to step change events - updates step store directly
+  useStepChangeListener();
 
   // Calculate workflow zone dimensions for ELK layout
   const workflowDimensions = useMemo(() => {

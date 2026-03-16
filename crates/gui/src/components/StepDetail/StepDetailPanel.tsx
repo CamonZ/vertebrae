@@ -81,7 +81,7 @@ export function StepDetailPanel({
   const [viewMode, setViewMode] = useState<ViewMode>("tree");
 
   // Fetch step data and listen for changes
-  const { step, refetch } = useStep(stepId);
+  const { step } = useStep(stepId);
 
   // Use expanded nodes hook for task tree
   const expandedNodes = useExpandedNodes();
@@ -98,12 +98,8 @@ export function StepDetailPanel({
     return buildTreeFromTasks(filtered);
   }, [tasks, search]);
 
-  // Listen for step change events
-  useStepChangeListener(stepId, {
-    onStepChange: () => {
-      void refetch();
-    },
-  });
+  // Listen for step change events - updates step store directly
+  useStepChangeListener();
 
   // Handle field updates
   const handleUpdateField = useCallback(
