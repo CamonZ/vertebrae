@@ -130,8 +130,9 @@ function TimelineNode({ status }: { status: ExecutionStatus }) {
 function ExecutionEntry({ execution, isLast, index }: { execution: StepExecution; isLast: boolean; index: number }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const { logs, isLoading, error, hasFetched, fetchLogs } = useExecutionLogs();
-  const styles = getStatusStyles(execution.status);
-  const isActive = execution.status === 'in_progress';
+  const status = execution.status ?? 'in_progress';
+  const styles = getStatusStyles(status);
+  const isActive = status === 'in_progress';
 
   const handleToggle = () => {
     const newExpanded = !isExpanded;
@@ -149,7 +150,7 @@ function ExecutionEntry({ execution, isLast, index }: { execution: StepExecution
     >
       {/* Timeline connector */}
       <div className="flex flex-col items-center">
-        <TimelineNode status={execution.status} />
+        <TimelineNode status={status} />
         {!isLast && (
           <div className={`mt-1 w-0.5 flex-1 ${isActive ? 'animate-signal-flow' : ''}`}>
             <div className="h-full w-full bg-gradient-to-b from-border via-border to-transparent" />
@@ -176,18 +177,18 @@ function ExecutionEntry({ execution, isLast, index }: { execution: StepExecution
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
             </svg>
             <div>
-              <h4 className="text-sm font-medium text-text-primary">{execution.step_name}</h4>
+              <h4 className="text-sm font-medium text-text-primary">{execution.step_name ?? ''}</h4>
               <p className="mt-0.5 text-xs text-text-muted">
-                {formatDateTime(execution.started_at)}
+                {formatDateTime(execution.started_at ?? '')}
               </p>
             </div>
           </div>
           <div className="flex flex-col items-end gap-1">
             <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${styles.bg} ${styles.text}`}>
-              {isActive ? 'Active' : execution.status}
+              {isActive ? 'Active' : status}
             </span>
             <span className="font-mono text-[10px] text-text-muted">
-              {formatDuration(execution.started_at, execution.completed_at)}
+              {formatDuration(execution.started_at ?? '', execution.completed_at)}
             </span>
           </div>
         </button>
@@ -233,8 +234,8 @@ export function ExecutionHistory({ taskId }: ExecutionHistoryProps) {
   // Sort executions descending (newest first)
   const sortedExecutions = useMemo(() => {
     return [...executions].sort((a, b) => {
-      const dateA = new Date(a.started_at).getTime();
-      const dateB = new Date(b.started_at).getTime();
+      const dateA = new Date(a.started_at ?? 0).getTime();
+      const dateB = new Date(b.started_at ?? 0).getTime();
       return dateB - dateA;
     });
   }, [executions]);

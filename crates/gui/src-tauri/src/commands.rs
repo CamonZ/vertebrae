@@ -882,6 +882,7 @@ pub async fn update_step(
             step_id: step_id.clone(),
             workflow_id,
             change_type: crate::events::StepChangeType::Updated,
+            step: None,
         },
     );
 
@@ -931,6 +932,7 @@ pub async fn delete_step(
             step_id: step_id.clone(),
             workflow_id,
             change_type: crate::events::StepChangeType::Deleted,
+            step: None,
         },
     );
 
@@ -945,12 +947,10 @@ pub(crate) async fn delete_step_inner(
 ) -> Result<String, CommandError> {
     // Verify step exists and capture workflow_id before deletion
     let existing = service.steps().get_step(step_id).await?;
-    if existing.is_none() {
-        return Err(CommandError {
-            message: format!("Step not found: {}", step_id),
-        });
-    }
-    let workflow_id = existing.unwrap().workflow_id.clone();
+    let step = existing.ok_or_else(|| CommandError {
+        message: format!("Step not found: {}", step_id),
+    })?;
+    let workflow_id = step.workflow_id.clone();
 
     service.steps().delete_step(step_id).await?;
     log::info!("delete_step succeeded for step: {}", step_id);
@@ -1280,6 +1280,7 @@ pub async fn update_task(
         crate::events::TaskChangedEvent {
             task_id: task_id.clone(),
             change_type: crate::events::TaskChangeType::Updated,
+            task: None,
         },
     );
 

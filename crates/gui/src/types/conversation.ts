@@ -281,8 +281,8 @@ export function parseSessionLogs(logs: SessionLog[]): ConversationEvent[] {
 
   for (const log of logs) {
     try {
-      const raw = JSON.parse(log.content) as ClaudeRawMessage;
-      const parsed = parseClaudeMessage(raw, log.created_at);
+      const raw = JSON.parse(log.content ?? '') as ClaudeRawMessage;
+      const parsed = parseClaudeMessage(raw, log.created_at ?? '');
       events.push(...parsed);
     } catch {
       // Skip non-JSON or malformed entries

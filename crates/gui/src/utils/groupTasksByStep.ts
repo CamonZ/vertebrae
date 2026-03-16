@@ -9,7 +9,7 @@ export function groupTasksByStep(
   tasks: Task[],
   steps: Step[]
 ): Map<string, Task[]> {
-  const sortedSteps = [...steps].sort((a, b) => a.order - b.order);
+  const sortedSteps = [...steps].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   const groups = new Map<string, Task[]>();
 
   // Initialize groups for each step (keyed by step name for display compatibility)

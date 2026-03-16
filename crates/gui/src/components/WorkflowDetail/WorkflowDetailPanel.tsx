@@ -179,7 +179,7 @@ export function WorkflowDetailPanel({
                   type="button"
                   onClick={() => {
                     // Create a new step with the next order number
-                    const nextOrder = Math.max(...steps.map((s) => s.order), -1) + 1;
+                    const nextOrder = Math.max(...steps.map((s) => s.order ?? 0), -1) + 1;
                     const workflowId = workflow?.id || "";
                     void commands
                       .createStep(
@@ -213,7 +213,7 @@ export function WorkflowDetailPanel({
             </div>
             <div className="space-y-2">
               {steps
-                .sort((a, b) => a.order - b.order)
+                .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
                 .map((step) => (
                   <div
                     key={step.id || step.name}
@@ -225,7 +225,7 @@ export function WorkflowDetailPanel({
                     }`}
                   >
                     <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded border border-primary/30 bg-primary/10 font-mono text-xs font-bold text-primary">
-                      {step.order + 1}
+                      {(step.order ?? 0) + 1}
                     </span>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium text-text-primary">
@@ -238,7 +238,7 @@ export function WorkflowDetailPanel({
                       )}
                     </div>
                     <code className="flex-shrink-0 rounded bg-bg-secondary px-1.5 py-0.5 font-mono text-[10px] text-text-muted">
-                      {step.agent_config.model || "default"}
+                      {step.agent_config?.model || "default"}
                     </code>
                   </div>
                 ))}
@@ -247,11 +247,11 @@ export function WorkflowDetailPanel({
         )}
 
         {/* Metadata */}
-        {Object.keys(workflow.metadata).length > 0 && (
+        {Object.keys(workflow.metadata ?? {}).length > 0 && (
           <div className="p-4">
             <SectionHeader title="Metadata" />
             <div className="space-y-1">
-              {Object.entries(workflow.metadata).map(([key, value]) => (
+              {Object.entries(workflow.metadata ?? {}).map(([key, value]) => (
                 <DetailRow key={key} label={key}>
                   <code className="rounded bg-bg-tertiary px-1.5 py-0.5 font-mono text-xs">
                     {value}

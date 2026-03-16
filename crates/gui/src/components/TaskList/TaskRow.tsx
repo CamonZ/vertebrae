@@ -247,9 +247,9 @@ export function TaskRow({ task, isSelected = false, onClick, columnWidths = {}, 
 
       {/* Tags column */}
       <td style={{ width: columnWidths['tags'] ? `${columnWidths['tags']}px` : '200px' }} className="px-4 py-3">
-        {task.tags.length > 0 ? (
+        {(task.tags ?? []).length > 0 ? (
           <div className="flex flex-wrap gap-1">
-            {task.tags.slice(0, 3).map((tag) => (
+            {(task.tags ?? []).slice(0, 3).map((tag) => (
               <span
                 key={tag}
                 className="inline-flex items-center rounded-full border border-border bg-bg-tertiary px-2 py-0.5 text-[10px] text-text-secondary"
@@ -257,9 +257,9 @@ export function TaskRow({ task, isSelected = false, onClick, columnWidths = {}, 
                 {tag}
               </span>
             ))}
-            {task.tags.length > 3 && (
+            {(task.tags ?? []).length > 3 && (
               <span className="inline-flex items-center rounded-full border border-border bg-bg-tertiary px-2 py-0.5 text-[10px] text-text-muted">
-                +{task.tags.length - 3}
+                +{(task.tags ?? []).length - 3}
               </span>
             )}
           </div>

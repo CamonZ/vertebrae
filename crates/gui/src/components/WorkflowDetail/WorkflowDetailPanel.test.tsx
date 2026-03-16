@@ -179,7 +179,7 @@ describe("WorkflowDetailPanel", () => {
           name: "review",
           order: 0,
           agent_config: {
-            ...createStep().agent_config,
+            ...createStep().agent_config!,
             model: "sonnet",
           },
         }),
