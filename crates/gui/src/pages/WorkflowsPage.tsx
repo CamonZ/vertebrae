@@ -7,12 +7,10 @@ import { WorkflowGrid } from "../components/WorkflowGrid";
  * Automatically refreshes when workflow change events are received.
  */
 export function WorkflowsPage() {
-  const { workflows, isLoading, error, refetch } = useWorkflows();
+  const { workflows, isLoading, error } = useWorkflows();
 
-  // Subscribe to workflow change events for automatic list refresh
-  useWorkflowChangeListener({
-    onWorkflowListChange: refetch,
-  });
+  // Subscribe to workflow change events for automatic store updates
+  useWorkflowChangeListener();
 
   return (
     <div className="relative flex-1 space-y-6 overflow-auto p-6">

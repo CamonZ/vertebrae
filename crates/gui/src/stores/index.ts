@@ -5,6 +5,12 @@ export type { TaskStore } from "./taskStore";
 export { useWorkflowStore } from "./workflowStore";
 export type { WorkflowStore } from "./workflowStore";
 
+export { useStepStore } from "./stepStore";
+export type { StepStore } from "./stepStore";
+
+export { useExecutionStore } from "./executionStore";
+export type { ExecutionStore } from "./executionStore";
+
 export { useUIStore } from "./uiStore";
 export type { UIStore } from "./uiStore";
 

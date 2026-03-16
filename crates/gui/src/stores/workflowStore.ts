@@ -13,6 +13,10 @@ interface WorkflowState {
 interface WorkflowActions {
   /** Set the list of workflows */
   setWorkflows: (workflows: Workflow[]) => void;
+  /** Insert or update a workflow in the list */
+  upsertWorkflow: (workflow: Workflow) => void;
+  /** Remove a workflow by ID; clears currentWorkflow if it matches */
+  removeWorkflow: (workflowId: string) => void;
   /** Set the current workflow with tasks */
   setCurrentWorkflow: (workflow: WorkflowWithTasks | null) => void;
   /** Set the loading state */
@@ -31,6 +35,31 @@ export const useWorkflowStore = create<WorkflowStore>((set) => ({
 
   // Actions
   setWorkflows: (workflows) => set({ workflows }),
+
+  upsertWorkflow: (workflow) =>
+    set((state) => {
+      const index = state.workflows.findIndex((w) => w.id === workflow.id);
+      if (index >= 0) {
+        const workflows = [...state.workflows];
+        workflows[index] = workflow;
+        return {
+          workflows,
+          currentWorkflow:
+            state.currentWorkflow?.workflow?.id === workflow.id
+              ? { ...state.currentWorkflow, workflow }
+              : state.currentWorkflow,
+        };
+      }
+      return { workflows: [...state.workflows, workflow] };
+    }),
+
+  removeWorkflow: (workflowId) =>
+    set((state) => ({
+      workflows: state.workflows.filter((w) => w.id !== workflowId),
+      ...(state.currentWorkflow?.workflow?.id === workflowId
+        ? { currentWorkflow: null }
+        : {}),
+    })),
 
   setCurrentWorkflow: (workflow) => set({ currentWorkflow: workflow }),
 
