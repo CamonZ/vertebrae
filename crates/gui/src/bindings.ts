@@ -669,15 +669,15 @@ agents: string | null;
 /**
  * List of available tools from the built-in set
  */
-tools: string[]; 
+tools?: string[]; 
 /**
  * List of tool names to allow
  */
-allowed_tools: string[]; 
+allowed_tools?: string[]; 
 /**
  * List of tool names to deny
  */
-disallowed_tools: string[]; 
+disallowed_tools?: string[]; 
 /**
  * Permission mode to use for the session
  */
@@ -689,11 +689,11 @@ max_budget_usd: number | null;
 /**
  * Paths to MCP server configuration files or JSON strings
  */
-mcp_config: string[]; 
+mcp_config?: string[]; 
 /**
  * Directories to load plugins from
  */
-plugin_dirs: string[]; 
+plugin_dirs?: string[]; 
 /**
  * JSON Schema for structured output validation (serialized as JSON string)
  */
@@ -838,8 +838,9 @@ export type SectionChangeType = "Created" | "Updated" | "Deleted"
 /**
  * Event payload for section changes.
  * Emitted when a section is created, updated, or deleted.
+ * For create/update events, `section` carries the full deserialized entity.
  */
-export type SectionChangedEvent = { section_id: string; task_id: string; change_type: SectionChangeType }
+export type SectionChangedEvent = { section_id: string; task_id: string; change_type: SectionChangeType; section: Section | null }
 /**
  * Section type - mirrors db::SectionType
  */
@@ -855,20 +856,21 @@ id: string | null;
 /**
  * Step execution ID this log belongs to
  */
-step_execution_id: string; 
+step_execution_id?: string; 
 /**
  * The log content
  */
-content: string; 
+content?: string; 
 /**
  * When this log was created (ISO 8601 string)
  */
-created_at: string }
+created_at?: string }
 /**
  * Event payload for session log creation.
  * Emitted when a new session log is created during step execution.
+ * `session_log` carries the full deserialized entity when available.
  */
-export type SessionLogCreatedEvent = { log_id: string; execution_id: string }
+export type SessionLogCreatedEvent = { log_id: string; execution_id: string; session_log: SessionLog | null }
 /**
  * Workflow step entity - mirrors db::Step
  */
@@ -908,19 +910,19 @@ skills?: string[];
 /**
  * Agent configuration for this step
  */
-agent_config: AgentConfig; 
+agent_config?: AgentConfig; 
 /**
  * Whether this is a final step (no outgoing transitions)
  */
-is_final: boolean; 
+is_final?: boolean; 
 /**
  * List of step IDs this step can transition to
  */
-transitions_to: string[]; 
+transitions_to?: string[]; 
 /**
  * Ordering index for sequential fallback (0-based)
  */
-order: number; 
+order?: number; 
 /**
  * Creation timestamp (ISO 8601 string)
  */
@@ -936,8 +938,9 @@ export type StepChangeType = "Created" | "Updated" | "Deleted"
 /**
  * Event payload for step changes.
  * Emitted when a step is created, updated, or deleted.
+ * For create/update events, `step` carries the full deserialized entity.
  */
-export type StepChangedEvent = { step_id: string; workflow_id: string; change_type: StepChangeType }
+export type StepChangedEvent = { step_id: string; workflow_id: string; change_type: StepChangeType; step: Step | null }
 /**
  * Step execution record - mirrors db::StepExecution
  */
@@ -949,19 +952,19 @@ id: string | null;
 /**
  * Task ID this execution belongs to
  */
-task_id: string; 
+task_id?: string; 
 /**
  * Workflow ID being executed
  */
-workflow_id: string; 
+workflow_id?: string; 
 /**
  * Name of the step being executed
  */
-step_name: string; 
+step_name?: string; 
 /**
  * When this step execution started (ISO 8601 string)
  */
-started_at: string; 
+started_at?: string; 
 /**
  * When this step execution completed (ISO 8601 string)
  */
@@ -969,7 +972,7 @@ completed_at: string | null;
 /**
  * Current status of this step execution
  */
-status: ExecutionStatus }
+status?: ExecutionStatus }
 /**
  * The type of change that occurred on a step execution.
  */
@@ -977,8 +980,9 @@ export type StepExecutionChangeType = "Created" | "StatusChanged"
 /**
  * Event payload for step execution changes.
  * Emitted when a step execution is created or its status changes.
+ * For create/update events, `execution` carries the full deserialized entity.
  */
-export type StepExecutionChangedEvent = { execution_id: string; task_id: string; workflow_id: string; step_name: string; status: StepExecutionStatus; change_type: StepExecutionChangeType }
+export type StepExecutionChangedEvent = { execution_id: string; task_id: string; workflow_id: string; step_name: string; status: StepExecutionStatus; change_type: StepExecutionChangeType; execution: StepExecution | null }
 /**
  * Status of a step execution (mirrors db::ExecutionStatus for frontend)
  */
@@ -1019,7 +1023,7 @@ priority: TaskPriority | null;
 /**
  * Tags for categorization
  */
-tags: string[]; 
+tags?: string[]; 
 /**
  * Workflow ID (string form)
  */
@@ -1043,7 +1047,7 @@ needs_human_review: boolean | null;
 /**
  * Whether this task is archived
  */
-archived: boolean; 
+archived?: boolean; 
 /**
  * Optional worktree path
  */
@@ -1071,11 +1075,11 @@ dependency_ids?: string[];
 /**
  * Embedded sections
  */
-sections: Section[]; 
+sections?: Section[]; 
 /**
  * Embedded code references
  */
-code_refs: CodeRef[]; 
+code_refs?: CodeRef[]; 
 /**
  * Creation timestamp (ISO 8601 string)
  */
@@ -1099,8 +1103,9 @@ export type TaskChangeType = "Created" | "Updated" | "Deleted" | "StatusChanged"
 /**
  * Event payload for task changes.
  * Emitted when a task is created, updated, deleted, or its status changes.
+ * For create/update events, `task` carries the full deserialized entity.
  */
-export type TaskChangedEvent = { task_id: string; change_type: TaskChangeType }
+export type TaskChangedEvent = { task_id: string; change_type: TaskChangeType; task: Task | null }
 /**
  * Filter options for listing tasks
  */
@@ -1154,6 +1159,7 @@ export type TaskStepChangedEvent = { task_id: string; step_id: string; step_name
 /**
  * Options for updating a workflow step.
  * Only fields that are Some will be updated.
+ * Note: agent_config is intentionally omitted — not editable from the GUI.
  */
 export type UpdateStepOptions = { step_id: string; name: string | null; goal: string | null; prompt: string | null; eval_prompt: string | null; agents: string[] | null; skills: string[] | null; order: number | null; is_final: boolean | null; transitions_to: string[] | null }
 /**
@@ -1223,7 +1229,7 @@ initial_step: string | null;
 /**
  * Additional metadata as key-value pairs
  */
-metadata: Partial<{ [key in string]: string }>; 
+metadata?: Partial<{ [key in string]: string }>; 
 /**
  * Creation timestamp (ISO 8601 string)
  */
@@ -1247,8 +1253,9 @@ export type WorkflowChangeType = "Created" | "Updated" | "Deleted" |
 /**
  * Event payload for workflow changes.
  * Emitted when a workflow is created, updated, or deleted.
+ * For create/update events, `workflow` carries the full deserialized entity.
  */
-export type WorkflowChangedEvent = { workflow_id: string; change_type: WorkflowChangeType }
+export type WorkflowChangedEvent = { workflow_id: string; change_type: WorkflowChangeType; workflow: Workflow | null }
 /**
  * Workflow transition - defines allowed transitions between workflows
  */

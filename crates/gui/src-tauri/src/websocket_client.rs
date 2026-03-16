@@ -18,6 +18,26 @@ use crate::events::{
     StepTransitionChangeType, StepTransitionChangedEvent, TaskChangeType, TaskChangedEvent,
     WorkflowChangeType, WorkflowChangedEvent,
 };
+use crate::types;
+
+/// Attempt to deserialize a WebSocket payload into a GUI type.
+/// Returns `None` and logs a warning if deserialization fails.
+fn try_deserialize<T: serde::de::DeserializeOwned>(
+    payload: &serde_json::Value,
+    type_name: &str,
+) -> Option<T> {
+    match serde_json::from_value::<T>(payload.clone()) {
+        Ok(v) => Some(v),
+        Err(e) => {
+            log::warn!(
+                "[WebSocket] Failed to deserialize {} from payload: {}",
+                type_name,
+                e
+            );
+            None
+        }
+    }
+}
 
 /// Default heartbeat interval (30 seconds as per Phoenix protocol)
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
@@ -361,12 +381,19 @@ impl SacrumSocket {
             _ => TaskChangeType::StatusChanged,
         };
 
+        let task = if !matches!(change_type, TaskChangeType::Deleted) {
+            try_deserialize::<types::Task>(payload, "Task")
+        } else {
+            None
+        };
+
         let event = TaskChangedEvent {
             task_id,
             change_type,
+            task,
         };
 
-        log::info!("[WebSocket] Emitting TaskChangedEvent: {:?}", event);
+        log::debug!("[WebSocket] Emitting TaskChangedEvent: {:?}", event);
 
         app_handle
             .emit("task-changed-event", &event)
@@ -396,12 +423,19 @@ impl SacrumSocket {
             _ => WorkflowChangeType::Updated,
         };
 
+        let workflow = if !matches!(change_type, WorkflowChangeType::Deleted) {
+            try_deserialize::<types::Workflow>(payload, "Workflow")
+        } else {
+            None
+        };
+
         let event = WorkflowChangedEvent {
             workflow_id,
             change_type,
+            workflow,
         };
 
-        log::info!("[WebSocket] Emitting WorkflowChangedEvent: {:?}", event);
+        log::debug!("[WebSocket] Emitting WorkflowChangedEvent: {:?}", event);
 
         app_handle
             .emit("workflow-changed-event", &event)
@@ -435,13 +469,20 @@ impl SacrumSocket {
             _ => StepChangeType::Updated,
         };
 
+        let step = if !matches!(change_type, StepChangeType::Deleted) {
+            try_deserialize::<types::Step>(payload, "Step")
+        } else {
+            None
+        };
+
         let event = StepChangedEvent {
             step_id,
             workflow_id,
             change_type,
+            step,
         };
 
-        log::info!("[WebSocket] Emitting StepChangedEvent: {:?}", event);
+        log::debug!("[WebSocket] Emitting StepChangedEvent: {:?}", event);
 
         app_handle
             .emit("step-changed-event", &event)
@@ -473,7 +514,7 @@ impl SacrumSocket {
             change_type,
         };
 
-        log::info!(
+        log::debug!(
             "[WebSocket] Emitting StepTransitionChangedEvent: {:?}",
             event
         );
@@ -528,6 +569,8 @@ impl SacrumSocket {
             _ => StepExecutionChangeType::Created,
         };
 
+        let execution = try_deserialize::<types::StepExecution>(payload, "StepExecution");
+
         let event = StepExecutionChangedEvent {
             execution_id,
             task_id,
@@ -535,9 +578,10 @@ impl SacrumSocket {
             step_name,
             status,
             change_type,
+            execution,
         };
 
-        log::info!(
+        log::debug!(
             "[WebSocket] Emitting StepExecutionChangedEvent: {:?}",
             event
         );
@@ -566,12 +610,15 @@ impl SacrumSocket {
             .unwrap_or("")
             .to_string();
 
+        let session_log = try_deserialize::<types::SessionLog>(payload, "SessionLog");
+
         let event = SessionLogCreatedEvent {
             log_id,
             execution_id,
+            session_log,
         };
 
-        log::info!("[WebSocket] Emitting SessionLogCreatedEvent: {:?}", event);
+        log::debug!("[WebSocket] Emitting SessionLogCreatedEvent: {:?}", event);
 
         app_handle
             .emit("session-log-created-event", &event)
@@ -605,13 +652,20 @@ impl SacrumSocket {
             _ => SectionChangeType::Updated,
         };
 
+        let section = if !matches!(change_type, SectionChangeType::Deleted) {
+            try_deserialize::<types::Section>(payload, "Section")
+        } else {
+            None
+        };
+
         let event = SectionChangedEvent {
             section_id,
             task_id,
             change_type,
+            section,
         };
 
-        log::info!("[WebSocket] Emitting SectionChangedEvent: {:?}", event);
+        log::debug!("[WebSocket] Emitting SectionChangedEvent: {:?}", event);
 
         app_handle
             .emit("section-changed-event", &event)
