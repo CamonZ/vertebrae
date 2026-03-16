@@ -2,12 +2,16 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use tauri_specta::Event;
 
+use crate::types;
+
 /// Event payload for task changes.
 /// Emitted when a task is created, updated, deleted, or its status changes.
+/// For create/update events, `task` carries the full deserialized entity.
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct TaskChangedEvent {
     pub task_id: String,
     pub change_type: TaskChangeType,
+    pub task: Option<types::Task>,
 }
 
 /// The type of change that occurred on a task.
@@ -21,10 +25,12 @@ pub enum TaskChangeType {
 
 /// Event payload for workflow changes.
 /// Emitted when a workflow is created, updated, or deleted.
+/// For create/update events, `workflow` carries the full deserialized entity.
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct WorkflowChangedEvent {
     pub workflow_id: String,
     pub change_type: WorkflowChangeType,
+    pub workflow: Option<types::Workflow>,
 }
 
 /// The type of change that occurred on a workflow.
@@ -41,11 +47,13 @@ pub enum WorkflowChangeType {
 
 /// Event payload for step changes.
 /// Emitted when a step is created, updated, or deleted.
+/// For create/update events, `step` carries the full deserialized entity.
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct StepChangedEvent {
     pub step_id: String,
     pub workflow_id: String,
     pub change_type: StepChangeType,
+    pub step: Option<types::Step>,
 }
 
 /// The type of change that occurred on a step.
@@ -68,6 +76,7 @@ pub struct TaskStepChangedEvent {
 
 /// Event payload for step execution changes.
 /// Emitted when a step execution is created or its status changes.
+/// For create/update events, `execution` carries the full deserialized entity.
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct StepExecutionChangedEvent {
     pub execution_id: String,
@@ -76,6 +85,7 @@ pub struct StepExecutionChangedEvent {
     pub step_name: String,
     pub status: StepExecutionStatus,
     pub change_type: StepExecutionChangeType,
+    pub execution: Option<types::StepExecution>,
 }
 
 /// Status of a step execution (mirrors db::ExecutionStatus for frontend)
@@ -111,19 +121,23 @@ pub enum StepTransitionChangeType {
 
 /// Event payload for session log creation.
 /// Emitted when a new session log is created during step execution.
+/// `session_log` carries the full deserialized entity when available.
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct SessionLogCreatedEvent {
     pub log_id: String,
     pub execution_id: String,
+    pub session_log: Option<types::SessionLog>,
 }
 
 /// Event payload for section changes.
 /// Emitted when a section is created, updated, or deleted.
+/// For create/update events, `section` carries the full deserialized entity.
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct SectionChangedEvent {
     pub section_id: String,
     pub task_id: String,
     pub change_type: SectionChangeType,
+    pub section: Option<types::Section>,
 }
 
 /// The type of change that occurred on a section.
