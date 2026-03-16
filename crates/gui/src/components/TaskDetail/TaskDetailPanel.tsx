@@ -496,7 +496,7 @@ function TaskDetailsTab({
           Tags
         </h3>
         <InlineEditField
-          value={taskData.tags.join(", ")}
+          value={(taskData.tags ?? []).join(", ")}
           placeholder="Click to add tags (comma-separated)"
           onSave={async (value) => {
             const tags = value.split(",").map(t => t.trim()).filter(t => t.length > 0);
@@ -894,7 +894,7 @@ export function TaskDetailPanel({
         case "tags": {
           // For tags, we need to compute the difference
           const newTags = value as string[];
-          const currentTags = taskData.tags;
+          const currentTags = taskData.tags ?? [];
           options.add_tags = newTags.filter(t => !currentTags.includes(t));
           options.remove_tags = currentTags.filter(t => !newTags.includes(t));
           break;
@@ -1238,14 +1238,14 @@ export function TaskDetailPanel({
             )}
             {activeTab === "sections" && taskData.id && (
               <TaskSections
-                sections={taskData.sections}
+                sections={taskData.sections ?? []}
                 taskId={taskData.id}
                 onSectionsChanged={refetch}
               />
             )}
             {activeTab === "code_refs" && taskData.id && (
               <TaskCodeRefs
-                codeRefs={taskData.code_refs}
+                codeRefs={taskData.code_refs ?? []}
                 taskId={taskData.id}
                 onCodeRefsChanged={refetch}
               />

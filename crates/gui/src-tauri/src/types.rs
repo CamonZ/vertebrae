@@ -163,6 +163,7 @@ pub struct Task {
     /// Optional priority
     pub priority: Option<TaskPriority>,
     /// Tags for categorization
+    #[serde(default)]
     pub tags: Vec<String>,
     /// Workflow ID (string form)
     pub workflow_id: Option<String>,
@@ -175,6 +176,7 @@ pub struct Task {
     /// Whether this task needs human review
     pub needs_human_review: Option<bool>,
     /// Whether this task is archived
+    #[serde(default)]
     pub archived: bool,
     /// Optional worktree path
     pub worktree: Option<String>,
@@ -190,10 +192,13 @@ pub struct Task {
     #[serde(default)]
     pub dependency_ids: Vec<String>,
     /// Embedded sections
+    #[serde(default)]
     pub sections: Vec<Section>,
     /// Embedded code references
+    #[serde(default)]
     pub code_refs: Vec<CodeRef>,
     /// Creation timestamp (ISO 8601 string)
+    #[serde(alias = "inserted_at")]
     pub created_at: Option<String>,
     /// Last update timestamp (ISO 8601 string)
     pub updated_at: Option<String>,
@@ -386,18 +391,23 @@ pub struct AgentConfig {
     /// JSON object defining custom agents (serialized as JSON string)
     pub agents: Option<String>,
     /// List of available tools from the built-in set
+    #[serde(default)]
     pub tools: Vec<String>,
     /// List of tool names to allow
+    #[serde(default)]
     pub allowed_tools: Vec<String>,
     /// List of tool names to deny
+    #[serde(default)]
     pub disallowed_tools: Vec<String>,
     /// Permission mode to use for the session
     pub permission_mode: Option<PermissionMode>,
     /// Maximum dollar amount to spend on API calls
     pub max_budget_usd: Option<f64>,
     /// Paths to MCP server configuration files or JSON strings
+    #[serde(default)]
     pub mcp_config: Vec<String>,
     /// Directories to load plugins from
+    #[serde(default)]
     pub plugin_dirs: Vec<String>,
     /// JSON Schema for structured output validation (serialized as JSON string)
     pub json_schema: Option<String>,
@@ -445,14 +455,19 @@ pub struct Step {
     #[serde(default)]
     pub skills: Vec<String>,
     /// Agent configuration for this step
+    #[serde(default)]
     pub agent_config: AgentConfig,
     /// Whether this is a final step (no outgoing transitions)
+    #[serde(default)]
     pub is_final: bool,
     /// List of step IDs this step can transition to
+    #[serde(default)]
     pub transitions_to: Vec<String>,
     /// Ordering index for sequential fallback (0-based)
+    #[serde(default)]
     pub order: i32,
     /// Creation timestamp (ISO 8601 string)
+    #[serde(alias = "inserted_at")]
     pub created_at: Option<String>,
     /// Last update timestamp (ISO 8601 string)
     pub updated_at: Option<String>,
@@ -491,8 +506,10 @@ pub struct Workflow {
     /// Reference to the initial step in the workflow
     pub initial_step: Option<String>,
     /// Additional metadata as key-value pairs
+    #[serde(default)]
     pub metadata: std::collections::HashMap<String, String>,
     /// Creation timestamp (ISO 8601 string)
+    #[serde(alias = "inserted_at")]
     pub created_at: Option<String>,
     /// Last update timestamp (ISO 8601 string)
     pub updated_at: Option<String>,
@@ -578,17 +595,28 @@ pub struct StepExecution {
     /// Execution ID (string form)
     pub id: Option<String>,
     /// Task ID this execution belongs to
+    #[serde(default)]
     pub task_id: String,
     /// Workflow ID being executed
+    #[serde(default)]
     pub workflow_id: String,
     /// Name of the step being executed
+    #[serde(default)]
     pub step_name: String,
     /// When this step execution started (ISO 8601 string)
+    #[serde(default)]
     pub started_at: String,
     /// When this step execution completed (ISO 8601 string)
     pub completed_at: Option<String>,
     /// Current status of this step execution
+    #[serde(default = "StepExecution::default_status")]
     pub status: ExecutionStatus,
+}
+
+impl StepExecution {
+    fn default_status() -> ExecutionStatus {
+        ExecutionStatus::InProgress
+    }
 }
 
 impl From<vertebrae_core::StepExecution> for StepExecution {
@@ -611,10 +639,13 @@ pub struct SessionLog {
     /// Log ID (string form)
     pub id: Option<String>,
     /// Step execution ID this log belongs to
+    #[serde(default)]
     pub step_execution_id: String,
     /// The log content
+    #[serde(default)]
     pub content: String,
     /// When this log was created (ISO 8601 string)
+    #[serde(alias = "inserted_at", default)]
     pub created_at: String,
 }
 
@@ -1306,5 +1337,264 @@ mod tests {
         let gui = SessionLog::from(core);
         chrono::DateTime::parse_from_rfc3339(&gui.created_at)
             .expect("created_at should be valid RFC3339");
+    }
+
+    // ─── Sacrum WS Payload Deserialization Tests ────────────────────
+
+    #[test]
+    fn task_deserializes_from_sacrum_ws_payload() {
+        let payload = serde_json::json!({
+            "id": "abc12345-0000-4000-8000-000000000001",
+            "title": "Implement feature X",
+            "description": "A task from Sacrum WS",
+            "level": "ticket",
+            "priority": "high",
+            "tags": ["rust", "gui"],
+            "workflow_id": "wf-001",
+            "current_step_id": "step-001",
+            "workflow_name": "Development",
+            "step_name": "in_progress",
+            "needs_human_review": false,
+            "archived": false,
+            "parent_id": null,
+            "inserted_at": "2026-03-15T10:00:00.000000Z",
+            "updated_at": "2026-03-15T11:00:00.000000Z",
+            "started_at": "2026-03-15T10:30:00.000000Z",
+            "completed_at": null,
+            "short_id": "abc12345",
+            "project_id": "proj-001"
+        });
+
+        let task: Task = serde_json::from_value(payload).expect("should deserialize");
+        assert_eq!(task.id, "abc12345-0000-4000-8000-000000000001");
+        assert_eq!(task.title, "Implement feature X");
+        assert_eq!(task.description, Some("A task from Sacrum WS".to_string()));
+        assert_eq!(task.level, TaskLevel::Ticket);
+        assert_eq!(task.priority, Some(TaskPriority::High));
+        assert_eq!(task.tags, vec!["rust", "gui"]);
+        assert_eq!(task.workflow_id, Some("wf-001".to_string()));
+        assert_eq!(
+            task.created_at,
+            Some("2026-03-15T10:00:00.000000Z".to_string())
+        );
+        assert!(!task.archived);
+        assert!(task.sections.is_empty());
+        assert!(task.code_refs.is_empty());
+        assert!(task.dependency_ids.is_empty());
+    }
+
+    #[test]
+    fn task_deserializes_from_minimal_sacrum_payload() {
+        let payload = serde_json::json!({
+            "id": "task-minimal",
+            "title": "Minimal task",
+            "level": "task",
+            "inserted_at": "2026-03-15T10:00:00.000000Z"
+        });
+
+        let task: Task = serde_json::from_value(payload).expect("should deserialize");
+        assert_eq!(task.id, "task-minimal");
+        assert_eq!(task.title, "Minimal task");
+        assert_eq!(task.level, TaskLevel::Task);
+        assert!(!task.archived);
+        assert!(task.tags.is_empty());
+        assert!(task.sections.is_empty());
+        assert!(task.code_refs.is_empty());
+        assert!(task.dependency_ids.is_empty());
+        assert_eq!(
+            task.created_at,
+            Some("2026-03-15T10:00:00.000000Z".to_string())
+        );
+    }
+
+    #[test]
+    fn task_inserted_at_maps_to_created_at() {
+        let payload = serde_json::json!({
+            "id": "t1",
+            "title": "Test",
+            "level": "task",
+            "inserted_at": "2026-01-01T00:00:00Z"
+        });
+
+        let task: Task = serde_json::from_value(payload).expect("should deserialize");
+        assert_eq!(task.created_at, Some("2026-01-01T00:00:00Z".to_string()));
+    }
+
+    #[test]
+    fn task_ignores_unknown_fields() {
+        let payload = serde_json::json!({
+            "id": "t2",
+            "title": "Test",
+            "level": "task",
+            "short_id": "t2",
+            "project_id": "proj-xyz",
+            "some_future_field": 42
+        });
+
+        let task: Task = serde_json::from_value(payload).expect("should deserialize");
+        assert_eq!(task.id, "t2");
+    }
+
+    #[test]
+    fn workflow_deserializes_from_sacrum_ws_payload() {
+        let payload = serde_json::json!({
+            "id": "wf-001",
+            "name": "Development",
+            "description": "Standard dev workflow",
+            "initial_step": "step-backlog",
+            "inserted_at": "2026-03-15T10:00:00.000000Z",
+            "updated_at": "2026-03-15T11:00:00.000000Z",
+            "short_id": "wf001",
+            "project_id": "proj-001"
+        });
+
+        let workflow: Workflow = serde_json::from_value(payload).expect("should deserialize");
+        assert_eq!(workflow.id, Some("wf-001".to_string()));
+        assert_eq!(workflow.name, "Development");
+        assert_eq!(
+            workflow.description,
+            Some("Standard dev workflow".to_string())
+        );
+        assert_eq!(workflow.initial_step, Some("step-backlog".to_string()));
+        assert_eq!(
+            workflow.created_at,
+            Some("2026-03-15T10:00:00.000000Z".to_string())
+        );
+        assert!(workflow.metadata.is_empty());
+    }
+
+    #[test]
+    fn step_deserializes_from_sacrum_ws_payload() {
+        let payload = serde_json::json!({
+            "id": "step-001",
+            "name": "review",
+            "workflow_id": "wf-001",
+            "goal": "Review code changes",
+            "prompt": "Review the PR carefully",
+            "order": 2,
+            "is_final": false,
+            "inserted_at": "2026-03-15T10:00:00.000000Z",
+            "updated_at": "2026-03-15T11:00:00.000000Z",
+            "short_id": "s001",
+            "project_id": "proj-001"
+        });
+
+        let step: Step = serde_json::from_value(payload).expect("should deserialize");
+        assert_eq!(step.id, Some("step-001".to_string()));
+        assert_eq!(step.name, "review");
+        assert_eq!(step.workflow_id, "wf-001");
+        assert_eq!(step.goal, Some("Review code changes".to_string()));
+        assert_eq!(step.order, 2);
+        assert!(!step.is_final);
+        assert!(step.agents.is_empty());
+        assert!(step.skills.is_empty());
+        assert!(step.transitions_to.is_empty());
+        assert_eq!(
+            step.created_at,
+            Some("2026-03-15T10:00:00.000000Z".to_string())
+        );
+    }
+
+    #[test]
+    fn step_deserializes_from_minimal_sacrum_payload() {
+        let payload = serde_json::json!({
+            "id": "step-min",
+            "name": "backlog",
+            "workflow_id": "wf-001"
+        });
+
+        let step: Step = serde_json::from_value(payload).expect("should deserialize");
+        assert_eq!(step.name, "backlog");
+        assert_eq!(step.workflow_id, "wf-001");
+        assert_eq!(step.order, 0);
+        assert!(!step.is_final);
+        assert!(step.transitions_to.is_empty());
+    }
+
+    #[test]
+    fn section_deserializes_from_sacrum_ws_payload() {
+        let payload = serde_json::json!({
+            "id": "sec-001",
+            "task_id": "task-001",
+            "type": "checklist_item",
+            "content": "Add unit tests",
+            "order": 1,
+            "done": false,
+            "done_at": null,
+            "project_id": "proj-001"
+        });
+
+        let section: Section = serde_json::from_value(payload).expect("should deserialize");
+        assert_eq!(section.section_type, SectionType::ChecklistItem);
+        assert_eq!(section.content, "Add unit tests");
+        assert_eq!(section.order, Some(1));
+        assert_eq!(section.done, Some(false));
+        assert!(section.refs.is_empty());
+    }
+
+    #[test]
+    fn step_execution_deserializes_from_sacrum_ws_payload() {
+        let payload = serde_json::json!({
+            "id": "exec-001",
+            "task_id": "task-001",
+            "workflow_id": "wf-001",
+            "step_name": "review",
+            "status": "in_progress",
+            "started_at": "2026-03-15T10:00:00.000000Z",
+            "completed_at": null,
+            "inserted_at": "2026-03-15T09:59:00.000000Z",
+            "project_id": "proj-001"
+        });
+
+        let exec: StepExecution = serde_json::from_value(payload).expect("should deserialize");
+        assert_eq!(exec.id, Some("exec-001".to_string()));
+        assert_eq!(exec.task_id, "task-001");
+        assert_eq!(exec.workflow_id, "wf-001");
+        assert_eq!(exec.step_name, "review");
+        assert_eq!(exec.status, ExecutionStatus::InProgress);
+        assert_eq!(exec.started_at, "2026-03-15T10:00:00.000000Z");
+        assert_eq!(exec.completed_at, None);
+    }
+
+    #[test]
+    fn step_execution_deserializes_with_minimal_fields() {
+        let payload = serde_json::json!({
+            "id": "exec-min"
+        });
+
+        let exec: StepExecution = serde_json::from_value(payload).expect("should deserialize");
+        assert_eq!(exec.id, Some("exec-min".to_string()));
+        assert_eq!(exec.task_id, "");
+        assert_eq!(exec.workflow_id, "");
+        assert_eq!(exec.step_name, "");
+        assert_eq!(exec.status, ExecutionStatus::InProgress);
+    }
+
+    #[test]
+    fn session_log_deserializes_from_sacrum_ws_payload() {
+        let payload = serde_json::json!({
+            "id": "log-001",
+            "step_execution_id": "exec-001",
+            "content": "Step completed successfully",
+            "inserted_at": "2026-03-15T10:05:00.000000Z",
+            "project_id": "proj-001"
+        });
+
+        let log: SessionLog = serde_json::from_value(payload).expect("should deserialize");
+        assert_eq!(log.id, Some("log-001".to_string()));
+        assert_eq!(log.step_execution_id, "exec-001");
+        assert_eq!(log.content, "Step completed successfully");
+        assert_eq!(log.created_at, "2026-03-15T10:05:00.000000Z");
+    }
+
+    #[test]
+    fn session_log_inserted_at_maps_to_created_at() {
+        let payload = serde_json::json!({
+            "id": "log-002",
+            "inserted_at": "2026-01-01T00:00:00Z"
+        });
+
+        let log: SessionLog = serde_json::from_value(payload).expect("should deserialize");
+        assert_eq!(log.created_at, "2026-01-01T00:00:00Z");
     }
 }

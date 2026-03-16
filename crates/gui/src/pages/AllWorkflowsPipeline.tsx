@@ -386,8 +386,8 @@ function AllWorkflowsPipelineInner() {
         // Latest execution is the last one in the chronological list
         const latest = result.data[result.data.length - 1];
         newStates.set(taskId, {
-          status: mapStatus(latest.status),
-          stepName: latest.step_name,
+          status: latest.status ? mapStatus(latest.status) : "Pending",
+          stepName: latest.step_name ?? "",
         });
       }
       if (newStates.size > 0) {
@@ -600,7 +600,7 @@ function AllWorkflowsPipelineInner() {
       if (!workflowId) return;
 
       const workflowSteps = workflowStepsMap.get(workflowId) || [];
-      const sortedSteps = [...workflowSteps].sort((a, b) => a.order - b.order);
+      const sortedSteps = [...workflowSteps].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
       const workflowTasks = workflowTasksMap.get(workflowId) || [];
       // Use collapsed or expanded dimensions based on toggle
       const zoneWidth = isCollapsed
@@ -729,7 +729,7 @@ function AllWorkflowsPipelineInner() {
         const stepIdToOrder = new Map<string, number>();
         workflowSteps.forEach((step) => {
           if (step.id) {
-            stepIdToOrder.set(step.id, step.order);
+            stepIdToOrder.set(step.id, step.order ?? 0);
           }
         });
 

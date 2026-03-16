@@ -31,11 +31,12 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
   const handleClick = () => {
     onStepClick?.(step);
   };
+  const agentConfig = step.agent_config;
   const hasSystemPrompt = Boolean(
-    step.agent_config.system_prompt || step.agent_config.append_system_prompt
+    agentConfig?.system_prompt || agentConfig?.append_system_prompt
   );
   const toolCount =
-    step.agent_config.tools.length + step.agent_config.allowed_tools.length;
+    (agentConfig?.tools ?? []).length + (agentConfig?.allowed_tools ?? []).length;
 
   // Use isSelected from data prop if available, otherwise fall back to ReactFlow's selected
   const isNodeSelected = isSelected ?? selected;
@@ -75,7 +76,7 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
               ? 'border-accent/30 bg-accent/10 text-accent'
               : 'border-primary/30 bg-primary/10 text-primary'
           }`}>
-            {step.order + 1}
+            {(step.order ?? 0) + 1}
           </span>
           {/* Pulse effect for first step */}
           {isFirst && (
@@ -96,9 +97,9 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
               </p>
             </div>
           )}
-          {!step.goal && step.agent_config.model && (
+          {!step.goal && agentConfig?.model && (
             <p className="mt-0.5 truncate font-mono text-[10px] text-text-muted">
-              {step.agent_config.model}
+              {agentConfig.model}
             </p>
           )}
         </div>
@@ -129,15 +130,15 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
             {toolCount}
           </span>
         )}
-        {step.agent_config.permission_mode && (
+        {agentConfig?.permission_mode && (
           <span
             className="inline-flex items-center gap-1 rounded-full border border-warning/30 bg-warning/10 px-2 py-0.5 text-[10px] font-medium text-warning"
-            title={`Permission mode: ${step.agent_config.permission_mode}`}
+            title={`Permission mode: ${agentConfig.permission_mode}`}
           >
             <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
             </svg>
-            {step.agent_config.permission_mode}
+            {agentConfig.permission_mode}
           </span>
         )}
       </div>

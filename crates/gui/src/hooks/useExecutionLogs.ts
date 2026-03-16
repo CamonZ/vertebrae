@@ -21,8 +21,8 @@ export function useExecutionLogs() {
       if (result.status === "ok") {
         // Sort logs descending (newest first) as per requirements
         const sortedLogs = [...result.data].sort((a, b) => {
-          const dateA = new Date(a.created_at).getTime();
-          const dateB = new Date(b.created_at).getTime();
+          const dateA = new Date(a.created_at ?? '').getTime();
+          const dateB = new Date(b.created_at ?? '').getTime();
           return dateB - dateA;
         });
         setLogs(sortedLogs);

@@ -350,7 +350,7 @@ export function StepDetailPanel({
           <div className="border-b border-border px-4 py-3">
             <div className="flex items-center gap-3">
               <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-primary/30 bg-primary/10 font-mono text-sm font-bold text-primary">
-                {step.order + 1}
+                {(step.order ?? 0) + 1}
               </span>
               <div className="min-w-0 flex-1">
                 <InlineEditField
@@ -431,7 +431,7 @@ export function StepDetailPanel({
                 </DetailRow>
                 <DetailRow label="Final Step">
                   <Toggle
-                    checked={step.is_final}
+                    checked={step.is_final ?? false}
                     onChange={handleToggleIsFinal}
                     label={`Final step: ${step.is_final ? "enabled" : "disabled"}`}
                   />
@@ -470,13 +470,13 @@ export function StepDetailPanel({
             {/* Transitions */}
             <div className="p-4">
               <SectionHeader
-                title={`Transitions (${step.transitions_to.length})`}
+                title={`Transitions (${(step.transitions_to ?? []).length})`}
               />
-              {step.transitions_to.length === 0 ? (
+              {(step.transitions_to ?? []).length === 0 ? (
                 <p className="text-xs italic text-text-muted">No transitions</p>
               ) : (
                 <div className="flex flex-wrap gap-1.5">
-                  {step.transitions_to.map((targetId, index) => {
+                  {(step.transitions_to ?? []).map((targetId, index) => {
                     const targetStep = allSteps.find((s) => s.id === targetId);
                     return (
                       <span
@@ -499,7 +499,7 @@ export function StepDetailPanel({
               <SectionHeader title="Model" />
               <div className="space-y-1">
                 <DetailRow label="Primary">
-                  {step.agent_config.model ? (
+                  {step.agent_config?.model ? (
                     <code className="rounded bg-bg-tertiary px-1.5 py-0.5 font-mono text-xs">
                       {step.agent_config.model}
                     </code>
@@ -507,7 +507,7 @@ export function StepDetailPanel({
                     <span className="text-xs italic text-text-muted">Default</span>
                   )}
                 </DetailRow>
-                {step.agent_config.fallback_model && (
+                {step.agent_config?.fallback_model && (
                   <DetailRow label="Fallback">
                     <code className="rounded bg-bg-tertiary px-1.5 py-0.5 font-mono text-xs">
                       {step.agent_config.fallback_model}
