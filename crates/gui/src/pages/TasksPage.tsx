@@ -65,20 +65,13 @@ export function TasksPage() {
     }),
     [filters, showDone]
   );
-  const { tasks, isLoading, error, refetch } = useTasks(memoizedFilters);
+  const { tasks, isLoading, error } = useTasks(memoizedFilters);
 
   // Build tree locally from flat task list (no separate API call needed)
   const hierarchy = useMemo(() => buildTreeFromTasks(tasks), [tasks]);
 
-  // Refetch when task changes are detected
-  const handleTaskListChange = useCallback(() => {
-    refetch();
-  }, [refetch]);
-
-  // Subscribe to task change events for automatic list refresh
-  useTaskChangeListener({
-    onTaskListChange: handleTaskListChange,
-  });
+  // Subscribe to task change events for automatic store updates
+  useTaskChangeListener();
 
   const handleFiltersChange = useCallback((newFilters: TaskFilterOptions) => {
     setFilters(newFilters);
