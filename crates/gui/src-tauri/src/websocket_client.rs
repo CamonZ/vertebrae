@@ -604,8 +604,8 @@ impl SacrumSocket {
             .ok_or("Missing id in session log payload")?
             .to_string();
 
-        let execution_id = payload
-            .get("execution_id")
+        let step_execution_id = payload
+            .get("step_execution_id")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
@@ -614,7 +614,7 @@ impl SacrumSocket {
 
         let event = SessionLogCreatedEvent {
             log_id,
-            execution_id,
+            step_execution_id,
             session_log,
         };
 
@@ -1621,7 +1621,7 @@ mod tests {
         let handle = app.handle();
         let payload = serde_json::json!({
             "id": "log123",
-            "execution_id": "exec123"
+            "step_execution_id": "exec123"
         });
         let result = SacrumSocket::handle_session_log_event(&payload, handle);
         assert!(result.is_ok());
@@ -1631,7 +1631,7 @@ mod tests {
     fn test_handle_session_log_event_missing_id_returns_error() {
         let app = build_test_app();
         let handle = app.handle();
-        let payload = serde_json::json!({"execution_id": "exec123"});
+        let payload = serde_json::json!({"step_execution_id": "exec123"});
         let result = SacrumSocket::handle_session_log_event(&payload, handle);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Missing id"));
@@ -1709,7 +1709,7 @@ mod tests {
     fn test_handle_phoenix_message_session_log_created() {
         let app = build_test_app();
         let handle = app.handle();
-        let msg = r#"["ref1", "1", "project:test", "session_log_created", {"id": "log123", "execution_id": "exec123"}]"#;
+        let msg = r#"["ref1", "1", "project:test", "session_log_created", {"id": "log123", "step_execution_id": "exec123"}]"#;
         let result = SacrumSocket::handle_phoenix_message(msg, handle, "test");
         assert!(result.is_ok());
     }
