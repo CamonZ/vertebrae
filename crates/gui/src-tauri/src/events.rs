@@ -125,7 +125,7 @@ pub enum StepTransitionChangeType {
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct SessionLogCreatedEvent {
     pub log_id: String,
-    pub execution_id: String,
+    pub step_execution_id: String,
     pub session_log: Option<types::SessionLog>,
 }
 

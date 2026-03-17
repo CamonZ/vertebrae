@@ -870,7 +870,7 @@ created_at?: string }
  * Emitted when a new session log is created during step execution.
  * `session_log` carries the full deserialized entity when available.
  */
-export type SessionLogCreatedEvent = { log_id: string; execution_id: string; session_log: SessionLog | null }
+export type SessionLogCreatedEvent = { log_id: string; step_execution_id: string; session_log: SessionLog | null }
 /**
  * Workflow step entity - mirrors db::Step
  */
