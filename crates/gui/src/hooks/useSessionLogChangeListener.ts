@@ -26,13 +26,13 @@ export function useSessionLogChangeListener(
 
   const handleSessionLogCreated = useCallback(
     (event: { payload: SessionLogCreatedEvent }) => {
-      const { log_id, execution_id } = event.payload;
+      const { log_id, step_execution_id } = event.payload;
 
       console.debug(
-        `[SessionLogChangeListener] Log ${log_id.slice(0, 6)} created for execution ${execution_id.slice(0, 6)}`
+        `[SessionLogChangeListener] Log ${log_id.slice(0, 6)} created for execution ${step_execution_id.slice(0, 6)}`
       );
 
-      addToast(`New session log for execution ${execution_id.slice(0, 6)}`, "info");
+      addToast(`New session log for execution ${step_execution_id.slice(0, 6)}`, "info");
 
       if (onSessionLogCreated) {
         onSessionLogCreated(event.payload);
