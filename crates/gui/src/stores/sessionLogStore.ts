@@ -31,8 +31,8 @@ export const useSessionLogStore = create<SessionLogStore>((set) => ({
 
   clearLogs: (executionId) =>
     set((state) => {
-      const { [executionId]: _removed, ...rest } = state.logsByExecutionId;
-      void _removed;
-      return { logsByExecutionId: rest };
+      const next = { ...state.logsByExecutionId };
+      delete next[executionId];
+      return { logsByExecutionId: next };
     }),
 }));
