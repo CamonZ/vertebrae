@@ -1,6 +1,8 @@
 import { useState, useMemo } from 'react';
 import type { StepExecution, ExecutionStatus } from '../../bindings';
-import { useTaskExecutions, useExecutionLogs } from '../../hooks';
+import { commands } from '../../bindings';
+import { useTaskExecutions } from '../../hooks';
+import { useSessionLogStore } from '../../stores';
 import { ConversationLogViewer } from './ConversationLogViewer';
 
 interface ExecutionHistoryProps {
@@ -128,18 +130,41 @@ function TimelineNode({ status }: { status: ExecutionStatus }) {
  * Single execution entry in the timeline with expandable session logs
  */
 function ExecutionEntry({ execution, isLast, index }: { execution: StepExecution; isLast: boolean; index: number }) {
-  const [isExpanded, setIsExpanded] = useState(false);
-  const { logs, isLoading, error, hasFetched, fetchLogs } = useExecutionLogs();
   const status = execution.status ?? 'in_progress';
+  const [isExpanded, setIsExpanded] = useState(status === 'in_progress');
+  const [isFetching, setIsFetching] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+
+  const logs = useSessionLogStore((state) => state.logsByExecutionId[execution.id ?? '']);
+  const setLogs = useSessionLogStore((state) => state.setLogs);
+
   const styles = getStatusStyles(status);
   const isActive = status === 'in_progress';
 
-  const handleToggle = () => {
+  const handleToggle = async () => {
     const newExpanded = !isExpanded;
     setIsExpanded(newExpanded);
-    // Lazy load logs when first expanded
-    if (newExpanded && !hasFetched && execution.id) {
-      fetchLogs(execution.id);
+
+    if (newExpanded && logs === undefined && execution.id) {
+      setIsFetching(true);
+      setFetchError(null);
+      try {
+        const result = await commands.getExecutionLogs(execution.id);
+        if (result.status === 'ok') {
+          const sortedLogs = [...result.data].sort((a, b) => {
+            const dateA = new Date(a.created_at ?? '').getTime();
+            const dateB = new Date(b.created_at ?? '').getTime();
+            return dateA - dateB;
+          });
+          setLogs(execution.id!, sortedLogs);
+        } else {
+          setFetchError(result.error.message);
+        }
+      } catch (e) {
+        setFetchError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setIsFetching(false);
+      }
     }
   };
 
@@ -196,23 +221,23 @@ function ExecutionEntry({ execution, isLast, index }: { execution: StepExecution
         {/* Expanded session logs */}
         {isExpanded && (
           <div className="mt-2 ml-5 space-y-1">
-            {isLoading && (
+            {isFetching && (
               <div className="flex items-center gap-2 py-2">
                 <div className="h-3 w-3 animate-spin rounded-full border border-border border-t-primary" />
                 <span className="text-xs text-text-muted">Loading logs...</span>
               </div>
             )}
-            {error && (
+            {fetchError && (
               <div className="rounded border border-error/20 bg-error/5 px-2 py-1 text-xs text-error">
-                {error}
+                {fetchError}
               </div>
             )}
-            {!isLoading && !error && logs.length === 0 && hasFetched && (
+            {!isFetching && !fetchError && logs !== undefined && logs.length === 0 && (
               <div className="py-2 text-xs text-text-muted italic">
                 No session logs
               </div>
             )}
-            {!isLoading && logs.length > 0 && (
+            {!isFetching && logs !== undefined && logs.length > 0 && (
               <div className="max-h-96 overflow-y-auto rounded border border-border bg-bg-tertiary p-3">
                 <ConversationLogViewer logs={logs} initialLimit={30} />
               </div>

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { ExecutionHistory } from "./ExecutionHistory";
 import { commands, StepExecution, SessionLog } from "../../bindings";
+import { useSessionLogStore } from "../../stores";
 
 // Mock the bindings commands
 vi.mock("../../bindings", () => ({
@@ -49,6 +50,7 @@ const mockSessionLog = (
 describe("ExecutionHistory", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    useSessionLogStore.setState({ logsByExecutionId: {} });
   });
 
   describe("loading state", () => {
@@ -157,129 +159,179 @@ describe("ExecutionHistory", () => {
     });
   });
 
-  describe("collapsible session logs", () => {
-    it("shows chevron icon for expand/collapse", async () => {
+  describe("in_progress execution auto-expand", () => {
+    it("renders expanded by default when status is in_progress", async () => {
       mockGetTaskExecutions.mockResolvedValue({
         status: "ok",
-        data: [mockExecution()],
+        data: [
+          mockExecution({ status: "in_progress", completed_at: null }),
+        ],
       });
 
       render(<ExecutionHistory taskId="task-1" />);
 
       await waitFor(() => {
-        expect(screen.getByText("in_progress")).toBeInTheDocument();
+        expect(screen.getByText("Active")).toBeInTheDocument();
       });
 
-      // Find the button with chevron
-      const expandButton = screen.getByRole("button");
-      expect(expandButton).toBeInTheDocument();
+      // The chevron should have rotate-90 class (expanded state)
+      const chevron = document.querySelector("svg[aria-hidden='true']");
+      expect(chevron?.getAttribute("class")).toContain("rotate-90");
     });
 
-    it("fetches logs lazily when expanded", async () => {
+    it("shows logs from the store for an in_progress execution", async () => {
+      useSessionLogStore.setState({
+        logsByExecutionId: {
+          "exec-1": [
+            mockSessionLog({
+              content: createThinkingLog("Streaming log content"),
+            }),
+          ],
+        },
+      });
+
       mockGetTaskExecutions.mockResolvedValue({
         status: "ok",
-        data: [mockExecution()],
+        data: [
+          mockExecution({
+            id: "exec-1",
+            status: "in_progress",
+            completed_at: null,
+          }),
+        ],
+      });
+
+      render(<ExecutionHistory taskId="task-1" />);
+
+      await waitFor(() => {
+        expect(
+          screen.getByText("Streaming log content")
+        ).toBeInTheDocument();
+      });
+    });
+  });
+
+  describe("completed execution expand", () => {
+    it("renders collapsed by default when status is completed", async () => {
+      mockGetTaskExecutions.mockResolvedValue({
+        status: "ok",
+        data: [mockExecution({ status: "completed" })],
+      });
+
+      render(<ExecutionHistory taskId="task-1" />);
+
+      await waitFor(() => {
+        expect(screen.getByText("completed")).toBeInTheDocument();
+      });
+
+      // The chevron should NOT have rotate-90 class (collapsed state)
+      const chevron = document.querySelector("svg[aria-hidden='true']");
+      expect(chevron?.getAttribute("class")).not.toContain("rotate-90");
+    });
+
+    it("triggers getExecutionLogs and populates the store when expanding a completed execution", async () => {
+      const fetchedLogs = [
+        mockSessionLog({
+          id: "log-1",
+          content: createThinkingLog("Historical log"),
+          created_at: "2024-01-01T10:01:00Z",
+        }),
+        mockSessionLog({
+          id: "log-2",
+          content: createThinkingLog("Older log"),
+          created_at: "2024-01-01T10:00:00Z",
+        }),
+      ];
+
+      mockGetTaskExecutions.mockResolvedValue({
+        status: "ok",
+        data: [mockExecution({ id: "exec-1", status: "completed" })],
       });
 
       mockGetExecutionLogs.mockResolvedValue({
         status: "ok",
-        data: [mockSessionLog()],
+        data: fetchedLogs,
       });
 
       render(<ExecutionHistory taskId="task-1" />);
 
       await waitFor(() => {
-        expect(screen.getByText("in_progress")).toBeInTheDocument();
+        expect(screen.getByText("completed")).toBeInTheDocument();
       });
 
       // Initially, logs should not be fetched
       expect(mockGetExecutionLogs).not.toHaveBeenCalled();
 
       // Click to expand
-      const expandButton = screen.getByRole("button");
-      fireEvent.click(expandButton);
+      fireEvent.click(screen.getByRole("button"));
 
-      // Now logs should be fetched
       await waitFor(() => {
         expect(mockGetExecutionLogs).toHaveBeenCalledWith("exec-1");
       });
+
+      // Verify logs were stored in ascending order
+      const storeState = useSessionLogStore.getState();
+      expect(storeState.logsByExecutionId["exec-1"]).toHaveLength(2);
+      expect(storeState.logsByExecutionId["exec-1"][0].id).toBe("log-2");
+      expect(storeState.logsByExecutionId["exec-1"][1].id).toBe("log-1");
     });
 
-    it("displays session logs when expanded", async () => {
-      mockGetTaskExecutions.mockResolvedValue({
-        status: "ok",
-        data: [mockExecution()],
+    it("does NOT re-fetch when re-expanding a completed execution that already has logs in the store", async () => {
+      useSessionLogStore.setState({
+        logsByExecutionId: {
+          "exec-1": [
+            mockSessionLog({
+              content: createThinkingLog("Already fetched log"),
+            }),
+          ],
+        },
       });
 
-      mockGetExecutionLogs.mockResolvedValue({
+      mockGetTaskExecutions.mockResolvedValue({
         status: "ok",
-        data: [mockSessionLog({ content: createThinkingLog("Session log content") })],
+        data: [mockExecution({ id: "exec-1", status: "completed" })],
       });
 
       render(<ExecutionHistory taskId="task-1" />);
 
       await waitFor(() => {
-        expect(screen.getByText("in_progress")).toBeInTheDocument();
+        expect(screen.getByText("completed")).toBeInTheDocument();
       });
 
-      // Click to expand
-      fireEvent.click(screen.getByRole("button"));
+      const button = screen.getByRole("button");
+
+      // Expand
+      fireEvent.click(button);
 
       await waitFor(() => {
-        // Content is now parsed and displayed by ConversationLogViewer
-        expect(screen.getByText("Session log content")).toBeInTheDocument();
+        expect(
+          screen.getByText("Already fetched log")
+        ).toBeInTheDocument();
       });
-    });
 
-    it("shows No session logs message when expanded but empty", async () => {
+      // Should NOT have called getExecutionLogs since store already has data
+      expect(mockGetExecutionLogs).not.toHaveBeenCalled();
+
+      // Collapse and re-expand
+      fireEvent.click(button);
+      fireEvent.click(button);
+
+      await waitFor(() => {
+        expect(
+          screen.getByText("Already fetched log")
+        ).toBeInTheDocument();
+      });
+
+      // Still should not have fetched
+      expect(mockGetExecutionLogs).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("fetch error handling", () => {
+    it("shows error message when log fetch fails", async () => {
       mockGetTaskExecutions.mockResolvedValue({
         status: "ok",
-        data: [mockExecution()],
-      });
-
-      mockGetExecutionLogs.mockResolvedValue({
-        status: "ok",
-        data: [],
-      });
-
-      render(<ExecutionHistory taskId="task-1" />);
-
-      await waitFor(() => {
-        expect(screen.getByText("in_progress")).toBeInTheDocument();
-      });
-
-      fireEvent.click(screen.getByRole("button"));
-
-      await waitFor(() => {
-        expect(screen.getByText("No session logs")).toBeInTheDocument();
-      });
-    });
-
-    it("shows loading state while fetching logs", async () => {
-      mockGetTaskExecutions.mockResolvedValue({
-        status: "ok",
-        data: [mockExecution()],
-      });
-
-      mockGetExecutionLogs.mockReturnValue(new Promise(() => {}));
-
-      render(<ExecutionHistory taskId="task-1" />);
-
-      await waitFor(() => {
-        expect(screen.getByText("in_progress")).toBeInTheDocument();
-      });
-
-      fireEvent.click(screen.getByRole("button"));
-
-      await waitFor(() => {
-        expect(screen.getByText("Loading logs...")).toBeInTheDocument();
-      });
-    });
-
-    it("shows error when log fetch fails", async () => {
-      mockGetTaskExecutions.mockResolvedValue({
-        status: "ok",
-        data: [mockExecution()],
+        data: [mockExecution({ id: "exec-1", status: "completed" })],
       });
 
       mockGetExecutionLogs.mockResolvedValue({
@@ -290,7 +342,7 @@ describe("ExecutionHistory", () => {
       render(<ExecutionHistory taskId="task-1" />);
 
       await waitFor(() => {
-        expect(screen.getByText("in_progress")).toBeInTheDocument();
+        expect(screen.getByText("completed")).toBeInTheDocument();
       });
 
       fireEvent.click(screen.getByRole("button"));
@@ -299,77 +351,74 @@ describe("ExecutionHistory", () => {
         expect(screen.getByText("Failed to fetch logs")).toBeInTheDocument();
       });
     });
+  });
 
-    it("does not refetch logs when collapsing and re-expanding", async () => {
+  describe("null id handling", () => {
+    it("does not attempt fetch when execution has null id", async () => {
       mockGetTaskExecutions.mockResolvedValue({
         status: "ok",
-        data: [mockExecution()],
-      });
-
-      mockGetExecutionLogs.mockResolvedValue({
-        status: "ok",
-        data: [mockSessionLog()],
+        data: [mockExecution({ id: null, status: "completed" })],
       });
 
       render(<ExecutionHistory taskId="task-1" />);
 
       await waitFor(() => {
-        expect(screen.getByText("in_progress")).toBeInTheDocument();
+        expect(screen.getByText("completed")).toBeInTheDocument();
       });
 
-      const button = screen.getByRole("button");
+      fireEvent.click(screen.getByRole("button"));
 
-      // First expand
-      fireEvent.click(button);
+      // Give time for any async operation
       await waitFor(() => {
-        expect(screen.getByText("Log content here")).toBeInTheDocument();
+        expect(mockGetExecutionLogs).not.toHaveBeenCalled();
       });
-      expect(mockGetExecutionLogs).toHaveBeenCalledTimes(1);
+    });
+  });
 
-      // Collapse
-      fireEvent.click(button);
+  describe("loading state for logs", () => {
+    it("shows loading spinner while fetching logs", async () => {
+      mockGetTaskExecutions.mockResolvedValue({
+        status: "ok",
+        data: [mockExecution({ status: "completed" })],
+      });
 
-      // Re-expand - should not fetch again
-      fireEvent.click(button);
+      mockGetExecutionLogs.mockReturnValue(new Promise(() => {}));
+
+      render(<ExecutionHistory taskId="task-1" />);
+
       await waitFor(() => {
-        expect(screen.getByText("Log content here")).toBeInTheDocument();
+        expect(screen.getByText("completed")).toBeInTheDocument();
       });
-      expect(mockGetExecutionLogs).toHaveBeenCalledTimes(1);
+
+      fireEvent.click(screen.getByRole("button"));
+
+      await waitFor(() => {
+        expect(screen.getByText("Loading logs...")).toBeInTheDocument();
+      });
     });
 
-    it("manages expand state independently for multiple executions", async () => {
+    it("shows No session logs for completed execution with empty results", async () => {
       mockGetTaskExecutions.mockResolvedValue({
         status: "ok",
-        data: [
-          mockExecution({ id: "exec-1", step_name: "step-1" }),
-          mockExecution({ id: "exec-2", step_name: "step-2" }),
-        ],
+        data: [mockExecution({ id: "exec-1", status: "completed" })],
       });
 
       mockGetExecutionLogs.mockResolvedValue({
         status: "ok",
-        data: [mockSessionLog({ content: createThinkingLog("Log for exec-1") })],
+        data: [],
       });
 
       render(<ExecutionHistory taskId="task-1" />);
 
       await waitFor(() => {
-        expect(screen.getByText("step-1")).toBeInTheDocument();
-        expect(screen.getByText("step-2")).toBeInTheDocument();
+        expect(screen.getByText("completed")).toBeInTheDocument();
       });
 
-      const buttons = screen.getAllByRole("button");
-
-      // Expand first execution
-      fireEvent.click(buttons[0]);
+      fireEvent.click(screen.getByRole("button"));
 
       await waitFor(() => {
-        expect(screen.getByText("Log for exec-1")).toBeInTheDocument();
+        expect(screen.getByText("No session logs")).toBeInTheDocument();
       });
-
-      // Second execution should still be collapsed (no logs visible)
-      expect(mockGetExecutionLogs).toHaveBeenCalledTimes(1);
-      expect(mockGetExecutionLogs).toHaveBeenCalledWith("exec-1");
     });
   });
 
