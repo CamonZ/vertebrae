@@ -3,7 +3,6 @@ export { useTasks } from "./useTasks";
 export { useTask } from "./useTask";
 export { useDeleteTask } from "./useDeleteTask";
 export { useTaskExecutions } from "./useTaskExecutions";
-export { useExecutionLogs } from "./useExecutionLogs";
 export { useTaskChangeListener } from "./useTaskChangeListener";
 export { useTaskStepChangeListener } from "./useTaskStepChangeListener";
 export { useWorkflows } from "./useWorkflows";
