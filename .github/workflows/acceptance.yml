@@ -1,0 +1,27 @@
+name: Acceptance Tests
+
+on:
+  workflow_dispatch:
+
+jobs:
+  acceptance:
+    name: Acceptance Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout vertebrae
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run acceptance tests
+        run: docker compose run --rm test-runner
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

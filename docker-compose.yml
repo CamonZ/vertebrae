@@ -1,0 +1,81 @@
+# Docker Compose for acceptance testing against a real Sacrum backend.
+#
+# Usage:
+#   docker compose run --rm test-runner
+#
+#   # Tear down:
+#   docker compose down -v
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: sacrum_prod
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  sacrum:
+    image: ghcr.io/camonz/sacrum:latest
+    user: root
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "ecto://postgres:postgres@postgres/sacrum_prod"
+      SECRET_KEY_BASE: "acceptance-test-secret-key-base-that-is-at-least-64-bytes-long-for-phoenix"
+      PHX_HOST: "localhost"
+      PHX_SERVER: "true"
+      PORT: "4000"
+    entrypoint: ["/bin/sh", "-c", "chmod -R a+x /app/bin && /app/bin/migrate && exec /app/bin/server"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/healthz"]
+      interval: 5s
+      timeout: 3s
+      start_period: 30s
+      retries: 10
+
+  seeder:
+    image: ghcr.io/camonz/sacrum:latest
+    user: root
+    depends_on:
+      sacrum:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "ecto://postgres:postgres@postgres/sacrum_prod"
+      SECRET_KEY_BASE: "acceptance-test-secret-key-base-that-is-at-least-64-bytes-long-for-phoenix"
+    volumes:
+      - ./docker/seed_test_data.exs:/seed.exs:ro
+    entrypoint: ["/bin/sh", "-c", "chmod -R a+x /app/bin && /app/bin/sacrum eval \"$$(cat /seed.exs)\""]
+    command: []
+
+  test-runner:
+    build:
+      context: docker
+      dockerfile: test-runner.Dockerfile
+    network_mode: "service:sacrum"
+    depends_on:
+      sacrum:
+        condition: service_healthy
+      seeder:
+        condition: service_completed_successfully
+    environment:
+      SACRUM_URL: "http://localhost:4000"
+      SACRUM_API_TOKEN: "sac_acceptance-test-token-vertebrae"
+      SACRUM_PROJECT_ID: "a0000000-0000-0000-0000-000000000001"
+      CARGO_HOME: "/cargo"
+    volumes:
+      - .:/app
+      - cargo-cache:/cargo
+    working_dir: /app
+    command: cargo test -p acceptance --test acceptance
+
+volumes:
+  pgdata:
+  cargo-cache:
