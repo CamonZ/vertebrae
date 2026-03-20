@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use cucumber::{World, given, then, when};
 use regex::Regex;
 use vertebrae_core::error::ServiceError;
-use vertebrae_core::models::{Level, Priority, SectionType};
+use vertebrae_core::models::{Level, Priority, SectionType, TaskFilter};
 use vertebrae_core::service::{CreateTaskOptions, TaskService};
 use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig};
 
@@ -232,6 +232,33 @@ async fn given_create_task_with_depends_on(world: &mut SmokeWorld, title: String
     world.track_task(task_id);
 }
 
+#[given(expr = "I create a task titled {string} with priority {string}")]
+async fn given_create_task_with_priority(world: &mut SmokeWorld, title: String, priority: String) {
+    let service = world.task_service();
+    let options = CreateTaskOptions::new(title).with_priority(parse_priority(&priority));
+    let task_id = service
+        .create_task(options)
+        .await
+        .expect("failed to create task with priority");
+    world.set_output(format!("Created task: {}", task_id));
+    world.track_task(task_id);
+}
+
+#[given(expr = "I create a task titled {string} with tags {string}")]
+async fn given_create_task_with_tags(world: &mut SmokeWorld, title: String, tags_str: String) {
+    let service = world.task_service();
+    let mut options = CreateTaskOptions::new(title);
+    for tag in tags_str.split(", ") {
+        options = options.with_tag(tag.trim());
+    }
+    let task_id = service
+        .create_task(options)
+        .await
+        .expect("failed to create task with tags");
+    world.set_output(format!("Created task: {}", task_id));
+    world.track_task(task_id);
+}
+
 // ---------------------------------------------------------------------------
 // When steps (smoke test originals)
 // ---------------------------------------------------------------------------
@@ -414,6 +441,108 @@ async fn attempt_show_task(world: &mut SmokeWorld, task_ref: String) {
     match service.get_task(&task_id).await {
         Ok(task) => {
             world.set_output(format_task_show(&task));
+        }
+        Err(e) => {
+            world.set_service_error(e);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// When steps: task_list scenarios
+// ---------------------------------------------------------------------------
+
+#[when("I list all tasks")]
+async fn list_all_tasks(world: &mut SmokeWorld) {
+    let service = world.task_service();
+    let filter = TaskFilter::new();
+    let tasks = service
+        .list_tasks(&filter)
+        .await
+        .expect("failed to list tasks");
+    world.set_output(format_task_list(&tasks));
+}
+
+#[when(expr = "I list tasks with --level {string}")]
+async fn list_tasks_with_level(world: &mut SmokeWorld, level: String) {
+    let service = world.task_service();
+    let filter = TaskFilter::new().with_level(parse_level(&level));
+    let tasks = service
+        .list_tasks(&filter)
+        .await
+        .expect("failed to list tasks with level filter");
+    world.set_output(format_task_list(&tasks));
+}
+
+#[when(expr = "I list tasks with --priority {string}")]
+async fn list_tasks_with_priority(world: &mut SmokeWorld, priority: String) {
+    let service = world.task_service();
+    let filter = TaskFilter::new().with_priority(parse_priority(&priority));
+    let tasks = service
+        .list_tasks(&filter)
+        .await
+        .expect("failed to list tasks with priority filter");
+    world.set_output(format_task_list(&tasks));
+}
+
+#[when(expr = "I list tasks with --tag {string}")]
+async fn list_tasks_with_tag(world: &mut SmokeWorld, tag: String) {
+    let service = world.task_service();
+    let filter = TaskFilter::new().with_tag(tag);
+    let tasks = service
+        .list_tasks(&filter)
+        .await
+        .expect("failed to list tasks with tag filter");
+    world.set_output(format_task_list(&tasks));
+}
+
+#[when("I list tasks with --root")]
+async fn list_tasks_with_root(world: &mut SmokeWorld) {
+    let service = world.task_service();
+    let filter = TaskFilter::new().root_only();
+    let tasks = service
+        .list_tasks(&filter)
+        .await
+        .expect("failed to list tasks with root filter");
+    world.set_output(format_task_list(&tasks));
+}
+
+#[when(expr = "I list tasks with --parent {string}")]
+async fn list_tasks_with_parent(world: &mut SmokeWorld, parent_ref: String) {
+    let parent_id = world.resolve_vars(&parent_ref);
+    let service = world.task_service();
+    let filter = TaskFilter::new().children_of(parent_id);
+    let tasks = service
+        .list_tasks(&filter)
+        .await
+        .expect("failed to list tasks with parent filter");
+    world.set_output(format_task_list(&tasks));
+}
+
+#[when(expr = "I list tasks with --search {string}")]
+async fn list_tasks_with_search(world: &mut SmokeWorld, search: String) {
+    let service = world.task_service();
+    let filter = TaskFilter::new().with_search(search);
+    let tasks = service
+        .list_tasks(&filter)
+        .await
+        .expect("failed to list tasks with search filter");
+    world.set_output(format_task_list(&tasks));
+}
+
+#[when(expr = "I attempt to list tasks with --search {string}")]
+async fn attempt_list_tasks_with_search(world: &mut SmokeWorld, search: String) {
+    if search.trim().is_empty() {
+        world.set_service_error(ServiceError::validation_failed(
+            "Search query cannot be empty",
+        ));
+        return;
+    }
+    let service = world.task_service();
+    let filter = TaskFilter::new().with_search(search);
+    match service.list_tasks(&filter).await {
+        Ok(tasks) => {
+            world.set_output(format_task_list(&tasks));
         }
         Err(e) => {
             world.set_service_error(e);
@@ -914,6 +1043,14 @@ fn format_task_show(task: &vertebrae_core::Task) -> String {
         out.push('\n');
     }
 
+    out
+}
+
+fn format_task_list(tasks: &[vertebrae_core::Task]) -> String {
+    let mut out = String::new();
+    for task in tasks {
+        out.push_str(&format!("{} {}\n", task.id, task.title));
+    }
     out
 }
 
