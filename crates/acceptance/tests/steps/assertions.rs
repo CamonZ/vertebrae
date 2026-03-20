@@ -409,7 +409,8 @@ async fn task_should_have_n_sections(
             )
         });
 
-    let sections = json.as_array().unwrap_or(&vec![]);
+    let empty_sections = vec![];
+    let sections = json.as_array().unwrap_or(&empty_sections);
     let actual_count = sections
         .iter()
         .filter(|s| s["section_type"].as_str() == Some(&section_type_str))
@@ -441,7 +442,8 @@ async fn section_content_should_be(
             )
         });
 
-    let sections = json.as_array().unwrap_or(&vec![]);
+    let empty_sections = vec![];
+    let sections = json.as_array().unwrap_or(&empty_sections);
     let section = sections
         .iter()
         .find(|s| s["section_type"].as_str() == Some(&section_type_str))
@@ -473,7 +475,8 @@ async fn task_should_have_section_with_content(
             )
         });
 
-    let sections = json.as_array().unwrap_or(&vec![]);
+    let empty_sections = vec![];
+    let sections = json.as_array().unwrap_or(&empty_sections);
     let section = sections
         .iter()
         .find(|s| s["section_type"].as_str() == Some(&section_type_str))
@@ -501,7 +504,8 @@ async fn task_should_have_section_of_type(world: &mut SmokeWorld, section_type_s
             )
         });
 
-    let sections = json.as_array().unwrap_or(&vec![]);
+    let empty_sections = vec![];
+    let sections = json.as_array().unwrap_or(&empty_sections);
     let count = sections
         .iter()
         .filter(|s| s["section_type"].as_str() == Some(&section_type_str))
@@ -528,7 +532,8 @@ async fn checklist_item_should_not_be_done(world: &mut SmokeWorld, index: usize)
             )
         });
 
-    let sections = json.as_array().unwrap_or(&vec![]);
+    let empty_sections = vec![];
+    let sections = json.as_array().unwrap_or(&empty_sections);
     let mut items: Vec<&serde_json::Value> = sections
         .iter()
         .filter(|s| s["section_type"].as_str() == Some("checklist_item"))
@@ -565,7 +570,8 @@ async fn ref_should_have_path_and_line_start(
             )
         });
 
-    let refs = json.as_array().unwrap_or(&vec![]);
+    let empty_refs = vec![];
+    let refs = json.as_array().unwrap_or(&empty_refs);
     let found = refs.iter().any(|r| {
         r["path"].as_str() == Some(&expected_path)
             && r["line_start"].as_i64() == Some(expected_line as i64)
@@ -599,7 +605,8 @@ async fn ref_should_have_path_and_line_range(
             )
         });
 
-    let refs = json.as_array().unwrap_or(&vec![]);
+    let empty_refs = vec![];
+    let refs = json.as_array().unwrap_or(&empty_refs);
     let found = refs.iter().any(|r| {
         r["path"].as_str() == Some(&expected_path)
             && r["line_start"].as_i64() == Some(expected_start as i64)
@@ -630,7 +637,8 @@ async fn ref_should_have_description(world: &mut SmokeWorld, expected_desc: Stri
             )
         });
 
-    let refs = json.as_array().unwrap_or(&vec![]);
+    let empty_refs = vec![];
+    let refs = json.as_array().unwrap_or(&empty_refs);
     let found = refs
         .iter()
         .any(|r| r["description"].as_str() == Some(&expected_desc));
@@ -657,7 +665,8 @@ async fn task_should_have_n_refs(world: &mut SmokeWorld, expected_count: usize) 
             )
         });
 
-    let refs = json.as_array().unwrap_or(&vec![]);
+    let empty_refs = vec![];
+    let refs = json.as_array().unwrap_or(&empty_refs);
     assert_eq!(
         refs.len(),
         expected_count,
@@ -687,7 +696,8 @@ async fn refs_should_appear_in_order(
             )
         });
 
-    let refs = json.as_array().unwrap_or(&vec![]);
+    let empty_refs = vec![];
+    let refs = json.as_array().unwrap_or(&empty_refs);
     let actual_specs: Vec<String> = refs
         .iter()
         .map(|r| {

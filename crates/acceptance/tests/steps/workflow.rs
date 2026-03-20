@@ -132,7 +132,7 @@ async fn when_transition_lifecycle_task_through(world: &mut SmokeWorld, target_s
 
     let target_idx = ordered
         .iter()
-        .position(|(_, name, _)| name == target_step_name)
+        .position(|(_, name, _)| *name == target_step_name)
         .unwrap_or_else(|| panic!("step '{}' not found in workflow", target_step_name));
 
     // Walk through each step from current+1 to target
