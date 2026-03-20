@@ -1604,6 +1604,631 @@ async fn section_content_should_be(
 }
 
 // ---------------------------------------------------------------------------
+// When steps: section (add) scenarios
+// ---------------------------------------------------------------------------
+
+fn parse_section_type(s: &str) -> SectionType {
+    s.parse::<SectionType>()
+        .unwrap_or_else(|e| panic!("invalid section type '{}': {}", s, e))
+}
+
+#[when(expr = "I add a {string} section with content {string}")]
+async fn add_section(world: &mut SmokeWorld, section_type_str: String, content: String) {
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+    let section_type = parse_section_type(&section_type_str);
+    let service = world.task_service();
+
+    let task = service
+        .get_task(&task_id)
+        .await
+        .expect("failed to get task for section add");
+
+    let (ordinal, replaced) = if section_type.is_single_instance() {
+        let existing = task.sections.iter().any(|s| s.section_type == section_type);
+        if existing {
+            service
+                .remove_sections(&task_id, section_type.clone(), None)
+                .await
+                .expect("failed to remove existing single-instance section");
+        }
+        (None, existing)
+    } else {
+        let count = task
+            .sections
+            .iter()
+            .filter(|s| s.section_type == section_type)
+            .count();
+        (Some(count as u32), false)
+    };
+
+    let section = vertebrae_core::Section {
+        section_type: section_type.clone(),
+        content: content.clone(),
+        order: ordinal,
+        done: None,
+        done_at: None,
+        refs: Vec::new(),
+    };
+
+    service
+        .add_section(&task_id, section)
+        .await
+        .expect("failed to add section");
+
+    let output = if replaced {
+        format!("Replaced {} section for task: {}", section_type, task_id)
+    } else if let Some(ord) = ordinal {
+        format!(
+            "Added {} section (ordinal {}) to task: {}",
+            section_type, ord, task_id
+        )
+    } else {
+        format!("Added {} section to task: {}", section_type, task_id)
+    };
+
+    world.set_output(output);
+}
+
+#[when(expr = "I attempt to add a {string} section with content {string}")]
+async fn attempt_add_section(world: &mut SmokeWorld, section_type_str: String, content: String) {
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+    let section_type = parse_section_type(&section_type_str);
+
+    if content.trim().is_empty() {
+        world.set_service_error(ServiceError::validation_failed(
+            "section content cannot be empty",
+        ));
+        return;
+    }
+
+    let service = world.task_service();
+    let section = vertebrae_core::Section::new(section_type, content);
+    match service.add_section(&task_id, section).await {
+        Ok(()) => {
+            world.set_output(format!(
+                "Added {} section to task: {}",
+                section_type_str, task_id
+            ));
+        }
+        Err(e) => {
+            world.set_service_error(e);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Then steps: section (add) assertions
+// ---------------------------------------------------------------------------
+
+#[then(expr = "the task should have a {word} section with content {string}")]
+async fn task_should_have_section_with_content(
+    world: &mut SmokeWorld,
+    section_type_str: String,
+    expected_content: String,
+) {
+    let service = world.task_service();
+    let task_id = world.task_id.as_ref().expect("no task ID stored");
+    let task = service.get_task(task_id).await.expect("failed to get task");
+
+    let section_type = parse_section_type(&section_type_str);
+
+    let section = task
+        .sections
+        .iter()
+        .find(|s| s.section_type == section_type)
+        .unwrap_or_else(|| panic!("no {} section found on task", section_type_str));
+
+    assert_eq!(
+        section.content, expected_content,
+        "section '{}' content mismatch: expected '{}', got '{}'",
+        section_type_str, expected_content, section.content
+    );
+}
+
+#[then(expr = "the task should have a {word} section")]
+async fn task_should_have_section_of_type(world: &mut SmokeWorld, section_type_str: String) {
+    let service = world.task_service();
+    let task_id = world.task_id.as_ref().expect("no task ID stored");
+    let task = service.get_task(task_id).await.expect("failed to get task");
+
+    let section_type = parse_section_type(&section_type_str);
+
+    let count = task
+        .sections
+        .iter()
+        .filter(|s| s.section_type == section_type)
+        .count();
+
+    assert!(
+        count > 0,
+        "expected task to have at least one {} section, but found 0",
+        section_type_str
+    );
+}
+
+// ---------------------------------------------------------------------------
+// When steps: sections (list) scenarios
+// ---------------------------------------------------------------------------
+
+#[when("I list sections")]
+async fn list_sections(world: &mut SmokeWorld) {
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+    let service = world.task_service();
+
+    let task = service
+        .get_task(&task_id)
+        .await
+        .expect("failed to get task for sections list");
+
+    if task.sections.is_empty() {
+        world.set_output("No sections defined".to_string());
+        return;
+    }
+
+    let mut out = String::new();
+    out.push_str(&format!("Sections for task: {}\n", task_id));
+    out.push_str(&"=".repeat(60));
+    out.push('\n');
+
+    let positive: Vec<_> = task
+        .sections
+        .iter()
+        .filter(|s| is_positive_space(&s.section_type))
+        .collect();
+    let negative: Vec<_> = task
+        .sections
+        .iter()
+        .filter(|s| !is_positive_space(&s.section_type))
+        .collect();
+
+    if !positive.is_empty() {
+        out.push_str("\nDesired Behavior\n");
+        out.push_str(&"-".repeat(40));
+        out.push('\n');
+        for s in &positive {
+            out.push_str(&format!("{}: {}\n", s.section_type, s.content));
+        }
+    }
+
+    if !negative.is_empty() {
+        out.push_str("\nUndesired Behavior\n");
+        out.push_str(&"-".repeat(40));
+        out.push('\n');
+        for s in &negative {
+            out.push_str(&format!("{}: {}\n", s.section_type, s.content));
+        }
+    }
+
+    world.set_output(out);
+}
+
+fn is_positive_space(section_type: &SectionType) -> bool {
+    matches!(
+        section_type,
+        SectionType::Goal
+            | SectionType::Context
+            | SectionType::CurrentBehavior
+            | SectionType::DesiredBehavior
+            | SectionType::ChecklistItem
+            | SectionType::TestingCriterion
+    )
+}
+
+#[when(expr = "I list sections with --type {string}")]
+async fn list_sections_with_type(world: &mut SmokeWorld, type_filter: String) {
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+    let service = world.task_service();
+    let filter_type = parse_section_type(&type_filter);
+
+    let task = service
+        .get_task(&task_id)
+        .await
+        .expect("failed to get task for sections list with type");
+
+    let filtered: Vec<_> = task
+        .sections
+        .iter()
+        .filter(|s| s.section_type == filter_type)
+        .collect();
+
+    if filtered.is_empty() {
+        world.set_output(format!("No sections of type '{}'", filter_type));
+        return;
+    }
+
+    let mut out = String::new();
+    out.push_str(&format!("Sections for task: {}\n", task_id));
+    for s in &filtered {
+        out.push_str(&format!("{}: {}\n", s.section_type, s.content));
+    }
+    world.set_output(out);
+}
+
+// ---------------------------------------------------------------------------
+// When steps: unsection (remove) scenarios
+// ---------------------------------------------------------------------------
+
+#[when(expr = "I remove the {string} section")]
+async fn remove_section(world: &mut SmokeWorld, section_type_str: String) {
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+    let section_type = parse_section_type(&section_type_str);
+    let service = world.task_service();
+
+    service
+        .remove_sections(&task_id, section_type.clone(), None)
+        .await
+        .expect("failed to remove section");
+
+    world.set_output(format!(
+        "Removed {} section from task: {}",
+        section_type, task_id
+    ));
+}
+
+#[when(expr = "I remove the {string} section at index {int}")]
+async fn remove_section_at_index(world: &mut SmokeWorld, section_type_str: String, index: u32) {
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+    let section_type = parse_section_type(&section_type_str);
+    let service = world.task_service();
+
+    service
+        .remove_section_by_ordinal(&task_id, section_type.clone(), index)
+        .await
+        .expect("failed to remove section at index");
+
+    world.set_output(format!(
+        "Removed {} section from task: {}",
+        section_type, task_id
+    ));
+}
+
+#[when(expr = "I attempt to remove the {string} section without index")]
+async fn attempt_remove_multi_section_without_index(
+    world: &mut SmokeWorld,
+    section_type_str: String,
+) {
+    let section_type = parse_section_type(&section_type_str);
+
+    if !section_type.is_single_instance() {
+        world.set_service_error(ServiceError::validation_failed(format!(
+            "Section type '{}' can have multiple instances. Use --index <n> to remove a specific one",
+            section_type
+        )));
+        return;
+    }
+
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+    let service = world.task_service();
+    match service
+        .remove_sections(&task_id, section_type.clone(), None)
+        .await
+    {
+        Ok(()) => {
+            world.set_output(format!(
+                "Removed {} section from task: {}",
+                section_type, task_id
+            ));
+        }
+        Err(e) => {
+            world.set_service_error(e);
+        }
+    }
+}
+
+#[when(expr = "I attempt to remove the {string} section")]
+async fn attempt_remove_section(world: &mut SmokeWorld, section_type_str: String) {
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+    let section_type = parse_section_type(&section_type_str);
+    let service = world.task_service();
+
+    let task = match service.get_task(&task_id).await {
+        Ok(t) => t,
+        Err(e) => {
+            world.set_service_error(e);
+            return;
+        }
+    };
+
+    let exists = task.sections.iter().any(|s| s.section_type == section_type);
+
+    if !exists {
+        world.set_service_error(ServiceError::validation_failed(format!(
+            "No {} section found",
+            section_type
+        )));
+        return;
+    }
+
+    match service
+        .remove_sections(&task_id, section_type.clone(), None)
+        .await
+    {
+        Ok(()) => {
+            world.set_output(format!(
+                "Removed {} section from task: {}",
+                section_type, task_id
+            ));
+        }
+        Err(e) => {
+            world.set_service_error(e);
+        }
+    }
+}
+
+#[when(expr = "I attempt to remove the {string} section at index {int}")]
+async fn attempt_remove_section_at_index(
+    world: &mut SmokeWorld,
+    section_type_str: String,
+    index: u32,
+) {
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+    let section_type = parse_section_type(&section_type_str);
+    let service = world.task_service();
+
+    let task = match service.get_task(&task_id).await {
+        Ok(t) => t,
+        Err(e) => {
+            world.set_service_error(e);
+            return;
+        }
+    };
+
+    let exists = task
+        .sections
+        .iter()
+        .any(|s| s.section_type == section_type && s.order == Some(index));
+
+    if !exists {
+        world.set_service_error(ServiceError::validation_failed(format!(
+            "No {} section found at index {}",
+            section_type, index
+        )));
+        return;
+    }
+
+    match service
+        .remove_section_by_ordinal(&task_id, section_type.clone(), index)
+        .await
+    {
+        Ok(()) => {
+            world.set_output(format!(
+                "Removed {} section from task: {}",
+                section_type, task_id
+            ));
+        }
+        Err(e) => {
+            world.set_service_error(e);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// When steps: check-item / uncheck-item scenarios
+// ---------------------------------------------------------------------------
+
+#[when(expr = "I check item {int}")]
+async fn check_item(world: &mut SmokeWorld, index: usize) {
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+    let service = world.task_service();
+
+    let task = service
+        .get_task(&task_id)
+        .await
+        .expect("failed to get task for check-item");
+
+    let mut items: Vec<_> = task
+        .sections
+        .iter()
+        .filter(|s| s.section_type == SectionType::ChecklistItem)
+        .collect();
+    items.sort_by_key(|s| s.order.unwrap_or(u32::MAX));
+
+    let item = items
+        .get(index - 1)
+        .unwrap_or_else(|| panic!("checklist item {} not found", index));
+
+    let section_order = item.order.unwrap_or(0);
+    let content = item.content.clone();
+
+    service
+        .mark_checklist_item_done(&task_id, section_order)
+        .await
+        .expect("failed to mark checklist item done");
+
+    world.set_output(format!(
+        "Marked checklist item {} as done in {}: {}",
+        index, task_id, content
+    ));
+}
+
+#[when(expr = "I attempt to check item {int}")]
+async fn attempt_check_item(world: &mut SmokeWorld, index: usize) {
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+
+    if index == 0 {
+        world.set_service_error(ServiceError::validation_failed(
+            "Checklist item index must be 1 or greater",
+        ));
+        return;
+    }
+
+    let service = world.task_service();
+
+    let task = match service.get_task(&task_id).await {
+        Ok(t) => t,
+        Err(e) => {
+            world.set_service_error(e);
+            return;
+        }
+    };
+
+    let mut items: Vec<_> = task
+        .sections
+        .iter()
+        .filter(|s| s.section_type == SectionType::ChecklistItem)
+        .collect();
+    items.sort_by_key(|s| s.order.unwrap_or(u32::MAX));
+
+    if index > items.len() {
+        world.set_service_error(ServiceError::validation_failed(format!(
+            "Checklist item {} not found. Task has {} checklist item(s).",
+            index,
+            items.len()
+        )));
+        return;
+    }
+
+    let item = &items[index - 1];
+    let section_order = item.order.unwrap_or(0);
+    let content = item.content.clone();
+
+    match service
+        .mark_checklist_item_done(&task_id, section_order)
+        .await
+    {
+        Ok(()) => {
+            world.set_output(format!(
+                "Marked checklist item {} as done in {}: {}",
+                index, task_id, content
+            ));
+        }
+        Err(e) => {
+            world.set_service_error(e);
+        }
+    }
+}
+
+#[when(expr = "I uncheck item {int}")]
+async fn uncheck_item(world: &mut SmokeWorld, index: usize) {
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+    let service = world.task_service();
+
+    let task = service
+        .get_task(&task_id)
+        .await
+        .expect("failed to get task for uncheck-item");
+
+    let mut items: Vec<_> = task
+        .sections
+        .iter()
+        .filter(|s| s.section_type == SectionType::ChecklistItem)
+        .collect();
+    items.sort_by_key(|s| s.order.unwrap_or(u32::MAX));
+
+    let item = items
+        .get(index - 1)
+        .unwrap_or_else(|| panic!("checklist item {} not found", index));
+
+    let section_order = item.order.unwrap_or(0);
+    let content = item.content.clone();
+
+    service
+        .toggle_checklist_item_done(&task_id, section_order)
+        .await
+        .expect("failed to uncheck checklist item");
+
+    world.set_output(format!(
+        "Unchecked checklist item {} in {}: {}",
+        index, task_id, content
+    ));
+}
+
+#[when(expr = "I attempt to uncheck item {int}")]
+async fn attempt_uncheck_item(world: &mut SmokeWorld, index: usize) {
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+
+    if index == 0 {
+        world.set_service_error(ServiceError::validation_failed(
+            "Checklist item index must be 1 or greater",
+        ));
+        return;
+    }
+
+    let service = world.task_service();
+
+    let task = match service.get_task(&task_id).await {
+        Ok(t) => t,
+        Err(e) => {
+            world.set_service_error(e);
+            return;
+        }
+    };
+
+    let mut items: Vec<_> = task
+        .sections
+        .iter()
+        .filter(|s| s.section_type == SectionType::ChecklistItem)
+        .collect();
+    items.sort_by_key(|s| s.order.unwrap_or(u32::MAX));
+
+    if index > items.len() {
+        world.set_service_error(ServiceError::validation_failed(format!(
+            "Checklist item {} not found. Task has {} checklist item(s).",
+            index,
+            items.len()
+        )));
+        return;
+    }
+
+    let item = &items[index - 1];
+
+    if !item.done.unwrap_or(false) {
+        world.set_service_error(ServiceError::validation_failed(format!(
+            "Checklist item {} is not checked",
+            index
+        )));
+        return;
+    }
+
+    let section_order = item.order.unwrap_or(0);
+    let content = item.content.clone();
+
+    match service
+        .toggle_checklist_item_done(&task_id, section_order)
+        .await
+    {
+        Ok(()) => {
+            world.set_output(format!(
+                "Unchecked checklist item {} in {}: {}",
+                index, task_id, content
+            ));
+        }
+        Err(e) => {
+            world.set_service_error(e);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Then steps: checklist done/not-done assertions
+// ---------------------------------------------------------------------------
+
+#[then(expr = "checklist item {int} should not be done")]
+async fn checklist_item_should_not_be_done(world: &mut SmokeWorld, index: usize) {
+    let service = world.task_service();
+    let task_id = world.task_id.as_ref().expect("no task ID stored");
+    let task = service.get_task(task_id).await.expect("failed to get task");
+
+    let mut items: Vec<_> = task
+        .sections
+        .iter()
+        .filter(|s| s.section_type == SectionType::ChecklistItem)
+        .collect();
+    items.sort_by_key(|s| s.order.unwrap_or(u32::MAX));
+
+    let item = items
+        .get(index - 1)
+        .unwrap_or_else(|| panic!("checklist item {} not found for assertion", index));
+
+    assert!(
+        !item.done.unwrap_or(false),
+        "expected checklist item {} ('{}') to NOT be done, but it was marked done",
+        index,
+        item.content
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Helpers: format task show output (mirrors TaskDetail::Display from CLI)
 // ---------------------------------------------------------------------------
 
