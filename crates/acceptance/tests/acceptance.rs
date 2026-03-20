@@ -5,6 +5,8 @@ use regex::Regex;
 use vertebrae_core::error::ServiceError;
 use vertebrae_core::models::{Level, Priority, SectionType, TaskFilter};
 use vertebrae_core::service::{CreateTaskOptions, TaskService, UpdateTaskOptions};
+use vertebrae_core::step_service::StepService;
+use vertebrae_core::workflow_service::{CreateWorkflowOptions, WorkflowService, WorkflowStepInput};
 use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig};
 
 fn parse_level(s: &str) -> Level {
@@ -36,6 +38,9 @@ pub struct SmokeWorld {
     stored_ids: HashMap<String, String>,
     last_command_output: Option<String>,
     last_error: Option<String>,
+    workflow_id: Option<String>,
+    created_workflow_ids: Vec<String>,
+    lifecycle_task_id: Option<String>,
 }
 
 impl std::fmt::Debug for SmokeWorld {
@@ -45,6 +50,9 @@ impl std::fmt::Debug for SmokeWorld {
             .field("task_id", &self.task_id)
             .field("created_task_ids", &self.created_task_ids)
             .field("stored_ids", &self.stored_ids)
+            .field("workflow_id", &self.workflow_id)
+            .field("created_workflow_ids", &self.created_workflow_ids)
+            .field("lifecycle_task_id", &self.lifecycle_task_id)
             .finish()
     }
 }
@@ -59,6 +67,9 @@ impl SmokeWorld {
             stored_ids: HashMap::new(),
             last_command_output: None,
             last_error: None,
+            workflow_id: None,
+            created_workflow_ids: Vec::new(),
+            lifecycle_task_id: None,
         }
     }
 
@@ -66,6 +77,23 @@ impl SmokeWorld {
         vertebrae_sacrum_client::SacrumTaskService::new(
             self.client.as_ref().expect("client not configured").clone(),
         )
+    }
+
+    fn workflow_service(&self) -> vertebrae_sacrum_client::SacrumWorkflowService {
+        vertebrae_sacrum_client::SacrumWorkflowService::new(
+            self.client.as_ref().expect("client not configured").clone(),
+        )
+    }
+
+    fn step_service(&self) -> vertebrae_sacrum_client::SacrumStepService {
+        vertebrae_sacrum_client::SacrumStepService::new(
+            self.client.as_ref().expect("client not configured").clone(),
+        )
+    }
+
+    fn track_workflow(&mut self, workflow_id: String) {
+        self.workflow_id = Some(workflow_id.clone());
+        self.created_workflow_ids.push(workflow_id);
     }
 
     fn resolve_vars(&self, text: &str) -> String {
@@ -105,11 +133,17 @@ impl SmokeWorld {
 
     async fn cleanup(&mut self) {
         if let Some(client) = &self.client {
-            let service = vertebrae_sacrum_client::SacrumTaskService::new(client.clone());
+            let task_service = vertebrae_sacrum_client::SacrumTaskService::new(client.clone());
             for task_id in self.created_task_ids.drain(..).rev() {
-                let _ = service.delete_task(&task_id, true).await;
+                let _ = task_service.delete_task(&task_id, true).await;
+            }
+            let wf_service = vertebrae_sacrum_client::SacrumWorkflowService::new(client.clone());
+            for wf_id in self.created_workflow_ids.drain(..).rev() {
+                let _ = wf_service.delete_workflow(&wf_id).await;
             }
         }
+        self.workflow_id = None;
+        self.lifecycle_task_id = None;
     }
 }
 
@@ -301,6 +335,105 @@ async fn given_run_depend(world: &mut SmokeWorld, task_ref: String, blocker_ref:
     world.set_output(format!(
         "Created dependency: {} depends on {}",
         task_id, blocker_id
+    ));
+}
+
+// ---------------------------------------------------------------------------
+// Given steps: workflow setup (step_lifecycle.feature)
+// ---------------------------------------------------------------------------
+
+#[given(expr = "a workflow {string} with steps {string}")]
+async fn given_workflow_with_steps(world: &mut SmokeWorld, name: String, steps_str: String) {
+    let wf_service = world.workflow_service();
+    let step_service = world.step_service();
+    let steps: Vec<WorkflowStepInput> = steps_str
+        .split(", ")
+        .map(|s| WorkflowStepInput::new(s.trim(), "default"))
+        .collect();
+    let wf_id = wf_service
+        .create_workflow(CreateWorkflowOptions::new(name, steps))
+        .await
+        .expect("failed to create workflow");
+
+    // Set up linear transitions and mark the final step
+    let created_steps = step_service
+        .list_steps_for_workflow(&wf_id)
+        .await
+        .expect("failed to list created steps");
+    let mut sorted_steps = created_steps;
+    sorted_steps.sort_by_key(|s| s.order);
+
+    for i in 0..sorted_steps.len() {
+        let step_id = sorted_steps[i].id.as_ref().unwrap().clone();
+        let is_last = i == sorted_steps.len() - 1;
+
+        let mut update = vertebrae_core::models::StepUpdate::new();
+        if !is_last {
+            let next_id = sorted_steps[i + 1].id.as_ref().unwrap().clone();
+            update = update.with_transitions_to(vec![next_id]);
+        }
+        if is_last {
+            update = update.with_is_final(true);
+        }
+        step_service
+            .update_step(&step_id, &update)
+            .await
+            .expect("failed to update step transitions");
+    }
+
+    world.track_workflow(wf_id);
+}
+
+#[given("I assign the workflow to the task")]
+async fn given_assign_workflow_to_task(world: &mut SmokeWorld) {
+    let wf_service = world.workflow_service();
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+    let wf_id = world
+        .workflow_id
+        .as_ref()
+        .expect("no workflow ID stored")
+        .clone();
+    wf_service
+        .assign_workflow(&task_id, &wf_id)
+        .await
+        .expect("failed to assign workflow to task");
+    world.lifecycle_task_id = Some(task_id);
+    world.set_output(format!("Assigned workflow {} to task", wf_id));
+}
+
+#[given(expr = "a second workflow {string} with steps {string}")]
+async fn given_second_workflow_with_steps(world: &mut SmokeWorld, name: String, steps_str: String) {
+    let wf_service = world.workflow_service();
+    let steps: Vec<WorkflowStepInput> = steps_str
+        .split(", ")
+        .map(|s| WorkflowStepInput::new(s.trim(), "default"))
+        .collect();
+    let wf_id = wf_service
+        .create_workflow(CreateWorkflowOptions::new(name, steps))
+        .await
+        .expect("failed to create second workflow");
+    world.created_workflow_ids.push(wf_id.clone());
+    world
+        .stored_ids
+        .insert("second_workflow_id".to_string(), wf_id);
+}
+
+#[given(expr = "I run depend {string} --on the lifecycle task")]
+async fn given_run_depend_on_lifecycle_task(world: &mut SmokeWorld, task_ref: String) {
+    let task_id = world.resolve_vars(&task_ref);
+    let lifecycle_id = world
+        .lifecycle_task_id
+        .as_ref()
+        .expect("no lifecycle task ID stored")
+        .clone();
+    let service = world.task_service();
+    service
+        .add_dependency(&task_id, &lifecycle_id)
+        .await
+        .expect("failed to create dependency on lifecycle task");
+    world.set_output(format!(
+        "Created dependency: {} depends on {}",
+        task_id, lifecycle_id
     ));
 }
 
@@ -3292,6 +3425,282 @@ async fn run_ready(world: &mut SmokeWorld) {
         out.push_str(&format!("  {}  {}  {}\n", task.id, task.level, task.title));
     }
     world.set_output(out);
+}
+
+// ---------------------------------------------------------------------------
+// When steps: transition-to scenarios (step_lifecycle.feature)
+// ---------------------------------------------------------------------------
+
+async fn execute_transition(
+    world: &mut SmokeWorld,
+    task_id: &str,
+    target_step_name: &str,
+    skip_validation: bool,
+    target_workflow_name: Option<&str>,
+) -> Result<String, ServiceError> {
+    let task_service = world.task_service();
+    let step_service = world.step_service();
+    let wf_service = world.workflow_service();
+
+    let task = task_service.get_task(task_id).await?;
+
+    let from_workflow_id = task.workflow_id.clone();
+    let from_step_id = task.current_step_id.clone();
+
+    let Some(current_wf_id) = &from_workflow_id else {
+        return Err(ServiceError::InvalidInput(format!(
+            "Task '{}' is not assigned to any workflow. \
+             Use 'vtb workflow assign' first.",
+            task_id
+        )));
+    };
+
+    // Resolve the target step by name within the appropriate workflow
+    let resolve_wf_id = if let Some(wf_name) = target_workflow_name {
+        // Find the workflow by name from the stored IDs or created workflows
+        let wf_service_ref = &wf_service;
+        let all_wfs = wf_service_ref.list_workflows_full().await?;
+        let target_wf = all_wfs.iter().find(|w| w.name == wf_name).ok_or_else(|| {
+            ServiceError::InvalidInput(format!("Workflow '{}' not found", wf_name))
+        })?;
+        target_wf.id.clone().unwrap()
+    } else {
+        current_wf_id.clone()
+    };
+
+    let steps = step_service.list_steps_for_workflow(&resolve_wf_id).await?;
+    let target_step = steps
+        .iter()
+        .find(|s| s.name == target_step_name)
+        .or_else(|| {
+            steps
+                .iter()
+                .find(|s| s.id.as_deref() == Some(target_step_name))
+        })
+        .ok_or_else(|| {
+            ServiceError::InvalidInput(format!(
+                "Step '{}' not found. Use 'vtb step list <workflow-id>' to see available steps.",
+                target_step_name
+            ))
+        })?;
+
+    let target_step_id = target_step.id.as_ref().unwrap();
+
+    // Validate same workflow
+    if &target_step.workflow_id != current_wf_id {
+        return Err(ServiceError::InvalidInput(format!(
+            "Target step belongs to workflow '{}' but task is in workflow '{}'. \
+             Use 'vtb workflow assign' to change workflows first.",
+            target_step.workflow_id, current_wf_id
+        )));
+    }
+
+    // Validate the transition graph unless skipped
+    if !skip_validation {
+        if let Some(current_step_id) = &from_step_id {
+            let current_step = step_service
+                .get_step(current_step_id)
+                .await?
+                .ok_or_else(|| {
+                    ServiceError::InvalidInput(format!(
+                        "Task's current step '{}' not found",
+                        current_step_id
+                    ))
+                })?;
+
+            let is_valid = current_step
+                .transitions_to
+                .iter()
+                .any(|t| t == target_step_id);
+            let is_same = current_step_id == target_step_id;
+
+            if !is_valid && !is_same {
+                let valid_transitions: Vec<String> = current_step
+                    .transitions_to
+                    .iter()
+                    .filter_map(|t| steps.iter().find(|s| s.id.as_deref() == Some(t.as_str())))
+                    .map(|s| format!("{} ({})", s.name, s.id.as_deref().unwrap_or("?")))
+                    .collect();
+
+                let hint = if valid_transitions.is_empty() {
+                    "This step has no valid transitions (terminal state).".to_string()
+                } else {
+                    format!(
+                        "Valid transitions from '{}': {}",
+                        current_step.name,
+                        valid_transitions.join(", ")
+                    )
+                };
+
+                return Err(ServiceError::InvalidInput(format!(
+                    "Invalid step transition from '{}' to '{}'. {}",
+                    current_step.name, target_step.name, hint
+                )));
+            }
+        }
+    }
+
+    // Perform the transition
+    task_service
+        .set_current_step(task_id, target_step_id)
+        .await?;
+
+    // Get workflow name for display
+    let wf = wf_service.get_workflow(current_wf_id).await?;
+    let from_step_name = if let Some(fsi) = &from_step_id {
+        step_service
+            .get_step(fsi)
+            .await?
+            .map(|s| s.name)
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let mut out = String::new();
+
+    if skip_validation {
+        out.push_str("Note: Workflow transition validation skipped (--skip-validation)\n\n");
+    }
+
+    out.push_str(&format!(
+        "Transitioned task '{}' from {}:{} to {}:{}",
+        task_id, wf.name, from_step_name, wf.name, target_step.name
+    ));
+
+    // Check for unblocked tasks when reaching a final step
+    if target_step.is_final {
+        let dependents = task_service.get_dependents(task_id).await?;
+
+        let mut unblocked = Vec::new();
+        for dep_id in dependents {
+            let blockers = task_service
+                .get_incomplete_blockers_with_details(&dep_id)
+                .await?;
+            if blockers.is_empty() {
+                if let Ok(dep_task) = task_service.get_task(&dep_id).await {
+                    unblocked.push((dep_id, dep_task.title));
+                }
+            }
+        }
+
+        if !unblocked.is_empty() {
+            out.push_str("\n\nUnblocked tasks:");
+            for (id, title) in &unblocked {
+                out.push_str(&format!("\n  - {} ({})", id, title));
+            }
+        }
+    }
+
+    Ok(out)
+}
+
+#[when(expr = "I transition the task to step {string}")]
+async fn when_transition_task_to_step(world: &mut SmokeWorld, step_name: String) {
+    let task_id = world
+        .lifecycle_task_id
+        .as_ref()
+        .or(world.task_id.as_ref())
+        .expect("no task ID stored")
+        .clone();
+    match execute_transition(world, &task_id, &step_name, false, None).await {
+        Ok(output) => world.set_output(output),
+        Err(e) => world.set_service_error(e),
+    }
+}
+
+#[when(expr = "I transition the task to step {string} with --skip-validation")]
+async fn when_transition_task_skip_validation(world: &mut SmokeWorld, step_name: String) {
+    let task_id = world
+        .lifecycle_task_id
+        .as_ref()
+        .or(world.task_id.as_ref())
+        .expect("no task ID stored")
+        .clone();
+    match execute_transition(world, &task_id, &step_name, true, None).await {
+        Ok(output) => world.set_output(output),
+        Err(e) => world.set_service_error(e),
+    }
+}
+
+#[when(expr = "I attempt to transition the task to step {string}")]
+async fn when_attempt_transition_task(world: &mut SmokeWorld, step_name: String) {
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+    match execute_transition(world, &task_id, &step_name, false, None).await {
+        Ok(output) => world.set_output(output),
+        Err(e) => world.set_service_error(e),
+    }
+}
+
+#[when(expr = "I attempt to transition the task to step {string} of {string}")]
+async fn when_attempt_transition_task_of_workflow(
+    world: &mut SmokeWorld,
+    step_name: String,
+    wf_name: String,
+) {
+    let task_id = world
+        .lifecycle_task_id
+        .as_ref()
+        .or(world.task_id.as_ref())
+        .expect("no task ID stored")
+        .clone();
+    match execute_transition(world, &task_id, &step_name, false, Some(&wf_name)).await {
+        Ok(output) => world.set_output(output),
+        Err(e) => world.set_service_error(e),
+    }
+}
+
+#[when(expr = "I transition the lifecycle task through to step {string} with --skip-validation")]
+async fn when_transition_lifecycle_task_through(world: &mut SmokeWorld, target_step_name: String) {
+    let task_id = world
+        .lifecycle_task_id
+        .as_ref()
+        .expect("no lifecycle task ID stored")
+        .clone();
+    let wf_id = world
+        .workflow_id
+        .as_ref()
+        .expect("no workflow ID stored")
+        .clone();
+
+    let step_service = world.step_service();
+    let steps = step_service
+        .list_steps_for_workflow(&wf_id)
+        .await
+        .expect("failed to list workflow steps");
+
+    // Find current step index
+    let task_service = world.task_service();
+    let task = task_service
+        .get_task(&task_id)
+        .await
+        .expect("failed to get lifecycle task");
+
+    let current_step_id = task.current_step_id.as_deref().unwrap_or("");
+    let current_idx = steps
+        .iter()
+        .position(|s| s.id.as_deref() == Some(current_step_id))
+        .unwrap_or(0);
+
+    let target_idx = steps
+        .iter()
+        .position(|s| s.name == target_step_name)
+        .unwrap_or_else(|| panic!("step '{}' not found in workflow", target_step_name));
+
+    // Walk through each step from current to target
+    let mut last_output = String::new();
+    for i in (current_idx + 1)..=target_idx {
+        let step = &steps[i];
+        match execute_transition(world, &task_id, &step.name, true, None).await {
+            Ok(output) => last_output = output,
+            Err(e) => {
+                world.set_service_error(e);
+                return;
+            }
+        }
+    }
+
+    world.set_output(last_output);
 }
 
 // ---------------------------------------------------------------------------
