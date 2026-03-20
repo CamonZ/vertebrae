@@ -2411,6 +2411,680 @@ async fn collect_descendant_ids(
 }
 
 // ---------------------------------------------------------------------------
+// Helpers: file spec parsing for code ref tests
+// ---------------------------------------------------------------------------
+
+struct ParsedFileSpec {
+    path: String,
+    line_start: Option<u32>,
+    line_end: Option<u32>,
+}
+
+fn parse_file_spec(spec: &str) -> Result<ParsedFileSpec, String> {
+    if let Some(colon_pos) = spec.rfind(':') {
+        let after_colon = &spec[colon_pos + 1..];
+
+        if after_colon.starts_with('L') || after_colon.starts_with('l') {
+            let path = spec[..colon_pos].to_string();
+            let line_part = &after_colon[1..];
+
+            if path.is_empty() {
+                return Err("file path cannot be empty".to_string());
+            }
+
+            if let Some(dash_pos) = line_part.find('-') {
+                let start_str = &line_part[..dash_pos];
+                let end_str = &line_part[dash_pos + 1..];
+
+                let start: u32 = start_str
+                    .parse()
+                    .map_err(|_| format!("invalid line number: '{}'", start_str))?;
+                let end: u32 = end_str
+                    .parse()
+                    .map_err(|_| format!("invalid line number: '{}'", end_str))?;
+
+                if start > end {
+                    return Err(format!(
+                        "invalid line range: start ({}) > end ({})",
+                        start, end
+                    ));
+                }
+
+                return Ok(ParsedFileSpec {
+                    path,
+                    line_start: Some(start),
+                    line_end: Some(end),
+                });
+            }
+
+            if line_part.is_empty() {
+                return Err("line number required after 'L'".to_string());
+            }
+
+            let line: u32 = line_part
+                .parse()
+                .map_err(|_| format!("invalid line number: '{}'", line_part))?;
+
+            return Ok(ParsedFileSpec {
+                path,
+                line_start: Some(line),
+                line_end: None,
+            });
+        }
+    }
+
+    if spec.is_empty() {
+        return Err("file path cannot be empty".to_string());
+    }
+
+    Ok(ParsedFileSpec {
+        path: spec.to_string(),
+        line_start: None,
+        line_end: None,
+    })
+}
+
+fn format_file_spec(path: &str, line_start: Option<u32>, line_end: Option<u32>) -> String {
+    match (line_start, line_end) {
+        (Some(start), Some(end)) => format!("{}:L{}-{}", path, start, end),
+        (Some(line), None) => format!("{}:L{}", path, line),
+        _ => path.to_string(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// When steps: ref (add) scenarios
+// ---------------------------------------------------------------------------
+
+#[when(expr = "I add a ref {string}")]
+async fn add_ref(world: &mut SmokeWorld, file_spec: String) {
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+    let service = world.task_service();
+
+    let parsed = parse_file_spec(&file_spec).expect("invalid file spec");
+    let code_ref = vertebrae_core::CodeRef {
+        path: parsed.path.clone(),
+        line_start: parsed.line_start,
+        line_end: parsed.line_end,
+        name: None,
+        description: None,
+    };
+
+    service
+        .append_ref(&task_id, &code_ref)
+        .await
+        .expect("failed to add ref");
+
+    let location = format_file_spec(&parsed.path, parsed.line_start, parsed.line_end);
+    let mut output = format!("Added reference {} to task: {}", location, task_id);
+
+    if !std::path::Path::new(&parsed.path).exists() {
+        output.push_str(&format!("\nWarning: file '{}' does not exist", parsed.path));
+    }
+
+    world.set_output(output);
+}
+
+#[when(expr = "I add a ref {string} --name {string}")]
+async fn add_ref_with_name(world: &mut SmokeWorld, file_spec: String, name: String) {
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+    let service = world.task_service();
+
+    let parsed = parse_file_spec(&file_spec).expect("invalid file spec");
+    let code_ref = vertebrae_core::CodeRef {
+        path: parsed.path.clone(),
+        line_start: parsed.line_start,
+        line_end: parsed.line_end,
+        name: Some(name.clone()),
+        description: None,
+    };
+
+    service
+        .append_ref(&task_id, &code_ref)
+        .await
+        .expect("failed to add ref with name");
+
+    let location = format_file_spec(&parsed.path, parsed.line_start, parsed.line_end);
+    let mut output = format!(
+        "Added reference {} to task: {} [{}]",
+        location, task_id, name
+    );
+
+    if !std::path::Path::new(&parsed.path).exists() {
+        output.push_str(&format!("\nWarning: file '{}' does not exist", parsed.path));
+    }
+
+    world.set_output(output);
+}
+
+#[when(expr = "I add a ref {string} --description {string}")]
+async fn add_ref_with_description(world: &mut SmokeWorld, file_spec: String, desc: String) {
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+    let service = world.task_service();
+
+    let parsed = parse_file_spec(&file_spec).expect("invalid file spec");
+    let code_ref = vertebrae_core::CodeRef {
+        path: parsed.path.clone(),
+        line_start: parsed.line_start,
+        line_end: parsed.line_end,
+        name: None,
+        description: Some(desc.clone()),
+    };
+
+    service
+        .append_ref(&task_id, &code_ref)
+        .await
+        .expect("failed to add ref with description");
+
+    let location = format_file_spec(&parsed.path, parsed.line_start, parsed.line_end);
+    let mut output = format!("Added reference {} to task: {}", location, task_id);
+
+    if !std::path::Path::new(&parsed.path).exists() {
+        output.push_str(&format!("\nWarning: file '{}' does not exist", parsed.path));
+    }
+
+    world.set_output(output);
+}
+
+#[when(expr = "I attempt to add a ref {string}")]
+async fn attempt_add_ref(world: &mut SmokeWorld, file_spec: String) {
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+
+    let parsed = match parse_file_spec(&file_spec) {
+        Ok(p) => p,
+        Err(msg) => {
+            world.set_service_error(ServiceError::validation_failed(format!(
+                "{}: {}",
+                file_spec, msg
+            )));
+            return;
+        }
+    };
+
+    let code_ref = vertebrae_core::CodeRef {
+        path: parsed.path.clone(),
+        line_start: parsed.line_start,
+        line_end: parsed.line_end,
+        name: None,
+        description: None,
+    };
+
+    let service = world.task_service();
+    match service.append_ref(&task_id, &code_ref).await {
+        Ok(()) => {
+            let location = format_file_spec(&parsed.path, parsed.line_start, parsed.line_end);
+            world.set_output(format!("Added reference {} to task: {}", location, task_id));
+        }
+        Err(e) => {
+            world.set_service_error(e);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// When steps: refs (list) scenarios
+// ---------------------------------------------------------------------------
+
+#[when("I list refs")]
+async fn list_refs(world: &mut SmokeWorld) {
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+    let service = world.task_service();
+
+    let task = service
+        .get_task(&task_id)
+        .await
+        .expect("failed to get task for refs list");
+
+    let mut refs = task.code_refs.clone();
+
+    if refs.is_empty() {
+        world.set_output("No code references defined".to_string());
+        return;
+    }
+
+    refs.sort_by(|a, b| match a.path.cmp(&b.path) {
+        std::cmp::Ordering::Equal => {
+            let a_line = a.line_start.unwrap_or(0);
+            let b_line = b.line_start.unwrap_or(0);
+            a_line.cmp(&b_line)
+        }
+        other => other,
+    });
+
+    let mut out = String::new();
+    out.push_str(&format!(
+        "Code references for: {} \"{}\"\n",
+        task_id, task.title
+    ));
+    out.push_str(&"\u{2550}".repeat(60));
+    out.push('\n');
+    out.push('\n');
+
+    let file_width = refs.iter().map(|r| r.path.len()).max().unwrap_or(4).max(4);
+    let lines_width = refs
+        .iter()
+        .map(|r| format_file_spec_lines(r.line_start, r.line_end).len())
+        .max()
+        .unwrap_or(5)
+        .max(5);
+    let name_width = refs
+        .iter()
+        .filter_map(|r| r.name.as_ref().map(|n| n.len()))
+        .max()
+        .unwrap_or(4)
+        .max(4);
+
+    out.push_str(&format!(
+        "{:<fw$}  {:<lw$}  {:<nw$}  Description\n",
+        "File",
+        "Lines",
+        "Name",
+        fw = file_width,
+        lw = lines_width,
+        nw = name_width,
+    ));
+    out.push_str(&format!(
+        "{}  {}  {}  {}\n",
+        "\u{2500}".repeat(file_width),
+        "\u{2500}".repeat(lines_width),
+        "\u{2500}".repeat(name_width),
+        "\u{2500}".repeat(23),
+    ));
+
+    for code_ref in &refs {
+        let lines = format_file_spec_lines(code_ref.line_start, code_ref.line_end);
+        let name = code_ref.name.as_deref().unwrap_or("-");
+        let description = code_ref.description.as_deref().unwrap_or("");
+        out.push_str(&format!(
+            "{:<fw$}  {:<lw$}  {:<nw$}  {}\n",
+            code_ref.path,
+            lines,
+            name,
+            description,
+            fw = file_width,
+            lw = lines_width,
+            nw = name_width,
+        ));
+    }
+
+    world.set_output(out);
+}
+
+fn format_file_spec_lines(line_start: Option<u32>, line_end: Option<u32>) -> String {
+    match (line_start, line_end) {
+        (Some(start), Some(end)) => format!("L{}-{}", start, end),
+        (Some(line), None) => format!("L{}", line),
+        _ => "-".to_string(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// When steps: unref (remove) scenarios
+// ---------------------------------------------------------------------------
+
+#[when(expr = "I unref {string}")]
+async fn unref_by_file(world: &mut SmokeWorld, file: String) {
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+    let service = world.task_service();
+
+    let task = service
+        .get_task(&task_id)
+        .await
+        .expect("failed to get task for unref");
+
+    let refs_to_remove: Vec<usize> = task
+        .code_refs
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| r.path == file)
+        .map(|(i, _)| i)
+        .collect();
+
+    let removed_count = refs_to_remove.len();
+
+    if removed_count > 0 {
+        service
+            .remove_code_refs(&task_id, Some(refs_to_remove))
+            .await
+            .expect("failed to remove code refs");
+    }
+
+    if removed_count == 0 {
+        world.set_output(format!(
+            "Warning: No references to {} in task: {}",
+            file, task_id
+        ));
+    } else {
+        world.set_output(format!(
+            "Removed {} reference(s) to {} from task: {}",
+            removed_count, file, task_id
+        ));
+    }
+}
+
+#[when("I unref --all")]
+async fn unref_all(world: &mut SmokeWorld) {
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+    let service = world.task_service();
+
+    let task = service
+        .get_task(&task_id)
+        .await
+        .expect("failed to get task for unref --all");
+
+    let original_count = task.code_refs.len();
+
+    if original_count > 0 {
+        service
+            .remove_code_refs(&task_id, None)
+            .await
+            .expect("failed to remove all code refs");
+    }
+
+    if original_count == 0 {
+        world.set_output(format!("No references to remove from task: {}", task_id));
+    } else {
+        world.set_output(format!(
+            "Removed all {} reference(s) from task: {}",
+            original_count, task_id
+        ));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// When steps: criterion-ref scenarios
+// ---------------------------------------------------------------------------
+
+#[when(expr = "I add a criterion-ref {int} {string}")]
+async fn add_criterion_ref(world: &mut SmokeWorld, index: usize, file_spec: String) {
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+    let service = world.task_service();
+
+    let parsed = parse_file_spec(&file_spec).expect("invalid file spec in criterion-ref");
+
+    let task = service
+        .get_task(&task_id)
+        .await
+        .expect("failed to get task for criterion-ref");
+
+    let mut criteria: Vec<(usize, &vertebrae_core::Section)> = task
+        .sections
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| s.section_type == SectionType::TestingCriterion)
+        .collect();
+    criteria.sort_by_key(|(_, s)| s.order.unwrap_or(u32::MAX));
+
+    let criterion_idx = index - 1;
+    let (original_idx, criterion) = criteria[criterion_idx];
+    let criterion_content = criterion.content.clone();
+
+    let code_ref = vertebrae_core::CodeRef {
+        path: parsed.path.clone(),
+        line_start: parsed.line_start,
+        line_end: parsed.line_end,
+        name: None,
+        description: None,
+    };
+
+    service
+        .append_section_ref(&task_id, original_idx, &code_ref)
+        .await
+        .expect("failed to append criterion ref");
+
+    let location = format_file_spec(&parsed.path, parsed.line_start, parsed.line_end);
+    world.set_output(format!(
+        "Added reference {} to testing criterion {} in {}: {}",
+        location, index, task_id, criterion_content
+    ));
+}
+
+#[when(expr = "I add a criterion-ref {int} {string} --name {string}")]
+async fn add_criterion_ref_with_name(
+    world: &mut SmokeWorld,
+    index: usize,
+    file_spec: String,
+    name: String,
+) {
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+    let service = world.task_service();
+
+    let parsed = parse_file_spec(&file_spec).expect("invalid file spec in criterion-ref");
+
+    let task = service
+        .get_task(&task_id)
+        .await
+        .expect("failed to get task for criterion-ref");
+
+    let mut criteria: Vec<(usize, &vertebrae_core::Section)> = task
+        .sections
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| s.section_type == SectionType::TestingCriterion)
+        .collect();
+    criteria.sort_by_key(|(_, s)| s.order.unwrap_or(u32::MAX));
+
+    let criterion_idx = index - 1;
+    let (original_idx, criterion) = criteria[criterion_idx];
+    let criterion_content = criterion.content.clone();
+
+    let code_ref = vertebrae_core::CodeRef {
+        path: parsed.path.clone(),
+        line_start: parsed.line_start,
+        line_end: parsed.line_end,
+        name: Some(name.clone()),
+        description: None,
+    };
+
+    service
+        .append_section_ref(&task_id, original_idx, &code_ref)
+        .await
+        .expect("failed to append criterion ref with name");
+
+    let location = format_file_spec(&parsed.path, parsed.line_start, parsed.line_end);
+    world.set_output(format!(
+        "Added reference {} to testing criterion {} in {}: {} [{}]",
+        location, index, task_id, criterion_content, name
+    ));
+}
+
+#[when(expr = "I attempt to add a criterion-ref {int} {string}")]
+async fn attempt_add_criterion_ref(world: &mut SmokeWorld, index: usize, file_spec: String) {
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+
+    if index == 0 {
+        world.set_service_error(ServiceError::validation_failed(
+            "Testing criterion index must be 1 or greater",
+        ));
+        return;
+    }
+
+    let parsed = match parse_file_spec(&file_spec) {
+        Ok(p) => p,
+        Err(msg) => {
+            world.set_service_error(ServiceError::validation_failed(format!(
+                "{}: {}",
+                file_spec, msg
+            )));
+            return;
+        }
+    };
+
+    let service = world.task_service();
+
+    let task = match service.get_task(&task_id).await {
+        Ok(t) => t,
+        Err(e) => {
+            world.set_service_error(e);
+            return;
+        }
+    };
+
+    let mut criteria: Vec<(usize, &vertebrae_core::Section)> = task
+        .sections
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| s.section_type == SectionType::TestingCriterion)
+        .collect();
+    criteria.sort_by_key(|(_, s)| s.order.unwrap_or(u32::MAX));
+
+    let criterion_idx = index - 1;
+    if criterion_idx >= criteria.len() {
+        world.set_service_error(ServiceError::validation_failed(format!(
+            "Testing criterion at index {} not found. Task has {} testing criterion(s).",
+            index,
+            criteria.len()
+        )));
+        return;
+    }
+
+    let (original_idx, criterion) = criteria[criterion_idx];
+    let criterion_content = criterion.content.clone();
+
+    let code_ref = vertebrae_core::CodeRef {
+        path: parsed.path.clone(),
+        line_start: parsed.line_start,
+        line_end: parsed.line_end,
+        name: None,
+        description: None,
+    };
+
+    match service
+        .append_section_ref(&task_id, original_idx, &code_ref)
+        .await
+    {
+        Ok(()) => {
+            let location = format_file_spec(&parsed.path, parsed.line_start, parsed.line_end);
+            world.set_output(format!(
+                "Added reference {} to testing criterion {} in {}: {}",
+                location, index, task_id, criterion_content
+            ));
+        }
+        Err(e) => {
+            world.set_service_error(e);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Then steps: code ref assertions
+// ---------------------------------------------------------------------------
+
+#[then(expr = "the ref should have path {string} and line_start {int}")]
+async fn ref_should_have_path_and_line_start(
+    world: &mut SmokeWorld,
+    expected_path: String,
+    expected_line: u32,
+) {
+    let service = world.task_service();
+    let task_id = world.task_id.as_ref().expect("no task ID stored");
+    let task = service.get_task(task_id).await.expect("failed to get task");
+
+    let found = task
+        .code_refs
+        .iter()
+        .any(|r| r.path == expected_path && r.line_start == Some(expected_line));
+
+    assert!(
+        found,
+        "expected a code ref with path='{}' and line_start={}, but refs are: {:?}",
+        expected_path, expected_line, task.code_refs
+    );
+}
+
+#[then(expr = "the ref should have path {string} and line_start {int} and line_end {int}")]
+async fn ref_should_have_path_and_line_range(
+    world: &mut SmokeWorld,
+    expected_path: String,
+    expected_start: u32,
+    expected_end: u32,
+) {
+    let service = world.task_service();
+    let task_id = world.task_id.as_ref().expect("no task ID stored");
+    let task = service.get_task(task_id).await.expect("failed to get task");
+
+    let found = task.code_refs.iter().any(|r| {
+        r.path == expected_path
+            && r.line_start == Some(expected_start)
+            && r.line_end == Some(expected_end)
+    });
+
+    assert!(
+        found,
+        "expected a code ref with path='{}', line_start={}, line_end={}, but refs are: {:?}",
+        expected_path, expected_start, expected_end, task.code_refs
+    );
+}
+
+#[then(expr = "the ref should have description {string}")]
+async fn ref_should_have_description(world: &mut SmokeWorld, expected_desc: String) {
+    let service = world.task_service();
+    let task_id = world.task_id.as_ref().expect("no task ID stored");
+    let task = service.get_task(task_id).await.expect("failed to get task");
+
+    let found = task
+        .code_refs
+        .iter()
+        .any(|r| r.description.as_deref() == Some(&expected_desc));
+
+    assert!(
+        found,
+        "expected a code ref with description='{}', but refs are: {:?}",
+        expected_desc, task.code_refs
+    );
+}
+
+#[then(expr = "the task should have {int} refs")]
+async fn task_should_have_n_refs(world: &mut SmokeWorld, expected_count: usize) {
+    let service = world.task_service();
+    let task_id = world.task_id.as_ref().expect("no task ID stored");
+    let task = service.get_task(task_id).await.expect("failed to get task");
+
+    assert_eq!(
+        task.code_refs.len(),
+        expected_count,
+        "expected {} refs, but found {}. Refs: {:?}",
+        expected_count,
+        task.code_refs.len(),
+        task.code_refs
+    );
+}
+
+#[then(expr = "the refs should appear in order: {string}, {string}, {string}")]
+async fn refs_should_appear_in_order(
+    world: &mut SmokeWorld,
+    first: String,
+    second: String,
+    third: String,
+) {
+    let service = world.task_service();
+    let task_id = world.task_id.as_ref().expect("no task ID stored");
+    let task = service.get_task(task_id).await.expect("failed to get task");
+
+    let mut refs = task.code_refs.clone();
+    refs.sort_by(|a, b| match a.path.cmp(&b.path) {
+        std::cmp::Ordering::Equal => {
+            let a_line = a.line_start.unwrap_or(0);
+            let b_line = b.line_start.unwrap_or(0);
+            a_line.cmp(&b_line)
+        }
+        other => other,
+    });
+
+    let actual_specs: Vec<String> = refs
+        .iter()
+        .map(|r| format_file_spec(&r.path, r.line_start, r.line_end))
+        .collect();
+
+    let expected = vec![first.clone(), second.clone(), third.clone()];
+    assert_eq!(
+        actual_specs, expected,
+        "expected refs in order {:?}, but got {:?}",
+        expected, actual_specs
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
