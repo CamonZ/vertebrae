@@ -298,6 +298,70 @@ async fn delete_task(world: &mut SmokeWorld) {
 }
 
 // ---------------------------------------------------------------------------
+// When steps: task_delete scenarios
+// ---------------------------------------------------------------------------
+
+#[when("I delete the task with --force")]
+async fn delete_task_force(world: &mut SmokeWorld) {
+    let service = world.task_service();
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+    service
+        .delete_task(&task_id, false)
+        .await
+        .expect("failed to force-delete task");
+    world.created_task_ids.retain(|id| id != &task_id);
+    world.set_output(format!("Deleted task: {}", task_id));
+}
+
+#[when(expr = "I delete task {string} with --cascade --force")]
+async fn delete_task_cascade_force(world: &mut SmokeWorld, task_ref: String) {
+    let task_id = world.resolve_vars(&task_ref);
+    let service = world.task_service();
+
+    let mut deleted_ids = collect_descendant_ids(&service, &task_id).await;
+    deleted_ids.push(task_id.clone());
+    let total = deleted_ids.len();
+
+    service
+        .delete_task(&task_id, true)
+        .await
+        .expect("failed to cascade-force-delete task");
+
+    world
+        .created_task_ids
+        .retain(|id| !deleted_ids.contains(id));
+
+    world.set_output(format!("Deleted {} tasks (including children)", total));
+}
+
+#[when(expr = "I delete task {string} with --force")]
+async fn delete_task_by_ref_force(world: &mut SmokeWorld, task_ref: String) {
+    let task_id = world.resolve_vars(&task_ref);
+    let service = world.task_service();
+    service
+        .delete_task(&task_id, false)
+        .await
+        .expect("failed to force-delete task by ref");
+    world.created_task_ids.retain(|id| id != &task_id);
+    world.set_output(format!("Deleted task: {}", task_id));
+}
+
+#[when(expr = "I attempt to delete task {string} with --force")]
+async fn attempt_delete_task_force(world: &mut SmokeWorld, task_ref: String) {
+    let task_id = world.resolve_vars(&task_ref);
+    let service = world.task_service();
+    match service.delete_task(&task_id, false).await {
+        Ok(()) => {
+            world.created_task_ids.retain(|id| id != &task_id);
+            world.set_output(format!("Deleted task: {}", task_id));
+        }
+        Err(e) => {
+            world.set_service_error(e);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // When steps: task_add scenarios
 // ---------------------------------------------------------------------------
 
@@ -949,6 +1013,51 @@ async fn task_should_not_have_tag(world: &mut SmokeWorld, tag: String) {
 }
 
 // ---------------------------------------------------------------------------
+// Then steps: task_delete assertions
+// ---------------------------------------------------------------------------
+
+#[then(expr = "task {string} should no longer exist")]
+async fn task_ref_should_not_exist(world: &mut SmokeWorld, task_ref: String) {
+    let task_id = world.resolve_vars(&task_ref);
+    let service = world.task_service();
+    let result = service.get_task(&task_id).await;
+    assert!(
+        result.is_err(),
+        "expected task '{}' to not exist after deletion, but get_task succeeded",
+        task_id
+    );
+}
+
+#[then(expr = "task {string} should still exist")]
+async fn task_ref_should_still_exist(world: &mut SmokeWorld, task_ref: String) {
+    let task_id = world.resolve_vars(&task_ref);
+    let service = world.task_service();
+    let result = service.get_task(&task_id).await;
+    assert!(
+        result.is_ok(),
+        "expected task '{}' to still exist, but get_task failed: {:?}",
+        task_id,
+        result.err()
+    );
+}
+
+#[then(expr = "task {string} should have no parent")]
+async fn task_ref_should_have_no_parent(world: &mut SmokeWorld, task_ref: String) {
+    let task_id = world.resolve_vars(&task_ref);
+    let service = world.task_service();
+    let task = service
+        .get_task(&task_id)
+        .await
+        .unwrap_or_else(|e| panic!("failed to get task '{}': {:?}", task_id, e));
+    assert!(
+        task.parent_id.is_none(),
+        "expected task '{}' to have no parent, but parent_id is {:?}",
+        task_id,
+        task.parent_id
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Then steps: parent and dependency assertions
 // ---------------------------------------------------------------------------
 
@@ -1211,6 +1320,24 @@ fn format_task_list(tasks: &[vertebrae_core::Task]) -> String {
         out.push_str(&format!("{} {}\n", task.id, task.title));
     }
     out
+}
+
+// ---------------------------------------------------------------------------
+// Helpers: cascade delete descendant collection
+// ---------------------------------------------------------------------------
+
+async fn collect_descendant_ids(
+    service: &vertebrae_sacrum_client::SacrumTaskService,
+    task_id: &str,
+) -> Vec<String> {
+    let mut ids = Vec::new();
+    let children = service.get_children(task_id).await.unwrap_or_default();
+    for child_id in &children {
+        ids.push(child_id.clone());
+        let nested = Box::pin(collect_descendant_ids(service, child_id)).await;
+        ids.extend(nested);
+    }
+    ids
 }
 
 // ---------------------------------------------------------------------------
