@@ -28,7 +28,7 @@ Feature: Delete tasks
   Scenario: Force delete without cascade orphans children
     Given I create a task titled "Parent" with level "epic"
     And I store the task ID as "parent_id"
-    And I create a task titled "Child"  with parent "<parent_id>"
+    And I create a task titled "Child" with parent "<parent_id>"
     And I store the task ID as "child_id"
     When I delete task "<parent_id>" with --force
     Then task "<parent_id>" should no longer exist

@@ -18,8 +18,8 @@ Feature: Sections and checklist items
     When I add a "goal" section with content "Original"
     And I add a "goal" section with content "Replaced"
     Then the output should match "Replaced goal section for task: <TASK_ID>"
-    And the task should have exactly 1 goal section
-    And the goal section content should be "Replaced"
+    And the task should have 1 goal sections
+    And the section "goal" content should be "Replaced"
 
   @cleanup
   Scenario: Add multi-instance sections with auto ordinals
@@ -61,7 +61,7 @@ Feature: Sections and checklist items
   @cleanup
   Scenario: List sections when empty
     When I list sections
-    Then the output should be "No sections defined"
+    Then the output should match "No sections defined"
 
   @cleanup
   Scenario: List sections with type filter when empty

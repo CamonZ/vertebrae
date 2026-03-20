@@ -32,13 +32,13 @@ Feature: Update tasks
   Scenario: Add tags
     Given I create a task titled "Tag task"
     When I update the task with --add-tag "backend" --add-tag "urgent"
-    Then the task should have tags "backend", "urgent"
+    Then the task should have tags "backend, urgent"
 
   @cleanup
   Scenario: Remove tag
-    Given I create a task titled "Tag removal" with tags "frontend", "backend", "urgent"
+    Given I create a task titled "Tag removal" with tags "frontend, backend, urgent"
     When I update the task with --remove-tag "urgent"
-    Then the task should have tags "frontend", "backend"
+    Then the task should have tags "frontend, backend"
     And the task should not have tag "urgent"
 
   @cleanup

@@ -39,7 +39,7 @@ Feature: Task state management
     And I archive the task
     When I unarchive the task
     Then the output should match "Task <task_id> unarchived"
-    And the task archived flag should be false
+    And the task archived should be "false"
 
   @cleanup
   Scenario: Double-archive is idempotent
@@ -48,7 +48,7 @@ Feature: Task state management
     When I archive the task
     And I archive the task
     Then the output should match "Task <task_id> archived"
-    And the task archived flag should be true
+    And the task archived should be "true"
 
   Scenario: Archive non-existent task fails
     When I attempt to archive task "00000000-0000-4000-8000-000000000000"
@@ -61,24 +61,24 @@ Feature: Task state management
     Given I create a task titled "Review toggle"
     When I run review for the task
     Then the output should contain "marked as needing review"
-    And the task needs_human_review should be true
+    And the task needs_human_review should be "true"
 
   @cleanup
   Scenario: Toggle review flag off
     Given I create a task titled "Review toggle" with needs-review
     When I run review for the task
     Then the output should contain "marked as not needing review"
-    And the task needs_human_review should be false
+    And the task needs_human_review should be "false"
 
   @cleanup
   Scenario: Set review flag explicitly
     Given I create a task titled "Review set"
     When I run review for the task with --set true
     Then the output should contain "marked as needing review"
-    And the task needs_human_review should be true
+    And the task needs_human_review should be "true"
     When I run review for the task with --set false
     Then the output should contain "marked as not needing review"
-    And the task needs_human_review should be false
+    And the task needs_human_review should be "false"
 
   Scenario: Review non-existent task fails
     When I attempt to run review for task "00000000-0000-4000-8000-000000000000"

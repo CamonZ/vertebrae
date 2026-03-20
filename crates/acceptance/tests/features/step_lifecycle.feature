@@ -3,7 +3,7 @@ Feature: Step lifecycle
 
   Background:
     Given a configured Sacrum client
-    And a workflow "test-wf" with steps "backlog", "in_progress", "pending_review", "done"
+    And a workflow "test-wf" with steps "backlog, in_progress, pending_review, done"
     And I create a task titled "Lifecycle task"
     And I assign the workflow to the task
 
@@ -41,7 +41,7 @@ Feature: Step lifecycle
 
   @cleanup
   Scenario: Target step from different workflow is rejected
-    Given a second workflow "other-wf" with steps "alpha", "beta"
+    Given a second workflow "other-wf" with steps "alpha, beta"
     When I attempt to transition the task to step "alpha" of "other-wf"
     Then the command should fail with "Target step belongs to workflow"
     And the error should contain "Use 'vtb workflow assign' to change workflows first"
