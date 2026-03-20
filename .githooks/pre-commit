@@ -14,10 +14,10 @@ cargo fmt --check
 echo "==> Running clippy, coverage, GUI tests, and linting in parallel..."
 
 # Start background jobs
-cargo clippy --quiet -- -D warnings &
+cargo clippy --quiet --workspace --exclude acceptance -- -D warnings &
 CLIPPY_PID=$!
 
-cargo llvm-cov --quiet --fail-under-lines 75 &
+cargo llvm-cov --quiet --workspace --exclude acceptance --fail-under-lines 75 &
 LLVM_COV_PID=$!
 
 (cd crates/gui && npm run test) &
