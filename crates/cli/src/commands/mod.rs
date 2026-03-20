@@ -73,6 +73,7 @@ pub use workflow::WorkflowCommand;
 use crate::output::{format_task_table, format_task_tree};
 use clap::Subcommand;
 use clap::builder::ValueParser;
+use serde_json;
 use vertebrae_core::{SectionType, ServiceError, VertebraeServices};
 
 /// Check whether a string is a valid short ID prefix (8 hex characters).
@@ -217,6 +218,8 @@ pub enum CommandResult {
     Message(String),
     /// A formatted table to display
     Table(String),
+    /// A JSON value to display (used when --json flag is set)
+    Json(serde_json::Value),
 }
 
 impl std::fmt::Display for CommandResult {
@@ -224,6 +227,13 @@ impl std::fmt::Display for CommandResult {
         match self {
             CommandResult::Message(msg) => write!(f, "{}", msg),
             CommandResult::Table(table) => write!(f, "{}", table),
+            CommandResult::Json(value) => {
+                write!(
+                    f,
+                    "{}",
+                    serde_json::to_string_pretty(value).unwrap_or_default()
+                )
+            }
         }
     }
 }
@@ -538,6 +548,55 @@ impl Command {
             Command::Workflow(cmd) => {
                 let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(result))
+            }
+        }
+    }
+
+    /// Execute the command and return JSON output.
+    ///
+    /// For commands that produce structured data (show, list, sections, refs, blockers),
+    /// this serializes the result directly to JSON. For all other commands, it wraps the
+    /// text output in a `{"output": "..."}` JSON object.
+    pub async fn execute_json(
+        &self,
+        services: &VertebraeServices,
+    ) -> Result<CommandResult, ServiceError> {
+        match self {
+            Command::Show(cmd) => {
+                let detail = cmd.execute(services).await?;
+                let json = serde_json::to_value(&detail)
+                    .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
+                Ok(CommandResult::Json(json))
+            }
+            Command::List(cmd) => {
+                let tasks = cmd.execute(services).await?;
+                let json = serde_json::to_value(&tasks)
+                    .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
+                Ok(CommandResult::Json(json))
+            }
+            Command::Sections(cmd) => {
+                let result = cmd.execute(services).await?;
+                let json = serde_json::to_value(&result)
+                    .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
+                Ok(CommandResult::Json(json))
+            }
+            Command::Refs(cmd) => {
+                let result = cmd.execute(services).await?;
+                let json = serde_json::to_value(&result)
+                    .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
+                Ok(CommandResult::Json(json))
+            }
+            Command::Blockers(cmd) => {
+                let result = cmd.execute(services).await?;
+                let json = serde_json::to_value(&result)
+                    .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
+                Ok(CommandResult::Json(json))
+            }
+            _ => {
+                let result = self.execute(services).await?;
+                let text = format!("{}", result);
+                let json = serde_json::json!({ "output": text });
+                Ok(CommandResult::Json(json))
             }
         }
     }
@@ -1780,5 +1839,65 @@ mod tests {
             }
             _ => panic!("Expected List command"),
         }
+    }
+
+    #[test]
+    fn test_command_result_json_display() {
+        let json = serde_json::json!({"id": "abc123", "title": "Test task"});
+        let result = CommandResult::Json(json);
+        let output = format!("{}", result);
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(
+            parsed["id"], "abc123",
+            "JSON output should contain the id field"
+        );
+        assert_eq!(
+            parsed["title"], "Test task",
+            "JSON output should contain the title field"
+        );
+    }
+
+    #[test]
+    fn test_command_result_json_display_with_nested_data() {
+        let json = serde_json::json!({
+            "tasks": [
+                {"id": "task1", "title": "First"},
+                {"id": "task2", "title": "Second"}
+            ]
+        });
+        let result = CommandResult::Json(json);
+        let output = format!("{}", result);
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(
+            parsed["tasks"].as_array().unwrap().len(),
+            2,
+            "JSON output should contain 2 tasks"
+        );
+        assert_eq!(parsed["tasks"][0]["id"], "task1");
+        assert_eq!(parsed["tasks"][1]["id"], "task2");
+    }
+
+    #[test]
+    fn test_command_result_json_wraps_text_output() {
+        let json = serde_json::json!({"output": "Created task: abc-123"});
+        let result = CommandResult::Json(json);
+        let output = format!("{}", result);
+        let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(
+            parsed["output"], "Created task: abc-123",
+            "Wrapped text output should be accessible via the output key"
+        );
+    }
+
+    #[test]
+    fn test_command_result_message_display() {
+        let result = CommandResult::Message("Hello world".to_string());
+        assert_eq!(format!("{}", result), "Hello world");
+    }
+
+    #[test]
+    fn test_command_result_table_display() {
+        let result = CommandResult::Table("col1 | col2\nval1 | val2".to_string());
+        assert_eq!(format!("{}", result), "col1 | col2\nval1 | val2");
     }
 }
