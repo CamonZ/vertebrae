@@ -23,3 +23,4 @@ vertebrae-core = { path = "../core" }
 tokio = { version = "1", features = ["full"] }
 wiremock = "0.6"
 uuid = { version = "1", features = ["v4", "serde"] }
+serial_test = "3"
