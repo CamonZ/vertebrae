@@ -4,6 +4,7 @@
 //! optionally filtered by type and grouped by positive/negative space.
 
 use clap::Args;
+use serde::Serialize;
 use vertebrae_core::{Section, SectionType};
 use vertebrae_core::{ServiceError, VertebraeServices};
 
@@ -20,7 +21,7 @@ pub struct SectionsCommand {
 }
 
 /// Result of the sections command execution
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct SectionsResult {
     /// The task ID
     pub id: String,

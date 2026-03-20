@@ -5,6 +5,7 @@
 
 use crate::commands::list::TaskSummary;
 use clap::Args;
+use serde::Serialize;
 use vertebrae_core::{CodeRef, Section, SectionType};
 use vertebrae_core::{ServiceError, VertebraeServices, WorkflowInfo, WorkflowService};
 
@@ -17,7 +18,7 @@ pub struct ShowCommand {
 }
 
 /// Detailed view of a task with all relationships
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct TaskDetail {
     /// The task ID
     pub id: String,
@@ -705,5 +706,141 @@ fn format_code_ref_location(code_ref: &CodeRef) -> String {
         (Some(start), Some(end)) => format!("{}:{}-{}", code_ref.path, start, end),
         (Some(line), None) => format!("{}:{}", code_ref.path, line),
         _ => code_ref.path.clone(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_task_detail() -> TaskDetail {
+        TaskDetail {
+            id: "abc12345-0000-4000-8000-000000000001".to_string(),
+            title: "Sample task".to_string(),
+            description: Some("A test task".to_string()),
+            level: "ticket".to_string(),
+            workflow_name: Some("Implementation".to_string()),
+            step_name: Some("in_progress".to_string()),
+            priority: Some("high".to_string()),
+            tags: vec!["backend".to_string(), "api".to_string()],
+            created_at: Some("2026-01-01T00:00:00Z".to_string()),
+            updated_at: Some("2026-01-02T00:00:00Z".to_string()),
+            completed_at: None,
+            needs_human_review: Some(false),
+            worktree: None,
+            revision_feedback: None,
+            rejection_reason: None,
+            workflow: None,
+            sections: vec![],
+            code_refs: vec![],
+            parent: None,
+            children: vec![],
+            blocked_by: vec![],
+            blocks: vec![],
+        }
+    }
+
+    #[test]
+    fn test_task_detail_serializes_to_json() {
+        let detail = sample_task_detail();
+        let json = serde_json::to_value(&detail).unwrap();
+
+        assert_eq!(json["id"], "abc12345-0000-4000-8000-000000000001");
+        assert_eq!(json["title"], "Sample task");
+        assert_eq!(json["description"], "A test task");
+        assert_eq!(json["level"], "ticket");
+        assert_eq!(json["workflow_name"], "Implementation");
+        assert_eq!(json["step_name"], "in_progress");
+        assert_eq!(json["priority"], "high");
+        assert_eq!(json["tags"][0], "backend");
+        assert_eq!(json["tags"][1], "api");
+        assert!(json["completed_at"].is_null());
+    }
+
+    #[test]
+    fn test_task_detail_json_includes_relationships() {
+        let mut detail = sample_task_detail();
+        detail.children = vec![TaskSummary {
+            id: "child-0000-4000-8000-000000000001".to_string(),
+            title: "Child task".to_string(),
+            level: "task".to_string(),
+            workflow_name: None,
+            step_name: None,
+            priority: None,
+            tags: vec![],
+            needs_human_review: None,
+            archived: false,
+            parent_id: None,
+        }];
+        detail.blocked_by = vec![TaskSummary {
+            id: "blocker-0000-4000-8000-000000000001".to_string(),
+            title: "Blocking task".to_string(),
+            level: "ticket".to_string(),
+            workflow_name: None,
+            step_name: Some("todo".to_string()),
+            priority: None,
+            tags: vec![],
+            needs_human_review: None,
+            archived: false,
+            parent_id: None,
+        }];
+
+        let json = serde_json::to_value(&detail).unwrap();
+        let children = json["children"].as_array().unwrap();
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0]["id"], "child-0000-4000-8000-000000000001");
+        assert_eq!(children[0]["title"], "Child task");
+
+        let blocked_by = json["blocked_by"].as_array().unwrap();
+        assert_eq!(blocked_by.len(), 1);
+        assert_eq!(blocked_by[0]["id"], "blocker-0000-4000-8000-000000000001");
+        assert_eq!(blocked_by[0]["step_name"], "todo");
+    }
+
+    #[test]
+    fn test_task_detail_json_includes_sections() {
+        let mut detail = sample_task_detail();
+        detail.sections = vec![Section::new(
+            SectionType::ChecklistItem,
+            "Write tests".to_string(),
+        )];
+
+        let json = serde_json::to_value(&detail).unwrap();
+        let sections = json["sections"].as_array().unwrap();
+        assert_eq!(sections.len(), 1);
+        assert_eq!(sections[0]["content"], "Write tests");
+        assert_eq!(
+            sections[0]["type"], "checklist_item",
+            "Section type is serialized as 'type' due to serde rename"
+        );
+    }
+
+    #[test]
+    fn test_task_detail_json_includes_code_refs() {
+        let mut detail = sample_task_detail();
+        detail.code_refs =
+            vec![CodeRef::line("src/main.rs".to_string(), 42).with_name("main".to_string())];
+
+        let json = serde_json::to_value(&detail).unwrap();
+        let refs = json["code_refs"].as_array().unwrap();
+        assert_eq!(refs.len(), 1);
+        assert_eq!(refs[0]["path"], "src/main.rs");
+        assert_eq!(refs[0]["line_start"], 42);
+        assert_eq!(refs[0]["name"], "main");
+    }
+
+    #[test]
+    fn test_task_detail_json_roundtrip_is_valid() {
+        let detail = sample_task_detail();
+        let json_string = serde_json::to_string(&detail).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json_string).unwrap();
+        assert!(
+            parsed.is_object(),
+            "Serialized TaskDetail should be a JSON object"
+        );
+        assert!(
+            parsed.as_object().unwrap().contains_key("id"),
+            "JSON object should contain id key"
+        );
     }
 }

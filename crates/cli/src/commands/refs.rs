@@ -4,6 +4,7 @@
 //! sorted by file path and then line number.
 
 use clap::Args;
+use serde::Serialize;
 use vertebrae_core::CodeRef;
 use vertebrae_core::{ServiceError, VertebraeServices};
 
@@ -16,7 +17,7 @@ pub struct RefsCommand {
 }
 
 /// Result of the refs command execution
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct RefsResult {
     /// The task ID
     pub id: String,
