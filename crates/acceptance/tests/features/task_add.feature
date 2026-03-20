@@ -48,16 +48,13 @@ Feature: Add tasks
 
   @cleanup
   Scenario: Create task with multiple tags
-    When I create a task titled "Tagged" with tags:
-      | backend  |
-      | database |
-      | urgent   |
-    Then the task should have tags "backend", "database", "urgent"
+    When I create a task titled "Tagged" with tags "backend, database, urgent"
+    Then the task should have tags "backend, database, urgent"
 
   @cleanup
   Scenario: Create task with needs-review flag
     When I create a task titled "Needs review" with needs-review
-    Then the task needs_human_review should be true
+    Then the task needs_human_review should be "true"
 
   @cleanup
   Scenario: Create child task with parent

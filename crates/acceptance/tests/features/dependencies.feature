@@ -89,7 +89,7 @@ Feature: Task dependencies
   Scenario: No blockers
     Given I create a task titled "Independent"
     When I run blockers for the task
-    Then the output should be "No blockers"
+    Then the output should match "No blockers"
 
   @cleanup
   Scenario: Direct blockers are listed

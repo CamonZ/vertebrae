@@ -64,7 +64,7 @@ Feature: Code references
   @cleanup
   Scenario: List refs when empty
     When I list refs
-    Then the output should be "No code references defined"
+    Then the output should match "No code references defined"
 
   @cleanup
   Scenario: List refs shows table
@@ -94,7 +94,7 @@ Feature: Code references
     And I add a ref "src/lib.rs"
     And I unref "src/main.rs"
     Then the output should match "Removed 2 reference(s) to src/main.rs from task: <TASK_ID>"
-    And the task should have 1 ref remaining
+    And the task should have 1 refs
 
   @cleanup
   Scenario: Remove all refs
