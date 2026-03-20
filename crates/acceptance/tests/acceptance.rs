@@ -4,9 +4,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use cucumber::World;
-use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig};
+use vertebrae_sacrum_client::GraphqlClient;
 
-#[derive(Debug, World)]
+#[derive(World)]
 #[world(init = Self::new)]
 pub struct SmokeWorld {
     vtb_binary: PathBuf,
@@ -24,6 +24,17 @@ pub struct SmokeWorld {
     last_exit_code: i32,
 
     graphql_client: Option<GraphqlClient>,
+}
+
+impl std::fmt::Debug for SmokeWorld {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SmokeWorld")
+            .field("task_id", &self.task_id)
+            .field("stored_ids", &self.stored_ids)
+            .field("workflow_id", &self.workflow_id)
+            .field("last_exit_code", &self.last_exit_code)
+            .finish()
+    }
 }
 
 impl SmokeWorld {
