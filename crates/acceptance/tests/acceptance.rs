@@ -2,9 +2,28 @@ use std::collections::HashMap;
 
 use cucumber::{World, given, then, when};
 use regex::Regex;
-use vertebrae_core::models::SectionType;
+use vertebrae_core::models::{Level, Priority, SectionType};
 use vertebrae_core::service::{CreateTaskOptions, TaskService};
 use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig};
+
+fn parse_level(s: &str) -> Level {
+    match s {
+        "epic" => Level::Epic,
+        "ticket" => Level::Ticket,
+        "task" => Level::Task,
+        other => panic!("unsupported level: '{}'", other),
+    }
+}
+
+fn parse_priority(s: &str) -> Priority {
+    match s {
+        "low" => Priority::Low,
+        "medium" => Priority::Medium,
+        "high" => Priority::High,
+        "critical" => Priority::Critical,
+        other => panic!("unsupported priority: '{}'", other),
+    }
+}
 
 #[derive(World)]
 #[world(init = Self::new)]
@@ -115,6 +134,30 @@ async fn store_task_id(world: &mut SmokeWorld, name: String) {
     world.stored_ids.insert(name, task_id);
 }
 
+#[given(expr = "I create a task titled {string}")]
+async fn given_create_task(world: &mut SmokeWorld, title: String) {
+    let service = world.task_service();
+    let options = CreateTaskOptions::new(title);
+    let task_id = service
+        .create_task(options)
+        .await
+        .expect("failed to create task");
+    world.set_output(format!("Created task: {}", task_id));
+    world.track_task(task_id);
+}
+
+#[given(expr = "I create a task titled {string} with level {string}")]
+async fn given_create_task_with_level(world: &mut SmokeWorld, title: String, level: String) {
+    let service = world.task_service();
+    let options = CreateTaskOptions::new(title).with_level(parse_level(&level));
+    let task_id = service
+        .create_task(options)
+        .await
+        .expect("failed to create task with level");
+    world.set_output(format!("Created task: {}", task_id));
+    world.track_task(task_id);
+}
+
 // ---------------------------------------------------------------------------
 // When steps (smoke test originals)
 // ---------------------------------------------------------------------------
@@ -139,6 +182,129 @@ async fn delete_task(world: &mut SmokeWorld) {
         .delete_task(task_id, false)
         .await
         .expect("failed to delete task");
+}
+
+// ---------------------------------------------------------------------------
+// When steps: task_add scenarios
+// ---------------------------------------------------------------------------
+
+#[when(expr = "I create a task with:")]
+async fn create_task_with_table(world: &mut SmokeWorld, step: &cucumber::gherkin::Step) {
+    let table = step.table.as_ref().expect("expected a data table");
+    let mut options = CreateTaskOptions::default();
+
+    for row in &table.rows {
+        let key = row[0].as_str();
+        let value = row[1].as_str();
+        match key {
+            "title" => options.title = value.to_string(),
+            "level" => options.level = Some(parse_level(value)),
+            "description" => options.description = Some(value.to_string()),
+            "priority" => options.priority = Some(parse_priority(value)),
+            other => panic!("unsupported table key: '{}'", other),
+        }
+    }
+
+    let service = world.task_service();
+    let task_id = service
+        .create_task(options)
+        .await
+        .expect("failed to create task from table");
+    world.set_output(format!("Created task: {}", task_id));
+    world.track_task(task_id);
+}
+
+#[when(expr = "I create a task titled {string} with level {string}")]
+async fn create_task_with_level(world: &mut SmokeWorld, title: String, level: String) {
+    let service = world.task_service();
+    let options = CreateTaskOptions::new(title).with_level(parse_level(&level));
+    let task_id = service
+        .create_task(options)
+        .await
+        .expect("failed to create task with level");
+    world.set_output(format!("Created task: {}", task_id));
+    world.track_task(task_id);
+}
+
+#[when(expr = "I create a task titled {string} with priority {string}")]
+async fn create_task_with_priority(world: &mut SmokeWorld, title: String, priority: String) {
+    let service = world.task_service();
+    let options = CreateTaskOptions::new(title).with_priority(parse_priority(&priority));
+    let task_id = service
+        .create_task(options)
+        .await
+        .expect("failed to create task with priority");
+    world.set_output(format!("Created task: {}", task_id));
+    world.track_task(task_id);
+}
+
+#[when(expr = "I create a task titled {string} with tags {string}")]
+async fn create_task_with_tags(world: &mut SmokeWorld, title: String, tags_str: String) {
+    let service = world.task_service();
+    let mut options = CreateTaskOptions::new(title);
+    for tag in tags_str.split(", ") {
+        options = options.with_tag(tag.trim());
+    }
+    let task_id = service
+        .create_task(options)
+        .await
+        .expect("failed to create task with tags");
+    world.set_output(format!("Created task: {}", task_id));
+    world.track_task(task_id);
+}
+
+#[when(expr = "I create a task titled {string} with needs-review")]
+async fn create_task_with_needs_review(world: &mut SmokeWorld, title: String) {
+    let service = world.task_service();
+    let options = CreateTaskOptions::new(title).with_needs_review(true);
+    let task_id = service
+        .create_task(options)
+        .await
+        .expect("failed to create task with needs-review");
+    world.set_output(format!("Created task: {}", task_id));
+    world.track_task(task_id);
+}
+
+#[when(expr = "I create a task titled {string} with parent {string}")]
+async fn create_task_with_parent(world: &mut SmokeWorld, title: String, parent_ref: String) {
+    let parent_id = world.resolve_vars(&parent_ref);
+    let service = world.task_service();
+    let options = CreateTaskOptions::new(title).with_parent(parent_id);
+    let task_id = service
+        .create_task(options)
+        .await
+        .expect("failed to create task with parent");
+    world.set_output(format!("Created task: {}", task_id));
+    world.track_task(task_id);
+}
+
+#[when(expr = "I create a task titled {string} with depends-on {string}")]
+async fn create_task_with_depends_on(world: &mut SmokeWorld, title: String, dep_ref: String) {
+    let dep_id = world.resolve_vars(&dep_ref);
+    let service = world.task_service();
+    let mut options = CreateTaskOptions::new(title);
+    options.depends_on.push(dep_id);
+    let task_id = service
+        .create_task(options)
+        .await
+        .expect("failed to create task with dependency");
+    world.set_output(format!("Created task: {}", task_id));
+    world.track_task(task_id);
+}
+
+#[when(expr = "I attempt to create a task with title {string}")]
+async fn attempt_create_task_with_title(world: &mut SmokeWorld, title: String) {
+    let service = world.task_service();
+    let options = CreateTaskOptions::new(title);
+    match service.create_task(options).await {
+        Ok(task_id) => {
+            world.set_output(format!("Created task: {}", task_id));
+            world.track_task(task_id);
+        }
+        Err(e) => {
+            world.set_error(e.to_string());
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -377,6 +543,48 @@ async fn task_should_have_tags(world: &mut SmokeWorld, expected_tags_str: String
         actual_sorted, expected_sorted,
         "tag mismatch: expected {:?}, got {:?}",
         expected_sorted, actual_sorted
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Then steps: parent and dependency assertions
+// ---------------------------------------------------------------------------
+
+#[then(expr = "the task parent_id should match {string}")]
+async fn task_parent_id_should_match(world: &mut SmokeWorld, expected_ref: String) {
+    let expected = world.resolve_vars(&expected_ref);
+    let service = world.task_service();
+    let task_id = world.task_id.as_ref().expect("no task ID stored");
+    let task = service.get_task(task_id).await.expect("failed to get task");
+
+    let actual = task
+        .parent_id
+        .as_ref()
+        .expect("expected task to have a parent_id, but it was None");
+
+    assert_eq!(
+        actual, &expected,
+        "task parent_id mismatch: expected '{}', got '{}'",
+        expected, actual
+    );
+}
+
+#[then(expr = "the task should be blocked by {string}")]
+async fn task_should_be_blocked_by(world: &mut SmokeWorld, blocker_ref: String) {
+    let expected_blocker = world.resolve_vars(&blocker_ref);
+    let service = world.task_service();
+    let task_id = world.task_id.as_ref().expect("no task ID stored");
+    let deps = service
+        .get_dependencies(task_id)
+        .await
+        .expect("failed to get dependencies");
+
+    assert!(
+        deps.contains(&expected_blocker),
+        "expected task '{}' to be blocked by '{}', but dependencies are: {:?}",
+        task_id,
+        expected_blocker,
+        deps
     );
 }
 
