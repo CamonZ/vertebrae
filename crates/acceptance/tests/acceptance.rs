@@ -3085,6 +3085,216 @@ async fn refs_should_appear_in_order(
 }
 
 // ---------------------------------------------------------------------------
+// Given steps: archive setup
+// ---------------------------------------------------------------------------
+
+#[given(expr = "I archive task {string}")]
+async fn given_archive_task_by_ref(world: &mut SmokeWorld, task_ref: String) {
+    let task_id = world.resolve_vars(&task_ref);
+    let service = world.task_service();
+    let options = UpdateTaskOptions::new().with_archived(true);
+    service
+        .update_task(&task_id, options)
+        .await
+        .expect("failed to archive task");
+    world.set_output(format!("Task {} archived", task_id));
+}
+
+#[given("I archive the task")]
+async fn given_archive_current_task(world: &mut SmokeWorld) {
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+    let service = world.task_service();
+    let options = UpdateTaskOptions::new().with_archived(true);
+    service
+        .update_task(&task_id, options)
+        .await
+        .expect("failed to archive task");
+    world.set_output(format!("Task {} archived", task_id));
+}
+
+// ---------------------------------------------------------------------------
+// When steps: archive / unarchive scenarios
+// ---------------------------------------------------------------------------
+
+#[when("I archive the task")]
+async fn archive_current_task(world: &mut SmokeWorld) {
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+    let service = world.task_service();
+    let options = UpdateTaskOptions::new().with_archived(true);
+    service
+        .update_task(&task_id, options)
+        .await
+        .expect("failed to archive task");
+    world.set_output(format!("Task {} archived", task_id));
+}
+
+#[when(expr = "I archive task {string}")]
+async fn archive_task_by_ref(world: &mut SmokeWorld, task_ref: String) {
+    let task_id = world.resolve_vars(&task_ref);
+    let service = world.task_service();
+    let options = UpdateTaskOptions::new().with_archived(true);
+    service
+        .update_task(&task_id, options)
+        .await
+        .expect("failed to archive task");
+    world.set_output(format!("Task {} archived", task_id));
+}
+
+#[when("I unarchive the task")]
+async fn unarchive_current_task(world: &mut SmokeWorld) {
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+    let service = world.task_service();
+    let options = UpdateTaskOptions::new().with_archived(false);
+    service
+        .update_task(&task_id, options)
+        .await
+        .expect("failed to unarchive task");
+    world.set_output(format!("Task {} unarchived", task_id));
+}
+
+#[when(expr = "I attempt to archive task {string}")]
+async fn attempt_archive_task(world: &mut SmokeWorld, task_ref: String) {
+    let task_id = world.resolve_vars(&task_ref);
+    let service = world.task_service();
+    let options = UpdateTaskOptions::new().with_archived(true);
+    match service.update_task(&task_id, options).await {
+        Ok(()) => {
+            world.set_output(format!("Task {} archived", task_id));
+        }
+        Err(e) => {
+            world.set_service_error(e);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// When steps: list with --include-archived
+// ---------------------------------------------------------------------------
+
+#[when("I list tasks with --include-archived")]
+async fn list_tasks_with_include_archived(world: &mut SmokeWorld) {
+    let service = world.task_service();
+    let filter = TaskFilter::new().include_archived();
+    let tasks = service
+        .list_tasks(&filter)
+        .await
+        .expect("failed to list tasks with include-archived");
+    world.set_output(format_task_list(&tasks));
+}
+
+// ---------------------------------------------------------------------------
+// When steps: review scenarios
+// ---------------------------------------------------------------------------
+
+#[when("I run review for the task")]
+async fn review_current_task(world: &mut SmokeWorld) {
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+    let service = world.task_service();
+
+    let task = service
+        .get_task(&task_id)
+        .await
+        .expect("failed to get task for review toggle");
+
+    let current = task.needs_human_review.unwrap_or(false);
+    let new_value = !current;
+
+    let options = UpdateTaskOptions::new().with_needs_human_review(new_value);
+    service
+        .update_task(&task_id, options)
+        .await
+        .expect("failed to toggle review flag");
+
+    let action = if new_value {
+        "marked as needing review"
+    } else {
+        "marked as not needing review"
+    };
+    world.set_output(format!("Task {} {}", task_id, action));
+}
+
+#[when(expr = "I run review for the task with --set {word}")]
+async fn review_current_task_with_set(world: &mut SmokeWorld, value_str: String) {
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+    let new_value = match value_str.as_str() {
+        "true" => true,
+        "false" => false,
+        other => panic!("unsupported review --set value: '{}'", other),
+    };
+
+    let service = world.task_service();
+    let options = UpdateTaskOptions::new().with_needs_human_review(new_value);
+    service
+        .update_task(&task_id, options)
+        .await
+        .expect("failed to set review flag");
+
+    let action = if new_value {
+        "marked as needing review"
+    } else {
+        "marked as not needing review"
+    };
+    world.set_output(format!("Task {} {}", task_id, action));
+}
+
+#[when(expr = "I attempt to run review for task {string}")]
+async fn attempt_review_task(world: &mut SmokeWorld, task_ref: String) {
+    let task_id = world.resolve_vars(&task_ref);
+    let service = world.task_service();
+
+    let task = match service.get_task(&task_id).await {
+        Ok(t) => t,
+        Err(e) => {
+            world.set_service_error(e);
+            return;
+        }
+    };
+
+    let current = task.needs_human_review.unwrap_or(false);
+    let new_value = !current;
+
+    let options = UpdateTaskOptions::new().with_needs_human_review(new_value);
+    match service.update_task(&task_id, options).await {
+        Ok(()) => {
+            let action = if new_value {
+                "marked as needing review"
+            } else {
+                "marked as not needing review"
+            };
+            world.set_output(format!("Task {} {}", task_id, action));
+        }
+        Err(e) => {
+            world.set_service_error(e);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// When steps: ready scenarios
+// ---------------------------------------------------------------------------
+
+#[when("I run ready")]
+async fn run_ready(world: &mut SmokeWorld) {
+    let service = world.task_service();
+    let tasks = service
+        .list_ready()
+        .await
+        .expect("failed to list ready tasks");
+
+    if tasks.is_empty() {
+        world.set_output("No actionable items found.".to_string());
+        return;
+    }
+
+    let mut out = String::new();
+    out.push_str("Ready to start (backlog):\n");
+    for task in &tasks {
+        out.push_str(&format!("  {}  {}  {}\n", task.id, task.level, task.title));
+    }
+    world.set_output(out);
+}
+
+// ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
