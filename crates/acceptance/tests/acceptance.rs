@@ -272,6 +272,39 @@ async fn given_create_task_with_tags(world: &mut SmokeWorld, title: String, tags
 }
 
 // ---------------------------------------------------------------------------
+// Given steps: dependency setup
+// ---------------------------------------------------------------------------
+
+#[given(expr = "I run depend {string} --on {string}")]
+async fn given_run_depend(world: &mut SmokeWorld, task_ref: String, blocker_ref: String) {
+    let task_id = world.resolve_vars(&task_ref);
+    let blocker_id = world.resolve_vars(&blocker_ref);
+    let service = world.task_service();
+
+    let task = service
+        .get_task(&task_id)
+        .await
+        .expect("failed to get task for depend");
+
+    if task.dependency_ids.contains(&blocker_id) {
+        world.set_output(format!(
+            "Dependency already exists: {} -> {}",
+            task_id, blocker_id
+        ));
+        return;
+    }
+
+    service
+        .add_dependency(&task_id, &blocker_id)
+        .await
+        .expect("failed to create dependency");
+    world.set_output(format!(
+        "Created dependency: {} depends on {}",
+        task_id, blocker_id
+    ));
+}
+
+// ---------------------------------------------------------------------------
 // When steps (smoke test originals)
 // ---------------------------------------------------------------------------
 
@@ -480,6 +513,418 @@ async fn attempt_create_task_with_title(world: &mut SmokeWorld, title: String) {
         }
         Err(e) => {
             world.set_error(e.to_string());
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// When steps: depend scenarios
+// ---------------------------------------------------------------------------
+
+#[when(expr = "I run depend {string} --on {string}")]
+async fn when_run_depend(world: &mut SmokeWorld, task_ref: String, blocker_ref: String) {
+    let task_id = world.resolve_vars(&task_ref);
+    let blocker_id = world.resolve_vars(&blocker_ref);
+    let service = world.task_service();
+
+    let task = service
+        .get_task(&task_id)
+        .await
+        .expect("failed to get task for depend");
+
+    if task.dependency_ids.contains(&blocker_id) {
+        world.set_output(format!(
+            "Dependency already exists: {} -> {}",
+            task_id, blocker_id
+        ));
+        return;
+    }
+
+    service
+        .add_dependency(&task_id, &blocker_id)
+        .await
+        .expect("failed to create dependency");
+    world.set_output(format!(
+        "Created dependency: {} depends on {}",
+        task_id, blocker_id
+    ));
+}
+
+#[when(expr = "I attempt to run depend {string} --on {string}")]
+async fn attempt_run_depend(world: &mut SmokeWorld, task_ref: String, blocker_ref: String) {
+    let task_id = world.resolve_vars(&task_ref);
+    let blocker_id = world.resolve_vars(&blocker_ref);
+
+    // Self-dependency check
+    if task_id == blocker_id {
+        world.set_service_error(ServiceError::validation_failed(
+            "Task cannot depend on itself",
+        ));
+        return;
+    }
+
+    let service = world.task_service();
+
+    // Validate task exists
+    let task = match service.get_task(&task_id).await {
+        Ok(t) => t,
+        Err(e) => {
+            world.set_service_error(e);
+            return;
+        }
+    };
+
+    // Validate blocker exists
+    match service.task_exists(&blocker_id).await {
+        Ok(true) => {}
+        Ok(false) => {
+            world.set_service_error(ServiceError::task_not_found(&blocker_id));
+            return;
+        }
+        Err(e) => {
+            world.set_service_error(e);
+            return;
+        }
+    }
+
+    // Check idempotency
+    if task.dependency_ids.contains(&blocker_id) {
+        world.set_output(format!(
+            "Dependency already exists: {} -> {}",
+            task_id, blocker_id
+        ));
+        return;
+    }
+
+    match service.add_dependency(&task_id, &blocker_id).await {
+        Ok(()) => {
+            world.set_output(format!(
+                "Created dependency: {} depends on {}",
+                task_id, blocker_id
+            ));
+        }
+        Err(e) => {
+            world.set_service_error(e);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// When steps: undepend scenarios
+// ---------------------------------------------------------------------------
+
+#[when(expr = "I run undepend {string} --on {string}")]
+async fn when_run_undepend(world: &mut SmokeWorld, task_ref: String, blocker_ref: String) {
+    let task_id = world.resolve_vars(&task_ref);
+    let blocker_id = world.resolve_vars(&blocker_ref);
+    let service = world.task_service();
+
+    let task = service
+        .get_task(&task_id)
+        .await
+        .expect("failed to get task for undepend");
+
+    let existed = task.dependency_ids.contains(&blocker_id);
+
+    if existed {
+        service
+            .remove_dependency(&task_id, &blocker_id)
+            .await
+            .expect("failed to remove dependency");
+        world.set_output(format!(
+            "Removed dependency: {} no longer depends on {}",
+            task_id, blocker_id
+        ));
+    } else {
+        world.set_output(format!(
+            "Warning: No dependency from {} to {} exists",
+            task_id, blocker_id
+        ));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// When steps: blockers scenarios
+// ---------------------------------------------------------------------------
+
+#[when("I run blockers for the task")]
+async fn when_run_blockers_current(world: &mut SmokeWorld) {
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+    run_blockers(world, &task_id, None).await;
+}
+
+#[when(expr = "I run blockers for task {string}")]
+async fn when_run_blockers_by_ref(world: &mut SmokeWorld, task_ref: String) {
+    let task_id = world.resolve_vars(&task_ref);
+    run_blockers(world, &task_id, None).await;
+}
+
+#[when(expr = "I run blockers for task {string} with --depth {int}")]
+async fn when_run_blockers_with_depth(world: &mut SmokeWorld, task_ref: String, depth: usize) {
+    let task_id = world.resolve_vars(&task_ref);
+    run_blockers(world, &task_id, Some(depth)).await;
+}
+
+async fn run_blockers(world: &mut SmokeWorld, task_id: &str, max_depth: Option<usize>) {
+    let service = world.task_service();
+
+    let task = service
+        .get_task(task_id)
+        .await
+        .expect("failed to get task for blockers");
+
+    let blockers = build_blocker_tree(&service, task_id, 0, max_depth).await;
+    let total_count = count_blocker_nodes(&blockers);
+
+    if blockers.is_empty() {
+        world.set_output("No blockers".to_string());
+        return;
+    }
+
+    let mut out = String::new();
+    out.push_str(&format!("Blockers for: {} \"{}\"\n", task_id, task.title));
+    out.push_str(&"=".repeat(50));
+    out.push('\n');
+    out.push('\n');
+
+    for (i, node) in blockers.iter().enumerate() {
+        let is_last = i == blockers.len() - 1;
+        format_blocker_node(&mut out, node, "", is_last);
+    }
+
+    out.push('\n');
+    out.push_str(&format!(
+        "Total: {} blocking item{}",
+        total_count,
+        if total_count == 1 { "" } else { "s" }
+    ));
+
+    world.set_output(out);
+}
+
+struct BlockerNodeLocal {
+    id: String,
+    title: String,
+    level: String,
+    step_name: Option<String>,
+    children: Vec<BlockerNodeLocal>,
+}
+
+async fn build_blocker_tree(
+    service: &vertebrae_sacrum_client::SacrumTaskService,
+    task_id: &str,
+    current_depth: usize,
+    max_depth: Option<usize>,
+) -> Vec<BlockerNodeLocal> {
+    if let Some(limit) = max_depth {
+        if current_depth >= limit {
+            return vec![];
+        }
+    }
+
+    let task = service
+        .get_task(task_id)
+        .await
+        .expect("failed to get task for blocker tree");
+
+    let mut nodes = Vec::new();
+    for blocker_id in &task.dependency_ids {
+        if let Ok(blocker) = service.get_task(blocker_id).await {
+            let step_name = blocker
+                .step_name
+                .clone()
+                .unwrap_or_else(|| "backlog".to_string());
+
+            if step_name == "done" {
+                continue;
+            }
+
+            let children = Box::pin(build_blocker_tree(
+                service,
+                blocker_id,
+                current_depth + 1,
+                max_depth,
+            ))
+            .await;
+
+            nodes.push(BlockerNodeLocal {
+                id: blocker_id.clone(),
+                title: blocker.title,
+                level: blocker.level.to_string(),
+                step_name: Some(step_name),
+                children,
+            });
+        }
+    }
+
+    nodes
+}
+
+fn count_blocker_nodes(nodes: &[BlockerNodeLocal]) -> usize {
+    nodes
+        .iter()
+        .map(|n| 1 + count_blocker_nodes(&n.children))
+        .sum()
+}
+
+fn format_blocker_node(out: &mut String, node: &BlockerNodeLocal, prefix: &str, is_last: bool) {
+    let connector = if prefix.is_empty() {
+        ""
+    } else if is_last {
+        "`-- "
+    } else {
+        "|-- "
+    };
+
+    let level_display = format!("{:8}", node.level);
+    let status_display = format!("{:12}", node.step_name.as_deref().unwrap_or("unassigned"));
+
+    out.push_str(&format!(
+        "{}{}{:<8} {} {} {}\n",
+        prefix, connector, node.id, level_display, status_display, node.title
+    ));
+
+    let child_prefix = if prefix.is_empty() {
+        "".to_string()
+    } else if is_last {
+        format!("{}    ", prefix)
+    } else {
+        format!("{}|   ", prefix)
+    };
+
+    let actual_prefix = if prefix.is_empty() {
+        "    ".to_string()
+    } else {
+        child_prefix
+    };
+
+    for (i, child) in node.children.iter().enumerate() {
+        let child_is_last = i == node.children.len() - 1;
+        format_blocker_node(out, child, &actual_prefix, child_is_last);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// When steps: path scenarios
+// ---------------------------------------------------------------------------
+
+#[when(expr = "I run path {string} {string}")]
+async fn when_run_path(world: &mut SmokeWorld, from_ref: String, to_ref: String) {
+    let from_id = world.resolve_vars(&from_ref);
+    let to_id = world.resolve_vars(&to_ref);
+    let service = world.task_service();
+
+    let from_task = service
+        .get_task(&from_id)
+        .await
+        .expect("failed to get source task for path");
+
+    if from_id == to_id {
+        world.set_output(format!("Same task: {} \"{}\"", from_id, from_task.title));
+        return;
+    }
+
+    let _to_task = service
+        .get_task(&to_id)
+        .await
+        .expect("failed to get target task for path");
+
+    match service.find_path(&from_id, &to_id).await {
+        Ok(Some(path_ids)) => {
+            let mut out = String::new();
+            out.push_str(&format!("Path from {} to {}:\n\n", from_id, to_id));
+
+            let mut summaries = Vec::new();
+            for id in &path_ids {
+                let task = service
+                    .get_task(id)
+                    .await
+                    .expect("failed to get task in path");
+                summaries.push((id.clone(), task.title));
+            }
+
+            for (i, (id, title)) in summaries.iter().enumerate() {
+                out.push_str(&format!("{:<8}  \"{}\"\n", id, title));
+                if i < summaries.len() - 1 {
+                    out.push_str("   \u{2193} depends on\n");
+                }
+            }
+
+            out.push('\n');
+            out.push_str(&format!(
+                "{} task{} in path",
+                summaries.len(),
+                if summaries.len() == 1 { "" } else { "s" }
+            ));
+
+            world.set_output(out);
+        }
+        Ok(None) => {
+            world.set_output(format!("No dependency path from {} to {}", from_id, to_id));
+        }
+        Err(e) => {
+            world.set_service_error(e);
+        }
+    }
+}
+
+#[when(expr = "I attempt to run path {string} {string}")]
+async fn attempt_run_path(world: &mut SmokeWorld, from_ref: String, to_ref: String) {
+    let from_id = world.resolve_vars(&from_ref);
+    let to_id = world.resolve_vars(&to_ref);
+    let service = world.task_service();
+
+    let from_task = match service.get_task(&from_id).await {
+        Ok(t) => t,
+        Err(e) => {
+            world.set_service_error(e);
+            return;
+        }
+    };
+
+    match service.get_task(&to_id).await {
+        Ok(_) => {}
+        Err(e) => {
+            world.set_service_error(e);
+            return;
+        }
+    }
+
+    if from_id == to_id {
+        world.set_output(format!("Same task: {} \"{}\"", from_id, from_task.title));
+        return;
+    }
+
+    match service.find_path(&from_id, &to_id).await {
+        Ok(Some(path_ids)) => {
+            let mut out = String::new();
+            out.push_str(&format!("Path from {} to {}:\n\n", from_id, to_id));
+
+            for (i, id) in path_ids.iter().enumerate() {
+                let task = service
+                    .get_task(id)
+                    .await
+                    .expect("failed to get task in path");
+                out.push_str(&format!("{:<8}  \"{}\"\n", id, task.title));
+                if i < path_ids.len() - 1 {
+                    out.push_str("   \u{2193} depends on\n");
+                }
+            }
+
+            out.push('\n');
+            out.push_str(&format!(
+                "{} task{} in path",
+                path_ids.len(),
+                if path_ids.len() == 1 { "" } else { "s" }
+            ));
+
+            world.set_output(out);
+        }
+        Ok(None) => {
+            world.set_output(format!("No dependency path from {} to {}", from_id, to_id));
+        }
+        Err(e) => {
+            world.set_service_error(e);
         }
     }
 }
