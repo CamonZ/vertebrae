@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use cucumber::{World, given, then, when};
 use regex::Regex;
+use vertebrae_core::error::ServiceError;
 use vertebrae_core::models::{Level, Priority, SectionType};
 use vertebrae_core::service::{CreateTaskOptions, TaskService};
 use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig};
@@ -88,10 +89,18 @@ impl SmokeWorld {
         self.last_error = None;
     }
 
-    #[allow(dead_code)]
     fn set_error(&mut self, error: String) {
         self.last_error = Some(error);
         self.last_command_output = None;
+    }
+
+    fn set_service_error(&mut self, err: ServiceError) {
+        let mut msg = format!("error: {}", err);
+        if let Some(hint) = err.hint() {
+            msg.push('\n');
+            msg.push_str(&hint);
+        }
+        self.set_error(msg);
     }
 
     async fn cleanup(&mut self) {
@@ -154,6 +163,71 @@ async fn given_create_task_with_level(world: &mut SmokeWorld, title: String, lev
         .create_task(options)
         .await
         .expect("failed to create task with level");
+    world.set_output(format!("Created task: {}", task_id));
+    world.track_task(task_id);
+}
+
+#[given(expr = "I create a task with:")]
+async fn given_create_task_with_table(world: &mut SmokeWorld, step: &cucumber::gherkin::Step) {
+    let table = step.table.as_ref().expect("expected a data table");
+    let mut options = CreateTaskOptions::default();
+
+    for row in &table.rows {
+        let key = row[0].as_str();
+        let value = row[1].as_str();
+        match key {
+            "title" => options.title = value.to_string(),
+            "level" => options.level = Some(parse_level(value)),
+            "description" => options.description = Some(value.to_string()),
+            "priority" => options.priority = Some(parse_priority(value)),
+            other => panic!("unsupported table key: '{}'", other),
+        }
+    }
+
+    let service = world.task_service();
+    let task_id = service
+        .create_task(options)
+        .await
+        .expect("failed to create task from table");
+    world.set_output(format!("Created task: {}", task_id));
+    world.track_task(task_id);
+}
+
+#[given(expr = "I create a task titled {string} with parent {string}")]
+async fn given_create_task_with_parent(world: &mut SmokeWorld, title: String, parent_ref: String) {
+    let parent_id = world.resolve_vars(&parent_ref);
+    let service = world.task_service();
+    let options = CreateTaskOptions::new(title).with_parent(parent_id);
+    let task_id = service
+        .create_task(options)
+        .await
+        .expect("failed to create task with parent");
+    world.set_output(format!("Created task: {}", task_id));
+    world.track_task(task_id);
+}
+
+#[given(expr = "I create a task titled {string} with needs-review")]
+async fn given_create_task_with_needs_review(world: &mut SmokeWorld, title: String) {
+    let service = world.task_service();
+    let options = CreateTaskOptions::new(title).with_needs_review(true);
+    let task_id = service
+        .create_task(options)
+        .await
+        .expect("failed to create task with needs-review");
+    world.set_output(format!("Created task: {}", task_id));
+    world.track_task(task_id);
+}
+
+#[given(expr = "I create a task titled {string} with depends-on {string}")]
+async fn given_create_task_with_depends_on(world: &mut SmokeWorld, title: String, dep_ref: String) {
+    let dep_id = world.resolve_vars(&dep_ref);
+    let service = world.task_service();
+    let mut options = CreateTaskOptions::new(title);
+    options.depends_on.push(dep_id);
+    let task_id = service
+        .create_task(options)
+        .await
+        .expect("failed to create task with dependency");
     world.set_output(format!("Created task: {}", task_id));
     world.track_task(task_id);
 }
@@ -303,6 +377,46 @@ async fn attempt_create_task_with_title(world: &mut SmokeWorld, title: String) {
         }
         Err(e) => {
             world.set_error(e.to_string());
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// When steps: task_show scenarios
+// ---------------------------------------------------------------------------
+
+#[when("I show the task")]
+async fn show_current_task(world: &mut SmokeWorld) {
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+    let service = world.task_service();
+    let task = service
+        .get_task(&task_id)
+        .await
+        .expect("failed to get task for show");
+    world.set_output(format_task_show(&task));
+}
+
+#[when(expr = "I show the task {string}")]
+async fn show_task_by_ref(world: &mut SmokeWorld, task_ref: String) {
+    let task_id = world.resolve_vars(&task_ref);
+    let service = world.task_service();
+    let task = service
+        .get_task(&task_id)
+        .await
+        .expect("failed to get task for show");
+    world.set_output(format_task_show(&task));
+}
+
+#[when(expr = "I attempt to show task {string}")]
+async fn attempt_show_task(world: &mut SmokeWorld, task_ref: String) {
+    let task_id = world.resolve_vars(&task_ref);
+    let service = world.task_service();
+    match service.get_task(&task_id).await {
+        Ok(task) => {
+            world.set_output(format_task_show(&task));
+        }
+        Err(e) => {
+            world.set_service_error(e);
         }
     }
 }
@@ -645,6 +759,162 @@ async fn section_content_should_be(
         "section '{}' content mismatch: expected '{}', got '{}'",
         section_type_str, expected_content, section.content
     );
+}
+
+// ---------------------------------------------------------------------------
+// Helpers: format task show output (mirrors TaskDetail::Display from CLI)
+// ---------------------------------------------------------------------------
+
+fn format_task_show(task: &vertebrae_core::Task) -> String {
+    let mut out = String::new();
+
+    out.push_str(&format!("Task: {} - {}\n", task.id, task.title));
+    out.push_str(&"=".repeat(60));
+    out.push('\n');
+    out.push('\n');
+
+    // Metadata
+    out.push_str("Metadata\n");
+    out.push_str(&"-".repeat(40));
+    out.push('\n');
+    out.push_str(&format!("Level:    {}\n", task.level));
+    let status_display = match (&task.workflow_name, &task.step_name) {
+        (Some(wf), Some(step)) => format!("{}:{}", wf, step),
+        _ => "unassigned".to_string(),
+    };
+    out.push_str(&format!("Status:   {}\n", status_display));
+    out.push_str(&format!(
+        "Priority: {}\n",
+        task.priority
+            .as_ref()
+            .map(|p| p.as_str())
+            .unwrap_or("(none)")
+    ));
+    let tags_display = if task.tags.is_empty() {
+        "(none)".to_string()
+    } else {
+        task.tags.join(", ")
+    };
+    out.push_str(&format!("Tags:     {}\n\n", tags_display));
+    let review_status = match task.needs_human_review {
+        Some(true) => "True",
+        Some(false) | None => "False",
+    };
+    out.push_str(&format!("Human Review: {}\n", review_status));
+    out.push_str("\n\n");
+
+    // Description
+    if let Some(ref description) = task.description {
+        out.push_str("Description\n");
+        out.push_str(&"-".repeat(40));
+        out.push('\n');
+        out.push_str(description);
+        out.push_str("\n\n");
+    }
+
+    // Sections by type
+    let section_configs: &[(SectionType, &str)] = &[
+        (SectionType::Goal, "Goal"),
+        (SectionType::Context, "Context"),
+        (SectionType::CurrentBehavior, "Current Behavior"),
+        (SectionType::DesiredBehavior, "Desired Behavior"),
+        (SectionType::ChecklistItem, "Checklist Items"),
+        (SectionType::TestingCriterion, "Testing Criteria"),
+        (SectionType::AntiPattern, "Anti-Patterns"),
+        (SectionType::FailureTest, "Failure Tests"),
+        (SectionType::Constraint, "Constraints"),
+    ];
+
+    for (section_type, label) in section_configs {
+        let matching: Vec<_> = task
+            .sections
+            .iter()
+            .filter(|s| &s.section_type == section_type)
+            .collect();
+
+        if matching.is_empty() {
+            continue;
+        }
+
+        out.push_str(label);
+        out.push('\n');
+        out.push_str(&"-".repeat(40));
+        out.push('\n');
+
+        let is_checklist = *section_type == SectionType::ChecklistItem;
+        if matching.len() == 1 {
+            if is_checklist {
+                let checkbox = if matching[0].done.unwrap_or(false) {
+                    "[x]"
+                } else {
+                    "[ ]"
+                };
+                out.push_str(&format!("{} {}\n", checkbox, matching[0].content));
+            } else {
+                out.push_str(&format!("{}\n", matching[0].content));
+            }
+        } else {
+            for (i, section) in matching.iter().enumerate() {
+                if is_checklist {
+                    let checkbox = if section.done.unwrap_or(false) {
+                        "[x]"
+                    } else {
+                        "[ ]"
+                    };
+                    out.push_str(&format!("{}. {} {}\n", i + 1, checkbox, section.content));
+                } else {
+                    out.push_str(&format!("{}. {}\n", i + 1, section.content));
+                }
+            }
+        }
+        out.push('\n');
+    }
+
+    // Relationships
+    let has_parent = task.parent_id.is_some();
+    let has_children = !task.children.is_empty();
+    let has_blockers = task
+        .blockers
+        .iter()
+        .any(|t| t.step_name.as_deref() != Some("done"));
+    let has_dependents = !task.dependents.is_empty();
+
+    if has_parent || has_children || has_blockers || has_dependents {
+        out.push_str("Relationships\n");
+        out.push_str(&"-".repeat(40));
+        out.push('\n');
+
+        if let Some(ref parent_id) = task.parent_id {
+            out.push_str(&format!("Parent: {}\n", parent_id));
+        }
+
+        if has_children {
+            out.push_str("Children:\n");
+            for child in &task.children {
+                out.push_str(&format!("  - {} - {}\n", child.id, child.title));
+            }
+        }
+
+        if has_blockers {
+            out.push_str("Blocked by:\n");
+            for blocker in &task.blockers {
+                if blocker.step_name.as_deref() != Some("done") {
+                    out.push_str(&format!("  - {} - {}\n", blocker.id, blocker.title));
+                }
+            }
+        }
+
+        if has_dependents {
+            out.push_str("Blocks:\n");
+            for dependent in &task.dependents {
+                out.push_str(&format!("  - {} - {}\n", dependent.id, dependent.title));
+            }
+        }
+
+        out.push('\n');
+    }
+
+    out
 }
 
 // ---------------------------------------------------------------------------
