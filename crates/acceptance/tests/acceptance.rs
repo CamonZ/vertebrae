@@ -4,7 +4,7 @@ use cucumber::{World, given, then, when};
 use regex::Regex;
 use vertebrae_core::error::ServiceError;
 use vertebrae_core::models::{Level, Priority, SectionType, TaskFilter};
-use vertebrae_core::service::{CreateTaskOptions, TaskService};
+use vertebrae_core::service::{CreateTaskOptions, TaskService, UpdateTaskOptions};
 use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig};
 
 fn parse_level(s: &str) -> Level {
@@ -202,6 +202,18 @@ async fn given_create_task_with_parent(world: &mut SmokeWorld, title: String, pa
         .create_task(options)
         .await
         .expect("failed to create task with parent");
+    world.set_output(format!("Created task: {}", task_id));
+    world.track_task(task_id);
+}
+
+#[given(expr = "I create a task titled {string} with description {string}")]
+async fn given_create_task_with_description(world: &mut SmokeWorld, title: String, desc: String) {
+    let service = world.task_service();
+    let options = CreateTaskOptions::new(title).with_description(desc);
+    let task_id = service
+        .create_task(options)
+        .await
+        .expect("failed to create task with description");
     world.set_output(format!("Created task: {}", task_id));
     world.track_task(task_id);
 }
@@ -551,6 +563,139 @@ async fn attempt_list_tasks_with_search(world: &mut SmokeWorld, search: String) 
 }
 
 // ---------------------------------------------------------------------------
+// When steps: task_update scenarios
+// ---------------------------------------------------------------------------
+
+#[when(expr = "I update the task with --title {string}")]
+async fn update_task_title(world: &mut SmokeWorld, title: String) {
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+    let service = world.task_service();
+    let options = UpdateTaskOptions::new().with_title(title);
+    service
+        .update_task(&task_id, options)
+        .await
+        .expect("failed to update task title");
+}
+
+#[when(expr = "I update the task with --description {string}")]
+async fn update_task_description(world: &mut SmokeWorld, description: String) {
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+    let service = world.task_service();
+    let options = if description.is_empty() {
+        UpdateTaskOptions::new().clear_description()
+    } else {
+        UpdateTaskOptions::new().with_description(description)
+    };
+    service
+        .update_task(&task_id, options)
+        .await
+        .expect("failed to update task description");
+}
+
+#[when(expr = "I update the task with --priority {string}")]
+async fn update_task_priority(world: &mut SmokeWorld, priority: String) {
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+    let service = world.task_service();
+    let options = UpdateTaskOptions::new().with_priority(parse_priority(&priority));
+    service
+        .update_task(&task_id, options)
+        .await
+        .expect("failed to update task priority");
+}
+
+#[when(regex = r#"^I update the task with((?:\s+--add-tag "[^"]+")+ *)$"#)]
+async fn update_task_add_tags(world: &mut SmokeWorld, _tags_part: String) {
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+    let service = world.task_service();
+    let re = Regex::new(r#"--add-tag "([^"]+)""#).unwrap();
+    let mut options = UpdateTaskOptions::new();
+    for cap in re.captures_iter(&_tags_part) {
+        options = options.add_tag(&cap[1]);
+    }
+    service
+        .update_task(&task_id, options)
+        .await
+        .expect("failed to update task tags");
+}
+
+#[when(expr = "I update the task with --remove-tag {string}")]
+async fn update_task_remove_tag(world: &mut SmokeWorld, tag: String) {
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+    let service = world.task_service();
+    let options = UpdateTaskOptions::new().remove_tag(tag);
+    service
+        .update_task(&task_id, options)
+        .await
+        .expect("failed to update task remove-tag");
+}
+
+#[when(expr = "I update the task with --parent {string}")]
+async fn update_task_parent(world: &mut SmokeWorld, parent_ref: String) {
+    let parent_ref = world.resolve_vars(&parent_ref);
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+    let service = world.task_service();
+    let options = if parent_ref.is_empty() {
+        UpdateTaskOptions::new().clear_parent()
+    } else {
+        UpdateTaskOptions::new().with_parent(parent_ref)
+    };
+    service
+        .update_task(&task_id, options)
+        .await
+        .expect("failed to update task parent");
+}
+
+#[when(expr = "I update the task with --worktree {string}")]
+async fn update_task_worktree(world: &mut SmokeWorld, worktree: String) {
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+    let service = world.task_service();
+    let options = if worktree.is_empty() {
+        UpdateTaskOptions::new().clear_worktree()
+    } else {
+        UpdateTaskOptions::new().with_worktree(worktree)
+    };
+    service
+        .update_task(&task_id, options)
+        .await
+        .expect("failed to update task worktree");
+}
+
+#[when(expr = "I attempt to update task {string} with --title {string}")]
+async fn attempt_update_task_by_id(world: &mut SmokeWorld, task_ref: String, title: String) {
+    let task_id = world.resolve_vars(&task_ref);
+    let service = world.task_service();
+    let options = UpdateTaskOptions::new().with_title(title);
+    match service.update_task(&task_id, options).await {
+        Ok(()) => {
+            world.set_output("Task updated".to_string());
+        }
+        Err(e) => {
+            world.set_service_error(e);
+        }
+    }
+}
+
+#[when(expr = "I attempt to update the task with --parent {string}")]
+async fn attempt_update_task_parent(world: &mut SmokeWorld, parent_ref: String) {
+    let parent_ref = world.resolve_vars(&parent_ref);
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+    let service = world.task_service();
+    let options = if parent_ref.is_empty() {
+        UpdateTaskOptions::new().clear_parent()
+    } else {
+        UpdateTaskOptions::new().with_parent(parent_ref)
+    };
+    match service.update_task(&task_id, options).await {
+        Ok(()) => {
+            world.set_output("Task updated".to_string());
+        }
+        Err(e) => {
+            world.set_service_error(e);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Then steps (smoke test originals)
 // ---------------------------------------------------------------------------
 
@@ -786,6 +931,20 @@ async fn task_should_have_tags(world: &mut SmokeWorld, expected_tags_str: String
         actual_sorted, expected_sorted,
         "tag mismatch: expected {:?}, got {:?}",
         expected_sorted, actual_sorted
+    );
+}
+
+#[then(expr = "the task should not have tag {string}")]
+async fn task_should_not_have_tag(world: &mut SmokeWorld, tag: String) {
+    let service = world.task_service();
+    let task_id = world.task_id.as_ref().expect("no task ID stored");
+    let task = service.get_task(task_id).await.expect("failed to get task");
+
+    assert!(
+        !task.tags.contains(&tag),
+        "expected task NOT to have tag '{}', but tags are: {:?}",
+        tag,
+        task.tags
     );
 }
 
