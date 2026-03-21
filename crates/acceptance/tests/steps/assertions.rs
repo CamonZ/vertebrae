@@ -373,7 +373,7 @@ async fn task_should_be_blocked_by(world: &mut SmokeWorld, blocker_ref: String) 
             )
         });
 
-    let blockers: Vec<String> = json["blockers"]
+    let blockers: Vec<String> = json["blocked_by"]
         .as_array()
         .map(|arr| {
             arr.iter()

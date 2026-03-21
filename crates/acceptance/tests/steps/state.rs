@@ -17,7 +17,7 @@ async fn archive_task_by_ref(world: &mut SmokeWorld, task_ref: String) {
 #[when("I unarchive the task")]
 async fn unarchive_current_task(world: &mut SmokeWorld) {
     let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
-    world.run_vtb(&["archive", &task_id, "--unarchive"]).await;
+    world.run_vtb(&["unarchive", &task_id]).await;
 }
 
 #[when("I run review for the task")]

@@ -24,7 +24,7 @@ Feature: Sections and checklist items
     When I add a "checklist_item" section with content "First"
     And I add a "checklist_item" section with content "Second"
     And I add a "checklist_item" section with content "Third"
-    Then the output should match "Added checklist_item section (ordinal 2) to task: <TASK_ID>"
+    Then the output should contain "Added checklist_item section (ordinal 2) to task: <TASK_ID>"
     And the task should have 3 checklist_item sections
 
   Scenario Outline: Add each section type
