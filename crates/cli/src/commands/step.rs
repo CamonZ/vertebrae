@@ -172,6 +172,12 @@ pub struct StepListCommand {
 }
 
 impl StepListCommand {
+    /// Fetch steps for the workflow, returning the raw Step objects.
+    pub async fn list_steps(&self, service: &dyn StepService) -> Result<Vec<Step>, ServiceError> {
+        let workflow_id = self.workflow.to_lowercase();
+        service.list_steps_for_workflow(&workflow_id).await
+    }
+
     /// Execute the list steps command.
     ///
     /// Fetches all steps for the given workflow from the database and returns a formatted list.
@@ -184,8 +190,7 @@ impl StepListCommand {
     ///
     /// Returns `ServiceError` if service operations fail.
     pub async fn execute(&self, service: &dyn StepService) -> Result<String, ServiceError> {
-        let workflow_id = self.workflow.to_lowercase();
-        let steps = service.list_steps_for_workflow(&workflow_id).await?;
+        let steps = self.list_steps(service).await?;
 
         if steps.is_empty() {
             return Ok(format!("No steps found for workflow '{}'", self.workflow));

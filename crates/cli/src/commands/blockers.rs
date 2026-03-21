@@ -4,6 +4,7 @@
 //! recursively traversing the dependency graph.
 
 use clap::Args;
+use serde::Serialize;
 use vertebrae_core::{ServiceError, VertebraeServices};
 
 /// Show all tasks blocking a given task
@@ -23,7 +24,7 @@ pub struct BlockersCommand {
 }
 
 /// A node in the blocker tree
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct BlockerNode {
     /// Task ID
     pub id: String,
@@ -38,7 +39,7 @@ pub struct BlockerNode {
 }
 
 /// Result of the blockers command execution
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct BlockersResult {
     /// The target task ID
     pub task_id: String,
@@ -267,4 +268,60 @@ fn print_node(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_blockers_result_serializes_to_json() {
+        let result = BlockersResult {
+            task_id: "abc12345".to_string(),
+            task_title: "Main task".to_string(),
+            blockers: vec![BlockerNode {
+                id: "blocker1".to_string(),
+                title: "Blocker one".to_string(),
+                level: "ticket".to_string(),
+                step_name: Some("in_progress".to_string()),
+                children: vec![BlockerNode {
+                    id: "blocker2".to_string(),
+                    title: "Nested blocker".to_string(),
+                    level: "task".to_string(),
+                    step_name: None,
+                    children: vec![],
+                }],
+            }],
+            total_count: 2,
+        };
+
+        let json = serde_json::to_value(&result).unwrap();
+        assert_eq!(json["task_id"], "abc12345");
+        assert_eq!(json["task_title"], "Main task");
+        assert_eq!(json["total_count"], 2);
+
+        let blockers = json["blockers"].as_array().unwrap();
+        assert_eq!(blockers.len(), 1);
+        assert_eq!(blockers[0]["id"], "blocker1");
+        assert_eq!(blockers[0]["step_name"], "in_progress");
+
+        let nested = blockers[0]["children"].as_array().unwrap();
+        assert_eq!(nested.len(), 1);
+        assert_eq!(nested[0]["id"], "blocker2");
+        assert!(nested[0]["step_name"].is_null());
+    }
+
+    #[test]
+    fn test_empty_blockers_result_serializes() {
+        let result = BlockersResult {
+            task_id: "abc12345".to_string(),
+            task_title: "No blockers".to_string(),
+            blockers: vec![],
+            total_count: 0,
+        };
+
+        let json = serde_json::to_value(&result).unwrap();
+        assert_eq!(json["total_count"], 0);
+        assert!(json["blockers"].as_array().unwrap().is_empty());
+    }
 }

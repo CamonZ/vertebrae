@@ -1,17 +1,17 @@
 # Seed script for acceptance testing with fixed/known values.
 # Idempotent — safe to run multiple times.
 #
-# Fixed values (also hardcoded in docker-compose.yml and acceptance.yml):
-#   SACRUM_API_TOKEN=sac_acceptance-test-token-vertebrae
-#   SACRUM_PROJECT_ID=a0000000-0000-0000-0000-000000000001
+# Creates a user and API token for authentication.
+# Projects are created per-scenario by the acceptance test framework via GraphQL.
+#
+# Fixed values (also hardcoded in docker-compose.yml):
+#   VTB_TOKEN=sac_acceptance-test-token-vertebrae
 
 Application.ensure_all_started(:sacrum)
 
 alias Sacrum.Repo.Users
 
 fixed_token = "sac_acceptance-test-token-vertebrae"
-fixed_project_id = "a0000000-0000-0000-0000-000000000001"
-now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
 
 user =
   case Users.insert(%{
@@ -30,18 +30,6 @@ Sacrum.Repo.insert(
     user_id: user.id,
     token_hash: token_hash,
     name: "acceptance-test-token"
-  },
-  on_conflict: :nothing
-)
-
-Sacrum.Repo.insert(
-  %Sacrum.Repo.Schemas.Project{
-    id: fixed_project_id,
-    user_id: user.id,
-    name: "Acceptance Test Project",
-    slug: "acceptance-test",
-    inserted_at: now,
-    updated_at: now
   },
   on_conflict: :nothing
 )

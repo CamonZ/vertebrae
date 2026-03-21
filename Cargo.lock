@@ -12,10 +12,11 @@ checksum = "fe438c63458706e03479442743baae6c88256498e6431708f6dfc520a26515d3"
 name = "acceptance"
 version = "0.1.0"
 dependencies = [
- "async-trait",
  "cucumber",
+ "regex",
  "serde_json",
  "tokio",
+ "uuid",
  "vertebrae-core",
  "vertebrae-sacrum-client",
 ]
@@ -6004,6 +6005,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "serial_test",
  "thiserror 2.0.18",
  "tokio",
  "toml 0.9.12+spec-1.1.0",

@@ -1,20 +1,38 @@
-use cucumber::{World, given, then, when};
-use vertebrae_core::service::{CreateTaskOptions, TaskService};
-use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig};
+mod steps;
+
+use std::collections::HashMap;
+use std::path::PathBuf;
+
+use cucumber::World;
+use vertebrae_sacrum_client::GraphqlClient;
 
 #[derive(World)]
 #[world(init = Self::new)]
 pub struct SmokeWorld {
-    client: Option<GraphqlClient>,
-    project_id: Option<String>,
+    vtb_binary: PathBuf,
+    env: HashMap<String, String>,
+
     task_id: Option<String>,
+    stored_ids: HashMap<String, String>,
+    created_task_ids: Vec<String>,
+    created_workflow_ids: Vec<String>,
+    workflow_id: Option<String>,
+    lifecycle_task_id: Option<String>,
+
+    last_stdout: String,
+    last_stderr: String,
+    last_exit_code: i32,
+
+    graphql_client: Option<GraphqlClient>,
 }
 
 impl std::fmt::Debug for SmokeWorld {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SmokeWorld")
-            .field("project_id", &self.project_id)
             .field("task_id", &self.task_id)
+            .field("stored_ids", &self.stored_ids)
+            .field("workflow_id", &self.workflow_id)
+            .field("last_exit_code", &self.last_exit_code)
             .finish()
     }
 }
@@ -22,92 +40,129 @@ impl std::fmt::Debug for SmokeWorld {
 impl SmokeWorld {
     fn new() -> Self {
         Self {
-            client: None,
-            project_id: None,
+            vtb_binary: PathBuf::new(),
+            env: HashMap::new(),
             task_id: None,
+            stored_ids: HashMap::new(),
+            created_task_ids: Vec::new(),
+            created_workflow_ids: Vec::new(),
+            workflow_id: None,
+            lifecycle_task_id: None,
+            last_stdout: String::new(),
+            last_stderr: String::new(),
+            last_exit_code: 0,
+            graphql_client: None,
         }
     }
 
-    fn task_service(&self) -> vertebrae_sacrum_client::SacrumTaskService {
-        vertebrae_sacrum_client::SacrumTaskService::new(
-            self.client.as_ref().expect("client not configured").clone(),
-        )
+    async fn run_vtb(&mut self, args: &[&str]) {
+        let resolved_args: Vec<String> = args.iter().map(|a| self.resolve_vars(a)).collect();
+
+        let output = tokio::process::Command::new(&self.vtb_binary)
+            .args(&resolved_args)
+            .envs(&self.env)
+            .output()
+            .await
+            .expect("failed to execute vtb");
+
+        self.last_stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        self.last_stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        self.last_exit_code = output.status.code().unwrap_or(-1);
     }
-}
 
-fn load_test_config() -> SacrumConfig {
-    let base_url =
-        std::env::var("SACRUM_URL").unwrap_or_else(|_| "http://localhost:4000".to_string());
-    let api_token = std::env::var("SACRUM_API_TOKEN")
-        .expect("SACRUM_API_TOKEN must be set for acceptance tests");
-    let project_id = std::env::var("SACRUM_PROJECT_ID")
-        .expect("SACRUM_PROJECT_ID must be set for acceptance tests");
+    async fn run_vtb_json(&mut self, args: &[&str]) -> Option<serde_json::Value> {
+        let mut full_args = vec!["--json"];
+        full_args.extend_from_slice(args);
+        self.run_vtb(&full_args).await;
+        if self.last_exit_code == 0 {
+            serde_json::from_str(&self.last_stdout).ok()
+        } else {
+            None
+        }
+    }
 
-    SacrumConfig::new(base_url, api_token, project_id)
-}
+    fn resolve_vars(&self, text: &str) -> String {
+        let mut result = text.to_string();
+        if let Some(task_id) = &self.task_id {
+            result = result.replace("<TASK_ID>", task_id);
+        }
+        for (key, value) in &self.stored_ids {
+            result = result.replace(&format!("<{}>", key), value);
+        }
+        result
+    }
 
-#[given("a configured Sacrum client")]
-async fn configured_client(world: &mut SmokeWorld) {
-    let config = load_test_config();
-    let project_id = config.project_id.clone();
-    let client = GraphqlClient::new(config);
-    world.client = Some(client);
-    world.project_id = Some(project_id);
-}
+    fn extract_task_id_from_output(&self) -> Option<String> {
+        let stdout = self.last_stdout.trim();
+        // vtb add outputs "Created task: <uuid>"
+        if let Some(rest) = stdout.strip_prefix("Created task: ") {
+            let uuid = rest.trim();
+            if !uuid.is_empty() {
+                return Some(uuid.to_string());
+            }
+        }
+        // Fallback for --json mode: {"output": "Created task: <uuid>"}
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(stdout) {
+            if let Some(output) = json.get("output").and_then(|v| v.as_str()) {
+                if let Some(rest) = output.strip_prefix("Created task: ") {
+                    let uuid = rest.trim();
+                    if !uuid.is_empty() {
+                        return Some(uuid.to_string());
+                    }
+                }
+            }
+        }
+        None
+    }
 
-#[when(expr = "I create a task titled {string}")]
-async fn create_task(world: &mut SmokeWorld, title: String) {
-    let service = world.task_service();
-    let options = CreateTaskOptions::new(title);
-    let task_id = service
-        .create_task(options)
-        .await
-        .expect("failed to create task");
-    world.task_id = Some(task_id);
-}
+    fn track_task(&mut self, id: String) {
+        self.task_id = Some(id.clone());
+        self.created_task_ids.push(id);
+    }
 
-#[then(expr = "the task should exist with title {string}")]
-async fn task_exists_with_title(world: &mut SmokeWorld, expected_title: String) {
-    let service = world.task_service();
-    let task_id = world.task_id.as_ref().expect("no task ID stored");
-    let task = service.get_task(task_id).await.expect("failed to get task");
+    fn track_workflow(&mut self, id: String) {
+        self.workflow_id = Some(id.clone());
+        self.created_workflow_ids.push(id);
+    }
 
-    assert_eq!(
-        task.title, expected_title,
-        "task title mismatch: expected '{}', got '{}'",
-        expected_title, task.title
-    );
-    assert_eq!(
-        &task.id, task_id,
-        "task ID mismatch: expected '{}', got '{}'",
-        task_id, task.id
-    );
-}
-
-#[when("I delete the task")]
-async fn delete_task(world: &mut SmokeWorld) {
-    let service = world.task_service();
-    let task_id = world.task_id.as_ref().expect("no task ID stored");
-    service
-        .delete_task(task_id, false)
-        .await
-        .expect("failed to delete task");
-}
-
-#[then("the task should no longer exist")]
-async fn task_does_not_exist(world: &mut SmokeWorld) {
-    let service = world.task_service();
-    let task_id = world.task_id.as_ref().expect("no task ID stored");
-    let result = service.get_task(task_id).await;
-
-    assert!(
-        result.is_err(),
-        "expected task '{}' to not exist after deletion, but get_task succeeded",
-        task_id
-    );
+    fn combined_output(&self) -> String {
+        format!("{}{}", self.last_stdout, self.last_stderr)
+    }
 }
 
 #[tokio::main]
 async fn main() {
-    SmokeWorld::cucumber().run("tests/features").await;
+    SmokeWorld::cucumber()
+        .before(|_feature, _rule, _scenario, _world| Box::pin(async move {}))
+        .after(|_feature, _rule, _scenario, _ev, world| {
+            Box::pin(async move {
+                if let Some(world) = world {
+                    // Cleanup created tasks in reverse order
+                    if let Some(client) = &world.graphql_client {
+                        let task_service =
+                            vertebrae_sacrum_client::SacrumTaskService::new(client.clone());
+                        for task_id in world.created_task_ids.iter().rev() {
+                            let _ = vertebrae_core::service::TaskService::delete_task(
+                                &task_service,
+                                task_id,
+                                true,
+                            )
+                            .await;
+                        }
+                        let wf_service =
+                            vertebrae_sacrum_client::SacrumWorkflowService::new(client.clone());
+                        for wf_id in world.created_workflow_ids.iter().rev() {
+                            let _ =
+                                vertebrae_core::workflow_service::WorkflowService::delete_workflow(
+                                    &wf_service,
+                                    wf_id,
+                                )
+                                .await;
+                        }
+                    }
+                }
+            })
+        })
+        .run("tests/features")
+        .await;
 }
