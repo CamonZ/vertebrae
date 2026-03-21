@@ -93,11 +93,9 @@ async fn when_transition_lifecycle_task_through(world: &mut SmokeWorld, target_s
         .as_ref()
         .expect("no workflow ID stored")
         .clone();
-    let wf_short = &wf_id[..8];
-
-    // Get the step list to find the path from current to target
+    // Get the step list to find the path from current to target (use full UUID — step commands don't resolve short IDs)
     let json = world
-        .run_vtb_json(&["step", "list", wf_short])
+        .run_vtb_json(&["step", "list", &wf_id])
         .await
         .expect("failed to list workflow steps as JSON");
 

@@ -89,12 +89,12 @@ async fn given_workflow_with_steps(world: &mut SmokeWorld, name: String, steps_s
         panic!("unexpected workflow create output: {}", stdout);
     };
 
-    // Set up linear transitions: each step transitions to the next, last step is final
-    let wf_id_short = &wf_id[..8];
+    // Steps are created in order by `workflow add --step`. The linear ordering
+    // defines the transition graph. We just need to mark the last step as final.
 
-    // List steps for this workflow
+    // List steps to find the last one
     let json = world
-        .run_vtb_json(&["step", "list", wf_id_short])
+        .run_vtb_json(&["step", "list", &wf_id])
         .await
         .expect("failed to list workflow steps as JSON");
 
@@ -110,39 +110,11 @@ async fn given_workflow_with_steps(world: &mut SmokeWorld, name: String, steps_s
         })
         .collect();
     ordered.sort_by_key(|(_, _, order)| *order);
-    let step_ids: Vec<(String, String)> = ordered
-        .iter()
-        .map(|(id, name, _)| (id.clone(), name.clone()))
-        .collect();
-
-    // Add transitions: each step -> next step
-    for i in 0..step_ids.len() - 1 {
-        let from_id = &step_ids[i].0;
-        let to_id = &step_ids[i + 1].0;
-        let from_short = &from_id[..8];
-        let to_short = &to_id[..8];
-        world
-            .run_vtb(&[
-                "workflow",
-                "transition",
-                "add",
-                wf_id_short,
-                from_short,
-                to_short,
-            ])
-            .await;
-        assert_eq!(
-            world.last_exit_code, 0,
-            "failed to add transition from {} to {}: {}{}",
-            from_short, to_short, world.last_stdout, world.last_stderr
-        );
-    }
 
     // Mark last step as final
-    let last_id = &step_ids.last().unwrap().0;
-    let last_short = &last_id[..8];
+    let last_id = &ordered.last().unwrap().0;
     world
-        .run_vtb(&["step", "update", last_short, "--final", "true"])
+        .run_vtb(&["step", "update", last_id, "--final", "true"])
         .await;
     assert_eq!(
         world.last_exit_code, 0,
@@ -161,9 +133,8 @@ async fn given_assign_workflow_to_task(world: &mut SmokeWorld) {
         .as_ref()
         .expect("no workflow ID stored")
         .clone();
-    let wf_short = &wf_id[..8];
     world
-        .run_vtb(&["workflow", "assign", &task_id, wf_short])
+        .run_vtb(&["workflow", "assign", &task_id, &wf_id])
         .await;
     assert_eq!(
         world.last_exit_code, 0,
