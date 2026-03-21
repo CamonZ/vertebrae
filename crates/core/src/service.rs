@@ -268,7 +268,15 @@ pub trait TaskService: Send + Sync {
     /// Set the current workflow step for a task
     ///
     /// This updates the task's `current_step_id` field to the specified step.
+    /// Validates that a transition exists between the current step and target step.
     async fn set_current_step(&self, task_id: &str, step_id: &str) -> ServiceResult<()>;
+
+    /// Advance to a specific step, skipping transition validation
+    ///
+    /// Like `set_current_step` but does not require a StepTransition between
+    /// the current and target steps. Only validates that the target step belongs
+    /// to the task's workflow.
+    async fn advance_to_step(&self, task_id: &str, step_id: &str) -> ServiceResult<()>;
 
     /// Start a workflow step for a task
     ///

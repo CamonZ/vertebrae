@@ -207,6 +207,10 @@ impl TaskService for MockTaskService {
         Ok(())
     }
 
+    async fn advance_to_step(&self, task_id: &str, step_id: &str) -> ServiceResult<()> {
+        self.set_current_step(task_id, step_id).await
+    }
+
     async fn start_step(&self, task_id: &str) -> ServiceResult<()> {
         let mut s = self.state.lock().unwrap();
         let task = s

@@ -39,9 +39,9 @@ async fn given_second_workflow_with_steps(world: &mut SmokeWorld, name: String, 
 #[when(expr = "I transition the task to step {string}")]
 async fn when_transition_task_to_step(world: &mut SmokeWorld, step_name: String) {
     let task_id = world
-        .lifecycle_task_id
+        .task_id
         .as_ref()
-        .or(world.task_id.as_ref())
+        .or(world.lifecycle_task_id.as_ref())
         .expect("no task ID stored")
         .clone();
     world
@@ -52,9 +52,9 @@ async fn when_transition_task_to_step(world: &mut SmokeWorld, step_name: String)
 #[when(expr = "I transition the task to step {string} with --skip-validation")]
 async fn when_transition_task_skip_validation(world: &mut SmokeWorld, step_name: String) {
     let task_id = world
-        .lifecycle_task_id
+        .task_id
         .as_ref()
-        .or(world.task_id.as_ref())
+        .or(world.lifecycle_task_id.as_ref())
         .expect("no task ID stored")
         .clone();
     world
@@ -69,9 +69,9 @@ async fn when_transition_task_of_workflow(
     _wf_name: String,
 ) {
     let task_id = world
-        .lifecycle_task_id
+        .task_id
         .as_ref()
-        .or(world.task_id.as_ref())
+        .or(world.lifecycle_task_id.as_ref())
         .expect("no task ID stored")
         .clone();
     // The transition-to command resolves by step name within the task's current workflow.
