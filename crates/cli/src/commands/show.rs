@@ -50,6 +50,10 @@ pub struct TaskDetail {
     pub revision_feedback: Option<String>,
     /// Reason why the task was rejected
     pub rejection_reason: Option<String>,
+    /// Whether this task is archived
+    pub archived: bool,
+    /// Parent task ID (if any)
+    pub parent_id: Option<String>,
     /// Workflow assignment information
     pub workflow: Option<WorkflowInfo>,
     /// Embedded sections
@@ -81,6 +85,7 @@ struct TaskRow {
     updated_at: Option<chrono::DateTime<chrono::Utc>>,
     completed_at: Option<chrono::DateTime<chrono::Utc>>,
     needs_human_review: Option<bool>,
+    archived: bool,
     worktree: Option<String>,
     revision_feedback: Option<String>,
     rejection_reason: Option<String>,
@@ -282,6 +287,8 @@ impl ShowCommand {
             updated_at: task.updated_at.map(|dt| dt.to_string()),
             completed_at: task.completed_at.map(|dt| dt.to_string()),
             needs_human_review: task.needs_human_review,
+            archived: task.archived,
+            parent_id: task.parent_id,
             worktree: task.worktree,
             revision_feedback: task.revision_feedback,
             rejection_reason: task.rejection_reason,
@@ -318,6 +325,7 @@ impl ShowCommand {
             updated_at: task.updated_at,
             completed_at: task.completed_at,
             needs_human_review: task.needs_human_review,
+            archived: task.archived,
             worktree: task.worktree,
             revision_feedback: task.revision_feedback,
             rejection_reason: task.rejection_reason,
@@ -727,6 +735,8 @@ mod tests {
             updated_at: Some("2026-01-02T00:00:00Z".to_string()),
             completed_at: None,
             needs_human_review: Some(false),
+            archived: false,
+            parent_id: None,
             worktree: None,
             revision_feedback: None,
             rejection_reason: None,

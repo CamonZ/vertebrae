@@ -83,14 +83,14 @@ Feature: Code references
     And I add a ref "src/main.rs:L50"
     And I add a ref "src/lib.rs"
     And I unref "src/main.rs"
-    Then the output should match "Removed 2 reference(s) to src/main.rs from task: <TASK_ID>"
+    Then the output should contain "Removed 2 reference(s) to src/main.rs from task: <TASK_ID>"
     And the task should have 1 refs
 
   Scenario: Remove all refs
     When I add a ref "src/main.rs"
     And I add a ref "src/lib.rs"
     And I unref --all
-    Then the output should match "Removed all 2 reference(s) from task: <TASK_ID>"
+    Then the output should contain "Removed all 2 reference(s) from task: <TASK_ID>"
     And the task should have 0 refs
 
   Scenario: Unref file with no matches warns

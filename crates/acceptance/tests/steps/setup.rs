@@ -142,7 +142,7 @@ async fn given_workflow_with_steps(world: &mut SmokeWorld, name: String, steps_s
     let last_id = &step_ids.last().unwrap().0;
     let last_short = &last_id[..8];
     world
-        .run_vtb(&["step", "update", last_short, "--is-final", "true"])
+        .run_vtb(&["step", "update", last_short, "--final", "true"])
         .await;
     assert_eq!(
         world.last_exit_code, 0,

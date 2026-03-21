@@ -592,6 +592,12 @@ impl Command {
                     .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
                 Ok(CommandResult::Json(json))
             }
+            Command::Step(step::StepCommand::List(cmd)) => {
+                let steps = cmd.list_steps(services.steps()).await?;
+                let json = serde_json::to_value(&steps)
+                    .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
+                Ok(CommandResult::Json(json))
+            }
             _ => {
                 let result = self.execute(services).await?;
                 let text = format!("{}", result);
