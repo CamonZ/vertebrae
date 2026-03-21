@@ -416,6 +416,17 @@ impl TaskService for SacrumTaskService {
         Ok(())
     }
 
+    async fn advance_to_step(&self, task_id: &str, step_id: &str) -> ServiceResult<()> {
+        let variables = json!({
+            "task_id": task_id,
+            "step_id": step_id,
+        });
+        self.client
+            .execute_void(tasks::ADVANCE_TO_STEP, variables)
+            .await?;
+        Ok(())
+    }
+
     async fn start_step(&self, task_id: &str) -> ServiceResult<()> {
         let variables = json!({
             "task_id": task_id,
