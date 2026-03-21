@@ -54,6 +54,7 @@ pub const LIST_TASKS: &str = r#"
     query ListTasks(
         $project_id: Uuid4!,
         $level: String,
+        $priority: String,
         $parent_id: Uuid4,
         $status: String,
         $tags: [String!],
@@ -66,6 +67,7 @@ pub const LIST_TASKS: &str = r#"
         tasks(
             project_id: $project_id,
             level: $level,
+            priority: $priority,
             parent_id: $parent_id,
             status: $status,
             tags: $tags,
