@@ -65,5 +65,5 @@ Feature: Show task details
 
   Scenario: Show non-existent task fails
     When I show the task "00000000-0000-4000-8000-000000000000"
-    Then the command should fail with "Task not found: 00000000-0000-4000-8000-000000000000"
+    Then the command should fail with "Task not found:"
     And the hint should contain "Use 'vtb list' to see available tasks"

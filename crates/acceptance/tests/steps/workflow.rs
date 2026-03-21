@@ -33,7 +33,7 @@ async fn given_second_workflow_with_steps(world: &mut SmokeWorld, name: String, 
     world.created_workflow_ids.push(wf_id.clone());
     world
         .stored_ids
-        .insert("second_workflow_id".to_string(), wf_id[..8].to_string());
+        .insert("second_workflow_id".to_string(), wf_id);
 }
 
 #[when(expr = "I transition the task to step {string}")]

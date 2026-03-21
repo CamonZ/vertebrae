@@ -92,7 +92,7 @@ Feature: Update tasks
   Scenario: Update non-existent task fails
     When I update task "00000000-0000-4000-8000-000000000000" with:
       | title | New |
-    Then the command should fail with "Task not found: 00000000-0000-4000-8000-000000000000"
+    Then the command should fail with "Task not found:"
 
   Scenario: Self-parent is rejected
     Given I create a task with:

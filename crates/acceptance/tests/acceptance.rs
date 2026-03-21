@@ -97,8 +97,8 @@ impl SmokeWorld {
         // vtb add outputs "Created task: <uuid>"
         if let Some(rest) = stdout.strip_prefix("Created task: ") {
             let uuid = rest.trim();
-            if uuid.len() >= 8 {
-                return Some(uuid[..8].to_string());
+            if !uuid.is_empty() {
+                return Some(uuid.to_string());
             }
         }
         // Fallback for --json mode: {"output": "Created task: <uuid>"}
@@ -106,8 +106,8 @@ impl SmokeWorld {
             if let Some(output) = json.get("output").and_then(|v| v.as_str()) {
                 if let Some(rest) = output.strip_prefix("Created task: ") {
                     let uuid = rest.trim();
-                    if uuid.len() >= 8 {
-                        return Some(uuid[..8].to_string());
+                    if !uuid.is_empty() {
+                        return Some(uuid.to_string());
                     }
                 }
             }
