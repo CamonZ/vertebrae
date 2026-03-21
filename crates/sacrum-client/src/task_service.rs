@@ -494,6 +494,9 @@ impl TaskService for SacrumTaskService {
         if let Some(level) = filter.levels.first() {
             variables["level"] = json!(level.as_str());
         }
+        if let Some(priority) = filter.priorities.first() {
+            variables["priority"] = json!(priority.as_str());
+        }
         if let Some(ref parent_id) = filter.children_of {
             variables["parent_id"] = json!(parent_id);
         }
@@ -543,6 +546,9 @@ impl TaskService for SacrumTaskService {
 
         if let Some(level) = filter.levels.first() {
             variables["level"] = json!(level.as_str());
+        }
+        if let Some(priority) = filter.priorities.first() {
+            variables["priority"] = json!(priority.as_str());
         }
         if let Some(ref parent_id) = filter.children_of {
             variables["parent_id"] = json!(parent_id);
