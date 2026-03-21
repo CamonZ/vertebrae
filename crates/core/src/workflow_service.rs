@@ -178,7 +178,7 @@ pub struct AssignResult {
 }
 
 /// Information about a workflow at a specific step
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct WorkflowInfo {
     /// Workflow ID
     pub id: String,

@@ -292,6 +292,18 @@ impl TaskService for SacrumTaskService {
                 .await?;
         }
 
+        // If needs_review is set, update via separate call
+        // (CREATE_TASK mutation doesn't accept needs_human_review)
+        if options.needs_review {
+            let update_vars = json!({
+                "id": task_id,
+                "needs_human_review": true,
+            });
+            self.client
+                .execute_void(tasks::UPDATE_TASK, update_vars)
+                .await?;
+        }
+
         Ok(task_id)
     }
 

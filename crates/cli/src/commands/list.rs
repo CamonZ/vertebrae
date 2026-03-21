@@ -3,11 +3,12 @@
 //! Implements the `vtb list` command to display tasks with filtering options.
 
 use clap::Args;
+use serde::Serialize;
 use vertebrae_core::{Level, Priority, TaskFilter};
 use vertebrae_core::{ServiceError, VertebraeServices};
 
 /// A summary of a task for display in the list
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct TaskSummary {
     /// The task ID (extracted from SurrealDB Thing)
     pub id: String,
@@ -230,5 +231,98 @@ impl ListCommand {
         }
 
         filter
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_task_summary_serializes_to_json() {
+        let summary = TaskSummary {
+            id: "abc12345-0000-4000-8000-000000000001".to_string(),
+            title: "Test task".to_string(),
+            level: "ticket".to_string(),
+            workflow_name: Some("Implementation".to_string()),
+            step_name: Some("todo".to_string()),
+            priority: Some("high".to_string()),
+            tags: vec!["backend".to_string()],
+            needs_human_review: Some(false),
+            archived: false,
+            parent_id: Some("parent-0000-4000-8000-000000000001".to_string()),
+        };
+
+        let json = serde_json::to_value(&summary).unwrap();
+        assert_eq!(json["id"], "abc12345-0000-4000-8000-000000000001");
+        assert_eq!(json["title"], "Test task");
+        assert_eq!(json["level"], "ticket");
+        assert_eq!(json["workflow_name"], "Implementation");
+        assert_eq!(json["step_name"], "todo");
+        assert_eq!(json["priority"], "high");
+        assert_eq!(json["tags"][0], "backend");
+        assert_eq!(json["needs_human_review"], false);
+        assert_eq!(json["archived"], false);
+        assert_eq!(json["parent_id"], "parent-0000-4000-8000-000000000001");
+    }
+
+    #[test]
+    fn test_task_summary_list_serializes_to_json_array() {
+        let tasks = vec![
+            TaskSummary {
+                id: "task1".to_string(),
+                title: "First".to_string(),
+                level: "epic".to_string(),
+                workflow_name: None,
+                step_name: None,
+                priority: None,
+                tags: vec![],
+                needs_human_review: None,
+                archived: false,
+                parent_id: None,
+            },
+            TaskSummary {
+                id: "task2".to_string(),
+                title: "Second".to_string(),
+                level: "task".to_string(),
+                workflow_name: None,
+                step_name: None,
+                priority: None,
+                tags: vec![],
+                needs_human_review: None,
+                archived: false,
+                parent_id: None,
+            },
+        ];
+
+        let json = serde_json::to_value(&tasks).unwrap();
+        let arr = json.as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0]["id"], "task1");
+        assert_eq!(arr[1]["id"], "task2");
+    }
+
+    #[test]
+    fn test_task_summary_with_null_optional_fields() {
+        let summary = TaskSummary {
+            id: "task1".to_string(),
+            title: "Minimal task".to_string(),
+            level: "task".to_string(),
+            workflow_name: None,
+            step_name: None,
+            priority: None,
+            tags: vec![],
+            needs_human_review: None,
+            archived: false,
+            parent_id: None,
+        };
+
+        let json = serde_json::to_value(&summary).unwrap();
+        assert!(json["workflow_name"].is_null());
+        assert!(json["step_name"].is_null());
+        assert!(json["priority"].is_null());
+        assert!(json["needs_human_review"].is_null());
+        assert!(json["parent_id"].is_null());
+        assert!(json["tags"].as_array().unwrap().is_empty());
     }
 }

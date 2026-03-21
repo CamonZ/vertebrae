@@ -73,33 +73,61 @@ impl SacrumConfig {
     /// Load configuration by matching CWD against project paths in the global config.
     ///
     /// 1. Reads ~/.config/vertebrae/config.toml
-    /// 2. Extracts `[sacrum].token` (error if missing)
-    /// 3. Canonicalizes CWD
-    /// 4. Finds the project whose `path` is the longest prefix of CWD
+    /// 2. Applies env var overrides (`VTB_URL`, `VTB_TOKEN`, `VTB_PROJECT_ID`)
+    /// 3. Extracts token from env or config (error if neither is set)
+    /// 4. If `VTB_PROJECT_ID` is set, uses it directly; otherwise resolves via CWD
     /// 5. Returns `SacrumConfig { base_url, api_token, project_id }`
     pub fn load() -> SacrumClientResult<Self> {
         let config = load_config_file()?;
+        Self::load_from_config(config)
+    }
 
-        let api_token = config.sacrum.token.clone().ok_or_else(|| {
-            SacrumClientError::ConfigError(
-                "No API token found. Set [sacrum].token in ~/.config/vertebrae/config.toml"
-                    .to_string(),
-            )
-        })?;
+    /// Build a SacrumConfig from a parsed config file, applying env var overrides.
+    ///
+    /// Env var precedence (highest wins):
+    /// - `VTB_URL` overrides `[sacrum].url`
+    /// - `VTB_TOKEN` overrides `[sacrum].token`
+    /// - `VTB_PROJECT_ID` overrides CWD-based project resolution entirely
+    fn load_from_config(config: VertebraeConfigFile) -> SacrumClientResult<Self> {
+        let base_url = std::env::var("VTB_URL")
+            .ok()
+            .filter(|v| !v.is_empty())
+            .unwrap_or_else(|| config.sacrum.url.clone());
 
-        let cwd = std::env::current_dir().map_err(|e| {
-            SacrumClientError::ConfigError(format!("Failed to get current directory: {}", e))
-        })?;
+        let api_token = std::env::var("VTB_TOKEN")
+            .ok()
+            .filter(|v| !v.is_empty())
+            .or_else(|| config.sacrum.token.clone())
+            .ok_or_else(|| {
+                SacrumClientError::ConfigError(
+                    "No API token found. Set VTB_TOKEN env var or [sacrum].token in ~/.config/vertebrae/config.toml"
+                        .to_string(),
+                )
+            })?;
 
-        let cwd = cwd.canonicalize().unwrap_or(cwd);
+        let project_id = match std::env::var("VTB_PROJECT_ID")
+            .ok()
+            .filter(|v| !v.is_empty())
+        {
+            Some(id) => id,
+            None => {
+                let cwd = std::env::current_dir().map_err(|e| {
+                    SacrumClientError::ConfigError(format!(
+                        "Failed to get current directory: {}",
+                        e
+                    ))
+                })?;
 
-        let base_url = config.sacrum.url.clone();
-        let (_name, section) = find_project_by_path(&config, &cwd)?;
+                let cwd = cwd.canonicalize().unwrap_or(cwd);
+                let (_name, section) = find_project_by_path(&config, &cwd)?;
+                section.id.clone()
+            }
+        };
 
         Ok(SacrumConfig {
             base_url,
             api_token,
-            project_id: section.id.clone(),
+            project_id,
         })
     }
 
@@ -263,6 +291,7 @@ pub fn unregister_project(name: &str) -> SacrumClientResult<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     #[test]
     fn test_config_creation() {
@@ -491,5 +520,205 @@ path = "/Users/test/other"
         let config: VertebraeConfigFile = toml::from_str(toml_str).unwrap();
         assert_eq!(config.sacrum.token.as_deref(), Some("sac_mytoken"));
         assert_eq!(config.projects.len(), 2);
+    }
+
+    /// Helper: build a VertebraeConfigFile with a token and a project whose path
+    /// matches the current working directory so CWD-based resolution succeeds.
+    fn config_with_cwd_project() -> VertebraeConfigFile {
+        let cwd = std::env::current_dir()
+            .unwrap()
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+
+        VertebraeConfigFile {
+            sacrum: GlobalSacrumSection {
+                url: "http://file-url:4000".to_string(),
+                token: Some("file-token".to_string()),
+            },
+            projects: BTreeMap::from([(
+                "testproject".to_string(),
+                ProjectSection {
+                    id: "file-project-id".to_string(),
+                    path: cwd,
+                },
+            )]),
+        }
+    }
+
+    /// Helper: clean up all VTB_ env vars to ensure a pristine state.
+    fn clear_vtb_env_vars() {
+        unsafe {
+            std::env::remove_var("VTB_URL");
+            std::env::remove_var("VTB_TOKEN");
+            std::env::remove_var("VTB_PROJECT_ID");
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn test_load_from_config_without_env_vars_uses_file_values() {
+        clear_vtb_env_vars();
+        let config = config_with_cwd_project();
+        let result = SacrumConfig::load_from_config(config).unwrap();
+
+        assert_eq!(result.base_url, "http://file-url:4000");
+        assert_eq!(result.api_token, "file-token");
+        assert_eq!(result.project_id, "file-project-id");
+    }
+
+    #[test]
+    #[serial]
+    fn test_vtb_url_overrides_config_file_url() {
+        clear_vtb_env_vars();
+        unsafe {
+            std::env::set_var("VTB_URL", "http://env-url:9999");
+        }
+        let config = config_with_cwd_project();
+        let result = SacrumConfig::load_from_config(config).unwrap();
+
+        assert_eq!(result.base_url, "http://env-url:9999");
+        assert_eq!(result.api_token, "file-token");
+        assert_eq!(result.project_id, "file-project-id");
+        clear_vtb_env_vars();
+    }
+
+    #[test]
+    #[serial]
+    fn test_vtb_token_overrides_config_file_token() {
+        clear_vtb_env_vars();
+        unsafe {
+            std::env::set_var("VTB_TOKEN", "env-token");
+        }
+        let config = config_with_cwd_project();
+        let result = SacrumConfig::load_from_config(config).unwrap();
+
+        assert_eq!(result.base_url, "http://file-url:4000");
+        assert_eq!(result.api_token, "env-token");
+        assert_eq!(result.project_id, "file-project-id");
+        clear_vtb_env_vars();
+    }
+
+    #[test]
+    #[serial]
+    fn test_vtb_project_id_overrides_cwd_resolution() {
+        clear_vtb_env_vars();
+        unsafe {
+            std::env::set_var("VTB_PROJECT_ID", "env-project-id");
+        }
+        let config = config_with_cwd_project();
+        let result = SacrumConfig::load_from_config(config).unwrap();
+
+        assert_eq!(result.base_url, "http://file-url:4000");
+        assert_eq!(result.api_token, "file-token");
+        assert_eq!(result.project_id, "env-project-id");
+        clear_vtb_env_vars();
+    }
+
+    #[test]
+    #[serial]
+    fn test_vtb_project_id_skips_cwd_lookup_entirely() {
+        clear_vtb_env_vars();
+        unsafe {
+            std::env::set_var("VTB_PROJECT_ID", "env-project-id");
+        }
+        // Config has no projects at all -- CWD lookup would fail without the env var
+        let config = VertebraeConfigFile {
+            sacrum: GlobalSacrumSection {
+                url: "http://localhost:4000".to_string(),
+                token: Some("some-token".to_string()),
+            },
+            projects: BTreeMap::new(),
+        };
+        let result = SacrumConfig::load_from_config(config).unwrap();
+
+        assert_eq!(result.project_id, "env-project-id");
+        assert_eq!(result.api_token, "some-token");
+        clear_vtb_env_vars();
+    }
+
+    #[test]
+    #[serial]
+    fn test_vtb_token_relaxes_config_file_token_requirement() {
+        clear_vtb_env_vars();
+        unsafe {
+            std::env::set_var("VTB_TOKEN", "env-token");
+            std::env::set_var("VTB_PROJECT_ID", "env-project-id");
+        }
+        // Config has no token -- would normally error
+        let config = VertebraeConfigFile {
+            sacrum: GlobalSacrumSection {
+                url: "http://localhost:4000".to_string(),
+                token: None,
+            },
+            projects: BTreeMap::new(),
+        };
+        let result = SacrumConfig::load_from_config(config).unwrap();
+
+        assert_eq!(result.api_token, "env-token");
+        assert_eq!(result.project_id, "env-project-id");
+        clear_vtb_env_vars();
+    }
+
+    #[test]
+    #[serial]
+    fn test_all_env_vars_override_all_config_values() {
+        clear_vtb_env_vars();
+        unsafe {
+            std::env::set_var("VTB_URL", "http://env-url:8080");
+            std::env::set_var("VTB_TOKEN", "env-token-all");
+            std::env::set_var("VTB_PROJECT_ID", "env-project-all");
+        }
+        let config = config_with_cwd_project();
+        let result = SacrumConfig::load_from_config(config).unwrap();
+
+        assert_eq!(result.base_url, "http://env-url:8080");
+        assert_eq!(result.api_token, "env-token-all");
+        assert_eq!(result.project_id, "env-project-all");
+        clear_vtb_env_vars();
+    }
+
+    #[test]
+    #[serial]
+    fn test_empty_env_vars_are_ignored() {
+        clear_vtb_env_vars();
+        unsafe {
+            std::env::set_var("VTB_URL", "");
+            std::env::set_var("VTB_TOKEN", "");
+            std::env::set_var("VTB_PROJECT_ID", "");
+        }
+        let config = config_with_cwd_project();
+        let result = SacrumConfig::load_from_config(config).unwrap();
+
+        assert_eq!(result.base_url, "http://file-url:4000");
+        assert_eq!(result.api_token, "file-token");
+        assert_eq!(result.project_id, "file-project-id");
+        clear_vtb_env_vars();
+    }
+
+    #[test]
+    #[serial]
+    fn test_missing_token_in_both_env_and_config_errors() {
+        clear_vtb_env_vars();
+        unsafe {
+            std::env::set_var("VTB_PROJECT_ID", "env-project-id");
+        }
+        let config = VertebraeConfigFile {
+            sacrum: GlobalSacrumSection {
+                url: "http://localhost:4000".to_string(),
+                token: None,
+            },
+            projects: BTreeMap::new(),
+        };
+        let result = SacrumConfig::load_from_config(config);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("No API token found"),
+            "Expected error about missing token, got: {}",
+            err_msg
+        );
+        clear_vtb_env_vars();
     }
 }

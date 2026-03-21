@@ -13,6 +13,10 @@ use vertebrae_sacrum_client::SacrumConfig;
 #[command(version = "0.1.0")]
 #[command(about = "A task management CLI tool", long_about = None)]
 struct Args {
+    /// Output machine-readable JSON instead of human-readable text
+    #[arg(long, global = true)]
+    json: bool,
+
     /// Subcommand to execute
     #[command(subcommand)]
     command: Option<Command>,
@@ -92,7 +96,11 @@ async fn run_with_args(args: Args) -> Result<(), ServiceError> {
     match args.command {
         Some(mut cmd) => {
             cmd.resolve_ids(&services).await?;
-            let result = cmd.execute(&services).await?;
+            let result = if args.json {
+                cmd.execute_json(&services).await?
+            } else {
+                cmd.execute(&services).await?
+            };
             println!("{}", result);
         }
         None => {
@@ -529,5 +537,93 @@ mod tests {
             Command::Daemon(DaemonCommand::Status(_)) => {}
             other => panic!("Expected Daemon(Status), got: {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_json_flag_defaults_to_false() {
+        let args = Args::try_parse_from(["vtb"]).unwrap();
+        assert!(!args.json, "json flag should default to false");
+    }
+
+    #[test]
+    fn test_json_flag_before_subcommand() {
+        let args = Args::try_parse_from(["vtb", "--json", "list"]).unwrap();
+        assert!(
+            args.json,
+            "json flag should be true when --json is passed before subcommand"
+        );
+        assert!(args.command.is_some());
+    }
+
+    #[test]
+    fn test_json_flag_after_subcommand() {
+        let args = Args::try_parse_from(["vtb", "list", "--json"]).unwrap();
+        assert!(
+            args.json,
+            "json flag should be true when --json is passed after subcommand (global flag)"
+        );
+        assert!(args.command.is_some());
+    }
+
+    #[test]
+    fn test_json_flag_with_show_command() {
+        let args = Args::try_parse_from([
+            "vtb",
+            "--json",
+            "show",
+            "a1b2c3d4-0000-4000-8000-000000000001",
+        ])
+        .unwrap();
+        assert!(args.json, "json flag should be true");
+        assert!(args.command.is_some());
+    }
+
+    #[test]
+    fn test_json_flag_with_add_command() {
+        let args = Args::try_parse_from(["vtb", "--json", "add", "My task"]).unwrap();
+        assert!(args.json, "json flag should be true");
+        assert!(args.command.is_some());
+    }
+
+    #[test]
+    fn test_json_flag_with_blockers_command() {
+        let args = Args::try_parse_from([
+            "vtb",
+            "blockers",
+            "a1b2c3d4-0000-4000-8000-000000000001",
+            "--json",
+        ])
+        .unwrap();
+        assert!(
+            args.json,
+            "json flag should be true when passed after blockers subcommand args"
+        );
+    }
+
+    #[test]
+    fn test_json_flag_with_sections_command() {
+        let args = Args::try_parse_from([
+            "vtb",
+            "--json",
+            "sections",
+            "a1b2c3d4-0000-4000-8000-000000000001",
+        ])
+        .unwrap();
+        assert!(args.json, "json flag should be true");
+    }
+
+    #[test]
+    fn test_json_flag_with_refs_command() {
+        let args = Args::try_parse_from([
+            "vtb",
+            "refs",
+            "--json",
+            "a1b2c3d4-0000-4000-8000-000000000001",
+        ])
+        .unwrap();
+        assert!(
+            args.json,
+            "json flag should be true when passed between subcommand and args"
+        );
     }
 }
