@@ -410,16 +410,20 @@ async fn task_should_have_n_sections(
         });
 
     let empty_sections = vec![];
-    let sections = json.as_array().unwrap_or(&empty_sections);
+    let sections = json["sections"].as_array().unwrap_or(&empty_sections);
     let actual_count = sections
         .iter()
-        .filter(|s| s["section_type"].as_str() == Some(&section_type_str))
+        .filter(|s| s["type"].as_str() == Some(&section_type_str))
         .count();
 
     assert_eq!(
-        actual_count, expected_count,
-        "expected {} {} sections, but found {}",
-        expected_count, section_type_str, actual_count
+        actual_count,
+        expected_count,
+        "expected {} {} sections, but found {}.\nJSON: {}",
+        expected_count,
+        section_type_str,
+        actual_count,
+        serde_json::to_string_pretty(&json).unwrap_or_default()
     );
 }
 
@@ -443,10 +447,10 @@ async fn section_content_should_be(
         });
 
     let empty_sections = vec![];
-    let sections = json.as_array().unwrap_or(&empty_sections);
+    let sections = json["sections"].as_array().unwrap_or(&empty_sections);
     let section = sections
         .iter()
-        .find(|s| s["section_type"].as_str() == Some(&section_type_str))
+        .find(|s| s["type"].as_str() == Some(&section_type_str))
         .unwrap_or_else(|| panic!("no {} section found on task", section_type_str));
 
     let actual = section["content"].as_str().unwrap_or("");
@@ -476,10 +480,10 @@ async fn task_should_have_section_with_content(
         });
 
     let empty_sections = vec![];
-    let sections = json.as_array().unwrap_or(&empty_sections);
+    let sections = json["sections"].as_array().unwrap_or(&empty_sections);
     let section = sections
         .iter()
-        .find(|s| s["section_type"].as_str() == Some(&section_type_str))
+        .find(|s| s["type"].as_str() == Some(&section_type_str))
         .unwrap_or_else(|| panic!("no {} section found on task", section_type_str));
 
     let actual = section["content"].as_str().unwrap_or("");
@@ -505,16 +509,17 @@ async fn task_should_have_section_of_type(world: &mut SmokeWorld, section_type_s
         });
 
     let empty_sections = vec![];
-    let sections = json.as_array().unwrap_or(&empty_sections);
+    let sections = json["sections"].as_array().unwrap_or(&empty_sections);
     let count = sections
         .iter()
-        .filter(|s| s["section_type"].as_str() == Some(&section_type_str))
+        .filter(|s| s["type"].as_str() == Some(&section_type_str))
         .count();
 
     assert!(
         count > 0,
-        "expected task to have at least one {} section, but found 0",
-        section_type_str
+        "expected task to have at least one {} section, but found 0.\nJSON: {}",
+        section_type_str,
+        serde_json::to_string_pretty(&json).unwrap_or_default()
     );
 }
 
@@ -533,10 +538,10 @@ async fn checklist_item_should_not_be_done(world: &mut SmokeWorld, index: usize)
         });
 
     let empty_sections = vec![];
-    let sections = json.as_array().unwrap_or(&empty_sections);
+    let sections = json["sections"].as_array().unwrap_or(&empty_sections);
     let mut items: Vec<&serde_json::Value> = sections
         .iter()
-        .filter(|s| s["section_type"].as_str() == Some("checklist_item"))
+        .filter(|s| s["type"].as_str() == Some("checklist_item"))
         .collect();
     items.sort_by_key(|s| s["order"].as_u64().unwrap_or(u64::MAX));
 
@@ -571,7 +576,7 @@ async fn ref_should_have_path_and_line_start(
         });
 
     let empty_refs = vec![];
-    let refs = json.as_array().unwrap_or(&empty_refs);
+    let refs = json["refs"].as_array().unwrap_or(&empty_refs);
     let found = refs.iter().any(|r| {
         r["path"].as_str() == Some(&expected_path)
             && r["line_start"].as_i64() == Some(expected_line as i64)
@@ -606,7 +611,7 @@ async fn ref_should_have_path_and_line_range(
         });
 
     let empty_refs = vec![];
-    let refs = json.as_array().unwrap_or(&empty_refs);
+    let refs = json["refs"].as_array().unwrap_or(&empty_refs);
     let found = refs.iter().any(|r| {
         r["path"].as_str() == Some(&expected_path)
             && r["line_start"].as_i64() == Some(expected_start as i64)
@@ -638,7 +643,7 @@ async fn ref_should_have_description(world: &mut SmokeWorld, expected_desc: Stri
         });
 
     let empty_refs = vec![];
-    let refs = json.as_array().unwrap_or(&empty_refs);
+    let refs = json["refs"].as_array().unwrap_or(&empty_refs);
     let found = refs
         .iter()
         .any(|r| r["description"].as_str() == Some(&expected_desc));
@@ -666,7 +671,7 @@ async fn task_should_have_n_refs(world: &mut SmokeWorld, expected_count: usize) 
         });
 
     let empty_refs = vec![];
-    let refs = json.as_array().unwrap_or(&empty_refs);
+    let refs = json["refs"].as_array().unwrap_or(&empty_refs);
     assert_eq!(
         refs.len(),
         expected_count,
@@ -697,7 +702,7 @@ async fn refs_should_appear_in_order(
         });
 
     let empty_refs = vec![];
-    let refs = json.as_array().unwrap_or(&empty_refs);
+    let refs = json["refs"].as_array().unwrap_or(&empty_refs);
     let actual_specs: Vec<String> = refs
         .iter()
         .map(|r| {

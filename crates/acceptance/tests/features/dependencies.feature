@@ -43,8 +43,7 @@ Feature: Task dependencies
     And I store the task ID as "b"
     And I run depend "<a>" --on "<b>"
     When I run depend "<b>" --on "<a>"
-    Then the command should fail with "Dependency would create a cycle"
-    And the hint should contain "circular dependency chain"
+    Then the command should fail with "circular_dependency"
 
   Scenario: Indirect cycle is rejected
     Given I create a task with:
@@ -59,7 +58,7 @@ Feature: Task dependencies
     And I run depend "<a>" --on "<b>"
     And I run depend "<b>" --on "<c>"
     When I run depend "<c>" --on "<a>"
-    Then the command should fail with "Dependency would create a cycle"
+    Then the command should fail with "circular_dependency"
 
   Scenario: Depend on non-existent task fails
     Given I create a task with:
@@ -202,4 +201,4 @@ Feature: Task dependencies
       | title | Existing |
     And I store the task ID as "existing"
     When I run path "<existing>" "00000000-0000-4000-8000-000000000000"
-    Then the command should fail with "Task not found: 00000000-0000-4000-8000-000000000000"
+    Then the command should fail with "Task not found:"

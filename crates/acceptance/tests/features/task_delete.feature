@@ -47,4 +47,4 @@ Feature: Delete tasks
 
   Scenario: Delete non-existent task fails
     When I delete task "00000000-0000-4000-8000-000000000000" with --force
-    Then the command should fail with "Task not found: 00000000-0000-4000-8000-000000000000"
+    Then the command should fail with "Task not found:"

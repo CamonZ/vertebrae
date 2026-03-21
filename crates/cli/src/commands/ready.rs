@@ -52,7 +52,10 @@ impl ReadyCommand {
     /// Returns `ServiceError` if database operations fail.
     pub async fn execute(&self, services: &VertebraeServices) -> Result<ReadyResult, ServiceError> {
         // Get ready items for backlog status (ready to start work)
-        let backlog_ready = services.tasks().list_ready().await?;
+        let mut backlog_ready = services.tasks().list_ready().await?;
+
+        // Filter out archived tasks
+        backlog_ready.retain(|t| !t.archived);
 
         Ok(ReadyResult { backlog_ready })
     }
