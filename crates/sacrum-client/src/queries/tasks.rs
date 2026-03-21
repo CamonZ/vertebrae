@@ -233,6 +233,14 @@ pub const MOVE_TO_STEP: &str = r#"
     }
 "#;
 
+pub const ADVANCE_TO_STEP: &str = r#"
+    mutation AdvanceToStep($task_id: Uuid4!, $step_id: Uuid4!) {
+        advance_to_step(task_id: $task_id, step_id: $step_id) {
+            id current_step_id
+        }
+    }
+"#;
+
 pub const START_STEP: &str = r#"
     mutation StartStep($task_id: Uuid4!) {
         start_step(task_id: $task_id) {

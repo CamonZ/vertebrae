@@ -14,7 +14,7 @@ use vertebrae_core::workflow_service::{
 
 use crate::api_types::{WorkflowResponse, WorkflowStepResponse, WorkflowTransitionResponse};
 use crate::client::{GraphqlClient, with_fragments};
-use crate::queries::steps::{CREATE_STEP, STEP_FIELDS};
+use crate::queries::steps::{CREATE_STEP, STEP_FIELDS, SYNC_STEP_TRANSITIONS};
 use crate::queries::tasks::{ASSIGN_WORKFLOW, UNASSIGN_WORKFLOW};
 use crate::queries::workflows::{
     CREATE_WORKFLOW, CREATE_WORKFLOW_TRANSITION, DELETE_WORKFLOW, DELETE_WORKFLOW_TRANSITION,
@@ -175,6 +175,8 @@ impl WorkflowService for SacrumWorkflowService {
         // Create steps if any were provided
         if !options.steps.is_empty() {
             let step_query = with_fragments(CREATE_STEP, &[STEP_FIELDS]);
+            let mut created_step_ids: Vec<String> = Vec::new();
+
             for (i, step) in options.steps.iter().enumerate() {
                 let agent_config =
                     serde_json::to_string(&json!({ "model": step.model })).unwrap_or_default();
@@ -185,10 +187,28 @@ impl WorkflowService for SacrumWorkflowService {
                     "step_order": i as i32,
                 });
 
-                let _: serde_json::Value = self
+                let resp: WorkflowStepResponse = self
                     .client
                     .execute(&step_query, step_variables, "create_workflow_step")
                     .await?;
+                created_step_ids.push(resp.id);
+            }
+
+            // Set up linear transitions between consecutive steps
+            if created_step_ids.len() > 1 {
+                let sync_query = with_fragments(SYNC_STEP_TRANSITIONS, &[STEP_FIELDS]);
+                for i in 0..created_step_ids.len() - 1 {
+                    let from_id = &created_step_ids[i];
+                    let to_id = &created_step_ids[i + 1];
+                    let sync_vars = json!({
+                        "id": from_id,
+                        "transitions": [{"to_step_id": to_id}],
+                    });
+                    let _: serde_json::Value = self
+                        .client
+                        .execute(&sync_query, sync_vars.clone(), "sync_step_transitions")
+                        .await?;
+                }
             }
         }
 
@@ -797,7 +817,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        // Subsequent calls: create_workflow_step returns step data
+        // Second call: create_workflow_step for step 1
         Mock::given(method("POST"))
             .and(path("/graphql"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
@@ -819,7 +839,59 @@ mod tests {
                     }
                 }
             })))
-            .expect(2)
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        // Third call: create_workflow_step for step 2
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "create_workflow_step": {
+                        "id": "step-2",
+                        "name": "review",
+                        "goal": null,
+                        "agents": [],
+                        "skills": [],
+                        "agent_config": {"model": "haiku"},
+                        "is_final": false,
+                        "step_order": 1,
+                        "workflow_id": "wf-with-steps",
+                        "project_id": "test-proj",
+                        "inserted_at": "2026-01-01T00:00:00Z",
+                        "updated_at": "2026-01-01T00:00:00Z",
+                        "transitions": []
+                    }
+                }
+            })))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        // Fourth call: sync_step_transitions for step-1 -> step-2
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "sync_step_transitions": {
+                        "id": "step-1",
+                        "name": "implement",
+                        "goal": null,
+                        "agents": [],
+                        "skills": [],
+                        "agent_config": {"model": "sonnet"},
+                        "is_final": false,
+                        "step_order": 0,
+                        "workflow_id": "wf-with-steps",
+                        "project_id": "test-proj",
+                        "inserted_at": "2026-01-01T00:00:00Z",
+                        "updated_at": "2026-01-01T00:00:00Z",
+                        "transitions": [{"id": "t-1", "to_step_id": "step-2", "label": null}]
+                    }
+                }
+            })))
+            .up_to_n_times(1)
             .mount(&server)
             .await;
 
