@@ -8,17 +8,17 @@ use vertebrae_core::{ServiceError, VertebraeServices};
 
 /// Transition a task to a specific workflow step
 ///
-/// Both arguments are UUIDs. The target step must belong to the same workflow
-/// the task is currently assigned to, and must be a valid transition from the
-/// task's current step (unless --skip-validation is used).
+/// The task argument is a UUID. The target can be either a full UUID or a step
+/// name (e.g., 'backlog', 'in_progress', 'done'). When a name is given, it is
+/// resolved by looking up the task's current workflow steps.
 #[derive(Debug, Args)]
 pub struct TransitionToCommand {
     /// Task UUID to transition
     #[arg(required = true, value_parser = crate::commands::parse_uuid("task ID"))]
     pub id: String,
 
-    /// Target step UUID to transition the task to
-    #[arg(required = true, value_parser = crate::commands::parse_uuid("step ID"))]
+    /// Target step: a full UUID or step name (e.g., 'backlog', 'in_progress')
+    #[arg(required = true)]
     pub target: String,
 
     /// Override warnings (but not errors) when transitioning
@@ -103,7 +103,7 @@ impl TransitionToCommand {
         services: &VertebraeServices,
     ) -> Result<TransitionToResult, ServiceError> {
         let id = self.id.to_lowercase();
-        let target_step_id = self.target.to_lowercase();
+        let target_input = self.target.clone();
 
         // Get the task
         let task = services.tasks().get_task(&id).await?;
@@ -112,18 +112,57 @@ impl TransitionToCommand {
         let from_workflow = task.workflow_id.clone();
         let from_step = task.current_step_id.clone();
 
-        // Resolve target step - validate it exists
-        let target_step = services
-            .steps()
-            .get_step(&target_step_id)
-            .await?
-            .ok_or_else(|| {
+        // Resolve target: full UUID or step name
+        let target_step = if uuid::Uuid::parse_str(&target_input).is_ok() {
+            // Full UUID — look up directly
+            let target_step_id = target_input.to_lowercase();
+            services
+                .steps()
+                .get_step(&target_step_id)
+                .await?
+                .ok_or_else(|| {
+                    ServiceError::InvalidInput(format!(
+                        "Step '{}' not found. Use 'vtb step list <workflow-id>' to see available steps.",
+                        target_step_id
+                    ))
+                })?
+        } else {
+            // Treat as step name — resolve via the task's workflow
+            let wf_id = from_workflow.as_ref().ok_or_else(|| {
                 ServiceError::InvalidInput(format!(
-                    "Step '{}' not found. Use 'vtb step list <workflow-id>' to see available steps.",
-                    target_step_id
+                    "Task '{}' is not assigned to any workflow. \
+                     Use 'vtb workflow assign' first.",
+                    id
                 ))
             })?;
 
+            let steps = services.steps().list_steps_for_workflow(wf_id).await?;
+
+            match steps.iter().find(|s| s.name == target_input) {
+                Some(step) => step.clone(),
+                None => {
+                    // Check if the name exists in another workflow
+                    let all_steps = services.steps().list_all_steps().await?;
+                    if let Some(other) = all_steps.iter().find(|s| s.name == target_input) {
+                        return Err(ServiceError::InvalidInput(format!(
+                            "Target step belongs to workflow '{}' but task is in workflow '{}'. \
+                             Use 'vtb workflow assign' to change workflows first.",
+                            other.workflow_id, wf_id
+                        )));
+                    }
+                    return Err(ServiceError::InvalidInput(format!(
+                        "Step name '{}' not found in workflow. \
+                         Use 'vtb step list {}' to see available steps.",
+                        target_input, wf_id
+                    )));
+                }
+            }
+        };
+
+        let target_step_id = target_step
+            .id
+            .clone()
+            .expect("resolved step must have an ID");
         let target_workflow_id = target_step.workflow_id.clone();
 
         // Validate the task is assigned to the same workflow
@@ -195,14 +234,36 @@ impl TransitionToCommand {
             }
         }
 
-        // Perform the transition
-        services
-            .tasks()
-            .set_current_step(&id, &target_step_id)
-            .await?;
+        // Skip the backend call if already on the target step (no-op)
+        let is_same_step = from_step.as_ref() == Some(&target_step_id);
+        if !is_same_step {
+            if self.skip_validation {
+                services
+                    .tasks()
+                    .advance_to_step(&id, &target_step_id)
+                    .await?;
+            } else {
+                services
+                    .tasks()
+                    .set_current_step(&id, &target_step_id)
+                    .await?;
+            }
+        }
 
-        // Resolve target step name for display
+        // Resolve names for display
         let target_step_name = Some(target_step.name.clone());
+        let workflow = services
+            .workflows()
+            .get_workflow(&target_workflow_id)
+            .await?;
+        let target_workflow_name = workflow.name;
+
+        let from_workflow_name = from_workflow.as_ref().map(|_| target_workflow_name.clone());
+        let from_step_name = if let Some(step_id) = &from_step {
+            services.steps().get_step(step_id).await?.map(|s| s.name)
+        } else {
+            None
+        };
 
         // Get unblocked tasks (for done/terminal steps)
         let mut unblocked_tasks = vec![];
@@ -225,10 +286,10 @@ impl TransitionToCommand {
 
         Ok(TransitionToResult {
             id,
-            target_workflow: target_workflow_id,
+            target_workflow: target_workflow_name,
             target_step: target_step_name,
-            from_workflow,
-            from_step,
+            from_workflow: from_workflow_name,
+            from_step: from_step_name,
             unblocked_tasks,
             validation_skipped: self.skip_validation,
         })

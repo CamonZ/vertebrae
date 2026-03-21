@@ -1419,14 +1419,18 @@ mod tests {
     }
 
     #[test]
-    fn test_command_transition_to_rejects_non_uuid_target() {
-        let result = TestCli::try_parse_from([
+    fn test_command_transition_to_accepts_step_name_as_target() {
+        let cli = TestCli::try_parse_from([
             "test",
             "transition-to",
             "a1b2c3d4-0000-4000-8000-000000000001",
-            "not-a-uuid",
+            "in_progress",
         ]);
-        assert!(result.is_err());
+        assert!(cli.is_ok(), "step names should be accepted as target");
+        let Command::TransitionTo(cmd) = cli.unwrap().command else {
+            panic!("expected TransitionTo");
+        };
+        assert_eq!(cmd.target, "in_progress");
     }
 
     #[test]
