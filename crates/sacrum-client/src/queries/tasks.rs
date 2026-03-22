@@ -54,6 +54,7 @@ pub const LIST_TASKS: &str = r#"
     query ListTasks(
         $project_id: Uuid4!,
         $level: String,
+        $priority: String,
         $parent_id: Uuid4,
         $status: String,
         $tags: [String!],
@@ -66,6 +67,7 @@ pub const LIST_TASKS: &str = r#"
         tasks(
             project_id: $project_id,
             level: $level,
+            priority: $priority,
             parent_id: $parent_id,
             status: $status,
             tags: $tags,
@@ -342,6 +344,14 @@ pub const CREATE_CODE_REF: &str = r#"
 pub const DELETE_CODE_REF: &str = r#"
     mutation DeleteCodeRef($id: Uuid4!) {
         delete_code_ref(id: $id) {
+            id
+        }
+    }
+"#;
+
+pub const DELETE_TASK_CODE_REFS: &str = r#"
+    mutation DeleteTaskCodeRefs($task_id: Uuid4!) {
+        deleteTaskCodeRefs(task_id: $task_id) {
             id
         }
     }
