@@ -10,14 +10,22 @@ Feature: Step lifecycle
 
   # --- transition-to ---
 
-  Scenario: Transition to valid next step
+  Scenario: Transition to valid next step shows from and to
     When I transition the task to step "in_progress"
     Then the output should contain "Transitioned task"
+    And the output should contain "from test-wf:backlog"
     And the output should contain "to test-wf:in_progress"
 
   Scenario: Transition to same step is allowed
     When I transition the task to step "backlog"
     Then the command should succeed
+
+  Scenario: Sequential transitions through workflow
+    When I transition the task to step "in_progress"
+    And I transition the task to step "pending_review"
+    Then the output should contain "Transitioned task"
+    And the output should contain "from test-wf:in_progress"
+    And the output should contain "to test-wf:pending_review"
 
   Scenario: Transition with --skip-validation bypasses graph
     When I transition the task to step "done" with --skip-validation
@@ -28,6 +36,7 @@ Feature: Step lifecycle
     When I transition the task to step "done"
     Then the command should fail with "Invalid step transition from"
     And the error should contain "Valid transitions from"
+    And the error should contain "backlog"
 
   Scenario: Task without workflow cannot transition
     Given I create a task with:
@@ -42,7 +51,7 @@ Feature: Step lifecycle
     Then the command should fail with "Target step belongs to workflow"
     And the error should contain "Use 'vtb workflow assign' to change workflows first"
 
-  Scenario: Transition to final step shows unblocked tasks
+  Scenario: Transition to final step shows unblocked tasks with title
     Given I create a task with:
       | title | Dependent task |
     And I store the task ID as "dependent_id"
@@ -50,7 +59,12 @@ Feature: Step lifecycle
     When I transition the lifecycle task through to step "done" with --skip-validation
     Then the output should contain "Unblocked tasks:"
     And the output should contain "<dependent_id>"
+    And the output should contain "Dependent task"
 
-  Scenario: Transition to non-existent step fails
+  Scenario: Transition to non-existent step name fails
+    When I transition the task to step "nonexistent_step_name"
+    Then the command should fail with "not found"
+
+  Scenario: Transition to non-existent step UUID fails
     When I transition the task to step "00000000-0000-4000-8000-000000000000"
     Then the command should fail with "not found"
