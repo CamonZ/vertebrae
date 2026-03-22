@@ -494,6 +494,9 @@ impl TaskService for SacrumTaskService {
         if let Some(level) = filter.levels.first() {
             variables["level"] = json!(level.as_str());
         }
+        if let Some(priority) = filter.priorities.first() {
+            variables["priority"] = json!(priority.as_str());
+        }
         if let Some(ref parent_id) = filter.children_of {
             variables["parent_id"] = json!(parent_id);
         }
@@ -543,6 +546,9 @@ impl TaskService for SacrumTaskService {
 
         if let Some(level) = filter.levels.first() {
             variables["level"] = json!(level.as_str());
+        }
+        if let Some(priority) = filter.priorities.first() {
+            variables["priority"] = json!(priority.as_str());
         }
         if let Some(ref parent_id) = filter.children_of {
             variables["parent_id"] = json!(parent_id);
@@ -897,15 +903,23 @@ impl TaskService for SacrumTaskService {
     }
 
     async fn remove_code_refs(&self, id: &str, indices: Option<Vec<usize>>) -> ServiceResult<()> {
-        if let Some(indices) = indices {
-            let response = self.fetch_task_response(id).await?;
-            for idx in indices {
-                if let Some(ref_response) = response.code_refs.get(idx) {
-                    let variables = json!({ "id": ref_response.id });
-                    self.client
-                        .execute_void(tasks::DELETE_CODE_REF, variables)
-                        .await?;
+        match indices {
+            Some(indices) => {
+                let response = self.fetch_task_response(id).await?;
+                for idx in indices {
+                    if let Some(ref_response) = response.code_refs.get(idx) {
+                        let variables = json!({ "id": ref_response.id });
+                        self.client
+                            .execute_void(tasks::DELETE_CODE_REF, variables)
+                            .await?;
+                    }
                 }
+            }
+            None => {
+                let variables = json!({ "task_id": id });
+                self.client
+                    .execute_void(tasks::DELETE_TASK_CODE_REFS, variables)
+                    .await?;
             }
         }
         Ok(())
@@ -1798,6 +1812,26 @@ mod tests {
 
         let service = create_wiremock_service(&server.uri());
         let result = service.remove_code_refs("task-1", Some(vec![1])).await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_remove_all_code_refs() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("DeleteTaskCodeRefs"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "deleteTaskCodeRefs": { "id": "task-1" } }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let result = service.remove_code_refs("task-1", None).await;
 
         assert!(result.is_ok());
     }
