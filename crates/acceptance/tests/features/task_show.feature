@@ -63,6 +63,53 @@ Feature: Show task details
     When I show the task
     Then the output should contain "Human Review: True"
 
+  Scenario: Show task displays sections
+    Given I create a task with:
+      | title | Section show task |
+    When I add a "goal" section with content "Ship fast"
+    And I add a "checklist_item" section with content "Write code"
+    And I add a "checklist_item" section with content "Add tests"
+    And I add a "constraint" section with content "No regressions"
+    And I show the task
+    Then the output should contain "Goal"
+    And the output should contain "Ship fast"
+    And the output should contain "Checklist Items"
+    And the output should contain "Write code"
+    And the output should contain "Add tests"
+    And the output should contain "Constraints"
+    And the output should contain "No regressions"
+
+  Scenario: Show task displays code references
+    Given I create a task with:
+      | title | Ref show task |
+    When I add a ref "src/main.rs:L42" with:
+      | name | entry_point |
+    And I add a ref "src/lib.rs:L10-20"
+    And I show the task
+    Then the output should contain "Code References"
+    And the output should contain "src/main.rs"
+    And the output should contain "[entry_point]"
+    And the output should contain "src/lib.rs"
+
+  Scenario: Show task displays checklist items with checkboxes
+    Given I create a task with:
+      | title | Checkbox show task |
+    When I add a "checklist_item" section with content "Not done yet"
+    And I add a "checklist_item" section with content "Already done"
+    And I check item 2
+    And I show the task
+    Then the output should contain "Checklist Items"
+    And the output should contain "[ ] Not done yet"
+    And the output should contain "[x] Already done"
+
+  Scenario: Show task displays timestamps
+    Given I create a task with:
+      | title | Timestamp task |
+    When I show the task
+    Then the output should contain "Started At:"
+    And the output should contain "Updated At:"
+    And the output should contain "Completed At:"
+
   Scenario: Show non-existent task fails
     When I show the task "00000000-0000-4000-8000-000000000000"
     Then the command should fail with "Task not found:"

@@ -102,6 +102,23 @@ pub struct SectionResponse {
     pub inserted_at: Option<String>,
     #[serde(default)]
     pub updated_at: Option<String>,
+    #[serde(default)]
+    pub code_refs: Vec<SectionCodeRefResponse>,
+}
+
+/// A code reference nested inside a section response (no task_id — section-scoped)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SectionCodeRefResponse {
+    pub id: String,
+    pub path: String,
+    #[serde(default)]
+    pub line_start: Option<i32>,
+    #[serde(default)]
+    pub line_end: Option<i32>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
 /// Code reference response from Sacrum API (matches CodeRefJSON)

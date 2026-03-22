@@ -69,6 +69,63 @@ Feature: Sections and checklist items
     Then the output should contain "Desired Behavior"
     And the output should contain "Undesired Behavior"
 
+  Scenario: Sections output shows goal content
+    When I add a "goal" section with content "Ship the MVP"
+    And I list sections
+    Then the output should contain "Sections for task:"
+    And the output should contain "Goal: Ship the MVP"
+
+  Scenario: Sections output shows checklist items with ordinals
+    When I add a "checklist_item" section with content "Write tests"
+    And I add a "checklist_item" section with content "Update docs"
+    And I list sections
+    Then the output should contain "Checklist Items:"
+    And the output should contain "Write tests"
+    And the output should contain "Update docs"
+
+  Scenario: Sections output shows testing criteria label
+    When I add a "testing_criterion" section with content "Verify output format"
+    And I list sections
+    Then the output should contain "Testing Criteria:"
+    And the output should contain "Verify output format"
+
+  Scenario: Sections output shows constraint under undesired behavior
+    When I add a "constraint" section with content "Must not break API"
+    And I list sections
+    Then the output should contain "Undesired Behavior"
+    And the output should contain "Constraints:"
+    And the output should contain "Must not break API"
+
+  Scenario: Sections output shows anti-pattern under undesired behavior
+    When I add a "anti_pattern" section with content "Do not use global state"
+    And I list sections
+    Then the output should contain "Undesired Behavior"
+    And the output should contain "Anti-Patterns:"
+    And the output should contain "Do not use global state"
+
+  Scenario: Sections output shows context under desired behavior
+    When I add a "context" section with content "This is the background"
+    And I list sections
+    Then the output should contain "Desired Behavior"
+    And the output should contain "Context: This is the background"
+
+  Scenario: Sections output shows testing criterion with code ref
+    When I add a "testing_criterion" section with content "Verify parsing"
+    And I add a criterion-ref 1 "tests/parse_test.rs:L10" with:
+      | name | test_parse |
+    And I list sections
+    Then the output should contain "Testing Criteria:"
+    And the output should contain "Verify parsing"
+    And the output should contain "tests/parse_test.rs"
+    And the output should contain "test_parse"
+
+  Scenario: Sections output shows failure test under undesired behavior
+    When I add a "failure_test" section with content "Should reject empty input"
+    And I list sections
+    Then the output should contain "Undesired Behavior"
+    And the output should contain "Failure Tests:"
+    And the output should contain "Should reject empty input"
+
   # --- unsection (remove) ---
 
   Scenario: Remove single-instance section

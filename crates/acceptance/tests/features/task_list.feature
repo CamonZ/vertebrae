@@ -29,19 +29,26 @@ Feature: List tasks
     Then the output should contain "<epic_id>"
     And the output should not contain "<ticket_id>"
 
-  Scenario: Filter by priority
+  Scenario Outline: Filter by each priority value
     Given I create a task with:
-      | title    | Critical |
-      | priority | critical |
-    And I store the task ID as "critical_id"
+      | title    | Target task     |
+      | priority | <target>        |
+    And I store the task ID as "target_id"
     And I create a task with:
-      | title    | Low |
-      | priority | low |
-    And I store the task ID as "low_id"
+      | title    | Other task      |
+      | priority | <other>         |
+    And I store the task ID as "other_id"
     When I list tasks with:
-      | priority | critical |
-    Then the output should contain "<critical_id>"
-    And the output should not contain "<low_id>"
+      | priority | <target> |
+    Then the output should contain "<target_id>"
+    And the output should not contain "<other_id>"
+
+    Examples:
+      | target   | other    |
+      | low      | critical |
+      | medium   | low      |
+      | high     | medium   |
+      | critical | high     |
 
   Scenario: Filter by tag
     Given I create a task with:
@@ -99,6 +106,57 @@ Feature: List tasks
       | search | Database |
     Then the output should contain "<db_id>"
     And the output should not contain "<api_id>"
+
+  Scenario: No priority filter returns tasks of all priorities
+    Given I create a task with:
+      | title    | Low priority   |
+      | priority | low            |
+    And I store the task ID as "low_id"
+    And I create a task with:
+      | title    | High priority  |
+      | priority | high           |
+    And I store the task ID as "high_id"
+    When I list tasks
+    Then the output should contain "<low_id>"
+    And the output should contain "<high_id>"
+
+  Scenario: No level filter returns tasks of all levels
+    Given I create a task with:
+      | title | Epic item  |
+      | level | epic       |
+    And I store the task ID as "epic_id"
+    And I create a task with:
+      | title | Task item  |
+      | level | task       |
+    And I store the task ID as "task_id"
+    When I list tasks
+    Then the output should contain "<epic_id>"
+    And the output should contain "<task_id>"
+
+  Scenario: No tag filter returns tasks regardless of tags
+    Given I create a task with:
+      | title | Tagged     |
+      | tags  | special    |
+    And I store the task ID as "tagged_id"
+    And I create a task with:
+      | title | Untagged   |
+    And I store the task ID as "untagged_id"
+    When I list tasks
+    Then the output should contain "<tagged_id>"
+    And the output should contain "<untagged_id>"
+
+  Scenario: No root filter returns both root and child tasks
+    Given I create a task with:
+      | title | Parent epic |
+      | level | epic        |
+    And I store the task ID as "parent_id"
+    And I create a task with:
+      | title  | Child task  |
+      | parent | <parent_id> |
+    And I store the task ID as "child_id"
+    When I list tasks
+    Then the output should contain "<parent_id>"
+    And the output should contain "<child_id>"
 
   Scenario: Empty search query is rejected
     When I list tasks with:

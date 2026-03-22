@@ -69,6 +69,27 @@ Feature: Code references
     And the output should contain "L10"
     And the output should contain "entry"
 
+  Scenario: Refs human-readable output shows line ranges
+    When I add a ref "src/cmd.rs:L100-150" with:
+      | name | handler |
+    And I add a ref "src/utils.rs:L42"
+    And I add a ref "src/config.rs" with:
+      | description | Config module |
+    And I list refs
+    Then the output should contain "Code references for: <TASK_ID>"
+    And the output should contain "src/cmd.rs"
+    And the output should contain "L100-150"
+    And the output should contain "handler"
+    And the output should contain "src/utils.rs"
+    And the output should contain "L42"
+    And the output should contain "src/config.rs"
+    And the output should contain "Config module"
+
+  Scenario: Refs output shows file-only ref with dash for lines
+    When I add a ref "README.md"
+    And I list refs
+    Then the output should contain "README.md"
+
   Scenario: Refs sorted by path then line number
     When I add a ref "src/z.rs:L50"
     And I add a ref "src/a.rs:L100"
