@@ -348,3 +348,11 @@ pub const DELETE_CODE_REF: &str = r#"
         }
     }
 "#;
+
+pub const DELETE_TASK_CODE_REFS: &str = r#"
+    mutation DeleteTaskCodeRefs($task_id: Uuid4!) {
+        deleteTaskCodeRefs(task_id: $task_id) {
+            id
+        }
+    }
+"#;
