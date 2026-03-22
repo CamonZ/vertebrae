@@ -218,13 +218,25 @@ fn section_response_to_section(r: &SectionResponse) -> ServiceResult<Section> {
         .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
         .map(|dt| dt.with_timezone(&chrono::Utc));
 
+    let refs = r
+        .code_refs
+        .iter()
+        .map(|cr| CodeRef {
+            path: cr.path.clone(),
+            line_start: cr.line_start.map(|v| v as u32),
+            line_end: cr.line_end.map(|v| v as u32),
+            name: cr.name.clone(),
+            description: cr.description.clone(),
+        })
+        .collect();
+
     Ok(Section {
         section_type,
         content: r.content.clone(),
         order: Some(r.section_order as u32),
         done: r.done,
         done_at,
-        refs: Vec::new(),
+        refs,
     })
 }
 
@@ -1080,6 +1092,7 @@ mod tests {
             done_at: None,
             inserted_at: None,
             updated_at: None,
+            code_refs: vec![],
         }];
 
         let task = service.response_to_task(&response).unwrap();
@@ -1168,6 +1181,7 @@ mod tests {
                 done_at: None,
                 inserted_at: None,
                 updated_at: None,
+                code_refs: vec![],
             };
             let section = section_response_to_section(&response).unwrap();
             assert_eq!(section.section_type, expected_type);
