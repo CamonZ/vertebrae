@@ -26,13 +26,20 @@ Feature: Update tasks
       | description | |
     Then the task description should be empty
 
-  Scenario: Update priority
+  Scenario Outline: Update priority to each value
     Given I create a task with:
       | title    | Priority task |
-      | priority | low           |
+      | priority | <from>        |
     When I update the task with:
-      | priority | critical |
-    Then the task priority should be "critical"
+      | priority | <to> |
+    Then the task priority should be "<to>"
+
+    Examples:
+      | from     | to       |
+      | low      | medium   |
+      | medium   | high     |
+      | high     | critical |
+      | critical | low      |
 
   Scenario: Add tags
     Given I create a task with:

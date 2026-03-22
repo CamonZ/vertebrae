@@ -32,6 +32,14 @@ pub const TASK_FIELDS: &str = r#"
             done_at
             inserted_at
             updated_at
+            code_refs {
+                id
+                path
+                line_start
+                line_end
+                name
+                description
+            }
         }
         code_refs {
             id
