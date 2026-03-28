@@ -25,29 +25,80 @@ Orchestrate the full GUI development feedback loop: make code changes, wait for 
 6. If incorrect, iterate from step 2
 ```
 
+## Critical: Coordinate Systems
+
+Screenshots use **image coordinates** (0,0 = top-left of the captured window). Click/mouse commands use **screen coordinates** (absolute position on the display). You MUST convert between them.
+
+**Conversion formula:**
+```
+screen_x = window_frame.x + image_x
+screen_y = window_frame.y + image_y
+```
+
+Get the window frame from `vtb-gui window list gui`:
+```json
+{"app":"gui","frame":{"x":911,"y":292,"w":3077,"h":1787},"title":"Vertebrae","id":3509}
+```
+
+If a UI element is at image coordinates (1200, 630), the click target is:
+```
+screen_x = 911 + 1200 = 2111
+screen_y = 292 + 630 = 922
+```
+
+**IMPORTANT:** The Tauri app appears as `gui` in the process list, NOT `Vertebrae`. Use `gui` as the app name for window commands, and `"Vertebrae"` as the optional title filter.
+
+## Critical: Performance
+
+**Chain commands in a single Bash call.** Each separate tool invocation adds overhead. Do this:
+
+```bash
+# GOOD: one Bash call, no sleep needed
+vtb-gui click 2111 922 && vtb-gui screenshot-app gui "Vertebrae"
+```
+
+```bash
+# BAD: two separate tool calls with sleep
+vtb-gui click 2111 922    # call 1
+sleep 1                    # unnecessary wait
+vtb-gui screenshot-app gui # call 2
+```
+
+**Crop inline with screenshots.** Don't take a full screenshot, then crop, then read — combine when possible:
+
+```bash
+# Capture and crop in one chain
+vtb-gui screenshot-app gui "Vertebrae" && vtb-gui screenshot-region "$(jq -r .path < /tmp/last.json)" 100 200 400 300
+```
+
+**UI updates are instant** after clicks in a web-based app. Only sleep when waiting for:
+- Hot reload after code changes (2-3s for Vite, 10-15s for Rust)
+- Network requests to complete
+- Animations to finish
+
 ## Step-by-Step Guide
 
 ### 1. Launch the Development App
 
-Start the Tauri dev server and wait for the window to appear:
+Start the Tauri dev server (from `crates/gui/`):
 
 ```bash
-hammerspoon/bin/vtb-gui launch Vertebrae 60
+cd crates/gui && npm run tauri:dev &>/tmp/tauri-dev.log &
 ```
 
-Returns JSON with window info once the app is ready. If the app is already running, returns immediately with `"status": "already_running"`.
-
-To just check if the app is already running without launching:
+Wait for the window to appear (first build takes several minutes):
 
 ```bash
-hammerspoon/bin/vtb-gui window list Vertebrae
+vtb-gui wait-for-window gui 120
 ```
 
-If the app was started externally (e.g., from another terminal), wait for its window to appear:
+To check if the app is already running:
 
 ```bash
-hammerspoon/bin/vtb-gui wait-for-window Vertebrae 30
+vtb-gui window list gui
 ```
+
+**Note:** The process name is `gui`, the window title is `Vertebrae`.
 
 ### 2. Make Code Changes
 
@@ -57,31 +108,28 @@ Edit React components in `crates/gui/src/` or Rust backend in `crates/gui/src-ta
 
 After editing frontend files, wait 2-3 seconds for Vite hot reload. After editing Rust backend files, wait 10-15 seconds for Tauri rebuild.
 
-### 4. Capture a Screenshot
+### 4. Capture and Analyze in One Step
 
-Capture the app window by name (preferred -- finds and captures the first window):
-
-```bash
-hammerspoon/bin/vtb-gui screenshot-app Vertebrae
-```
-
-Returns JSON: `{"success": true, "path": "/tmp/vtb-screenshot-XXXXXX.png"}`
-
-To capture a specific window by title substring (useful if the app has multiple windows):
+Capture the app window and read the result immediately:
 
 ```bash
-hammerspoon/bin/vtb-gui screenshot-app Vertebrae "Settings"
+vtb-gui screenshot-app gui "Vertebrae"
 ```
 
-Other screenshot variants:
+Returns JSON: `{"success": true, "path": "/tmp/lua_XXXXXX.png", "window_id": 3509}`
+
+Then read the image with the Read tool to analyze it visually.
+
+**For small/dense UI areas, crop first:**
 
 ```bash
-# Full screen screenshot (captures entire display)
-hammerspoon/bin/vtb-gui screenshot
-
-# Screenshot a specific window by its numeric ID
-hammerspoon/bin/vtb-gui screenshot-window 12345
+# Take screenshot, then crop to the area of interest
+vtb-gui screenshot-app gui "Vertebrae"
+# Use the returned path to crop:
+vtb-gui screenshot-region /tmp/lua_XXXXXX.png 700 250 1700 700
 ```
+
+Image coordinates for cropping: `<source> <x> <y> <width> <height>` — all in image pixels (0,0 = top-left of window).
 
 ### 5. Analyze the Screenshot
 
@@ -103,24 +151,24 @@ When iterating on visual changes, use the screenshot pipeline to automatically c
 
 ```bash
 # Full pipeline: capture before, execute an action, capture after, diff
-hammerspoon/bin/vtb-gui screenshot-pipeline Vertebrae "click 500 300" "" 2
+vtb-gui screenshot-pipeline Vertebrae "click 500 300" "" 2
 ```
 
 Or do it manually:
 
 ```bash
 # 1. Capture "before" state
-hammerspoon/bin/vtb-gui screenshot-app Vertebrae
+vtb-gui screenshot-app Vertebrae
 # Note the path from the response
 
 # 2. Make code changes and wait for reload
 
 # 3. Capture "after" state
-hammerspoon/bin/vtb-gui screenshot-app Vertebrae
+vtb-gui screenshot-app Vertebrae
 # Note the path from the response
 
 # 4. Compare the two screenshots
-hammerspoon/bin/vtb-gui screenshot-diff /tmp/vtb-before.png /tmp/vtb-after.png
+vtb-gui screenshot-diff /tmp/vtb-before.png /tmp/vtb-after.png
 ```
 
 The diff returns a similarity score (0.0-1.0) and generates a visual diff image highlighting changed pixels in red.
@@ -130,7 +178,7 @@ The diff returns a similarity score (0.0-1.0) and generates a visual diff image 
 To focus analysis on a specific area of the UI:
 
 ```bash
-hammerspoon/bin/vtb-gui screenshot-region /tmp/vtb-screenshot.png 100 200 400 300
+vtb-gui screenshot-region /tmp/vtb-screenshot.png 100 200 400 300
 ```
 
 Arguments: `<source_png> <x> <y> <width> <height>`
@@ -139,74 +187,89 @@ Arguments: `<source_png> <x> <y> <width> <height>`
 
 ### Click and Type
 
+All click/mouse commands use **screen coordinates** (not image coordinates). See the coordinate system section above.
+
 ```bash
-# Click at screen coordinates
-hammerspoon/bin/vtb-gui click 500 300
+# Click at screen coordinates — chain with screenshot for instant feedback
+vtb-gui click 2111 922 && vtb-gui screenshot-app gui "Vertebrae"
 
 # Right-click
-hammerspoon/bin/vtb-gui right-click 500 300
+vtb-gui right-click 500 300
 
 # Type text into the focused element
-hammerspoon/bin/vtb-gui type "search query"
+vtb-gui type "search query"
 
 # Press a key combination (e.g., Cmd+S)
-hammerspoon/bin/vtb-gui key-press s cmd
+vtb-gui key-press s cmd
 
 # Move mouse without clicking
-hammerspoon/bin/vtb-gui move-mouse 500 300
+vtb-gui move-mouse 500 300
 
-# Get current mouse position
-hammerspoon/bin/vtb-gui mouse-position
+# Get current mouse position (useful for debugging coordinate issues)
+vtb-gui mouse-position
+```
+
+### Finding Click Targets
+
+**Preferred approach: screenshot and crop.** Take a screenshot, crop the area of interest, read it visually, then calculate screen coordinates from image coordinates.
+
+```bash
+# 1. Screenshot and get window frame
+vtb-gui window list gui
+# → frame: {x: 911, y: 292, w: 3077, h: 1787}
+
+# 2. Crop an area to see UI elements clearly
+vtb-gui screenshot-app gui "Vertebrae"
+vtb-gui screenshot-region /tmp/lua_XXX.png 20 170 60 100
+
+# 3. Read the crop, identify the element at image coords (50, 220)
+# 4. Convert: screen_x=911+50=961, screen_y=292+220=512
+vtb-gui click 961 512
+```
+
+**Fallback: accessibility inspection.** For web-based Tauri apps, this is slow and often returns a flat tree. Use depth 1 to avoid timeouts:
+
+```bash
+vtb-gui ui-elements-app gui 1
 ```
 
 ### Window Management
 
 ```bash
-# List all windows for an app
-hammerspoon/bin/vtb-gui window list Vertebrae
+# List all windows (use "gui" as app name, NOT "Vertebrae")
+vtb-gui window list gui
 
 # Find windows by title substring
-hammerspoon/bin/vtb-gui window find "Settings" Vertebrae
+vtb-gui window find "Settings" gui
 
 # Focus a window by ID
-hammerspoon/bin/vtb-gui window focus 12345
+vtb-gui window focus 3509
 
 # Get the currently focused window
-hammerspoon/bin/vtb-gui window focused
+vtb-gui window focused
 ```
-
-### UI Element Inspection
-
-Inspect the accessibility tree to find element positions for clicking:
-
-```bash
-# By app name (inspects first window, default depth 3)
-hammerspoon/bin/vtb-gui ui-elements-app Vertebrae
-
-# With custom depth for more detail
-hammerspoon/bin/vtb-gui ui-elements-app Vertebrae 5
-
-# By specific window ID
-hammerspoon/bin/vtb-gui ui-elements 12345 3
-```
-
-Use the returned element positions (x, y, width, height) to calculate click coordinates.
 
 ## Typical GUI Ticket Workflow
 
 When implementing a GUI ticket, follow this pattern:
 
 ```
-1. vtb-gui launch Vertebrae 60          # Ensure app is running
-2. vtb-gui screenshot-app Vertebrae     # Capture baseline state
-3. Read the baseline screenshot         # Understand current appearance
-4. Edit React/CSS files                 # Make the changes
-5. Sleep 3 seconds                      # Wait for hot reload
-6. vtb-gui screenshot-app Vertebrae     # Capture new state
-7. Read the new screenshot              # Verify visual result
-8. vtb-gui screenshot-diff <before> <after>  # Quantify changes
-9. If not right, go to step 4           # Iterate until correct
+1. vtb-gui window list gui                       # Check if app is running
+2. vtb-gui screenshot-app gui "Vertebrae"         # Capture baseline (note path)
+3. Read the screenshot, crop areas of interest     # Understand current state
+4. Edit React/CSS files                            # Make the changes
+5. Sleep 2-3s (Vite) or 10-15s (Rust)             # Wait for hot reload
+6. vtb-gui screenshot-app gui "Vertebrae"          # Capture new state
+7. Read the screenshot                             # Verify visual result
+8. vtb-gui screenshot-diff <before> <after>        # Quantify changes (optional)
+9. If not right, go to step 4                      # Iterate until correct
 ```
+
+**Key principles:**
+- Chain `click && screenshot` in one Bash call — no sleep between them
+- Use `screenshot-region` to crop dense areas before reading — full screenshots are often too small to analyze
+- Convert image coords → screen coords before clicking (add window frame x/y)
+- The app process is named `gui`, not `Vertebrae`
 
 ## Output Format
 
@@ -218,12 +281,14 @@ All `vtb-gui` commands return JSON. Success responses include `"success": true`.
 |---------|----------|
 | `hs command not found` | Install Hammerspoon and enable the CLI tool |
 | `no JSON output` | Check that `vtb.lua` is loaded in Hammerspoon's `init.lua` |
-| App window not found | Verify the app name matches exactly (use `vtb-gui window list <name>`) |
+| App window not found | The process is named `gui`, not `Vertebrae`. Use `vtb-gui window list gui` |
+| Click lands in wrong spot | You're using image coords instead of screen coords. Add window frame x/y |
+| Commands feel slow | Chain with `&&` in one Bash call. Don't sleep between click and screenshot |
 | Screenshot is blank | Ensure Screen Recording permission is granted to Hammerspoon |
 | Hot reload not working | Check Vite dev server is running (`npm run dev` in `crates/gui/`) |
 
 ## See Also
 
 - `hammerspoon/README.md` - Low-level Hammerspoon primitives documentation
-- `hammerspoon/bin/vtb-gui --help` - Full command reference
+- `vtb-gui --help` - Full command reference
 - `crates/gui/` - GUI source code (React frontend + Tauri backend)
