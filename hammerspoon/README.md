@@ -70,6 +70,32 @@ hs -c 'vtb.screenshot_app("Vertebrae")'
 hs -c 'vtb.screenshot_app("Vertebrae", "Settings")'
 ```
 
+### Screenshot Pipeline (Capture, Diff, Region Crop)
+
+These commands work with PNG files on disk and do not require Hammerspoon. They use Python (PIL/numpy) for image processing.
+
+```bash
+# Crop a region from an existing screenshot
+# Returns path to the cropped PNG
+hs -c 'vtb.screenshot_app("Vertebrae")' | vtb-gui screenshot-region <source.png> <x> <y> <width> <height>
+
+# Compare two screenshots (produces similarity score + visual diff)
+vtb-gui screenshot-diff before.png after.png [diff_output.png]
+# Returns: {"similarity": 0.96, "changed_pixels": 400, "diff_image": "/path/to/diff.png", ...}
+
+# Full before/after pipeline: screenshot → action → screenshot → diff
+vtb-gui screenshot-pipeline <app_name> "<vtb-gui action>" [title] [delay_secs]
+# Example: capture Vertebrae, click a button, capture again, diff
+vtb-gui screenshot-pipeline Vertebrae "click 500 300" "" 2
+```
+
+**Similarity scores:**
+- `1.0` = identical images
+- `0.96` = 4% of pixels changed (e.g., a button highlight)
+- `0.0` = completely different images
+
+The visual diff image highlights changed pixels in red against a dimmed version of the original.
+
 ### UI Element Inspection
 
 ```bash
@@ -96,7 +122,14 @@ Window enumeration uses `hs.application.runningApplications()` with per-app wind
 ```bash
 # Run all tests (requires Hammerspoon running + visible windows)
 ./hammerspoon/test_vtb.sh
+./hammerspoon/bin/test_vtb_gui.sh
 
-# Run basic tests only (no window dependency)
-./hammerspoon/test_vtb.sh --basic
+# Run basic tests only (no window dependency, includes image processing tests)
+./hammerspoon/bin/test_vtb_gui.sh --basic
+
+# Run image processing tests only (crop, diff — no Hammerspoon needed)
+./hammerspoon/bin/test_vtb_gui.sh --images
+
+# Run live tests only (requires Hammerspoon + visible windows)
+./hammerspoon/bin/test_vtb_gui.sh --live
 ```

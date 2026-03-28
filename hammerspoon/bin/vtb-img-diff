@@ -1,0 +1,197 @@
+#!/usr/bin/env python3
+"""
+vtb-img-diff - Image comparison utility for screenshot feedback pipeline.
+
+Compares two images and produces:
+  - A similarity score (0.0 = completely different, 1.0 = identical)
+  - An optional visual diff image highlighting changed pixels
+
+Usage:
+  vtb-img-diff <before> <after> [--diff-output <path>] [--threshold <0-255>]
+  vtb-img-diff crop <source> <output> <x> <y> <width> <height>
+
+Output: JSON to stdout.
+"""
+
+import json
+import sys
+import os
+import argparse
+
+import numpy as np
+from PIL import Image
+
+
+def json_error(msg: str, code: int = 1):
+    print(json.dumps({"error": msg}))
+    sys.exit(code)
+
+
+def json_result(data: dict):
+    print(json.dumps(data))
+    sys.exit(0)
+
+
+def cmd_diff(args):
+    before_path = args.before
+    after_path = args.after
+    diff_output = args.diff_output
+    threshold = args.threshold
+
+    if not os.path.isfile(before_path):
+        json_error(f"before image not found: {before_path}")
+    if not os.path.isfile(after_path):
+        json_error(f"after image not found: {after_path}")
+
+    try:
+        before_img = Image.open(before_path).convert("RGB")
+        after_img = Image.open(after_path).convert("RGB")
+    except Exception as e:
+        json_error(f"failed to open images: {e}")
+
+    before_size = before_img.size
+    after_size = after_img.size
+
+    # If sizes differ, resize the after image to match before for comparison
+    size_match = before_size == after_size
+    if not size_match:
+        after_img_resized = after_img.resize(before_size, Image.LANCZOS)
+    else:
+        after_img_resized = after_img
+
+    before_arr = np.array(before_img, dtype=np.int16)
+    after_arr = np.array(after_img_resized, dtype=np.int16)
+
+    # Per-pixel absolute difference across channels
+    pixel_diff = np.abs(before_arr - after_arr)
+
+    # A pixel is "changed" if any channel differs by more than threshold
+    max_channel_diff = pixel_diff.max(axis=2)
+    changed_mask = max_channel_diff > threshold
+
+    total_pixels = changed_mask.size
+    changed_pixels = int(changed_mask.sum())
+    unchanged_pixels = total_pixels - changed_pixels
+
+    similarity = unchanged_pixels / total_pixels if total_pixels > 0 else 1.0
+
+    # Mean absolute difference normalized to 0-1
+    mean_diff = float(pixel_diff.mean()) / 255.0
+
+    result = {
+        "success": True,
+        "similarity": round(similarity, 6),
+        "mean_diff": round(mean_diff, 6),
+        "changed_pixels": changed_pixels,
+        "total_pixels": total_pixels,
+        "before_size": {"w": before_size[0], "h": before_size[1]},
+        "after_size": {"w": after_size[0], "h": after_size[1]},
+        "size_match": size_match,
+        "threshold": threshold,
+    }
+
+    if diff_output:
+        try:
+            diff_img = Image.new("RGB", before_size, (0, 0, 0))
+            diff_arr = np.array(diff_img)
+
+            # Unchanged pixels shown dimmed from the before image
+            dimmed = (before_arr * 0.3).astype(np.uint8)
+            diff_arr[~changed_mask] = dimmed[~changed_mask]
+
+            # Changed pixels highlighted in red, with intensity proportional to change
+            red_intensity = np.clip(max_channel_diff * 3, 0, 255).astype(np.uint8)
+            diff_arr[changed_mask, 0] = red_intensity[changed_mask]
+            diff_arr[changed_mask, 1] = 0
+            diff_arr[changed_mask, 2] = 0
+
+            diff_img = Image.fromarray(diff_arr)
+            diff_img.save(diff_output, "PNG")
+            result["diff_image"] = os.path.abspath(diff_output)
+        except Exception as e:
+            result["diff_image_error"] = str(e)
+
+    json_result(result)
+
+
+def cmd_crop(args):
+    source_path = args.source
+    output_path = args.output
+    x = args.x
+    y = args.y
+    width = args.width
+    height = args.height
+
+    if not os.path.isfile(source_path):
+        json_error(f"source image not found: {source_path}")
+
+    try:
+        img = Image.open(source_path)
+    except Exception as e:
+        json_error(f"failed to open image: {e}")
+
+    img_w, img_h = img.size
+
+    # Validate crop bounds
+    if x < 0 or y < 0:
+        json_error(f"crop origin must be non-negative, got x={x} y={y}")
+    if width <= 0 or height <= 0:
+        json_error(f"crop dimensions must be positive, got {width}x{height}")
+    if x + width > img_w or y + height > img_h:
+        json_error(
+            f"crop region ({x},{y},{width},{height}) exceeds image bounds ({img_w}x{img_h})"
+        )
+
+    cropped = img.crop((x, y, x + width, y + height))
+    cropped.save(output_path, "PNG")
+
+    json_result({
+        "success": True,
+        "path": os.path.abspath(output_path),
+        "region": {"x": x, "y": y, "w": width, "h": height},
+        "source_size": {"w": img_w, "h": img_h},
+    })
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Image comparison and cropping for screenshot feedback pipeline"
+    )
+    subparsers = parser.add_subparsers(dest="command")
+
+    # diff subcommand
+    diff_parser = subparsers.add_parser("diff", help="Compare two images")
+    diff_parser.add_argument("before", help="Path to before image")
+    diff_parser.add_argument("after", help="Path to after image")
+    diff_parser.add_argument(
+        "--diff-output", help="Path to save visual diff image", default=None
+    )
+    diff_parser.add_argument(
+        "--threshold",
+        type=int,
+        default=10,
+        help="Per-channel difference threshold to consider a pixel changed (0-255, default: 10)",
+    )
+
+    # crop subcommand
+    crop_parser = subparsers.add_parser("crop", help="Crop a region from an image")
+    crop_parser.add_argument("source", help="Path to source image")
+    crop_parser.add_argument("output", help="Path to save cropped image")
+    crop_parser.add_argument("x", type=int, help="X offset of crop region")
+    crop_parser.add_argument("y", type=int, help="Y offset of crop region")
+    crop_parser.add_argument("width", type=int, help="Width of crop region")
+    crop_parser.add_argument("height", type=int, help="Height of crop region")
+
+    args = parser.parse_args()
+
+    if args.command == "diff":
+        cmd_diff(args)
+    elif args.command == "crop":
+        cmd_crop(args)
+    else:
+        parser.print_help()
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

@@ -216,6 +216,151 @@ cmd_screenshot_app() {
 }
 
 # ---------------------------------------------------------------------------
+# Subcommand: screenshot-region
+# ---------------------------------------------------------------------------
+cmd_screenshot_region() {
+    local source="${1:-}"
+    local x="${2:-}"
+    local y="${3:-}"
+    local width="${4:-}"
+    local height="${5:-}"
+
+    [ -z "$source" ] || [ -z "$x" ] || [ -z "$y" ] || [ -z "$width" ] || [ -z "$height" ] && \
+        json_error "usage: vtb-gui screenshot-region <source_png> <x> <y> <width> <height>"
+
+    [ ! -f "$source" ] && json_error "source image not found: $source"
+
+    local output
+    output="$(mktemp /tmp/vtb-region-XXXXXX).png"
+
+    local result
+    result="$("$SCRIPT_DIR/vtb-img-diff" crop "$source" "$output" "$x" "$y" "$width" "$height" 2>&1)" || true
+
+    # vtb-img-diff returns JSON; pass it through
+    printf '%s\n' "$result"
+
+    # Exit with error if the result contains an error field
+    if printf '%s' "$result" | grep -q '"error"'; then
+        rm -f "$output"
+        exit 1
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Subcommand: screenshot-diff
+# ---------------------------------------------------------------------------
+cmd_screenshot_diff() {
+    local before="${1:-}"
+    local after="${2:-}"
+    local diff_output="${3:-}"
+
+    [ -z "$before" ] || [ -z "$after" ] && \
+        json_error "usage: vtb-gui screenshot-diff <before_png> <after_png> [diff_output_png]"
+
+    local diff_args=("diff" "$before" "$after")
+
+    if [ -z "$diff_output" ]; then
+        diff_output="$(mktemp /tmp/vtb-diff-XXXXXX).png"
+    fi
+    diff_args+=("--diff-output" "$diff_output")
+
+    local result
+    result="$("$SCRIPT_DIR/vtb-img-diff" "${diff_args[@]}" 2>&1)" || true
+
+    printf '%s\n' "$result"
+
+    if printf '%s' "$result" | grep -q '"error"'; then
+        exit 1
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Subcommand: screenshot-pipeline
+# ---------------------------------------------------------------------------
+# Helper: extract a field from a JSON string using python
+_json_field() {
+    printf '%s' "$1" | python3 -c "import sys,json; print(json.load(sys.stdin)['$2'])" 2>/dev/null
+}
+
+cmd_screenshot_pipeline() {
+    local app_name="${1:-}"
+    local action="${2:-}"
+    local title="${3:-}"
+    local delay="${4:-1}"
+
+    [ -z "$app_name" ] || [ -z "$action" ] && \
+        json_error "usage: vtb-gui screenshot-pipeline <app_name> <action_command> [title] [delay_secs]"
+
+    # Step 1: Capture "before" screenshot
+    local before_json
+    if [ -n "$title" ]; then
+        before_json="$(run_hs "vtb.screenshot_app('$(lua_escape "$app_name")', '$(lua_escape "$title")')")" || exit $?
+    else
+        before_json="$(run_hs "vtb.screenshot_app('$(lua_escape "$app_name")')")" || exit $?
+    fi
+
+    if printf '%s' "$before_json" | grep -q '"error"'; then
+        json_error "before screenshot failed"
+    fi
+
+    local before_path
+    before_path="$(_json_field "$before_json" path)"
+    [ -z "$before_path" ] && json_error "could not extract path from before screenshot"
+
+    # Step 2: Execute the action (a vtb-gui subcommand string)
+    local action_result
+    action_result="$(eval "$SCRIPT_DIR/vtb-gui $action" 2>&1)" || true
+
+    # Step 3: Wait for UI to settle
+    sleep "$delay"
+
+    # Step 4: Capture "after" screenshot
+    local after_json
+    if [ -n "$title" ]; then
+        after_json="$(run_hs "vtb.screenshot_app('$(lua_escape "$app_name")', '$(lua_escape "$title")')")" || exit $?
+    else
+        after_json="$(run_hs "vtb.screenshot_app('$(lua_escape "$app_name")')")" || exit $?
+    fi
+
+    if printf '%s' "$after_json" | grep -q '"error"'; then
+        json_error "after screenshot failed"
+    fi
+
+    local after_path
+    after_path="$(_json_field "$after_json" path)"
+    [ -z "$after_path" ] && json_error "could not extract path from after screenshot"
+
+    # Step 5: Diff the before/after screenshots
+    local diff_output
+    diff_output="$(mktemp /tmp/vtb-pipeline-diff-XXXXXX).png"
+
+    local diff_result
+    diff_result="$("$SCRIPT_DIR/vtb-img-diff" diff "$before_path" "$after_path" --diff-output "$diff_output" 2>&1)" || true
+
+    if printf '%s' "$diff_result" | grep -q '"error"'; then
+        json_error "diff failed"
+    fi
+
+    local similarity
+    similarity="$(_json_field "$diff_result" similarity)"
+
+    # Build final JSON result using Python for safe serialization
+    python3 -c "
+import json, sys
+result = {
+    'success': True,
+    'before': sys.argv[1],
+    'after': sys.argv[2],
+    'diff_image': sys.argv[3],
+    'similarity': float(sys.argv[4]),
+    'action': sys.argv[5],
+    'changed': float(sys.argv[4]) < 1.0,
+}
+print(json.dumps(result))
+" "$before_path" "$after_path" "$diff_output" "$similarity" "$action"
+}
+
+# ---------------------------------------------------------------------------
 # Subcommand: ui-elements
 # ---------------------------------------------------------------------------
 cmd_ui_elements() {
@@ -327,6 +472,9 @@ Screenshots:
   screenshot                                Full screen screenshot
   screenshot-window <window_id>             Screenshot a specific window
   screenshot-app <app_name> [title]         Screenshot by app (optional title filter)
+  screenshot-region <src> <x> <y> <w> <h>   Crop a region from a screenshot PNG
+  screenshot-diff <before> <after> [diff]   Compare two screenshots (similarity score + visual diff)
+  screenshot-pipeline <app> <action> [t] [d]  Before/after pipeline (capture, act, capture, diff)
 
 UI Inspection:
   ui-elements <window_id> [depth]           Read accessibility tree (default depth: 3)
@@ -338,6 +486,7 @@ App Lifecycle:
 
 All commands return JSON. Errors include an "error" field.
 Screenshots return a "path" field with the absolute path to the PNG file.
+Diff commands return a "similarity" field (0.0-1.0) and "diff_image" path.
 HELP
 }
 
@@ -369,6 +518,9 @@ main() {
         screenshot)         cmd_screenshot ;;
         screenshot-window)  cmd_screenshot_window "$@" ;;
         screenshot-app)     cmd_screenshot_app "$@" ;;
+        screenshot-region)  cmd_screenshot_region "$@" ;;
+        screenshot-diff)    cmd_screenshot_diff "$@" ;;
+        screenshot-pipeline) cmd_screenshot_pipeline "$@" ;;
         ui-elements)        cmd_ui_elements "$@" ;;
         ui-elements-app)    cmd_ui_elements_app "$@" ;;
         launch)             cmd_launch "$@" ;;
