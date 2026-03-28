@@ -153,6 +153,9 @@ See `skills/` for detailed command guides:
 - `/ref` - Link tasks to code locations
 - `/criterion-ref` - Link code to testing criteria
 
+**GUI development:**
+- `/gui-dev` - Orchestrate GUI development with Hammerspoon visual feedback
+
 **Advanced:**
 - `/execution` - Workflow execution history
 - `/gate` - Validation gates
@@ -298,6 +301,7 @@ vertebrae/
 │   ├── delete/SKILL.md     # /delete - Remove tasks
 │   ├── depend/SKILL.md     # /depend - Manage dependencies
 │   ├── execution/SKILL.md  # /execution - Execution history
+│   ├── gui-dev/SKILL.md    # /gui-dev - GUI development with visual feedback
 │   ├── init/SKILL.md       # /init - Initialize project
 │   ├── list/SKILL.md       # /list - Filter and list tasks
 │   ├── path/SKILL.md       # /path - Find dependency path
