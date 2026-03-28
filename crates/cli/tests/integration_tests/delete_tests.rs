@@ -17,6 +17,7 @@ async fn create_task(services: &vertebrae_core::VertebraeServices, title: &str) 
         parent: None,
         depends_on: vec![],
         needs_review: false,
+        track: None,
         workflow: None,
     };
     cmd.execute(services).await.unwrap()
@@ -104,6 +105,7 @@ async fn test_delete_task_with_one_child_cascade() {
         parent: Some(parent_id.clone()),
         depends_on: vec![],
         needs_review: false,
+        track: None,
         workflow: None,
     };
     let child_id = child.execute(&services).await.unwrap();
@@ -146,6 +148,7 @@ async fn test_delete_task_with_multiple_children_cascade() {
             parent: Some(parent_id.clone()),
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         child_ids.push(child.execute(&services).await.unwrap());
@@ -185,6 +188,7 @@ async fn test_delete_task_with_grandchildren_cascade() {
         parent: Some(grandparent_id.clone()),
         depends_on: vec![],
         needs_review: false,
+        track: None,
         workflow: None,
     };
     let parent_id = parent.execute(&services).await.unwrap();
@@ -199,6 +203,7 @@ async fn test_delete_task_with_grandchildren_cascade() {
         parent: Some(parent_id.clone()),
         depends_on: vec![],
         needs_review: false,
+        track: None,
         workflow: None,
     };
     let child_id = child.execute(&services).await.unwrap();
@@ -238,6 +243,7 @@ async fn test_delete_with_cascade_false_orphans_children() {
         parent: Some(parent_id.clone()),
         depends_on: vec![],
         needs_review: false,
+        track: None,
         workflow: None,
     };
     let child_id = child.execute(&services).await.unwrap();
@@ -284,6 +290,7 @@ async fn test_delete_task_that_blocks_others() {
         parent: None,
         depends_on: vec![blocker_id.clone()],
         needs_review: false,
+        track: None,
         workflow: None,
     };
     let dependent_id = dependent.execute(&services).await.unwrap();
@@ -336,6 +343,7 @@ async fn test_delete_task_blocked_by_others() {
         parent: None,
         depends_on: vec![blocker1_id.clone(), blocker2_id.clone()],
         needs_review: false,
+        track: None,
         workflow: None,
     };
     let task_id = task.execute(&services).await.unwrap();
@@ -400,6 +408,7 @@ async fn test_delete_multiple_tasks_returns_count_message() {
             parent: Some(parent_id.clone()),
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         child.execute(&services).await.unwrap();
@@ -436,6 +445,7 @@ async fn test_delete_removes_from_parent_relationships() {
         parent: Some(parent_id.clone()),
         depends_on: vec![],
         needs_review: false,
+        track: None,
         workflow: None,
     };
     let child1_id = child1.execute(&services).await.unwrap();
@@ -449,6 +459,7 @@ async fn test_delete_removes_from_parent_relationships() {
         parent: Some(parent_id.clone()),
         depends_on: vec![],
         needs_review: false,
+        track: None,
         workflow: None,
     };
     let child2_id = child2.execute(&services).await.unwrap();
@@ -492,6 +503,7 @@ async fn test_delete_removes_from_dependency_lists() {
         parent: None,
         depends_on: vec![task_a.clone()],
         needs_review: false,
+        track: None,
         workflow: None,
     };
     let task_b_id = task_b.execute(&services).await.unwrap();
@@ -505,6 +517,7 @@ async fn test_delete_removes_from_dependency_lists() {
         parent: None,
         depends_on: vec![task_a.clone()],
         needs_review: false,
+        track: None,
         workflow: None,
     };
     let task_c_id = task_c.execute(&services).await.unwrap();
@@ -551,6 +564,7 @@ async fn test_delete_task_with_both_parent_and_children() {
         parent: Some(grandparent_id.clone()),
         depends_on: vec![],
         needs_review: false,
+        track: None,
         workflow: None,
     };
     let parent_id = parent.execute(&services).await.unwrap();
@@ -565,6 +579,7 @@ async fn test_delete_task_with_both_parent_and_children() {
         parent: Some(parent_id.clone()),
         depends_on: vec![],
         needs_review: false,
+        track: None,
         workflow: None,
     };
     let child1_id = child1.execute(&services).await.unwrap();
@@ -578,6 +593,7 @@ async fn test_delete_task_with_both_parent_and_children() {
         parent: Some(parent_id.clone()),
         depends_on: vec![],
         needs_review: false,
+        track: None,
         workflow: None,
     };
     let child2_id = child2.execute(&services).await.unwrap();
@@ -623,6 +639,7 @@ async fn test_delete_task_with_both_parent_and_children_cascade() {
         parent: Some(grandparent_id.clone()),
         depends_on: vec![],
         needs_review: false,
+        track: None,
         workflow: None,
     };
     let parent_id = parent.execute(&services).await.unwrap();
@@ -637,6 +654,7 @@ async fn test_delete_task_with_both_parent_and_children_cascade() {
         parent: Some(parent_id.clone()),
         depends_on: vec![],
         needs_review: false,
+        track: None,
         workflow: None,
     };
     let child_id = child.execute(&services).await.unwrap();
@@ -676,6 +694,7 @@ async fn test_delete_task_with_complex_relationships() {
         parent: None,
         depends_on: vec![task_a.clone()],
         needs_review: false,
+        track: None,
         workflow: None,
     };
     let task_b_id = task_b.execute(&services).await.unwrap();
@@ -690,6 +709,7 @@ async fn test_delete_task_with_complex_relationships() {
         parent: None,
         depends_on: vec![],
         needs_review: false,
+        track: None,
         workflow: None,
     };
     let task_c_id = task_c.execute(&services).await.unwrap();

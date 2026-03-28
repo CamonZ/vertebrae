@@ -598,6 +598,12 @@ impl Command {
                     .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
                 Ok(CommandResult::Json(json))
             }
+            Command::Workflow(workflow::WorkflowCommand::Show(cmd)) => {
+                let detail = cmd.execute_detail(services).await?;
+                let json = serde_json::to_value(&detail)
+                    .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
+                Ok(CommandResult::Json(json))
+            }
             _ => {
                 let result = self.execute(services).await?;
                 let text = format!("{}", result);

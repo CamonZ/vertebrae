@@ -26,6 +26,14 @@ pub struct WorkflowAddCommand {
     /// Display order for sorting workflows (lower values appear first)
     #[arg(short, long, default_value = "0")]
     pub order: i32,
+
+    /// Track for categorizing the workflow
+    #[arg(long)]
+    pub track: Option<String>,
+
+    /// Kanban column for board placement
+    #[arg(long)]
+    pub kanban_column: Option<String>,
 }
 
 /// A parsed workflow step from the command line
@@ -102,6 +110,14 @@ impl WorkflowAddCommand {
 
         if let Some(description) = &self.description {
             options = options.with_description(description);
+        }
+
+        if let Some(track) = &self.track {
+            options = options.with_track(track);
+        }
+
+        if let Some(kanban_column) = &self.kanban_column {
+            options = options.with_kanban_column(kanban_column);
         }
 
         // Create the workflow

@@ -1,6 +1,15 @@
-use cucumber::{given, when};
+use cucumber::{given, then, when};
 
 use crate::SmokeWorld;
+
+fn extract_workflow_id(stdout: &str) -> String {
+    stdout
+        .trim()
+        .strip_prefix("Created workflow: ")
+        .unwrap_or_else(|| panic!("unexpected workflow create output: {}", stdout))
+        .trim()
+        .to_string()
+}
 
 #[given(expr = "a second workflow {string} with steps {string}")]
 async fn given_second_workflow_with_steps(world: &mut SmokeWorld, name: String, steps_str: String) {
@@ -143,4 +152,134 @@ async fn when_transition_lifecycle_task_through(world: &mut SmokeWorld, target_s
             return;
         }
     }
+}
+
+// ============================================================================
+// Workflow creation with table
+// ============================================================================
+
+pub async fn do_create_workflow(
+    world: &mut SmokeWorld,
+    name: &str,
+    step: &cucumber::gherkin::Step,
+) {
+    let table = step.table.as_ref().expect("expected a data table");
+
+    let mut args: Vec<String> = vec!["workflow".to_string(), "add".to_string(), name.to_string()];
+
+    // Default to one step if none provided in the table
+    let mut has_steps = false;
+
+    for row in &table.rows {
+        let key = row[0].as_str();
+        let value = world.resolve_vars(row[1].as_str());
+        match key {
+            "description" => {
+                args.push("--description".to_string());
+                args.push(value);
+            }
+            "steps" => {
+                has_steps = true;
+                for s in value.split(", ") {
+                    args.push("--step".to_string());
+                    args.push(format!("{}:default", s.trim()));
+                }
+            }
+            "track" => {
+                args.push("--track".to_string());
+                args.push(value);
+            }
+            "kanban_column" => {
+                args.push("--kanban-column".to_string());
+                args.push(value);
+            }
+            "auto_advance" => {
+                if value == "true" {
+                    args.push("--auto-advance".to_string());
+                }
+            }
+            other => panic!("unsupported table key in create workflow: '{}'", other),
+        }
+    }
+
+    if !has_steps {
+        args.push("--step".to_string());
+        args.push("default_step:default".to_string());
+    }
+
+    let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    world.run_vtb(&arg_refs).await;
+
+    if world.last_exit_code == 0 {
+        let wf_id = extract_workflow_id(&world.last_stdout);
+        world.track_workflow(wf_id);
+    }
+}
+
+#[when(expr = "I create a workflow {string} with:")]
+async fn when_create_workflow_with_table(
+    world: &mut SmokeWorld,
+    name: String,
+    step: &cucumber::gherkin::Step,
+) {
+    do_create_workflow(world, &name, step).await;
+}
+
+#[given(expr = "I create a workflow {string} with:")]
+async fn given_create_workflow_with_table(
+    world: &mut SmokeWorld,
+    name: String,
+    step: &cucumber::gherkin::Step,
+) {
+    do_create_workflow(world, &name, step).await;
+}
+
+// ============================================================================
+// Workflow field assertions (via --json)
+// ============================================================================
+
+async fn get_workflow_json(world: &mut SmokeWorld) -> serde_json::Value {
+    let wf_id = world
+        .workflow_id
+        .as_ref()
+        .expect("no workflow ID stored")
+        .clone();
+    world
+        .run_vtb_json(&["workflow", "show", &wf_id])
+        .await
+        .unwrap_or_else(|| {
+            panic!(
+                "failed to show workflow as JSON: {}{}",
+                world.last_stdout, world.last_stderr
+            )
+        })
+}
+
+#[then(expr = "the workflow {word} should be {string}")]
+async fn workflow_field_should_be(world: &mut SmokeWorld, field: String, expected: String) {
+    let json = get_workflow_json(world).await;
+
+    let actual = json[&field].as_str().unwrap_or("");
+    assert_eq!(
+        actual,
+        expected,
+        "workflow {} mismatch: expected '{}', got '{}'\nJSON: {}",
+        field,
+        expected,
+        actual,
+        serde_json::to_string_pretty(&json).unwrap_or_default()
+    );
+}
+
+#[then(expr = "the workflow {word} should be empty")]
+async fn workflow_field_should_be_empty(world: &mut SmokeWorld, field: String) {
+    let json = get_workflow_json(world).await;
+
+    let val = &json[&field];
+    assert!(
+        val.is_null() || val.as_str() == Some(""),
+        "expected workflow {} to be empty, got: {}",
+        field,
+        val
+    );
 }

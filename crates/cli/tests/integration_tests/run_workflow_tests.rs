@@ -24,6 +24,7 @@ async fn create_task_with_workflow(
         parent: None,
         depends_on: vec![],
         needs_review: false,
+        track: None,
         workflow: None,
     };
     let task_id = task_cmd.execute(services).await.unwrap();
@@ -34,6 +35,8 @@ async fn create_task_with_workflow(
         steps: vec![],
         auto_advance: false,
         order: 0,
+        track: None,
+        kanban_column: None,
     };
     let wf_id = services
         .workflows()
@@ -88,6 +91,7 @@ mod run_workflow_command_tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let task_id = task_cmd.execute(&services).await.unwrap();

@@ -44,6 +44,10 @@ pub struct UpdateCommand {
     #[arg(long)]
     pub worktree: Option<String>,
 
+    /// Track for this task (use empty string "" to clear)
+    #[arg(long)]
+    pub track: Option<String>,
+
     /// Edit a section: <type> <ordinal> <new-content>
     /// Example: --edit-section step 0 "New step content"
     #[arg(long = "edit-section", num_args = 3, value_names = ["TYPE", "ORDINAL", "CONTENT"])]
@@ -158,6 +162,15 @@ impl UpdateCommand {
             }
         }
 
+        // Handle track
+        if let Some(track) = &self.track {
+            if track.is_empty() {
+                options = options.clear_track();
+            } else {
+                options = options.with_track(track.clone());
+            }
+        }
+
         // Handle parent
         if let Some(parent_id) = &self.parent {
             if parent_id.is_empty() {
@@ -231,6 +244,7 @@ impl UpdateCommand {
             || !self.remove_tags.is_empty()
             || self.parent.is_some()
             || self.worktree.is_some()
+            || self.track.is_some()
             || self.edit_section.is_some()
             || self.remove_section.is_some()
     }
