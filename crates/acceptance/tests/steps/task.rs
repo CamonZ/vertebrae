@@ -46,6 +46,10 @@ pub async fn do_create_task(world: &mut SmokeWorld, step: &cucumber::gherkin::St
                     args.push("--needs-review".to_string());
                 }
             }
+            "track" => {
+                args.push("--track".to_string());
+                args.push(value);
+            }
             other => panic!("unsupported table key in create task: '{}'", other),
         }
     }
@@ -121,6 +125,10 @@ async fn do_update_task(world: &mut SmokeWorld, task_id: &str, step: &cucumber::
             }
             "worktree" => {
                 args.push("--worktree".to_string());
+                args.push(value);
+            }
+            "track" => {
+                args.push("--track".to_string());
                 args.push(value);
             }
             other => panic!("unsupported table key in update task: '{}'", other),
@@ -224,6 +232,10 @@ async fn list_tasks_with_table(world: &mut SmokeWorld, step: &cucumber::gherkin:
                 if value == "true" {
                     args.push("--include-archived".to_string());
                 }
+            }
+            "track" => {
+                args.push("--track".to_string());
+                args.push(value);
             }
             other => panic!("unsupported table key in list tasks: '{}'", other),
         }

@@ -24,6 +24,8 @@ async fn create_workflow(
         steps: vec![],
         auto_advance: false,
         order: 0,
+        track: None,
+        kanban_column: None,
     };
     services.workflows().create_workflow(options).await.unwrap()
 }
@@ -164,6 +166,8 @@ async fn test_workflow_update_name() {
         clear_description: false,
         auto_advance: false,
         no_auto_advance: false,
+        track: None,
+        kanban_column: None,
     };
     let output = cmd.execute(services.workflows()).await.unwrap();
 
@@ -188,6 +192,8 @@ async fn test_workflow_update_description() {
         clear_description: false,
         auto_advance: false,
         no_auto_advance: false,
+        track: None,
+        kanban_column: None,
     };
     let output = cmd.execute(services.workflows()).await.unwrap();
 
@@ -210,6 +216,8 @@ async fn test_workflow_update_auto_advance_enable() {
         clear_description: false,
         auto_advance: true,
         no_auto_advance: false,
+        track: None,
+        kanban_column: None,
     };
     let output = cmd.execute(services.workflows()).await.unwrap();
 
@@ -232,6 +240,8 @@ async fn test_workflow_update_multiple_fields() {
         clear_description: false,
         auto_advance: true,
         no_auto_advance: false,
+        track: None,
+        kanban_column: None,
     };
     let output = cmd.execute(services.workflows()).await.unwrap();
 
@@ -259,6 +269,8 @@ async fn test_workflow_update_no_updates_fails() {
         clear_description: false,
         auto_advance: false,
         no_auto_advance: false,
+        track: None,
+        kanban_column: None,
     };
     let result = cmd.execute(services.workflows()).await;
 
@@ -276,6 +288,8 @@ async fn test_workflow_update_nonexistent_workflow() {
         clear_description: false,
         auto_advance: false,
         no_auto_advance: false,
+        track: None,
+        kanban_column: None,
     };
     let result = cmd.execute(services.workflows()).await;
 
@@ -322,6 +336,8 @@ async fn test_workflow_command_dispatch_update() {
         clear_description: false,
         auto_advance: false,
         no_auto_advance: false,
+        track: None,
+        kanban_column: None,
     });
     let output = cmd.execute(&services).await.unwrap();
 
@@ -349,6 +365,8 @@ async fn test_workflow_show_after_update() {
         clear_description: false,
         auto_advance: false,
         no_auto_advance: false,
+        track: None,
+        kanban_column: None,
     };
     update_cmd.execute(services.workflows()).await.unwrap();
 
@@ -409,6 +427,112 @@ async fn test_list_workflows_full_returns_complete_workflow_objects() {
     // Full workflows have timestamps that summaries don't
     assert!(wf.created_at.is_some());
     assert!(wf.updated_at.is_some());
+}
+
+// ============================================================================
+// WorkflowAddCommand tests
+// ============================================================================
+
+#[tokio::test]
+async fn test_workflow_add_basic() {
+    let services = mock_services();
+    let cmd = WorkflowAddCommand {
+        name: "Basic Workflow".to_string(),
+        description: None,
+        steps: vec![],
+        auto_advance: false,
+        order: 0,
+        track: None,
+        kanban_column: None,
+    };
+    let output = cmd.execute(services.workflows()).await.unwrap();
+    assert!(output.starts_with("Created workflow: "));
+}
+
+#[tokio::test]
+async fn test_workflow_add_with_track() {
+    let services = mock_services();
+    let cmd = WorkflowAddCommand {
+        name: "Tracked Workflow".to_string(),
+        description: None,
+        steps: vec![],
+        auto_advance: false,
+        order: 0,
+        track: Some("design".to_string()),
+        kanban_column: None,
+    };
+    let output = cmd.execute(services.workflows()).await.unwrap();
+    let wf_id = output.strip_prefix("Created workflow: ").unwrap().trim();
+
+    let wf = services.workflows().get_workflow(wf_id).await.unwrap();
+    assert_eq!(wf.track, Some("design".to_string()));
+    assert!(wf.kanban_column.is_none());
+}
+
+#[tokio::test]
+async fn test_workflow_add_with_kanban_column() {
+    let services = mock_services();
+    let cmd = WorkflowAddCommand {
+        name: "Kanban Workflow".to_string(),
+        description: None,
+        steps: vec![],
+        auto_advance: false,
+        order: 0,
+        track: None,
+        kanban_column: Some("In Progress".to_string()),
+    };
+    let output = cmd.execute(services.workflows()).await.unwrap();
+    let wf_id = output.strip_prefix("Created workflow: ").unwrap().trim();
+
+    let wf = services.workflows().get_workflow(wf_id).await.unwrap();
+    assert!(wf.track.is_none());
+    assert_eq!(wf.kanban_column, Some("In Progress".to_string()));
+}
+
+#[tokio::test]
+async fn test_workflow_add_with_track_and_kanban_column() {
+    let services = mock_services();
+    let cmd = WorkflowAddCommand {
+        name: "Full Workflow".to_string(),
+        description: Some("A fully specified workflow".to_string()),
+        steps: vec![],
+        auto_advance: true,
+        order: 5,
+        track: Some("engineering".to_string()),
+        kanban_column: Some("Review".to_string()),
+    };
+    let output = cmd.execute(services.workflows()).await.unwrap();
+    let wf_id = output.strip_prefix("Created workflow: ").unwrap().trim();
+
+    let wf = services.workflows().get_workflow(wf_id).await.unwrap();
+    assert_eq!(wf.name, "Full Workflow");
+    assert_eq!(
+        wf.description,
+        Some("A fully specified workflow".to_string())
+    );
+    assert_eq!(wf.track, Some("engineering".to_string()));
+    assert_eq!(wf.kanban_column, Some("Review".to_string()));
+    assert!(wf.auto_advance);
+}
+
+#[tokio::test]
+async fn test_workflow_add_without_track_and_kanban_column() {
+    let services = mock_services();
+    let cmd = WorkflowAddCommand {
+        name: "Plain Workflow".to_string(),
+        description: None,
+        steps: vec![],
+        auto_advance: false,
+        order: 0,
+        track: None,
+        kanban_column: None,
+    };
+    let output = cmd.execute(services.workflows()).await.unwrap();
+    let wf_id = output.strip_prefix("Created workflow: ").unwrap().trim();
+
+    let wf = services.workflows().get_workflow(wf_id).await.unwrap();
+    assert!(wf.track.is_none());
+    assert!(wf.kanban_column.is_none());
 }
 
 #[tokio::test]

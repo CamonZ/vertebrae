@@ -18,6 +18,7 @@ async fn create_task(services: &vertebrae_core::VertebraeServices, title: &str) 
         parent: None,
         depends_on: vec![],
         needs_review: false,
+        track: None,
         workflow: None,
     };
     cmd.execute(services).await.unwrap()
@@ -73,6 +74,7 @@ async fn test_update_edit_section_valid_step() {
         remove_tags: vec![],
         parent: None,
         worktree: None,
+        track: None,
         edit_section: Some(vec![
             "checklist_item".to_string(),
             "0".to_string(),
@@ -115,6 +117,7 @@ async fn test_update_edit_section_second_ordinal() {
         remove_tags: vec![],
         parent: None,
         worktree: None,
+        track: None,
         edit_section: Some(vec![
             "checklist_item".to_string(),
             "1".to_string(),
@@ -161,6 +164,7 @@ async fn test_update_edit_constraint_section() {
         remove_tags: vec![],
         parent: None,
         worktree: None,
+        track: None,
         edit_section: Some(vec![
             "constraint".to_string(),
             "0".to_string(),
@@ -196,6 +200,7 @@ async fn test_update_edit_section_invalid_ordinal() {
         remove_tags: vec![],
         parent: None,
         worktree: None,
+        track: None,
         edit_section: Some(vec![
             "checklist_item".to_string(),
             "999".to_string(),
@@ -223,6 +228,7 @@ async fn test_update_edit_section_invalid_ordinal_format() {
         remove_tags: vec![],
         parent: None,
         worktree: None,
+        track: None,
         edit_section: Some(vec![
             "checklist_item".to_string(),
             "not_a_number".to_string(),
@@ -252,6 +258,7 @@ async fn test_update_edit_section_invalid_type() {
         remove_tags: vec![],
         parent: None,
         worktree: None,
+        track: None,
         edit_section: Some(vec![
             "invalid_type".to_string(),
             "0".to_string(),
@@ -281,6 +288,7 @@ async fn test_update_edit_section_wrong_arg_count() {
         remove_tags: vec![],
         parent: None,
         worktree: None,
+        track: None,
         edit_section: Some(vec!["checklist_item".to_string(), "0".to_string()]),
         remove_section: None,
     };
@@ -326,6 +334,7 @@ async fn test_update_remove_section_valid_step() {
         remove_tags: vec![],
         parent: None,
         worktree: None,
+        track: None,
         edit_section: None,
         remove_section: Some(vec!["checklist_item".to_string(), "0".to_string()]),
     };
@@ -363,6 +372,7 @@ async fn test_update_remove_section_second_ordinal() {
         remove_tags: vec![],
         parent: None,
         worktree: None,
+        track: None,
         edit_section: None,
         remove_section: Some(vec!["checklist_item".to_string(), "1".to_string()]),
     };
@@ -405,6 +415,7 @@ async fn test_update_remove_constraint_section() {
         remove_tags: vec![],
         parent: None,
         worktree: None,
+        track: None,
         edit_section: None,
         remove_section: Some(vec!["constraint".to_string(), "0".to_string()]),
     };
@@ -438,6 +449,7 @@ async fn test_update_remove_section_invalid_ordinal() {
         remove_tags: vec![],
         parent: None,
         worktree: None,
+        track: None,
         edit_section: None,
         remove_section: Some(vec!["checklist_item".to_string(), "999".to_string()]),
     };
@@ -471,6 +483,7 @@ async fn test_update_remove_section_invalid_ordinal_format() {
         remove_tags: vec![],
         parent: None,
         worktree: None,
+        track: None,
         edit_section: None,
         remove_section: Some(vec!["checklist_item".to_string(), "abc".to_string()]),
     };
@@ -496,6 +509,7 @@ async fn test_update_remove_section_invalid_type() {
         remove_tags: vec![],
         parent: None,
         worktree: None,
+        track: None,
         edit_section: None,
         remove_section: Some(vec!["bad_type".to_string(), "0".to_string()]),
     };
@@ -521,6 +535,7 @@ async fn test_update_remove_section_wrong_arg_count() {
         remove_tags: vec![],
         parent: None,
         worktree: None,
+        track: None,
         edit_section: None,
         remove_section: Some(vec!["checklist_item".to_string()]),
     };
@@ -550,6 +565,7 @@ async fn test_update_self_parent_fails() {
         remove_tags: vec![],
         parent: Some(task_id.clone()),
         worktree: None,
+        track: None,
         edit_section: None,
         remove_section: None,
     };
@@ -575,6 +591,7 @@ async fn test_update_nonexistent_parent_fails() {
         remove_tags: vec![],
         parent: Some("nonexistent".to_string()),
         worktree: None,
+        track: None,
         edit_section: None,
         remove_section: None,
     };
@@ -605,6 +622,7 @@ async fn test_update_no_changes_specified() {
         remove_tags: vec![],
         parent: None,
         worktree: None,
+        track: None,
         edit_section: None,
         remove_section: None,
     };
@@ -633,6 +651,7 @@ async fn test_update_title_and_description() {
         remove_tags: vec![],
         parent: None,
         worktree: None,
+        track: None,
         edit_section: None,
         remove_section: None,
     };
@@ -658,6 +677,7 @@ async fn test_update_clear_description() {
         parent: None,
         depends_on: vec![],
         needs_review: false,
+        track: None,
         workflow: None,
     };
     let task_id = cmd.execute(&services).await.unwrap();
@@ -679,6 +699,7 @@ async fn test_update_clear_description() {
         remove_tags: vec![],
         parent: None,
         worktree: None,
+        track: None,
         edit_section: None,
         remove_section: None,
     };
@@ -707,6 +728,7 @@ async fn test_update_tags_combined() {
         parent: None,
         depends_on: vec![],
         needs_review: false,
+        track: None,
         workflow: None,
     };
     let task_id = cmd.execute(&services).await.unwrap();
@@ -721,6 +743,7 @@ async fn test_update_tags_combined() {
         remove_tags: vec!["tag1".to_string()],
         parent: None,
         worktree: None,
+        track: None,
         edit_section: None,
         remove_section: None,
     };
@@ -746,6 +769,7 @@ async fn test_update_title_and_priority_and_tags() {
         remove_tags: vec![],
         parent: None,
         worktree: None,
+        track: None,
         edit_section: None,
         remove_section: None,
     };
@@ -781,6 +805,7 @@ async fn test_update_edit_and_field_change() {
         remove_tags: vec![],
         parent: None,
         worktree: None,
+        track: None,
         edit_section: Some(vec![
             "checklist_item".to_string(),
             "0".to_string(),
@@ -814,6 +839,7 @@ async fn test_update_nonexistent_task_fails() {
         remove_tags: vec![],
         parent: None,
         worktree: None,
+        track: None,
         edit_section: None,
         remove_section: None,
     };
@@ -837,6 +863,7 @@ async fn test_update_case_insensitive_id() {
         remove_tags: vec![],
         parent: None,
         worktree: None,
+        track: None,
         edit_section: None,
         remove_section: None,
     };
@@ -869,6 +896,7 @@ async fn test_update_all_fields_at_once() {
         remove_tags: vec![],
         parent: None,
         worktree: None,
+        track: None,
         edit_section: Some(vec![
             "checklist_item".to_string(),
             "0".to_string(),
@@ -913,6 +941,7 @@ async fn test_update_set_worktree() {
         remove_tags: vec![],
         parent: None,
         worktree: Some("/home/user/projects/my-worktree".to_string()),
+        track: None,
         edit_section: None,
         remove_section: None,
     };
@@ -941,6 +970,7 @@ async fn test_update_clear_worktree() {
         remove_tags: vec![],
         parent: None,
         worktree: Some("/some/path".to_string()),
+        track: None,
         edit_section: None,
         remove_section: None,
     };
@@ -959,6 +989,7 @@ async fn test_update_clear_worktree() {
         remove_tags: vec![],
         parent: None,
         worktree: Some("".to_string()),
+        track: None,
         edit_section: None,
         remove_section: None,
     };

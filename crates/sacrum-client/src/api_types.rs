@@ -57,6 +57,8 @@ pub struct TaskResponse {
     #[serde(default)]
     pub worktree: Option<String>,
     #[serde(default)]
+    pub track: Option<String>,
+    #[serde(default)]
     pub review_comment: Option<String>,
     #[serde(default)]
     pub rejection_reason: Option<String>,
@@ -167,6 +169,10 @@ pub struct WorkflowResponse {
     pub metadata: Option<serde_json::Value>,
     #[serde(default)]
     pub initial_step_id: Option<String>,
+    #[serde(default)]
+    pub track: Option<String>,
+    #[serde(default)]
+    pub kanban_column: Option<String>,
     #[serde(default)]
     pub project_id: Option<String>,
     #[serde(default)]
@@ -702,5 +708,57 @@ mod tests {
         assert_eq!(task.children.len(), 1);
         assert_eq!(task.children[0].id, "c-1");
         assert_eq!(task.children[0].level.as_deref(), Some("task"));
+    }
+
+    #[test]
+    fn test_task_response_with_track() {
+        let json = r#"{
+            "id": "task-track",
+            "title": "Tracked Task",
+            "project_id": "proj-1",
+            "track": "frontend"
+        }"#;
+
+        let task: TaskResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(task.track.as_deref(), Some("frontend"));
+    }
+
+    #[test]
+    fn test_task_response_with_null_track() {
+        let json = r#"{
+            "id": "task-notrack",
+            "title": "No Track",
+            "project_id": "proj-1",
+            "track": null
+        }"#;
+
+        let task: TaskResponse = serde_json::from_str(json).unwrap();
+        assert!(task.track.is_none());
+    }
+
+    #[test]
+    fn test_workflow_response_with_track_and_kanban_column() {
+        let json = r#"{
+            "id": "wf-track",
+            "name": "Tracked Workflow",
+            "track": "design",
+            "kanban_column": "In Progress"
+        }"#;
+
+        let workflow: WorkflowResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(workflow.track.as_deref(), Some("design"));
+        assert_eq!(workflow.kanban_column.as_deref(), Some("In Progress"));
+    }
+
+    #[test]
+    fn test_workflow_response_without_track_and_kanban_column() {
+        let json = r#"{
+            "id": "wf-notrack",
+            "name": "No Track Workflow"
+        }"#;
+
+        let workflow: WorkflowResponse = serde_json::from_str(json).unwrap();
+        assert!(workflow.track.is_none());
+        assert!(workflow.kanban_column.is_none());
     }
 }

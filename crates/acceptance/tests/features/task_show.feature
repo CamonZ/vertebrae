@@ -110,6 +110,19 @@ Feature: Show task details
     And the output should contain "Updated At:"
     And the output should contain "Completed At:"
 
+  Scenario: Show task displays track when set
+    Given I create a task with:
+      | title | Track show task |
+      | track | frontend        |
+    When I show the task
+    Then the output should contain "Track:    frontend"
+
+  Scenario: Show task omits track when unset
+    Given I create a task with:
+      | title | No track show |
+    When I show the task
+    Then the output should not contain "Track:"
+
   Scenario: Show non-existent task fails
     When I show the task "00000000-0000-4000-8000-000000000000"
     Then the command should fail with "Task not found:"
