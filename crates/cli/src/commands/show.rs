@@ -46,8 +46,6 @@ pub struct TaskDetail {
     pub needs_human_review: Option<bool>,
     /// Optional worktree path
     pub worktree: Option<String>,
-    /// Optional track
-    pub track: Option<String>,
     /// Feedback to address when a validation gate fails
     pub revision_feedback: Option<String>,
     /// Reason why the task was rejected
@@ -89,7 +87,6 @@ struct TaskRow {
     needs_human_review: Option<bool>,
     archived: bool,
     worktree: Option<String>,
-    track: Option<String>,
     revision_feedback: Option<String>,
     rejection_reason: Option<String>,
     workflow_id: Option<String>,
@@ -149,7 +146,6 @@ impl From<RelatedTaskRow> for TaskSummary {
             needs_human_review: row.needs_human_review,
             archived: false,
             parent_id: None,
-            track: None,
         }
     }
 }
@@ -291,7 +287,6 @@ impl ShowCommand {
             updated_at: task.updated_at.map(|dt| dt.to_string()),
             completed_at: task.completed_at.map(|dt| dt.to_string()),
             needs_human_review: task.needs_human_review,
-            track: task.track,
             archived: task.archived,
             parent_id: task.parent_id,
             worktree: task.worktree,
@@ -332,7 +327,6 @@ impl ShowCommand {
             needs_human_review: task.needs_human_review,
             archived: task.archived,
             worktree: task.worktree,
-            track: task.track,
             revision_feedback: task.revision_feedback,
             rejection_reason: task.rejection_reason,
             workflow_id: task.workflow_id,
@@ -401,7 +395,6 @@ impl ShowCommand {
             needs_human_review: task.needs_human_review,
             archived: task.archived,
             parent_id: None,
-            track: task.track,
         }))
     }
 
@@ -438,7 +431,6 @@ fn task_to_summary(task: &vertebrae_core::Task) -> TaskSummary {
         needs_human_review: task.needs_human_review,
         archived: task.archived,
         parent_id: task.parent_id.clone(),
-        track: task.track.clone(),
     }
 }
 
@@ -473,9 +465,6 @@ impl std::fmt::Display for TaskDetail {
                 self.tags.join(", ")
             }
         )?;
-        if let Some(ref track) = self.track {
-            writeln!(f, "Track:    {}", track)?;
-        }
         let review_status = match self.needs_human_review {
             Some(true) => "True",
             Some(false) => "False",
@@ -746,7 +735,6 @@ mod tests {
             updated_at: Some("2026-01-02T00:00:00Z".to_string()),
             completed_at: None,
             needs_human_review: Some(false),
-            track: None,
             archived: false,
             parent_id: None,
             worktree: None,
@@ -793,7 +781,6 @@ mod tests {
             needs_human_review: None,
             archived: false,
             parent_id: None,
-            track: None,
         }];
         detail.blocked_by = vec![TaskSummary {
             id: "blocker-0000-4000-8000-000000000001".to_string(),
@@ -806,7 +793,6 @@ mod tests {
             needs_human_review: None,
             archived: false,
             parent_id: None,
-            track: None,
         }];
 
         let json = serde_json::to_value(&detail).unwrap();

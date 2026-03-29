@@ -185,10 +185,6 @@ pub async fn do_create_workflow(
                     args.push(format!("{}:default", s.trim()));
                 }
             }
-            "track" => {
-                args.push("--track".to_string());
-                args.push(value);
-            }
             "kanban_column" => {
                 args.push("--kanban-column".to_string());
                 args.push(value);
