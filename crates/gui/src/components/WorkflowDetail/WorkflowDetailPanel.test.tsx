@@ -11,6 +11,8 @@ function createWorkflow(overrides?: Partial<Workflow>): Workflow {
     name: "Test Workflow",
     description: null,
     initial_step: null,
+    kanban_column: null,
+    is_default: false,
     metadata: {},
     created_at: null,
     updated_at: null,
@@ -132,6 +134,36 @@ describe("WorkflowDetailPanel", () => {
       expect(screen.getByText("Initial Step")).toBeInTheDocument();
       // The initial step name should appear (getAllByText since it appears in both Overview and Steps list)
       expect(screen.getAllByText("entry_point")).toHaveLength(2);
+    });
+
+    it("displays Default row when workflow is_default is true", () => {
+      const workflow = createWorkflow({ is_default: true });
+      render(<WorkflowDetailPanel workflow={workflow} />);
+
+      expect(screen.getByText("Default")).toBeInTheDocument();
+      expect(screen.getByText("Yes")).toBeInTheDocument();
+    });
+
+    it("does not display Default row when workflow is_default is false", () => {
+      const workflow = createWorkflow({ is_default: false });
+      render(<WorkflowDetailPanel workflow={workflow} />);
+
+      expect(screen.queryByText("Default")).not.toBeInTheDocument();
+    });
+
+    it("displays kanban column when configured", () => {
+      const workflow = createWorkflow({ kanban_column: "in_progress" });
+      render(<WorkflowDetailPanel workflow={workflow} />);
+
+      expect(screen.getByText("Kanban Column")).toBeInTheDocument();
+      expect(screen.getByText("in_progress")).toBeInTheDocument();
+    });
+
+    it("does not display kanban column row when not configured", () => {
+      const workflow = createWorkflow({ kanban_column: null });
+      render(<WorkflowDetailPanel workflow={workflow} />);
+
+      expect(screen.queryByText("Kanban Column")).not.toBeInTheDocument();
     });
   });
 

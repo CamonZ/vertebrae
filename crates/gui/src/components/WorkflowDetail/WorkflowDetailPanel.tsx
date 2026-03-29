@@ -157,6 +157,20 @@ export function WorkflowDetailPanel({
         <div className="p-4">
           <SectionHeader title="Overview" />
           <div className="space-y-1">
+            {workflow.is_default && (
+              <DetailRow label="Default">
+                <span className="inline-flex items-center rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-primary">
+                  Yes
+                </span>
+              </DetailRow>
+            )}
+            {workflow.kanban_column && (
+              <DetailRow label="Kanban Column">
+                <code className="rounded bg-bg-tertiary px-1.5 py-0.5 font-mono text-xs">
+                  {workflow.kanban_column}
+                </code>
+              </DetailRow>
+            )}
             <DetailRow label="Steps">{steps.length}</DetailRow>
             <DetailRow label="Tasks">{taskCount}</DetailRow>
             {initialStep && (

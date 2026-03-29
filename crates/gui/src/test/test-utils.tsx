@@ -79,6 +79,8 @@ export function createMockWorkflow(overrides?: Partial<Workflow>): Workflow {
     name: "Test Workflow",
     description: "A test workflow",
     initial_step: "step-backlog",
+    kanban_column: null,
+    is_default: false,
     metadata: {},
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
