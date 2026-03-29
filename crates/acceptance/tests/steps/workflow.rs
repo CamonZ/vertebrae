@@ -194,6 +194,11 @@ pub async fn do_create_workflow(
                     args.push("--auto-advance".to_string());
                 }
             }
+            "default" => {
+                if value == "true" {
+                    args.push("--default".to_string());
+                }
+            }
             other => panic!("unsupported table key in create workflow: '{}'", other),
         }
     }
@@ -265,6 +270,48 @@ async fn workflow_field_should_be(world: &mut SmokeWorld, field: String, expecte
         actual,
         serde_json::to_string_pretty(&json).unwrap_or_default()
     );
+}
+
+#[then(expr = "the workflow {word} should be true")]
+async fn workflow_bool_field_should_be_true(world: &mut SmokeWorld, field: String) {
+    let json = get_workflow_json(world).await;
+    let val = &json[&field];
+    assert_eq!(
+        val.as_bool(),
+        Some(true),
+        "expected workflow {} to be true, got: {}\nJSON: {}",
+        field,
+        val,
+        serde_json::to_string_pretty(&json).unwrap_or_default()
+    );
+}
+
+#[then(expr = "the workflow {word} should be false")]
+async fn workflow_bool_field_should_be_false(world: &mut SmokeWorld, field: String) {
+    let json = get_workflow_json(world).await;
+    let val = &json[&field];
+    assert_eq!(
+        val.as_bool(),
+        Some(false),
+        "expected workflow {} to be false, got: {}\nJSON: {}",
+        field,
+        val,
+        serde_json::to_string_pretty(&json).unwrap_or_default()
+    );
+}
+
+// ============================================================================
+// Workflow update steps
+// ============================================================================
+
+#[when(expr = "I update the workflow with {word}")]
+async fn when_update_workflow_with_flag(world: &mut SmokeWorld, flag: String) {
+    let wf_id = world
+        .workflow_id
+        .as_ref()
+        .expect("no workflow ID stored")
+        .clone();
+    world.run_vtb(&["workflow", "update", &wf_id, &flag]).await;
 }
 
 #[then(expr = "the workflow {word} should be empty")]
