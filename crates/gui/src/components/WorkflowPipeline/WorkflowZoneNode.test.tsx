@@ -12,6 +12,8 @@ function createWorkflow(overrides?: Partial<Workflow>): Workflow {
     name: "Test Workflow",
     description: "A test workflow",
     initial_step: null,
+    kanban_column: null,
+    is_default: false,
     metadata: {},
     created_at: null,
     updated_at: null,
@@ -104,6 +106,101 @@ describe("WorkflowZoneNode", () => {
 
       const button = container.querySelector("button");
       expect(button).toHaveClass("text-primary");
+    });
+  });
+
+  describe("is_default badge", () => {
+    it("renders 'Default' badge in expanded view when is_default is true", () => {
+      const props = createWorkflowZoneNodeProps({
+        workflow: createWorkflow({ is_default: true }),
+        isCollapsed: false,
+      });
+
+      const { container } = render(<WorkflowZoneNode {...props} />);
+
+      expect(container.textContent).toContain("Default");
+    });
+
+    it("does not render 'Default' badge in expanded view when is_default is false", () => {
+      const props = createWorkflowZoneNodeProps({
+        workflow: createWorkflow({ is_default: false }),
+        isCollapsed: false,
+      });
+
+      const { container } = render(<WorkflowZoneNode {...props} />);
+
+      expect(container.textContent).not.toContain("Default");
+    });
+
+    it("renders 'Default' badge in collapsed view when is_default is true", () => {
+      const props = createWorkflowZoneNodeProps({
+        workflow: createWorkflow({ is_default: true }),
+        isCollapsed: true,
+      });
+
+      const { container } = render(<WorkflowZoneNode {...props} />);
+
+      expect(container.textContent).toContain("Default");
+    });
+
+    it("does not render 'Default' badge in collapsed view when is_default is false", () => {
+      const props = createWorkflowZoneNodeProps({
+        workflow: createWorkflow({ is_default: false }),
+        isCollapsed: true,
+      });
+
+      const { container } = render(<WorkflowZoneNode {...props} />);
+
+      expect(container.textContent).not.toContain("Default");
+    });
+  });
+
+  describe("kanban_column display", () => {
+    it("renders kanban_column in expanded view when set", () => {
+      const props = createWorkflowZoneNodeProps({
+        workflow: createWorkflow({ kanban_column: "in_progress" }),
+        isCollapsed: false,
+      });
+
+      const { container } = render(<WorkflowZoneNode {...props} />);
+
+      expect(container.textContent).toContain("in_progress");
+    });
+
+    it("does not render kanban_column in expanded view when null", () => {
+      const props = createWorkflowZoneNodeProps({
+        workflow: createWorkflow({ kanban_column: null }),
+        isCollapsed: false,
+      });
+
+      const { container } = render(<WorkflowZoneNode {...props} />);
+
+      expect(container.textContent).not.toContain("in_progress");
+    });
+
+    it("renders kanban_column in collapsed view when set", () => {
+      const props = createWorkflowZoneNodeProps({
+        workflow: createWorkflow({ kanban_column: "done" }),
+        isCollapsed: true,
+      });
+
+      const { container } = render(<WorkflowZoneNode {...props} />);
+
+      expect(container.textContent).toContain("done");
+    });
+
+    it("does not render kanban_column in collapsed view when null", () => {
+      const props = createWorkflowZoneNodeProps({
+        workflow: createWorkflow({ kanban_column: null }),
+        isCollapsed: true,
+      });
+
+      const { container } = render(<WorkflowZoneNode {...props} />);
+
+      // Only the default text should be present, not any kanban column value
+      const text = container.textContent || "";
+      expect(text).toContain("3 steps");
+      expect(text).toContain("5 tasks");
     });
   });
 
