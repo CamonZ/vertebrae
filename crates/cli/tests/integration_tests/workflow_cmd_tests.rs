@@ -24,6 +24,7 @@ async fn create_workflow(
         steps: vec![],
         auto_advance: false,
         order: 0,
+        is_default: false,
         kanban_column: None,
     };
     services.workflows().create_workflow(options).await.unwrap()
