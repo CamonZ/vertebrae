@@ -227,10 +227,6 @@ describe("Router Acceptance Tests", () => {
           screen.getByRole("heading", { name: "Board" }),
         ).toBeInTheDocument();
       });
-
-      expect(
-        screen.getByText("Kanban board view coming soon"),
-      ).toBeInTheDocument();
     });
   });
 
