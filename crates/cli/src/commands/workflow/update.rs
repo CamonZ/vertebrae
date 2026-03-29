@@ -33,6 +33,14 @@ pub struct WorkflowUpdateCommand {
     /// Kanban column for the workflow (use empty string "" to clear)
     #[arg(long = "kanban-column")]
     pub kanban_column: Option<String>,
+
+    /// Mark this workflow as the default for new tasks
+    #[arg(long, conflicts_with = "no_default")]
+    pub default: bool,
+
+    /// Unmark this workflow as the default
+    #[arg(long, conflicts_with = "default")]
+    pub no_default: bool,
 }
 
 impl WorkflowUpdateCommand {
@@ -68,6 +76,12 @@ impl WorkflowUpdateCommand {
             options = options.with_auto_advance(false);
         }
 
+        if self.default {
+            options = options.with_is_default(true);
+        } else if self.no_default {
+            options = options.with_is_default(false);
+        }
+
         if let Some(kanban_column) = &self.kanban_column {
             if kanban_column.is_empty() {
                 options = options.clear_kanban_column();
@@ -79,7 +93,7 @@ impl WorkflowUpdateCommand {
         // Check if any updates were provided
         if !options.has_updates() {
             return Err(ServiceError::validation_failed(
-                "no updates specified (use --name, --description, --clear-description, --auto-advance, --no-auto-advance, or --kanban-column options)",
+                "no updates specified (use --name, --description, --clear-description, --auto-advance, --no-auto-advance, --default, --no-default, or --kanban-column options)",
             ));
         }
 
@@ -103,6 +117,8 @@ mod tests {
             clear_description: false,
             auto_advance: false,
             no_auto_advance: false,
+            default: false,
+            no_default: false,
             kanban_column: None,
         };
         let debug = format!("{:?}", cmd);

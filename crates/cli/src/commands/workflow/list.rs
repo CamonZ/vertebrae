@@ -29,11 +29,13 @@ impl WorkflowListCommand {
         let output = summaries
             .iter()
             .map(|s| {
+                let default_marker = if s.is_default { " [default]" } else { "" };
                 format!(
-                    "{} - {} ({} steps){}",
+                    "{} - {} ({} steps){}{}",
                     s.id,
                     s.name,
                     s.step_count,
+                    default_marker,
                     s.description
                         .as_ref()
                         .map(|d| format!(" - {}", d))
