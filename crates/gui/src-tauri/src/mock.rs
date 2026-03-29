@@ -636,6 +636,7 @@ impl WorkflowService for MockWorkflowService {
             metadata: std::collections::HashMap::new(),
             auto_advance: options.auto_advance,
             order: options.order,
+            is_default: options.is_default,
             kanban_column: options.kanban_column.clone(),
             transitions: Vec::new(),
             created_at: Some(Utc::now()),
@@ -684,6 +685,9 @@ impl WorkflowService for MockWorkflowService {
         }
         if let Some(auto_advance) = options.auto_advance {
             wf.auto_advance = auto_advance;
+        }
+        if let Some(is_default) = options.is_default {
+            wf.is_default = is_default;
         }
         if let Some(kanban_column) = &options.kanban_column {
             wf.kanban_column = kanban_column.clone();

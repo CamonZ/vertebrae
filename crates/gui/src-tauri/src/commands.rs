@@ -2338,6 +2338,7 @@ mod tests {
                     steps: vec![],
                     auto_advance: false,
                     order: 0,
+                    is_default: false,
                     kanban_column: None,
                 })
                 .await
@@ -2372,6 +2373,7 @@ mod tests {
                     steps: vec![],
                     auto_advance: false,
                     order: 0,
+                    is_default: false,
                     kanban_column: None,
                 })
                 .await
@@ -2397,6 +2399,7 @@ mod tests {
                     steps: vec![],
                     auto_advance: false,
                     order: 0,
+                    is_default: false,
                     kanban_column: None,
                 })
                 .await
@@ -2427,6 +2430,7 @@ mod tests {
                     steps: vec![],
                     auto_advance: false,
                     order: 0,
+                    is_default: false,
                     kanban_column: None,
                 })
                 .await
@@ -2457,6 +2461,7 @@ mod tests {
                     steps: vec![],
                     auto_advance: false,
                     order: 0,
+                    is_default: false,
                     kanban_column: None,
                 })
                 .await
@@ -2468,6 +2473,7 @@ mod tests {
                     steps: vec![],
                     auto_advance: false,
                     order: 1,
+                    is_default: false,
                     kanban_column: None,
                 })
                 .await
@@ -2521,6 +2527,7 @@ mod tests {
                     steps: vec![],
                     auto_advance: false,
                     order: 0,
+                    is_default: false,
                     kanban_column: None,
                 })
                 .await
@@ -2557,6 +2564,7 @@ mod tests {
                     steps: vec![],
                     auto_advance: false,
                     order: 0,
+                    is_default: false,
                     kanban_column: None,
                 })
                 .await
@@ -2569,6 +2577,7 @@ mod tests {
                     steps: vec![],
                     auto_advance: false,
                     order: 1,
+                    is_default: false,
                     kanban_column: None,
                 })
                 .await

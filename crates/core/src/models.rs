@@ -1205,6 +1205,10 @@ pub struct Workflow {
     #[serde(default)]
     pub order: i32,
 
+    /// Whether this is the default workflow for new tasks
+    #[serde(default)]
+    pub is_default: bool,
+
     /// Optional kanban column for workflows
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kanban_column: Option<String>,
@@ -1233,6 +1237,7 @@ impl Workflow {
             metadata: std::collections::HashMap::new(),
             auto_advance: false,
             order: 0,
+            is_default: false,
             kanban_column: None,
             transitions: Vec::new(),
             created_at: None,
@@ -1267,6 +1272,12 @@ impl Workflow {
     /// Set the initial step
     pub fn with_initial_step(mut self, step_id: impl Into<String>) -> Self {
         self.initial_step = Some(step_id.into());
+        self
+    }
+
+    /// Set whether this is the default workflow
+    pub fn with_is_default(mut self, is_default: bool) -> Self {
+        self.is_default = is_default;
         self
     }
 
@@ -2690,5 +2701,39 @@ mod tests {
         let json_str = serde_json::to_string(&wf).unwrap();
         let deserialized: Workflow = serde_json::from_str(&json_str).unwrap();
         assert!(deserialized.kanban_column.is_none());
+    }
+
+    // ─── is_default ─────────────────────────────────────────────────
+
+    #[test]
+    fn workflow_is_default_defaults_to_false() {
+        let wf = Workflow::new("W");
+        assert!(!wf.is_default);
+    }
+
+    #[test]
+    fn workflow_with_is_default_builder() {
+        let wf = Workflow::new("W").with_is_default(true);
+        assert!(wf.is_default);
+    }
+
+    #[test]
+    fn workflow_serde_roundtrip_with_is_default() {
+        let wf = Workflow::new("Test")
+            .with_is_default(true)
+            .with_description("A workflow");
+        let json_str = serde_json::to_string(&wf).unwrap();
+        let deserialized: Workflow = serde_json::from_str(&json_str).unwrap();
+        assert_eq!(deserialized.name, "Test");
+        assert!(deserialized.is_default);
+        assert_eq!(deserialized.description, Some("A workflow".to_string()));
+    }
+
+    #[test]
+    fn workflow_serde_roundtrip_without_is_default() {
+        let wf = Workflow::new("Test");
+        let json_str = serde_json::to_string(&wf).unwrap();
+        let deserialized: Workflow = serde_json::from_str(&json_str).unwrap();
+        assert!(!deserialized.is_default);
     }
 }

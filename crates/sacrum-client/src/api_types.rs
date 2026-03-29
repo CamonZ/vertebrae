@@ -728,4 +728,39 @@ mod tests {
         let workflow: WorkflowResponse = serde_json::from_str(json).unwrap();
         assert!(workflow.kanban_column.is_none());
     }
+
+    #[test]
+    fn test_workflow_response_with_is_default_true() {
+        let json = r#"{
+            "id": "wf-default",
+            "name": "Default Workflow",
+            "is_default": true
+        }"#;
+
+        let workflow: WorkflowResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(workflow.is_default, Some(true));
+    }
+
+    #[test]
+    fn test_workflow_response_with_is_default_false() {
+        let json = r#"{
+            "id": "wf-nondefault",
+            "name": "Non-Default Workflow",
+            "is_default": false
+        }"#;
+
+        let workflow: WorkflowResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(workflow.is_default, Some(false));
+    }
+
+    #[test]
+    fn test_workflow_response_without_is_default() {
+        let json = r#"{
+            "id": "wf-noisdefault",
+            "name": "No IsDefault Workflow"
+        }"#;
+
+        let workflow: WorkflowResponse = serde_json::from_str(json).unwrap();
+        assert!(workflow.is_default.is_none());
+    }
 }
