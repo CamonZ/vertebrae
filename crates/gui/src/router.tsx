@@ -1,12 +1,18 @@
-import { createBrowserRouter, Outlet, useNavigate } from "react-router-dom";
+import {
+  createBrowserRouter,
+  Navigate,
+  Outlet,
+  useNavigate,
+} from "react-router-dom";
 import { useState, useEffect } from "react";
 import { AppShell } from "./components";
 import { useTheme } from "./hooks";
 import {
   ProjectSetupPage,
   TasksPage,
-  WorkflowsPage,
   AllWorkflowsPipeline,
+  OperationsPage,
+  BoardPage,
 } from "./pages";
 import { commands } from "./bindings";
 
@@ -79,6 +85,26 @@ export const router = createBrowserRouter([
     children: [
       {
         index: true,
+        element: <Navigate to="/operations" replace />,
+      },
+      {
+        path: "operations",
+        element: (
+          <ProjectGuard>
+            <OperationsPage />
+          </ProjectGuard>
+        ),
+      },
+      {
+        path: "board",
+        element: (
+          <ProjectGuard>
+            <BoardPage />
+          </ProjectGuard>
+        ),
+      },
+      {
+        path: "design",
         element: (
           <ProjectGuard>
             <AllWorkflowsPipeline />
@@ -90,22 +116,6 @@ export const router = createBrowserRouter([
         element: (
           <ProjectGuard>
             <TasksPage />
-          </ProjectGuard>
-        ),
-      },
-      {
-        path: "workflows",
-        element: (
-          <ProjectGuard>
-            <WorkflowsPage />
-          </ProjectGuard>
-        ),
-      },
-      {
-        path: "workflow-pipelines",
-        element: (
-          <ProjectGuard>
-            <AllWorkflowsPipeline />
           </ProjectGuard>
         ),
       },
