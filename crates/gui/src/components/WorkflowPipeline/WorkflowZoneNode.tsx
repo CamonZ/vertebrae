@@ -80,12 +80,22 @@ function WorkflowZoneNodeComponent({
 
         {/* Compact content */}
         <div className="p-4 h-full flex flex-col justify-center">
-          <h3 className="text-base font-semibold text-text-primary truncate">
-            {workflow.name}
-          </h3>
+          <div className="flex items-center gap-2">
+            <h3 className="text-base font-semibold text-text-primary truncate">
+              {workflow.name}
+            </h3>
+            {workflow.is_default && (
+              <span className="inline-flex flex-shrink-0 items-center rounded-full bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-primary">
+                Default
+              </span>
+            )}
+          </div>
           <div className="mt-2 flex items-center gap-4 text-xs text-text-muted">
             <span>{stepCount} steps</span>
             <span>{taskCount} tasks</span>
+            {workflow.kanban_column && (
+              <span>{workflow.kanban_column}</span>
+            )}
           </div>
         </div>
       </div>
@@ -120,17 +130,24 @@ function WorkflowZoneNodeComponent({
       <div
         className="absolute left-4 top-4 right-4 z-10"
       >
-        <button
-          type="button"
-          onClick={handleWorkflowClick}
-          className={`text-lg font-semibold transition-colors text-left cursor-pointer pointer-events-auto ${
-            isWorkflowSelected
-              ? "text-primary"
-              : "text-text-primary hover:text-primary"
-          }`}
-        >
-          {workflow.name}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleWorkflowClick}
+            className={`text-lg font-semibold transition-colors text-left cursor-pointer pointer-events-auto ${
+              isWorkflowSelected
+                ? "text-primary"
+                : "text-text-primary hover:text-primary"
+            }`}
+          >
+            {workflow.name}
+          </button>
+          {workflow.is_default && (
+            <span className="inline-flex flex-shrink-0 items-center rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-primary pointer-events-none">
+              Default
+            </span>
+          )}
+        </div>
         <div className="mt-1 flex items-center gap-3 text-xs text-text-muted">
           <code className="font-mono">{workflow.id?.slice(0, 8)}</code>
           <span className="flex items-center gap-1">
@@ -165,6 +182,24 @@ function WorkflowZoneNodeComponent({
             </svg>
             {taskCount} task{taskCount !== 1 ? "s" : ""}
           </span>
+          {workflow.kanban_column && (
+            <span className="flex items-center gap-1">
+              <svg
+                className="h-3 w-3"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7"
+                />
+              </svg>
+              {workflow.kanban_column}
+            </span>
+          )}
         </div>
         {workflow.description && (
           <p className="mt-2 text-sm text-text-secondary line-clamp-2">

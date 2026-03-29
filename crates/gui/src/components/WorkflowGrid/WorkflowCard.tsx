@@ -27,9 +27,16 @@ export function WorkflowCard({ workflow }: WorkflowCardProps) {
       aria-label={`View workflow: ${workflow.name}`}
     >
       <div className="flex items-start justify-between">
-        <h3 className="text-base font-semibold text-text-primary group-hover:text-primary">
-          {workflow.name}
-        </h3>
+        <div className="flex items-center gap-2">
+          <h3 className="text-base font-semibold text-text-primary group-hover:text-primary">
+            {workflow.name}
+          </h3>
+          {workflow.is_default && (
+            <span className="inline-flex items-center rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-primary">
+              Default
+            </span>
+          )}
+        </div>
         <span className="font-mono text-xs text-text-muted">
           {truncateId(workflowId)}
         </span>
@@ -61,6 +68,25 @@ export function WorkflowCard({ workflow }: WorkflowCardProps) {
             {workflow.initial_step ? 'Active' : 'No steps configured'}
           </span>
         </div>
+        {workflow.kanban_column && (
+          <div className="flex items-center gap-1.5 text-sm text-text-muted">
+            <svg
+              className="h-4 w-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={1.5}
+                d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7"
+              />
+            </svg>
+            <span>{workflow.kanban_column}</span>
+          </div>
+        )}
       </div>
     </Link>
   );

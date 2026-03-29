@@ -507,6 +507,9 @@ pub struct Workflow {
     pub initial_step: Option<String>,
     /// Optional kanban column
     pub kanban_column: Option<String>,
+    /// Whether this is the default workflow for new tasks
+    #[serde(default)]
+    pub is_default: bool,
     /// Additional metadata as key-value pairs
     #[serde(default)]
     pub metadata: std::collections::HashMap<String, String>,
@@ -525,6 +528,7 @@ impl From<vertebrae_core::Workflow> for Workflow {
             description: workflow.description,
             initial_step: workflow.initial_step,
             kanban_column: workflow.kanban_column,
+            is_default: workflow.is_default,
             metadata: workflow.metadata,
             created_at: workflow.created_at.map(|dt| dt.to_rfc3339()),
             updated_at: workflow.updated_at.map(|dt| dt.to_rfc3339()),
