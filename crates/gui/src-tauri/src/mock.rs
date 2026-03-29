@@ -663,6 +663,7 @@ impl WorkflowService for MockWorkflowService {
                 name: w.name.clone(),
                 description: w.description.clone(),
                 step_count: 0,
+                is_default: w.is_default,
             })
             .collect())
     }

@@ -96,7 +96,6 @@ async fn test_workflow_list_single_workflow() {
 
     assert!(output.contains(&wf_id));
     assert!(output.contains("Testing Workflow"));
-    // Verify step count is shown
     assert!(output.contains("0 steps"));
 }
 
@@ -118,11 +117,52 @@ async fn test_workflow_list_multiple_workflows() {
 }
 
 #[tokio::test]
+async fn test_workflow_list_shows_default_marker() {
+    let services = mock_services();
+    let options = CreateWorkflowOptions {
+        name: "Default Workflow".to_string(),
+        description: None,
+        steps: vec![],
+        auto_advance: false,
+        order: 0,
+        is_default: true,
+        kanban_column: None,
+    };
+    let wf_id = services.workflows().create_workflow(options).await.unwrap();
+
+    let cmd = WorkflowListCommand {};
+    let output = cmd.execute(services.workflows()).await.unwrap();
+
+    assert!(output.contains(&wf_id));
+    assert!(output.contains("Default Workflow"));
+    assert!(
+        output.contains("[default]"),
+        "expected [default] marker in output: {}",
+        output
+    );
+}
+
+#[tokio::test]
+async fn test_workflow_list_no_default_marker_when_not_default() {
+    let services = mock_services();
+    create_workflow(&services, "Regular Workflow", None).await;
+
+    let cmd = WorkflowListCommand {};
+    let output = cmd.execute(services.workflows()).await.unwrap();
+
+    assert!(output.contains("Regular Workflow"));
+    assert!(
+        !output.contains("[default]"),
+        "unexpected [default] marker in output: {}",
+        output
+    );
+}
+
+#[tokio::test]
 async fn test_workflow_list_includes_step_count() {
     let services = mock_services();
     let wf_id = create_workflow(&services, "Counted Workflow", None).await;
 
-    // Create two steps for the workflow
     for name in ["Review", "Deploy"] {
         let step = Step {
             id: None,
@@ -146,7 +186,6 @@ async fn test_workflow_list_includes_step_count() {
     let cmd = WorkflowListCommand {};
     let output = cmd.execute(services.workflows()).await.unwrap();
 
-    // Output should show accurate step count
     assert!(output.contains("2 steps"));
 }
 
@@ -166,6 +205,8 @@ async fn test_workflow_update_name() {
         clear_description: false,
         auto_advance: false,
         no_auto_advance: false,
+        default: false,
+        no_default: false,
         kanban_column: None,
     };
     let output = cmd.execute(services.workflows()).await.unwrap();
@@ -191,6 +232,8 @@ async fn test_workflow_update_description() {
         clear_description: false,
         auto_advance: false,
         no_auto_advance: false,
+        default: false,
+        no_default: false,
         kanban_column: None,
     };
     let output = cmd.execute(services.workflows()).await.unwrap();
@@ -214,6 +257,8 @@ async fn test_workflow_update_auto_advance_enable() {
         clear_description: false,
         auto_advance: true,
         no_auto_advance: false,
+        default: false,
+        no_default: false,
         kanban_column: None,
     };
     let output = cmd.execute(services.workflows()).await.unwrap();
@@ -237,6 +282,8 @@ async fn test_workflow_update_multiple_fields() {
         clear_description: false,
         auto_advance: true,
         no_auto_advance: false,
+        default: false,
+        no_default: false,
         kanban_column: None,
     };
     let output = cmd.execute(services.workflows()).await.unwrap();
@@ -265,6 +312,8 @@ async fn test_workflow_update_no_updates_fails() {
         clear_description: false,
         auto_advance: false,
         no_auto_advance: false,
+        default: false,
+        no_default: false,
         kanban_column: None,
     };
     let result = cmd.execute(services.workflows()).await;
@@ -283,6 +332,8 @@ async fn test_workflow_update_nonexistent_workflow() {
         clear_description: false,
         auto_advance: false,
         no_auto_advance: false,
+        default: false,
+        no_default: false,
         kanban_column: None,
     };
     let result = cmd.execute(services.workflows()).await;
@@ -330,6 +381,8 @@ async fn test_workflow_command_dispatch_update() {
         clear_description: false,
         auto_advance: false,
         no_auto_advance: false,
+        default: false,
+        no_default: false,
         kanban_column: None,
     });
     let output = cmd.execute(&services).await.unwrap();
@@ -358,6 +411,8 @@ async fn test_workflow_show_after_update() {
         clear_description: false,
         auto_advance: false,
         no_auto_advance: false,
+        default: false,
+        no_default: false,
         kanban_column: None,
     };
     update_cmd.execute(services.workflows()).await.unwrap();
@@ -434,6 +489,7 @@ async fn test_workflow_add_basic() {
         steps: vec![],
         auto_advance: false,
         order: 0,
+        default: false,
         kanban_column: None,
     };
     let output = cmd.execute(services.workflows()).await.unwrap();
@@ -449,6 +505,7 @@ async fn test_workflow_add_with_kanban_column() {
         steps: vec![],
         auto_advance: false,
         order: 0,
+        default: false,
         kanban_column: Some("In Progress".to_string()),
     };
     let output = cmd.execute(services.workflows()).await.unwrap();
@@ -467,6 +524,7 @@ async fn test_workflow_add_with_kanban_column_and_options() {
         steps: vec![],
         auto_advance: true,
         order: 5,
+        default: false,
         kanban_column: Some("Review".to_string()),
     };
     let output = cmd.execute(services.workflows()).await.unwrap();
@@ -491,6 +549,7 @@ async fn test_workflow_add_without_kanban_column() {
         steps: vec![],
         auto_advance: false,
         order: 0,
+        default: false,
         kanban_column: None,
     };
     let output = cmd.execute(services.workflows()).await.unwrap();
@@ -498,6 +557,153 @@ async fn test_workflow_add_without_kanban_column() {
 
     let wf = services.workflows().get_workflow(wf_id).await.unwrap();
     assert!(wf.kanban_column.is_none());
+}
+
+#[tokio::test]
+async fn test_workflow_add_with_default_flag() {
+    let services = mock_services();
+    let cmd = WorkflowAddCommand {
+        name: "Default Workflow".to_string(),
+        description: None,
+        steps: vec![],
+        auto_advance: false,
+        order: 0,
+        default: true,
+        kanban_column: None,
+    };
+    let output = cmd.execute(services.workflows()).await.unwrap();
+    let wf_id = output.strip_prefix("Created workflow: ").unwrap().trim();
+
+    let wf = services.workflows().get_workflow(wf_id).await.unwrap();
+    assert!(wf.is_default, "expected workflow to be marked as default");
+}
+
+#[tokio::test]
+async fn test_workflow_add_without_default_flag() {
+    let services = mock_services();
+    let cmd = WorkflowAddCommand {
+        name: "Regular Workflow".to_string(),
+        description: None,
+        steps: vec![],
+        auto_advance: false,
+        order: 0,
+        default: false,
+        kanban_column: None,
+    };
+    let output = cmd.execute(services.workflows()).await.unwrap();
+    let wf_id = output.strip_prefix("Created workflow: ").unwrap().trim();
+
+    let wf = services.workflows().get_workflow(wf_id).await.unwrap();
+    assert!(
+        !wf.is_default,
+        "expected workflow to NOT be marked as default"
+    );
+}
+
+#[tokio::test]
+async fn test_workflow_update_default_flag() {
+    let services = mock_services();
+    let wf_id = create_workflow(&services, "Workflow", None).await;
+
+    let cmd = WorkflowUpdateCommand {
+        id: wf_id.clone(),
+        name: None,
+        description: None,
+        clear_description: false,
+        auto_advance: false,
+        no_auto_advance: false,
+        default: true,
+        no_default: false,
+        kanban_column: None,
+    };
+    let output = cmd.execute(services.workflows()).await.unwrap();
+    assert!(output.contains("Updated workflow"));
+
+    let updated = services.workflows().get_workflow(&wf_id).await.unwrap();
+    assert!(
+        updated.is_default,
+        "expected workflow to be marked as default after update"
+    );
+}
+
+#[tokio::test]
+async fn test_workflow_update_no_default_flag() {
+    let services = mock_services();
+
+    // Create a default workflow
+    let options = CreateWorkflowOptions {
+        name: "Default WF".to_string(),
+        description: None,
+        steps: vec![],
+        auto_advance: false,
+        order: 0,
+        is_default: true,
+        kanban_column: None,
+    };
+    let wf_id = services.workflows().create_workflow(options).await.unwrap();
+
+    // Verify it's default
+    let wf = services.workflows().get_workflow(&wf_id).await.unwrap();
+    assert!(wf.is_default);
+
+    // Unmark as default
+    let cmd = WorkflowUpdateCommand {
+        id: wf_id.clone(),
+        name: None,
+        description: None,
+        clear_description: false,
+        auto_advance: false,
+        no_auto_advance: false,
+        default: false,
+        no_default: true,
+        kanban_column: None,
+    };
+    let output = cmd.execute(services.workflows()).await.unwrap();
+    assert!(output.contains("Updated workflow"));
+
+    let updated = services.workflows().get_workflow(&wf_id).await.unwrap();
+    assert!(
+        !updated.is_default,
+        "expected workflow to NOT be marked as default after --no-default"
+    );
+}
+
+#[tokio::test]
+async fn test_workflow_show_displays_default_yes() {
+    let services = mock_services();
+
+    let options = CreateWorkflowOptions {
+        name: "Default Show WF".to_string(),
+        description: None,
+        steps: vec![],
+        auto_advance: false,
+        order: 0,
+        is_default: true,
+        kanban_column: None,
+    };
+    let wf_id = services.workflows().create_workflow(options).await.unwrap();
+
+    let cmd = WorkflowShowCommand { id: wf_id };
+    let output = cmd.execute(&services).await.unwrap();
+    assert!(
+        output.contains("Default: Yes"),
+        "expected 'Default: Yes' in show output: {}",
+        output
+    );
+}
+
+#[tokio::test]
+async fn test_workflow_show_displays_default_no() {
+    let services = mock_services();
+    let wf_id = create_workflow(&services, "Regular Show WF", None).await;
+
+    let cmd = WorkflowShowCommand { id: wf_id };
+    let output = cmd.execute(&services).await.unwrap();
+    assert!(
+        output.contains("Default: No"),
+        "expected 'Default: No' in show output: {}",
+        output
+    );
 }
 
 #[tokio::test]

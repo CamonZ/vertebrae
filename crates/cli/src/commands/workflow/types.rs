@@ -57,6 +57,8 @@ pub struct WorkflowDetail {
     pub description: Option<String>,
     /// Whether to automatically advance to the next step on successful completion
     pub auto_advance: bool,
+    /// Whether this is the default workflow for new tasks
+    pub is_default: bool,
     /// Optional kanban column
     pub kanban_column: Option<String>,
     /// Ordered list of workflow steps
@@ -90,6 +92,9 @@ impl std::fmt::Display for WorkflowDetail {
             "Auto Advance: {}",
             if self.auto_advance { "Yes" } else { "No" }
         )?;
+
+        // Default workflow setting
+        writeln!(f, "Default: {}", if self.is_default { "Yes" } else { "No" })?;
 
         // Kanban column (if present)
         if let Some(ref kanban_column) = self.kanban_column {
@@ -206,6 +211,7 @@ mod tests {
             name: "Test Workflow".to_string(),
             description: Some("A detailed workflow".to_string()),
             auto_advance: false,
+            is_default: false,
             kanban_column: None,
             steps: vec![
                 StepDisplayInfo {
@@ -246,6 +252,7 @@ mod tests {
             name: "Test".to_string(),
             description: None,
             auto_advance: true,
+            is_default: false,
             kanban_column: None,
             steps: vec![],
             metadata,
@@ -303,6 +310,7 @@ mod tests {
             name: "Test".to_string(),
             description: None,
             auto_advance: false,
+            is_default: false,
             kanban_column: None,
             steps: vec![],
             metadata: HashMap::new(),
@@ -322,6 +330,7 @@ mod tests {
             name: "Empty".to_string(),
             description: None,
             auto_advance: false,
+            is_default: false,
             kanban_column: None,
             steps: vec![],
             metadata: HashMap::new(),
@@ -340,6 +349,7 @@ mod tests {
             name: "Auto".to_string(),
             description: None,
             auto_advance: true,
+            is_default: false,
             kanban_column: None,
             steps: vec![],
             metadata: HashMap::new(),
@@ -351,12 +361,49 @@ mod tests {
     }
 
     #[test]
+    fn test_workflow_detail_display_default_yes() {
+        let detail = WorkflowDetail {
+            id: "wf1".to_string(),
+            name: "Def".to_string(),
+            description: None,
+            auto_advance: false,
+            is_default: true,
+            kanban_column: None,
+            steps: vec![],
+            metadata: HashMap::new(),
+            created_at: None,
+            updated_at: None,
+        };
+        let output = format!("{}", detail);
+        assert!(output.contains("Default: Yes"));
+    }
+
+    #[test]
+    fn test_workflow_detail_display_default_no() {
+        let detail = WorkflowDetail {
+            id: "wf1".to_string(),
+            name: "NoDef".to_string(),
+            description: None,
+            auto_advance: false,
+            is_default: false,
+            kanban_column: None,
+            steps: vec![],
+            metadata: HashMap::new(),
+            created_at: None,
+            updated_at: None,
+        };
+        let output = format!("{}", detail);
+        assert!(output.contains("Default: No"));
+    }
+
+    #[test]
     fn test_workflow_detail_display_with_timestamps() {
         let detail = WorkflowDetail {
             id: "wf1".to_string(),
             name: "Timestamped".to_string(),
             description: None,
             auto_advance: false,
+            is_default: false,
             kanban_column: None,
             steps: vec![],
             metadata: HashMap::new(),
@@ -376,6 +423,7 @@ mod tests {
             name: "Created".to_string(),
             description: None,
             auto_advance: false,
+            is_default: false,
             kanban_column: None,
             steps: vec![],
             metadata: HashMap::new(),
@@ -395,6 +443,7 @@ mod tests {
             name: "Updated".to_string(),
             description: None,
             auto_advance: false,
+            is_default: false,
             kanban_column: None,
             steps: vec![],
             metadata: HashMap::new(),
@@ -414,6 +463,7 @@ mod tests {
             name: "NoTs".to_string(),
             description: None,
             auto_advance: false,
+            is_default: false,
             kanban_column: None,
             steps: vec![],
             metadata: HashMap::new(),
@@ -431,6 +481,7 @@ mod tests {
             name: "Default Model".to_string(),
             description: None,
             auto_advance: false,
+            is_default: false,
             kanban_column: None,
             steps: vec![StepDisplayInfo {
                 name: "review".to_string(),
@@ -454,6 +505,7 @@ mod tests {
             name: "Sorted".to_string(),
             description: None,
             auto_advance: false,
+            is_default: false,
             kanban_column: None,
             steps: vec![
                 StepDisplayInfo {
@@ -498,6 +550,7 @@ mod tests {
             name: "NoDesc".to_string(),
             description: None,
             auto_advance: false,
+            is_default: false,
             kanban_column: None,
             steps: vec![],
             metadata: HashMap::new(),
@@ -520,6 +573,7 @@ mod tests {
             name: "Meta".to_string(),
             description: None,
             auto_advance: false,
+            is_default: false,
             kanban_column: None,
             steps: vec![],
             metadata,
@@ -626,6 +680,7 @@ mod tests {
             name: "Prompted".to_string(),
             description: None,
             auto_advance: false,
+            is_default: false,
             kanban_column: None,
             steps: vec![StepDisplayInfo {
                 name: "review".to_string(),
@@ -650,6 +705,7 @@ mod tests {
             name: "Eval".to_string(),
             description: None,
             auto_advance: false,
+            is_default: false,
             kanban_column: None,
             steps: vec![StepDisplayInfo {
                 name: "check".to_string(),
@@ -675,6 +731,7 @@ mod tests {
             name: "Both".to_string(),
             description: None,
             auto_advance: false,
+            is_default: false,
             kanban_column: None,
             steps: vec![StepDisplayInfo {
                 name: "implement".to_string(),
@@ -704,6 +761,7 @@ mod tests {
             name: "NoPrompts".to_string(),
             description: None,
             auto_advance: false,
+            is_default: false,
             kanban_column: None,
             steps: vec![StepDisplayInfo {
                 name: "basic".to_string(),

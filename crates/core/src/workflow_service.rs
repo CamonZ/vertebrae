@@ -206,6 +206,8 @@ pub struct WorkflowSummary {
     pub description: Option<String>,
     /// Number of steps in the workflow
     pub step_count: usize,
+    /// Whether this is the default workflow for new tasks
+    pub is_default: bool,
 }
 
 /// Result of assigning a workflow to a task

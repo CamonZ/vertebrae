@@ -115,6 +115,7 @@ impl SacrumWorkflowService {
             name: response.name.clone(),
             description: response.description.clone(),
             step_count: response.workflow_steps.len(),
+            is_default: response.is_default.unwrap_or(false),
         }
     }
 
