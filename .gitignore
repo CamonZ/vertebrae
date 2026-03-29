@@ -27,3 +27,4 @@ Thumbs.db
 /.claude/settings.json
 /.env
 .mcp.json
+/mutants.out
