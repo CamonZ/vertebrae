@@ -43,6 +43,8 @@ pub struct CreateWorkflowOptions {
     pub auto_advance: bool,
     /// Display order for sorting workflows (lower values appear first)
     pub order: i32,
+    /// Whether this is the default workflow for new tasks
+    pub is_default: bool,
     /// Optional kanban column for board placement
     pub kanban_column: Option<String>,
 }
@@ -56,6 +58,7 @@ impl CreateWorkflowOptions {
             steps,
             auto_advance: false,
             order: 0,
+            is_default: false,
             kanban_column: None,
         }
     }
@@ -75,6 +78,12 @@ impl CreateWorkflowOptions {
     /// Set the display order
     pub fn with_order(mut self, order: i32) -> Self {
         self.order = order;
+        self
+    }
+
+    /// Set whether this is the default workflow
+    pub fn with_is_default(mut self, is_default: bool) -> Self {
+        self.is_default = is_default;
         self
     }
 
@@ -115,6 +124,8 @@ pub struct UpdateWorkflowOptions {
     pub auto_advance: Option<bool>,
     /// Display order for sorting workflows (Some(i32) to set, None leaves unchanged)
     pub order: Option<i32>,
+    /// Whether this is the default workflow (Some(bool) to set, None leaves unchanged)
+    pub is_default: Option<bool>,
     /// Kanban column (Some(Some(x)) to set, Some(None) to clear, None leaves unchanged)
     pub kanban_column: Option<Option<String>>,
 }
@@ -155,6 +166,12 @@ impl UpdateWorkflowOptions {
         self
     }
 
+    /// Set whether this is the default workflow
+    pub fn with_is_default(mut self, is_default: bool) -> Self {
+        self.is_default = Some(is_default);
+        self
+    }
+
     /// Set the kanban column
     pub fn with_kanban_column(mut self, kanban_column: impl Into<String>) -> Self {
         self.kanban_column = Some(Some(kanban_column.into()));
@@ -173,6 +190,7 @@ impl UpdateWorkflowOptions {
             || self.description.is_some()
             || self.auto_advance.is_some()
             || self.order.is_some()
+            || self.is_default.is_some()
             || self.kanban_column.is_some()
     }
 }
@@ -383,9 +401,21 @@ mod tests {
     }
 
     #[test]
+    fn create_workflow_options_defaults_is_default_to_false() {
+        let opts = CreateWorkflowOptions::new("test", vec![]);
+        assert!(!opts.is_default);
+    }
+
+    #[test]
     fn create_workflow_options_with_kanban_column() {
         let opts = CreateWorkflowOptions::new("test", vec![]).with_kanban_column("In Progress");
         assert_eq!(opts.kanban_column, Some("In Progress".to_string()));
+    }
+
+    #[test]
+    fn create_workflow_options_with_is_default() {
+        let opts = CreateWorkflowOptions::new("test", vec![]).with_is_default(true);
+        assert!(opts.is_default);
     }
 
     #[test]
@@ -394,11 +424,13 @@ mod tests {
             .with_description("desc")
             .with_auto_advance(true)
             .with_order(5)
+            .with_is_default(true)
             .with_kanban_column("Review");
         assert_eq!(opts.name, "test");
         assert_eq!(opts.description, Some("desc".to_string()));
         assert!(opts.auto_advance);
         assert_eq!(opts.order, 5);
+        assert!(opts.is_default);
         assert_eq!(opts.kanban_column, Some("Review".to_string()));
     }
 
@@ -419,9 +451,17 @@ mod tests {
     }
 
     #[test]
+    fn update_workflow_options_with_is_default() {
+        let opts = UpdateWorkflowOptions::new().with_is_default(true);
+        assert_eq!(opts.is_default, Some(true));
+        assert!(opts.has_updates());
+    }
+
+    #[test]
     fn update_workflow_options_defaults() {
         let opts = UpdateWorkflowOptions::new();
         assert!(opts.kanban_column.is_none());
+        assert!(opts.is_default.is_none());
         assert!(!opts.has_updates());
     }
 }
