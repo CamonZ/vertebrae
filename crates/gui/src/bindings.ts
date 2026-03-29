@@ -1227,6 +1227,14 @@ description: string | null;
  */
 initial_step: string | null; 
 /**
+ * Optional kanban column
+ */
+kanban_column: string | null; 
+/**
+ * Whether this is the default workflow for new tasks
+ */
+is_default?: boolean; 
+/**
  * Additional metadata as key-value pairs
  */
 metadata?: Partial<{ [key in string]: string }>; 
