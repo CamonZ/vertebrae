@@ -118,7 +118,6 @@ async fn task_field_should_be(world: &mut SmokeWorld, field: String, expected: S
         "priority" => json["priority"].as_str().unwrap_or("").to_string(),
         "description" => json["description"].as_str().unwrap_or("").to_string(),
         "worktree" => json["worktree"].as_str().unwrap_or("").to_string(),
-        "track" => json["track"].as_str().unwrap_or("").to_string(),
         "archived" => {
             if json["archived"].as_bool().unwrap_or(false) {
                 "true".to_string()
@@ -183,14 +182,6 @@ async fn task_field_should_be_empty(world: &mut SmokeWorld, field: String) {
             assert!(
                 val.is_null() || val.as_str() == Some(""),
                 "expected worktree to be empty, got: {}",
-                val
-            );
-        }
-        "track" => {
-            let val = &json["track"];
-            assert!(
-                val.is_null() || val.as_str() == Some(""),
-                "expected track to be empty, got: {}",
                 val
             );
         }

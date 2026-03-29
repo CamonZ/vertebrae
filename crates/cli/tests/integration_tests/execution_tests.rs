@@ -38,7 +38,6 @@ async fn test_execution_create_success() {
             parent_id: None,
             depends_on: vec![],
             needs_review: false,
-            track: None,
         })
         .await
         .unwrap();
@@ -50,7 +49,6 @@ async fn test_execution_create_success() {
         auto_advance: false,
         steps: vec![],
         order: 0,
-        track: None,
         kanban_column: None,
     };
     let workflow_id = services
@@ -138,7 +136,6 @@ async fn test_execution_create_with_context_and_prompt() {
             parent_id: None,
             depends_on: vec![],
             needs_review: false,
-            track: None,
         })
         .await
         .unwrap();
@@ -151,7 +148,6 @@ async fn test_execution_create_with_context_and_prompt() {
             auto_advance: false,
             steps: vec![],
             order: 0,
-            track: None,
             kanban_column: None,
         })
         .await
@@ -229,7 +225,6 @@ async fn test_execution_create_invalid_context_json_fails() {
             parent_id: None,
             depends_on: vec![],
             needs_review: false,
-            track: None,
         })
         .await
         .unwrap();
@@ -242,7 +237,6 @@ async fn test_execution_create_invalid_context_json_fails() {
             auto_advance: false,
             steps: vec![],
             order: 0,
-            track: None,
             kanban_column: None,
         })
         .await
@@ -319,7 +313,6 @@ async fn test_execution_list_empty() {
             parent_id: None,
             depends_on: vec![],
             needs_review: false,
-            track: None,
         })
         .await
         .unwrap();
@@ -351,7 +344,6 @@ async fn test_execution_list_with_executions() {
             parent_id: None,
             depends_on: vec![],
             needs_review: false,
-            track: None,
         })
         .await
         .unwrap();
@@ -408,7 +400,6 @@ async fn test_execution_list_chronological_order() {
             parent_id: None,
             depends_on: vec![],
             needs_review: false,
-            track: None,
         })
         .await
         .unwrap();
@@ -459,7 +450,6 @@ async fn test_execution_show_basic() {
             parent_id: None,
             depends_on: vec![],
             needs_review: false,
-            track: None,
         })
         .await
         .unwrap();
@@ -505,7 +495,6 @@ async fn test_execution_show_with_context_prompt_output() {
             parent_id: None,
             depends_on: vec![],
             needs_review: false,
-            track: None,
         })
         .await
         .unwrap();
@@ -557,7 +546,6 @@ async fn test_execution_show_with_logs() {
             parent_id: None,
             depends_on: vec![],
             needs_review: false,
-            track: None,
         })
         .await
         .unwrap();
@@ -607,7 +595,6 @@ async fn test_execution_show_with_transition_result() {
             parent_id: None,
             depends_on: vec![],
             needs_review: false,
-            track: None,
         })
         .await
         .unwrap();
@@ -662,7 +649,6 @@ async fn test_execution_update_output() {
             parent_id: None,
             depends_on: vec![],
             needs_review: false,
-            track: None,
         })
         .await
         .unwrap();
@@ -709,7 +695,6 @@ async fn test_execution_update_transition_result() {
             parent_id: None,
             depends_on: vec![],
             needs_review: false,
-            track: None,
         })
         .await
         .unwrap();
@@ -755,7 +740,6 @@ async fn test_execution_update_both_fields() {
             parent_id: None,
             depends_on: vec![],
             needs_review: false,
-            track: None,
         })
         .await
         .unwrap();
@@ -820,7 +804,6 @@ async fn test_execution_log_success() {
             parent_id: None,
             depends_on: vec![],
             needs_review: false,
-            track: None,
         })
         .await
         .unwrap();
@@ -871,7 +854,6 @@ async fn test_execution_log_multiline() {
             parent_id: None,
             depends_on: vec![],
             needs_review: false,
-            track: None,
         })
         .await
         .unwrap();
@@ -916,7 +898,6 @@ async fn test_execution_log_long_content_truncated_in_output() {
             parent_id: None,
             depends_on: vec![],
             needs_review: false,
-            track: None,
         })
         .await
         .unwrap();
@@ -984,7 +965,6 @@ async fn test_execution_workflow_create_list_show() {
             parent_id: None,
             depends_on: vec![],
             needs_review: false,
-            track: None,
         })
         .await
         .unwrap();
@@ -1054,7 +1034,6 @@ async fn test_execution_with_logs_complete_flow() {
             parent_id: None,
             depends_on: vec![],
             needs_review: false,
-            track: None,
         })
         .await
         .unwrap();

@@ -19,7 +19,6 @@ async fn test_review_toggle_from_false_to_true() {
         parent: None,
         depends_on: vec![],
         needs_review: false,
-        track: None,
         workflow: None,
     };
     let task_id = task.execute(&services).await.unwrap();
@@ -58,7 +57,6 @@ async fn test_review_toggle_from_true_to_false() {
         parent: None,
         depends_on: vec![],
         needs_review: true,
-        track: None,
         workflow: None,
     };
     let task_id = task.execute(&services).await.unwrap();
@@ -97,7 +95,6 @@ async fn test_review_set_to_true() {
         parent: None,
         depends_on: vec![],
         needs_review: false,
-        track: None,
         workflow: None,
     };
     let task_id = task.execute(&services).await.unwrap();
@@ -129,7 +126,6 @@ async fn test_review_set_to_false() {
         parent: None,
         depends_on: vec![],
         needs_review: true,
-        track: None,
         workflow: None,
     };
     let task_id = task.execute(&services).await.unwrap();
@@ -174,7 +170,6 @@ async fn test_review_case_insensitive_task_id() {
         parent: None,
         depends_on: vec![],
         needs_review: false,
-        track: None,
         workflow: None,
     };
     let task_id = task.execute(&services).await.unwrap();
@@ -209,7 +204,6 @@ async fn test_review_multiple_toggles() {
         parent: None,
         depends_on: vec![],
         needs_review: false,
-        track: None,
         workflow: None,
     };
     let task_id = task.execute(&services).await.unwrap();
@@ -256,7 +250,6 @@ async fn test_review_set_overrides_current_state() {
         parent: None,
         depends_on: vec![],
         needs_review: true,
-        track: None,
         workflow: None,
     };
     let task_id = task.execute(&services).await.unwrap();
@@ -303,7 +296,6 @@ async fn test_review_with_parent_and_children() {
         parent: None,
         depends_on: vec![],
         needs_review: false,
-        track: None,
         workflow: None,
     };
     let parent_id = parent.execute(&services).await.unwrap();
@@ -318,7 +310,6 @@ async fn test_review_with_parent_and_children() {
         parent: Some(parent_id.clone()),
         depends_on: vec![],
         needs_review: false,
-        track: None,
         workflow: None,
     };
     let child_id = child.execute(&services).await.unwrap();

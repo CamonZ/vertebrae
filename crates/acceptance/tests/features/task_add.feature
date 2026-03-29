@@ -78,19 +78,6 @@ Feature: Add tasks
       | depends_on | <blocker_id> |
     Then the task should be blocked by "<blocker_id>"
 
-  Scenario: Create task with track
-    When I create a task with:
-      | title | Frontend task |
-      | track | frontend      |
-    Then the command should succeed
-    And the task track should be "frontend"
-
-  Scenario: Create task without track
-    When I create a task with:
-      | title | No track task |
-    Then the command should succeed
-    And the task track should be empty
-
   Scenario: Empty title is rejected
     When I create a task with:
       | title | |

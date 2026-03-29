@@ -43,8 +43,6 @@ pub struct CreateWorkflowOptions {
     pub auto_advance: bool,
     /// Display order for sorting workflows (lower values appear first)
     pub order: i32,
-    /// Optional track for categorizing workflows
-    pub track: Option<String>,
     /// Optional kanban column for board placement
     pub kanban_column: Option<String>,
 }
@@ -58,7 +56,6 @@ impl CreateWorkflowOptions {
             steps,
             auto_advance: false,
             order: 0,
-            track: None,
             kanban_column: None,
         }
     }
@@ -78,12 +75,6 @@ impl CreateWorkflowOptions {
     /// Set the display order
     pub fn with_order(mut self, order: i32) -> Self {
         self.order = order;
-        self
-    }
-
-    /// Set the track
-    pub fn with_track(mut self, track: impl Into<String>) -> Self {
-        self.track = Some(track.into());
         self
     }
 
@@ -124,8 +115,6 @@ pub struct UpdateWorkflowOptions {
     pub auto_advance: Option<bool>,
     /// Display order for sorting workflows (Some(i32) to set, None leaves unchanged)
     pub order: Option<i32>,
-    /// Track (Some(Some(x)) to set, Some(None) to clear, None leaves unchanged)
-    pub track: Option<Option<String>>,
     /// Kanban column (Some(Some(x)) to set, Some(None) to clear, None leaves unchanged)
     pub kanban_column: Option<Option<String>>,
 }
@@ -166,18 +155,6 @@ impl UpdateWorkflowOptions {
         self
     }
 
-    /// Set the track
-    pub fn with_track(mut self, track: impl Into<String>) -> Self {
-        self.track = Some(Some(track.into()));
-        self
-    }
-
-    /// Clear the track
-    pub fn clear_track(mut self) -> Self {
-        self.track = Some(None);
-        self
-    }
-
     /// Set the kanban column
     pub fn with_kanban_column(mut self, kanban_column: impl Into<String>) -> Self {
         self.kanban_column = Some(Some(kanban_column.into()));
@@ -196,7 +173,6 @@ impl UpdateWorkflowOptions {
             || self.description.is_some()
             || self.auto_advance.is_some()
             || self.order.is_some()
-            || self.track.is_some()
             || self.kanban_column.is_some()
     }
 }
@@ -401,16 +377,9 @@ mod tests {
     // ==================== CreateWorkflowOptions tests ====================
 
     #[test]
-    fn create_workflow_options_defaults_track_and_kanban_to_none() {
+    fn create_workflow_options_defaults_kanban_to_none() {
         let opts = CreateWorkflowOptions::new("test", vec![]);
-        assert!(opts.track.is_none());
         assert!(opts.kanban_column.is_none());
-    }
-
-    #[test]
-    fn create_workflow_options_with_track() {
-        let opts = CreateWorkflowOptions::new("test", vec![]).with_track("design");
-        assert_eq!(opts.track, Some("design".to_string()));
     }
 
     #[test]
@@ -420,45 +389,20 @@ mod tests {
     }
 
     #[test]
-    fn create_workflow_options_with_track_and_kanban_column() {
-        let opts = CreateWorkflowOptions::new("test", vec![])
-            .with_track("engineering")
-            .with_kanban_column("Done");
-        assert_eq!(opts.track, Some("engineering".to_string()));
-        assert_eq!(opts.kanban_column, Some("Done".to_string()));
-    }
-
-    #[test]
     fn create_workflow_options_builder_chain() {
         let opts = CreateWorkflowOptions::new("test", vec![])
             .with_description("desc")
             .with_auto_advance(true)
             .with_order(5)
-            .with_track("ops")
             .with_kanban_column("Review");
         assert_eq!(opts.name, "test");
         assert_eq!(opts.description, Some("desc".to_string()));
         assert!(opts.auto_advance);
         assert_eq!(opts.order, 5);
-        assert_eq!(opts.track, Some("ops".to_string()));
         assert_eq!(opts.kanban_column, Some("Review".to_string()));
     }
 
     // ==================== UpdateWorkflowOptions tests ====================
-
-    #[test]
-    fn update_workflow_options_with_track() {
-        let opts = UpdateWorkflowOptions::new().with_track("design");
-        assert_eq!(opts.track, Some(Some("design".to_string())));
-        assert!(opts.has_updates());
-    }
-
-    #[test]
-    fn update_workflow_options_clear_track() {
-        let opts = UpdateWorkflowOptions::new().clear_track();
-        assert_eq!(opts.track, Some(None));
-        assert!(opts.has_updates());
-    }
 
     #[test]
     fn update_workflow_options_with_kanban_column() {
@@ -477,7 +421,6 @@ mod tests {
     #[test]
     fn update_workflow_options_defaults() {
         let opts = UpdateWorkflowOptions::new();
-        assert!(opts.track.is_none());
         assert!(opts.kanban_column.is_none());
         assert!(!opts.has_updates());
     }
