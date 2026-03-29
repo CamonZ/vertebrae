@@ -30,8 +30,6 @@ pub struct TaskSummary {
     pub archived: bool,
     /// Parent task ID (if any)
     pub parent_id: Option<String>,
-    /// Optional track for categorization
-    pub track: Option<String>,
 }
 
 /// List tasks with optional filters
@@ -81,10 +79,6 @@ pub struct ListCommand {
     #[arg(long)]
     pub search: Option<String>,
 
-    /// Filter by track name
-    #[arg(long)]
-    pub track: Option<String>,
-
     /// Display tasks as a flat table (tree is default)
     #[arg(long)]
     pub flat: bool,
@@ -131,7 +125,6 @@ impl From<vertebrae_core::Task> for TaskSummary {
             needs_human_review: task.needs_human_review,
             archived: task.archived,
             parent_id: task.parent_id,
-            track: task.track,
         }
     }
 }
@@ -237,11 +230,6 @@ impl ListCommand {
             filter = filter.with_search(search);
         }
 
-        // Add track filter
-        if let Some(ref track) = self.track {
-            filter = filter.with_track(track);
-        }
-
         filter
     }
 }
@@ -263,7 +251,6 @@ mod tests {
             needs_human_review: Some(false),
             archived: false,
             parent_id: Some("parent-0000-4000-8000-000000000001".to_string()),
-            track: None,
         };
 
         let json = serde_json::to_value(&summary).unwrap();
@@ -293,7 +280,6 @@ mod tests {
                 needs_human_review: None,
                 archived: false,
                 parent_id: None,
-                track: None,
             },
             TaskSummary {
                 id: "task2".to_string(),
@@ -306,7 +292,6 @@ mod tests {
                 needs_human_review: None,
                 archived: false,
                 parent_id: None,
-                track: None,
             },
         ];
 
@@ -330,7 +315,6 @@ mod tests {
             needs_human_review: None,
             archived: false,
             parent_id: None,
-            track: None,
         };
 
         let json = serde_json::to_value(&summary).unwrap();
@@ -340,89 +324,5 @@ mod tests {
         assert!(json["needs_human_review"].is_null());
         assert!(json["parent_id"].is_null());
         assert!(json["tags"].as_array().unwrap().is_empty());
-    }
-
-    #[test]
-    fn test_task_summary_serialization_with_track() {
-        let summary = TaskSummary {
-            id: "task1".to_string(),
-            title: "Tracked task".to_string(),
-            level: "ticket".to_string(),
-            workflow_name: None,
-            step_name: None,
-            priority: None,
-            tags: vec![],
-            needs_human_review: None,
-            archived: false,
-            parent_id: None,
-            track: Some("frontend".to_string()),
-        };
-
-        let json = serde_json::to_value(&summary).unwrap();
-        assert_eq!(json["track"], "frontend");
-    }
-
-    #[test]
-    fn test_task_summary_serialization_without_track() {
-        let summary = TaskSummary {
-            id: "task2".to_string(),
-            title: "No track task".to_string(),
-            level: "task".to_string(),
-            workflow_name: None,
-            step_name: None,
-            priority: None,
-            tags: vec![],
-            needs_human_review: None,
-            archived: false,
-            parent_id: None,
-            track: None,
-        };
-
-        let json = serde_json::to_value(&summary).unwrap();
-        assert!(json["track"].is_null());
-    }
-
-    #[test]
-    fn test_build_filter_with_track() {
-        let cmd = ListCommand {
-            levels: vec![],
-            statuses: vec![],
-            priorities: vec![],
-            tags: vec![],
-            workflow: None,
-            step: None,
-            root: false,
-            parent: None,
-            all: false,
-            include_archived: false,
-            search: None,
-            track: Some("frontend".to_string()),
-            flat: false,
-        };
-
-        let filter = cmd.build_filter();
-        assert_eq!(filter.track, Some("frontend".to_string()));
-    }
-
-    #[test]
-    fn test_build_filter_without_track() {
-        let cmd = ListCommand {
-            levels: vec![],
-            statuses: vec![],
-            priorities: vec![],
-            tags: vec![],
-            workflow: None,
-            step: None,
-            root: false,
-            parent: None,
-            all: false,
-            include_archived: false,
-            search: None,
-            track: None,
-            flat: false,
-        };
-
-        let filter = cmd.build_filter();
-        assert_eq!(filter.track, None);
     }
 }

@@ -18,7 +18,6 @@ pub const TASK_FIELDS: &str = r#"
         revision_feedback
         archived
         worktree
-        track
         parent_id
         started_at
         completed_at
@@ -71,8 +70,7 @@ pub const LIST_TASKS: &str = r#"
         $workflow_id: Uuid4,
         $root_only: Boolean,
         $blocked: Boolean,
-        $includeArchived: Boolean,
-        $track: String
+        $includeArchived: Boolean
     ) {
         tasks(
             project_id: $project_id,
@@ -85,8 +83,7 @@ pub const LIST_TASKS: &str = r#"
             workflow_id: $workflow_id,
             root_only: $root_only,
             blocked: $blocked,
-            includeArchived: $includeArchived,
-            track: $track
+            includeArchived: $includeArchived
         ) {
             ...TaskFields
         }
@@ -143,8 +140,7 @@ pub const CREATE_TASK: &str = r#"
         $priority: String,
         $tags: [String!],
         $parent_id: Uuid4,
-        $sections: [TaskSectionInput!],
-        $track: String
+        $sections: [TaskSectionInput!]
     ) {
         create_task(
             project_id: $project_id,
@@ -154,8 +150,7 @@ pub const CREATE_TASK: &str = r#"
             priority: $priority,
             tags: $tags,
             parent_id: $parent_id,
-            sections: $sections,
-            track: $track
+            sections: $sections
         ) {
             id
         }
@@ -175,8 +170,7 @@ pub const UPDATE_TASK: &str = r#"
         $parent_id: Uuid4,
         $depends_on_ids: [Uuid4!],
         $archived: Boolean,
-        $worktree: String,
-        $track: String
+        $worktree: String
     ) {
         update_task(
             id: $id,
@@ -190,8 +184,7 @@ pub const UPDATE_TASK: &str = r#"
             parent_id: $parent_id,
             depends_on_ids: $depends_on_ids,
             archived: $archived,
-            worktree: $worktree,
-            track: $track
+            worktree: $worktree
         ) {
             id
         }

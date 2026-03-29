@@ -116,17 +116,3 @@ Feature: Update tasks
       | parent | 00000000-0000-4000-8000-000000000000 |
     Then the command should fail with "Parent task not found: 00000000-0000-4000-8000-000000000000"
 
-  Scenario: Update task track
-    Given I create a task with:
-      | title | Track update task |
-    When I update the task with:
-      | track | backend |
-    Then the task track should be "backend"
-
-  Scenario: Clear task track
-    Given I create a task with:
-      | title | Track clear task |
-      | track | frontend         |
-    When I update the task with:
-      | track | |
-    Then the task track should be empty
