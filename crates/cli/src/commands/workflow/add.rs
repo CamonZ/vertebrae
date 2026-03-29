@@ -30,6 +30,10 @@ pub struct WorkflowAddCommand {
     /// Kanban column for board placement
     #[arg(long)]
     pub kanban_column: Option<String>,
+
+    /// Mark this workflow as the default for new tasks
+    #[arg(long)]
+    pub default: bool,
 }
 
 /// A parsed workflow step from the command line
@@ -102,6 +106,7 @@ impl WorkflowAddCommand {
         // Build the create options
         let mut options = CreateWorkflowOptions::new(&self.name, steps)
             .with_auto_advance(self.auto_advance)
+            .with_is_default(self.default)
             .with_order(self.order);
 
         if let Some(description) = &self.description {
