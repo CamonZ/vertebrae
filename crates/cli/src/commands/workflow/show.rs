@@ -67,7 +67,6 @@ impl WorkflowShowCommand {
             name: workflow.name,
             description: workflow.description,
             auto_advance: workflow.auto_advance,
-            track: workflow.track,
             kanban_column: workflow.kanban_column,
             steps,
             metadata: workflow.metadata,

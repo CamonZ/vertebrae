@@ -82,7 +82,6 @@ impl TaskService for MockTaskService {
             },
             archived: false,
             worktree: None,
-            track: options.track.clone(),
             revision_feedback: None,
             rejection_reason: None,
             review_comment: None,
@@ -188,9 +187,6 @@ impl TaskService for MockTaskService {
         }
         if let Some(worktree) = &options.worktree {
             task.worktree = worktree.clone();
-        }
-        if let Some(track) = &options.track {
-            task.track = track.clone();
         }
         task.updated_at = Some(Utc::now());
         Ok(())
@@ -640,7 +636,6 @@ impl WorkflowService for MockWorkflowService {
             metadata: std::collections::HashMap::new(),
             auto_advance: options.auto_advance,
             order: options.order,
-            track: options.track.clone(),
             kanban_column: options.kanban_column.clone(),
             transitions: Vec::new(),
             created_at: Some(Utc::now()),
@@ -689,9 +684,6 @@ impl WorkflowService for MockWorkflowService {
         }
         if let Some(auto_advance) = options.auto_advance {
             wf.auto_advance = auto_advance;
-        }
-        if let Some(track) = &options.track {
-            wf.track = track.clone();
         }
         if let Some(kanban_column) = &options.kanban_column {
             wf.kanban_column = kanban_column.clone();

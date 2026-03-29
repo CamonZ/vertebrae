@@ -101,7 +101,6 @@ impl SacrumWorkflowService {
             metadata,
             auto_advance: response.auto_advance.unwrap_or(false),
             order: response.display_order.unwrap_or(0),
-            track: response.track.clone(),
             kanban_column: response.kanban_column.clone(),
             transitions,
             created_at,
@@ -161,10 +160,6 @@ impl WorkflowService for SacrumWorkflowService {
             "auto_advance": options.auto_advance,
             "display_order": options.order,
         });
-
-        if let Some(ref track) = options.track {
-            variables["track"] = json!(track);
-        }
 
         if let Some(ref kanban_column) = options.kanban_column {
             variables["kanban_column"] = json!(kanban_column);
@@ -275,12 +270,6 @@ impl WorkflowService for SacrumWorkflowService {
         }
         if let Some(order) = options.order {
             variables["display_order"] = json!(order);
-        }
-        if let Some(ref track_opt) = options.track {
-            match track_opt {
-                Some(track) => variables["track"] = json!(track),
-                None => variables["track"] = serde_json::Value::Null,
-            }
         }
         if let Some(ref kanban_opt) = options.kanban_column {
             match kanban_opt {
@@ -542,7 +531,6 @@ mod tests {
             display_order: None,
             metadata: None,
             initial_step_id: None,
-            track: None,
             kanban_column: None,
             project_id: Some("test-proj".to_string()),
             workflow_steps: vec![],
@@ -1432,28 +1420,25 @@ mod tests {
     }
 
     #[test]
-    fn test_response_to_workflow_maps_track_and_kanban_column() {
+    fn test_response_to_workflow_maps_kanban_column() {
         let client = create_test_client();
         let service = SacrumWorkflowService::new(client);
 
-        let mut response = make_workflow_response("wf-track", "Tracked Workflow");
-        response.track = Some("design".to_string());
+        let mut response = make_workflow_response("wf-kanban", "Kanban Workflow");
         response.kanban_column = Some("In Progress".to_string());
 
         let workflow = service.response_to_workflow(&response);
-        assert_eq!(workflow.track, Some("design".to_string()));
         assert_eq!(workflow.kanban_column, Some("In Progress".to_string()));
     }
 
     #[test]
-    fn test_response_to_workflow_maps_null_track_and_kanban_column() {
+    fn test_response_to_workflow_maps_null_kanban_column() {
         let client = create_test_client();
         let service = SacrumWorkflowService::new(client);
 
-        let response = make_workflow_response("wf-null", "No Track Workflow");
+        let response = make_workflow_response("wf-null", "No Kanban Workflow");
 
         let workflow = service.response_to_workflow(&response);
-        assert_eq!(workflow.track, None);
         assert_eq!(workflow.kanban_column, None);
     }
 }

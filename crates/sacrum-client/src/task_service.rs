@@ -159,7 +159,6 @@ impl SacrumTaskService {
             needs_human_review: response.needs_human_review,
             archived: response.archived,
             worktree: response.worktree.clone(),
-            track: response.track.clone(),
             review_comment: response.review_comment.clone(),
             revision_feedback: response.revision_feedback.clone(),
             rejection_reason: response.rejection_reason.clone(),
@@ -217,9 +216,6 @@ impl SacrumTaskService {
         }
         if filter.include_archived {
             variables["includeArchived"] = json!(true);
-        }
-        if let Some(ref track) = filter.track {
-            variables["track"] = json!(track);
         }
 
         variables
@@ -320,9 +316,6 @@ impl TaskService for SacrumTaskService {
         }
         if let Some(ref parent_id) = options.parent_id {
             variables["parent_id"] = json!(parent_id);
-        }
-        if let Some(ref track) = options.track {
-            variables["track"] = json!(track);
         }
 
         #[derive(serde::Deserialize)]
@@ -439,13 +432,6 @@ impl TaskService for SacrumTaskService {
             match worktree_opt {
                 Some(worktree) => variables["worktree"] = json!(worktree),
                 None => variables["worktree"] = Value::Null,
-            }
-        }
-
-        if let Some(ref track_opt) = options.track {
-            match track_opt {
-                Some(track) => variables["track"] = json!(track),
-                None => variables["track"] = Value::Null,
             }
         }
 
@@ -1002,7 +988,6 @@ mod tests {
             needs_human_review: None,
             archived: false,
             worktree: None,
-            track: None,
             review_comment: None,
             rejection_reason: None,
             revision_feedback: None,
@@ -2080,28 +2065,5 @@ mod tests {
         let result = service.delete_task("task-1", true).await;
 
         assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_response_to_task_maps_track() {
-        let client = create_test_client();
-        let service = SacrumTaskService::new(client);
-
-        let mut response = make_task_response("task-track", "Tracked Task");
-        response.track = Some("frontend".to_string());
-
-        let task = service.response_to_task(&response).unwrap();
-        assert_eq!(task.track, Some("frontend".to_string()));
-    }
-
-    #[test]
-    fn test_response_to_task_maps_null_track() {
-        let client = create_test_client();
-        let service = SacrumTaskService::new(client);
-
-        let response = make_task_response("task-notrack", "No Track");
-
-        let task = service.response_to_task(&response).unwrap();
-        assert_eq!(task.track, None);
     }
 }

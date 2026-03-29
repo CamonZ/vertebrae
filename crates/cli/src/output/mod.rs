@@ -449,7 +449,6 @@ mod tests {
             needs_human_review: None,
             archived: false,
             parent_id: None,
-            track: None,
         }];
 
         let result = format_task_table(&tasks);
@@ -495,7 +494,6 @@ mod tests {
                 needs_human_review: Some(true),
                 archived: false,
                 parent_id: None,
-                track: None,
             },
             TaskSummary {
                 id: "d4e5f6".to_string(),
@@ -508,7 +506,6 @@ mod tests {
                 needs_human_review: None,
                 archived: false,
                 parent_id: None,
-                track: None,
             },
         ];
 
@@ -547,7 +544,6 @@ mod tests {
             needs_human_review: None,
             archived: false,
             parent_id: None,
-            track: None,
         }];
 
         let result = format_task_table(&tasks);
@@ -571,7 +567,6 @@ mod tests {
             needs_human_review: None,
             archived: false,
             parent_id: None,
-            track: None,
         }];
 
         let result = format_task_table(&tasks);
@@ -642,7 +637,6 @@ mod tests {
             needs_human_review: None,
             archived: false,
             parent_id: None,
-            track: None,
         }];
         let result = format_task_table(&tasks);
         let lines: Vec<&str> = result.lines().collect();
@@ -686,7 +680,6 @@ mod tests {
             needs_human_review: None,
             archived: false,
             parent_id: None,
-            track: None,
         }];
         let result = format_task_table(&tasks);
         let lines: Vec<&str> = result.lines().collect();
@@ -715,7 +708,6 @@ mod tests {
                 needs_human_review: None,
                 archived: false,
                 parent_id: None,
-                track: None,
             },
             TaskSummary {
                 id: "abcdef".to_string(),
@@ -728,7 +720,6 @@ mod tests {
                 needs_human_review: Some(true),
                 archived: false,
                 parent_id: None,
-                track: None,
             },
         ];
 
@@ -778,7 +769,6 @@ mod tests {
                 needs_human_review: None,
                 archived: false,
                 parent_id: None,
-                track: None,
             }];
             let result = format_task_table(&tasks);
             assert!(result.contains(step_name));
@@ -801,7 +791,6 @@ mod tests {
                 needs_human_review: None,
                 archived: false,
                 parent_id: None,
-                track: None,
             }];
             let result = format_task_table(&tasks);
             assert!(result.contains(level));
@@ -824,7 +813,6 @@ mod tests {
                 needs_human_review: None,
                 archived: false,
                 parent_id: None,
-                track: None,
             }];
             let result = format_task_table(&tasks);
             assert!(result.contains(priority));
@@ -852,7 +840,6 @@ mod tests {
             needs_human_review: Some(true),
             archived: false,
             parent_id: None,
-            track: None,
         }];
 
         let result = format_task_table(&tasks);
@@ -877,7 +864,6 @@ mod tests {
             needs_human_review: Some(false),
             archived: false,
             parent_id: None,
-            track: None,
         }];
 
         let result = format_task_table(&tasks);
@@ -921,7 +907,6 @@ mod tests {
             needs_human_review: None,
             archived: false,
             parent_id: None,
-            track: None,
         }];
         let parent_map = HashMap::new();
 
@@ -949,7 +934,6 @@ mod tests {
                 needs_human_review: None,
                 archived: false,
                 parent_id: None,
-                track: None,
             },
             TaskSummary {
                 id: "ticket1".to_string(),
@@ -962,7 +946,6 @@ mod tests {
                 needs_human_review: None,
                 archived: false,
                 parent_id: None,
-                track: None,
             },
         ];
 
@@ -997,7 +980,6 @@ mod tests {
                 needs_human_review: None,
                 archived: false,
                 parent_id: None,
-                track: None,
             },
             TaskSummary {
                 id: "ticket1".to_string(),
@@ -1010,7 +992,6 @@ mod tests {
                 needs_human_review: None,
                 archived: false,
                 parent_id: None,
-                track: None,
             },
             TaskSummary {
                 id: "ticket2".to_string(),
@@ -1023,7 +1004,6 @@ mod tests {
                 needs_human_review: None,
                 archived: false,
                 parent_id: None,
-                track: None,
             },
         ];
 
@@ -1057,7 +1037,6 @@ mod tests {
                 needs_human_review: None,
                 archived: false,
                 parent_id: None,
-                track: None,
             },
             TaskSummary {
                 id: "ticket1".to_string(),
@@ -1070,7 +1049,6 @@ mod tests {
                 needs_human_review: None,
                 archived: false,
                 parent_id: None,
-                track: None,
             },
             TaskSummary {
                 id: "task1".to_string(),
@@ -1083,7 +1061,6 @@ mod tests {
                 needs_human_review: None,
                 archived: false,
                 parent_id: None,
-                track: None,
             },
         ];
 
@@ -1115,7 +1092,6 @@ mod tests {
                 needs_human_review: None,
                 archived: false,
                 parent_id: None,
-                track: None,
             },
             TaskSummary {
                 id: "epic1".to_string(),
@@ -1128,7 +1104,6 @@ mod tests {
                 needs_human_review: None,
                 archived: false,
                 parent_id: None,
-                track: None,
             },
         ];
 
@@ -1158,7 +1133,6 @@ mod tests {
             needs_human_review: None,
             archived: false,
             parent_id: None,
-            track: None,
         }];
 
         let mut parent_map = HashMap::new();
@@ -1187,7 +1161,6 @@ mod tests {
             needs_human_review: Some(true),
             archived: false,
             parent_id: None,
-            track: None,
         }];
 
         let parent_map = HashMap::new();
@@ -1218,7 +1191,6 @@ mod tests {
                 needs_human_review: None,
                 archived: false,
                 parent_id: None,
-                track: None,
             },
             children: vec![],
         };
@@ -1242,7 +1214,6 @@ mod tests {
                 needs_human_review: None,
                 archived: false,
                 parent_id: None,
-                track: None,
             },
             children: vec![],
         };
@@ -1271,7 +1242,6 @@ mod tests {
             needs_human_review: None,
             archived: true,
             parent_id: None,
-            track: None,
         }];
 
         let result = format_task_table(&tasks);
@@ -1294,7 +1264,6 @@ mod tests {
             needs_human_review: None,
             archived: false,
             parent_id: None,
-            track: None,
         }];
 
         let result = format_task_table(&tasks);
@@ -1321,7 +1290,6 @@ mod tests {
             needs_human_review: None,
             archived: true,
             parent_id: None,
-            track: None,
         }];
 
         let parent_map = HashMap::new();
@@ -1345,7 +1313,6 @@ mod tests {
             needs_human_review: Some(true),
             archived: true,
             parent_id: None,
-            track: None,
         }];
 
         let parent_map = HashMap::new();

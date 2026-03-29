@@ -41,10 +41,6 @@ pub struct AddCommand {
     #[arg(long = "needs-review")]
     pub needs_review: bool,
 
-    /// Track for categorizing the task
-    #[arg(long)]
-    pub track: Option<String>,
-
     /// Workflow ID to assign task to (defaults to 'default')
     #[arg(long, value_parser = crate::commands::parse_uuid("workflow ID"))]
     pub workflow: Option<String>,
@@ -140,11 +136,6 @@ impl AddCommand {
         // Set needs review
         if self.needs_review {
             options = options.with_needs_review(true);
-        }
-
-        // Set track
-        if let Some(track) = &self.track {
-            options = options.with_track(track);
         }
 
         // Create the task using the service layer
