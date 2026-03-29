@@ -29,6 +29,14 @@ pub struct WorkflowUpdateCommand {
     /// Disable automatic advancement to the next step
     #[arg(long, conflicts_with = "auto_advance")]
     pub no_auto_advance: bool,
+
+    /// Track for categorizing the workflow (use empty string "" to clear)
+    #[arg(long)]
+    pub track: Option<String>,
+
+    /// Kanban column for the workflow (use empty string "" to clear)
+    #[arg(long = "kanban-column")]
+    pub kanban_column: Option<String>,
 }
 
 impl WorkflowUpdateCommand {
@@ -64,10 +72,26 @@ impl WorkflowUpdateCommand {
             options = options.with_auto_advance(false);
         }
 
+        if let Some(track) = &self.track {
+            if track.is_empty() {
+                options = options.clear_track();
+            } else {
+                options = options.with_track(track);
+            }
+        }
+
+        if let Some(kanban_column) = &self.kanban_column {
+            if kanban_column.is_empty() {
+                options = options.clear_kanban_column();
+            } else {
+                options = options.with_kanban_column(kanban_column);
+            }
+        }
+
         // Check if any updates were provided
         if !options.has_updates() {
             return Err(ServiceError::validation_failed(
-                "no updates specified (use --name, --description, --clear-description, --auto-advance, or --no-auto-advance options)",
+                "no updates specified (use --name, --description, --clear-description, --auto-advance, --no-auto-advance, --track, or --kanban-column options)",
             ));
         }
 
@@ -91,6 +115,8 @@ mod tests {
             clear_description: false,
             auto_advance: false,
             no_auto_advance: false,
+            track: None,
+            kanban_column: None,
         };
         let debug = format!("{:?}", cmd);
         assert!(debug.contains("WorkflowUpdateCommand"));

@@ -20,6 +20,7 @@ async fn create_task_with_checklist_items(
         parent: None,
         depends_on: vec![],
         needs_review: false,
+        track: None,
         workflow: None,
     };
     let task_id = task.execute(services).await.unwrap();
@@ -250,6 +251,7 @@ async fn test_check_item_on_task_without_items_fails() {
         parent: None,
         depends_on: vec![],
         needs_review: false,
+        track: None,
         workflow: None,
     };
     let task_id = task.execute(&services).await.unwrap();
@@ -308,6 +310,7 @@ async fn test_check_item_with_constraint_sections() {
         parent: None,
         depends_on: vec![],
         needs_review: false,
+        track: None,
         workflow: None,
     };
     let task_id = task.execute(&services).await.unwrap();
@@ -381,6 +384,7 @@ async fn test_check_item_with_parent_child_hierarchy() {
         parent: None,
         depends_on: vec![],
         needs_review: false,
+        track: None,
         workflow: None,
     };
     let parent_id = parent.execute(&services).await.unwrap();

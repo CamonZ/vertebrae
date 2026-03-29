@@ -415,6 +415,7 @@ pub struct TaskFilter {
     pub search: Option<String>,
     pub workflow_id: Option<String>,
     pub current_step: Option<String>,
+    pub track: Option<String>,
 }
 
 impl TaskFilter {
@@ -498,6 +499,11 @@ impl TaskFilter {
 
     pub fn with_current_step(mut self, step_name: impl Into<String>) -> Self {
         self.current_step = Some(step_name.into());
+        self
+    }
+
+    pub fn with_track(mut self, track: impl Into<String>) -> Self {
+        self.track = Some(track.into());
         self
     }
 }
@@ -844,6 +850,10 @@ pub struct Task {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub worktree: Option<String>,
 
+    /// Optional track for categorizing tasks
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub track: Option<String>,
+
     /// Review comment
     #[serde(skip_serializing_if = "Option::is_none")]
     pub review_comment: Option<String>,
@@ -918,6 +928,7 @@ impl Task {
             needs_human_review: None,
             archived: false,
             worktree: None,
+            track: None,
             review_comment: None,
             revision_feedback: None,
             rejection_reason: None,
@@ -968,6 +979,12 @@ impl Task {
     /// Add a code reference
     pub fn with_code_ref(mut self, code_ref: CodeRef) -> Self {
         self.code_refs.push(code_ref);
+        self
+    }
+
+    /// Set the track
+    pub fn with_track(mut self, track: impl Into<String>) -> Self {
+        self.track = Some(track.into());
         self
     }
 
@@ -1205,6 +1222,14 @@ pub struct Workflow {
     #[serde(default)]
     pub order: i32,
 
+    /// Optional track for categorizing workflows
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub track: Option<String>,
+
+    /// Optional kanban column for workflows
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kanban_column: Option<String>,
+
     /// Transitions to other workflows
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub transitions: Vec<WorkflowTransition>,
@@ -1229,6 +1254,8 @@ impl Workflow {
             metadata: std::collections::HashMap::new(),
             auto_advance: false,
             order: 0,
+            track: None,
+            kanban_column: None,
             transitions: Vec::new(),
             created_at: None,
             updated_at: None,
@@ -1262,6 +1289,18 @@ impl Workflow {
     /// Set the initial step
     pub fn with_initial_step(mut self, step_id: impl Into<String>) -> Self {
         self.initial_step = Some(step_id.into());
+        self
+    }
+
+    /// Set the track
+    pub fn with_track(mut self, track: impl Into<String>) -> Self {
+        self.track = Some(track.into());
+        self
+    }
+
+    /// Set the kanban column
+    pub fn with_kanban_column(mut self, kanban_column: impl Into<String>) -> Self {
+        self.kanban_column = Some(kanban_column.into());
         self
     }
 }
@@ -2645,5 +2684,73 @@ mod tests {
 
         let formatted2 = format_float(5.10);
         assert_eq!(formatted2, "5.1");
+    }
+
+    // ─── Track and kanban_column ────────────────────────────────────
+
+    #[test]
+    fn task_track_defaults_to_none() {
+        let task = Task::new("T", Level::Task);
+        assert!(task.track.is_none());
+    }
+
+    #[test]
+    fn task_with_track_builder() {
+        let task = Task::new("T", Level::Task).with_track("frontend");
+        assert_eq!(task.track, Some("frontend".to_string()));
+    }
+
+    #[test]
+    fn workflow_track_and_kanban_column_defaults() {
+        let wf = Workflow::new("W");
+        assert!(wf.track.is_none());
+        assert!(wf.kanban_column.is_none());
+    }
+
+    #[test]
+    fn workflow_with_track_builder() {
+        let wf = Workflow::new("W").with_track("design");
+        assert_eq!(wf.track, Some("design".to_string()));
+    }
+
+    #[test]
+    fn workflow_with_kanban_column_builder() {
+        let wf = Workflow::new("W").with_kanban_column("In Progress");
+        assert_eq!(wf.kanban_column, Some("In Progress".to_string()));
+    }
+
+    #[test]
+    fn workflow_serde_roundtrip_with_track_and_kanban_column() {
+        let wf = Workflow::new("Test")
+            .with_track("design")
+            .with_kanban_column("In Progress")
+            .with_description("A workflow");
+        let json_str = serde_json::to_string(&wf).unwrap();
+        let deserialized: Workflow = serde_json::from_str(&json_str).unwrap();
+        assert_eq!(deserialized.name, "Test");
+        assert_eq!(deserialized.track, Some("design".to_string()));
+        assert_eq!(deserialized.kanban_column, Some("In Progress".to_string()));
+        assert_eq!(deserialized.description, Some("A workflow".to_string()));
+    }
+
+    #[test]
+    fn workflow_serde_roundtrip_without_track_and_kanban_column() {
+        let wf = Workflow::new("Test");
+        let json_str = serde_json::to_string(&wf).unwrap();
+        let deserialized: Workflow = serde_json::from_str(&json_str).unwrap();
+        assert!(deserialized.track.is_none());
+        assert!(deserialized.kanban_column.is_none());
+    }
+
+    #[test]
+    fn task_filter_with_track() {
+        let filter = TaskFilter::new().with_track("frontend");
+        assert_eq!(filter.track, Some("frontend".to_string()));
+    }
+
+    #[test]
+    fn task_filter_without_track() {
+        let filter = TaskFilter::new();
+        assert!(filter.track.is_none());
     }
 }

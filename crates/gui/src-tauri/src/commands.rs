@@ -2338,6 +2338,8 @@ mod tests {
                     steps: vec![],
                     auto_advance: false,
                     order: 0,
+                    track: None,
+                    kanban_column: None,
                 })
                 .await
                 .unwrap();
@@ -2371,6 +2373,8 @@ mod tests {
                     steps: vec![],
                     auto_advance: false,
                     order: 0,
+                    track: None,
+                    kanban_column: None,
                 })
                 .await
                 .unwrap()
@@ -2395,6 +2399,8 @@ mod tests {
                     steps: vec![],
                     auto_advance: false,
                     order: 0,
+                    track: None,
+                    kanban_column: None,
                 })
                 .await
                 .unwrap()
@@ -2424,6 +2430,8 @@ mod tests {
                     steps: vec![],
                     auto_advance: false,
                     order: 0,
+                    track: None,
+                    kanban_column: None,
                 })
                 .await
                 .unwrap();
@@ -2453,6 +2461,8 @@ mod tests {
                     steps: vec![],
                     auto_advance: false,
                     order: 0,
+                    track: None,
+                    kanban_column: None,
                 })
                 .await
                 .unwrap();
@@ -2463,6 +2473,8 @@ mod tests {
                     steps: vec![],
                     auto_advance: false,
                     order: 1,
+                    track: None,
+                    kanban_column: None,
                 })
                 .await
                 .unwrap();
@@ -2515,6 +2527,8 @@ mod tests {
                     steps: vec![],
                     auto_advance: false,
                     order: 0,
+                    track: None,
+                    kanban_column: None,
                 })
                 .await
                 .unwrap();
@@ -2550,6 +2564,8 @@ mod tests {
                     steps: vec![],
                     auto_advance: false,
                     order: 0,
+                    track: None,
+                    kanban_column: None,
                 })
                 .await
                 .unwrap();
@@ -2561,6 +2577,8 @@ mod tests {
                     steps: vec![],
                     auto_advance: false,
                     order: 1,
+                    track: None,
+                    kanban_column: None,
                 })
                 .await
                 .unwrap();

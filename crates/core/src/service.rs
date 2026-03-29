@@ -50,6 +50,8 @@ pub struct CreateTaskOptions {
     pub needs_review: bool,
     /// Optional custom ID (for testing) - if not provided, ID is auto-generated
     pub id: Option<String>,
+    /// Optional track for categorizing tasks
+    pub track: Option<String>,
 }
 
 impl CreateTaskOptions {
@@ -108,6 +110,12 @@ impl CreateTaskOptions {
         self.id = Some(id.into());
         self
     }
+
+    /// Set the track
+    pub fn with_track(mut self, track: impl Into<String>) -> Self {
+        self.track = Some(track.into());
+        self
+    }
 }
 
 /// Options for updating a task
@@ -135,6 +143,8 @@ pub struct UpdateTaskOptions {
     pub revision_feedback: Option<Option<String>>,
     /// Worktree path (Some(Some(x)) to set, Some(None) to clear)
     pub worktree: Option<Option<String>>,
+    /// Track (Some(Some(x)) to set, Some(None) to clear)
+    pub track: Option<Option<String>>,
 }
 
 impl UpdateTaskOptions {
@@ -221,6 +231,18 @@ impl UpdateTaskOptions {
         self
     }
 
+    /// Set the track
+    pub fn with_track(mut self, track: impl Into<String>) -> Self {
+        self.track = Some(Some(track.into()));
+        self
+    }
+
+    /// Clear the track
+    pub fn clear_track(mut self) -> Self {
+        self.track = Some(None);
+        self
+    }
+
     /// Check if any updates are specified
     pub fn has_updates(&self) -> bool {
         self.title.is_some()
@@ -231,6 +253,7 @@ impl UpdateTaskOptions {
             || self.needs_human_review.is_some()
             || self.archived.is_some()
             || self.worktree.is_some()
+            || self.track.is_some()
     }
 }
 
@@ -605,5 +628,37 @@ mod tests {
     fn update_task_options_has_updates_includes_worktree() {
         let opts = UpdateTaskOptions::new().with_worktree("/path");
         assert!(opts.has_updates());
+    }
+
+    #[test]
+    fn create_task_options_with_track() {
+        let opts = CreateTaskOptions::new("Test").with_track("frontend");
+        assert_eq!(opts.track, Some("frontend".to_string()));
+    }
+
+    #[test]
+    fn create_task_options_without_track() {
+        let opts = CreateTaskOptions::new("Test");
+        assert_eq!(opts.track, None);
+    }
+
+    #[test]
+    fn update_task_options_with_track() {
+        let opts = UpdateTaskOptions::new().with_track("backend");
+        assert_eq!(opts.track, Some(Some("backend".to_string())));
+        assert!(opts.has_updates());
+    }
+
+    #[test]
+    fn update_task_options_clear_track() {
+        let opts = UpdateTaskOptions::new().clear_track();
+        assert_eq!(opts.track, Some(None));
+        assert!(opts.has_updates());
+    }
+
+    #[test]
+    fn update_task_options_track_default_is_none() {
+        let opts = UpdateTaskOptions::new();
+        assert!(opts.track.is_none());
     }
 }
