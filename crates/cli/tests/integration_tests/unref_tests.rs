@@ -20,6 +20,7 @@ async fn create_task(services: &vertebrae_core::VertebraeServices, title: &str) 
         parent: None,
         depends_on: vec![],
         needs_review: false,
+        track: None,
         workflow: None,
     };
     cmd.execute(services).await.unwrap()

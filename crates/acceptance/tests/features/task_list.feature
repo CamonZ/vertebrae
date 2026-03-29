@@ -158,6 +158,32 @@ Feature: List tasks
     Then the output should contain "<parent_id>"
     And the output should contain "<child_id>"
 
+  Scenario: Filter by track
+    Given I create a task with:
+      | title | Frontend task |
+      | track | frontend      |
+    And I store the task ID as "frontend_task"
+    And I create a task with:
+      | title | Backend task |
+      | track | backend      |
+    And I store the task ID as "backend_task"
+    When I list tasks with:
+      | track | frontend |
+    Then the output should contain "<frontend_task>"
+    And the output should not contain "<backend_task>"
+
+  Scenario: List without track filter returns all
+    Given I create a task with:
+      | title | Tracked item  |
+      | track | frontend      |
+    And I store the task ID as "tracked_id"
+    And I create a task with:
+      | title | Untracked item |
+    And I store the task ID as "untracked_id"
+    When I list tasks
+    Then the output should contain "<tracked_id>"
+    And the output should contain "<untracked_id>"
+
   Scenario: Empty search query is rejected
     When I list tasks with:
       | search | |

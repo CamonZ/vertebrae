@@ -159,6 +159,7 @@ impl SacrumTaskService {
             needs_human_review: response.needs_human_review,
             archived: response.archived,
             worktree: response.worktree.clone(),
+            track: response.track.clone(),
             review_comment: response.review_comment.clone(),
             revision_feedback: response.revision_feedback.clone(),
             rejection_reason: response.rejection_reason.clone(),
@@ -182,6 +183,46 @@ impl SacrumTaskService {
         let variables = json!({ "id": id });
         let response: TaskResponse = self.client.execute(&query, variables, "task").await?;
         Ok(response)
+    }
+
+    /// Build GraphQL variables from a TaskFilter
+    fn filter_to_variables(&self, filter: &TaskFilter) -> Value {
+        let mut variables = json!({
+            "project_id": self.client.project_id,
+        });
+
+        if let Some(level) = filter.levels.first() {
+            variables["level"] = json!(level.as_str());
+        }
+        if let Some(priority) = filter.priorities.first() {
+            variables["priority"] = json!(priority.as_str());
+        }
+        if let Some(ref parent_id) = filter.children_of {
+            variables["parent_id"] = json!(parent_id);
+        }
+        if let Some(ref step_name) = filter.step_names.first() {
+            variables["status"] = json!(step_name);
+        }
+        if !filter.tags.is_empty() {
+            variables["tags"] = json!(filter.tags);
+        }
+        if let Some(ref search) = filter.search {
+            variables["search"] = json!(search);
+        }
+        if let Some(ref workflow_id) = filter.workflow_id {
+            variables["workflow_id"] = json!(workflow_id);
+        }
+        if filter.root_only {
+            variables["root_only"] = json!(true);
+        }
+        if filter.include_archived {
+            variables["includeArchived"] = json!(true);
+        }
+        if let Some(ref track) = filter.track {
+            variables["track"] = json!(track);
+        }
+
+        variables
     }
 }
 
@@ -279,6 +320,9 @@ impl TaskService for SacrumTaskService {
         }
         if let Some(ref parent_id) = options.parent_id {
             variables["parent_id"] = json!(parent_id);
+        }
+        if let Some(ref track) = options.track {
+            variables["track"] = json!(track);
         }
 
         #[derive(serde::Deserialize)]
@@ -398,6 +442,13 @@ impl TaskService for SacrumTaskService {
             }
         }
 
+        if let Some(ref track_opt) = options.track {
+            match track_opt {
+                Some(track) => variables["track"] = json!(track),
+                None => variables["track"] = Value::Null,
+            }
+        }
+
         // Handle tags: fetch current task, compute new tag set
         if !options.add_tags.is_empty() || !options.remove_tags.is_empty() {
             let task_response = self.fetch_task_response(id).await?;
@@ -496,41 +547,9 @@ impl TaskService for SacrumTaskService {
     }
 
     async fn list_tasks(&self, filter: &TaskFilter) -> ServiceResult<Vec<Task>> {
+        let variables = self.filter_to_variables(filter);
+
         let query = with_fragments(tasks::LIST_TASKS, &[tasks::TASK_FIELDS]);
-
-        let mut variables = json!({
-            "project_id": self.client.project_id,
-        });
-
-        // Apply filter fields as GQL variables
-        if let Some(level) = filter.levels.first() {
-            variables["level"] = json!(level.as_str());
-        }
-        if let Some(priority) = filter.priorities.first() {
-            variables["priority"] = json!(priority.as_str());
-        }
-        if let Some(ref parent_id) = filter.children_of {
-            variables["parent_id"] = json!(parent_id);
-        }
-        if let Some(ref step_name) = filter.step_names.first() {
-            variables["status"] = json!(step_name);
-        }
-        if !filter.tags.is_empty() {
-            variables["tags"] = json!(filter.tags);
-        }
-        if let Some(ref search) = filter.search {
-            variables["search"] = json!(search);
-        }
-        if let Some(ref workflow_id) = filter.workflow_id {
-            variables["workflow_id"] = json!(workflow_id);
-        }
-        if filter.root_only {
-            variables["root_only"] = json!(true);
-        }
-        if filter.include_archived {
-            variables["includeArchived"] = json!(true);
-        }
-
         let responses: Vec<TaskResponse> = self.client.execute(&query, variables, "tasks").await?;
 
         // Fetch lookups once for all tasks
@@ -550,40 +569,9 @@ impl TaskService for SacrumTaskService {
         workflow_names: Option<&HashMap<String, String>>,
         step_names: Option<&HashMap<String, String>>,
     ) -> ServiceResult<Vec<Task>> {
+        let variables = self.filter_to_variables(filter);
+
         let query = with_fragments(tasks::LIST_TASKS, &[tasks::TASK_FIELDS]);
-
-        let mut variables = json!({
-            "project_id": self.client.project_id,
-        });
-
-        if let Some(level) = filter.levels.first() {
-            variables["level"] = json!(level.as_str());
-        }
-        if let Some(priority) = filter.priorities.first() {
-            variables["priority"] = json!(priority.as_str());
-        }
-        if let Some(ref parent_id) = filter.children_of {
-            variables["parent_id"] = json!(parent_id);
-        }
-        if let Some(ref step_name) = filter.step_names.first() {
-            variables["status"] = json!(step_name);
-        }
-        if !filter.tags.is_empty() {
-            variables["tags"] = json!(filter.tags);
-        }
-        if let Some(ref search) = filter.search {
-            variables["search"] = json!(search);
-        }
-        if let Some(ref workflow_id) = filter.workflow_id {
-            variables["workflow_id"] = json!(workflow_id);
-        }
-        if filter.root_only {
-            variables["root_only"] = json!(true);
-        }
-        if filter.include_archived {
-            variables["includeArchived"] = json!(true);
-        }
-
         let responses: Vec<TaskResponse> = self.client.execute(&query, variables, "tasks").await?;
 
         responses
@@ -1014,6 +1002,7 @@ mod tests {
             needs_human_review: None,
             archived: false,
             worktree: None,
+            track: None,
             review_comment: None,
             rejection_reason: None,
             revision_feedback: None,
@@ -2091,5 +2080,28 @@ mod tests {
         let result = service.delete_task("task-1", true).await;
 
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_response_to_task_maps_track() {
+        let client = create_test_client();
+        let service = SacrumTaskService::new(client);
+
+        let mut response = make_task_response("task-track", "Tracked Task");
+        response.track = Some("frontend".to_string());
+
+        let task = service.response_to_task(&response).unwrap();
+        assert_eq!(task.track, Some("frontend".to_string()));
+    }
+
+    #[test]
+    fn test_response_to_task_maps_null_track() {
+        let client = create_test_client();
+        let service = SacrumTaskService::new(client);
+
+        let response = make_task_response("task-notrack", "No Track");
+
+        let task = service.response_to_task(&response).unwrap();
+        assert_eq!(task.track, None);
     }
 }

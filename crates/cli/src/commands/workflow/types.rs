@@ -1,9 +1,10 @@
 //! Shared display types for workflow commands
 
+use serde::Serialize;
 use std::collections::HashMap;
 
 /// A summary of a workflow for display in the list
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct WorkflowSummary {
     /// The workflow ID
     pub id: String,
@@ -31,7 +32,7 @@ impl std::fmt::Display for WorkflowSummary {
 }
 
 /// Display information for a workflow step
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct StepDisplayInfo {
     /// Step name
     pub name: String,
@@ -46,7 +47,7 @@ pub struct StepDisplayInfo {
 }
 
 /// Detailed view of a workflow with all steps
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct WorkflowDetail {
     /// The workflow ID
     pub id: String,
@@ -56,6 +57,10 @@ pub struct WorkflowDetail {
     pub description: Option<String>,
     /// Whether to automatically advance to the next step on successful completion
     pub auto_advance: bool,
+    /// Optional track for categorizing
+    pub track: Option<String>,
+    /// Optional kanban column
+    pub kanban_column: Option<String>,
     /// Ordered list of workflow steps
     pub steps: Vec<StepDisplayInfo>,
     /// Additional metadata as key-value pairs
@@ -87,6 +92,17 @@ impl std::fmt::Display for WorkflowDetail {
             "Auto Advance: {}",
             if self.auto_advance { "Yes" } else { "No" }
         )?;
+
+        // Track (if present)
+        if let Some(ref track) = self.track {
+            writeln!(f, "Track: {}", track)?;
+        }
+
+        // Kanban column (if present)
+        if let Some(ref kanban_column) = self.kanban_column {
+            writeln!(f, "Kanban Column: {}", kanban_column)?;
+        }
+
         writeln!(f)?;
 
         // Steps section
@@ -197,6 +213,8 @@ mod tests {
             name: "Test Workflow".to_string(),
             description: Some("A detailed workflow".to_string()),
             auto_advance: false,
+            track: None,
+            kanban_column: None,
             steps: vec![
                 StepDisplayInfo {
                     name: "step1".to_string(),
@@ -236,6 +254,8 @@ mod tests {
             name: "Test".to_string(),
             description: None,
             auto_advance: true,
+            track: None,
+            kanban_column: None,
             steps: vec![],
             metadata,
             created_at: None,
@@ -292,6 +312,8 @@ mod tests {
             name: "Test".to_string(),
             description: None,
             auto_advance: false,
+            track: None,
+            kanban_column: None,
             steps: vec![],
             metadata: HashMap::new(),
             created_at: None,
@@ -310,6 +332,8 @@ mod tests {
             name: "Empty".to_string(),
             description: None,
             auto_advance: false,
+            track: None,
+            kanban_column: None,
             steps: vec![],
             metadata: HashMap::new(),
             created_at: None,
@@ -327,6 +351,8 @@ mod tests {
             name: "Auto".to_string(),
             description: None,
             auto_advance: true,
+            track: None,
+            kanban_column: None,
             steps: vec![],
             metadata: HashMap::new(),
             created_at: None,
@@ -343,6 +369,8 @@ mod tests {
             name: "Timestamped".to_string(),
             description: None,
             auto_advance: false,
+            track: None,
+            kanban_column: None,
             steps: vec![],
             metadata: HashMap::new(),
             created_at: Some("2024-01-15T10:30:00Z".to_string()),
@@ -361,6 +389,8 @@ mod tests {
             name: "Created".to_string(),
             description: None,
             auto_advance: false,
+            track: None,
+            kanban_column: None,
             steps: vec![],
             metadata: HashMap::new(),
             created_at: Some("2024-01-15T10:30:00Z".to_string()),
@@ -379,6 +409,8 @@ mod tests {
             name: "Updated".to_string(),
             description: None,
             auto_advance: false,
+            track: None,
+            kanban_column: None,
             steps: vec![],
             metadata: HashMap::new(),
             created_at: None,
@@ -397,6 +429,8 @@ mod tests {
             name: "NoTs".to_string(),
             description: None,
             auto_advance: false,
+            track: None,
+            kanban_column: None,
             steps: vec![],
             metadata: HashMap::new(),
             created_at: None,
@@ -413,6 +447,8 @@ mod tests {
             name: "Default Model".to_string(),
             description: None,
             auto_advance: false,
+            track: None,
+            kanban_column: None,
             steps: vec![StepDisplayInfo {
                 name: "review".to_string(),
                 model: None,
@@ -435,6 +471,8 @@ mod tests {
             name: "Sorted".to_string(),
             description: None,
             auto_advance: false,
+            track: None,
+            kanban_column: None,
             steps: vec![
                 StepDisplayInfo {
                     name: "deploy".to_string(),
@@ -478,6 +516,8 @@ mod tests {
             name: "NoDesc".to_string(),
             description: None,
             auto_advance: false,
+            track: None,
+            kanban_column: None,
             steps: vec![],
             metadata: HashMap::new(),
             created_at: None,
@@ -499,6 +539,8 @@ mod tests {
             name: "Meta".to_string(),
             description: None,
             auto_advance: false,
+            track: None,
+            kanban_column: None,
             steps: vec![],
             metadata,
             created_at: None,
@@ -604,6 +646,8 @@ mod tests {
             name: "Prompted".to_string(),
             description: None,
             auto_advance: false,
+            track: None,
+            kanban_column: None,
             steps: vec![StepDisplayInfo {
                 name: "review".to_string(),
                 model: None,
@@ -627,6 +671,8 @@ mod tests {
             name: "Eval".to_string(),
             description: None,
             auto_advance: false,
+            track: None,
+            kanban_column: None,
             steps: vec![StepDisplayInfo {
                 name: "check".to_string(),
                 model: None,
@@ -651,6 +697,8 @@ mod tests {
             name: "Both".to_string(),
             description: None,
             auto_advance: false,
+            track: None,
+            kanban_column: None,
             steps: vec![StepDisplayInfo {
                 name: "implement".to_string(),
                 model: Some("opus".to_string()),
@@ -679,6 +727,8 @@ mod tests {
             name: "NoPrompts".to_string(),
             description: None,
             auto_advance: false,
+            track: None,
+            kanban_column: None,
             steps: vec![StepDisplayInfo {
                 name: "basic".to_string(),
                 model: None,

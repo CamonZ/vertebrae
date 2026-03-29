@@ -180,6 +180,8 @@ pub struct Task {
     pub archived: bool,
     /// Optional worktree path
     pub worktree: Option<String>,
+    /// Optional track for categorization
+    pub track: Option<String>,
     /// Review comment
     pub review_comment: Option<String>,
     /// Feedback to address when a validation gate fails
@@ -224,6 +226,7 @@ impl From<vertebrae_core::Task> for Task {
             needs_human_review: task.needs_human_review,
             archived: task.archived,
             worktree: task.worktree,
+            track: task.track,
             review_comment: task.review_comment,
             revision_feedback: task.revision_feedback,
             rejection_reason: task.rejection_reason,
@@ -505,6 +508,10 @@ pub struct Workflow {
     pub description: Option<String>,
     /// Reference to the initial step in the workflow
     pub initial_step: Option<String>,
+    /// Optional track for categorization
+    pub track: Option<String>,
+    /// Optional kanban column
+    pub kanban_column: Option<String>,
     /// Additional metadata as key-value pairs
     #[serde(default)]
     pub metadata: std::collections::HashMap<String, String>,
@@ -522,6 +529,8 @@ impl From<vertebrae_core::Workflow> for Workflow {
             name: workflow.name,
             description: workflow.description,
             initial_step: workflow.initial_step,
+            track: workflow.track,
+            kanban_column: workflow.kanban_column,
             metadata: workflow.metadata,
             created_at: workflow.created_at.map(|dt| dt.to_rfc3339()),
             updated_at: workflow.updated_at.map(|dt| dt.to_rfc3339()),

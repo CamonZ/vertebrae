@@ -26,6 +26,14 @@ impl WorkflowShowCommand {
     /// Returns `ServiceError::NotFound` if the workflow doesn't exist.
     /// Returns `ServiceError` if service operations fail.
     pub async fn execute(&self, services: &VertebraeServices) -> Result<String, ServiceError> {
+        let detail = self.execute_detail(services).await?;
+        Ok(detail.to_string())
+    }
+
+    pub async fn execute_detail(
+        &self,
+        services: &VertebraeServices,
+    ) -> Result<WorkflowDetail, ServiceError> {
         let workflow = services.workflows().get_workflow(&self.id).await?;
 
         let workflow_id = workflow
@@ -40,7 +48,6 @@ impl WorkflowShowCommand {
                 .steps()
                 .list_steps_for_workflow(workflow_id_str.as_str())
                 .await?;
-            // Convert to display format
             first_class_steps
                 .into_iter()
                 .map(|s| StepDisplayInfo {
@@ -55,17 +62,18 @@ impl WorkflowShowCommand {
             Vec::new()
         };
 
-        let detail = WorkflowDetail {
+        Ok(WorkflowDetail {
             id: workflow_id,
             name: workflow.name,
             description: workflow.description,
             auto_advance: workflow.auto_advance,
+            track: workflow.track,
+            kanban_column: workflow.kanban_column,
             steps,
             metadata: workflow.metadata,
             created_at: workflow.created_at.map(|dt| dt.to_rfc3339()),
             updated_at: workflow.updated_at.map(|dt| dt.to_rfc3339()),
-        };
-        Ok(detail.to_string())
+        })
     }
 }
 

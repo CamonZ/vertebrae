@@ -10,6 +10,8 @@ pub const WORKFLOW_FIELDS: &str = r#"
         display_order
         metadata
         initial_step_id
+        track
+        kanban_column
         project_id
         on_done_workflow_id
         on_reject_workflow_id
@@ -60,7 +62,9 @@ pub const CREATE_WORKFLOW: &str = r#"
         $description: String,
         $auto_advance: Boolean,
         $display_order: Int,
-        $is_default: Boolean
+        $is_default: Boolean,
+        $track: String,
+        $kanban_column: String
     ) {
         create_workflow(
             project_id: $project_id,
@@ -68,7 +72,9 @@ pub const CREATE_WORKFLOW: &str = r#"
             description: $description,
             auto_advance: $auto_advance,
             display_order: $display_order,
-            is_default: $is_default
+            is_default: $is_default,
+            track: $track,
+            kanban_column: $kanban_column
         ) {
             id
         }
@@ -85,7 +91,9 @@ pub const UPDATE_WORKFLOW: &str = r#"
         $is_default: Boolean,
         $initial_step_id: Uuid4,
         $on_done_workflow_id: Uuid4,
-        $on_reject_workflow_id: Uuid4
+        $on_reject_workflow_id: Uuid4,
+        $track: String,
+        $kanban_column: String
     ) {
         update_workflow(
             id: $id,
@@ -96,7 +104,9 @@ pub const UPDATE_WORKFLOW: &str = r#"
             is_default: $is_default,
             initial_step_id: $initial_step_id,
             on_done_workflow_id: $on_done_workflow_id,
-            on_reject_workflow_id: $on_reject_workflow_id
+            on_reject_workflow_id: $on_reject_workflow_id,
+            track: $track,
+            kanban_column: $kanban_column
         ) {
             id
         }

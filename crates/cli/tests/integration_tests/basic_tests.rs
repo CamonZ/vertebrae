@@ -26,6 +26,7 @@ mod lifecycle_tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let id = cmd.execute(&services).await.unwrap();
@@ -48,6 +49,7 @@ mod lifecycle_tests {
             parent: None,
             depends_on: vec![],
             needs_review: true,
+            track: None,
             workflow: None,
         };
         let id = cmd.execute(&services).await.unwrap();
@@ -74,6 +76,7 @@ mod lifecycle_tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let parent_id = parent_cmd.execute(&services).await.unwrap();
@@ -88,6 +91,7 @@ mod lifecycle_tests {
             parent: Some(parent_id.clone()),
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let child_id = child_cmd.execute(&services).await.unwrap();
@@ -112,6 +116,7 @@ mod lifecycle_tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let result = cmd.execute(&services).await;
@@ -132,6 +137,7 @@ mod lifecycle_tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let id = add.execute(&services).await.unwrap();
@@ -146,6 +152,7 @@ mod lifecycle_tests {
             remove_tags: vec![],
             parent: None,
             worktree: None,
+            track: None,
             edit_section: None,
             remove_section: None,
         };
@@ -170,6 +177,7 @@ mod lifecycle_tests {
             remove_tags: vec![],
             parent: None,
             worktree: None,
+            track: None,
             edit_section: None,
             remove_section: None,
         };
@@ -190,6 +198,7 @@ mod lifecycle_tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let id = add.execute(&services).await.unwrap();
@@ -221,6 +230,7 @@ mod lifecycle_tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let parent_id = parent.execute(&services).await.unwrap();
@@ -235,6 +245,7 @@ mod lifecycle_tests {
             parent: Some(parent_id.clone()),
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let child_id = child.execute(&services).await.unwrap();
@@ -288,6 +299,7 @@ mod query_tests {
                 parent: None,
                 depends_on: vec![],
                 needs_review: false,
+                track: None,
                 workflow: None,
             };
             cmd.execute(&services).await.unwrap();
@@ -298,6 +310,7 @@ mod query_tests {
             statuses: vec![],
             priorities: vec![],
             tags: vec![],
+            track: None,
             workflow: None,
             step: None,
             parent: None,
@@ -324,6 +337,7 @@ mod query_tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let id = add.execute(&services).await.unwrap();
@@ -362,6 +376,7 @@ mod query_tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let parent_id = parent_add.execute(&services).await.unwrap();
@@ -376,6 +391,7 @@ mod query_tests {
             parent: Some(parent_id.clone()),
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let child_id = child_add.execute(&services).await.unwrap();
@@ -411,6 +427,7 @@ mod query_tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let a_id = a.execute(&services).await.unwrap();
@@ -424,6 +441,7 @@ mod query_tests {
             parent: None,
             depends_on: vec![a_id.clone()],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let _b_id = b.execute(&services).await.unwrap();
@@ -455,6 +473,7 @@ mod relationship_tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         cmd.execute(services).await.unwrap()
@@ -663,6 +682,7 @@ mod section_tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         cmd.execute(services).await.unwrap()
@@ -812,6 +832,7 @@ mod workflow_tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         cmd.execute(services).await.unwrap()
@@ -826,6 +847,8 @@ mod workflow_tests {
             steps: vec![],
             auto_advance: false,
             order: 0,
+            track: None,
+            kanban_column: None,
         };
         let wf_id = services.workflows().create_workflow(options).await.unwrap();
         assert!(!wf_id.is_empty());
@@ -845,6 +868,8 @@ mod workflow_tests {
             steps: vec![],
             auto_advance: false,
             order: 0,
+            track: None,
+            kanban_column: None,
         };
         let wf_id = services
             .workflows()
@@ -876,6 +901,8 @@ mod workflow_tests {
             steps: vec![],
             auto_advance: false,
             order: 0,
+            track: None,
+            kanban_column: None,
         };
         let wf_id = services
             .workflows()
@@ -921,6 +948,7 @@ mod command_dispatch_tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         });
         let result = cmd.execute(&services).await.unwrap();
@@ -942,6 +970,7 @@ mod command_dispatch_tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let id = add.execute(&services).await.unwrap();
@@ -966,6 +995,7 @@ mod command_dispatch_tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let id = add.execute(&services).await.unwrap();
@@ -993,6 +1023,7 @@ mod command_dispatch_tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let id = add.execute(&services).await.unwrap();
@@ -1006,6 +1037,7 @@ mod command_dispatch_tests {
             remove_tags: vec![],
             parent: None,
             worktree: None,
+            track: None,
             edit_section: None,
             remove_section: None,
         });

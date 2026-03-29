@@ -26,3 +26,4 @@ Thumbs.db
 /vtb-export-*
 /.claude/settings.json
 /.env
+.mcp.json

@@ -25,6 +25,7 @@ async fn create_task_with_workflow(
         parent: None,
         depends_on: vec![],
         needs_review: false,
+        track: None,
         workflow: None,
     };
     let task_id = task_cmd.execute(services).await.unwrap();
@@ -35,6 +36,8 @@ async fn create_task_with_workflow(
         steps: vec![],
         auto_advance: false,
         order: 0,
+        track: None,
+        kanban_column: None,
     };
     let wf_id = services
         .workflows()
@@ -89,6 +92,7 @@ mod run_command_tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let task_id = task_cmd.execute(&services).await.unwrap();
@@ -126,6 +130,7 @@ mod run_command_tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let task_id = task_cmd.execute(&services).await.unwrap();
@@ -208,6 +213,7 @@ mod run_command_tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let task_id = task_cmd.execute(&services).await.unwrap();
@@ -242,6 +248,7 @@ mod run_command_tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let epic_id = epic_cmd.execute(&services).await.unwrap();
@@ -252,6 +259,8 @@ mod run_command_tests {
             steps: vec![],
             auto_advance: false,
             order: 0,
+            track: None,
+            kanban_column: None,
         };
         let wf_id = services
             .workflows()
@@ -312,6 +321,7 @@ mod run_command_tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let blocker_id = blocker_cmd.execute(&services).await.unwrap();
@@ -325,6 +335,7 @@ mod run_command_tests {
             parent: None,
             depends_on: vec![blocker_id],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let task_id = task_cmd.execute(&services).await.unwrap();
@@ -335,6 +346,8 @@ mod run_command_tests {
             steps: vec![],
             auto_advance: false,
             order: 0,
+            track: None,
+            kanban_column: None,
         };
         let wf_id = services
             .workflows()
@@ -366,6 +379,7 @@ mod run_command_tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let parent_id = parent_cmd.execute(&services).await.unwrap();
@@ -379,6 +393,7 @@ mod run_command_tests {
             parent: Some(parent_id.clone()),
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let child_id = child_cmd.execute(&services).await.unwrap();
@@ -389,6 +404,8 @@ mod run_command_tests {
             steps: vec![],
             auto_advance: false,
             order: 0,
+            track: None,
+            kanban_column: None,
         };
         let wf_id = services
             .workflows()

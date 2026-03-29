@@ -30,6 +30,7 @@ mod show_basic_tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let task_id = cmd.execute(&services).await.unwrap();
@@ -66,6 +67,7 @@ mod show_basic_tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let task_id = cmd.execute(&services).await.unwrap();
@@ -115,6 +117,7 @@ mod show_worktree_tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let task_id = cmd.execute(&services).await.unwrap();
@@ -158,6 +161,7 @@ mod show_worktree_tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let task_id = cmd.execute(&services).await.unwrap();
@@ -200,6 +204,7 @@ mod show_sections_tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let task_id = cmd.execute(&services).await.unwrap();
@@ -236,6 +241,7 @@ mod show_sections_tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let task_id = cmd.execute(&services).await.unwrap();
@@ -284,6 +290,7 @@ mod show_sections_tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let task_id = cmd.execute(&services).await.unwrap();
@@ -339,6 +346,7 @@ mod show_code_refs_tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let task_id = cmd.execute(&services).await.unwrap();
@@ -382,6 +390,7 @@ mod show_code_refs_tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let task_id = cmd.execute(&services).await.unwrap();
@@ -423,6 +432,7 @@ mod show_code_refs_tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let task_id = cmd.execute(&services).await.unwrap();
@@ -463,6 +473,7 @@ mod show_code_refs_tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let task_id = cmd.execute(&services).await.unwrap();
@@ -501,6 +512,7 @@ mod show_code_refs_tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let task_id = cmd.execute(&services).await.unwrap();
@@ -560,6 +572,7 @@ mod show_relationships_tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let parent_id = parent_cmd.execute(&services).await.unwrap();
@@ -574,6 +587,7 @@ mod show_relationships_tests {
             parent: Some(parent_id.clone()),
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let child_id = child_cmd.execute(&services).await.unwrap();
@@ -604,6 +618,7 @@ mod show_relationships_tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let parent_id = parent_cmd.execute(&services).await.unwrap();
@@ -618,6 +633,7 @@ mod show_relationships_tests {
             parent: Some(parent_id.clone()),
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let child1_id = child1_cmd.execute(&services).await.unwrap();
@@ -631,6 +647,7 @@ mod show_relationships_tests {
             parent: Some(parent_id.clone()),
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let child2_id = child2_cmd.execute(&services).await.unwrap();
@@ -664,6 +681,7 @@ mod show_relationships_tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let blocker_id = blocker_cmd.execute(&services).await.unwrap();
@@ -678,6 +696,7 @@ mod show_relationships_tests {
             parent: None,
             depends_on: vec![blocker_id.clone()],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let task_id = task_cmd.execute(&services).await.unwrap();
@@ -706,6 +725,7 @@ mod show_relationships_tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let task_id = task_cmd.execute(&services).await.unwrap();
@@ -720,6 +740,7 @@ mod show_relationships_tests {
             parent: None,
             depends_on: vec![task_id.clone()],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let blocked1_id = blocked1_cmd.execute(&services).await.unwrap();
@@ -733,6 +754,7 @@ mod show_relationships_tests {
             parent: None,
             depends_on: vec![task_id.clone()],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let blocked2_id = blocked2_cmd.execute(&services).await.unwrap();
@@ -781,6 +803,7 @@ mod show_workflow_tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: Some(workflow_id.clone()),
         };
         let task_id = task_cmd.execute(&services).await.unwrap();
@@ -819,6 +842,7 @@ mod show_comprehensive_tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let parent_id = parent_cmd.execute(&services).await.unwrap();
@@ -833,6 +857,7 @@ mod show_comprehensive_tests {
             parent: None,
             depends_on: vec![],
             needs_review: false,
+            track: None,
             workflow: None,
         };
         let blocker_id = blocker_cmd.execute(&services).await.unwrap();
@@ -847,6 +872,7 @@ mod show_comprehensive_tests {
             parent: Some(parent_id.clone()),
             depends_on: vec![blocker_id.clone()],
             needs_review: true,
+            track: None,
             workflow: None,
         };
         let task_id = task_cmd.execute(&services).await.unwrap();
