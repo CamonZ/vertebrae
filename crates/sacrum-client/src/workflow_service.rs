@@ -101,6 +101,7 @@ impl SacrumWorkflowService {
             metadata,
             auto_advance: response.auto_advance.unwrap_or(false),
             order: response.display_order.unwrap_or(0),
+            is_default: response.is_default.unwrap_or(false),
             kanban_column: response.kanban_column.clone(),
             transitions,
             created_at,
@@ -159,6 +160,7 @@ impl WorkflowService for SacrumWorkflowService {
             "description": options.description,
             "auto_advance": options.auto_advance,
             "display_order": options.order,
+            "is_default": options.is_default,
         });
 
         if let Some(ref kanban_column) = options.kanban_column {
@@ -270,6 +272,9 @@ impl WorkflowService for SacrumWorkflowService {
         }
         if let Some(order) = options.order {
             variables["display_order"] = json!(order);
+        }
+        if let Some(is_default) = options.is_default {
+            variables["is_default"] = json!(is_default);
         }
         if let Some(ref kanban_opt) = options.kanban_column {
             match kanban_opt {

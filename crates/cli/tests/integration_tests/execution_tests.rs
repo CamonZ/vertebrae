@@ -49,6 +49,7 @@ async fn test_execution_create_success() {
         auto_advance: false,
         steps: vec![],
         order: 0,
+        is_default: false,
         kanban_column: None,
     };
     let workflow_id = services
@@ -148,6 +149,7 @@ async fn test_execution_create_with_context_and_prompt() {
             auto_advance: false,
             steps: vec![],
             order: 0,
+            is_default: false,
             kanban_column: None,
         })
         .await
@@ -237,6 +239,7 @@ async fn test_execution_create_invalid_context_json_fails() {
             auto_advance: false,
             steps: vec![],
             order: 0,
+            is_default: false,
             kanban_column: None,
         })
         .await
