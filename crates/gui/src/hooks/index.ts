@@ -18,4 +18,5 @@ export { useTheme } from "./useTheme";
 export { useExpandedNodes } from "./useExpandedNodes";
 export { useResizableColumns } from "./useResizableColumns";
 export { useElkLayout, calculateElkLayout } from "./useElkLayout";
+export { useOperationsData } from "./useOperationsData";
 export type { LayoutNode, LayoutEdge, LayoutPoint, LayoutEdgePath, LayoutResult, ElkLayoutOptions } from "./useElkLayout";

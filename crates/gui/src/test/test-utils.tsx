@@ -2,7 +2,7 @@ import { render, type RenderOptions } from "@testing-library/react";
 import { ReactFlowProvider } from "@xyflow/react";
 import { BrowserRouter } from "react-router-dom";
 import type { ReactElement, ReactNode } from "react";
-import type { Task, Workflow, Step, AgentConfig } from "../bindings";
+import type { Task, Workflow, Step, StepExecution, AgentConfig } from "../bindings";
 
 /**
  * Custom render function that wraps components with necessary providers
@@ -113,6 +113,22 @@ export function createMockSteps(workflowId = "test-workflow-1"): Step[] {
       is_final: true,
     }),
   ];
+}
+
+/**
+ * Create mock step execution data for testing
+ */
+export function createMockStepExecution(overrides?: Partial<StepExecution>): StepExecution {
+  return {
+    id: `exec-${Math.random().toString(36).slice(2, 10)}`,
+    task_id: "task-1",
+    workflow_id: "workflow-1",
+    step_name: "in_progress",
+    started_at: new Date().toISOString(),
+    completed_at: null,
+    status: "in_progress",
+    ...overrides,
+  };
 }
 
 /**
