@@ -105,6 +105,11 @@ describe("Router Acceptance Tests", () => {
       data: [],
     });
 
+    (commands.getTaskExecutions as ReturnType<typeof vi.fn>).mockResolvedValue({
+      status: "ok",
+      data: [],
+    });
+
     (commands.getTask as ReturnType<typeof vi.fn>).mockResolvedValue({
       status: "ok",
       data: {
@@ -206,9 +211,10 @@ describe("Router Acceptance Tests", () => {
         ).toBeInTheDocument();
       });
 
-      expect(
-        screen.getByText("Operations dashboard coming soon"),
-      ).toBeInTheDocument();
+      // With no tasks or executions, shows the empty "All clear" state
+      await waitFor(() => {
+        expect(screen.getByText("All clear")).toBeInTheDocument();
+      });
     });
   });
 

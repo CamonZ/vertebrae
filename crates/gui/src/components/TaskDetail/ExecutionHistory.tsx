@@ -4,6 +4,7 @@ import { commands } from '../../bindings';
 import { useTaskExecutions } from '../../hooks';
 import { useSessionLogStore } from '../../stores';
 import { ConversationLogViewer } from './ConversationLogViewer';
+import { formatDuration } from '../Operations/formatDuration';
 
 interface ExecutionHistoryProps {
   taskId: string;
@@ -23,36 +24,6 @@ function formatDateTime(isoString: string): string {
     });
   } catch {
     return isoString;
-  }
-}
-
-
-/**
- * Calculate duration between two timestamps
- */
-function formatDuration(startedAt: string, completedAt: string | null): string {
-  if (!completedAt) return 'Running...';
-
-  try {
-    const start = new Date(startedAt).getTime();
-    const end = new Date(completedAt).getTime();
-    const durationMs = end - start;
-
-    if (durationMs < 1000) {
-      return `${durationMs}ms`;
-    } else if (durationMs < 60000) {
-      return `${Math.round(durationMs / 1000)}s`;
-    } else if (durationMs < 3600000) {
-      const mins = Math.floor(durationMs / 60000);
-      const secs = Math.round((durationMs % 60000) / 1000);
-      return `${mins}m ${secs}s`;
-    } else {
-      const hours = Math.floor(durationMs / 3600000);
-      const mins = Math.round((durationMs % 3600000) / 60000);
-      return `${hours}h ${mins}m`;
-    }
-  } catch {
-    return '-';
   }
 }
 
@@ -213,7 +184,9 @@ function ExecutionEntry({ execution, isLast, index }: { execution: StepExecution
               {isActive ? 'Active' : status}
             </span>
             <span className="font-mono text-[10px] text-text-muted">
-              {formatDuration(execution.started_at ?? '', execution.completed_at)}
+              {execution.completed_at
+                ? formatDuration(execution.started_at, execution.completed_at)
+                : 'Running...'}
             </span>
           </div>
         </button>
