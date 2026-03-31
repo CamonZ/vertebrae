@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use std::collections::HashMap;
-use std::io::Write;
+use std::io::{BufRead, Write};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::thread;
@@ -17,6 +17,20 @@ use tauri_specta::Event;
 use tokio::sync::{mpsc, oneshot, RwLock};
 
 use crate::helpers::find_claude_binary;
+
+/// Truncate a string to at most `max_bytes` bytes without splitting a multi-byte UTF-8 character.
+/// Walks backwards from the target offset to find the nearest char boundary.
+fn truncate_utf8(s: &str, max_bytes: usize) -> &str {
+    if max_bytes >= s.len() {
+        return s;
+    }
+    let mut end = max_bytes;
+    // is_char_boundary(0) is always true, so this loop always terminates
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
 
 // ============================================================================
 // Events emitted to the frontend
@@ -183,6 +197,21 @@ enum ClaudeContentItem {
         #[serde(default)]
         is_error: bool,
     },
+}
+
+// ============================================================================
+// Parsed event types (for testability)
+// ============================================================================
+
+/// A parsed event ready for emission — separates event construction from Tauri dispatch.
+#[derive(Debug, Clone)]
+enum EmittedEvent {
+    Init(ClaudeSessionInitEvent),
+    Text(ClaudeTextEvent),
+    ToolCall(ClaudeToolCallEvent),
+    ToolResult(ClaudeToolResultEvent),
+    PermissionRequest(ClaudePermissionRequestEvent),
+    SessionEnd(ClaudeSessionEndEvent),
 }
 
 // ============================================================================
@@ -385,36 +414,36 @@ impl ClaudeSessionManager {
         let (exit_tx, exit_rx) = std::sync::mpsc::channel();
 
         thread::spawn(move || {
-            use std::io::BufRead;
             let reader = std::io::BufReader::new(stdout);
-
-            for line in reader.lines() {
-                match line {
-                    Ok(line) if !line.is_empty() => {
-                        // Log all received JSONL messages for debugging
-                        log::info!(
-                            "[Claude JSONL] session={} msg={}",
-                            &session_id_for_reader[..8.min(session_id_for_reader.len())],
-                            &line[..200.min(line.len())]
-                        );
-
-                        if let Ok(msg) = serde_json::from_str::<ClaudeMessage>(&line) {
-                            Self::emit_events(&session_id_for_reader, msg, &app_handle_for_reader);
-                        } else {
-                            log::warn!(
-                                "[Claude JSONL] Failed to parse: {}",
-                                &line[..100.min(line.len())]
+            Self::process_jsonl_lines(reader, &session_id_for_reader, |events| {
+                for event in events {
+                    match event {
+                        EmittedEvent::Init(e) => {
+                            log::info!(
+                                "[Claude Init] conversation_id={:?}, model={}",
+                                e.claude_conversation_id,
+                                e.model
                             );
+                            let _ = e.emit(&app_handle_for_reader);
+                        }
+                        EmittedEvent::Text(e) => {
+                            let _ = e.emit(&app_handle_for_reader);
+                        }
+                        EmittedEvent::ToolCall(e) => {
+                            let _ = e.emit(&app_handle_for_reader);
+                        }
+                        EmittedEvent::ToolResult(e) => {
+                            let _ = e.emit(&app_handle_for_reader);
+                        }
+                        EmittedEvent::PermissionRequest(e) => {
+                            let _ = e.emit(&app_handle_for_reader);
+                        }
+                        EmittedEvent::SessionEnd(e) => {
+                            let _ = e.emit(&app_handle_for_reader);
                         }
                     }
-                    Err(e) => {
-                        log::error!("Error reading stdout: {}", e);
-                        break;
-                    }
-                    _ => {}
                 }
-            }
-
+            });
             let _ = exit_tx.send(());
         });
 
@@ -422,30 +451,14 @@ impl ClaudeSessionManager {
         let session_id_for_stderr = session_id.clone();
         let app_handle_for_stderr = app_handle.clone();
         thread::spawn(move || {
-            use std::io::BufRead;
             let reader = std::io::BufReader::new(stderr);
-
-            for line in reader.lines() {
-                match line {
-                    Ok(line) if !line.is_empty() => {
-                        log::warn!(
-                            "[Claude stderr] session={} {}",
-                            &session_id_for_stderr[..8.min(session_id_for_stderr.len())],
-                            &line[..500.min(line.len())]
-                        );
-                        let _ = ClaudeSessionErrorEvent {
-                            session_id: session_id_for_stderr.clone(),
-                            error: format!("[stderr] {}", line),
-                        }
-                        .emit(&app_handle_for_stderr);
-                    }
-                    Err(e) => {
-                        log::error!("Error reading stderr: {}", e);
-                        break;
-                    }
-                    _ => {}
+            Self::process_stderr_lines(reader, &session_id_for_stderr, |error_msg| {
+                let _ = ClaudeSessionErrorEvent {
+                    session_id: session_id_for_stderr.clone(),
+                    error: error_msg,
                 }
-            }
+                .emit(&app_handle_for_stderr);
+            });
         });
 
         // Forward commands to stdin using sync channel
@@ -535,25 +548,85 @@ impl ClaudeSessionManager {
         log::info!("Claude session {} ended", session_id);
     }
 
-    /// Emit appropriate events based on the parsed message
-    fn emit_events(session_id: &str, msg: ClaudeMessage, app_handle: &tauri::AppHandle) {
+    /// Process JSONL lines from the Claude CLI stdout.
+    /// Parses each non-empty line as a `ClaudeMessage`, builds events, and passes
+    /// them to the callback. Stops on read error.
+    fn process_jsonl_lines(
+        reader: impl BufRead,
+        session_id: &str,
+        mut on_events: impl FnMut(Vec<EmittedEvent>),
+    ) {
+        for line in reader.lines() {
+            match line {
+                Ok(line) if !line.is_empty() => {
+                    log::info!(
+                        "[Claude JSONL] session={} msg={}",
+                        &session_id[..8.min(session_id.len())],
+                        truncate_utf8(&line, 200)
+                    );
+
+                    if let Ok(msg) = serde_json::from_str::<ClaudeMessage>(&line) {
+                        let events = Self::build_events(session_id, msg);
+                        if !events.is_empty() {
+                            on_events(events);
+                        }
+                    } else {
+                        log::warn!(
+                            "[Claude JSONL] Failed to parse: {}",
+                            truncate_utf8(&line, 100)
+                        );
+                    }
+                }
+                Err(e) => {
+                    log::error!("Error reading stdout: {}", e);
+                    break;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Process stderr lines from the Claude CLI.
+    /// Passes each non-empty line (prefixed with `[stderr]`) to the callback.
+    /// Stops on read error.
+    fn process_stderr_lines(
+        reader: impl BufRead,
+        session_id: &str,
+        mut on_error: impl FnMut(String),
+    ) {
+        for line in reader.lines() {
+            match line {
+                Ok(line) if !line.is_empty() => {
+                    log::warn!(
+                        "[Claude stderr] session={} {}",
+                        &session_id[..8.min(session_id.len())],
+                        &line[..500.min(line.len())]
+                    );
+                    on_error(format!("[stderr] {}", line));
+                }
+                Err(e) => {
+                    log::error!("Error reading stderr: {}", e);
+                    break;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Build events from a parsed Claude message without emitting them.
+    /// This separates pure event construction from Tauri dispatch for testability.
+    fn build_events(session_id: &str, msg: ClaudeMessage) -> Vec<EmittedEvent> {
+        let mut events = Vec::new();
+
         match msg.msg_type.as_str() {
             "system" if msg.subtype.as_deref() == Some("init") => {
-                // Log the full init message to see what fields are available
-                log::info!(
-                    "[Claude Init] uuid={:?}, session_id={:?}, model={:?}",
-                    msg.uuid,
-                    msg.session_id,
-                    msg.model
-                );
-                let _ = ClaudeSessionInitEvent {
+                events.push(EmittedEvent::Init(ClaudeSessionInitEvent {
                     session_id: session_id.to_string(),
                     // Try session_id first, fall back to uuid
                     claude_conversation_id: msg.session_id.or(msg.uuid),
                     model: msg.model.unwrap_or_default(),
                     tools: msg.tools.unwrap_or_default(),
-                }
-                .emit(app_handle);
+                }));
             }
             // Streaming: stream_event wraps content_block_delta and other streaming events
             "stream_event" => {
@@ -562,12 +635,11 @@ impl ClaudeSessionManager {
                         if let Some(delta) = event.delta {
                             if delta.delta_type == "text_delta" {
                                 if let Some(text) = delta.text {
-                                    let _ = ClaudeTextEvent {
+                                    events.push(EmittedEvent::Text(ClaudeTextEvent {
                                         session_id: session_id.to_string(),
                                         text,
                                         is_partial: true,
-                                    }
-                                    .emit(app_handle);
+                                    }));
                                 }
                             }
                         }
@@ -579,12 +651,11 @@ impl ClaudeSessionManager {
                 if let Some(delta) = msg.delta {
                     if delta.delta_type == "text_delta" {
                         if let Some(text) = delta.text {
-                            let _ = ClaudeTextEvent {
+                            events.push(EmittedEvent::Text(ClaudeTextEvent {
                                 session_id: session_id.to_string(),
                                 text,
                                 is_partial: true,
-                            }
-                            .emit(app_handle);
+                            }));
                         }
                     }
                 }
@@ -604,21 +675,19 @@ impl ClaudeSessionManager {
                         for item in content {
                             match item {
                                 ClaudeContentItem::Text { text } => {
-                                    let _ = ClaudeTextEvent {
+                                    events.push(EmittedEvent::Text(ClaudeTextEvent {
                                         session_id: session_id.to_string(),
                                         text,
                                         is_partial: false,
-                                    }
-                                    .emit(app_handle);
+                                    }));
                                 }
                                 ClaudeContentItem::ToolUse { id, name, input } => {
-                                    let _ = ClaudeToolCallEvent {
+                                    events.push(EmittedEvent::ToolCall(ClaudeToolCallEvent {
                                         session_id: session_id.to_string(),
                                         tool_id: id,
                                         tool_name: name,
                                         input: serde_json::to_string(&input).unwrap_or_default(),
-                                    }
-                                    .emit(app_handle);
+                                    }));
                                 }
                                 _ => {}
                             }
@@ -641,24 +710,24 @@ impl ClaudeSessionManager {
                                     other => serde_json::to_string(&other).unwrap_or_default(),
                                 };
 
-                                // Check if this is a permission request - emit permission event and skip tool result
+                                // Check if this is a permission request
                                 if result_text.contains("Claude requested permissions") {
-                                    let _ = ClaudePermissionRequestEvent {
-                                        session_id: session_id.to_string(),
-                                        tool_name: "Read".to_string(),
-                                        permission_message: result_text,
-                                    }
-                                    .emit(app_handle);
-                                    continue; // Skip emitting tool result for permission requests
+                                    events.push(EmittedEvent::PermissionRequest(
+                                        ClaudePermissionRequestEvent {
+                                            session_id: session_id.to_string(),
+                                            tool_name: "Read".to_string(),
+                                            permission_message: result_text,
+                                        },
+                                    ));
+                                    continue;
                                 }
 
-                                let _ = ClaudeToolResultEvent {
+                                events.push(EmittedEvent::ToolResult(ClaudeToolResultEvent {
                                     session_id: session_id.to_string(),
                                     tool_id: tool_use_id,
                                     result: result_text,
                                     is_error,
-                                }
-                                .emit(app_handle);
+                                }));
                             }
                         }
                     }
@@ -681,7 +750,7 @@ impl ClaudeSessionManager {
                     })
                     .unwrap_or((0, 200_000));
 
-                let _ = ClaudeSessionEndEvent {
+                events.push(EmittedEvent::SessionEnd(ClaudeSessionEndEvent {
                     session_id: session_id.to_string(),
                     duration_ms: msg.duration_ms.unwrap_or(0),
                     cost_usd: msg.total_cost_usd.unwrap_or(0.0),
@@ -690,11 +759,12 @@ impl ClaudeSessionManager {
                     is_error: msg.is_error.unwrap_or(false),
                     context_tokens,
                     context_window,
-                }
-                .emit(app_handle);
+                }));
             }
             _ => {}
         }
+
+        events
     }
 
     /// Send a message to a Claude session
@@ -870,5 +940,877 @@ mod tests {
         let json = serde_json::to_string(&end_event).expect("Should serialize");
         assert!(json.contains("5000"));
         assert!(json.contains("0.05"));
+    }
+
+    #[test]
+    fn test_utf8_safe_truncation_does_not_panic() {
+        // '…' (U+2026) is 3 bytes in UTF-8 (0xE2 0x80 0xA6).
+        // Place it so a naive byte slice at 200 would land inside the character.
+        let line = "a".repeat(198) + "…" + &"b".repeat(50); // '…' spans bytes 198..201
+        assert_eq!(line.len(), 251); // 198 + 3 + 50
+
+        // Truncation at 200 must not panic and must land on a char boundary
+        let truncated = truncate_utf8(&line, 200);
+        assert!(truncated.is_char_boundary(truncated.len()));
+        // Should truncate before the '…' since byte 200 is inside it
+        assert_eq!(truncated.len(), 198);
+        assert_eq!(truncated, "a".repeat(198).as_str());
+
+        // Same test for the 100-byte truncation path
+        let line_100 = "x".repeat(98) + "…" + &"y".repeat(50); // '…' spans bytes 98..101
+        assert_eq!(line_100.len(), 151);
+
+        let truncated_100 = truncate_utf8(&line_100, 100);
+        assert!(truncated_100.is_char_boundary(truncated_100.len()));
+        assert_eq!(truncated_100.len(), 98);
+        assert_eq!(truncated_100, "x".repeat(98).as_str());
+    }
+
+    #[test]
+    fn test_utf8_safe_truncation_with_string_shorter_than_limit() {
+        let short = "hello…world";
+        let len = short.len(); // "hello" = 5, "…" = 3, "world" = 5 => 13
+        assert_eq!(len, 13);
+
+        let truncated = truncate_utf8(short, 200);
+        assert_eq!(truncated, short);
+    }
+
+    #[test]
+    fn test_utf8_safe_truncation_zero_max_bytes() {
+        let s = "hello";
+        let truncated = truncate_utf8(s, 0);
+        assert_eq!(truncated, "");
+    }
+
+    #[test]
+    fn test_utf8_safe_truncation_all_multibyte() {
+        // All 3-byte characters — truncating at 1 or 2 must walk back to 0
+        let s = "………"; // 3 × 3 bytes = 9 bytes
+        assert_eq!(s.len(), 9);
+
+        assert_eq!(truncate_utf8(s, 1), "");
+        assert_eq!(truncate_utf8(s, 2), "");
+        assert_eq!(truncate_utf8(s, 3), "…");
+        assert_eq!(truncate_utf8(s, 5), "…");
+        assert_eq!(truncate_utf8(s, 6), "……");
+    }
+
+    #[test]
+    fn test_utf8_safe_truncation_exact_boundary() {
+        let s = "abc…def"; // 3 + 3 + 3 = 9 bytes
+        assert_eq!(s.len(), 9);
+
+        // Truncate exactly at char boundary
+        assert_eq!(truncate_utf8(s, 3), "abc");
+        assert_eq!(truncate_utf8(s, 6), "abc…");
+        assert_eq!(truncate_utf8(s, 9), "abc…def");
+    }
+
+    // ========================================================================
+    // has_session with existing session
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_has_session_existing() {
+        let manager = ClaudeSessionManager::new();
+        let (tx, _rx) = mpsc::unbounded_channel();
+        {
+            let mut sessions = manager.sessions.write().await;
+            sessions.insert("test-session".to_string(), SessionHandle { command_tx: tx });
+        }
+        assert!(manager.has_session("test-session").await);
+        assert!(!manager.has_session("other-session").await);
+    }
+
+    #[tokio::test]
+    async fn test_send_message_channel_dropped() {
+        let manager = ClaudeSessionManager::new();
+        let (tx, rx) = mpsc::unbounded_channel();
+        drop(rx);
+        {
+            let mut sessions = manager.sessions.write().await;
+            sessions.insert("test-session".to_string(), SessionHandle { command_tx: tx });
+        }
+        let result = manager.send_message("test-session", "hello").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_close_session_channel_dropped() {
+        let manager = ClaudeSessionManager::new();
+        let (tx, rx) = mpsc::unbounded_channel();
+        drop(rx);
+        {
+            let mut sessions = manager.sessions.write().await;
+            sessions.insert("test-session".to_string(), SessionHandle { command_tx: tx });
+        }
+        let result = manager.close_session("test-session").await;
+        assert!(result.is_err());
+    }
+
+    // ========================================================================
+    // build_events tests
+    // ========================================================================
+
+    fn parse_msg(json: &str) -> ClaudeMessage {
+        serde_json::from_str(json).expect("Failed to parse test ClaudeMessage JSON")
+    }
+
+    #[test]
+    fn test_build_events_system_init() {
+        let msg = parse_msg(
+            r#"{
+                "type": "system",
+                "subtype": "init",
+                "session_id": "conv-abc",
+                "uuid": "uuid-123",
+                "model": "claude-sonnet-4",
+                "tools": ["Read", "Edit"]
+            }"#,
+        );
+
+        let events = ClaudeSessionManager::build_events("sess-1", msg);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            EmittedEvent::Init(e) => {
+                assert_eq!(e.session_id, "sess-1");
+                // session_id takes precedence over uuid
+                assert_eq!(e.claude_conversation_id, Some("conv-abc".to_string()));
+                assert_eq!(e.model, "claude-sonnet-4");
+                assert_eq!(e.tools, vec!["Read", "Edit"]);
+            }
+            other => panic!("Expected Init event, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_build_events_system_init_fallback_to_uuid() {
+        let msg = parse_msg(
+            r#"{
+                "type": "system",
+                "subtype": "init",
+                "uuid": "uuid-123",
+                "model": "claude-sonnet-4"
+            }"#,
+        );
+
+        let events = ClaudeSessionManager::build_events("sess-1", msg);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            EmittedEvent::Init(e) => {
+                assert_eq!(e.claude_conversation_id, Some("uuid-123".to_string()));
+            }
+            other => panic!("Expected Init event, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_build_events_system_non_init() {
+        let msg = parse_msg(r#"{"type": "system", "subtype": "other"}"#);
+        let events = ClaudeSessionManager::build_events("sess-1", msg);
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn test_build_events_system_no_subtype() {
+        let msg = parse_msg(r#"{"type": "system"}"#);
+        let events = ClaudeSessionManager::build_events("sess-1", msg);
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn test_build_events_stream_event_text_delta() {
+        let msg = parse_msg(
+            r#"{
+                "type": "stream_event",
+                "event": {
+                    "type": "content_block_delta",
+                    "delta": {
+                        "type": "text_delta",
+                        "text": "Hello"
+                    }
+                }
+            }"#,
+        );
+
+        let events = ClaudeSessionManager::build_events("sess-1", msg);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            EmittedEvent::Text(e) => {
+                assert_eq!(e.session_id, "sess-1");
+                assert_eq!(e.text, "Hello");
+                assert!(e.is_partial);
+            }
+            other => panic!("Expected Text event, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_build_events_stream_event_non_text_delta_type() {
+        let msg = parse_msg(
+            r#"{
+                "type": "stream_event",
+                "event": {
+                    "type": "content_block_delta",
+                    "delta": {
+                        "type": "input_json_delta",
+                        "text": "ignored"
+                    }
+                }
+            }"#,
+        );
+        assert!(ClaudeSessionManager::build_events("sess-1", msg).is_empty());
+    }
+
+    #[test]
+    fn test_build_events_stream_event_non_delta_event() {
+        let msg = parse_msg(
+            r#"{
+                "type": "stream_event",
+                "event": {
+                    "type": "content_block_start"
+                }
+            }"#,
+        );
+        assert!(ClaudeSessionManager::build_events("sess-1", msg).is_empty());
+    }
+
+    #[test]
+    fn test_build_events_stream_event_no_event_field() {
+        let msg = parse_msg(r#"{"type": "stream_event"}"#);
+        assert!(ClaudeSessionManager::build_events("sess-1", msg).is_empty());
+    }
+
+    #[test]
+    fn test_build_events_content_block_delta_direct() {
+        let msg = parse_msg(
+            r#"{
+                "type": "content_block_delta",
+                "delta": {
+                    "type": "text_delta",
+                    "text": "World"
+                }
+            }"#,
+        );
+
+        let events = ClaudeSessionManager::build_events("sess-1", msg);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            EmittedEvent::Text(e) => {
+                assert_eq!(e.text, "World");
+                assert!(e.is_partial);
+            }
+            other => panic!("Expected Text event, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_build_events_content_block_delta_non_text() {
+        let msg = parse_msg(
+            r#"{
+                "type": "content_block_delta",
+                "delta": {"type": "input_json_delta"}
+            }"#,
+        );
+        assert!(ClaudeSessionManager::build_events("sess-1", msg).is_empty());
+    }
+
+    #[test]
+    fn test_build_events_content_block_start_stop_are_noop() {
+        let msg = parse_msg(r#"{"type": "content_block_start"}"#);
+        assert!(ClaudeSessionManager::build_events("sess-1", msg).is_empty());
+
+        let msg = parse_msg(r#"{"type": "content_block_stop"}"#);
+        assert!(ClaudeSessionManager::build_events("sess-1", msg).is_empty());
+    }
+
+    #[test]
+    fn test_build_events_assistant_text() {
+        let msg = parse_msg(
+            r#"{
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {"type": "text", "text": "Hello from Claude"}
+                    ]
+                }
+            }"#,
+        );
+
+        let events = ClaudeSessionManager::build_events("sess-1", msg);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            EmittedEvent::Text(e) => {
+                assert_eq!(e.text, "Hello from Claude");
+                assert!(!e.is_partial);
+            }
+            other => panic!("Expected Text event, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_build_events_assistant_tool_use() {
+        let msg = parse_msg(
+            r#"{
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_123",
+                            "name": "Read",
+                            "input": {"file_path": "/test.txt"}
+                        }
+                    ]
+                }
+            }"#,
+        );
+
+        let events = ClaudeSessionManager::build_events("sess-1", msg);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            EmittedEvent::ToolCall(e) => {
+                assert_eq!(e.tool_id, "toolu_123");
+                assert_eq!(e.tool_name, "Read");
+                assert!(e.input.contains("file_path"));
+            }
+            other => panic!("Expected ToolCall event, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_build_events_assistant_mixed_content() {
+        let msg = parse_msg(
+            r#"{
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        {"type": "text", "text": "Let me read that"},
+                        {"type": "tool_use", "id": "toolu_456", "name": "Read", "input": {}}
+                    ]
+                }
+            }"#,
+        );
+
+        let events = ClaudeSessionManager::build_events("sess-1", msg);
+        assert_eq!(events.len(), 2);
+        assert!(matches!(&events[0], EmittedEvent::Text(_)));
+        assert!(matches!(&events[1], EmittedEvent::ToolCall(_)));
+    }
+
+    #[test]
+    fn test_build_events_assistant_no_message() {
+        let msg = parse_msg(r#"{"type": "assistant"}"#);
+        assert!(ClaudeSessionManager::build_events("sess-1", msg).is_empty());
+    }
+
+    #[test]
+    fn test_build_events_user_tool_result() {
+        let msg = parse_msg(
+            r#"{
+                "type": "user",
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "toolu_123",
+                            "content": "file contents here",
+                            "is_error": false
+                        }
+                    ]
+                }
+            }"#,
+        );
+
+        let events = ClaudeSessionManager::build_events("sess-1", msg);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            EmittedEvent::ToolResult(e) => {
+                assert_eq!(e.tool_id, "toolu_123");
+                assert_eq!(e.result, "file contents here");
+                assert!(!e.is_error);
+            }
+            other => panic!("Expected ToolResult event, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_build_events_user_tool_result_error() {
+        let msg = parse_msg(
+            r#"{
+                "type": "user",
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "toolu_err",
+                            "content": "something broke",
+                            "is_error": true
+                        }
+                    ]
+                }
+            }"#,
+        );
+
+        let events = ClaudeSessionManager::build_events("sess-1", msg);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            EmittedEvent::ToolResult(e) => {
+                assert!(e.is_error);
+                assert_eq!(e.result, "something broke");
+            }
+            other => panic!("Expected ToolResult event, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_build_events_user_tool_result_json_content() {
+        let msg = parse_msg(
+            r#"{
+                "type": "user",
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "toolu_json",
+                            "content": {"key": "value"},
+                            "is_error": false
+                        }
+                    ]
+                }
+            }"#,
+        );
+
+        let events = ClaudeSessionManager::build_events("sess-1", msg);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            EmittedEvent::ToolResult(e) => {
+                assert!(e.result.contains("key"));
+                assert!(e.result.contains("value"));
+            }
+            other => panic!("Expected ToolResult event, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_build_events_user_permission_request() {
+        let msg = parse_msg(
+            r#"{
+                "type": "user",
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "toolu_perm",
+                            "content": "Claude requested permissions to read /etc/passwd",
+                            "is_error": false
+                        }
+                    ]
+                }
+            }"#,
+        );
+
+        let events = ClaudeSessionManager::build_events("sess-1", msg);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            EmittedEvent::PermissionRequest(e) => {
+                assert_eq!(e.tool_name, "Read");
+                assert!(e
+                    .permission_message
+                    .contains("Claude requested permissions"));
+            }
+            other => panic!("Expected PermissionRequest event, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_build_events_user_mixed_results_and_permissions() {
+        // A message with both a regular tool result and a permission request
+        let msg = parse_msg(
+            r#"{
+                "type": "user",
+                "message": {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "toolu_1",
+                            "content": "normal result",
+                            "is_error": false
+                        },
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": "toolu_2",
+                            "content": "Claude requested permissions for X",
+                            "is_error": false
+                        }
+                    ]
+                }
+            }"#,
+        );
+
+        let events = ClaudeSessionManager::build_events("sess-1", msg);
+        assert_eq!(events.len(), 2);
+        assert!(matches!(&events[0], EmittedEvent::ToolResult(_)));
+        assert!(matches!(&events[1], EmittedEvent::PermissionRequest(_)));
+    }
+
+    #[test]
+    fn test_build_events_result_with_usage() {
+        let msg = parse_msg(
+            r#"{
+                "type": "result",
+                "duration_ms": 5000,
+                "num_turns": 3,
+                "total_cost_usd": 0.05,
+                "result": "Task completed",
+                "is_error": false,
+                "modelUsage": {
+                    "claude-sonnet-4": {
+                        "inputTokens": 1000,
+                        "outputTokens": 500,
+                        "cacheReadInputTokens": 200,
+                        "cacheCreationInputTokens": 100,
+                        "contextWindow": 200000
+                    }
+                }
+            }"#,
+        );
+
+        let events = ClaudeSessionManager::build_events("sess-1", msg);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            EmittedEvent::SessionEnd(e) => {
+                assert_eq!(e.session_id, "sess-1");
+                assert_eq!(e.duration_ms, 5000);
+                assert_eq!(e.num_turns, 3);
+                assert_eq!(e.cost_usd, 0.05);
+                assert_eq!(e.result, "Task completed");
+                assert!(!e.is_error);
+                // 1000 + 500 + 200 + 100 = 1800
+                assert_eq!(e.context_tokens, 1800);
+                assert_eq!(e.context_window, 200_000);
+            }
+            other => panic!("Expected SessionEnd event, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_build_events_result_no_usage() {
+        let msg = parse_msg(
+            r#"{
+                "type": "result",
+                "duration_ms": 1000,
+                "result": "Done"
+            }"#,
+        );
+
+        let events = ClaudeSessionManager::build_events("sess-1", msg);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            EmittedEvent::SessionEnd(e) => {
+                assert_eq!(e.context_tokens, 0);
+                assert_eq!(e.context_window, 200_000);
+                assert_eq!(e.duration_ms, 1000);
+            }
+            other => panic!("Expected SessionEnd event, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_build_events_result_is_error() {
+        let msg = parse_msg(
+            r#"{
+                "type": "result",
+                "result": "Something went wrong",
+                "is_error": true
+            }"#,
+        );
+
+        let events = ClaudeSessionManager::build_events("sess-1", msg);
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            EmittedEvent::SessionEnd(e) => {
+                assert!(e.is_error);
+                assert_eq!(e.result, "Something went wrong");
+            }
+            other => panic!("Expected SessionEnd event, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_build_events_result_token_arithmetic() {
+        // Verify each component contributes to the total
+        let msg = parse_msg(
+            r#"{
+                "type": "result",
+                "modelUsage": {
+                    "model-x": {
+                        "inputTokens": 10,
+                        "outputTokens": 20,
+                        "cacheReadInputTokens": 30,
+                        "cacheCreationInputTokens": 40,
+                        "contextWindow": 100000
+                    }
+                }
+            }"#,
+        );
+
+        let events = ClaudeSessionManager::build_events("sess-1", msg);
+        match &events[0] {
+            EmittedEvent::SessionEnd(e) => {
+                // 10 + 20 + 30 + 40 = 100
+                assert_eq!(e.context_tokens, 100);
+                assert_eq!(e.context_window, 100_000);
+            }
+            other => panic!("Expected SessionEnd event, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_build_events_unknown_type() {
+        let msg = parse_msg(r#"{"type": "unknown_type"}"#);
+        assert!(ClaudeSessionManager::build_events("sess-1", msg).is_empty());
+    }
+
+    #[test]
+    fn test_build_events_session_id_propagation() {
+        // Verify the session_id parameter is correctly set on all event types
+        let test_sid = "my-unique-session-42";
+
+        let msg = parse_msg(r#"{"type": "system", "subtype": "init"}"#);
+        let events = ClaudeSessionManager::build_events(test_sid, msg);
+        match &events[0] {
+            EmittedEvent::Init(e) => assert_eq!(e.session_id, test_sid),
+            other => panic!("Expected Init, got {:?}", other),
+        }
+
+        let msg = parse_msg(
+            r#"{"type": "content_block_delta", "delta": {"type": "text_delta", "text": "x"}}"#,
+        );
+        let events = ClaudeSessionManager::build_events(test_sid, msg);
+        match &events[0] {
+            EmittedEvent::Text(e) => assert_eq!(e.session_id, test_sid),
+            other => panic!("Expected Text, got {:?}", other),
+        }
+
+        let msg = parse_msg(r#"{"type": "result"}"#);
+        let events = ClaudeSessionManager::build_events(test_sid, msg);
+        match &events[0] {
+            EmittedEvent::SessionEnd(e) => assert_eq!(e.session_id, test_sid),
+            other => panic!("Expected SessionEnd, got {:?}", other),
+        }
+    }
+
+    // ========================================================================
+    // Shared test helpers
+    // ========================================================================
+
+    /// A reader that yields its data then returns errors forever.
+    /// Use this to test that processing stops on read error.
+    struct FailingReader {
+        data: std::io::Cursor<Vec<u8>>,
+        has_errored: bool,
+    }
+
+    impl FailingReader {
+        fn new(data: &str) -> Self {
+            Self {
+                data: std::io::Cursor::new(data.as_bytes().to_vec()),
+                has_errored: false,
+            }
+        }
+    }
+
+    impl std::io::Read for FailingReader {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            if self.has_errored {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "pipe broke",
+                ));
+            }
+            let n = self.data.read(buf)?;
+            if n == 0 {
+                self.has_errored = true;
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "pipe broke",
+                ));
+            }
+            Ok(n)
+        }
+    }
+
+    impl BufRead for FailingReader {
+        fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
+            if self.has_errored {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "pipe broke",
+                ));
+            }
+            let buf = self.data.fill_buf()?;
+            if buf.is_empty() {
+                self.has_errored = true;
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "pipe broke",
+                ));
+            }
+            Ok(buf)
+        }
+        fn consume(&mut self, amt: usize) {
+            self.data.consume(amt);
+        }
+    }
+
+    // ========================================================================
+    // process_jsonl_lines tests
+    // ========================================================================
+
+    #[test]
+    fn test_process_jsonl_lines_parses_and_emits() {
+        let input = concat!(
+            r#"{"type":"system","subtype":"init","model":"claude-sonnet-4"}"#,
+            "\n",
+            r#"{"type":"result","duration_ms":100}"#,
+            "\n",
+        );
+
+        let mut all_events = Vec::new();
+        ClaudeSessionManager::process_jsonl_lines(
+            std::io::Cursor::new(input),
+            "sess-1",
+            |events| all_events.extend(events),
+        );
+
+        assert_eq!(all_events.len(), 2);
+        assert!(matches!(&all_events[0], EmittedEvent::Init(_)));
+        assert!(matches!(&all_events[1], EmittedEvent::SessionEnd(_)));
+    }
+
+    #[test]
+    fn test_process_jsonl_lines_skips_empty_lines() {
+        let input = concat!(
+            r#"{"type":"system","subtype":"init"}"#,
+            "\n",
+            "\n",
+            "\n",
+            r#"{"type":"result"}"#,
+            "\n",
+        );
+
+        let mut count = 0;
+        ClaudeSessionManager::process_jsonl_lines(std::io::Cursor::new(input), "sess-1", |_| {
+            count += 1
+        });
+
+        // Two valid messages, empty lines skipped
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn test_process_jsonl_lines_skips_invalid_json() {
+        let input = concat!(
+            r#"{"type":"system","subtype":"init"}"#,
+            "\n",
+            "not valid json\n",
+            r#"{"type":"result"}"#,
+            "\n",
+        );
+
+        let mut all_events = Vec::new();
+        ClaudeSessionManager::process_jsonl_lines(
+            std::io::Cursor::new(input),
+            "sess-1",
+            |events| all_events.extend(events),
+        );
+
+        // Only the two valid messages should produce events
+        assert_eq!(all_events.len(), 2);
+    }
+
+    #[test]
+    fn test_process_jsonl_lines_empty_input() {
+        let mut called = false;
+        ClaudeSessionManager::process_jsonl_lines(std::io::Cursor::new(""), "sess-1", |_| {
+            called = true
+        });
+        assert!(!called);
+    }
+
+    #[test]
+    fn test_process_jsonl_lines_stops_on_read_error() {
+        let input = format!("{}\n", r#"{"type":"system","subtype":"init"}"#);
+        let reader = FailingReader::new(&input);
+
+        let mut all_events = Vec::new();
+        ClaudeSessionManager::process_jsonl_lines(reader, "sess-1", |events| {
+            all_events.extend(events)
+        });
+
+        // Should have processed the one valid line before the error
+        assert_eq!(all_events.len(), 1);
+        assert!(matches!(&all_events[0], EmittedEvent::Init(_)));
+    }
+
+    // ========================================================================
+    // process_stderr_lines tests
+    // ========================================================================
+
+    #[test]
+    fn test_process_stderr_lines_collects_errors() {
+        let input = "something went wrong\nanother error\n";
+
+        let mut errors = Vec::new();
+        ClaudeSessionManager::process_stderr_lines(std::io::Cursor::new(input), "sess-1", |msg| {
+            errors.push(msg)
+        });
+
+        assert_eq!(errors.len(), 2);
+        assert_eq!(errors[0], "[stderr] something went wrong");
+        assert_eq!(errors[1], "[stderr] another error");
+    }
+
+    #[test]
+    fn test_process_stderr_lines_skips_empty_lines() {
+        let input = "error one\n\n\nerror two\n";
+
+        let mut errors = Vec::new();
+        ClaudeSessionManager::process_stderr_lines(std::io::Cursor::new(input), "sess-1", |msg| {
+            errors.push(msg)
+        });
+
+        assert_eq!(errors.len(), 2);
+    }
+
+    #[test]
+    fn test_process_stderr_lines_empty_input() {
+        let mut called = false;
+        ClaudeSessionManager::process_stderr_lines(std::io::Cursor::new(""), "sess-1", |_| {
+            called = true
+        });
+        assert!(!called);
+    }
+
+    #[test]
+    fn test_process_stderr_lines_stops_on_read_error() {
+        let reader = FailingReader::new("first error\n");
+
+        let mut errors = Vec::new();
+        ClaudeSessionManager::process_stderr_lines(reader, "sess-1", |msg| errors.push(msg));
+
+        // Should have processed the one valid line before the error
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0], "[stderr] first error");
     }
 }
