@@ -29,6 +29,20 @@ const { mockTaskData } = vi.hoisted(() => {
       done: true,
       done_at: new Date().toISOString(),
     },
+    {
+      type: "testing_criterion" as const,
+      content: "Feature works end to end",
+      order: 0,
+      done: false,
+      done_at: null,
+    },
+    {
+      type: "testing_criterion" as const,
+      content: "No regressions",
+      order: 1,
+      done: true,
+      done_at: new Date().toISOString(),
+    },
   ];
 
   const mockTaskData = {
@@ -49,6 +63,8 @@ const { mockTaskData } = vi.hoisted(() => {
     step_name: null,
     parent_id: null,
     dependency_ids: [],
+    archived: false,
+    worktree: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     started_at: null,
@@ -74,6 +90,16 @@ vi.mock("../../hooks/useTask", () => ({
   },
 }));
 
+// Mock useTaskExecutions hook
+vi.mock("../../hooks/useTaskExecutions", () => ({
+  useTaskExecutions: () => ({
+    executions: [],
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
+}));
+
 // Mock commands and events
 vi.mock("../../bindings", () => ({
   commands: {
@@ -81,7 +107,12 @@ vi.mock("../../bindings", () => ({
     addSection: vi.fn().mockResolvedValue({ status: "ok", data: null }),
     editSection: vi.fn().mockResolvedValue({ status: "ok", data: null }),
     removeSection: vi.fn().mockResolvedValue({ status: "ok", data: null }),
-    toggleChecklistItemDone: vi.fn().mockResolvedValue({ status: "ok", data: null }),
+    toggleChecklistItemDone: vi
+      .fn()
+      .mockResolvedValue({ status: "ok", data: null }),
+    deleteTask: vi.fn().mockResolvedValue({ status: "ok", data: null }),
+    runStep: vi.fn().mockResolvedValue({ status: "ok", data: null }),
+    orchestrateTask: vi.fn().mockResolvedValue({ status: "ok", data: null }),
   },
   events: {
     taskChangedEvent: {
@@ -98,9 +129,15 @@ describe("TaskDetailPanel - Inline Editing Integration", () => {
     );
   });
 
-  describe("Details Tab - Consistent inline editing UX", () => {
+  describe("Details section - Inline editing UX", () => {
     it("clicking description shows input immediately with warning dot and check/X icons", async () => {
       render(<TaskDetailPanel taskId="task-123" onClose={vi.fn()} />);
+
+      // Expand Details section first
+      const detailsToggle = screen.getByRole("button", {
+        name: /toggle details section/i,
+      });
+      await userEvent.click(detailsToggle);
 
       // Click on description text
       const descriptionText = screen.getByText(
@@ -108,7 +145,7 @@ describe("TaskDetailPanel - Inline Editing Integration", () => {
       );
       await userEvent.click(descriptionText);
 
-      // Should show textarea immediately (not display mode)
+      // Should show textarea immediately
       const textarea = screen.getByRole("textbox");
       expect(textarea.tagName).toBe("TEXTAREA");
       expect(textarea).toHaveValue("Test Description for inline editing");
@@ -118,7 +155,9 @@ describe("TaskDetailPanel - Inline Editing Integration", () => {
       expect(warningDot).toBeInTheDocument();
 
       // Should show save and cancel buttons
-      expect(screen.getByRole("button", { name: /save/i })).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /save/i })
+      ).toBeInTheDocument();
       expect(
         screen.getByRole("button", { name: /cancel/i })
       ).toBeInTheDocument();
@@ -126,6 +165,12 @@ describe("TaskDetailPanel - Inline Editing Integration", () => {
 
     it("clicking tags shows input immediately with warning dot and check/X icons", async () => {
       render(<TaskDetailPanel taskId="task-123" onClose={vi.fn()} />);
+
+      // Expand Details section first
+      const detailsToggle = screen.getByRole("button", {
+        name: /toggle details section/i,
+      });
+      await userEvent.click(detailsToggle);
 
       // Find the tags display and click it
       const tagsDisplay = screen.getByText("tag1, tag2");
@@ -141,7 +186,9 @@ describe("TaskDetailPanel - Inline Editing Integration", () => {
       expect(warningDot).toBeInTheDocument();
 
       // Should show save and cancel buttons
-      expect(screen.getByRole("button", { name: /save/i })).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /save/i })
+      ).toBeInTheDocument();
       expect(
         screen.getByRole("button", { name: /cancel/i })
       ).toBeInTheDocument();
@@ -149,6 +196,11 @@ describe("TaskDetailPanel - Inline Editing Integration", () => {
 
     it("Enter key saves in description field (with Ctrl for multiline)", async () => {
       render(<TaskDetailPanel taskId="task-123" onClose={vi.fn()} />);
+
+      // Expand Details section
+      await userEvent.click(
+        screen.getByRole("button", { name: /toggle details section/i })
+      );
 
       // Click description to enter edit mode
       await userEvent.click(
@@ -169,6 +221,11 @@ describe("TaskDetailPanel - Inline Editing Integration", () => {
 
     it("Escape key cancels edit in description field", async () => {
       render(<TaskDetailPanel taskId="task-123" onClose={vi.fn()} />);
+
+      // Expand Details section
+      await userEvent.click(
+        screen.getByRole("button", { name: /toggle details section/i })
+      );
 
       // Click description to enter edit mode
       await userEvent.click(
@@ -192,6 +249,11 @@ describe("TaskDetailPanel - Inline Editing Integration", () => {
     it("Enter key saves in tags field (single line)", async () => {
       render(<TaskDetailPanel taskId="task-123" onClose={vi.fn()} />);
 
+      // Expand Details section
+      await userEvent.click(
+        screen.getByRole("button", { name: /toggle details section/i })
+      );
+
       // Click tags to enter edit mode
       await userEvent.click(screen.getByText("tag1, tag2"));
 
@@ -205,179 +267,120 @@ describe("TaskDetailPanel - Inline Editing Integration", () => {
     });
   });
 
-  describe("Sections Tab - Consistent inline editing UX", () => {
-    it("clicking section content shows input immediately (single click to edit)", async () => {
+  describe("Acceptance criteria interaction", () => {
+    it("displays acceptance criteria with met/pending indicators", () => {
       render(<TaskDetailPanel taskId="task-123" onClose={vi.fn()} />);
 
-      // Switch to Sections tab
-      const sectionsTab = screen.getByRole("tab", { name: /sections/i });
-      await userEvent.click(sectionsTab);
-
-      // Goal section should be open by default, click on content
-      const sectionContent = screen.getByText("Complete the feature");
-      await userEvent.click(sectionContent);
-
-      // Should show input immediately (not an intermediate state)
-      const input = screen.getByDisplayValue("Complete the feature");
-      expect(input).toBeInTheDocument();
-      expect(input.tagName).toBe("INPUT");
-
-      // Should show warning dot
-      const warningDot = document.querySelector(".bg-warning");
-      expect(warningDot).toBeInTheDocument();
-    });
-
-    it("shows save, cancel, and delete buttons in section edit mode", async () => {
-      render(<TaskDetailPanel taskId="task-123" onClose={vi.fn()} />);
-
-      // Switch to Sections tab
-      await userEvent.click(screen.getByRole("tab", { name: /sections/i }));
-
-      // Click section content to edit
-      await userEvent.click(screen.getByText("Complete the feature"));
-
-      // Should show all three buttons
-      expect(screen.getByRole("button", { name: /save/i })).toBeInTheDocument();
       expect(
-        screen.getByRole("button", { name: /cancel/i })
+        screen.getByText("Feature works end to end")
       ).toBeInTheDocument();
-      // Use exact match for section delete button (not "Delete task" header button)
-      expect(
-        screen.getByRole("button", { name: "Delete" })
-      ).toBeInTheDocument();
+      expect(screen.getByText("No regressions")).toBeInTheDocument();
     });
 
-    it("delete button in section edit mode triggers delete", async () => {
+    it("met criteria are styled with line-through", () => {
       render(<TaskDetailPanel taskId="task-123" onClose={vi.fn()} />);
 
-      // Switch to Sections tab
-      await userEvent.click(screen.getByRole("tab", { name: /sections/i }));
-
-      // Click section content to edit
-      await userEvent.click(screen.getByText("Complete the feature"));
-
-      // Click delete button (exact match to avoid "Delete task" header button)
-      const deleteButton = screen.getByRole("button", { name: "Delete" });
-      await userEvent.click(deleteButton);
-
-      await waitFor(() => {
-        expect(eventsModule.commands.removeSection).toHaveBeenCalledWith(
-          "task-123",
-          "goal",
-          0
-        );
-      });
+      const metCriterion = screen.getByText("No regressions");
+      expect(metCriterion.className).toContain("line-through");
     });
 
-    it("Escape key cancels section edit", async () => {
+    it("pending criteria are not styled with line-through", () => {
       render(<TaskDetailPanel taskId="task-123" onClose={vi.fn()} />);
 
-      // Switch to Sections tab
-      await userEvent.click(screen.getByRole("tab", { name: /sections/i }));
-
-      // Click section content to edit
-      await userEvent.click(screen.getByText("Complete the feature"));
-
-      // Verify we're in edit mode
-      expect(
-        screen.getByDisplayValue("Complete the feature")
-      ).toBeInTheDocument();
-
-      // Press Escape
-      await userEvent.keyboard("{Escape}");
-
-      // Should return to display mode
-      expect(screen.getByText("Complete the feature")).toBeInTheDocument();
-      expect(
-        screen.queryByDisplayValue("Complete the feature")
-      ).not.toBeInTheDocument();
+      const pendingCriterion = screen.getByText("Feature works end to end");
+      expect(pendingCriterion.className).not.toContain("line-through");
     });
 
-    it("Enter key saves section edit", async () => {
+    it("shows progress summary", () => {
       render(<TaskDetailPanel taskId="task-123" onClose={vi.fn()} />);
 
-      // Switch to Sections tab
-      await userEvent.click(screen.getByRole("tab", { name: /sections/i }));
-
-      // Click section content to edit
-      await userEvent.click(screen.getByText("Complete the feature"));
-
-      const input = screen.getByDisplayValue("Complete the feature");
-      await userEvent.clear(input);
-      await userEvent.type(input, "Updated goal{Enter}");
-
-      await waitFor(() => {
-        expect(eventsModule.commands.editSection).toHaveBeenCalledWith(
-          "task-123",
-          "goal",
-          0,
-          "Updated goal"
-        );
-      });
+      expect(screen.getByText("1/2 met")).toBeInTheDocument();
     });
 
-    it("step sections show checkbox that can be toggled without entering edit mode", async () => {
+    it("toggling criterion calls toggleChecklistItemDone", async () => {
       render(<TaskDetailPanel taskId="task-123" onClose={vi.fn()} />);
 
-      // Switch to Sections tab
-      await userEvent.click(screen.getByRole("tab", { name: /sections/i }));
-
-      // Steps section should be open by default
-      // Find the step checkbox (should show step number or checkmark)
-      const stepCheckboxes = screen
+      const toggleButtons = screen
         .getAllByRole("button")
-        .filter((btn) => btn.title?.includes("Mark as"));
+        .filter(
+          (btn) =>
+            btn.getAttribute("aria-label")?.includes("Mark criterion") ?? false
+        );
 
-      expect(stepCheckboxes.length).toBeGreaterThan(0);
+      expect(toggleButtons.length).toBeGreaterThan(0);
 
-      // Click the first checkbox
-      await userEvent.click(stepCheckboxes[0]);
+      await userEvent.click(toggleButtons[0]);
 
       await waitFor(() => {
-        expect(eventsModule.commands.toggleChecklistItemDone).toHaveBeenCalled();
+        expect(
+          eventsModule.commands.toggleChecklistItemDone
+        ).toHaveBeenCalled();
       });
     });
   });
 
-  describe("Cross-tab UX consistency", () => {
-    it("warning dot has same styling in both tabs", async () => {
+  describe("Progress section with checklist items", () => {
+    it("displays checklist items in progress section", () => {
       render(<TaskDetailPanel taskId="task-123" onClose={vi.fn()} />);
 
-      // Test Details tab
-      await userEvent.click(
-        screen.getByText("Test Description for inline editing")
-      );
-      const detailsWarningDot = document.querySelector(".bg-warning");
-      expect(detailsWarningDot).toHaveClass("rounded-full");
-
-      // Cancel and switch to Sections tab
-      await userEvent.keyboard("{Escape}");
-      await userEvent.click(screen.getByRole("tab", { name: /sections/i }));
-
-      // Edit a section
-      await userEvent.click(screen.getByText("Complete the feature"));
-
-      const sectionsWarningDot = document.querySelector(".bg-warning");
-      expect(sectionsWarningDot).toHaveClass("rounded-full");
+      expect(screen.getByText("First step to do")).toBeInTheDocument();
+      expect(screen.getByText("Second step to do")).toBeInTheDocument();
     });
 
-    it("same keyboard shortcuts work in both tabs (Escape to cancel)", async () => {
+    it("completed checklist items have line-through styling", () => {
       render(<TaskDetailPanel taskId="task-123" onClose={vi.fn()} />);
 
-      // Test Details tab
-      await userEvent.click(
-        screen.getByText("Test Description for inline editing")
-      );
-      expect(screen.getByRole("textbox")).toBeInTheDocument();
-      await userEvent.keyboard("{Escape}");
-      expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+      const completedItem = screen.getByText("Second step to do");
+      expect(completedItem.className).toContain("line-through");
+    });
 
-      // Test Sections tab
-      await userEvent.click(screen.getByRole("tab", { name: /sections/i }));
-      await userEvent.click(screen.getByText("Complete the feature"));
-      expect(screen.getByRole("textbox")).toBeInTheDocument();
-      await userEvent.keyboard("{Escape}");
-      expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    it("incomplete checklist items do not have line-through", () => {
+      render(<TaskDetailPanel taskId="task-123" onClose={vi.fn()} />);
+
+      const incompleteItem = screen.getByText("First step to do");
+      expect(incompleteItem.className).not.toContain("line-through");
+    });
+  });
+
+  describe("Spec section shows goal and constraints when expanded", () => {
+    it("shows goal content when Spec is expanded", async () => {
+      render(<TaskDetailPanel taskId="task-123" onClose={vi.fn()} />);
+
+      await userEvent.click(
+        screen.getByRole("button", { name: /toggle spec section/i })
+      );
+
+      expect(screen.getByText("Complete the feature")).toBeInTheDocument();
+    });
+  });
+
+  describe("Panel layout preserves existing functionality", () => {
+    it("all sections are rendered in the correct order: criteria, progress, spec, deps, code, details", () => {
+      render(<TaskDetailPanel taskId="task-123" onClose={vi.fn()} />);
+
+      const allText = document.body.textContent ?? "";
+      const criteriaPos = allText.indexOf("Acceptance Criteria");
+      const progressPos = allText.indexOf("Progress");
+      const specPos = allText.indexOf("Spec");
+      const depsPos = allText.indexOf("Dependencies");
+      const codePos = allText.indexOf("Code");
+      const detailsPos = allText.lastIndexOf("Details");
+
+      expect(criteriaPos).toBeLessThan(progressPos);
+      expect(progressPos).toBeLessThan(specPos);
+      expect(specPos).toBeLessThan(depsPos);
+      expect(depsPos).toBeLessThan(codePos);
+      expect(codePos).toBeLessThan(detailsPos);
+    });
+
+    it("title is editable via click", async () => {
+      render(<TaskDetailPanel taskId="task-123" onClose={vi.fn()} />);
+
+      await userEvent.click(screen.getByText("Test Task"));
+
+      const titleInput = screen.getByDisplayValue("Test Task");
+      expect(titleInput).toBeInTheDocument();
+      expect(titleInput).toHaveAttribute("type", "text");
     });
   });
 });

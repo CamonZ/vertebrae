@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import type {
-  Task,
   TaskLevel,
   TaskPriority,
   TaskChangedEvent,
@@ -8,15 +7,17 @@ import type {
 import { commands, events } from "../../bindings";
 import { useTask } from "../../hooks/useTask";
 import { useTaskStore } from "../../stores";
-import { TaskSections } from "./TaskSections";
-import { TaskCodeRefs } from "./TaskCodeRefs";
-import { TaskRelations } from "./TaskRelations";
 import { ExecutionHistory } from "./ExecutionHistory";
 import { DeleteConfirmation } from "../DeleteConfirmation";
 import { ResizablePanel } from "../ResizablePanel";
 import { Spinner } from "../Spinner";
 import { InlineEditField } from "./InlineEditField";
 import { Toggle } from "../Toggle";
+import { AcceptanceCriteria } from "./AcceptanceCriteria";
+import { CollapsibleSection } from "./CollapsibleSection";
+import { DependenciesSummary } from "./DependenciesSummary";
+import { CodeRefsSummary } from "./CodeRefsSummary";
+import { SpecSection } from "./SpecSection";
 
 /** Debounce delay in milliseconds for batching rapid events */
 const DEBOUNCE_MS = 100;
@@ -27,112 +28,6 @@ interface TaskDetailPanelProps {
   onTaskSelect?: (taskId: string) => void;
   onBack?: () => void;
 }
-
-type TabId = "details" | "sections" | "code_refs" | "relations" | "history";
-
-interface Tab {
-  id: TabId;
-  label: string;
-  icon: React.ReactNode;
-}
-
-const TABS: Tab[] = [
-  {
-    id: "details",
-    label: "Details",
-    icon: (
-      <svg
-        className="h-3.5 w-3.5"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={1.5}
-          d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-        />
-      </svg>
-    ),
-  },
-  {
-    id: "sections",
-    label: "Sections",
-    icon: (
-      <svg
-        className="h-3.5 w-3.5"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={1.5}
-          d="M4 6h16M4 12h16M4 18h7"
-        />
-      </svg>
-    ),
-  },
-  {
-    id: "code_refs",
-    label: "Code",
-    icon: (
-      <svg
-        className="h-3.5 w-3.5"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={1.5}
-          d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"
-        />
-      </svg>
-    ),
-  },
-  {
-    id: "relations",
-    label: "Graph",
-    icon: (
-      <svg
-        className="h-3.5 w-3.5"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={1.5}
-          d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"
-        />
-      </svg>
-    ),
-  },
-  {
-    id: "history",
-    label: "History",
-    icon: (
-      <svg
-        className="h-3.5 w-3.5"
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={1.5}
-          d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-        />
-      </svg>
-    ),
-  },
-];
 
 /**
  * Get status styling.
@@ -159,7 +54,7 @@ function getStatusStyles(status: string): {
       return {
         bg: "bg-warning/10",
         text: "text-warning",
-        glow: "shadow-[0_0_8px_rgba(245,158,11,0.3)]",
+        glow: "animate-pulse-glow",
       };
     case "pending_review":
       return { bg: "bg-info/10", text: "text-info" };
@@ -266,401 +161,9 @@ function DetailRow({
 }
 
 /**
- * Task details tab content
- */
-function TaskDetailsTab({
-  taskData,
-  childrenIds,
-  editingField,
-  editValues,
-  isSubmitting,
-  fieldError,
-  onFieldClick,
-  onFieldChange,
-  onFieldSave,
-  onKeyDown,
-  onUpdateField,
-  showDeleteConfirmation,
-  deleteError,
-  isDeleting,
-  cascade,
-  onCancelDelete,
-  onConfirmDelete,
-  onCascadeChange,
-}: {
-  taskData: Task;
-  childrenIds: string[];
-  editingField: "title" | "priority" | "level" | null;
-  editValues: {
-    title: string;
-    priority: string | null;
-    level: string;
-  };
-  isSubmitting: boolean;
-  fieldError: string | null;
-  onFieldClick: (field: "title" | "priority" | "level") => void;
-  onFieldChange: (
-    field: "title" | "priority" | "level",
-    value: string
-  ) => void;
-  onFieldSave: (fieldName: "title" | "priority" | "level") => void;
-  onKeyDown: (
-    e: React.KeyboardEvent<
-      HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
-    >,
-    field: "title" | "priority" | "level"
-  ) => void;
-  onUpdateField: (field: string, value: string | boolean | string[]) => Promise<void>;
-  showDeleteConfirmation: boolean;
-  deleteError: string | null;
-  isDeleting: boolean;
-  cascade: boolean;
-  onCancelDelete: () => void;
-  onConfirmDelete: () => void;
-  onCascadeChange: (value: boolean) => void;
-}) {
-  const statusStyles = getStatusStyles(taskData.step_name ?? "unassigned");
-  const levelStyles = getLevelStyles(taskData.level);
-  const priorityStyles = getPriorityStyles(taskData.priority);
-
-  return (
-    <div className="divide-y divide-border">
-      {/* Status Badges */}
-      <div className="flex flex-wrap gap-2 p-4">
-        <span
-          className={`inline-flex items-center rounded border px-2 py-1 text-[10px] font-medium uppercase tracking-wider ${levelStyles.bg} ${levelStyles.text} ${levelStyles.border}`}
-        >
-          {taskData.level}
-        </span>
-        {taskData.workflow_name && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-bg-tertiary px-2.5 py-1 text-xs font-medium text-text-secondary">
-            <svg
-              className="h-3 w-3"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={1.5}
-                d="M13 10V3L4 14h7v7l9-11h-7z"
-              />
-            </svg>
-            {taskData.workflow_name}
-          </span>
-        )}
-        <span
-          className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${statusStyles.bg} ${statusStyles.text} ${statusStyles.glow ?? ""}`}
-        >
-          {(taskData.step_name ?? "unassigned").replace("_", " ")}
-        </span>
-        {priorityStyles && (
-          <span
-            className={`font-mono text-sm font-bold ${priorityStyles.color}`}
-          >
-            {priorityStyles.indicator}
-          </span>
-        )}
-      </div>
-
-      {/* Priority Section */}
-      <div className="p-4 border-b border-border">
-        <h3 className="mb-2 font-mono text-[10px] uppercase tracking-wider text-text-muted">
-          Priority
-        </h3>
-        {editingField === "priority" ? (
-          <div className="space-y-2">
-            <select
-              value={editValues.priority || ""}
-              onChange={(e) => onFieldChange("priority", e.target.value)}
-              onKeyDown={(e) => onKeyDown(e, "priority")}
-              onBlur={() => onFieldSave("priority")}
-              autoFocus
-              disabled={isSubmitting}
-              className="w-full rounded border border-primary/30 bg-bg-secondary px-2 py-1.5 text-sm text-text-primary focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <option value="">None</option>
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-              <option value="critical">Critical</option>
-            </select>
-            {fieldError && <p className="text-xs text-error">{fieldError}</p>}
-          </div>
-        ) : (
-          <p
-            onClick={() => onFieldClick("priority")}
-            className="text-sm text-text-secondary cursor-pointer hover:bg-bg-hover p-2 rounded"
-          >
-            {taskData.priority || "None"}
-          </p>
-        )}
-      </div>
-
-      {/* Level Section */}
-      <div className="p-4 border-b border-border">
-        <h3 className="mb-2 font-mono text-[10px] uppercase tracking-wider text-text-muted">
-          Level
-        </h3>
-        {editingField === "level" ? (
-          <div className="space-y-2">
-            <div className="flex gap-2">
-              {["epic", "ticket", "task"].map((level) => (
-                <button
-                  key={level}
-                  type="button"
-                  onClick={() => {
-                    onFieldChange("level", level);
-                    onFieldSave("level");
-                  }}
-                  disabled={isSubmitting}
-                  className={`flex-1 rounded px-3 py-1.5 text-sm font-medium transition-colors cursor-pointer ${
-                    editValues.level === level
-                      ? "bg-primary text-white"
-                      : "border border-border bg-bg-secondary text-text-secondary hover:bg-bg-tertiary"
-                  } disabled:opacity-50 disabled:cursor-not-allowed`}
-                >
-                  {level.charAt(0).toUpperCase() + level.slice(1)}
-                </button>
-              ))}
-            </div>
-            {fieldError && <p className="text-xs text-error">{fieldError}</p>}
-          </div>
-        ) : (
-          <p
-            onClick={() => onFieldClick("level")}
-            className="text-sm text-text-secondary cursor-pointer hover:bg-bg-hover p-2 rounded"
-          >
-            {taskData.level.charAt(0).toUpperCase() + taskData.level.slice(1)}
-          </p>
-        )}
-      </div>
-
-      {/* Basic Info */}
-      <div className="p-4">
-        <div className="space-y-1 divide-y divide-border-subtle">
-          <DetailRow label="ID">
-            <div className="flex items-center gap-1.5">
-              <code className="rounded bg-bg-tertiary px-1.5 py-0.5 font-mono text-xs">
-                {taskData.id?.slice(0, 8) ?? "-"}
-              </code>
-              {taskData.id && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    navigator.clipboard.writeText(taskData.id!);
-                  }}
-                  className="rounded p-1 text-text-muted hover:bg-bg-tertiary hover:text-text-primary transition-colors cursor-pointer"
-                  title="Copy full ID to clipboard"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    viewBox="0 0 20 20"
-                    fill="currentColor"
-                    className="w-3.5 h-3.5"
-                  >
-                    <path
-                      fillRule="evenodd"
-                      d="M15.988 3.012A2.25 2.25 0 0118 5.25v6.5A2.25 2.25 0 0115.75 14H13.5v-3.379a3 3 0 00-.879-2.121l-3.12-3.122a3 3 0 00-1.402-.791 2.252 2.252 0 011.913-1.576A2.25 2.25 0 0112.25 1h1.5a2.25 2.25 0 012.238 2.012zM11.5 3.25a.75.75 0 01.75-.75h1.5a.75.75 0 01.75.75v.25h-3v-.25z"
-                      clipRule="evenodd"
-                    />
-                    <path d="M3.5 6A1.5 1.5 0 002 7.5v9A1.5 1.5 0 003.5 18h7a1.5 1.5 0 011.5-1.5v-5.879a1.5 1.5 0 00-.44-1.06l-3.12-3.122a1.5 1.5 0 00-1.061-.439H3.5z" />
-                  </svg>
-                </button>
-              )}
-            </div>
-          </DetailRow>
-        </div>
-      </div>
-
-      {/* Description */}
-      <div className="p-4 border-b border-border">
-        <h3 className="mb-2 font-mono text-[10px] uppercase tracking-wider text-text-muted">
-          Description
-        </h3>
-        <InlineEditField
-          value={taskData.description || ""}
-          placeholder="Click to add description"
-          multiline
-          rows={4}
-          onSave={async (value) => {
-            await onUpdateField("description", value);
-          }}
-        />
-      </div>
-
-      {/* Tags */}
-      <div className="p-4 border-b border-border">
-        <h3 className="mb-2 font-mono text-[10px] uppercase tracking-wider text-text-muted">
-          Tags
-        </h3>
-        <InlineEditField
-          value={(taskData.tags ?? []).join(", ")}
-          placeholder="Click to add tags (comma-separated)"
-          onSave={async (value) => {
-            const tags = value.split(",").map(t => t.trim()).filter(t => t.length > 0);
-            await onUpdateField("tags", tags);
-          }}
-        />
-      </div>
-
-      {/* Timestamps */}
-      <div className="p-4">
-        <h3 className="mb-2 font-mono text-[10px] uppercase tracking-wider text-text-muted">
-          Timeline
-        </h3>
-        <div className="space-y-1">
-          <DetailRow label="Created">
-            {formatDateTime(taskData.created_at)}
-          </DetailRow>
-          <DetailRow label="Updated">
-            {formatDateTime(taskData.updated_at)}
-          </DetailRow>
-          {taskData.started_at && (
-            <DetailRow label="Started">
-              {formatDateTime(taskData.started_at)}
-            </DetailRow>
-          )}
-          {taskData.completed_at && (
-            <DetailRow label="Completed">
-              {formatDateTime(taskData.completed_at)}
-            </DetailRow>
-          )}
-        </div>
-      </div>
-
-      {/* Worktree */}
-      {taskData.worktree && (
-        <div className="p-4 border-b border-border">
-          <h3 className="mb-2 font-mono text-[10px] uppercase tracking-wider text-text-muted">
-            Worktree
-          </h3>
-          <p className="font-mono text-xs text-text-secondary break-all">
-            {taskData.worktree}
-          </p>
-        </div>
-      )}
-
-      {/* Human Review Toggle */}
-      <div className="p-4 border-b border-border">
-        <div className="flex items-center justify-between">
-          <h3 className="font-mono text-[10px] uppercase tracking-wider text-text-muted">
-            Human Review
-          </h3>
-          <Toggle
-            checked={taskData.needs_human_review ?? false}
-            onChange={(checked) => onUpdateField("needs_human_review", checked)}
-            label="Toggle human review requirement"
-            activeColor="warning"
-          />
-        </div>
-        {taskData.needs_human_review && (
-          <p className="mt-2 text-xs text-warning">This task requires human review before completion</p>
-        )}
-      </div>
-
-      {/* Revision Feedback */}
-      <div className="p-4 border-b border-border">
-        <h3 className="mb-2 font-mono text-[10px] uppercase tracking-wider text-text-muted">
-          Revision Feedback
-        </h3>
-        <InlineEditField
-          value={taskData.revision_feedback || ""}
-          placeholder="Click to add revision feedback"
-          multiline
-          rows={4}
-          onSave={async (value) => {
-            await onUpdateField("revision_feedback", value);
-          }}
-        />
-      </div>
-
-      {/* Rejection Reason Banner */}
-      {taskData.rejection_reason && (
-        <div className="p-4">
-          <div className="rounded-lg border border-error/30 bg-error/10 p-4">
-            <div className="flex items-start gap-3">
-              <div className="flex-shrink-0">
-                <svg
-                  className="h-5 w-5 text-error"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={1.5}
-                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
-                  />
-                </svg>
-              </div>
-              <div className="min-w-0 flex-1">
-                <h4 className="text-sm font-semibold text-error">
-                  Rejection Reason
-                </h4>
-                <p className="mt-1 whitespace-pre-wrap text-sm text-text-secondary">
-                  {taskData.rejection_reason}
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Delete Confirmation Section */}
-      {showDeleteConfirmation && (
-        <DeleteConfirmation
-          itemType="Task"
-          itemName={taskData.title}
-          isDeleting={isDeleting}
-          error={deleteError}
-          onConfirm={onConfirmDelete}
-          onCancel={onCancelDelete}
-        >
-          {childrenIds.length > 0 && (
-            <div className="rounded border border-warning/20 bg-warning/5 p-2.5">
-              <p className="text-xs text-warning font-medium mb-2">
-                This task has {childrenIds.length} child task
-                {childrenIds.length !== 1 ? "s" : ""}
-              </p>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={cascade}
-                  onChange={(e) => onCascadeChange(e.target.checked)}
-                  disabled={isDeleting}
-                  className="rounded border border-border"
-                />
-                <span className="text-xs text-text-secondary">
-                  Delete all child tasks
-                </span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer mt-1.5">
-                <input
-                  type="checkbox"
-                  checked={!cascade}
-                  onChange={(e) => onCascadeChange(!e.target.checked)}
-                  disabled={isDeleting}
-                  className="rounded border border-border"
-                />
-                <span className="text-xs text-text-secondary">
-                  Keep child tasks without parent
-                </span>
-              </label>
-            </div>
-          )}
-        </DeleteConfirmation>
-      )}
-    </div>
-  );
-}
-
-/**
  * TaskDetailPanel displays comprehensive task information in a side panel.
- * Features neural-pathway-inspired design with glowing accents.
- * Automatically refreshes when task change events are received.
+ * Uses an operator-first single-scroll layout with acceptance criteria
+ * as the most prominent section, followed by execution progress.
  */
 export function TaskDetailPanel({
   taskId,
@@ -668,7 +171,6 @@ export function TaskDetailPanel({
   onTaskSelect,
   onBack,
 }: TaskDetailPanelProps) {
-  const [activeTab, setActiveTab] = useState<TabId>("details");
   const [editingField, setEditingField] = useState<
     "title" | "priority" | "level" | null
   >(null);
@@ -707,6 +209,21 @@ export function TaskDetailPanel({
       .filter((t) => t.dependency_ids?.includes(taskId))
       .map((t) => t.id);
   }, [taskId, allTasks]);
+
+  // Extract sections by type
+  const acceptanceCriteria = useMemo(
+    () =>
+      (taskData?.sections ?? []).filter(
+        (s) => s.type === "testing_criterion"
+      ),
+    [taskData?.sections]
+  );
+
+  const checklistItems = useMemo(
+    () =>
+      (taskData?.sections ?? []).filter((s) => s.type === "checklist_item"),
+    [taskData?.sections]
+  );
 
   // Track pending refetch for debouncing
   const pendingRefetch = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -827,7 +344,7 @@ export function TaskDetailPanel({
           setFieldError(result.error.message);
         } else {
           setEditingField(null);
-          await refetch();
+          refetch();
         }
       } catch (err) {
         setFieldError(
@@ -911,7 +428,7 @@ export function TaskDetailPanel({
       if (result.status === "error") {
         throw new Error(result.error.message);
       }
-      await refetch();
+      refetch();
     },
     [taskData, refetch]
   );
@@ -991,6 +508,18 @@ export function TaskDetailPanel({
     return null;
   }
 
+  const statusStyles = taskData
+    ? getStatusStyles(taskData.step_name ?? "unassigned")
+    : null;
+  const levelStyles = taskData ? getLevelStyles(taskData.level) : null;
+  const priorityStyles = taskData
+    ? getPriorityStyles(taskData.priority)
+    : null;
+  const isExecuting =
+    taskData?.step_name === "in_progress" ||
+    (taskData?.step_name?.includes(":") &&
+      taskData.step_name.split(":").pop() === "in_progress");
+
   return (
     <ResizablePanel
       storageKey="task-detail-panel-width"
@@ -1011,12 +540,44 @@ export function TaskDetailPanel({
               </svg>
             </button>
           )}
-          <h2 className="font-mono text-xs font-medium uppercase tracking-wider text-text-muted">
-            Task Details
-          </h2>
+          {/* Workflow -> Step breadcrumb */}
+          {taskData?.workflow_name ? (
+            <div className="flex items-center gap-1.5 text-xs">
+              <span className="font-medium text-text-secondary">
+                {taskData.workflow_name}
+              </span>
+              {taskData.step_name && (
+                <>
+                  <svg
+                    className="h-3 w-3 text-text-muted"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M9 5l7 7-7 7"
+                    />
+                  </svg>
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${statusStyles?.bg ?? ""} ${statusStyles?.text ?? ""} ${isExecuting ? "animate-pulse-glow" : ""}`}
+                    data-testid="status-badge"
+                  >
+                    {taskData.step_name.replace("_", " ")}
+                  </span>
+                </>
+              )}
+            </div>
+          ) : (
+            <h2 className="font-mono text-xs font-medium uppercase tracking-wider text-text-muted">
+              Task Details
+            </h2>
+          )}
         </div>
         <div className="flex items-center gap-2">
-          {/* Run Step Button - only when task has a current step */}
+          {/* Run Step Button */}
           {taskData?.workflow_id && taskData?.current_step_id && (
             <button
               type="button"
@@ -1155,10 +716,10 @@ export function TaskDetailPanel({
         </div>
       )}
 
-      {/* Content */}
+      {/* Content - single scroll layout */}
       {taskData && !isLoading && !error && (
-        <>
-          {/* Task title */}
+        <div className="flex-1 overflow-auto">
+          {/* Title + badges row */}
           <div className="border-b border-border px-4 py-3">
             {editingField === "title" ? (
               <div className="space-y-2">
@@ -1185,87 +746,512 @@ export function TaskDetailPanel({
                 {taskData.title}
               </h3>
             )}
-          </div>
-
-          {/* Tabs */}
-          <div className="border-b border-border">
-            <nav className="flex" aria-label="Task detail tabs">
-              {TABS.map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`relative flex flex-1 items-center justify-center gap-1.5 px-2 py-2.5 text-[11px] font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary ${activeTab === tab.id
-                    ? "text-primary"
-                    : "text-text-muted hover:text-text-secondary"
-                    }`}
-                  aria-selected={activeTab === tab.id}
-                  role="tab"
+            {/* Compact badges */}
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <span
+                className={`inline-flex items-center rounded border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${levelStyles?.bg} ${levelStyles?.text} ${levelStyles?.border}`}
+              >
+                {taskData.level}
+              </span>
+              {!taskData.workflow_name && (
+                <span
+                  className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${statusStyles?.bg} ${statusStyles?.text} ${isExecuting ? "animate-pulse-glow" : ""}`}
                 >
-                  {tab.icon}
-                  <span className="hidden sm:inline">{tab.label}</span>
-                  {activeTab === tab.id && (
-                    <span className="absolute bottom-0 left-2 right-2 h-0.5 rounded-full bg-primary shadow-glow-sm" />
-                  )}
-                </button>
-              ))}
-            </nav>
+                  {(taskData.step_name ?? "unassigned").replace("_", " ")}
+                </span>
+              )}
+              {priorityStyles && (
+                <span
+                  className={`font-mono text-xs font-bold ${priorityStyles.color}`}
+                >
+                  {priorityStyles.indicator}
+                </span>
+              )}
+              <code className="rounded bg-bg-tertiary px-1.5 py-0.5 font-mono text-[10px] text-text-muted">
+                {taskData.id?.slice(0, 8) ?? "-"}
+              </code>
+            </div>
           </div>
 
-          {/* Tab content */}
-          <div className="flex-1 overflow-auto">
-            {activeTab === "details" && (
-              <TaskDetailsTab
-                taskData={taskData}
-                childrenIds={childrenIds}
-                editingField={editingField}
-                editValues={editValues}
-                isSubmitting={isSubmitting}
-                fieldError={fieldError}
-                onFieldClick={handleFieldClick}
-                onFieldChange={handleFieldChange}
-                onFieldSave={handleFieldSave}
-                onKeyDown={handleKeyDown}
-                onUpdateField={onUpdateField}
-                showDeleteConfirmation={showDeleteConfirmation}
-                deleteError={deleteError}
-                isDeleting={isDeleting}
-                cascade={cascade}
-                onCancelDelete={handleCancelDelete}
-                onConfirmDelete={handleConfirmDelete}
-                onCascadeChange={setCascade}
-              />
-            )}
-            {activeTab === "sections" && taskData.id && (
-              <TaskSections
-                sections={taskData.sections ?? []}
-                taskId={taskData.id}
-                onSectionsChanged={refetch}
-              />
-            )}
-            {activeTab === "code_refs" && taskData.id && (
-              <TaskCodeRefs
-                codeRefs={taskData.code_refs ?? []}
-                taskId={taskData.id}
-                onCodeRefsChanged={refetch}
-              />
-            )}
-            {activeTab === "relations" && taskData.id && (
-              <TaskRelations
-                taskId={taskData.id}
-                parentId={taskData.parent_id}
-                childrenIds={childrenIds}
-                dependsOnIds={taskData.dependency_ids ?? []}
-                dependentIds={dependentIds}
-                onTaskSelect={onTaskSelect}
-                onRelationshipChange={refetch}
-              />
-            )}
-            {activeTab === "history" && taskData.id && (
-              <ExecutionHistory taskId={taskData.id} />
-            )}
+          {/* Rejection Reason Banner */}
+          {taskData.rejection_reason && (
+            <div className="mx-4 mt-3 rounded-lg border border-error/30 bg-error/10 p-3">
+              <div className="flex items-start gap-2">
+                <svg
+                  className="mt-0.5 h-4 w-4 flex-shrink-0 text-error"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={1.5}
+                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                  />
+                </svg>
+                <div className="min-w-0">
+                  <h4 className="text-xs font-semibold text-error">
+                    Rejection Reason
+                  </h4>
+                  <p className="mt-0.5 whitespace-pre-wrap text-xs text-text-secondary">
+                    {taskData.rejection_reason}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* === ACCEPTANCE CRITERIA (most prominent) === */}
+          <div className="border-b border-border">
+            <div className="flex items-center justify-between px-4 pt-3 pb-1">
+              <div className="flex items-center gap-2">
+                <svg
+                  className="h-4 w-4 text-success"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={1.5}
+                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-text-primary">
+                  Acceptance Criteria
+                </h3>
+              </div>
+            </div>
+            <AcceptanceCriteria
+              criteria={acceptanceCriteria}
+              taskId={taskData.id}
+              onSectionsChanged={refetch}
+            />
           </div>
-        </>
+
+          {/* === PROGRESS / EXECUTION TIMELINE === */}
+          <CollapsibleSection
+            title="Progress"
+            defaultOpen={true}
+            testId="progress-section"
+            icon={
+              <svg
+                className="h-3.5 w-3.5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.5}
+                  d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
+              </svg>
+            }
+            badge={
+              checklistItems.length > 0 ? (
+                <span className="rounded-full bg-bg-tertiary px-2 py-0.5 text-[10px] text-text-muted">
+                  {checklistItems.filter((c) => c.done).length}/
+                  {checklistItems.length}
+                </span>
+              ) : undefined
+            }
+          >
+            {/* Checklist items */}
+            {checklistItems.length > 0 && (
+              <div className="space-y-1 px-4 pb-2">
+                {[...checklistItems]
+                  .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+                  .map((item, i) => (
+                    <div
+                      key={`checklist-${item.order ?? i}`}
+                      className="flex items-start gap-2 py-1"
+                    >
+                      <span
+                        className={`mt-1 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded text-[10px] ${
+                          item.done
+                            ? "bg-success/20 text-success"
+                            : "bg-bg-tertiary text-text-muted"
+                        }`}
+                      >
+                        {item.done ? (
+                          <svg
+                            className="h-2.5 w-2.5"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={3}
+                              d="M5 13l4 4L19 7"
+                            />
+                          </svg>
+                        ) : (
+                          <span className="font-mono">
+                            {(item.order ?? i) + 1}
+                          </span>
+                        )}
+                      </span>
+                      <span
+                        className={`text-xs leading-relaxed ${
+                          item.done
+                            ? "text-text-muted line-through"
+                            : "text-text-secondary"
+                        }`}
+                      >
+                        {item.content}
+                      </span>
+                    </div>
+                  ))}
+              </div>
+            )}
+            {/* Execution timeline */}
+            {taskData.id && <ExecutionHistory taskId={taskData.id} />}
+          </CollapsibleSection>
+
+          {/* === SPEC (goal, constraints, collapsible) === */}
+          <CollapsibleSection
+            title="Spec"
+            defaultOpen={false}
+            testId="spec-section-wrapper"
+            icon={
+              <svg
+                className="h-3.5 w-3.5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.5}
+                  d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+                />
+              </svg>
+            }
+          >
+            <SpecSection
+              description={taskData.description}
+              sections={taskData.sections ?? []}
+            />
+          </CollapsibleSection>
+
+          {/* === DEPENDENCIES (blocked by, blocking, parent) === */}
+          <CollapsibleSection
+            title="Dependencies"
+            defaultOpen={false}
+            testId="dependencies-section"
+            icon={
+              <svg
+                className="h-3.5 w-3.5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.5}
+                  d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"
+                />
+              </svg>
+            }
+            badge={
+              <span className="rounded-full bg-bg-tertiary px-2 py-0.5 text-[10px] text-text-muted">
+                {(taskData.dependency_ids?.length ?? 0) + dependentIds.length + (taskData.parent_id ? 1 : 0)}
+              </span>
+            }
+          >
+            <DependenciesSummary
+              parentId={taskData.parent_id}
+              dependsOnIds={taskData.dependency_ids ?? []}
+              dependentIds={dependentIds}
+              onTaskSelect={onTaskSelect}
+            />
+          </CollapsibleSection>
+
+          {/* === CODE (file path references) === */}
+          <CollapsibleSection
+            title="Code"
+            defaultOpen={false}
+            testId="code-section"
+            icon={
+              <svg
+                className="h-3.5 w-3.5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.5}
+                  d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"
+                />
+              </svg>
+            }
+            badge={
+              (taskData.code_refs?.length ?? 0) > 0 ? (
+                <span className="rounded-full bg-bg-tertiary px-2 py-0.5 text-[10px] text-text-muted">
+                  {taskData.code_refs?.length}
+                </span>
+              ) : undefined
+            }
+          >
+            <CodeRefsSummary codeRefs={taskData.code_refs ?? []} />
+          </CollapsibleSection>
+
+          {/* === DETAILS (metadata, editing, etc.) === */}
+          <CollapsibleSection
+            title="Details"
+            defaultOpen={false}
+            testId="details-section"
+            icon={
+              <svg
+                className="h-3.5 w-3.5"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.5}
+                  d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
+              </svg>
+            }
+          >
+            <div className="divide-y divide-border px-4 py-2">
+              {/* Description */}
+              <div className="py-3">
+                <h4 className="mb-1 font-mono text-[10px] uppercase tracking-wider text-text-muted">
+                  Description
+                </h4>
+                <InlineEditField
+                  value={taskData.description || ""}
+                  placeholder="Click to add description"
+                  multiline
+                  rows={4}
+                  onSave={async (value) => {
+                    await onUpdateField("description", value);
+                  }}
+                />
+              </div>
+
+              {/* Priority */}
+              <div className="py-3">
+                <h4 className="mb-1 font-mono text-[10px] uppercase tracking-wider text-text-muted">
+                  Priority
+                </h4>
+                {editingField === "priority" ? (
+                  <div className="space-y-2">
+                    <select
+                      value={editValues.priority || ""}
+                      onChange={(e) => handleFieldChange("priority", e.target.value)}
+                      onKeyDown={(e) => handleKeyDown(e, "priority")}
+                      onBlur={() => handleFieldSave("priority")}
+                      autoFocus
+                      disabled={isSubmitting}
+                      className="w-full rounded border border-primary/30 bg-bg-secondary px-2 py-1.5 text-sm text-text-primary focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <option value="">None</option>
+                      <option value="low">Low</option>
+                      <option value="medium">Medium</option>
+                      <option value="high">High</option>
+                      <option value="critical">Critical</option>
+                    </select>
+                    {fieldError && <p className="text-xs text-error">{fieldError}</p>}
+                  </div>
+                ) : (
+                  <p
+                    onClick={() => handleFieldClick("priority")}
+                    className="text-sm text-text-secondary cursor-pointer hover:bg-bg-hover p-2 rounded"
+                  >
+                    {taskData.priority || "None"}
+                  </p>
+                )}
+              </div>
+
+              {/* Level */}
+              <div className="py-3">
+                <h4 className="mb-1 font-mono text-[10px] uppercase tracking-wider text-text-muted">
+                  Level
+                </h4>
+                {editingField === "level" ? (
+                  <div className="space-y-2">
+                    <div className="flex gap-2">
+                      {["epic", "ticket", "task"].map((level) => (
+                        <button
+                          key={level}
+                          type="button"
+                          onClick={() => {
+                            handleFieldChange("level", level);
+                            handleFieldSave("level");
+                          }}
+                          disabled={isSubmitting}
+                          className={`flex-1 rounded px-3 py-1.5 text-sm font-medium transition-colors cursor-pointer ${
+                            editValues.level === level
+                              ? "bg-primary text-white"
+                              : "border border-border bg-bg-secondary text-text-secondary hover:bg-bg-tertiary"
+                          } disabled:opacity-50 disabled:cursor-not-allowed`}
+                        >
+                          {level.charAt(0).toUpperCase() + level.slice(1)}
+                        </button>
+                      ))}
+                    </div>
+                    {fieldError && <p className="text-xs text-error">{fieldError}</p>}
+                  </div>
+                ) : (
+                  <p
+                    onClick={() => handleFieldClick("level")}
+                    className="text-sm text-text-secondary cursor-pointer hover:bg-bg-hover p-2 rounded"
+                  >
+                    {taskData.level.charAt(0).toUpperCase() + taskData.level.slice(1)}
+                  </p>
+                )}
+              </div>
+
+              {/* Tags */}
+              <div className="py-3">
+                <h4 className="mb-1 font-mono text-[10px] uppercase tracking-wider text-text-muted">
+                  Tags
+                </h4>
+                <InlineEditField
+                  value={(taskData.tags ?? []).join(", ")}
+                  placeholder="Click to add tags (comma-separated)"
+                  onSave={async (value) => {
+                    const tags = value.split(",").map(t => t.trim()).filter(t => t.length > 0);
+                    await onUpdateField("tags", tags);
+                  }}
+                />
+              </div>
+
+              {/* Timestamps */}
+              <div className="py-3">
+                <h4 className="mb-1 font-mono text-[10px] uppercase tracking-wider text-text-muted">
+                  Timeline
+                </h4>
+                <div className="space-y-1">
+                  <DetailRow label="Created">
+                    {formatDateTime(taskData.created_at)}
+                  </DetailRow>
+                  <DetailRow label="Updated">
+                    {formatDateTime(taskData.updated_at)}
+                  </DetailRow>
+                  {taskData.started_at && (
+                    <DetailRow label="Started">
+                      {formatDateTime(taskData.started_at)}
+                    </DetailRow>
+                  )}
+                  {taskData.completed_at && (
+                    <DetailRow label="Completed">
+                      {formatDateTime(taskData.completed_at)}
+                    </DetailRow>
+                  )}
+                </div>
+              </div>
+
+              {/* Worktree */}
+              {taskData.worktree && (
+                <div className="py-3">
+                  <h4 className="mb-1 font-mono text-[10px] uppercase tracking-wider text-text-muted">
+                    Worktree
+                  </h4>
+                  <p className="font-mono text-xs text-text-secondary break-all">
+                    {taskData.worktree}
+                  </p>
+                </div>
+              )}
+
+              {/* Human Review Toggle */}
+              <div className="py-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-mono text-[10px] uppercase tracking-wider text-text-muted">
+                    Human Review
+                  </h4>
+                  <Toggle
+                    checked={taskData.needs_human_review ?? false}
+                    onChange={(checked) => onUpdateField("needs_human_review", checked)}
+                    label="Toggle human review requirement"
+                    activeColor="warning"
+                  />
+                </div>
+                {taskData.needs_human_review && (
+                  <p className="mt-1 text-xs text-warning">This task requires human review before completion</p>
+                )}
+              </div>
+
+              {/* Revision Feedback */}
+              <div className="py-3">
+                <h4 className="mb-1 font-mono text-[10px] uppercase tracking-wider text-text-muted">
+                  Revision Feedback
+                </h4>
+                <InlineEditField
+                  value={taskData.revision_feedback || ""}
+                  placeholder="Click to add revision feedback"
+                  multiline
+                  rows={4}
+                  onSave={async (value) => {
+                    await onUpdateField("revision_feedback", value);
+                  }}
+                />
+              </div>
+            </div>
+          </CollapsibleSection>
+
+          {/* Delete Confirmation Section */}
+          {showDeleteConfirmation && (
+            <div className="border-t border-border">
+              <DeleteConfirmation
+                itemType="Task"
+                itemName={taskData.title}
+                isDeleting={isDeleting}
+                error={deleteError}
+                onConfirm={handleConfirmDelete}
+                onCancel={handleCancelDelete}
+              >
+                {childrenIds.length > 0 && (
+                  <div className="rounded border border-warning/20 bg-warning/5 p-2.5">
+                    <p className="text-xs text-warning font-medium mb-2">
+                      This task has {childrenIds.length} child task
+                      {childrenIds.length !== 1 ? "s" : ""}
+                    </p>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={cascade}
+                        onChange={(e) => setCascade(e.target.checked)}
+                        disabled={isDeleting}
+                        className="rounded border border-border"
+                      />
+                      <span className="text-xs text-text-secondary">
+                        Delete all child tasks
+                      </span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer mt-1.5">
+                      <input
+                        type="checkbox"
+                        checked={!cascade}
+                        onChange={(e) => setCascade(!e.target.checked)}
+                        disabled={isDeleting}
+                        className="rounded border border-border"
+                      />
+                      <span className="text-xs text-text-secondary">
+                        Keep child tasks without parent
+                      </span>
+                    </label>
+                  </div>
+                )}
+              </DeleteConfirmation>
+            </div>
+          )}
+        </div>
       )}
     </ResizablePanel>
   );
