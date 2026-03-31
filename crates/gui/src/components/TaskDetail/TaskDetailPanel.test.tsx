@@ -18,8 +18,63 @@ vi.mock("../../hooks/useTask", () => ({
         level: "task" as const,
         priority: "medium" as const,
         tags: ["tag1"],
-        sections: [],
-        code_refs: [],
+        sections: [
+          {
+            type: "testing_criterion" as const,
+            content: "App loads without errors",
+            order: 0,
+            done: true,
+            done_at: new Date().toISOString(),
+          },
+          {
+            type: "testing_criterion" as const,
+            content: "Navigation works correctly",
+            order: 1,
+            done: false,
+            done_at: null,
+          },
+          {
+            type: "goal" as const,
+            content: "Build a working feature",
+            order: 0,
+            done: null,
+            done_at: null,
+          },
+          {
+            type: "constraint" as const,
+            content: "Must use existing components",
+            order: 0,
+            done: null,
+            done_at: null,
+          },
+          {
+            type: "checklist_item" as const,
+            content: "First step",
+            order: 0,
+            done: true,
+            done_at: new Date().toISOString(),
+          },
+          {
+            type: "checklist_item" as const,
+            content: "Second step",
+            order: 1,
+            done: false,
+            done_at: null,
+          },
+        ],
+        code_refs: [
+          {
+            path: "src/components/App.tsx",
+            line_start: 42,
+            line_end: 50,
+            name: "App component",
+            description: "Main app entry",
+          },
+        ],
+        workflow_name: "Implementation",
+        step_name: "in_progress",
+        workflow_id: "wf-1",
+        current_step_id: "step-1",
       }),
       isLoading: false,
       error: null,
@@ -28,11 +83,25 @@ vi.mock("../../hooks/useTask", () => ({
   },
 }));
 
+// Mock the useTaskExecutions hook
+vi.mock("../../hooks/useTaskExecutions", () => ({
+  useTaskExecutions: () => ({
+    executions: [],
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
+}));
+
 // Mock the commands and events
 vi.mock("../../bindings", () => ({
   commands: {
     updateTask: vi.fn(),
     runWorkflow: vi.fn(),
+    runStep: vi.fn(),
+    orchestrateTask: vi.fn(),
+    deleteTask: vi.fn(),
+    toggleChecklistItemDone: vi.fn(),
   },
   events: {
     taskChangedEvent: {
@@ -52,96 +121,34 @@ const mockTaskData = createMockTask({
   code_refs: [],
 });
 
-describe("TaskDetailPanel - Edit Integration", () => {
+describe("TaskDetailPanel - Restructured Layout", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(eventsModule.events.taskChangedEvent.listen).mockResolvedValue(() => {});
+    vi.mocked(eventsModule.events.taskChangedEvent.listen).mockResolvedValue(
+      () => {}
+    );
   });
 
-  describe("Tab navigation", () => {
-    it("displays Details tab by default", () => {
+  describe("Header", () => {
+    it("displays workflow -> step breadcrumb when task has workflow", () => {
       render(
-        <TaskDetailPanel
-          taskId={mockTaskData.id}
-          onClose={vi.fn()}
-        />
+        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
       );
 
-      const detailsTab = screen.getByRole("tab", { name: /details/i });
-      expect(detailsTab).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByText("Implementation")).toBeInTheDocument();
+      expect(screen.getByText("in progress")).toBeInTheDocument();
     });
 
-    it("can switch to Sections tab", () => {
+    it("displays status badge with glow animation for in_progress", () => {
       render(
-        <TaskDetailPanel
-          taskId={mockTaskData.id}
-          onClose={vi.fn()}
-        />
+        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
       );
 
-      const sectionsTab = screen.getByRole("tab", { name: /sections/i });
-      fireEvent.click(sectionsTab);
-      expect(sectionsTab).toHaveAttribute("aria-selected", "true");
+      const statusBadge = screen.getByTestId("status-badge");
+      expect(statusBadge).toBeInTheDocument();
+      expect(statusBadge.className).toContain("animate-pulse-glow");
     });
 
-    it("can switch to Graph (Relations) tab", () => {
-      render(
-        <TaskDetailPanel
-          taskId={mockTaskData.id}
-          onClose={vi.fn()}
-        />
-      );
-
-      const graphTab = screen.getByRole("tab", { name: /graph/i });
-      fireEvent.click(graphTab);
-      expect(graphTab).toHaveAttribute("aria-selected", "true");
-    });
-
-    it("can switch to Code tab", () => {
-      render(
-        <TaskDetailPanel
-          taskId={mockTaskData.id}
-          onClose={vi.fn()}
-        />
-      );
-
-      const codeTab = screen.getByRole("tab", { name: /code/i });
-      fireEvent.click(codeTab);
-      expect(codeTab).toHaveAttribute("aria-selected", "true");
-    });
-  });
-
-  describe("Close button", () => {
-    it("renders Close button", () => {
-      render(
-        <TaskDetailPanel
-          taskId={mockTaskData.id}
-          onClose={vi.fn()}
-        />
-      );
-
-      const closeButton = screen.getByRole("button", { name: /close panel/i });
-      expect(closeButton).toBeInTheDocument();
-    });
-
-    it("calls onClose when Close button is clicked", () => {
-      const mockOnClose = vi.fn();
-
-      render(
-        <TaskDetailPanel
-          taskId={mockTaskData.id}
-          onClose={mockOnClose}
-        />
-      );
-
-      const closeButton = screen.getByRole("button", { name: /close panel/i });
-      fireEvent.click(closeButton);
-
-      expect(mockOnClose).toHaveBeenCalledTimes(1);
-    });
-  });
-
-  describe("Back button", () => {
     it("renders back button when onBack is provided", () => {
       render(
         <TaskDetailPanel
@@ -151,7 +158,9 @@ describe("TaskDetailPanel - Edit Integration", () => {
         />
       );
 
-      expect(screen.getByRole("button", { name: /go back/i })).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /go back/i })
+      ).toBeInTheDocument();
     });
 
     it("calls onBack when back button is clicked", () => {
@@ -173,40 +182,69 @@ describe("TaskDetailPanel - Edit Integration", () => {
 
     it("does not render back button when onBack is not provided", () => {
       render(
-        <TaskDetailPanel
-          taskId={mockTaskData.id}
-          onClose={vi.fn()}
-        />
+        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
       );
 
-      expect(screen.queryByRole("button", { name: /go back/i })).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: /go back/i })
+      ).not.toBeInTheDocument();
     });
   });
 
-  describe("Header buttons interaction", () => {
-    it("renders Delete and Close buttons in header", () => {
+  describe("Close button", () => {
+    it("renders Close button", () => {
       render(
-        <TaskDetailPanel
-          taskId={mockTaskData.id}
-          onClose={vi.fn()}
-        />
+        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
       );
 
-      expect(screen.getByRole("button", { name: /delete/i })).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: /close panel/i })).toBeInTheDocument();
+      const closeButton = screen.getByRole("button", {
+        name: /close panel/i,
+      });
+      expect(closeButton).toBeInTheDocument();
+    });
+
+    it("calls onClose when Close button is clicked", () => {
+      const mockOnClose = vi.fn();
+
+      render(
+        <TaskDetailPanel taskId={mockTaskData.id} onClose={mockOnClose} />
+      );
+
+      const closeButton = screen.getByRole("button", {
+        name: /close panel/i,
+      });
+      fireEvent.click(closeButton);
+
+      expect(mockOnClose).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("Header buttons", () => {
+    it("renders Delete and Close buttons in header", () => {
+      render(
+        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
+      );
+
+      expect(
+        screen.getByRole("button", { name: /delete/i })
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /close panel/i })
+      ).toBeInTheDocument();
     });
 
     it("Delete button is positioned before Close button", () => {
       render(
-        <TaskDetailPanel
-          taskId={mockTaskData.id}
-          onClose={vi.fn()}
-        />
+        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
       );
 
       const buttons = screen.getAllByRole("button");
-      const deleteIndex = buttons.findIndex(b => b.getAttribute("aria-label") === "Delete task");
-      const closeIndex = buttons.findIndex(b => b.getAttribute("aria-label") === "Close panel");
+      const deleteIndex = buttons.findIndex(
+        (b) => b.getAttribute("aria-label") === "Delete task"
+      );
+      const closeIndex = buttons.findIndex(
+        (b) => b.getAttribute("aria-label") === "Close panel"
+      );
 
       expect(deleteIndex).toBeLessThan(closeIndex);
     });
@@ -215,10 +253,7 @@ describe("TaskDetailPanel - Edit Integration", () => {
   describe("Task title display", () => {
     it("displays task title in the panel", () => {
       render(
-        <TaskDetailPanel
-          taskId={mockTaskData.id}
-          onClose={vi.fn()}
-        />
+        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
       );
 
       expect(screen.getByText("Test Task")).toBeInTheDocument();
@@ -228,140 +263,228 @@ describe("TaskDetailPanel - Edit Integration", () => {
   describe("Inline editing - Title", () => {
     it("makes title editable when clicked", () => {
       render(
-        <TaskDetailPanel
-          taskId={mockTaskData.id}
-          onClose={vi.fn()}
-        />
+        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
       );
 
-      // Click on title to edit
       const titleElement = screen.getByText("Test Task");
       fireEvent.click(titleElement);
 
-      // Should show input field for editing (auto-save on blur)
       const titleInput = screen.getByDisplayValue("Test Task");
       expect(titleInput).toBeInTheDocument();
       expect(titleInput).toHaveAttribute("type", "text");
     });
   });
 
-  describe("Inline editing - Description", () => {
-    it("makes description editable when clicked", () => {
+  describe("Acceptance Criteria section", () => {
+    it("is the first section after the title badges", () => {
       render(
-        <TaskDetailPanel
-          taskId={mockTaskData.id}
-          onClose={vi.fn()}
-        />
+        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
       );
 
-      // Find and click description
-      const descriptionText = screen.getByText("Test Description");
-      fireEvent.click(descriptionText);
+      expect(screen.getByText("Acceptance Criteria")).toBeInTheDocument();
+      const criteriaSection = screen.getByTestId("acceptance-criteria");
+      expect(criteriaSection).toBeInTheDocument();
+    });
 
-      // Should show textarea
-      const descriptionInput = screen.getByDisplayValue("Test Description");
-      expect(descriptionInput).toBeInTheDocument();
-      expect(descriptionInput.tagName).toBe("TEXTAREA");
+    it("displays testing_criterion sections with met/pending indicators", () => {
+      render(
+        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
+      );
+
+      expect(screen.getByText("App loads without errors")).toBeInTheDocument();
+      expect(
+        screen.getByText("Navigation works correctly")
+      ).toBeInTheDocument();
+    });
+
+    it("shows progress count for criteria", () => {
+      render(
+        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
+      );
+
+      expect(screen.getByText("1/2 met")).toBeInTheDocument();
+      expect(screen.getByText("50%")).toBeInTheDocument();
+    });
+
+    it("shows human/machine validation badges", () => {
+      render(
+        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
+      );
+
+      const humanBadges = screen.getAllByText("human");
+      expect(humanBadges.length).toBeGreaterThan(0);
+    });
+
+    it("met criteria have line-through styling", () => {
+      render(
+        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
+      );
+
+      const metCriterion = screen.getByText("App loads without errors");
+      expect(metCriterion.className).toContain("line-through");
     });
   });
 
-  describe("Inline editing - Tags", () => {
-    it("makes tags editable when clicked", () => {
+  describe("Progress section", () => {
+    it("shows checklist items in progress section", () => {
       render(
-        <TaskDetailPanel
-          taskId={mockTaskData.id}
-          onClose={vi.fn()}
-        />
+        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
       );
 
-      // Find and click tags section
-      const tagsContainer = screen.getByText("tag1").closest("div");
-      fireEvent.click(tagsContainer!);
+      const progressSection = screen.getByTestId("progress-section");
+      expect(progressSection).toBeInTheDocument();
+      expect(screen.getByText("First step")).toBeInTheDocument();
+      expect(screen.getByText("Second step")).toBeInTheDocument();
+    });
 
-      // Should show input with tags as comma-separated
-      const tagsInput = screen.getByDisplayValue("tag1");
-      expect(tagsInput).toBeInTheDocument();
-      expect(tagsInput.tagName).toBe("INPUT");
+    it("shows checklist progress badge", () => {
+      render(
+        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
+      );
+
+      expect(screen.getByText("1/2")).toBeInTheDocument();
     });
   });
 
-  describe("Inline editing - Priority", () => {
-    it("Priority field is visible in details tab", () => {
+  describe("Collapsible sections", () => {
+    it("renders Spec collapsible section", () => {
       render(
-        <TaskDetailPanel
-          taskId={mockTaskData.id}
-          onClose={vi.fn()}
-        />
+        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
       );
 
-      // Priority label should be present
-      const priorityLabels = screen.getAllByText(/Priority/i);
-      expect(priorityLabels.length).toBeGreaterThan(0);
+      const specToggle = screen.getByRole("button", {
+        name: /toggle spec section/i,
+      });
+      expect(specToggle).toBeInTheDocument();
+    });
+
+    it("renders Dependencies collapsible section", () => {
+      render(
+        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
+      );
+
+      const depsToggle = screen.getByRole("button", {
+        name: /toggle dependencies section/i,
+      });
+      expect(depsToggle).toBeInTheDocument();
+    });
+
+    it("renders Code collapsible section", () => {
+      render(
+        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
+      );
+
+      const codeToggle = screen.getByRole("button", {
+        name: /toggle code section/i,
+      });
+      expect(codeToggle).toBeInTheDocument();
+    });
+
+    it("renders Details collapsible section", () => {
+      render(
+        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
+      );
+
+      const detailsToggle = screen.getByRole("button", {
+        name: /toggle details section/i,
+      });
+      expect(detailsToggle).toBeInTheDocument();
+    });
+
+    it("Spec section expands to show goal and constraints", () => {
+      render(
+        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
+      );
+
+      const specToggle = screen.getByRole("button", {
+        name: /toggle spec section/i,
+      });
+      fireEvent.click(specToggle);
+
+      expect(screen.getByText("Build a working feature")).toBeInTheDocument();
+      expect(
+        screen.getByText("Must use existing components")
+      ).toBeInTheDocument();
+    });
+
+    it("Details section expands to show description, priority, tags", () => {
+      render(
+        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
+      );
+
+      const detailsToggle = screen.getByRole("button", {
+        name: /toggle details section/i,
+      });
+      fireEvent.click(detailsToggle);
+
+      expect(screen.getByText("Test Description")).toBeInTheDocument();
+      expect(screen.getByText("medium")).toBeInTheDocument();
+    });
+
+    it("Code section expands to show file paths with line numbers", () => {
+      render(
+        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
+      );
+
+      const codeToggle = screen.getByRole("button", {
+        name: /toggle code section/i,
+      });
+      fireEvent.click(codeToggle);
+
+      expect(screen.getByText("App.tsx")).toBeInTheDocument();
+      expect(screen.getByText("L42-50")).toBeInTheDocument();
     });
   });
 
   describe("Delete confirmation - Toggle", () => {
     it("renders Delete button in header", () => {
       render(
-        <TaskDetailPanel
-          taskId={mockTaskData.id}
-          onClose={vi.fn()}
-        />
+        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
       );
 
-      const deleteButton = screen.getByRole("button", { name: /delete/i });
-      expect(deleteButton).toBeInTheDocument();
-      expect(deleteButton).toHaveAttribute("title", "Delete this task");
+      expect(
+        screen.getByRole("button", { name: /delete task/i })
+      ).toBeInTheDocument();
+    });
+  });
+
+  describe("Level and ID badges", () => {
+    it("shows level badge in title area", () => {
+      render(
+        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
+      );
+
+      expect(screen.getByText("task")).toBeInTheDocument();
     });
 
-    it("shows delete confirmation when Delete button clicked", () => {
+    it("shows short task ID in title area", () => {
       render(
-        <TaskDetailPanel
-          taskId={mockTaskData.id}
-          onClose={vi.fn()}
-        />
+        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
       );
 
-      const deleteButton = screen.getByRole("button", { name: /delete/i });
-      fireEvent.click(deleteButton);
+      expect(screen.getByText("task-123")).toBeInTheDocument();
+    });
+  });
 
-      // Should show confirmation message
-      expect(screen.getByText(/Are you sure you want to delete/)).toBeInTheDocument();
+  describe("Run workflow buttons", () => {
+    it("shows Run Step button when task has workflow and current step", () => {
+      render(
+        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
+      );
+
+      expect(
+        screen.getByRole("button", { name: /run current step/i })
+      ).toBeInTheDocument();
     });
 
-    it("shows Confirm Delete button when delete confirmation visible", () => {
+    it("shows Run Workflow button when task has workflow", () => {
       render(
-        <TaskDetailPanel
-          taskId={mockTaskData.id}
-          onClose={vi.fn()}
-        />
+        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
       );
 
-      // Show confirmation
-      fireEvent.click(screen.getByRole("button", { name: /delete/i }));
-
-      // Should show Confirm Delete button
-      expect(screen.getByRole("button", { name: /Confirm Delete/i })).toBeInTheDocument();
-    });
-
-    it("hides confirmation when Cancel button clicked", () => {
-      render(
-        <TaskDetailPanel
-          taskId={mockTaskData.id}
-          onClose={vi.fn()}
-        />
-      );
-
-      // Show confirmation
-      fireEvent.click(screen.getByRole("button", { name: /delete/i }));
-      expect(screen.getByText(/Are you sure you want to delete/)).toBeInTheDocument();
-
-      // Click Cancel
-      const cancelButtons = screen.getAllByRole("button", { name: /cancel/i });
-      fireEvent.click(cancelButtons[cancelButtons.length - 1]); // Last Cancel button is in delete section
-
-      // Confirmation should be gone
-      expect(screen.queryByText(/Are you sure you want to delete/)).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /run entire workflow/i })
+      ).toBeInTheDocument();
     });
   });
 });
