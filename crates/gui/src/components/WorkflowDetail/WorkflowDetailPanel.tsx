@@ -1,6 +1,7 @@
 import type { Workflow, Step } from "../../bindings";
 import { commands } from "../../bindings";
 import { ResizablePanel } from "../ResizablePanel";
+import { OpenChatButton } from "../OpenChatButton";
 
 interface WorkflowDetailPanelProps {
   workflow: Workflow | null;
@@ -108,6 +109,11 @@ export function WorkflowDetailPanel({
           </h2>
         </div>
         <div className="flex items-center gap-2">
+          <OpenChatButton
+            scope="workflow"
+            entityId={workflow.id}
+            label={workflow.name}
+          />
           {onClose && (
             <button
               type="button"
