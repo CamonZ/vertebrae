@@ -18,6 +18,7 @@ import { CollapsibleSection } from "./CollapsibleSection";
 import { DependenciesSummary } from "./DependenciesSummary";
 import { CodeRefsSummary } from "./CodeRefsSummary";
 import { SpecSection } from "./SpecSection";
+import { OpenChatButton } from "../OpenChatButton";
 
 /** Debounce delay in milliseconds for batching rapid events */
 const DEBOUNCE_MS = 100;
@@ -617,6 +618,14 @@ export function TaskDetailPanel({
               )}
               <span>{isRunningWorkflow ? "Running..." : "Run Workflow"}</span>
             </button>
+          )}
+          {/* Open Chat Button */}
+          {taskData?.id && (
+            <OpenChatButton
+              scope="task"
+              entityId={taskData.id}
+              label={taskData.title}
+            />
           )}
           {/* Delete Button */}
           <button

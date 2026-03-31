@@ -1,0 +1,434 @@
+import { describe, it, expect, beforeEach } from "vitest";
+import { useChatStore, getParentScope } from "./chatStore";
+
+describe("chatStore", () => {
+  beforeEach(() => {
+    // Reset store to initial state
+    useChatStore.setState({
+      sessions: {},
+      activeSessionId: null,
+      panelOpen: false,
+    });
+  });
+
+  describe("openSession", () => {
+    it("creates a new session with the given scope and entity", () => {
+      const id = useChatStore.getState().openSession("task", "task-123", "My Task");
+
+      expect(id).toBeTruthy();
+      const session = useChatStore.getState().sessions[id];
+      expect(session).toBeDefined();
+      expect(session.scope).toBe("task");
+      expect(session.entityId).toBe("task-123");
+      expect(session.label).toBe("My Task");
+      expect(session.messages).toEqual([]);
+      expect(session.status).toBe("open");
+      expect(session.claudeSessionId).toBeNull();
+    });
+
+    it("sets the new session as active and opens the panel", () => {
+      const id = useChatStore.getState().openSession("workflow", "wf-1", "Workflow 1");
+
+      expect(useChatStore.getState().activeSessionId).toBe(id);
+      expect(useChatStore.getState().panelOpen).toBe(true);
+    });
+
+    it("reuses existing session for same scope+entity", () => {
+      const id1 = useChatStore.getState().openSession("task", "task-123", "Task A");
+      const id2 = useChatStore.getState().openSession("task", "task-123", "Task A");
+
+      expect(id1).toBe(id2);
+      expect(Object.keys(useChatStore.getState().sessions)).toHaveLength(1);
+    });
+
+    it("reusing session sets it as active and opens panel", () => {
+      const id1 = useChatStore.getState().openSession("task", "task-1", "T1");
+      useChatStore.getState().openSession("task", "task-2", "T2");
+
+      // Close panel manually
+      useChatStore.getState().setPanelOpen(false);
+      expect(useChatStore.getState().panelOpen).toBe(false);
+
+      // Reopen same session
+      useChatStore.getState().openSession("task", "task-1", "T1");
+      expect(useChatStore.getState().activeSessionId).toBe(id1);
+      expect(useChatStore.getState().panelOpen).toBe(true);
+    });
+
+    it("creates separate sessions for different entities", () => {
+      const id1 = useChatStore.getState().openSession("task", "task-1", "Task 1");
+      const id2 = useChatStore.getState().openSession("task", "task-2", "Task 2");
+
+      expect(id1).not.toBe(id2);
+      expect(Object.keys(useChatStore.getState().sessions)).toHaveLength(2);
+    });
+
+    it("creates separate sessions for different scopes on same entity", () => {
+      const id1 = useChatStore.getState().openSession("task", "entity-1", "Task View");
+      const id2 = useChatStore.getState().openSession("workflow", "entity-1", "Workflow View");
+
+      expect(id1).not.toBe(id2);
+      expect(Object.keys(useChatStore.getState().sessions)).toHaveLength(2);
+    });
+
+    it("supports project scope with null entityId", () => {
+      const id = useChatStore.getState().openSession("project", null, "Project Chat");
+
+      const session = useChatStore.getState().sessions[id];
+      expect(session.scope).toBe("project");
+      expect(session.entityId).toBeNull();
+    });
+  });
+
+  describe("closeSession", () => {
+    it("removes the session from the store", () => {
+      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+      useChatStore.getState().closeSession(id);
+
+      expect(useChatStore.getState().sessions[id]).toBeUndefined();
+    });
+
+    it("selects the last remaining session when active session is closed", () => {
+      const id1 = useChatStore.getState().openSession("task", "t-1", "T1");
+      const id2 = useChatStore.getState().openSession("task", "t-2", "T2");
+
+      // id2 is now active
+      expect(useChatStore.getState().activeSessionId).toBe(id2);
+
+      useChatStore.getState().closeSession(id2);
+      expect(useChatStore.getState().activeSessionId).toBe(id1);
+    });
+
+    it("closes the panel when the last session is closed", () => {
+      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+      expect(useChatStore.getState().panelOpen).toBe(true);
+
+      useChatStore.getState().closeSession(id);
+      expect(useChatStore.getState().panelOpen).toBe(false);
+      expect(useChatStore.getState().activeSessionId).toBeNull();
+    });
+
+    it("does not change active session if non-active is closed", () => {
+      const id1 = useChatStore.getState().openSession("task", "t-1", "T1");
+      const id2 = useChatStore.getState().openSession("task", "t-2", "T2");
+
+      expect(useChatStore.getState().activeSessionId).toBe(id2);
+      useChatStore.getState().closeSession(id1);
+      expect(useChatStore.getState().activeSessionId).toBe(id2);
+    });
+
+    it("preserves panelOpen when other sessions remain", () => {
+      useChatStore.getState().openSession("task", "t-1", "T1");
+      const id2 = useChatStore.getState().openSession("task", "t-2", "T2");
+      expect(useChatStore.getState().panelOpen).toBe(true);
+
+      useChatStore.getState().closeSession(id2);
+      expect(useChatStore.getState().panelOpen).toBe(true);
+    });
+  });
+
+  describe("focusSession", () => {
+    it("sets the active session", () => {
+      const id1 = useChatStore.getState().openSession("task", "t-1", "T1");
+      useChatStore.getState().openSession("task", "t-2", "T2");
+
+      useChatStore.getState().focusSession(id1);
+      expect(useChatStore.getState().activeSessionId).toBe(id1);
+    });
+  });
+
+  describe("addMessage", () => {
+    it("appends a message to the session", () => {
+      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+
+      useChatStore.getState().addMessage(id, {
+        kind: "user",
+        text: "Hello",
+        timestamp: "2024-01-01T00:00:00Z",
+      });
+
+      const session = useChatStore.getState().sessions[id];
+      expect(session.messages).toHaveLength(1);
+      expect(session.messages[0]).toEqual({
+        kind: "user",
+        text: "Hello",
+        timestamp: "2024-01-01T00:00:00Z",
+      });
+    });
+
+    it("does nothing for non-existent session", () => {
+      useChatStore.getState().addMessage("non-existent", {
+        kind: "user",
+        text: "Hello",
+        timestamp: "2024-01-01T00:00:00Z",
+      });
+
+      expect(Object.keys(useChatStore.getState().sessions)).toHaveLength(0);
+    });
+  });
+
+  describe("updateLastAssistantMessage", () => {
+    it("does nothing for non-existent session", () => {
+      useChatStore.getState().updateLastAssistantMessage("non-existent", "text");
+      expect(Object.keys(useChatStore.getState().sessions)).toHaveLength(0);
+    });
+
+    it("creates new partial message when session has no messages", () => {
+      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+
+      useChatStore.getState().updateLastAssistantMessage(id, "Start");
+
+      const session = useChatStore.getState().sessions[id];
+      expect(session.messages).toHaveLength(1);
+      expect(session.messages[0]).toMatchObject({
+        kind: "assistant",
+        text: "Start",
+        isPartial: true,
+      });
+    });
+
+    it("appends text to existing partial assistant message", () => {
+      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+
+      useChatStore.getState().addMessage(id, {
+        kind: "assistant",
+        text: "Hel",
+        timestamp: "2024-01-01T00:00:00Z",
+        isPartial: true,
+      });
+
+      useChatStore.getState().updateLastAssistantMessage(id, "lo");
+
+      const session = useChatStore.getState().sessions[id];
+      expect(session.messages).toHaveLength(1);
+      expect(session.messages[0]).toMatchObject({
+        kind: "assistant",
+        text: "Hello",
+        isPartial: true,
+      });
+    });
+
+    it("creates new partial message when last message is not assistant", () => {
+      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+
+      useChatStore.getState().addMessage(id, {
+        kind: "user",
+        text: "Question",
+        timestamp: "2024-01-01T00:00:00Z",
+      });
+
+      useChatStore.getState().updateLastAssistantMessage(id, "Answer");
+
+      const session = useChatStore.getState().sessions[id];
+      expect(session.messages).toHaveLength(2);
+      expect(session.messages[1]).toMatchObject({
+        kind: "assistant",
+        text: "Answer",
+        isPartial: true,
+      });
+    });
+  });
+
+  describe("finalizeLastAssistantMessage", () => {
+    it("does nothing for non-existent session", () => {
+      useChatStore.getState().finalizeLastAssistantMessage("non-existent", "text");
+      expect(Object.keys(useChatStore.getState().sessions)).toHaveLength(0);
+    });
+
+    it("pushes new complete message when last is not partial assistant", () => {
+      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+
+      useChatStore.getState().addMessage(id, {
+        kind: "user",
+        text: "Question",
+        timestamp: "2024-01-01T00:00:00Z",
+      });
+
+      useChatStore.getState().finalizeLastAssistantMessage(id, "Full answer");
+
+      const session = useChatStore.getState().sessions[id];
+      expect(session.messages).toHaveLength(2);
+      expect(session.messages[1]).toMatchObject({
+        kind: "assistant",
+        text: "Full answer",
+        isPartial: false,
+      });
+    });
+
+    it("pushes new complete message when session has no messages", () => {
+      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+
+      useChatStore.getState().finalizeLastAssistantMessage(id, "Direct response");
+
+      const session = useChatStore.getState().sessions[id];
+      expect(session.messages).toHaveLength(1);
+      expect(session.messages[0]).toMatchObject({
+        kind: "assistant",
+        text: "Direct response",
+        isPartial: false,
+      });
+    });
+
+    it("marks the partial message as complete", () => {
+      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+
+      useChatStore.getState().addMessage(id, {
+        kind: "assistant",
+        text: "partial...",
+        timestamp: "2024-01-01T00:00:00Z",
+        isPartial: true,
+      });
+
+      useChatStore.getState().finalizeLastAssistantMessage(id, "Full response");
+
+      const session = useChatStore.getState().sessions[id];
+      expect(session.messages).toHaveLength(1);
+      expect(session.messages[0]).toMatchObject({
+        kind: "assistant",
+        text: "Full response",
+        isPartial: false,
+      });
+    });
+  });
+
+  describe("setClaudeSessionId", () => {
+    it("sets the backend session ID", () => {
+      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+
+      useChatStore.getState().setClaudeSessionId(id, "claude-session-abc");
+
+      const session = useChatStore.getState().sessions[id];
+      expect(session.claudeSessionId).toBe("claude-session-abc");
+    });
+  });
+
+  describe("setClaudeConversationId", () => {
+    it("sets the conversation ID", () => {
+      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+
+      useChatStore.getState().setClaudeConversationId(id, "conv-abc-123");
+
+      const session = useChatStore.getState().sessions[id];
+      expect(session.claudeConversationId).toBe("conv-abc-123");
+    });
+
+    it("does nothing for non-existent session", () => {
+      useChatStore.getState().setClaudeConversationId("non-existent", "conv-1");
+      expect(Object.keys(useChatStore.getState().sessions)).toHaveLength(0);
+    });
+  });
+
+  describe("setContextSummary", () => {
+    it("stores the context summary text", () => {
+      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+
+      useChatStore.getState().setContextSummary(id, "[Context: Task]\nTask: My Task");
+
+      const session = useChatStore.getState().sessions[id];
+      expect(session.contextSummary).toBe("[Context: Task]\nTask: My Task");
+    });
+  });
+
+  describe("markSessionClosed", () => {
+    it("sets session status to closed", () => {
+      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+
+      useChatStore.getState().markSessionClosed(id);
+
+      const session = useChatStore.getState().sessions[id];
+      expect(session.status).toBe("closed");
+    });
+  });
+
+  describe("clearMessages", () => {
+    it("empties the messages array", () => {
+      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+
+      useChatStore.getState().addMessage(id, {
+        kind: "user",
+        text: "Hello",
+        timestamp: "2024-01-01T00:00:00Z",
+      });
+
+      expect(useChatStore.getState().sessions[id].messages).toHaveLength(1);
+
+      useChatStore.getState().clearMessages(id);
+      expect(useChatStore.getState().sessions[id].messages).toHaveLength(0);
+    });
+  });
+
+  describe("togglePanel / setPanelOpen", () => {
+    it("toggles the panel open state", () => {
+      expect(useChatStore.getState().panelOpen).toBe(false);
+
+      useChatStore.getState().togglePanel();
+      expect(useChatStore.getState().panelOpen).toBe(true);
+
+      useChatStore.getState().togglePanel();
+      expect(useChatStore.getState().panelOpen).toBe(false);
+    });
+
+    it("sets panel open state explicitly", () => {
+      useChatStore.getState().setPanelOpen(true);
+      expect(useChatStore.getState().panelOpen).toBe(true);
+
+      useChatStore.getState().setPanelOpen(false);
+      expect(useChatStore.getState().panelOpen).toBe(false);
+    });
+  });
+
+  describe("widenScope", () => {
+    it("updates session scope, entityId, and label", () => {
+      const id = useChatStore.getState().openSession("step", "step-1", "Step 1");
+
+      useChatStore.getState().widenScope(id, "task", "task-1", "Task Chat");
+
+      const session = useChatStore.getState().sessions[id];
+      expect(session.scope).toBe("task");
+      expect(session.entityId).toBe("task-1");
+      expect(session.label).toBe("Task Chat");
+    });
+  });
+
+  describe("findSession", () => {
+    it("finds an existing open session by scope and entityId", () => {
+      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+
+      const found = useChatStore.getState().findSession("task", "t-1");
+      expect(found).toBe(id);
+    });
+
+    it("returns null when no matching session exists", () => {
+      useChatStore.getState().openSession("task", "t-1", "T1");
+
+      const found = useChatStore.getState().findSession("task", "t-999");
+      expect(found).toBeNull();
+    });
+
+    it("does not find closed sessions", () => {
+      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+      useChatStore.getState().markSessionClosed(id);
+
+      const found = useChatStore.getState().findSession("task", "t-1");
+      expect(found).toBeNull();
+    });
+  });
+});
+
+describe("getParentScope", () => {
+  it("returns task for step", () => {
+    expect(getParentScope("step")).toBe("task");
+  });
+
+  it("returns workflow for task", () => {
+    expect(getParentScope("task")).toBe("workflow");
+  });
+
+  it("returns project for workflow", () => {
+    expect(getParentScope("workflow")).toBe("project");
+  });
+
+  it("returns null for project (top level)", () => {
+    expect(getParentScope("project")).toBeNull();
+  });
+});

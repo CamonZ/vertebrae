@@ -7,6 +7,7 @@ import { EditableList } from "../EditableList";
 import { ResizablePanel } from "../ResizablePanel";
 import { InlineEditField } from "../TaskDetail/InlineEditField";
 import { Toggle } from "../Toggle";
+import { OpenChatButton } from "../OpenChatButton";
 import type { ViewMode } from "../TaskList";
 import { TaskList, TaskTreeView } from "../TaskList";
 import { buildTreeFromTasks } from "../../utils/buildTreeFromTasks";
@@ -295,6 +296,14 @@ export function StepDetailPanel({
           </h2>
         </div>
         <div className="flex items-center gap-2">
+          {/* Open Chat button */}
+          {step?.id && (
+            <OpenChatButton
+              scope="step"
+              entityId={step.id}
+              label={step.name}
+            />
+          )}
           {/* Delete button */}
           <button
             type="button"

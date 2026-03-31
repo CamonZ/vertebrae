@@ -4,6 +4,7 @@ import { Header } from "./Header";
 import { ContentArea } from "./ContentArea";
 import { ToastContainer } from "./Toast";
 import { ClaudeChatSidebar } from "./ClaudeChatSidebar";
+import { ChatWindowManager } from "./ChatWindow";
 
 interface AppShellProps {
   children: ReactNode;
@@ -24,6 +25,7 @@ export function AppShell({
         <ContentArea>{children}</ContentArea>
       </div>
       <ClaudeChatSidebar />
+      <ChatWindowManager />
       <ToastContainer />
     </div>
   );

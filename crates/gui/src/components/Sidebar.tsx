@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { commands } from "../bindings";
 import { useUIStore } from "../stores";
+import { useChatStore } from "../stores/chatStore";
+import { useOpenChat } from "../hooks/useScopedChat";
 
 interface NavItemProps {
   to: string;
@@ -143,6 +145,54 @@ function ProjectSwitcher() {
         </svg>
       </div>
     </button>
+  );
+}
+
+/**
+ * Project chat button that opens a project-scoped chat in the ChatWindowManager
+ */
+function ProjectChatButton() {
+  const openChat = useOpenChat();
+  const panelOpen = useChatStore((s) => s.panelOpen);
+
+  const handleClick = useCallback(() => {
+    openChat("project", null, "Project Chat");
+  }, [openChat]);
+
+  return (
+    <li>
+      <button
+        onClick={handleClick}
+        className={`group relative flex w-full items-center justify-center rounded-lg p-2.5 text-sm font-medium transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+          panelOpen
+            ? "bg-accent/10 text-accent shadow-glow-sm"
+            : "text-text-secondary hover:bg-bg-hover hover:text-text-primary"
+        }`}
+        title="Project Chat"
+      >
+        {panelOpen && (
+          <span className="absolute left-0 top-1/2 h-6 w-0.5 -translate-y-1/2 rounded-full bg-accent shadow-glow-sm" />
+        )}
+        <span
+          className={`relative shrink-0 transition-transform duration-200 ${panelOpen ? "scale-110" : "group-hover:scale-105"}`}
+        >
+          <svg
+            className="h-5 w-5"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={1.5}
+              d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z"
+            />
+          </svg>
+        </span>
+      </button>
+    </li>
   );
 }
 
@@ -296,6 +346,7 @@ export function Sidebar() {
             }
           />
           <ClaudeChatToggleButton />
+          <ProjectChatButton />
         </ul>
       </nav>
     </aside>
