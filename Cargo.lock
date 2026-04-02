@@ -1897,9 +1897,14 @@ dependencies = [
 name = "gui-acceptance"
 version = "0.1.0"
 dependencies = [
+ "cucumber",
  "fantoccini",
  "serde_json",
+ "tempfile",
  "tokio",
+ "uuid",
+ "vertebrae-core",
+ "vertebrae-sacrum-client",
 ]
 
 [[package]]
