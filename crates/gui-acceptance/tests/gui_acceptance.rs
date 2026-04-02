@@ -1,5 +1,6 @@
 mod steps;
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -25,6 +26,27 @@ pub struct GuiWorld {
 
     /// Temporary directory used as the project path in config.toml.
     temp_dir: Option<PathBuf>,
+
+    /// Path to the vtb binary used for CLI mutations.
+    vtb_binary: PathBuf,
+
+    /// Environment variables passed to vtb CLI commands.
+    env: HashMap<String, String>,
+
+    /// The most recently created/referenced task ID.
+    task_id: Option<String>,
+
+    /// All task IDs created during this scenario (for cleanup).
+    created_task_ids: Vec<String>,
+
+    /// Last CLI stdout output.
+    last_stdout: String,
+
+    /// Last CLI stderr output.
+    last_stderr: String,
+
+    /// Last CLI exit code.
+    last_exit_code: i32,
 }
 
 impl std::fmt::Debug for GuiWorld {
@@ -33,6 +55,8 @@ impl std::fmt::Debug for GuiWorld {
             .field("project_slug", &self.project_slug)
             .field("project_id", &self.project_id)
             .field("temp_dir", &self.temp_dir)
+            .field("task_id", &self.task_id)
+            .field("last_exit_code", &self.last_exit_code)
             .finish()
     }
 }
@@ -45,7 +69,46 @@ impl GuiWorld {
             project_slug: None,
             project_id: None,
             temp_dir: None,
+            vtb_binary: PathBuf::new(),
+            env: HashMap::new(),
+            task_id: None,
+            created_task_ids: Vec::new(),
+            last_stdout: String::new(),
+            last_stderr: String::new(),
+            last_exit_code: 0,
         }
+    }
+
+    /// Execute a vtb CLI command and capture its output.
+    async fn run_vtb(&mut self, args: &[&str]) {
+        let output = tokio::process::Command::new(&self.vtb_binary)
+            .args(args)
+            .envs(&self.env)
+            .output()
+            .await
+            .expect("failed to execute vtb");
+
+        self.last_stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        self.last_stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        self.last_exit_code = output.status.code().unwrap_or(-1);
+    }
+
+    /// Extract a task ID from vtb add output ("Created task: <uuid>").
+    fn extract_task_id_from_output(&self) -> Option<String> {
+        let stdout = self.last_stdout.trim();
+        if let Some(rest) = stdout.strip_prefix("Created task: ") {
+            let uuid = rest.trim();
+            if !uuid.is_empty() {
+                return Some(uuid.to_string());
+            }
+        }
+        None
+    }
+
+    /// Track a newly created task for cleanup.
+    fn track_task(&mut self, id: String) {
+        self.task_id = Some(id.clone());
+        self.created_task_ids.push(id);
     }
 }
 
@@ -61,6 +124,19 @@ async fn main() {
         .after(|_feature, _rule, _scenario, _ev, world| {
             Box::pin(async move {
                 if let Some(world) = world {
+                    // Clean up tasks created during the scenario
+                    if let Some(client) = &world.graphql_client {
+                        let task_service =
+                            vertebrae_sacrum_client::SacrumTaskService::new(client.clone());
+                        for task_id in world.created_task_ids.iter().rev() {
+                            let _ = vertebrae_core::service::TaskService::delete_task(
+                                &task_service,
+                                task_id,
+                                true,
+                            )
+                            .await;
+                        }
+                    }
                     steps::setup::after_scenario(world).await;
                 }
             })

@@ -8,9 +8,9 @@ npm ci --prefer-offline
 npm run build
 cd /app
 
-# Build the Tauri app binary (debug mode for speed)
-echo "==> Building Tauri app binary..."
-cargo build --bin gui --quiet
+# Build the Tauri app binary and vtb CLI (debug mode for speed)
+echo "==> Building Tauri app and vtb CLI binaries..."
+cargo build --bin gui --bin vtb --quiet
 
 # Start tauri-driver in the background on port 4444
 echo "==> Starting tauri-driver on port 4444..."
