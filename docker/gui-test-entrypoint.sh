@@ -29,7 +29,7 @@ echo "==> tauri-driver started (PID: $TAURI_DRIVER_PID)"
 
 # Run the GUI acceptance tests
 echo "==> Running GUI acceptance tests..."
-cargo test -p gui-acceptance --test smoke -- --nocapture
+cargo test -p gui-acceptance --test gui_acceptance
 TEST_EXIT=$?
 
 # Cleanup
