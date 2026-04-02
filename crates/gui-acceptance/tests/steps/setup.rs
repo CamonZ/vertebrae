@@ -29,6 +29,28 @@ pub async fn before_scenario(world: &mut GuiWorld) {
 
     let project_id = project.id.clone();
 
+    // Configure vtb binary and environment for CLI mutations (before values are moved)
+    let vtb_binary = std::env::var("VTB_BINARY").unwrap_or_else(|_| {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let workspace_root = std::path::Path::new(manifest_dir)
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap();
+        workspace_root
+            .join("target")
+            .join("debug")
+            .join("vtb")
+            .to_string_lossy()
+            .to_string()
+    });
+    world.vtb_binary = std::path::PathBuf::from(vtb_binary);
+    world.env.insert("VTB_TOKEN".to_string(), api_token.clone());
+    world.env.insert("VTB_URL".to_string(), base_url.clone());
+    world
+        .env
+        .insert("VTB_PROJECT_ID".to_string(), project_id.clone());
+
     // Re-create client scoped to the project for later cleanup
     let scoped_config = SacrumConfig::new(base_url, api_token, project_id.clone());
     world.graphql_client = Some(GraphqlClient::new(scoped_config));
