@@ -1,0 +1,19 @@
+[package]
+name = "gui-acceptance"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+vertebrae-sacrum-client = { path = "../sacrum-client" }
+vertebrae-core = { path = "../core" }
+cucumber = "0.22"
+fantoccini = "0.21"
+tokio = { version = "1", features = ["full"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+tempfile = "3"
+
+[[test]]
+name = "gui_acceptance"
+harness = false

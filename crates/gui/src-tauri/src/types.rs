@@ -158,8 +158,8 @@ pub struct Task {
     pub title: String,
     /// Optional description
     pub description: Option<String>,
-    /// Hierarchy level
-    pub level: TaskLevel,
+    /// Hierarchy level (null when created without explicit level)
+    pub level: Option<TaskLevel>,
     /// Optional priority
     pub priority: Option<TaskPriority>,
     /// Tags for categorization
@@ -214,7 +214,7 @@ impl From<vertebrae_core::Task> for Task {
             id: task.id,
             title: task.title,
             description: task.description,
-            level: task.level.into(),
+            level: Some(task.level.into()),
             priority: task.priority.map(Into::into),
             tags: task.tags,
             workflow_id: task.workflow_id,
@@ -966,7 +966,7 @@ mod tests {
         let core = vertebrae_core::Task::new("Task", vertebrae_core::Level::Task);
         let gui = Task::from(core);
         assert_eq!(gui.title, "Task");
-        assert_eq!(gui.level, TaskLevel::Task);
+        assert_eq!(gui.level, Some(TaskLevel::Task));
         assert_eq!(gui.priority, None);
         assert!(gui.description.is_none());
         assert!(gui.tags.is_empty());
@@ -982,7 +982,7 @@ mod tests {
             .with_tag("urgent");
         let gui = Task::from(core);
         assert_eq!(gui.title, "Task");
-        assert_eq!(gui.level, TaskLevel::Epic);
+        assert_eq!(gui.level, Some(TaskLevel::Epic));
         assert_eq!(gui.description, Some("Task description".to_string()));
         assert_eq!(gui.priority, Some(TaskPriority::Critical));
         assert_eq!(gui.tags, vec!["urgent"]);
@@ -1376,7 +1376,7 @@ mod tests {
         assert_eq!(task.id, "abc12345-0000-4000-8000-000000000001");
         assert_eq!(task.title, "Implement feature X");
         assert_eq!(task.description, Some("A task from Sacrum WS".to_string()));
-        assert_eq!(task.level, TaskLevel::Ticket);
+        assert_eq!(task.level, Some(TaskLevel::Ticket));
         assert_eq!(task.priority, Some(TaskPriority::High));
         assert_eq!(task.tags, vec!["rust", "gui"]);
         assert_eq!(task.workflow_id, Some("wf-001".to_string()));
@@ -1402,7 +1402,7 @@ mod tests {
         let task: Task = serde_json::from_value(payload).expect("should deserialize");
         assert_eq!(task.id, "task-minimal");
         assert_eq!(task.title, "Minimal task");
-        assert_eq!(task.level, TaskLevel::Task);
+        assert_eq!(task.level, Some(TaskLevel::Task));
         assert!(!task.archived);
         assert!(task.tags.is_empty());
         assert!(task.sections.is_empty());

@@ -1,7 +1,11 @@
 # Docker Compose for acceptance testing against a real Sacrum backend.
 #
 # Usage:
+#   # CLI acceptance tests:
 #   docker compose run --rm test-runner
+#
+#   # GUI acceptance tests (headless Tauri via Xvfb + tauri-driver):
+#   docker compose run --rm gui-test-runner
 #
 #   # Tear down:
 #   docker compose down -v
@@ -75,6 +79,28 @@ services:
       - cargo-cache:/cargo
     working_dir: /app
     command: ["/bin/sh", "-c", "cargo build --bin vtb --quiet && cargo test -p acceptance --test acceptance"]
+
+  gui-test-runner:
+    build:
+      context: docker
+      dockerfile: gui-test-runner.Dockerfile
+    network_mode: "service:sacrum"
+    depends_on:
+      sacrum:
+        condition: service_healthy
+      seeder:
+        condition: service_completed_successfully
+    environment:
+      VTB_URL: "http://localhost:4000"
+      VTB_TOKEN: "sac_acceptance-test-token-vertebrae"
+      TAURI_BASE_URL: "http://localhost:1420"
+      CARGO_HOME: "/cargo"
+    volumes:
+      - .:/app
+      - cargo-cache:/cargo
+      - ./docker/gui-config.toml:/root/.config/vertebrae/config.toml.base:ro
+    working_dir: /app
+    command: ["/app/docker/gui-test-entrypoint.sh"]
 
 volumes:
   pgdata:

@@ -209,8 +209,10 @@ pub fn run() {
                 log::info!("[STARTUP] No project config available, WebSocket starts disconnected");
                 websocket_client::SacrumSocket::disconnected()
             };
-            // Always manage socket so the command can access it
-            app.manage(socket);
+            // Always manage socket so the command can access it.
+            // Wrapped in a Mutex so set_current_project can swap it out when the
+            // user selects a different project at runtime.
+            app.manage(tokio::sync::Mutex::new(socket));
 
             Ok(())
         })

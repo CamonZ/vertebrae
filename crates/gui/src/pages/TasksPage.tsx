@@ -147,7 +147,7 @@ export function TasksPage() {
           {viewMode === 'tree' ? (
             <TaskTreeView
               hierarchy={hierarchy}
-              isLoading={isLoading}
+              isLoading={isLoading && tasks.length === 0}
               error={error}
               selectedTaskId={selectedTaskId}
               onTaskSelect={handleTaskSelect}
@@ -156,7 +156,7 @@ export function TasksPage() {
           ) : (
             <TaskList
               tasks={tasks}
-              isLoading={isLoading}
+              isLoading={isLoading && tasks.length === 0}
               error={error}
               selectedTaskId={selectedTaskId}
               onTaskSelect={handleTaskSelect}
