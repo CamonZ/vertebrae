@@ -11,6 +11,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
     # Headless display
     xvfb \
+    xauth \
+    x11-utils \
     # WebKitWebDriver (used by tauri-driver)
     webkit2gtk-driver \
     # Utilities

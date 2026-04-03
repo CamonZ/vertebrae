@@ -67,6 +67,24 @@ pub struct SacrumSocket {
 }
 
 impl SacrumSocket {
+    /// Append a line to the WebSocket event trace log for debugging acceptance tests.
+    /// Errors are silently ignored to avoid disrupting event processing.
+    fn trace_event(entry: &str) {
+        use std::io::Write;
+        let _ = std::fs::create_dir_all("/app/test-output");
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open("/app/test-output/websocket-events.log")
+        {
+            let ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis();
+            let _ = writeln!(f, "[{ts}] {entry}");
+        }
+    }
+
     /// Create a new Sacrum socket connection handler
     pub fn new(base_url: String, api_token: String, project_slug: String) -> Self {
         SacrumSocket {
@@ -215,7 +233,7 @@ impl SacrumSocket {
         let join_msg = serde_json::json!([join_ref, ref_id, topic, "phx_join", join_payload]);
         let join_msg_str = join_msg.to_string();
 
-        log::debug!("[WebSocket] Sending join message: {}", join_msg_str);
+        log::info!("[WebSocket] Sending join for topic '{}'", topic);
         write
             .send(Message::Text(join_msg_str))
             .await
@@ -258,7 +276,8 @@ impl SacrumSocket {
         while let Some(msg) = read.next().await {
             match msg {
                 Ok(Message::Text(text)) => {
-                    log::debug!("[WebSocket] Received message: {}", text);
+                    log::info!("[WebSocket] Received message ({} bytes)", text.len());
+                    log::debug!("[WebSocket] Raw message: {}", text);
 
                     if let Err(e) = Self::handle_phoenix_message(&text, app_handle, project_slug) {
                         log::warn!("[WebSocket] Failed to handle message: {}", e);
@@ -314,13 +333,19 @@ impl SacrumSocket {
                 return Err("Message too short".to_string());
             }
 
+            let topic = arr.get(2).and_then(|v| v.as_str()).unwrap_or("?");
             let event = arr
                 .get(3)
                 .and_then(|v| v.as_str())
                 .ok_or("Missing event field")?;
             let payload = arr.get(4).ok_or("Missing payload")?;
 
-            log::debug!("[WebSocket] Event: {}, Payload: {}", event, payload);
+            log::info!(
+                "[WebSocket] Dispatching event '{}' on topic '{}'",
+                event,
+                topic
+            );
+            Self::trace_event(&format!("RECV event='{}' topic='{}'", event, topic));
 
             match event {
                 "task_created" | "task_updated" | "task_deleted" => {
@@ -346,7 +371,11 @@ impl SacrumSocket {
                     Self::handle_section_event(event, payload, app_handle)?;
                 }
                 "phx_reply" | "phx_error" => {
-                    log::debug!("[WebSocket] Phoenix reply: {}", event);
+                    log::info!(
+                        "[WebSocket] Phoenix reply/error on topic '{}': payload={}",
+                        topic,
+                        payload
+                    );
                 }
                 "phx_close" => {
                     log::info!("[WebSocket] Phoenix close message");
@@ -381,8 +410,35 @@ impl SacrumSocket {
             _ => TaskChangeType::StatusChanged,
         };
 
+        Self::trace_event(&format!(
+            "TASK event='{}' task_id='{}' payload_keys={:?}",
+            event,
+            task_id,
+            payload
+                .as_object()
+                .map(|o| o.keys().cloned().collect::<Vec<_>>())
+                .unwrap_or_default()
+        ));
+
         let task = if !matches!(change_type, TaskChangeType::Deleted) {
-            try_deserialize::<types::Task>(payload, "Task")
+            let result = serde_json::from_value::<types::Task>(payload.clone());
+            match result {
+                Ok(t) => {
+                    Self::trace_event(&format!(
+                        "TASK deserialized ok task_id='{}' title='{}'",
+                        task_id, t.title
+                    ));
+                    Some(t)
+                }
+                Err(e) => {
+                    Self::trace_event(&format!(
+                        "TASK deser FAILED task_id='{}' error='{}'",
+                        task_id, e
+                    ));
+                    log::warn!("[WebSocket] Failed to deserialize Task from payload: {}", e);
+                    None
+                }
+            }
         } else {
             None
         };
@@ -393,7 +449,17 @@ impl SacrumSocket {
             task,
         };
 
-        log::debug!("[WebSocket] Emitting TaskChangedEvent: {:?}", event);
+        Self::trace_event(&format!(
+            "TASK emitted change_type='{:?}' task_id='{}' has_task={}",
+            event.change_type,
+            event.task_id,
+            event.task.is_some()
+        ));
+        log::info!(
+            "[WebSocket] Emitting task {:?} event for task_id={}",
+            event.change_type,
+            event.task_id
+        );
 
         app_handle
             .emit("task-changed-event", &event)
@@ -423,8 +489,38 @@ impl SacrumSocket {
             _ => WorkflowChangeType::Updated,
         };
 
+        Self::trace_event(&format!(
+            "WORKFLOW event='{}' workflow_id='{}' payload_keys={:?}",
+            event,
+            workflow_id,
+            payload
+                .as_object()
+                .map(|o| o.keys().cloned().collect::<Vec<_>>())
+                .unwrap_or_default()
+        ));
+
         let workflow = if !matches!(change_type, WorkflowChangeType::Deleted) {
-            try_deserialize::<types::Workflow>(payload, "Workflow")
+            let result = serde_json::from_value::<types::Workflow>(payload.clone());
+            match result {
+                Ok(w) => {
+                    Self::trace_event(&format!(
+                        "WORKFLOW deserialized ok workflow_id='{}' name='{}'",
+                        workflow_id, w.name
+                    ));
+                    Some(w)
+                }
+                Err(e) => {
+                    Self::trace_event(&format!(
+                        "WORKFLOW deser FAILED workflow_id='{}' error='{}'",
+                        workflow_id, e
+                    ));
+                    log::warn!(
+                        "[WebSocket] Failed to deserialize Workflow from payload: {}",
+                        e
+                    );
+                    None
+                }
+            }
         } else {
             None
         };
@@ -435,7 +531,17 @@ impl SacrumSocket {
             workflow,
         };
 
-        log::debug!("[WebSocket] Emitting WorkflowChangedEvent: {:?}", event);
+        Self::trace_event(&format!(
+            "WORKFLOW emitted change_type='{:?}' workflow_id='{}' has_workflow={}",
+            event.change_type,
+            event.workflow_id,
+            event.workflow.is_some()
+        ));
+        log::info!(
+            "[WebSocket] Emitting workflow {:?} event for workflow_id={}",
+            event.change_type,
+            event.workflow_id
+        );
 
         app_handle
             .emit("workflow-changed-event", &event)
@@ -469,8 +575,36 @@ impl SacrumSocket {
             _ => StepChangeType::Updated,
         };
 
+        Self::trace_event(&format!(
+            "STEP event='{}' step_id='{}' workflow_id='{}' payload_keys={:?}",
+            event,
+            step_id,
+            workflow_id,
+            payload
+                .as_object()
+                .map(|o| o.keys().cloned().collect::<Vec<_>>())
+                .unwrap_or_default()
+        ));
+
         let step = if !matches!(change_type, StepChangeType::Deleted) {
-            try_deserialize::<types::Step>(payload, "Step")
+            let result = serde_json::from_value::<types::Step>(payload.clone());
+            match result {
+                Ok(s) => {
+                    Self::trace_event(&format!(
+                        "STEP deserialized ok step_id='{}' name='{}'",
+                        step_id, s.name
+                    ));
+                    Some(s)
+                }
+                Err(e) => {
+                    Self::trace_event(&format!(
+                        "STEP deser FAILED step_id='{}' error='{}'",
+                        step_id, e
+                    ));
+                    log::warn!("[WebSocket] Failed to deserialize Step from payload: {}", e);
+                    None
+                }
+            }
         } else {
             None
         };
@@ -482,7 +616,17 @@ impl SacrumSocket {
             step,
         };
 
-        log::debug!("[WebSocket] Emitting StepChangedEvent: {:?}", event);
+        Self::trace_event(&format!(
+            "STEP emitted change_type='{:?}' step_id='{}' has_step={}",
+            event.change_type,
+            event.step_id,
+            event.step.is_some()
+        ));
+        log::info!(
+            "[WebSocket] Emitting step {:?} event for step_id={}",
+            event.change_type,
+            event.step_id
+        );
 
         app_handle
             .emit("step-changed-event", &event)

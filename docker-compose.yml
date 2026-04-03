@@ -91,14 +91,15 @@ services:
       seeder:
         condition: service_completed_successfully
     environment:
-      DISPLAY: ":99"
+      VTB_URL: "http://localhost:4000"
+      VTB_TOKEN: "sac_acceptance-test-token-vertebrae"
+      TAURI_BASE_URL: "http://localhost:1420"
       CARGO_HOME: "/cargo"
     volumes:
       - .:/app
       - cargo-cache:/cargo
-      - ./docker/gui-config.toml:/root/.config/vertebrae/config.toml:ro
+      - ./docker/gui-config.toml:/root/.config/vertebrae/config.toml.base:ro
     working_dir: /app
-    entrypoint: ["xvfb-run", "--auto-servernum", "--server-args=-screen 0 1280x1024x24"]
     command: ["/app/docker/gui-test-entrypoint.sh"]
 
 volumes:

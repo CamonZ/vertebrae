@@ -69,7 +69,7 @@ function formatStepName(stepName: string | null): string {
  * Get level indicator styling
  */
 function getLevelStyles(
-  level: TaskLevel
+  level: TaskLevel | null
 ): { bg: string; text: string; border: string } {
   switch (level) {
     case "epic":
@@ -98,7 +98,7 @@ function getLevelStyles(
 /**
  * Format level for display
  */
-function formatLevel(level: TaskLevel): string {
+function formatLevel(level: TaskLevel | null): string {
   switch (level) {
     case "epic":
       return "Epic";
@@ -107,7 +107,7 @@ function formatLevel(level: TaskLevel): string {
     case "task":
       return "Task";
     default:
-      return level;
+      return level ?? "Unknown";
   }
 }
 
