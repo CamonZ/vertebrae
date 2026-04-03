@@ -81,8 +81,8 @@ export function StepDetailPanel({
   const [search, setSearch] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("tree");
 
-  // Fetch step data and listen for changes
-  const { step } = useStep(stepId);
+  // Fetch step data on mount; applyUpdate lets us apply WS payloads without a round-trip
+  const { step, applyUpdate } = useStep(stepId);
 
   // Use expanded nodes hook for task tree
   const expandedNodes = useExpandedNodes();
@@ -99,8 +99,21 @@ export function StepDetailPanel({
     return buildTreeFromTasks(filtered);
   }, [tasks, search]);
 
-  // Listen for step change events - updates step store directly
-  useStepChangeListener();
+  // Apply WS payloads directly — no round-trip needed since the payload is the full entity
+  useStepChangeListener({
+    onUpdated: useCallback(
+      (updatedStep: Step) => {
+        if (updatedStep.id === stepId) applyUpdate(updatedStep);
+      },
+      [stepId, applyUpdate]
+    ),
+    onDeleted: useCallback(
+      (deletedId: string) => {
+        if (deletedId === stepId) onClose?.();
+      },
+      [stepId, onClose]
+    ),
+  });
 
   // Handle field updates
   const handleUpdateField = useCallback(

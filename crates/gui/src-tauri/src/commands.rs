@@ -183,7 +183,11 @@ pub async fn add_project(
 /// is the currently selected project, clears the selection and services.
 #[tauri::command]
 #[specta::specta]
-pub async fn remove_project(state: State<'_, AppState>, slug: String) -> Result<(), CommandError> {
+pub async fn remove_project(
+    state: State<'_, AppState>,
+    socket_state: State<'_, tokio::sync::Mutex<crate::websocket_client::SacrumSocket>>,
+    slug: String,
+) -> Result<(), CommandError> {
     log::info!("remove_project called with slug: {}", slug);
 
     // Remove project from global config
@@ -197,7 +201,7 @@ pub async fn remove_project(state: State<'_, AppState>, slug: String) -> Result<
         });
     }
 
-    // If the removed project was the current one, clear selection and services
+    // If the removed project was the current one, clear selection, services, and socket
     if state.project_config.get_current_project().as_deref() == Some(&slug) {
         state
             .project_config
@@ -206,6 +210,10 @@ pub async fn remove_project(state: State<'_, AppState>, slug: String) -> Result<
 
         let mut service_lock = state.services.write().await;
         *service_lock = None;
+
+        let mut socket = socket_state.lock().await;
+        socket.disconnect();
+        *socket = crate::websocket_client::SacrumSocket::disconnected();
     }
 
     Ok(())
@@ -249,7 +257,9 @@ pub async fn get_current_project_path(
 #[tauri::command]
 #[specta::specta]
 pub async fn set_current_project(
+    app_handle: tauri::AppHandle,
     state: State<'_, AppState>,
+    socket_state: State<'_, tokio::sync::Mutex<crate::websocket_client::SacrumSocket>>,
     slug: Option<String>,
 ) -> Result<(), CommandError> {
     log::info!("set_current_project called with slug: {:?}", slug);
@@ -260,16 +270,10 @@ pub async fn set_current_project(
         .set_current_project(slug.clone())
         .map_err(|e| CommandError { message: e })?;
 
-    // Connect to Sacrum backend if a project is selected
-    if let Some(ref project_slug) = slug {
+    // Load Sacrum config once (used for both services and WebSocket)
+    let sacrum_config = if let Some(ref project_slug) = slug {
         match vertebrae_sacrum_client::SacrumConfig::load_for_project(project_slug) {
-            Ok(config) => {
-                let client = vertebrae_sacrum_client::GraphqlClient::new(config);
-                let client_arc = std::sync::Arc::new(client);
-                let services = vertebrae_sacrum_client::from_sacrum(client_arc);
-                let mut service_lock = state.services.write().await;
-                *service_lock = Some(services);
-            }
+            Ok(config) => Some(config),
             Err(e) => {
                 return Err(CommandError {
                     message: format!("Failed to load Sacrum configuration: {}", e),
@@ -277,8 +281,39 @@ pub async fn set_current_project(
             }
         }
     } else {
+        None
+    };
+
+    // Update REST services
+    {
         let mut service_lock = state.services.write().await;
-        *service_lock = None;
+        *service_lock = sacrum_config.as_ref().map(|config| {
+            let client = vertebrae_sacrum_client::GraphqlClient::new(config.clone());
+            let client_arc = std::sync::Arc::new(client);
+            vertebrae_sacrum_client::from_sacrum(client_arc)
+        });
+    }
+
+    // Restart WebSocket with new project credentials.
+    // Stop the old connection first so we don't leave a dangling background task.
+    {
+        let mut socket = socket_state.lock().await;
+        socket.disconnect();
+        if let Some(config) = sacrum_config {
+            log::info!(
+                "[WebSocket] Restarting connection for project '{}'",
+                config.project_id
+            );
+            *socket = crate::websocket_client::SacrumSocket::new(
+                config.base_url,
+                config.api_token,
+                config.project_id,
+            );
+            socket.connect(&app_handle);
+        } else {
+            log::info!("[WebSocket] No project selected, socket stays disconnected");
+            *socket = crate::websocket_client::SacrumSocket::disconnected();
+        }
     }
 
     Ok(())
@@ -1796,9 +1831,10 @@ pub async fn replace_code_refs(
 #[tauri::command]
 #[specta::specta]
 pub async fn get_websocket_status(
-    socket: State<'_, crate::websocket_client::SacrumSocket>,
+    socket: State<'_, tokio::sync::Mutex<crate::websocket_client::SacrumSocket>>,
 ) -> Result<String, CommandError> {
-    let status = socket.get_state().await;
+    let guard = socket.lock().await;
+    let status = guard.get_state().await;
     let status_str = match status {
         crate::websocket_client::ConnectionState::Disconnected => "disconnected",
         crate::websocket_client::ConnectionState::Connecting => "connecting",
@@ -1826,6 +1862,9 @@ mod tests {
                 services: RwLock::new(Some(services)),
                 project_config,
             })
+            .manage(tokio::sync::Mutex::new(
+                crate::websocket_client::SacrumSocket::disconnected(),
+            ))
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .unwrap()
     }
@@ -1840,6 +1879,9 @@ mod tests {
                 services: RwLock::new(None),
                 project_config,
             })
+            .manage(tokio::sync::Mutex::new(
+                crate::websocket_client::SacrumSocket::disconnected(),
+            ))
             .build(tauri::test::mock_context(tauri::test::noop_assets()))
             .unwrap()
     }

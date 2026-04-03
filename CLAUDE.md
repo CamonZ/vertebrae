@@ -231,22 +231,21 @@ npm run generate:types   # Generate TypeScript types from Rust
 
 ### Rust Tests
 
-```bash
-# Run all tests
-cargo test
+Acceptance tests (`crates/acceptance`, `crates/gui-acceptance`) run inside Docker only — do NOT run them locally as they require a live Sacrum backend and would pollute the local database.
 
-# Run tests quietly (only show failures)
-cargo test --quiet
+```bash
+# Run unit/integration tests (excludes acceptance test crates)
+cargo test --quiet --workspace --exclude acceptance --exclude gui-acceptance
 
 # Run tests with output
-cargo test -- --nocapture
+cargo test --workspace --exclude acceptance --exclude gui-acceptance -- --nocapture
 
 # Run tests with coverage (requires cargo-llvm-cov)
 # Note: llvm-cov runs tests internally, so no need to run cargo test separately
-cargo llvm-cov --quiet
+cargo llvm-cov --quiet --workspace --exclude acceptance --exclude gui-acceptance
 
 # Run tests with coverage threshold check (preferred for CI/pre-commit)
-cargo llvm-cov --quiet --fail-under-lines 75
+cargo llvm-cov --quiet --workspace --exclude acceptance --exclude gui-acceptance --fail-under-lines 75
 ```
 
 ### GUI Tests (React)
@@ -564,7 +563,7 @@ The pre-commit hook runs the following checks:
 **Rust:**
 1. `cargo fmt --check` - Ensures code is properly formatted
 2. `cargo clippy --quiet -- -D warnings` - Ensures no linting warnings
-3. `cargo llvm-cov --quiet --fail-under-lines 75` - Runs tests and ensures coverage >= 75%
+3. `cargo llvm-cov --quiet --workspace --exclude acceptance --exclude gui-acceptance --fail-under-lines 75` - Runs unit/integration tests and ensures coverage >= 75%
 
 **GUI (React):**
 4. `npm run test` - Ensures all React/TypeScript tests pass

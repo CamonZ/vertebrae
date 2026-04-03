@@ -5,7 +5,8 @@ use crate::GuiWorld;
 
 /// Before-hook: create a unique Sacrum project, register it in config.toml,
 /// navigate the GUI to /setup, select the project, and wait for redirect.
-pub async fn before_scenario(world: &mut GuiWorld) {
+pub async fn before_scenario(world: &mut GuiWorld, scenario_name: &str) {
+    world.scenario_name = scenario_name.to_string();
     let api_token =
         std::env::var("VTB_TOKEN").expect("VTB_TOKEN must be set for GUI acceptance tests");
     let base_url = std::env::var("VTB_URL").unwrap_or_else(|_| "http://localhost:4000".to_string());
@@ -78,8 +79,9 @@ pub async fn before_scenario(world: &mut GuiWorld) {
     let client = wd.lock().await;
 
     // Navigate to the project setup page
+    let setup_url = format!("{}/setup", gui_acceptance::tauri_base_url());
     client
-        .goto("tauri://localhost/setup")
+        .goto(&setup_url)
         .await
         .expect("failed to navigate to /setup");
 
@@ -91,8 +93,18 @@ pub async fn before_scenario(world: &mut GuiWorld) {
             "//*[contains(text(), '{}')]",
             slug
         )))
-        .await
-        .expect("project row not found on /setup page");
+        .await;
+
+    if project_row.is_err() {
+        // Capture a screenshot to help diagnose what the app is actually showing.
+        gui_acceptance::screenshot(&client, &world.scenario_name, "setup-debug").await;
+        panic!(
+            "project row not found on /setup page for slug '{}' — check test-output/ for screenshot",
+            slug
+        );
+    }
+
+    let project_row = project_row.unwrap();
 
     // Click the project row to select it
     project_row
@@ -102,6 +114,7 @@ pub async fn before_scenario(world: &mut GuiWorld) {
 
     // Wait for redirect away from /setup (the app navigates to / -> /operations)
     tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+    gui_acceptance::screenshot(&client, &world.scenario_name, "after-setup-select").await;
 }
 
 /// After-hook: unregister the project from config.toml and clean up the temp directory.

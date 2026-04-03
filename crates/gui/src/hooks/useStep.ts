@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
-import { commands, type Step } from "../bindings";
+import { commands } from "../bindings";
+import type { Step } from "../bindings";
 
 /**
  * Hook for fetching a single step with its configuration.
@@ -44,5 +45,10 @@ export function useStep(stepId: string | null | undefined) {
     fetchStep();
   }, [fetchStep]);
 
-  return { step, isLoading, error, refetch };
+  /** Apply a full step payload received from a WebSocket event directly. */
+  const applyUpdate = useCallback((data: Step) => {
+    setStep(data);
+  }, []);
+
+  return { step, isLoading, error, refetch, applyUpdate };
 }

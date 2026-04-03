@@ -103,7 +103,6 @@ function AllWorkflowsPipelineInner() {
   const [error, setError] = useState<string | null>(null);
 
   // Shared debounce timer for pipeline refetch - coalesces all WS event listeners
-  const refetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // State for selected task (for detail panel)
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
@@ -317,17 +316,6 @@ function AllWorkflowsPipelineInner() {
     }
   }, [addToast]);
 
-  // Debounced refetch - for structural changes (workflow/step CRUD)
-  const schedulePipelineRefetch = useCallback(() => {
-    if (refetchTimerRef.current) {
-      clearTimeout(refetchTimerRef.current);
-    }
-    refetchTimerRef.current = setTimeout(() => {
-      refetchTimerRef.current = null;
-      fetchPipelineData();
-    }, 200);
-  }, [fetchPipelineData]);
-
   // Store fetchPipelineData in a ref to avoid dependency cycles
   const fetchPipelineDataRef = useRef(fetchPipelineData);
   useEffect(() => {
@@ -381,13 +369,12 @@ function AllWorkflowsPipelineInner() {
     });
   }, [workflowTasksMap, setExecutions]);
 
-  // Handle individual task changes - fetch only the changed task and patch local state
+  // Handle individual task changes — WS payload carries the full entity, no round-trip needed
   useEffect(() => {
-    const unlistenPromise = events.taskChangedEvent.listen(async (event) => {
-      const { task_id, change_type } = event.payload;
+    const unlistenPromise = events.taskChangedEvent.listen((event) => {
+      const { task_id, change_type, task: updatedTask } = event.payload;
 
       if (change_type === "Deleted") {
-        // Remove task from the map
         setWorkflowTasksMap((prev) => {
           const next = new Map(prev);
           for (const [wfId, tasks] of next) {
@@ -401,102 +388,154 @@ function AllWorkflowsPipelineInner() {
         return;
       }
 
-      // Fetch just the changed task
-      try {
-        const result = await commands.getTask(task_id);
-        if (result.status !== "ok") return;
-        const updatedTask = result.data;
+      if (!updatedTask) return;
 
-        // Update the task store for detail panel
-        const store = useTaskStore.getState();
-        const updatedTasks = store.tasks.map((t) =>
-          t.id === task_id ? updatedTask : t
-        );
-        // If task wasn't in the list (newly created), add it
-        if (!store.tasks.some((t) => t.id === task_id)) {
-          updatedTasks.push(updatedTask);
+      // Apply to task store for the detail panel
+      const store = useTaskStore.getState();
+      const updatedTasks = store.tasks.map((t) =>
+        t.id === task_id ? updatedTask : t
+      );
+      if (!store.tasks.some((t) => t.id === task_id)) {
+        updatedTasks.push(updatedTask);
+      }
+      store.setTasks(updatedTasks);
+
+      // Patch the workflowTasksMap
+      setWorkflowTasksMap((prev) => {
+        const next = new Map(prev);
+
+        // Remove task from its old workflow bucket (in case it moved)
+        for (const [wfId, tasks] of next) {
+          const idx = tasks.findIndex((t) => t.id === task_id);
+          if (idx !== -1) {
+            const updated = [...tasks];
+            updated.splice(idx, 1);
+            next.set(wfId, updated);
+          }
         }
-        store.setTasks(updatedTasks);
 
-        // Patch the workflowTasksMap
-        setWorkflowTasksMap((prev) => {
-          const next = new Map(prev);
-
-          // Remove task from its old workflow bucket (if it moved)
-          for (const [wfId, tasks] of next) {
-            const idx = tasks.findIndex((t) => t.id === task_id);
-            if (idx !== -1) {
-              const updated = [...tasks];
-              updated.splice(idx, 1);
-              next.set(wfId, updated);
-            }
-          }
-
-          // Add task to its current workflow bucket
-          const wfId = updatedTask.workflow_id;
-          if (wfId) {
-            const bucket = next.get(wfId) || [];
-            next.set(wfId, [...bucket, updatedTask]);
-          }
-
-          return next;
-        });
-
-        // Trigger flash animation on workflow and step assignment
+        // Add task to its current workflow bucket
         const wfId = updatedTask.workflow_id;
-        const stepId = updatedTask.current_step_id;
-
         if (wfId) {
-          setFlashingWorkflowIds((prev) => new Set(prev).add(wfId));
-          setTimeout(() => {
-            setFlashingWorkflowIds((prev) => {
-              const next = new Set(prev);
-              next.delete(wfId);
-              return next;
-            });
-          }, 2000);
+          const bucket = next.get(wfId) || [];
+          next.set(wfId, [...bucket, updatedTask]);
         }
 
-        if (stepId) {
-          setFlashingStepIds((prev) => new Set(prev).add(stepId));
-          setTimeout(() => {
-            setFlashingStepIds((prev) => {
-              const next = new Set(prev);
-              next.delete(stepId);
-              return next;
-            });
-          }, 2000);
-        }
-      } catch {
-        // Fallback to full refetch on error
-        schedulePipelineRefetch();
+        return next;
+      });
+
+      // Trigger flash animation on workflow and step assignment
+      const wfId = updatedTask.workflow_id;
+      const stepId = updatedTask.current_step_id;
+
+      if (wfId) {
+        setFlashingWorkflowIds((prev) => new Set(prev).add(wfId));
+        setTimeout(() => {
+          setFlashingWorkflowIds((prev) => {
+            const next = new Set(prev);
+            next.delete(wfId);
+            return next;
+          });
+        }, 2000);
+      }
+
+      if (stepId) {
+        setFlashingStepIds((prev) => new Set(prev).add(stepId));
+        setTimeout(() => {
+          setFlashingStepIds((prev) => {
+            const next = new Set(prev);
+            next.delete(stepId);
+            return next;
+          });
+        }, 2000);
       }
     });
 
     return () => {
       unlistenPromise.then((unlisten) => unlisten());
     };
-  }, [schedulePipelineRefetch]);
+  }, []);
 
-  // Subscribe to workflow change events - only refetch for known workflows
+  // Subscribe to workflow change events — WS payload carries the full entity, no round-trip needed
   useEffect(() => {
     const unlistenPromise = events.workflowChangedEvent.listen((event) => {
-      const { workflow_id } = event.payload;
-      // Ignore events where the ID doesn't match any known workflow
-      // (backend bug: sometimes sends task_id as workflow_id)
-      const isKnownWorkflow = workflows.some((w) => w.id === workflow_id);
-      if (isKnownWorkflow) {
-        schedulePipelineRefetch();
+      const { workflow_id, change_type, workflow } = event.payload;
+
+      if (change_type === "Deleted") {
+        setWorkflows((prev) => prev.filter((w) => w.id !== workflow_id));
+        setWorkflowTasksMap((prev) => {
+          const next = new Map(prev);
+          next.delete(workflow_id);
+          return next;
+        });
+        setWorkflowStepsMap((prev) => {
+          const next = new Map(prev);
+          next.delete(workflow_id);
+          return next;
+        });
+        return;
+      }
+
+      if (!workflow) return;
+
+      if (change_type === "Created") {
+        setWorkflows((prev) => [...prev, workflow]);
+      } else {
+        // Updated, TaskAssigned, TaskUnassigned
+        setWorkflows((prev) =>
+          prev.map((w) => (w.id === workflow_id ? workflow : w))
+        );
       }
     });
 
     return () => {
       unlistenPromise.then((unlisten) => unlisten());
     };
-  }, [workflows, schedulePipelineRefetch]);
+  }, []);
 
-  // Subscribe to step change events - updates step store directly
-  useStepChangeListener();
+  // Subscribe to step change events - updates step store AND local workflowStepsMap
+  // so the pipeline reacts without a round-trip refetch.
+  useStepChangeListener({
+    onCreated: useCallback((step: Step) => {
+      if (!step.workflow_id) return;
+      setWorkflowStepsMap((prev) => {
+        const next = new Map(prev);
+        const existing = next.get(step.workflow_id) ?? [];
+        if (!existing.some((s) => s.id === step.id)) {
+          next.set(step.workflow_id, [...existing, step]);
+        }
+        return next;
+      });
+    }, []),
+    onUpdated: useCallback((step: Step) => {
+      setWorkflowStepsMap((prev) => {
+        const next = new Map(prev);
+        for (const [wfId, steps] of next) {
+          const idx = steps.findIndex((s) => s.id === step.id);
+          if (idx >= 0) {
+            const updated = [...steps];
+            updated[idx] = step;
+            next.set(wfId, updated);
+            break;
+          }
+        }
+        return next;
+      });
+    }, []),
+    onDeleted: useCallback((stepId: string) => {
+      setWorkflowStepsMap((prev) => {
+        const next = new Map(prev);
+        for (const [wfId, steps] of next) {
+          const filtered = steps.filter((s) => s.id !== stepId);
+          if (filtered.length !== steps.length) {
+            next.set(wfId, filtered);
+            break;
+          }
+        }
+        return next;
+      });
+    }, []),
+  });
 
   // Calculate workflow zone dimensions for ELK layout
   const workflowDimensions = useMemo(() => {

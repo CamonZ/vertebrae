@@ -1,5 +1,5 @@
 import { useEffect, useCallback } from "react";
-import { events, type StepChangedEvent, type StepChangeType } from "../bindings";
+import { events, type Step, type StepChangedEvent, type StepChangeType } from "../bindings";
 import { useStepStore, useToastStore } from "../stores";
 
 /** Get toast message for step change type */
@@ -19,6 +19,12 @@ function getStepChangeMessage(changeType: StepChangeType, stepId: string): strin
 interface UseStepChangeListenerOptions {
   /** Whether the listener is enabled (default: true) */
   enabled?: boolean;
+  /** Called after the store is updated when a step is created */
+  onCreated?: (step: Step) => void;
+  /** Called after the store is updated when a step is updated */
+  onUpdated?: (step: Step) => void;
+  /** Called after the store is updated when a step is deleted */
+  onDeleted?: (stepId: string) => void;
 }
 
 /**
@@ -26,12 +32,15 @@ interface UseStepChangeListenerOptions {
  * directly to the step store. No REST refetch is needed since WS payloads
  * carry the full entity.
  *
+ * Optional callbacks allow callers to also update local derived state
+ * (e.g. AllWorkflowsPipeline's workflowStepsMap) without a round-trip refetch.
+ *
  * @param options - Configuration options for the listener
  */
 export function useStepChangeListener(
   options: UseStepChangeListenerOptions = {}
 ) {
-  const { enabled = true } = options;
+  const { enabled = true, onCreated, onUpdated, onDeleted } = options;
   const upsertStep = useStepStore((state) => state.upsertStep);
   const removeStep = useStepStore((state) => state.removeStep);
   const addToast = useToastStore((state) => state.addToast);
@@ -51,11 +60,17 @@ export function useStepChangeListener(
 
       if (change_type === "Deleted") {
         removeStep(step_id);
+        onDeleted?.(step_id);
       } else if (step) {
         upsertStep(step);
+        if (change_type === "Created") {
+          onCreated?.(step);
+        } else {
+          onUpdated?.(step);
+        }
       }
     },
-    [addToast, upsertStep, removeStep]
+    [addToast, upsertStep, removeStep, onCreated, onUpdated, onDeleted]
   );
 
   useEffect(() => {
