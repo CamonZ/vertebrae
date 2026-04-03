@@ -71,7 +71,7 @@ function getStatusStyles(status: string): {
 /**
  * Get level styling
  */
-function getLevelStyles(level: TaskLevel): {
+function getLevelStyles(level: TaskLevel | null): {
   bg: string;
   text: string;
   border: string;
@@ -387,7 +387,7 @@ export function TaskDetailPanel({
         priority: string | null;
         add_tags: string[];
         remove_tags: string[];
-        level: string;
+        level: string | null;
         needs_human_review: boolean;
         archived: boolean | null;
         worktree: string | null;
@@ -760,7 +760,7 @@ export function TaskDetailPanel({
               <span
                 className={`inline-flex items-center rounded border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${levelStyles?.bg} ${levelStyles?.text} ${levelStyles?.border}`}
               >
-                {taskData.level}
+                {taskData.level ?? "unknown"}
               </span>
               {!taskData.workflow_name && (
                 <span
@@ -1121,7 +1121,7 @@ export function TaskDetailPanel({
                     onClick={() => handleFieldClick("level")}
                     className="text-sm text-text-secondary cursor-pointer hover:bg-bg-hover p-2 rounded"
                   >
-                    {taskData.level.charAt(0).toUpperCase() + taskData.level.slice(1)}
+                    {taskData.level ? taskData.level.charAt(0).toUpperCase() + taskData.level.slice(1) : "Unknown"}
                   </p>
                 )}
               </div>

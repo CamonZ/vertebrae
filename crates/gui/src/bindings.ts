@@ -1013,9 +1013,9 @@ title: string;
  */
 description: string | null; 
 /**
- * Hierarchy level
+ * Hierarchy level (null when created without explicit level)
  */
-level: TaskLevel; 
+level: TaskLevel | null; 
 /**
  * Optional priority
  */

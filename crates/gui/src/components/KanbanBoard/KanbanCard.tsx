@@ -7,7 +7,7 @@ interface KanbanCardProps {
   onClick?: (task: Task) => void;
 }
 
-function getLevelStyles(level: TaskLevel): { bg: string; text: string; border: string } {
+function getLevelStyles(level: TaskLevel | null): { bg: string; text: string; border: string } {
   switch (level) {
     case "epic":
       return { bg: "bg-info/10", text: "text-info", border: "border-info/30" };
@@ -20,7 +20,7 @@ function getLevelStyles(level: TaskLevel): { bg: string; text: string; border: s
   }
 }
 
-function formatLevel(level: TaskLevel): string {
+function formatLevel(level: TaskLevel | null): string {
   switch (level) {
     case "epic":
       return "Epic";
@@ -29,7 +29,7 @@ function formatLevel(level: TaskLevel): string {
     case "task":
       return "Task";
     default:
-      return level;
+      return level ?? "Unknown";
   }
 }
 

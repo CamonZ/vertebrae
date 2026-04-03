@@ -28,3 +28,6 @@ Thumbs.db
 /.env
 .mcp.json
 /mutants.out
+
+# GUI acceptance test output (screenshots, logs)
+/test-output/

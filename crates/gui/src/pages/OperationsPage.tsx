@@ -64,7 +64,7 @@ export function OperationsPage() {
 
       {/* Content */}
       <div className="flex-1 overflow-auto bg-bg-primary p-6">
-        {isLoading ? (
+        {isLoading && attentionItems.length === 0 && liveItems.length === 0 && completedItems.length === 0 && readyTasks.length === 0 ? (
           <div className="flex h-full items-center justify-center">
             <div className="text-center">
               <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />

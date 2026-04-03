@@ -102,6 +102,7 @@ describe("StepDetailPanel", () => {
       isLoading: false,
       error: null,
       refetch: vi.fn(),
+      applyUpdate: vi.fn(),
     });
     vi.mocked(hooks.useStepChangeListener).mockReturnValue(undefined);
     vi.mocked(hooks.useExpandedNodes).mockReturnValue({
@@ -121,6 +122,7 @@ describe("StepDetailPanel", () => {
         isLoading: false,
         error: null,
         refetch: vi.fn(),
+      applyUpdate: vi.fn(),
       });
 
       const { container } = render(
@@ -141,6 +143,7 @@ describe("StepDetailPanel", () => {
         isLoading: false,
         error: null,
         refetch: vi.fn(),
+      applyUpdate: vi.fn(),
       });
 
       render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
@@ -154,6 +157,7 @@ describe("StepDetailPanel", () => {
         isLoading: false,
         error: null,
         refetch: vi.fn(),
+      applyUpdate: vi.fn(),
       });
 
       render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
@@ -168,6 +172,7 @@ describe("StepDetailPanel", () => {
         isLoading: false,
         error: null,
         refetch: vi.fn(),
+      applyUpdate: vi.fn(),
       });
 
       render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
@@ -181,6 +186,7 @@ describe("StepDetailPanel", () => {
         isLoading: false,
         error: null,
         refetch: vi.fn(),
+      applyUpdate: vi.fn(),
       });
 
       render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
@@ -195,6 +201,7 @@ describe("StepDetailPanel", () => {
         isLoading: false,
         error: null,
         refetch: vi.fn(),
+      applyUpdate: vi.fn(),
       });
 
       render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
@@ -210,6 +217,7 @@ describe("StepDetailPanel", () => {
         isLoading: false,
         error: null,
         refetch: vi.fn(),
+      applyUpdate: vi.fn(),
       });
 
       render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
@@ -227,6 +235,7 @@ describe("StepDetailPanel", () => {
         isLoading: false,
         error: null,
         refetch: vi.fn(),
+      applyUpdate: vi.fn(),
       });
 
       render(<StepDetailPanel stepId="step-test" allSteps={[step1, step2]} />);
@@ -258,6 +267,7 @@ describe("StepDetailPanel", () => {
         isLoading: false,
         error: null,
         refetch: vi.fn(),
+      applyUpdate: vi.fn(),
       });
 
       render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
@@ -276,6 +286,7 @@ describe("StepDetailPanel", () => {
         isLoading: false,
         error: null,
         refetch: vi.fn(),
+      applyUpdate: vi.fn(),
       });
 
       render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
@@ -435,6 +446,7 @@ describe("StepDetailPanel", () => {
         isLoading: false,
         error: null,
         refetch: vi.fn(),
+      applyUpdate: vi.fn(),
       });
       
       // Re-render to pick up the new mock
@@ -503,6 +515,7 @@ describe("StepDetailPanel", () => {
         isLoading: false,
         error: null,
         refetch: vi.fn(),
+      applyUpdate: vi.fn(),
       });
 
       render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
@@ -519,6 +532,7 @@ describe("StepDetailPanel", () => {
         isLoading: false,
         error: null,
         refetch: vi.fn(),
+      applyUpdate: vi.fn(),
       });
 
       render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
@@ -535,6 +549,7 @@ describe("StepDetailPanel", () => {
         isLoading: false,
         error: null,
         refetch: vi.fn(),
+      applyUpdate: vi.fn(),
       });
 
       render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
@@ -551,6 +566,7 @@ describe("StepDetailPanel", () => {
         isLoading: false,
         error: null,
         refetch: vi.fn(),
+      applyUpdate: vi.fn(),
       });
 
       render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
@@ -571,6 +587,7 @@ describe("StepDetailPanel", () => {
         isLoading: false,
         error: null,
         refetch: vi.fn(),
+      applyUpdate: vi.fn(),
       });
 
       render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
@@ -588,6 +605,7 @@ describe("StepDetailPanel", () => {
         isLoading: false,
         error: null,
         refetch: vi.fn(),
+      applyUpdate: vi.fn(),
       });
 
       render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
