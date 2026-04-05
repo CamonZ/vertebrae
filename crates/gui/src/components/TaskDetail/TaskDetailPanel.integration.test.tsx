@@ -1,9 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { render } from "../../test/test-utils";
+import { render, createMockTask } from "../../test/test-utils";
 import { TaskDetailPanel } from "./TaskDetailPanel";
 import * as eventsModule from "../../bindings";
+import { useTaskStore } from "../../stores";
 
 // Use vi.hoisted to define mock data that's available in hoisted mocks
 const { mockTaskData } = vi.hoisted(() => {
@@ -127,6 +128,10 @@ describe("TaskDetailPanel - Inline Editing Integration", () => {
     vi.mocked(eventsModule.events.taskChangedEvent.listen).mockResolvedValue(
       () => {}
     );
+  });
+
+  afterEach(() => {
+    useTaskStore.getState().setTasks([]);
   });
 
   describe("Details section - Inline editing UX", () => {
@@ -354,6 +359,28 @@ describe("TaskDetailPanel - Inline Editing Integration", () => {
       expect(specPos).toBeLessThan(depsPos);
       expect(depsPos).toBeLessThan(codePos);
       expect(codePos).toBeLessThan(detailsPos);
+    });
+
+    it("sections include Children between Spec and Dependencies when task has children", () => {
+      useTaskStore.getState().setTasks([
+        createMockTask({
+          id: "child-integ-1",
+          title: "Integration child",
+          level: "task",
+          parent_id: "task-123",
+          step_name: "todo",
+        }),
+      ]);
+
+      render(<TaskDetailPanel taskId="task-123" onClose={vi.fn()} />);
+
+      const allText = document.body.textContent ?? "";
+      const specPos = allText.indexOf("Spec");
+      const childrenPos = allText.indexOf("Children");
+      const depsPos = allText.indexOf("Dependencies");
+
+      expect(specPos).toBeLessThan(childrenPos);
+      expect(childrenPos).toBeLessThan(depsPos);
     });
 
     it("title is editable via click", async () => {
