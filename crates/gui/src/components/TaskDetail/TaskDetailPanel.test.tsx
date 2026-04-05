@@ -391,15 +391,10 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       expect(detailsToggle).toBeInTheDocument();
     });
 
-    it("Spec section expands to show goal and constraints", () => {
+    it("Spec section is open by default showing goal and constraints", () => {
       render(
         <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
       );
-
-      const specToggle = screen.getByRole("button", {
-        name: /toggle spec section/i,
-      });
-      fireEvent.click(specToggle);
 
       expect(screen.getByText("Build a working feature")).toBeInTheDocument();
       expect(
@@ -407,7 +402,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       ).toBeInTheDocument();
     });
 
-    it("Details section expands to show description, priority, tags", () => {
+    it("Details section expands to show priority, tags", () => {
       render(
         <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
       );
@@ -417,7 +412,6 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       });
       fireEvent.click(detailsToggle);
 
-      expect(screen.getByText("Test Description")).toBeInTheDocument();
       expect(screen.getByText("medium")).toBeInTheDocument();
     });
 

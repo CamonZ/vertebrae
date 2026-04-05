@@ -923,10 +923,10 @@ export function TaskDetailPanel({
             {taskData.id && <ExecutionHistory taskId={taskData.id} />}
           </CollapsibleSection>
 
-          {/* === SPEC (goal, constraints, collapsible) === */}
+          {/* === SPEC (description, goal, constraints) === */}
           <CollapsibleSection
             title="Spec"
-            defaultOpen={false}
+            defaultOpen={true}
             testId="spec-section-wrapper"
             icon={
               <svg
@@ -947,6 +947,9 @@ export function TaskDetailPanel({
             <SpecSection
               description={taskData.description}
               sections={taskData.sections ?? []}
+              onDescriptionChange={async (value) => {
+                await onUpdateField("description", value);
+              }}
             />
           </CollapsibleSection>
 
@@ -1037,22 +1040,6 @@ export function TaskDetailPanel({
             }
           >
             <div className="divide-y divide-border px-4 py-2">
-              {/* Description */}
-              <div className="py-3">
-                <h4 className="mb-1 font-mono text-[10px] uppercase tracking-wider text-text-muted">
-                  Description
-                </h4>
-                <InlineEditField
-                  value={taskData.description || ""}
-                  placeholder="Click to add description"
-                  multiline
-                  rows={4}
-                  onSave={async (value) => {
-                    await onUpdateField("description", value);
-                  }}
-                />
-              </div>
-
               {/* Priority */}
               <div className="py-3">
                 <h4 className="mb-1 font-mono text-[10px] uppercase tracking-wider text-text-muted">
