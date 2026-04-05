@@ -26,9 +26,8 @@ import {
   type StepExecutionStatus,
   type ExecutionStatus,
 } from "../bindings";
-import { useStepChangeListener } from "../hooks/useStepChangeListener";
 import { useElkLayout, type LayoutNode, type LayoutEdge } from "../hooks";
-import { useToastStore, useTaskStore, useExecutionStore } from "../stores";
+import { useToastStore, useTaskStore, useExecutionStore, useWorkflowStore, useStepStore } from "../stores";
 import { groupTasksByStep } from "../utils";
 import {
   StepNode,
@@ -87,21 +86,42 @@ function AllWorkflowsPipelineInner() {
   const addToast = useToastStore((state) => state.addToast);
   const { fitView } = useReactFlow();
 
-  // Pipeline data loaded in a single batch
-  const [workflows, setWorkflows] = useState<Workflow[]>([]);
-  const [workflowTasksMap, setWorkflowTasksMap] = useState<
-    Map<string, Task[]>
-  >(new Map());
-  const [workflowStepsMap, setWorkflowStepsMap] = useState<Map<string, Step[]>>(
-    new Map()
-  );
+  // Read entity lists from global Zustand stores (kept fresh by GlobalListeners)
+  const workflows = useWorkflowStore((state) => state.workflows);
+  const allTasks = useTaskStore((state) => state.tasks);
+  const allSteps = useStepStore((state) => state.steps);
+
+  // Derive workflowTasksMap from the task store
+  const workflowTasksMap = useMemo(() => {
+    const map = new Map<string, Task[]>();
+    for (const task of allTasks) {
+      const wfId = task.workflow_id;
+      if (wfId) {
+        if (!map.has(wfId)) map.set(wfId, []);
+        map.get(wfId)!.push(task);
+      }
+    }
+    return map;
+  }, [allTasks]);
+
+  // Derive workflowStepsMap from the step store
+  const workflowStepsMap = useMemo(() => {
+    const map = new Map<string, Step[]>();
+    for (const step of allSteps) {
+      if (step.workflow_id) {
+        if (!map.has(step.workflow_id)) map.set(step.workflow_id, []);
+        map.get(step.workflow_id)!.push(step);
+      }
+    }
+    return map;
+  }, [allSteps]);
+
+  // Transitions stay as local state (Sacrum does not broadcast transition events)
   const [workflowTransitions, setWorkflowTransitions] = useState<
     WorkflowTransition[]
   >([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  // Shared debounce timer for pipeline refetch - coalesces all WS event listeners
 
   // State for selected task (for detail panel)
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
@@ -265,38 +285,25 @@ function AllWorkflowsPipelineInner() {
     return { stepTasks, workflowId };
   }, [selectedStepId, workflowStepsMap, workflowTasksMap]);
 
-  // Single fetch function that loads all pipeline data in one command
+  // Seed the Zustand stores and fetch transitions on mount
   const fetchPipelineData = useCallback(async () => {
     try {
       const result = await commands.getPipelineData();
       if (result.status === "ok") {
         const data = result.data;
 
-        setWorkflows(data.workflows);
-
-        // Push all tasks to the store so detail panel can derive relations
+        // Seed global stores — GlobalListeners keeps them fresh after this
+        useWorkflowStore.getState().setWorkflows(data.workflows);
         useTaskStore.getState().setTasks(data.tasks);
 
-        // Group tasks by workflow_id
-        const tasksMap = new Map<string, Task[]>();
-        for (const task of data.tasks) {
-          const wfId = task.workflow_id;
-          if (wfId) {
-            if (!tasksMap.has(wfId)) tasksMap.set(wfId, []);
-            tasksMap.get(wfId)!.push(task);
-          }
+        // Flatten workflow_steps into a single step array for the store
+        const allStepsArr: Step[] = [];
+        for (const steps of Object.values(data.workflow_steps)) {
+          if (steps) allStepsArr.push(...steps);
         }
-        setWorkflowTasksMap(tasksMap);
+        useStepStore.getState().setSteps(allStepsArr);
 
-        // Steps are already grouped by workflow_id from the backend
-        const stepsMap = new Map<string, Step[]>();
-        for (const [wfId, steps] of Object.entries(data.workflow_steps)) {
-          if (steps) {
-            stepsMap.set(wfId, steps);
-          }
-        }
-        setWorkflowStepsMap(stepsMap);
-
+        // Transitions stay local (no WS broadcast)
         setWorkflowTransitions(data.transitions);
         setError(null);
       } else {
@@ -312,115 +319,45 @@ function AllWorkflowsPipelineInner() {
     }
   }, [addToast]);
 
-  // Store fetchPipelineData in a ref to avoid dependency cycles
-  const fetchPipelineDataRef = useRef(fetchPipelineData);
-  useEffect(() => {
-    fetchPipelineDataRef.current = fetchPipelineData;
-  }, [fetchPipelineData]);
-
-  // Handle step updates (refetch all data)
-  const handleStepUpdated = useCallback(async () => {
-    await fetchPipelineDataRef.current();
-  }, []);
-
-  // Handle step deletion (refetch and close panel)
-  const handleStepDeleted = useCallback(async () => {
-    await fetchPipelineDataRef.current();
-    setSelectedStepId(null);
-  }, []);
-
   // Initial fetch
   useEffect(() => {
     fetchPipelineData();
   }, [fetchPipelineData]);
 
-  // Initialize execution store from API after pipeline data loads
+  // Seed execution store from API after the initial pipeline data loads
   const setExecutions = useExecutionStore((state) => state.setExecutions);
+  const executionSeeded = useRef(false);
   useEffect(() => {
-    // Gather all task IDs across all workflows
-    const allTaskIds: string[] = [];
-    for (const tasks of workflowTasksMap.values()) {
-      for (const task of tasks) {
-        allTaskIds.push(task.id);
-      }
-    }
+    if (executionSeeded.current || allTasks.length === 0) return;
+    executionSeeded.current = true;
 
-    if (allTaskIds.length === 0) return;
-
-    // Fetch latest execution for each task in parallel
+    const taskIds = allTasks.map((t) => t.id);
     Promise.allSettled(
-      allTaskIds.map((taskId) => commands.getTaskExecutions(taskId).then((result) => ({ taskId, result })))
+      taskIds.map((taskId) =>
+        commands
+          .getTaskExecutions(taskId)
+          .then((result) => ({ taskId, result }))
+      )
     ).then((outcomes) => {
       const latestExecutions = [];
       for (const outcome of outcomes) {
         if (outcome.status !== "fulfilled") continue;
         const { result } = outcome.value;
         if (result.status !== "ok" || result.data.length === 0) continue;
-        // Latest execution is the last one in the chronological list
         latestExecutions.push(result.data[result.data.length - 1]);
       }
       if (latestExecutions.length > 0) {
         setExecutions(latestExecutions);
       }
     });
-  }, [workflowTasksMap, setExecutions]);
+  }, [allTasks, setExecutions]);
 
-  // Handle individual task changes — WS payload carries the full entity, no round-trip needed
+  // Flash animations on task changes (UI-only, no entity state management)
   useEffect(() => {
     const unlistenPromise = events.taskChangedEvent.listen((event) => {
-      const { task_id, change_type, task: updatedTask } = event.payload;
+      const { change_type, task: updatedTask } = event.payload;
+      if (change_type === "Deleted" || !updatedTask) return;
 
-      if (change_type === "Deleted") {
-        setWorkflowTasksMap((prev) => {
-          const next = new Map(prev);
-          for (const [wfId, tasks] of next) {
-            const filtered = tasks.filter((t) => t.id !== task_id);
-            if (filtered.length !== tasks.length) {
-              next.set(wfId, filtered);
-            }
-          }
-          return next;
-        });
-        return;
-      }
-
-      if (!updatedTask) return;
-
-      // Apply to task store for the detail panel
-      const store = useTaskStore.getState();
-      const updatedTasks = store.tasks.map((t) =>
-        t.id === task_id ? updatedTask : t
-      );
-      if (!store.tasks.some((t) => t.id === task_id)) {
-        updatedTasks.push(updatedTask);
-      }
-      store.setTasks(updatedTasks);
-
-      // Patch the workflowTasksMap
-      setWorkflowTasksMap((prev) => {
-        const next = new Map(prev);
-
-        // Remove task from its old workflow bucket (in case it moved)
-        for (const [wfId, tasks] of next) {
-          const idx = tasks.findIndex((t) => t.id === task_id);
-          if (idx !== -1) {
-            const updated = [...tasks];
-            updated.splice(idx, 1);
-            next.set(wfId, updated);
-          }
-        }
-
-        // Add task to its current workflow bucket
-        const wfId = updatedTask.workflow_id;
-        if (wfId) {
-          const bucket = next.get(wfId) || [];
-          next.set(wfId, [...bucket, updatedTask]);
-        }
-
-        return next;
-      });
-
-      // Trigger flash animation on workflow and step assignment
       const wfId = updatedTask.workflow_id;
       const stepId = updatedTask.current_step_id;
 
@@ -451,87 +388,6 @@ function AllWorkflowsPipelineInner() {
       unlistenPromise.then((unlisten) => unlisten());
     };
   }, []);
-
-  // Subscribe to workflow change events — WS payload carries the full entity, no round-trip needed
-  useEffect(() => {
-    const unlistenPromise = events.workflowChangedEvent.listen((event) => {
-      const { workflow_id, change_type, workflow } = event.payload;
-
-      if (change_type === "Deleted") {
-        setWorkflows((prev) => prev.filter((w) => w.id !== workflow_id));
-        setWorkflowTasksMap((prev) => {
-          const next = new Map(prev);
-          next.delete(workflow_id);
-          return next;
-        });
-        setWorkflowStepsMap((prev) => {
-          const next = new Map(prev);
-          next.delete(workflow_id);
-          return next;
-        });
-        return;
-      }
-
-      if (!workflow) return;
-
-      if (change_type === "Created") {
-        setWorkflows((prev) => [...prev, workflow]);
-      } else {
-        // Updated, TaskAssigned, TaskUnassigned
-        setWorkflows((prev) =>
-          prev.map((w) => (w.id === workflow_id ? workflow : w))
-        );
-      }
-    });
-
-    return () => {
-      unlistenPromise.then((unlisten) => unlisten());
-    };
-  }, []);
-
-  // Subscribe to step change events - updates step store AND local workflowStepsMap
-  // so the pipeline reacts without a round-trip refetch.
-  useStepChangeListener({
-    onCreated: useCallback((step: Step) => {
-      if (!step.workflow_id) return;
-      setWorkflowStepsMap((prev) => {
-        const next = new Map(prev);
-        const existing = next.get(step.workflow_id) ?? [];
-        if (!existing.some((s) => s.id === step.id)) {
-          next.set(step.workflow_id, [...existing, step]);
-        }
-        return next;
-      });
-    }, []),
-    onUpdated: useCallback((step: Step) => {
-      setWorkflowStepsMap((prev) => {
-        const next = new Map(prev);
-        for (const [wfId, steps] of next) {
-          const idx = steps.findIndex((s) => s.id === step.id);
-          if (idx >= 0) {
-            const updated = [...steps];
-            updated[idx] = step;
-            next.set(wfId, updated);
-            break;
-          }
-        }
-        return next;
-      });
-    }, []),
-    onDeleted: useCallback((stepId: string) => {
-      setWorkflowStepsMap((prev) => {
-        const next = new Map(prev);
-        for (const [wfId, steps] of next) {
-          const filtered = steps.filter((s) => s.id !== stepId);
-          if (filtered.length !== steps.length) {
-            next.set(wfId, filtered);
-            break;
-          }
-        }
-        return next;
-      });
-    }, []),
-  });
 
   // Calculate workflow zone dimensions for ELK layout
   const workflowDimensions = useMemo(() => {
@@ -1019,13 +875,12 @@ function AllWorkflowsPipelineInner() {
       {selectedStepId && (
         <StepDetailPanel
           stepId={selectedStepId}
-          allSteps={Array.from(workflowStepsMap.values()).flat()}
+          allSteps={allSteps}
           tasks={stepTasksData.stepTasks}
           onTaskSelect={handleRelatedTaskSelect}
           selectedTaskId={selectedTaskId}
           onClose={handleCloseStepPanel}
-          onUpdated={handleStepUpdated}
-          onDeleted={handleStepDeleted}
+          onDeleted={handleCloseStepPanel}
           taskExecutionStates={taskExecutionStates}
           onBack={panelHistory.length > 0 ? handleBack : undefined}
         />
