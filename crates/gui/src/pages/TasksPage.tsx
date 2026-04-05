@@ -4,7 +4,6 @@ import type { TaskFilterOptions, Task } from "../bindings";
 import type { TaskTreeNode } from "../types/ui";
 import { useTasks } from "../hooks/useTasks";
 import { buildTreeFromTasks } from "../utils/buildTreeFromTasks";
-import { useTaskChangeListener } from "../hooks/useTaskChangeListener";
 import { useExpandedNodes } from "../hooks/useExpandedNodes";
 import { TaskList, TaskFilters, TaskTreeView, type ViewMode } from "../components/TaskList";
 import { TaskDetailPanel } from "../components/TaskDetail";
@@ -69,9 +68,6 @@ export function TasksPage() {
 
   // Build tree locally from flat task list (no separate API call needed)
   const hierarchy = useMemo(() => buildTreeFromTasks(tasks), [tasks]);
-
-  // Subscribe to task change events for automatic store updates
-  useTaskChangeListener();
 
   const handleFiltersChange = useCallback((newFilters: TaskFilterOptions) => {
     setFilters(newFilters);

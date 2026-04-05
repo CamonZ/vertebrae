@@ -27,7 +27,6 @@ import {
   type ExecutionStatus,
 } from "../bindings";
 import { useStepChangeListener } from "../hooks/useStepChangeListener";
-import { useStepExecutionChangeListener } from "../hooks/useStepExecutionChangeListener";
 import { useElkLayout, type LayoutNode, type LayoutEdge } from "../hooks";
 import { useToastStore, useTaskStore, useExecutionStore } from "../stores";
 import { groupTasksByStep } from "../utils";
@@ -124,9 +123,6 @@ function AllWorkflowsPipelineInner() {
   // Track IDs that should flash (workflow zone + step node)
   const [flashingWorkflowIds, setFlashingWorkflowIds] = useState<Set<string>>(new Set());
   const [flashingStepIds, setFlashingStepIds] = useState<Set<string>>(new Set());
-
-  // Listen for step execution changes - updates execution store directly
-  useStepExecutionChangeListener();
 
   // Derive per-task execution state from the execution store
   const executions = useExecutionStore((state) => state.executions);

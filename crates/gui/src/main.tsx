@@ -3,11 +3,10 @@ import { createRoot } from "react-dom/client";
 import { RouterProvider } from "react-router-dom";
 import "./index.css";
 import { router } from "./router";
-import { SplashScreen } from "./components";
+import { SplashScreen, GlobalListeners } from "./components";
 import { DebugConsole } from "./components/DebugConsole";
 import { commands } from "./bindings";
 import { useDebugLogger } from "./hooks/useDebugLogger";
-import { useSessionLogChangeListener } from "./hooks";
 import { useDebugStore } from "./stores/debugStore";
 
 function App() {
@@ -16,9 +15,6 @@ function App() {
 
   // Subscribe to Rust backend logs for the debug console
   useDebugLogger();
-
-  // Append incoming session logs to the store in real-time
-  useSessionLogChangeListener();
 
   // Global Cmd+Shift+D to toggle debug console
   useEffect(() => {
@@ -61,6 +57,7 @@ function App() {
 
   return (
     <>
+      <GlobalListeners />
       <RouterProvider router={router} />
       <DebugConsole />
     </>
