@@ -59,7 +59,7 @@ export const useTaskStore = create<TaskStore>((set) => ({
           tasks,
           selectedTask:
             state.selectedTaskId === task.id
-              ? { ...(state.selectedTask ?? {}), ...mergedTask }
+              ? mergedTask
               : state.selectedTask,
         };
       }

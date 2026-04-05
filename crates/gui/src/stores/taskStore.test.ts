@@ -173,6 +173,48 @@ describe("taskStore", () => {
       expect(useTaskStore.getState().tasks[0].code_refs).toEqual(codeRefs);
     });
 
+    it("preserves existing dependency_ids when WS payload has empty dependency_ids", () => {
+      const depIds = ["dep-1", "dep-2"];
+      const original = createMockTask({ id: "task-1", dependency_ids: depIds });
+      useTaskStore.getState().setTasks([original]);
+
+      const wsPayload = createMockTask({ id: "task-1", title: "Updated", dependency_ids: [] });
+      useTaskStore.getState().upsertTask(wsPayload);
+
+      expect(useTaskStore.getState().tasks[0].dependency_ids).toEqual(depIds);
+    });
+
+    it("replaces dependency_ids when WS payload has non-empty dependency_ids", () => {
+      const original = createMockTask({ id: "task-1", dependency_ids: ["old-dep"] });
+      useTaskStore.getState().setTasks([original]);
+
+      const wsPayload = createMockTask({ id: "task-1", dependency_ids: ["new-dep-1", "new-dep-2"] });
+      useTaskStore.getState().upsertTask(wsPayload);
+
+      expect(useTaskStore.getState().tasks[0].dependency_ids).toEqual(["new-dep-1", "new-dep-2"]);
+    });
+
+    it("preserves existing tags when WS payload has empty tags", () => {
+      const tags = ["frontend", "urgent"];
+      const original = createMockTask({ id: "task-1", tags });
+      useTaskStore.getState().setTasks([original]);
+
+      const wsPayload = createMockTask({ id: "task-1", title: "Updated", tags: [] });
+      useTaskStore.getState().upsertTask(wsPayload);
+
+      expect(useTaskStore.getState().tasks[0].tags).toEqual(tags);
+    });
+
+    it("replaces tags when WS payload has non-empty tags", () => {
+      const original = createMockTask({ id: "task-1", tags: ["old-tag"] });
+      useTaskStore.getState().setTasks([original]);
+
+      const wsPayload = createMockTask({ id: "task-1", tags: ["new-tag-1", "new-tag-2"] });
+      useTaskStore.getState().upsertTask(wsPayload);
+
+      expect(useTaskStore.getState().tasks[0].tags).toEqual(["new-tag-1", "new-tag-2"]);
+    });
+
     it("updates selectedTask when the upserted task matches selectedTaskId", () => {
       const task = createMockTask({ id: "task-1", title: "Original" });
       useTaskStore.getState().setTasks([task]);
@@ -183,6 +225,31 @@ describe("taskStore", () => {
 
       const state = useTaskStore.getState();
       expect(state.selectedTask?.title).toBe("Updated via WS");
+    });
+
+    it("updates selectedTask when a new task is inserted matching selectedTaskId", () => {
+      // Scenario: user navigates to task-1 (sets selectedTaskId), but the task
+      // hasn't been fetched into the list yet. Then a WS broadcast inserts it.
+      useTaskStore.getState().selectTask("task-new", null);
+
+      const task = createMockTask({ id: "task-new", title: "Arrived via WS" });
+      useTaskStore.getState().upsertTask(task);
+
+      const state = useTaskStore.getState();
+      expect(state.selectedTask?.title).toBe("Arrived via WS");
+      expect(state.selectedTask?.id).toBe("task-new");
+    });
+
+    it("does not update selectedTask when a new task is inserted not matching selectedTaskId", () => {
+      const existingSelected = createMockTask({ id: "task-selected", title: "Selected" });
+      useTaskStore.getState().selectTask("task-selected", existingSelected);
+
+      const task = createMockTask({ id: "task-other", title: "Other new task" });
+      useTaskStore.getState().upsertTask(task);
+
+      const state = useTaskStore.getState();
+      expect(state.selectedTask?.title).toBe("Selected");
+      expect(state.selectedTaskId).toBe("task-selected");
     });
 
     it("does not update selectedTask when the upserted task is different from selected", () => {
