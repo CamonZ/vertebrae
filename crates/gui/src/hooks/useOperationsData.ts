@@ -2,8 +2,6 @@ import { useEffect, useMemo } from "react";
 import { commands, type Task, type TaskFilterOptions } from "../bindings";
 import { useTaskStore, useExecutionStore } from "../stores";
 import { useTasks } from "./useTasks";
-import { useTaskChangeListener } from "./useTaskChangeListener";
-import { useStepExecutionChangeListener } from "./useStepExecutionChangeListener";
 import type { AttentionItem } from "../components/Operations/NeedsAttentionSection";
 import type { LiveItem } from "../components/Operations/LiveSection";
 import type { CompletedItem } from "../components/Operations/RecentlyCompletedSection";
@@ -34,8 +32,7 @@ interface OperationsData {
  *
  * Uses the same store-based pattern as BoardPage and TasksPage:
  * - useTasks() fetches and syncs to TaskStore
- * - useTaskChangeListener() keeps TaskStore live via WebSocket
- * - useStepExecutionChangeListener() keeps ExecutionStore live via WebSocket
+ * - GlobalListeners keeps TaskStore and ExecutionStore live via WebSocket
  * - Executions for active tasks are seeded on mount
  * - Sections are derived from store state
  */
@@ -45,12 +42,8 @@ export function useOperationsData(): OperationsData {
   const executions = useExecutionStore((s) => s.executions);
   const setExecutions = useExecutionStore((s) => s.setExecutions);
 
-  // Real-time updates via WebSocket — same pattern as BoardPage
-  useTaskChangeListener();
-  useStepExecutionChangeListener();
-
   // Seed the ExecutionStore with executions for active tasks on mount.
-  // After this, the store stays live via useStepExecutionChangeListener.
+  // After this, the store stays live via GlobalListeners.
   const activeTasks = useMemo(
     () => tasks.filter((t) => t.workflow_id && t.started_at && !t.completed_at),
     [tasks],
