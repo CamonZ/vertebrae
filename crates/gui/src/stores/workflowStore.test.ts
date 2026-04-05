@@ -112,4 +112,15 @@ describe("workflowStore", () => {
       expect(useWorkflowStore.getState().workflows).toHaveLength(1);
     });
   });
+
+  describe("clearCurrentWorkflow", () => {
+    it("clears the current workflow", () => {
+      const workflow = createMockWorkflow({ id: "wf-1", name: "Active" });
+      useWorkflowStore.getState().setCurrentWorkflow({ workflow, tasks: [] });
+
+      useWorkflowStore.getState().clearCurrentWorkflow();
+
+      expect(useWorkflowStore.getState().currentWorkflow).toBeNull();
+    });
+  });
 });
