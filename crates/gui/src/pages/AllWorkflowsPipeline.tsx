@@ -80,7 +80,7 @@ function mapExecutionStatus(status: ExecutionStatus): StepExecutionStatus {
 type PanelEntry =
   | { type: 'task'; id: string }
   | { type: 'step'; id: string }
-  | { type: 'workflow'; data: Workflow };
+  | { type: 'workflow'; id: string };
 
 function AllWorkflowsPipelineInner() {
   const addToast = useToastStore((state) => state.addToast);
@@ -129,9 +129,11 @@ function AllWorkflowsPipelineInner() {
   // State for selected step ID (for step config panel)
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
 
-  // State for selected workflow (for workflow detail panel)
-  const [selectedWorkflow, setSelectedWorkflow] = useState<Workflow | null>(
-    null
+  // State for selected workflow ID (derive full object from store for live updates)
+  const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(null);
+  const selectedWorkflow = useMemo(
+    () => workflows.find((w) => w.id === selectedWorkflowId) ?? null,
+    [workflows, selectedWorkflowId]
   );
 
   // Panel navigation history stack
@@ -163,7 +165,7 @@ function AllWorkflowsPipelineInner() {
   function currentPanelEntry(): PanelEntry | null {
     if (selectedTaskId) return { type: 'task', id: selectedTaskId };
     if (selectedStepId) return { type: 'step', id: selectedStepId };
-    if (selectedWorkflow) return { type: 'workflow', data: selectedWorkflow };
+    if (selectedWorkflowId) return { type: 'workflow', id: selectedWorkflowId };
     return null;
   }
 
@@ -187,27 +189,27 @@ function AllWorkflowsPipelineInner() {
     }
     setSelectedTaskId(taskId);
     setSelectedStepId(null);
-    setSelectedWorkflow(null);
-  }, [selectedTaskId, selectedStepId, selectedWorkflow]);
+    setSelectedWorkflowId(null);
+  }, [selectedTaskId, selectedStepId, selectedWorkflowId]);
 
   // Step selection handlers
   const handleStepClick = useCallback((step: Step) => {
     setSelectedStepId(step.id || null);
     setSelectedTaskId(null); // Clear task selection when step is selected
-    setSelectedWorkflow(null); // Clear workflow selection
+    setSelectedWorkflowId(null); // Clear workflow selection
     setPanelHistory([]); // Canvas click — fresh navigation
   }, []);
 
   // Workflow selection handlers
   const handleWorkflowClick = useCallback((workflow: Workflow) => {
-    setSelectedWorkflow(workflow);
+    setSelectedWorkflowId(workflow.id || null);
     setSelectedTaskId(null); // Clear task selection
     setSelectedStepId(null); // Clear step selection
     setPanelHistory([]); // Canvas click — fresh navigation
   }, []);
 
   const handleCloseWorkflowPanel = useCallback(() => {
-    setSelectedWorkflow(null);
+    setSelectedWorkflowId(null);
     setPanelHistory([]); // Explicit close — clear history
   }, []);
 
@@ -219,13 +221,13 @@ function AllWorkflowsPipelineInner() {
   // Handle step selection from workflow detail panel (in-panel navigation)
   const handleWorkflowStepSelect = useCallback((step: Step) => {
     // Push current workflow panel onto history
-    if (selectedWorkflow) {
-      setPanelHistory(prev => [...prev, { type: 'workflow', data: selectedWorkflow }]);
+    if (selectedWorkflowId) {
+      setPanelHistory(prev => [...prev, { type: 'workflow', id: selectedWorkflowId }]);
     }
     setSelectedStepId(step.id || null);
-    setSelectedWorkflow(null);
+    setSelectedWorkflowId(null);
     setSelectedTaskId(null);
-  }, [selectedWorkflow]);
+  }, [selectedWorkflowId]);
 
   // Navigate back through panel history
   const handleBack = useCallback(() => {
@@ -238,13 +240,13 @@ function AllWorkflowsPipelineInner() {
       if (entry.type === 'task') {
         setSelectedTaskId(entry.id);
         setSelectedStepId(null);
-        setSelectedWorkflow(null);
+        setSelectedWorkflowId(null);
       } else if (entry.type === 'step') {
         setSelectedStepId(entry.id);
         setSelectedTaskId(null);
-        setSelectedWorkflow(null);
+        setSelectedWorkflowId(null);
       } else if (entry.type === 'workflow') {
-        setSelectedWorkflow(entry.data);
+        setSelectedWorkflowId(entry.id);
         setSelectedTaskId(null);
         setSelectedStepId(null);
       }
