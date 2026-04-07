@@ -489,6 +489,10 @@ function AllWorkflowsPipelineInner() {
         id: `workflow-zone-${workflowId}`,
         type: "workflowZoneNode",
         position: { x: zoneX, y: zoneY },
+        // Explicit dimensions so React Flow skips the visibility:hidden phase
+        // while waiting for ResizeObserver measurement.
+        width: zoneWidth,
+        height: zoneHeight,
         data: {
           workflow,
           taskCount: workflowTasks.length,
@@ -545,6 +549,8 @@ function AllWorkflowsPipelineInner() {
                 LAYOUT_CONSTANTS.WORKFLOW_ZONE_HEADER_HEIGHT +
                 LAYOUT_CONSTANTS.STEP_Y_OFFSET,
             },
+            width: LAYOUT_CONSTANTS.STEP_NODE_WIDTH,
+            height: LAYOUT_CONSTANTS.STEP_NODE_HEIGHT,
             data: {
               step,
               isFirst: index === 0,
