@@ -96,8 +96,7 @@ pub async fn before_scenario(world: &mut GuiWorld, scenario_name: &str) {
         .await;
 
     if project_row.is_err() {
-        // Capture a screenshot to help diagnose what the app is actually showing.
-        gui_acceptance::screenshot(&client, &world.scenario_name, "setup-debug").await;
+        world.screenshot(&client, "setup-debug").await;
         panic!(
             "project row not found on /setup page for slug '{}' — check test-output/ for screenshot",
             slug
@@ -114,7 +113,7 @@ pub async fn before_scenario(world: &mut GuiWorld, scenario_name: &str) {
 
     // Wait for redirect away from /setup (the app navigates to / -> /operations)
     tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-    gui_acceptance::screenshot(&client, &world.scenario_name, "after-setup-select").await;
+    world.screenshot(&client, "after-setup-select").await;
 }
 
 /// After-hook: unregister the project from config.toml and clean up the temp directory.
