@@ -41,6 +41,10 @@ export const LAYOUT_CONSTANTS = {
   WORKFLOW_ZONE_HEADER_HEIGHT: 80,
   /** Vertical gap between workflow zones */
   WORKFLOW_ZONE_GAP: 60,
+  /** Step node width in pixels (must match NODE_SIZING.widthClass) */
+  STEP_NODE_WIDTH: 280,
+  /** Step node height in pixels (must match NODE_SIZING.stepHeightClass) */
+  STEP_NODE_HEIGHT: 170,
 } as const;
 
 /**
