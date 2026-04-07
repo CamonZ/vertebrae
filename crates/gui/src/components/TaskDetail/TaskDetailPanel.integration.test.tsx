@@ -1,9 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { render } from "../../test/test-utils";
+import { render, createMockTask } from "../../test/test-utils";
 import { TaskDetailPanel } from "./TaskDetailPanel";
 import * as eventsModule from "../../bindings";
+import { useTaskStore } from "../../stores";
 
 // Use vi.hoisted to define mock data that's available in hoisted mocks
 const { mockTaskData } = vi.hoisted(() => {
@@ -129,16 +130,15 @@ describe("TaskDetailPanel - Inline Editing Integration", () => {
     );
   });
 
+  afterEach(() => {
+    useTaskStore.getState().setTasks([]);
+  });
+
   describe("Details section - Inline editing UX", () => {
     it("clicking description shows input immediately with warning dot and check/X icons", async () => {
       render(<TaskDetailPanel taskId="task-123" onClose={vi.fn()} />);
 
-      // Expand Details section first
-      const detailsToggle = screen.getByRole("button", {
-        name: /toggle details section/i,
-      });
-      await userEvent.click(detailsToggle);
-
+      // Description is in the Spec section (open by default)
       // Click on description text
       const descriptionText = screen.getByText(
         "Test Description for inline editing"
@@ -197,11 +197,7 @@ describe("TaskDetailPanel - Inline Editing Integration", () => {
     it("Enter key saves in description field (with Ctrl for multiline)", async () => {
       render(<TaskDetailPanel taskId="task-123" onClose={vi.fn()} />);
 
-      // Expand Details section
-      await userEvent.click(
-        screen.getByRole("button", { name: /toggle details section/i })
-      );
-
+      // Description is in the Spec section (open by default)
       // Click description to enter edit mode
       await userEvent.click(
         screen.getByText("Test Description for inline editing")
@@ -222,11 +218,7 @@ describe("TaskDetailPanel - Inline Editing Integration", () => {
     it("Escape key cancels edit in description field", async () => {
       render(<TaskDetailPanel taskId="task-123" onClose={vi.fn()} />);
 
-      // Expand Details section
-      await userEvent.click(
-        screen.getByRole("button", { name: /toggle details section/i })
-      );
-
+      // Description is in the Spec section (open by default)
       // Click description to enter edit mode
       await userEvent.click(
         screen.getByText("Test Description for inline editing")
@@ -343,12 +335,8 @@ describe("TaskDetailPanel - Inline Editing Integration", () => {
   });
 
   describe("Spec section shows goal and constraints when expanded", () => {
-    it("shows goal content when Spec is expanded", async () => {
+    it("shows goal content in Spec section (open by default)", async () => {
       render(<TaskDetailPanel taskId="task-123" onClose={vi.fn()} />);
-
-      await userEvent.click(
-        screen.getByRole("button", { name: /toggle spec section/i })
-      );
 
       expect(screen.getByText("Complete the feature")).toBeInTheDocument();
     });
@@ -371,6 +359,28 @@ describe("TaskDetailPanel - Inline Editing Integration", () => {
       expect(specPos).toBeLessThan(depsPos);
       expect(depsPos).toBeLessThan(codePos);
       expect(codePos).toBeLessThan(detailsPos);
+    });
+
+    it("sections include Children between Spec and Dependencies when task has children", () => {
+      useTaskStore.getState().setTasks([
+        createMockTask({
+          id: "child-integ-1",
+          title: "Integration child",
+          level: "task",
+          parent_id: "task-123",
+          step_name: "todo",
+        }),
+      ]);
+
+      render(<TaskDetailPanel taskId="task-123" onClose={vi.fn()} />);
+
+      const allText = document.body.textContent ?? "";
+      const specPos = allText.indexOf("Spec");
+      const childrenPos = allText.indexOf("Children");
+      const depsPos = allText.indexOf("Dependencies");
+
+      expect(specPos).toBeLessThan(childrenPos);
+      expect(childrenPos).toBeLessThan(depsPos);
     });
 
     it("title is editable via click", async () => {

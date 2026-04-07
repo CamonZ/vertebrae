@@ -4,8 +4,6 @@ import type { Task, TaskLevel, TaskFilterOptions, WorkflowTransition } from "../
 import { useTasks } from "../hooks/useTasks";
 import { useWorkflows } from "../hooks/useWorkflows";
 import { useWorkflowTransitions } from "../hooks/useWorkflowTransitions";
-import { useTaskChangeListener } from "../hooks/useTaskChangeListener";
-import { useWorkflowChangeListener } from "../hooks/useWorkflowChangeListener";
 import { TaskDetailPanel } from "../components/TaskDetail";
 import { KanbanColumn } from "../components/KanbanBoard/KanbanColumn";
 
@@ -153,9 +151,6 @@ export function BoardPage() {
   const { tasks, isLoading: tasksLoading, error: tasksError } = useTasks(TASK_FILTER);
   const { workflows, isLoading: workflowsLoading, error: workflowsError } = useWorkflows();
   const { transitions } = useWorkflowTransitions();
-
-  useTaskChangeListener();
-  useWorkflowChangeListener();
 
   const handleTaskSelect = useCallback((task: Task) => {
     setSelectedTaskId(task.id);

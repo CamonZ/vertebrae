@@ -1,8 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { screen, fireEvent } from "@testing-library/react";
 import { render, createMockTask } from "../../test/test-utils";
 import { TaskDetailPanel } from "./TaskDetailPanel";
 import * as eventsModule from "../../bindings";
+import { useTaskStore } from "../../stores";
 
 // Mock the useTask hook to return task data directly
 vi.mock("../../hooks/useTask", () => ({
@@ -127,6 +128,10 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     vi.mocked(eventsModule.events.taskChangedEvent.listen).mockResolvedValue(
       () => {}
     );
+  });
+
+  afterEach(() => {
+    useTaskStore.getState().setTasks([]);
   });
 
   describe("Header", () => {
@@ -391,15 +396,10 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       expect(detailsToggle).toBeInTheDocument();
     });
 
-    it("Spec section expands to show goal and constraints", () => {
+    it("Spec section is open by default showing goal and constraints", () => {
       render(
         <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
       );
-
-      const specToggle = screen.getByRole("button", {
-        name: /toggle spec section/i,
-      });
-      fireEvent.click(specToggle);
 
       expect(screen.getByText("Build a working feature")).toBeInTheDocument();
       expect(
@@ -407,7 +407,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       ).toBeInTheDocument();
     });
 
-    it("Details section expands to show description, priority, tags", () => {
+    it("Details section expands to show priority, tags", () => {
       render(
         <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
       );
@@ -417,7 +417,6 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       });
       fireEvent.click(detailsToggle);
 
-      expect(screen.getByText("Test Description")).toBeInTheDocument();
       expect(screen.getByText("medium")).toBeInTheDocument();
     });
 
@@ -485,6 +484,102 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       expect(
         screen.getByRole("button", { name: /run entire workflow/i })
       ).toBeInTheDocument();
+    });
+  });
+
+  describe("Children section", () => {
+    const childTask1 = createMockTask({
+      id: "child-001",
+      title: "First child task",
+      level: "task",
+      parent_id: mockTaskData.id,
+      step_name: "in_progress",
+      workflow_name: "Implementation",
+    });
+
+    const childTask2 = createMockTask({
+      id: "child-002",
+      title: "Second child task",
+      level: "ticket",
+      parent_id: mockTaskData.id,
+      step_name: "todo",
+      workflow_name: "Backlog",
+    });
+
+    it("renders Children section with child count badge when task has children", () => {
+      useTaskStore.getState().setTasks([childTask1, childTask2]);
+
+      render(
+        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
+      );
+
+      const childrenSection = screen.getByTestId("children-section");
+      expect(childrenSection).toBeInTheDocument();
+      expect(childrenSection).toHaveTextContent("Children");
+      expect(childrenSection).toHaveTextContent("2");
+    });
+
+    it("displays each child with its level badge, title, and step name", () => {
+      useTaskStore.getState().setTasks([childTask1, childTask2]);
+
+      render(
+        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
+      );
+
+      expect(screen.getByText("First child task")).toBeInTheDocument();
+      expect(screen.getByText("Second child task")).toBeInTheDocument();
+
+      const child1Element = screen.getByTestId("child-task-child-001");
+      expect(child1Element).toHaveTextContent("task");
+      expect(child1Element).toHaveTextContent("First child task");
+      expect(child1Element).toHaveTextContent("in progress");
+
+      const child2Element = screen.getByTestId("child-task-child-002");
+      expect(child2Element).toHaveTextContent("ticket");
+      expect(child2Element).toHaveTextContent("Second child task");
+      expect(child2Element).toHaveTextContent("todo");
+    });
+
+    it("calls onTaskSelect when a child task is clicked", () => {
+      useTaskStore.getState().setTasks([childTask1]);
+      const mockOnTaskSelect = vi.fn();
+
+      render(
+        <TaskDetailPanel
+          taskId={mockTaskData.id}
+          onClose={vi.fn()}
+          onTaskSelect={mockOnTaskSelect}
+        />
+      );
+
+      const childButton = screen.getByTestId("child-task-child-001");
+      fireEvent.click(childButton);
+
+      expect(mockOnTaskSelect).toHaveBeenCalledTimes(1);
+      expect(mockOnTaskSelect).toHaveBeenCalledWith("child-001");
+    });
+
+    it("does not render Children section when task has no children", () => {
+      useTaskStore.getState().setTasks([]);
+
+      render(
+        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
+      );
+
+      expect(screen.queryByTestId("children-section")).not.toBeInTheDocument();
+    });
+
+    it("renders Children toggle button for accessibility", () => {
+      useTaskStore.getState().setTasks([childTask1]);
+
+      render(
+        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
+      );
+
+      const toggleButton = screen.getByRole("button", {
+        name: /toggle children section/i,
+      });
+      expect(toggleButton).toBeInTheDocument();
     });
   });
 });

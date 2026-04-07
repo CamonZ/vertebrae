@@ -197,12 +197,12 @@ export function TaskDetailPanel({
   const allTasks = useTaskStore((s) => s.tasks);
 
   // Derive children and dependents from the already-loaded task list
-  const childrenIds = useMemo(() => {
+  const children = useMemo(() => {
     if (!taskId || allTasks.length === 0) return [];
-    return allTasks
-      .filter((t) => t.parent_id === taskId)
-      .map((t) => t.id);
+    return allTasks.filter((t) => t.parent_id === taskId);
   }, [taskId, allTasks]);
+
+  const childrenIds = useMemo(() => children.map((t) => t.id), [children]);
 
   const dependentIds = useMemo(() => {
     if (!taskId || allTasks.length === 0) return [];
@@ -923,10 +923,10 @@ export function TaskDetailPanel({
             {taskData.id && <ExecutionHistory taskId={taskData.id} />}
           </CollapsibleSection>
 
-          {/* === SPEC (goal, constraints, collapsible) === */}
+          {/* === SPEC (description, goal, constraints) === */}
           <CollapsibleSection
             title="Spec"
-            defaultOpen={false}
+            defaultOpen={true}
             testId="spec-section-wrapper"
             icon={
               <svg
@@ -947,8 +947,71 @@ export function TaskDetailPanel({
             <SpecSection
               description={taskData.description}
               sections={taskData.sections ?? []}
+              onDescriptionChange={async (value) => {
+                await onUpdateField("description", value);
+              }}
             />
           </CollapsibleSection>
+
+          {/* === CHILDREN (child tasks) === */}
+          {children.length > 0 && (
+            <CollapsibleSection
+              title="Children"
+              defaultOpen={true}
+              testId="children-section"
+              icon={
+                <svg
+                  className="h-3.5 w-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={1.5}
+                    d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
+                  />
+                </svg>
+              }
+              badge={
+                <span className="rounded-full bg-bg-tertiary px-2 py-0.5 text-[10px] text-text-muted">
+                  {children.length}
+                </span>
+              }
+            >
+              <div className="space-y-1 px-4 py-2">
+                {children.map((child) => {
+                  const childLevelStyles = getLevelStyles(child.level);
+                  const childStepName = child.step_name?.replace("_", " ") ?? null;
+
+                  return (
+                    <button
+                      key={child.id}
+                      type="button"
+                      onClick={() => onTaskSelect?.(child.id)}
+                      className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left transition-colors hover:bg-bg-tertiary/50 cursor-pointer"
+                      data-testid={`child-task-${child.id}`}
+                    >
+                      <span
+                        className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider ${childLevelStyles.bg} ${childLevelStyles.text} ${childLevelStyles.border}`}
+                      >
+                        {child.level ?? "?"}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate text-xs text-text-secondary">
+                        {child.title}
+                      </span>
+                      {childStepName && (
+                        <span className="flex-shrink-0 rounded-full bg-bg-tertiary px-1.5 py-0.5 text-[10px] text-text-muted">
+                          {childStepName}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </CollapsibleSection>
+          )}
 
           {/* === DEPENDENCIES (blocked by, blocking, parent) === */}
           <CollapsibleSection
@@ -1037,22 +1100,6 @@ export function TaskDetailPanel({
             }
           >
             <div className="divide-y divide-border px-4 py-2">
-              {/* Description */}
-              <div className="py-3">
-                <h4 className="mb-1 font-mono text-[10px] uppercase tracking-wider text-text-muted">
-                  Description
-                </h4>
-                <InlineEditField
-                  value={taskData.description || ""}
-                  placeholder="Click to add description"
-                  multiline
-                  rows={4}
-                  onSave={async (value) => {
-                    await onUpdateField("description", value);
-                  }}
-                />
-              </div>
-
               {/* Priority */}
               <div className="py-3">
                 <h4 className="mb-1 font-mono text-[10px] uppercase tracking-wider text-text-muted">

@@ -1,21 +1,23 @@
 import { useEffect, useState, useCallback } from "react";
 import { commands } from "../bindings";
 import type { Step } from "../bindings";
+import { useStepStore } from "../stores";
 
 /**
  * Hook for fetching a single step with its configuration.
+ * Reads from the Zustand step store so WebSocket updates are reflected live.
  *
  * @param stepId - The step ID to fetch. If null/undefined, no fetch is performed.
  * @returns Object containing step data, loading state, error state, and refetch function
  */
 export function useStep(stepId: string | null | undefined) {
-  const [step, setStep] = useState<Step | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { selectedStep, selectStep, clearStepSelection } = useStepStore();
 
   const fetchStep = useCallback(async () => {
     if (!stepId) {
-      setStep(null);
+      clearStepSelection();
       return;
     }
 
@@ -24,18 +26,18 @@ export function useStep(stepId: string | null | undefined) {
     try {
       const result = await commands.getStep(stepId);
       if (result.status === "ok") {
-        setStep(result.data);
+        selectStep(stepId, result.data);
       } else {
         setError(result.error.message);
-        setStep(null);
+        clearStepSelection();
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-      setStep(null);
+      clearStepSelection();
     } finally {
       setIsLoading(false);
     }
-  }, [stepId]);
+  }, [stepId, selectStep, clearStepSelection]);
 
   useEffect(() => {
     fetchStep();
@@ -47,8 +49,8 @@ export function useStep(stepId: string | null | undefined) {
 
   /** Apply a full step payload received from a WebSocket event directly. */
   const applyUpdate = useCallback((data: Step) => {
-    setStep(data);
-  }, []);
+    selectStep(data.id ?? null, data);
+  }, [selectStep]);
 
-  return { step, isLoading, error, refetch, applyUpdate };
+  return { step: selectedStep, isLoading, error, refetch, applyUpdate };
 }

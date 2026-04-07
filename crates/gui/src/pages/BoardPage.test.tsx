@@ -39,14 +39,6 @@ vi.mock("../hooks/useWorkflowTransitions", () => ({
   }),
 }));
 
-vi.mock("../hooks/useTaskChangeListener", () => ({
-  useTaskChangeListener: vi.fn(),
-}));
-
-vi.mock("../hooks/useWorkflowChangeListener", () => ({
-  useWorkflowChangeListener: vi.fn(),
-}));
-
 // Mock TaskDetailPanel to keep tests focused on the board logic
 vi.mock("../components/TaskDetail", () => ({
   TaskDetailPanel: ({ taskId, onClose }: { taskId: string | null; onClose?: () => void }) => (

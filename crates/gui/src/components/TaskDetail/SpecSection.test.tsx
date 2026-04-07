@@ -17,10 +17,10 @@ function createSection(
 
 describe("SpecSection", () => {
   describe("empty state", () => {
-    it("shows empty message when no content", () => {
+    it("shows description placeholder when no content", () => {
       render(<SpecSection description={null} sections={[]} />);
 
-      expect(screen.getByText("No spec defined")).toBeInTheDocument();
+      expect(screen.getByText("No description")).toBeInTheDocument();
     });
   });
 

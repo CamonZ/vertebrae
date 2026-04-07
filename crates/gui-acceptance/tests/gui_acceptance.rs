@@ -65,6 +65,9 @@ pub struct GuiWorld {
 
     /// Scenario name, used as the screenshot subdirectory.
     pub scenario_name: String,
+
+    /// Per-scenario screenshot sequence counter for ordered filenames.
+    screenshot_seq: u32,
 }
 
 impl std::fmt::Debug for GuiWorld {
@@ -100,7 +103,19 @@ impl GuiWorld {
             last_stderr: String::new(),
             last_exit_code: 0,
             scenario_name: String::new(),
+            screenshot_seq: 0,
         }
+    }
+
+    fn next_seq(&mut self) -> u32 {
+        self.screenshot_seq += 1;
+        self.screenshot_seq
+    }
+
+    /// Take a sequenced screenshot in the current scenario's output directory.
+    async fn screenshot(&mut self, client: &Client, label: &str) {
+        let seq = self.next_seq();
+        gui_acceptance::screenshot(client, &self.scenario_name, seq, label).await;
     }
 
     /// Execute a vtb CLI command and capture its output.
