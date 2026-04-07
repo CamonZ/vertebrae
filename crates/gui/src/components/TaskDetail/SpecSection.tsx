@@ -1,9 +1,11 @@
 import { useMemo } from "react";
 import type { Section } from "../../bindings";
+import { InlineEditField } from "./InlineEditField";
 
 interface SpecSectionProps {
   description: string | null;
   sections: Section[];
+  onDescriptionChange?: (value: string) => Promise<void>;
 }
 
 function SectionList({
@@ -35,7 +37,7 @@ function SectionList({
   );
 }
 
-export function SpecSection({ description, sections }: SpecSectionProps) {
+export function SpecSection({ description, sections, onDescriptionChange }: SpecSectionProps) {
   const grouped = useMemo(() => {
     const result = {
       goals: [] as Section[],
@@ -66,21 +68,7 @@ export function SpecSection({ description, sections }: SpecSectionProps) {
     return result;
   }, [sections]);
 
-  const hasContent =
-    description ||
-    grouped.goals.length > 0 ||
-    grouped.constraints.length > 0 ||
-    grouped.context.length > 0 ||
-    grouped.currentBehavior.length > 0 ||
-    grouped.desiredBehavior.length > 0;
-
-  if (!hasContent) {
-    return (
-      <div className="px-4 py-3">
-        <p className="text-xs text-text-muted italic">No spec defined</p>
-      </div>
-    );
-  }
+  // Always render — description is always shown (editable when callback provided)
 
   return (
     <div className="space-y-3 px-4 py-3" data-testid="spec-section">
@@ -100,16 +88,24 @@ export function SpecSection({ description, sections }: SpecSectionProps) {
         </div>
       )}
 
-      {description && (
-        <div className="space-y-1">
-          <h4 className="font-mono text-[10px] uppercase tracking-wider text-text-muted">
-            Description
-          </h4>
+      <div className="space-y-1">
+        <h4 className="font-mono text-[10px] uppercase tracking-wider text-text-muted">
+          Description
+        </h4>
+        {onDescriptionChange ? (
+          <InlineEditField
+            value={description || ""}
+            placeholder="Click to add description"
+            multiline
+            rows={3}
+            onSave={onDescriptionChange}
+          />
+        ) : (
           <p className="whitespace-pre-wrap text-sm text-text-secondary leading-relaxed">
-            {description}
+            {description || <span className="italic text-text-muted">No description</span>}
           </p>
-        </div>
-      )}
+        )}
+      </div>
 
       <SectionList label="Constraints" items={grouped.constraints} />
       <SectionList label="Context" items={grouped.context} />

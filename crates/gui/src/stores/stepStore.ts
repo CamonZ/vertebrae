@@ -4,6 +4,10 @@ import type { Step } from "../bindings";
 interface StepState {
   /** List of steps */
   steps: Step[];
+  /** Currently selected step ID */
+  selectedStepId: string | null;
+  /** Full details of the selected step */
+  selectedStep: Step | null;
 }
 
 interface StepActions {
@@ -13,12 +17,18 @@ interface StepActions {
   upsertStep: (step: Step) => void;
   /** Remove a step by ID */
   removeStep: (stepId: string) => void;
+  /** Select a step by ID and optionally set its full details */
+  selectStep: (id: string | null, step?: Step | null) => void;
+  /** Clear the selected step */
+  clearStepSelection: () => void;
 }
 
 export type StepStore = StepState & StepActions;
 
 export const useStepStore = create<StepStore>((set) => ({
   steps: [],
+  selectedStepId: null,
+  selectedStep: null,
 
   setSteps: (steps) => set({ steps }),
 
@@ -28,13 +38,36 @@ export const useStepStore = create<StepStore>((set) => ({
       if (index >= 0) {
         const steps = [...state.steps];
         steps[index] = step;
-        return { steps };
+        return {
+          steps,
+          selectedStep:
+            state.selectedStepId === step.id ? step : state.selectedStep,
+        };
       }
-      return { steps: [...state.steps, step] };
+      return {
+        steps: [...state.steps, step],
+        selectedStep:
+          state.selectedStepId === step.id ? step : state.selectedStep,
+      };
     }),
 
   removeStep: (stepId) =>
     set((state) => ({
       steps: state.steps.filter((s) => s.id !== stepId),
+      ...(state.selectedStepId === stepId
+        ? { selectedStepId: null, selectedStep: null }
+        : {}),
     })),
+
+  selectStep: (id, step) =>
+    set({
+      selectedStepId: id,
+      selectedStep: step ?? null,
+    }),
+
+  clearStepSelection: () =>
+    set({
+      selectedStepId: null,
+      selectedStep: null,
+    }),
 }));

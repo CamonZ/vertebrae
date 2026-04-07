@@ -80,20 +80,17 @@ pub fn sanitize_name(name: &str) -> String {
 
 /// Save a screenshot of the current WebDriver window to `/app/test-output/<dir>/`.
 ///
-/// The file is named `step-<label>-<millis>.png`.  Both `dir` and `label` are
-/// sanitised so they are safe as filesystem path components.  Errors are
+/// The file is named `<seq:03>-<label>.png` where `seq` is a per-scenario
+/// sequence number so files sort in execution order.  Both `dir` and `label`
+/// are sanitised so they are safe as filesystem path components.  Errors are
 /// silently ignored so a failing screenshot never aborts the test.
-pub async fn screenshot(client: &Client, dir: &str, label: &str) {
+pub async fn screenshot(client: &Client, dir: &str, seq: u32, label: &str) {
     if let Ok(png) = client.screenshot().await {
         let safe_dir = sanitize_name(dir);
         let dir_path = format!("/app/test-output/{safe_dir}");
         let _ = std::fs::create_dir_all(&dir_path);
-        let ts = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis();
         let safe = sanitize_name(label);
-        let path = format!("{dir_path}/step-{safe}-{ts}.png");
+        let path = format!("{dir_path}/{seq:03}-{safe}.png");
         let _ = std::fs::write(&path, &png);
     }
 }

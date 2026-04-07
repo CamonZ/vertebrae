@@ -15,7 +15,7 @@ import {
  *   3. Recently Completed -- what just finished
  *   4. Ready -- unblocked tasks waiting to start
  *
- * Real-time event listeners keep all sections in sync with backend changes.
+ * Real-time sync is handled by GlobalListeners at the app root.
  */
 export function OperationsPage() {
   const {

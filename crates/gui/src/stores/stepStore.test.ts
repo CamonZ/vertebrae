@@ -4,7 +4,7 @@ import { createMockStep } from "../test/test-utils";
 
 describe("stepStore", () => {
   beforeEach(() => {
-    useStepStore.setState({ steps: [] });
+    useStepStore.setState({ steps: [], selectedStepId: null, selectedStep: null });
   });
 
   describe("initial state", () => {
@@ -100,6 +100,60 @@ describe("stepStore", () => {
       useStepStore.getState().removeStep("nonexistent");
 
       expect(useStepStore.getState().steps).toHaveLength(1);
+    });
+
+    it("clears selection when the selected step is removed", () => {
+      useStepStore.getState().setSteps([createMockStep({ id: "step-1" })]);
+      useStepStore.getState().selectStep("step-1", createMockStep({ id: "step-1" }));
+
+      useStepStore.getState().removeStep("step-1");
+
+      const state = useStepStore.getState();
+      expect(state.selectedStepId).toBeNull();
+      expect(state.selectedStep).toBeNull();
+    });
+  });
+
+  describe("selectStep / clearStepSelection", () => {
+    it("selects a step by ID", () => {
+      const step = createMockStep({ id: "step-1", name: "Todo" });
+      useStepStore.getState().selectStep("step-1", step);
+
+      const state = useStepStore.getState();
+      expect(state.selectedStepId).toBe("step-1");
+      expect(state.selectedStep?.name).toBe("Todo");
+    });
+
+    it("clears selection", () => {
+      useStepStore.getState().selectStep("step-1", createMockStep({ id: "step-1" }));
+      useStepStore.getState().clearStepSelection();
+
+      const state = useStepStore.getState();
+      expect(state.selectedStepId).toBeNull();
+      expect(state.selectedStep).toBeNull();
+    });
+  });
+
+  describe("upsertStep updates selectedStep", () => {
+    it("updates selectedStep when the upserted step matches selectedStepId", () => {
+      const step = createMockStep({ id: "step-1", name: "Original" });
+      useStepStore.getState().setSteps([step]);
+      useStepStore.getState().selectStep("step-1", step);
+
+      const updated = createMockStep({ id: "step-1", name: "Updated" });
+      useStepStore.getState().upsertStep(updated);
+
+      expect(useStepStore.getState().selectedStep?.name).toBe("Updated");
+    });
+
+    it("does not change selectedStep when a different step is upserted", () => {
+      const step1 = createMockStep({ id: "step-1", name: "Selected" });
+      useStepStore.getState().setSteps([step1]);
+      useStepStore.getState().selectStep("step-1", step1);
+
+      useStepStore.getState().upsertStep(createMockStep({ id: "step-2", name: "Other" }));
+
+      expect(useStepStore.getState().selectedStep?.name).toBe("Selected");
     });
   });
 });

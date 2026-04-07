@@ -3,93 +3,56 @@ use fantoccini::Locator;
 
 use crate::GuiWorld;
 
-#[given("the GUI is showing the task list")]
-async fn gui_showing_task_list(world: &mut GuiWorld) {
+async fn navigate_to(world: &mut GuiWorld, path: &str, label: &str) {
     let wd = world
         .webdriver
         .as_ref()
-        .expect("WebDriver session not initialized");
+        .expect("WebDriver session not initialized")
+        .clone();
     let client = wd.lock().await;
 
-    let url = format!("{}/tasks", gui_acceptance::tauri_base_url());
+    let url = format!("{}{}", gui_acceptance::tauri_base_url(), path);
     client
         .goto(&url)
         .await
-        .expect("failed to navigate to /tasks");
+        .unwrap_or_else(|_| panic!("failed to navigate to {path}"));
 
     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-    gui_acceptance::screenshot(&client, &world.scenario_name, "nav-tasks").await;
+    world.screenshot(&client, label).await;
+}
+
+#[given("the GUI is showing the task list")]
+async fn gui_showing_task_list(world: &mut GuiWorld) {
+    navigate_to(world, "/tasks", "nav-tasks").await;
 }
 
 #[given("the GUI is on the kanban board")]
 async fn gui_on_kanban_board(world: &mut GuiWorld) {
-    let wd = world
-        .webdriver
-        .as_ref()
-        .expect("WebDriver session not initialized");
-    let client = wd.lock().await;
-
-    let url = format!("{}/board", gui_acceptance::tauri_base_url());
-    client
-        .goto(&url)
-        .await
-        .expect("failed to navigate to /board");
-
-    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-    gui_acceptance::screenshot(&client, &world.scenario_name, "nav-board").await;
+    navigate_to(world, "/board", "nav-board").await;
 }
 
 #[given("the GUI is on the pipeline view")]
 async fn gui_on_pipeline_view(world: &mut GuiWorld) {
-    let wd = world
-        .webdriver
-        .as_ref()
-        .expect("WebDriver session not initialized");
-    let client = wd.lock().await;
-
-    let url = format!("{}/design", gui_acceptance::tauri_base_url());
-    client
-        .goto(&url)
-        .await
-        .expect("failed to navigate to /design");
-
-    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-    gui_acceptance::screenshot(&client, &world.scenario_name, "nav-pipeline").await;
+    navigate_to(world, "/design", "nav-pipeline").await;
 }
 
 #[given("the GUI is on the operations view")]
 async fn gui_on_operations_view(world: &mut GuiWorld) {
-    let wd = world
-        .webdriver
-        .as_ref()
-        .expect("WebDriver session not initialized");
-    let client = wd.lock().await;
-
-    let url = format!("{}/operations", gui_acceptance::tauri_base_url());
-    client
-        .goto(&url)
-        .await
-        .expect("failed to navigate to /operations");
-
-    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-    gui_acceptance::screenshot(&client, &world.scenario_name, "nav-operations").await;
+    navigate_to(world, "/operations", "nav-operations").await;
 }
 
 #[then(expr = "the GUI shows {string}")]
 async fn gui_shows_text(world: &mut GuiWorld, expected_text: String) {
-    let scenario_name = world.scenario_name.clone();
     let wd = world
         .webdriver
         .as_ref()
-        .expect("WebDriver session not initialized");
+        .expect("WebDriver session not initialized")
+        .clone();
     let client = wd.lock().await;
 
-    gui_acceptance::screenshot(
-        &client,
-        &scenario_name,
-        &format!("before-assert-shows-{expected_text}"),
-    )
-    .await;
+    world
+        .screenshot(&client, &format!("before-assert-shows-{expected_text}"))
+        .await;
 
     let element = client
         .wait()
@@ -101,12 +64,9 @@ async fn gui_shows_text(world: &mut GuiWorld, expected_text: String) {
         .await;
 
     if element.is_err() {
-        gui_acceptance::screenshot(
-            &client,
-            &scenario_name,
-            &format!("fail-shows-{expected_text}"),
-        )
-        .await;
+        world
+            .screenshot(&client, &format!("fail-shows-{expected_text}"))
+            .await;
     }
 
     assert!(
@@ -114,23 +74,24 @@ async fn gui_shows_text(world: &mut GuiWorld, expected_text: String) {
         "expected the GUI to show text '{}' but it was not found on the page",
         expected_text
     );
+
+    world
+        .screenshot(&client, &format!("after-assert-shows-{expected_text}"))
+        .await;
 }
 
 #[then(expr = "the GUI should show {string} within {int} seconds")]
 async fn gui_should_show_text_within(world: &mut GuiWorld, expected_text: String, timeout: u64) {
-    let scenario_name = world.scenario_name.clone();
     let wd = world
         .webdriver
         .as_ref()
-        .expect("WebDriver session not initialized");
+        .expect("WebDriver session not initialized")
+        .clone();
     let client = wd.lock().await;
 
-    gui_acceptance::screenshot(
-        &client,
-        &scenario_name,
-        &format!("before-assert-show-{expected_text}"),
-    )
-    .await;
+    world
+        .screenshot(&client, &format!("before-assert-show-{expected_text}"))
+        .await;
 
     let element = client
         .wait()
@@ -142,12 +103,9 @@ async fn gui_should_show_text_within(world: &mut GuiWorld, expected_text: String
         .await;
 
     if element.is_err() {
-        gui_acceptance::screenshot(
-            &client,
-            &scenario_name,
-            &format!("fail-show-{expected_text}"),
-        )
-        .await;
+        world
+            .screenshot(&client, &format!("fail-show-{expected_text}"))
+            .await;
     }
 
     assert!(
@@ -156,23 +114,24 @@ async fn gui_should_show_text_within(world: &mut GuiWorld, expected_text: String
         expected_text,
         timeout
     );
+
+    world
+        .screenshot(&client, &format!("after-assert-show-{expected_text}"))
+        .await;
 }
 
 #[then(expr = "the GUI should not show {string} within {int} seconds")]
 async fn gui_should_not_show_text_within(world: &mut GuiWorld, absent_text: String, timeout: u64) {
-    let scenario_name = world.scenario_name.clone();
     let wd = world
         .webdriver
         .as_ref()
-        .expect("WebDriver session not initialized");
+        .expect("WebDriver session not initialized")
+        .clone();
     let client = wd.lock().await;
 
-    gui_acceptance::screenshot(
-        &client,
-        &scenario_name,
-        &format!("before-assert-not-show-{absent_text}"),
-    )
-    .await;
+    world
+        .screenshot(&client, &format!("before-assert-not-show-{absent_text}"))
+        .await;
 
     // Poll until the element disappears or the timeout expires.
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(timeout);
@@ -188,16 +147,16 @@ async fn gui_should_not_show_text_within(world: &mut GuiWorld, absent_text: Stri
 
         if found.is_err() {
             // Element is absent — assertion passes.
+            world
+                .screenshot(&client, &format!("after-assert-not-show-{absent_text}"))
+                .await;
             return;
         }
 
         if tokio::time::Instant::now() >= deadline {
-            gui_acceptance::screenshot(
-                &client,
-                &scenario_name,
-                &format!("fail-not-show-{absent_text}"),
-            )
-            .await;
+            world
+                .screenshot(&client, &format!("fail-not-show-{absent_text}"))
+                .await;
             panic!(
                 "expected the GUI to NOT show text '{}' within {} seconds, but it was still present",
                 absent_text, timeout
@@ -210,11 +169,11 @@ async fn gui_should_not_show_text_within(world: &mut GuiWorld, absent_text: Stri
 
 #[when(expr = "I click on the element containing text {string}")]
 async fn click_element_containing_text(world: &mut GuiWorld, text: String) {
-    let scenario_name = world.scenario_name.clone();
     let wd = world
         .webdriver
         .as_ref()
-        .expect("WebDriver session not initialized");
+        .expect("WebDriver session not initialized")
+        .clone();
     let client = wd.lock().await;
 
     let element = client
@@ -239,7 +198,9 @@ async fn click_element_containing_text(world: &mut GuiWorld, text: String) {
 
     // Brief pause to let the UI respond to the click.
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-    gui_acceptance::screenshot(&client, &scenario_name, &format!("after-click-{text}")).await;
+    world
+        .screenshot(&client, &format!("after-click-{text}"))
+        .await;
 }
 
 #[then(expr = "the GUI should show an element with title {string} within {int} seconds")]
@@ -248,19 +209,16 @@ async fn gui_should_show_element_with_title_within(
     title: String,
     timeout: u64,
 ) {
-    let scenario_name = world.scenario_name.clone();
     let wd = world
         .webdriver
         .as_ref()
-        .expect("WebDriver session not initialized");
+        .expect("WebDriver session not initialized")
+        .clone();
     let client = wd.lock().await;
 
-    gui_acceptance::screenshot(
-        &client,
-        &scenario_name,
-        &format!("before-assert-title-{title}"),
-    )
-    .await;
+    world
+        .screenshot(&client, &format!("before-assert-title-{title}"))
+        .await;
 
     let element = client
         .wait()
@@ -269,7 +227,9 @@ async fn gui_should_show_element_with_title_within(
         .await;
 
     if element.is_err() {
-        gui_acceptance::screenshot(&client, &scenario_name, &format!("fail-title-{title}")).await;
+        world
+            .screenshot(&client, &format!("fail-title-{title}"))
+            .await;
     }
 
     assert!(
@@ -278,6 +238,10 @@ async fn gui_should_show_element_with_title_within(
         title,
         timeout
     );
+
+    world
+        .screenshot(&client, &format!("after-assert-title-{title}"))
+        .await;
 }
 
 #[then(expr = "the GUI should not show an element with title {string} within {int} seconds")]
@@ -286,19 +250,16 @@ async fn gui_should_not_show_element_with_title_within(
     absent_title: String,
     timeout: u64,
 ) {
-    let scenario_name = world.scenario_name.clone();
     let wd = world
         .webdriver
         .as_ref()
-        .expect("WebDriver session not initialized");
+        .expect("WebDriver session not initialized")
+        .clone();
     let client = wd.lock().await;
 
-    gui_acceptance::screenshot(
-        &client,
-        &scenario_name,
-        &format!("before-assert-no-title-{absent_title}"),
-    )
-    .await;
+    world
+        .screenshot(&client, &format!("before-assert-no-title-{absent_title}"))
+        .await;
 
     // Poll until the element disappears or the timeout expires.
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(timeout);
@@ -311,16 +272,16 @@ async fn gui_should_not_show_element_with_title_within(
 
         if found.is_err() {
             // Element is absent — assertion passes.
+            world
+                .screenshot(&client, &format!("after-assert-no-title-{absent_title}"))
+                .await;
             return;
         }
 
         if tokio::time::Instant::now() >= deadline {
-            gui_acceptance::screenshot(
-                &client,
-                &scenario_name,
-                &format!("fail-no-title-{absent_title}"),
-            )
-            .await;
+            world
+                .screenshot(&client, &format!("fail-no-title-{absent_title}"))
+                .await;
             panic!(
                 "expected the GUI to NOT show an element with title '{}' within {} seconds, but it was still present",
                 absent_title, timeout
