@@ -69,7 +69,19 @@ pub struct StepAddCommand {
     #[arg(long, short = 's')]
     pub skill: Vec<String>,
 
-    /// Model to use for this step's agent (legacy, use --agent instead)
+    /// Prompt sent to the agent when executing this step
+    #[arg(long)]
+    pub prompt: Option<String>,
+
+    /// Evaluation prompt used to assess step output for branching decisions
+    #[arg(long)]
+    pub eval_prompt: Option<String>,
+
+    /// Full agent config as a JSON string (e.g. '{"model":"opus","max_budget_usd":5.0}')
+    #[arg(long, value_name = "JSON")]
+    pub agent_config: Option<String>,
+
+    /// Model to use for this step's agent (convenience shortcut for agent_config.model)
     #[arg(long, short)]
     pub model: Option<String>,
 
@@ -105,8 +117,13 @@ impl StepAddCommand {
         // Build the workflow ID string
         let workflow_id = self.workflow.to_lowercase();
 
-        // Build agent config (legacy support)
-        let mut agent_config = AgentConfig::new();
+        // Build agent config: start from --agent-config JSON, then overlay --model
+        let mut agent_config = match &self.agent_config {
+            Some(json_str) => serde_json::from_str::<AgentConfig>(json_str).map_err(|e| {
+                ServiceError::validation_failed(format!("Invalid --agent-config JSON: {}", e))
+            })?,
+            None => AgentConfig::new(),
+        };
         if let Some(model) = &self.model {
             agent_config = agent_config.with_model(model);
         }
@@ -127,6 +144,16 @@ impl StepAddCommand {
         // Set goal if provided
         if let Some(goal) = &self.goal {
             step = step.with_goal(goal);
+        }
+
+        // Set prompt if provided
+        if let Some(prompt) = &self.prompt {
+            step = step.with_prompt(prompt);
+        }
+
+        // Set eval_prompt if provided
+        if let Some(eval_prompt) = &self.eval_prompt {
+            step = step.with_eval_prompt(eval_prompt);
         }
 
         // Set agents if provided
@@ -354,7 +381,19 @@ pub struct StepUpdateCommand {
     #[arg(long)]
     pub clear_skills: bool,
 
-    /// New model for the step's agent (legacy)
+    /// New prompt for the step
+    #[arg(long)]
+    pub prompt: Option<String>,
+
+    /// New evaluation prompt for the step
+    #[arg(long)]
+    pub eval_prompt: Option<String>,
+
+    /// Full agent config as a JSON string (e.g. '{"model":"opus","max_budget_usd":5.0}')
+    #[arg(long, value_name = "JSON")]
+    pub agent_config: Option<String>,
+
+    /// New model for the step's agent (convenience shortcut for agent_config.model)
     #[arg(long, short)]
     pub model: Option<String>,
 
@@ -408,6 +447,14 @@ impl StepUpdateCommand {
             updates = updates.with_goal(goal);
         }
 
+        if let Some(prompt) = &self.prompt {
+            updates = updates.with_prompt(prompt);
+        }
+
+        if let Some(eval_prompt) = &self.eval_prompt {
+            updates = updates.with_eval_prompt(eval_prompt);
+        }
+
         if self.clear_agents {
             updates = updates.with_agents(vec![]);
         } else if !self.agent.is_empty() {
@@ -428,10 +475,19 @@ impl StepUpdateCommand {
             updates = updates.with_is_final(is_final);
         }
 
-        if let Some(model) = &self.model {
-            let existing = existing.as_ref().unwrap();
-            let mut agent_config = existing.agent_config.clone();
-            agent_config.model = Some(model.clone());
+        // Build agent_config: start from --agent-config JSON (merged onto existing),
+        // then overlay --model if provided
+        if self.agent_config.is_some() || self.model.is_some() {
+            let existing_step = existing.as_ref().unwrap();
+            let mut agent_config = match &self.agent_config {
+                Some(json_str) => serde_json::from_str::<AgentConfig>(json_str).map_err(|e| {
+                    ServiceError::validation_failed(format!("Invalid --agent-config JSON: {}", e))
+                })?,
+                None => existing_step.agent_config.clone(),
+            };
+            if let Some(model) = &self.model {
+                agent_config = agent_config.with_model(model);
+            }
             let config_value = serde_json::to_value(&agent_config).map_err(|e| {
                 ServiceError::validation_failed(format!("Invalid agent config: {}", e))
             })?;
@@ -824,5 +880,119 @@ mod tests {
             debug_str.contains("Add") && debug_str.contains("Test Step"),
             "Debug output should contain Add variant and name field value"
         );
+    }
+
+    #[test]
+    fn test_step_add_with_prompt_and_eval_prompt() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "add",
+            "Review",
+            "--workflow",
+            "a1b2c3d4-0000-4000-8000-000000000006",
+            "--prompt",
+            "Review the code for quality",
+            "--eval-prompt",
+            "Did the review pass?",
+        ]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            StepCommand::Add(cmd) => {
+                assert_eq!(cmd.prompt, Some("Review the code for quality".to_string()));
+                assert_eq!(cmd.eval_prompt, Some("Did the review pass?".to_string()));
+            }
+            _ => panic!("Expected Add command"),
+        }
+    }
+
+    #[test]
+    fn test_step_add_with_agent_config_json() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "add",
+            "Deploy",
+            "--workflow",
+            "a1b2c3d4-0000-4000-8000-000000000006",
+            "--agent-config",
+            r#"{"model":"opus","max_budget_usd":5.0}"#,
+        ]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            StepCommand::Add(cmd) => {
+                assert_eq!(
+                    cmd.agent_config,
+                    Some(r#"{"model":"opus","max_budget_usd":5.0}"#.to_string())
+                );
+            }
+            _ => panic!("Expected Add command"),
+        }
+    }
+
+    #[test]
+    fn test_step_add_with_agent_config_and_model() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "add",
+            "Deploy",
+            "--workflow",
+            "a1b2c3d4-0000-4000-8000-000000000006",
+            "--agent-config",
+            r#"{"model":"sonnet","max_budget_usd":5.0}"#,
+            "--model",
+            "opus",
+        ]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            StepCommand::Add(cmd) => {
+                assert_eq!(
+                    cmd.agent_config,
+                    Some(r#"{"model":"sonnet","max_budget_usd":5.0}"#.to_string())
+                );
+                assert_eq!(cmd.model, Some("opus".to_string()));
+            }
+            _ => panic!("Expected Add command"),
+        }
+    }
+
+    #[test]
+    fn test_step_update_with_prompt_and_eval_prompt() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "update",
+            "a1b2c3d4-0000-4000-8000-00000000000b",
+            "--prompt",
+            "New prompt text",
+            "--eval-prompt",
+            "New eval prompt",
+        ]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            StepCommand::Update(cmd) => {
+                assert_eq!(cmd.prompt, Some("New prompt text".to_string()));
+                assert_eq!(cmd.eval_prompt, Some("New eval prompt".to_string()));
+            }
+            _ => panic!("Expected Update command"),
+        }
+    }
+
+    #[test]
+    fn test_step_update_with_agent_config_json() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "update",
+            "a1b2c3d4-0000-4000-8000-00000000000b",
+            "--agent-config",
+            r#"{"model":"haiku","permission_mode":"plan"}"#,
+        ]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            StepCommand::Update(cmd) => {
+                assert_eq!(
+                    cmd.agent_config,
+                    Some(r#"{"model":"haiku","permission_mode":"plan"}"#.to_string())
+                );
+            }
+            _ => panic!("Expected Update command"),
+        }
     }
 }
