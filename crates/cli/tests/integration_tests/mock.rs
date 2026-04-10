@@ -1047,13 +1047,40 @@ impl StepService for MockStepService {
             .cloned()
             .collect())
     }
-    async fn update_step(&self, id: &str, _updates: &StepUpdate) -> ServiceResult<()> {
-        let s = self.state.lock().unwrap();
-        if s.steps.contains_key(id) {
-            Ok(())
-        } else {
-            Err(ServiceError::task_not_found(id))
+    async fn update_step(&self, id: &str, updates: &StepUpdate) -> ServiceResult<()> {
+        let mut s = self.state.lock().unwrap();
+        let step = s
+            .steps
+            .get_mut(id)
+            .ok_or_else(|| ServiceError::task_not_found(id))?;
+        if let Some(name) = &updates.name {
+            step.name = name.clone();
         }
+        if let Some(goal) = &updates.goal {
+            step.goal = Some(goal.clone());
+        }
+        if let Some(prompt) = &updates.prompt {
+            step.prompt = Some(prompt.clone());
+        }
+        if let Some(eval_prompt) = &updates.eval_prompt {
+            step.eval_prompt = Some(eval_prompt.clone());
+        }
+        if let Some(agents) = &updates.agents {
+            step.agents = agents.clone();
+        }
+        if let Some(skills) = &updates.skills {
+            step.skills = skills.clone();
+        }
+        if let Some(is_final) = updates.is_final {
+            step.is_final = is_final;
+        }
+        if let Some(order) = updates.order {
+            step.order = order;
+        }
+        if let Some(transitions) = &updates.transitions_to {
+            step.transitions_to = transitions.clone();
+        }
+        Ok(())
     }
     async fn delete_step(&self, id: &str) -> ServiceResult<()> {
         let mut s = self.state.lock().unwrap();

@@ -4,5 +4,6 @@ pub mod refs;
 pub mod sections;
 pub mod setup;
 pub mod state;
+pub mod step;
 pub mod task;
 pub mod workflow;

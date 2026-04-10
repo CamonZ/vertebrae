@@ -34,6 +34,9 @@ mod step_create_tests {
             goal: None,
             agent: vec![],
             skill: vec![],
+            prompt: None,
+            eval_prompt: None,
+            agent_config: None,
             model: None,
             order: 0,
             r#final: false,
@@ -65,6 +68,9 @@ mod step_create_tests {
             goal: None,
             agent: vec![],
             skill: vec![],
+            prompt: None,
+            eval_prompt: None,
+            agent_config: None,
             model: None,
             order: 0,
             r#final: false,
@@ -106,6 +112,9 @@ mod step_create_tests {
             goal: Some("Review code for quality and best practices".to_string()),
             agent: vec![],
             skill: vec![],
+            prompt: None,
+            eval_prompt: None,
+            agent_config: None,
             model: None,
             order: 0,
             r#final: false,
@@ -147,6 +156,9 @@ mod step_create_tests {
             goal: None,
             agent: vec![],
             skill: vec![],
+            prompt: None,
+            eval_prompt: None,
+            agent_config: None,
             model: None,
             order: 5,
             r#final: false,
@@ -180,6 +192,9 @@ mod step_create_tests {
             goal: None,
             agent: vec![],
             skill: vec![],
+            prompt: None,
+            eval_prompt: None,
+            agent_config: None,
             model: None,
             order: 0,
             r#final: true,
@@ -221,6 +236,9 @@ mod step_create_tests {
                 ".claude/agents/analyzer.md".to_string(),
             ],
             skill: vec![],
+            prompt: None,
+            eval_prompt: None,
+            agent_config: None,
             model: None,
             order: 0,
             r#final: false,
@@ -267,6 +285,9 @@ mod step_create_tests {
             goal: None,
             agent: vec![],
             skill: vec!["test-writing".to_string(), "debugging".to_string()],
+            prompt: None,
+            eval_prompt: None,
+            agent_config: None,
             model: None,
             order: 0,
             r#final: false,
@@ -302,6 +323,9 @@ mod step_create_tests {
             goal: None,
             agent: vec![],
             skill: vec![],
+            prompt: None,
+            eval_prompt: None,
+            agent_config: None,
             model: None,
             order: 0,
             r#final: false,
@@ -347,6 +371,9 @@ mod step_create_tests {
             goal: None,
             agent: vec![],
             skill: vec![],
+            prompt: None,
+            eval_prompt: None,
+            agent_config: None,
             model: Some("sonnet".to_string()),
             order: 0,
             r#final: false,
@@ -395,6 +422,9 @@ mod step_list_tests {
                 goal: None,
                 agent: vec![],
                 skill: vec![],
+                prompt: None,
+                eval_prompt: None,
+                agent_config: None,
                 model: None,
                 order: i,
                 r#final: i == 2,
@@ -459,6 +489,9 @@ mod step_list_tests {
             goal: None,
             agent: vec![],
             skill: vec![],
+            prompt: None,
+            eval_prompt: None,
+            agent_config: None,
             model: None,
             order: 0,
             r#final: false,
@@ -504,6 +537,9 @@ mod step_show_tests {
             goal: Some("Review code quality".to_string()),
             agent: vec![],
             skill: vec![],
+            prompt: None,
+            eval_prompt: None,
+            agent_config: None,
             model: None,
             order: 1,
             r#final: false,
@@ -545,6 +581,9 @@ mod step_show_tests {
             goal: None,
             agent: vec![".claude/agents/reviewer.md".to_string()],
             skill: vec!["code-review".to_string(), "lint".to_string()],
+            prompt: None,
+            eval_prompt: None,
+            agent_config: None,
             model: Some("opus".to_string()),
             order: 0,
             r#final: false,
@@ -583,6 +622,9 @@ mod step_show_tests {
             goal: None,
             agent: vec![],
             skill: vec![],
+            prompt: None,
+            eval_prompt: None,
+            agent_config: None,
             model: None,
             order: 10,
             r#final: true,
@@ -631,6 +673,9 @@ mod step_show_tests {
             goal: None,
             agent: vec![],
             skill: vec![],
+            prompt: None,
+            eval_prompt: None,
+            agent_config: None,
             model: None,
             order: 0,
             r#final: false,
@@ -675,6 +720,9 @@ mod step_update_tests {
             goal: None,
             agent: vec![],
             skill: vec![],
+            prompt: None,
+            eval_prompt: None,
+            agent_config: None,
             model: None,
             order: 0,
             r#final: false,
@@ -691,6 +739,9 @@ mod step_update_tests {
             clear_agents: false,
             skill: vec![],
             clear_skills: false,
+            prompt: None,
+            eval_prompt: None,
+            agent_config: None,
             model: None,
             order: None,
             r#final: None,
@@ -722,6 +773,9 @@ mod step_update_tests {
             goal: Some("Old goal".to_string()),
             agent: vec![],
             skill: vec![],
+            prompt: None,
+            eval_prompt: None,
+            agent_config: None,
             model: None,
             order: 0,
             r#final: false,
@@ -738,6 +792,9 @@ mod step_update_tests {
             clear_agents: false,
             skill: vec![],
             clear_skills: false,
+            prompt: None,
+            eval_prompt: None,
+            agent_config: None,
             model: None,
             order: None,
             r#final: None,
@@ -769,6 +826,9 @@ mod step_update_tests {
             goal: None,
             agent: vec![],
             skill: vec![],
+            prompt: None,
+            eval_prompt: None,
+            agent_config: None,
             model: None,
             order: 0,
             r#final: false,
@@ -785,6 +845,9 @@ mod step_update_tests {
             clear_agents: false,
             skill: vec![],
             clear_skills: false,
+            prompt: None,
+            eval_prompt: None,
+            agent_config: None,
             model: None,
             order: Some(5),
             r#final: Some(true),
@@ -816,6 +879,9 @@ mod step_update_tests {
             goal: None,
             agent: vec![],
             skill: vec![],
+            prompt: None,
+            eval_prompt: None,
+            agent_config: None,
             model: None,
             order: 0,
             r#final: false,
@@ -832,6 +898,9 @@ mod step_update_tests {
             clear_agents: false,
             skill: vec![],
             clear_skills: false,
+            prompt: None,
+            eval_prompt: None,
+            agent_config: None,
             model: None,
             order: None,
             r#final: None,
@@ -842,6 +911,14 @@ mod step_update_tests {
         let result = update_cmd.execute(services.steps()).await.unwrap();
 
         assert!(result.contains("Updated step"));
+
+        // Verify agents were actually stored (kills !self.agent.is_empty() mutant)
+        let step = services.steps().get_step("step").await.unwrap().unwrap();
+        assert!(
+            step.agents.contains(&".claude/agents/new.md".to_string()),
+            "expected agent to be set after update, got: {:?}",
+            step.agents
+        );
     }
 
     #[tokio::test]
@@ -863,6 +940,9 @@ mod step_update_tests {
             goal: None,
             agent: vec![".claude/agents/old.md".to_string()],
             skill: vec![],
+            prompt: None,
+            eval_prompt: None,
+            agent_config: None,
             model: None,
             order: 0,
             r#final: false,
@@ -879,6 +959,9 @@ mod step_update_tests {
             clear_agents: true,
             skill: vec![],
             clear_skills: false,
+            prompt: None,
+            eval_prompt: None,
+            agent_config: None,
             model: None,
             order: None,
             r#final: None,
@@ -910,6 +993,9 @@ mod step_update_tests {
             goal: None,
             agent: vec![],
             skill: vec![],
+            prompt: None,
+            eval_prompt: None,
+            agent_config: None,
             model: None,
             order: 0,
             r#final: false,
@@ -926,6 +1012,9 @@ mod step_update_tests {
             clear_agents: false,
             skill: vec![],
             clear_skills: false,
+            prompt: None,
+            eval_prompt: None,
+            agent_config: None,
             model: None,
             order: None,
             r#final: None,
@@ -936,6 +1025,19 @@ mod step_update_tests {
         let result = update_cmd.execute(services.steps()).await.unwrap();
 
         assert!(result.contains("Updated step"));
+
+        // Verify transitions were actually stored (kills !self.transitions_to.is_empty() mutant)
+        let step = services.steps().get_step("step").await.unwrap().unwrap();
+        assert!(
+            step.transitions_to.contains(&"next".to_string()),
+            "expected 'next' transition, got: {:?}",
+            step.transitions_to
+        );
+        assert!(
+            step.transitions_to.contains(&"retry".to_string()),
+            "expected 'retry' transition, got: {:?}",
+            step.transitions_to
+        );
     }
 
     #[tokio::test]
@@ -957,6 +1059,9 @@ mod step_update_tests {
             goal: None,
             agent: vec![],
             skill: vec![],
+            prompt: None,
+            eval_prompt: None,
+            agent_config: None,
             model: None,
             order: 0,
             r#final: false,
@@ -973,6 +1078,9 @@ mod step_update_tests {
             clear_agents: false,
             skill: vec![],
             clear_skills: false,
+            prompt: None,
+            eval_prompt: None,
+            agent_config: None,
             model: None,
             order: None,
             r#final: None,
@@ -983,6 +1091,115 @@ mod step_update_tests {
         let result = update_cmd.execute(services.steps()).await.unwrap();
 
         assert!(result.contains("Updated step"));
+    }
+
+    #[tokio::test]
+    async fn test_update_step_add_skills() {
+        let services = mock_services();
+
+        let workflow_options = CreateWorkflowOptions::new("Default", vec![]);
+        let workflow_id = services
+            .workflows()
+            .create_workflow(workflow_options)
+            .await
+            .unwrap();
+
+        let cmd = StepAddCommand {
+            name: "Step".to_string(),
+            workflow: workflow_id,
+            id: Some("step".to_string()),
+            goal: None,
+            agent: vec![],
+            skill: vec![],
+            prompt: None,
+            eval_prompt: None,
+            agent_config: None,
+            model: None,
+            order: 0,
+            r#final: false,
+            transitions_to: vec![],
+        };
+        cmd.execute(services.steps()).await.unwrap();
+
+        let update_cmd = StepUpdateCommand {
+            id: "step".to_string(),
+            name: None,
+            goal: None,
+            agent: vec![],
+            clear_agents: false,
+            skill: vec!["code-review".to_string(), "testing".to_string()],
+            clear_skills: false,
+            prompt: None,
+            eval_prompt: None,
+            agent_config: None,
+            model: None,
+            order: None,
+            r#final: None,
+            transitions_to: vec![],
+            clear_transitions: false,
+        };
+
+        let result = update_cmd.execute(services.steps()).await.unwrap();
+        assert!(result.contains("Updated step"));
+
+        // Verify skills were actually stored (kills !self.skill.is_empty() mutant)
+        let step = services.steps().get_step("step").await.unwrap().unwrap();
+        assert!(
+            step.skills.contains(&"code-review".to_string()),
+            "expected 'code-review' skill, got: {:?}",
+            step.skills
+        );
+        assert!(
+            step.skills.contains(&"testing".to_string()),
+            "expected 'testing' skill, got: {:?}",
+            step.skills
+        );
+    }
+}
+
+// ============================================================================
+// Step dispatcher tests
+// ============================================================================
+
+#[cfg(test)]
+mod step_dispatcher_tests {
+    use super::*;
+    use vertebrae_cli::commands::step::StepCommand;
+
+    #[tokio::test]
+    async fn test_step_command_dispatch_add() {
+        let services = mock_services();
+
+        let workflow_options = CreateWorkflowOptions::new("Default", vec![]);
+        let workflow_id = services
+            .workflows()
+            .create_workflow(workflow_options)
+            .await
+            .unwrap();
+
+        let cmd = StepCommand::Add(StepAddCommand {
+            name: "Dispatched".to_string(),
+            workflow: workflow_id,
+            id: Some("dispatched".to_string()),
+            goal: None,
+            agent: vec![],
+            skill: vec![],
+            prompt: None,
+            eval_prompt: None,
+            agent_config: None,
+            model: None,
+            order: 0,
+            r#final: false,
+            transitions_to: vec![],
+        });
+
+        // Call through the dispatcher, not the inner command directly
+        let result = cmd.execute(&services).await.unwrap();
+        assert!(
+            result.starts_with("Created step:"),
+            "expected 'Created step:' output, got: {}",
+            result
+        );
     }
 }
 
@@ -1013,6 +1230,9 @@ mod step_delete_tests {
             goal: None,
             agent: vec![],
             skill: vec![],
+            prompt: None,
+            eval_prompt: None,
+            agent_config: None,
             model: None,
             order: 0,
             r#final: false,
@@ -1070,6 +1290,9 @@ mod step_delete_tests {
             goal: None,
             agent: vec![],
             skill: vec![],
+            prompt: None,
+            eval_prompt: None,
+            agent_config: None,
             model: None,
             order: 0,
             r#final: false,
@@ -1106,6 +1329,9 @@ mod step_delete_tests {
             goal: None,
             agent: vec![],
             skill: vec![],
+            prompt: None,
+            eval_prompt: None,
+            agent_config: None,
             model: None,
             order: 0,
             r#final: false,
@@ -1121,5 +1347,458 @@ mod step_delete_tests {
         let result = delete_cmd.execute(services.steps()).await.unwrap();
 
         assert!(result.contains("Deleted step"));
+    }
+}
+
+// ============================================================================
+// Step prompt, eval_prompt, and agent_config tests
+// ============================================================================
+
+#[cfg(test)]
+mod step_prompt_and_agent_config_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_create_step_with_prompt() {
+        let services = mock_services();
+
+        let workflow_options = CreateWorkflowOptions::new("Default", vec![]);
+        let workflow_id = services
+            .workflows()
+            .create_workflow(workflow_options)
+            .await
+            .unwrap();
+
+        let cmd = StepAddCommand {
+            name: "Review".to_string(),
+            workflow: workflow_id,
+            id: Some("review".to_string()),
+            goal: None,
+            agent: vec![],
+            skill: vec![],
+            prompt: Some("Review the code for quality and best practices".to_string()),
+            eval_prompt: None,
+            agent_config: None,
+            model: None,
+            order: 0,
+            r#final: false,
+            transitions_to: vec![],
+        };
+
+        cmd.execute(services.steps()).await.unwrap();
+
+        let step = services.steps().get_step("review").await.unwrap().unwrap();
+        assert_eq!(
+            step.prompt,
+            Some("Review the code for quality and best practices".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_create_step_with_eval_prompt() {
+        let services = mock_services();
+
+        let workflow_options = CreateWorkflowOptions::new("Default", vec![]);
+        let workflow_id = services
+            .workflows()
+            .create_workflow(workflow_options)
+            .await
+            .unwrap();
+
+        let cmd = StepAddCommand {
+            name: "Evaluate".to_string(),
+            workflow: workflow_id,
+            id: Some("evaluate".to_string()),
+            goal: None,
+            agent: vec![],
+            skill: vec![],
+            prompt: None,
+            eval_prompt: Some("Did the step produce valid output?".to_string()),
+            agent_config: None,
+            model: None,
+            order: 0,
+            r#final: false,
+            transitions_to: vec![],
+        };
+
+        cmd.execute(services.steps()).await.unwrap();
+
+        let step = services
+            .steps()
+            .get_step("evaluate")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            step.eval_prompt,
+            Some("Did the step produce valid output?".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_create_step_with_agent_config_json() {
+        let services = mock_services();
+
+        let workflow_options = CreateWorkflowOptions::new("Default", vec![]);
+        let workflow_id = services
+            .workflows()
+            .create_workflow(workflow_options)
+            .await
+            .unwrap();
+
+        let cmd = StepAddCommand {
+            name: "Deploy".to_string(),
+            workflow: workflow_id,
+            id: Some("deploy".to_string()),
+            goal: None,
+            agent: vec![],
+            skill: vec![],
+            prompt: None,
+            eval_prompt: None,
+            agent_config: Some(r#"{"model":"opus","max_budget_usd":5.0}"#.to_string()),
+            model: None,
+            order: 0,
+            r#final: false,
+            transitions_to: vec![],
+        };
+
+        cmd.execute(services.steps()).await.unwrap();
+
+        let step = services.steps().get_step("deploy").await.unwrap().unwrap();
+        assert_eq!(step.agent_config.model, Some("opus".to_string()));
+        assert_eq!(step.agent_config.max_budget_usd, Some(5.0));
+    }
+
+    #[tokio::test]
+    async fn test_create_step_agent_config_and_model_override() {
+        let services = mock_services();
+
+        let workflow_options = CreateWorkflowOptions::new("Default", vec![]);
+        let workflow_id = services
+            .workflows()
+            .create_workflow(workflow_options)
+            .await
+            .unwrap();
+
+        // --agent-config sets model to "sonnet", but --model overrides to "opus"
+        let cmd = StepAddCommand {
+            name: "Override".to_string(),
+            workflow: workflow_id,
+            id: Some("override".to_string()),
+            goal: None,
+            agent: vec![],
+            skill: vec![],
+            prompt: None,
+            eval_prompt: None,
+            agent_config: Some(r#"{"model":"sonnet","max_budget_usd":10.0}"#.to_string()),
+            model: Some("opus".to_string()),
+            order: 0,
+            r#final: false,
+            transitions_to: vec![],
+        };
+
+        cmd.execute(services.steps()).await.unwrap();
+
+        let step = services
+            .steps()
+            .get_step("override")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            step.agent_config.model,
+            Some("opus".to_string()),
+            "--model should override model from --agent-config"
+        );
+        assert_eq!(
+            step.agent_config.max_budget_usd,
+            Some(10.0),
+            "Other agent_config fields from JSON should be preserved"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_create_step_invalid_agent_config_json() {
+        let services = mock_services();
+
+        let workflow_options = CreateWorkflowOptions::new("Default", vec![]);
+        let workflow_id = services
+            .workflows()
+            .create_workflow(workflow_options)
+            .await
+            .unwrap();
+
+        let cmd = StepAddCommand {
+            name: "Bad".to_string(),
+            workflow: workflow_id,
+            id: None,
+            goal: None,
+            agent: vec![],
+            skill: vec![],
+            prompt: None,
+            eval_prompt: None,
+            agent_config: Some("not valid json".to_string()),
+            model: None,
+            order: 0,
+            r#final: false,
+            transitions_to: vec![],
+        };
+
+        let result = cmd.execute(services.steps()).await;
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("--agent-config JSON"),
+            "Error should mention --agent-config JSON, got: {}",
+            err_msg
+        );
+    }
+
+    #[tokio::test]
+    async fn test_update_step_with_eval_prompt() {
+        let services = mock_services();
+
+        let workflow_options = CreateWorkflowOptions::new("Default", vec![]);
+        let workflow_id = services
+            .workflows()
+            .create_workflow(workflow_options)
+            .await
+            .unwrap();
+
+        let add_cmd = StepAddCommand {
+            name: "Step".to_string(),
+            workflow: workflow_id,
+            id: Some("step".to_string()),
+            goal: None,
+            agent: vec![],
+            skill: vec![],
+            prompt: None,
+            eval_prompt: None,
+            agent_config: None,
+            model: None,
+            order: 0,
+            r#final: false,
+            transitions_to: vec![],
+        };
+        add_cmd.execute(services.steps()).await.unwrap();
+
+        let update_cmd = StepUpdateCommand {
+            id: "step".to_string(),
+            name: None,
+            goal: None,
+            agent: vec![],
+            clear_agents: false,
+            skill: vec![],
+            clear_skills: false,
+            prompt: None,
+            eval_prompt: Some("Was the output satisfactory?".to_string()),
+            agent_config: None,
+            model: None,
+            order: None,
+            r#final: None,
+            transitions_to: vec![],
+            clear_transitions: false,
+        };
+
+        let result = update_cmd.execute(services.steps()).await.unwrap();
+        assert!(result.contains("Updated step: step"));
+    }
+
+    #[tokio::test]
+    async fn test_update_step_with_agent_config_json() {
+        let services = mock_services();
+
+        let workflow_options = CreateWorkflowOptions::new("Default", vec![]);
+        let workflow_id = services
+            .workflows()
+            .create_workflow(workflow_options)
+            .await
+            .unwrap();
+
+        let add_cmd = StepAddCommand {
+            name: "Step".to_string(),
+            workflow: workflow_id,
+            id: Some("step".to_string()),
+            goal: None,
+            agent: vec![],
+            skill: vec![],
+            prompt: None,
+            eval_prompt: None,
+            agent_config: None,
+            model: Some("sonnet".to_string()),
+            order: 0,
+            r#final: false,
+            transitions_to: vec![],
+        };
+        add_cmd.execute(services.steps()).await.unwrap();
+
+        let update_cmd = StepUpdateCommand {
+            id: "step".to_string(),
+            name: None,
+            goal: None,
+            agent: vec![],
+            clear_agents: false,
+            skill: vec![],
+            clear_skills: false,
+            prompt: None,
+            eval_prompt: None,
+            agent_config: Some(r#"{"model":"haiku","max_budget_usd":2.5}"#.to_string()),
+            model: None,
+            order: None,
+            r#final: None,
+            transitions_to: vec![],
+            clear_transitions: false,
+        };
+
+        let result = update_cmd.execute(services.steps()).await.unwrap();
+        assert!(result.contains("Updated step: step"));
+    }
+
+    #[tokio::test]
+    async fn test_update_step_agent_config_and_model_override() {
+        let services = mock_services();
+
+        let workflow_options = CreateWorkflowOptions::new("Default", vec![]);
+        let workflow_id = services
+            .workflows()
+            .create_workflow(workflow_options)
+            .await
+            .unwrap();
+
+        let add_cmd = StepAddCommand {
+            name: "Step".to_string(),
+            workflow: workflow_id,
+            id: Some("step".to_string()),
+            goal: None,
+            agent: vec![],
+            skill: vec![],
+            prompt: None,
+            eval_prompt: None,
+            agent_config: None,
+            model: None,
+            order: 0,
+            r#final: false,
+            transitions_to: vec![],
+        };
+        add_cmd.execute(services.steps()).await.unwrap();
+
+        // --agent-config sets model to "sonnet", --model overrides to "opus"
+        let update_cmd = StepUpdateCommand {
+            id: "step".to_string(),
+            name: None,
+            goal: None,
+            agent: vec![],
+            clear_agents: false,
+            skill: vec![],
+            clear_skills: false,
+            prompt: None,
+            eval_prompt: None,
+            agent_config: Some(r#"{"model":"sonnet","max_budget_usd":3.0}"#.to_string()),
+            model: Some("opus".to_string()),
+            order: None,
+            r#final: None,
+            transitions_to: vec![],
+            clear_transitions: false,
+        };
+
+        let result = update_cmd.execute(services.steps()).await.unwrap();
+        assert!(result.contains("Updated step: step"));
+    }
+
+    #[tokio::test]
+    async fn test_update_step_invalid_agent_config_json() {
+        let services = mock_services();
+
+        let workflow_options = CreateWorkflowOptions::new("Default", vec![]);
+        let workflow_id = services
+            .workflows()
+            .create_workflow(workflow_options)
+            .await
+            .unwrap();
+
+        let add_cmd = StepAddCommand {
+            name: "Step".to_string(),
+            workflow: workflow_id,
+            id: Some("step".to_string()),
+            goal: None,
+            agent: vec![],
+            skill: vec![],
+            prompt: None,
+            eval_prompt: None,
+            agent_config: None,
+            model: None,
+            order: 0,
+            r#final: false,
+            transitions_to: vec![],
+        };
+        add_cmd.execute(services.steps()).await.unwrap();
+
+        let update_cmd = StepUpdateCommand {
+            id: "step".to_string(),
+            name: None,
+            goal: None,
+            agent: vec![],
+            clear_agents: false,
+            skill: vec![],
+            clear_skills: false,
+            prompt: None,
+            eval_prompt: None,
+            agent_config: Some("{bad json}".to_string()),
+            model: None,
+            order: None,
+            r#final: None,
+            transitions_to: vec![],
+            clear_transitions: false,
+        };
+
+        let result = update_cmd.execute(services.steps()).await;
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("--agent-config JSON"),
+            "Error should mention --agent-config JSON, got: {}",
+            err_msg
+        );
+    }
+
+    #[tokio::test]
+    async fn test_create_step_with_prompt_and_eval_prompt_together() {
+        let services = mock_services();
+
+        let workflow_options = CreateWorkflowOptions::new("Default", vec![]);
+        let workflow_id = services
+            .workflows()
+            .create_workflow(workflow_options)
+            .await
+            .unwrap();
+
+        let cmd = StepAddCommand {
+            name: "FullStep".to_string(),
+            workflow: workflow_id,
+            id: Some("full".to_string()),
+            goal: Some("Complete review".to_string()),
+            agent: vec![],
+            skill: vec![],
+            prompt: Some("Analyze the codebase".to_string()),
+            eval_prompt: Some("Is the analysis complete?".to_string()),
+            agent_config: Some(r#"{"model":"opus","max_budget_usd":15.0}"#.to_string()),
+            model: None,
+            order: 2,
+            r#final: false,
+            transitions_to: vec![],
+        };
+
+        cmd.execute(services.steps()).await.unwrap();
+
+        let step = services.steps().get_step("full").await.unwrap().unwrap();
+        assert_eq!(step.prompt, Some("Analyze the codebase".to_string()));
+        assert_eq!(
+            step.eval_prompt,
+            Some("Is the analysis complete?".to_string())
+        );
+        assert_eq!(step.goal, Some("Complete review".to_string()));
+        assert_eq!(step.agent_config.model, Some("opus".to_string()));
+        assert_eq!(step.agent_config.max_budget_usd, Some(15.0));
+        assert_eq!(step.order, 2);
     }
 }
