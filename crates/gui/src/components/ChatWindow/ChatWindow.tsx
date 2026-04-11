@@ -3,6 +3,7 @@ import { useScopedChat } from "../../hooks/useScopedChat";
 import { useChatStore, getParentScope } from "../../stores/chatStore";
 import type { ChatScope, ChatMessage } from "../../stores/chatStore";
 import { scopeLabel } from "../../utils/chatContext";
+import { MarkdownContent } from "./MarkdownContent";
 
 /**
  * Thinking indicator shown while waiting for Claude to respond
@@ -49,9 +50,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
       return (
         <div className="flex justify-start">
           <div className="max-w-[85%] rounded-lg bg-bg-tertiary px-4 py-3">
-            <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-text-primary antialiased">
-              {message.text}
-            </p>
+            <MarkdownContent text={message.text} />
             {message.isPartial && (
               <span className="ml-1 inline-block h-4 w-1 animate-pulse bg-primary" />
             )}
