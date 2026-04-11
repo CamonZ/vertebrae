@@ -10,8 +10,7 @@ import type {
   ClaudeSessionErrorEvent,
 } from "../bindings";
 import { useChatStore } from "../stores/chatStore";
-import type { ChatScope, ChatSession } from "../stores/chatStore";
-import type { ChatMessage } from "./useClaudeChat";
+import type { ChatScope, ChatSession, ChatMessage } from "../stores/chatStore";
 import { buildContextSummary, buildInitialPrompt } from "../utils/chatContext";
 
 // --- Extracted event handlers (pure functions, testable without hooks) ---
