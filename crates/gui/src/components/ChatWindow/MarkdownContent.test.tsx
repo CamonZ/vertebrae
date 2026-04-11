@@ -1,0 +1,265 @@
+import { describe, it, expect, vi } from "vitest";
+import { render, screen } from "@testing-library/react";
+import { MarkdownContent } from "./MarkdownContent";
+
+// Mock scrollIntoView
+Element.prototype.scrollIntoView = vi.fn();
+
+describe("MarkdownContent", () => {
+  describe("plain text rendering", () => {
+    it("renders plain text in a paragraph", () => {
+      render(<MarkdownContent text="Hello world" />);
+      const paragraph = screen.getByText("Hello world");
+      expect(paragraph.tagName).toBe("P");
+    });
+
+    it("wraps content in a container with data-testid", () => {
+      render(<MarkdownContent text="test" />);
+      expect(screen.getByTestId("markdown-content")).toBeInTheDocument();
+    });
+  });
+
+  describe("inline formatting", () => {
+    it("renders bold text with strong tag", () => {
+      render(<MarkdownContent text="This is **bold** text" />);
+      const strong = screen.getByText("bold");
+      expect(strong.tagName).toBe("STRONG");
+      expect(strong.className).toContain("font-semibold");
+    });
+
+    it("renders italic text with em tag", () => {
+      render(<MarkdownContent text="This is *italic* text" />);
+      const em = screen.getByText("italic");
+      expect(em.tagName).toBe("EM");
+    });
+
+    it("renders inline code with code tag and mono font", () => {
+      render(<MarkdownContent text="Use `console.log()` here" />);
+      const code = screen.getByText("console.log()");
+      expect(code.tagName).toBe("CODE");
+      expect(code.className).toContain("font-mono");
+      expect(code.className).toContain("text-primary");
+    });
+  });
+
+  describe("headings", () => {
+    it("renders h1 headings", () => {
+      render(<MarkdownContent text="# Main Title" />);
+      const heading = screen.getByText("Main Title");
+      expect(heading.tagName).toBe("H1");
+      expect(heading.className).toContain("text-xl");
+      expect(heading.className).toContain("font-bold");
+    });
+
+    it("renders h2 headings", () => {
+      render(<MarkdownContent text="## Section Title" />);
+      const heading = screen.getByText("Section Title");
+      expect(heading.tagName).toBe("H2");
+      expect(heading.className).toContain("font-semibold");
+    });
+
+    it("renders h3 headings", () => {
+      render(<MarkdownContent text="### Subsection" />);
+      const heading = screen.getByText("Subsection");
+      expect(heading.tagName).toBe("H3");
+    });
+
+    it("renders h4 headings", () => {
+      render(<MarkdownContent text="#### Detail" />);
+      const heading = screen.getByText("Detail");
+      expect(heading.tagName).toBe("H4");
+      expect(heading.className).toContain("font-semibold");
+    });
+  });
+
+  describe("lists", () => {
+    it("renders unordered lists with disc style", () => {
+      render(
+        <MarkdownContent text={"- Item one\n- Item two\n- Item three"} />
+      );
+      expect(screen.getByText("Item one")).toBeInTheDocument();
+      expect(screen.getByText("Item two")).toBeInTheDocument();
+      expect(screen.getByText("Item three")).toBeInTheDocument();
+
+      const list = screen.getByText("Item one").closest("ul");
+      expect(list).not.toBeNull();
+      expect(list!.className).toContain("list-disc");
+    });
+
+    it("renders ordered lists with decimal style", () => {
+      render(
+        <MarkdownContent text={"1. First\n2. Second\n3. Third"} />
+      );
+      expect(screen.getByText("First")).toBeInTheDocument();
+      const list = screen.getByText("First").closest("ol");
+      expect(list).not.toBeNull();
+      expect(list!.className).toContain("list-decimal");
+    });
+  });
+
+  describe("links", () => {
+    it("renders links with target=_blank and rel attributes", () => {
+      render(
+        <MarkdownContent text="Visit [Example](https://example.com)" />
+      );
+      const link = screen.getByText("Example");
+      expect(link.tagName).toBe("A");
+      expect(link).toHaveAttribute("href", "https://example.com");
+      expect(link).toHaveAttribute("target", "_blank");
+      expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    });
+  });
+
+  describe("blockquotes", () => {
+    it("renders blockquotes with left border styling", () => {
+      render(<MarkdownContent text="> This is a quote" />);
+      const quote = screen.getByText("This is a quote").closest("blockquote");
+      expect(quote).not.toBeNull();
+      expect(quote!.className).toContain("border-l-2");
+      expect(quote!.className).toContain("italic");
+    });
+  });
+
+  describe("code blocks", () => {
+    it("renders fenced code blocks with language label", () => {
+      const markdown = "```typescript\nconst x = 42;\n```";
+      const { container } = render(<MarkdownContent text={markdown} />);
+      expect(screen.getByText("typescript")).toBeInTheDocument();
+      // Syntax highlighter splits tokens across spans, so check the code element's text content
+      const codeEl = container.querySelector("code");
+      expect(codeEl).not.toBeNull();
+      expect(codeEl!.textContent).toContain("const");
+      expect(codeEl!.textContent).toContain("42");
+    });
+
+    it("renders fenced code blocks without language and no language label", () => {
+      const markdown = "```\nplain code\n```";
+      const { container } = render(<MarkdownContent text={markdown} />);
+      expect(screen.getByText("plain code")).toBeInTheDocument();
+      // Should not render a language label bar
+      const languageLabel = container.querySelector(".font-mono.text-\\[11px\\]");
+      expect(languageLabel).toBeNull();
+    });
+
+    it("renders multi-line code blocks with exact content", () => {
+      const markdown = "```js\nline1\nline2\nline3\n```";
+      const { container } = render(<MarkdownContent text={markdown} />);
+      expect(screen.getByText("js")).toBeInTheDocument();
+      const codeEl = container.querySelector("code");
+      expect(codeEl).not.toBeNull();
+      // Trailing newline should be stripped, content should be exact
+      expect(codeEl!.textContent).toBe("line1\nline2\nline3");
+    });
+  });
+
+  describe("tables (GFM)", () => {
+    it("renders GFM tables with proper structure", () => {
+      const markdown =
+        "| Name | Value |\n| --- | --- |\n| Alpha | 1 |\n| Beta | 2 |";
+      render(<MarkdownContent text={markdown} />);
+
+      expect(screen.getByText("Name")).toBeInTheDocument();
+      expect(screen.getByText("Value")).toBeInTheDocument();
+      expect(screen.getByText("Alpha")).toBeInTheDocument();
+      expect(screen.getByText("1")).toBeInTheDocument();
+      expect(screen.getByText("Beta")).toBeInTheDocument();
+      expect(screen.getByText("2")).toBeInTheDocument();
+
+      const nameHeader = screen.getByText("Name");
+      expect(nameHeader.tagName).toBe("TH");
+      expect(nameHeader.className).toContain("font-medium");
+
+      const alphaCell = screen.getByText("Alpha");
+      expect(alphaCell.tagName).toBe("TD");
+    });
+  });
+
+  describe("horizontal rules", () => {
+    it("renders horizontal rules", () => {
+      const { container } = render(
+        <MarkdownContent text={"Above\n\n---\n\nBelow"} />
+      );
+      const hr = container.querySelector("hr");
+      expect(hr).not.toBeNull();
+      expect(hr!.className).toContain("border-border");
+    });
+  });
+
+  describe("streaming / partial markdown", () => {
+    it("renders unclosed code fence without breaking", () => {
+      const partial = "Here is code:\n```python\ndef hello():";
+      const { container } = render(<MarkdownContent text={partial} />);
+      expect(container.querySelector('[data-testid="markdown-content"]')).toBeInTheDocument();
+      // Syntax highlighter splits tokens, so check via code element text content
+      const codeEl = container.querySelector("code");
+      expect(codeEl).not.toBeNull();
+      expect(codeEl!.textContent).toContain("def");
+      expect(codeEl!.textContent).toContain("hello");
+    });
+
+    it("renders partial bold syntax without breaking", () => {
+      const partial = "This is **bold but not clo";
+      const { container } = render(<MarkdownContent text={partial} />);
+      expect(container.querySelector('[data-testid="markdown-content"]')).toBeInTheDocument();
+    });
+
+    it("renders partial list without breaking", () => {
+      const partial = "Items:\n- First\n- Second\n- ";
+      const { container } = render(<MarkdownContent text={partial} />);
+      expect(container.querySelector('[data-testid="markdown-content"]')).toBeInTheDocument();
+      expect(screen.getByText("First")).toBeInTheDocument();
+      expect(screen.getByText("Second")).toBeInTheDocument();
+    });
+
+    it("renders empty text without breaking", () => {
+      const { container } = render(<MarkdownContent text="" />);
+      expect(container.querySelector('[data-testid="markdown-content"]')).toBeInTheDocument();
+    });
+  });
+
+  describe("complex markdown", () => {
+    it("renders a mix of headings, lists, code, and text", () => {
+      const markdown = [
+        "## Overview",
+        "",
+        "This function does the following:",
+        "",
+        "1. Reads the file",
+        "2. Parses the content",
+        "3. Returns the result",
+        "",
+        "Example:",
+        "",
+        "```rust",
+        "fn main() {",
+        '    println!("hello");',
+        "}",
+        "```",
+        "",
+        "Use `main()` to start.",
+      ].join("\n");
+
+      render(<MarkdownContent text={markdown} />);
+
+      expect(screen.getByText("Overview")).toBeInTheDocument();
+      expect(screen.getByText("Overview").tagName).toBe("H2");
+      expect(screen.getByText("Reads the file")).toBeInTheDocument();
+      expect(screen.getByText("rust")).toBeInTheDocument();
+      expect(screen.getByText("main()")).toBeInTheDocument();
+      expect(screen.getByText("main()").tagName).toBe("CODE");
+    });
+
+    it("renders GFM strikethrough text", () => {
+      render(<MarkdownContent text="This is ~~deleted~~ text" />);
+      const deleted = screen.getByText("deleted");
+      expect(deleted.tagName).toBe("DEL");
+    });
+
+    it("renders GFM task lists", () => {
+      const markdown = "- [x] Done\n- [ ] Not done";
+      render(<MarkdownContent text={markdown} />);
+      expect(screen.getByText("Done")).toBeInTheDocument();
+      expect(screen.getByText("Not done")).toBeInTheDocument();
+    });
+  });
+});
