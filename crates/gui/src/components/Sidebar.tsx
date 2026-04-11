@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { commands } from "../bindings";
-import { useUIStore } from "../stores";
 import { useChatStore } from "../stores/chatStore";
 import { useOpenChat } from "../hooks/useScopedChat";
 
@@ -42,52 +41,6 @@ function NavItem({ to, icon, label }: NavItemProps) {
           </>
         )}
       </NavLink>
-    </li>
-  );
-}
-
-/**
- * Claude chat toggle button that opens/closes the Claude sidebar
- */
-function ClaudeChatToggleButton() {
-  const toggleClaudeSidebar = useUIStore((s) => s.toggleClaudeSidebar);
-  const claudeSidebarOpen = useUIStore((s) => s.claudeSidebarOpen);
-
-  return (
-    <li>
-      <button
-        onClick={toggleClaudeSidebar}
-        className={`group relative flex w-full items-center justify-center rounded-lg p-2.5 text-sm font-medium transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
-          claudeSidebarOpen
-            ? "bg-accent/10 text-accent shadow-glow-sm"
-            : "text-text-secondary hover:bg-bg-hover hover:text-text-primary"
-        }`}
-        title={claudeSidebarOpen ? "Hide Claude Chat" : "Show Claude Chat"}
-      >
-        {/* Glow indicator for active state */}
-        {claudeSidebarOpen && (
-          <span className="absolute left-0 top-1/2 h-6 w-0.5 -translate-y-1/2 rounded-full bg-accent shadow-glow-sm" />
-        )}
-        <span
-          className={`relative shrink-0 transition-transform duration-200 ${claudeSidebarOpen ? "scale-110" : "group-hover:scale-105"}`}
-        >
-          {/* Chat bubble icon */}
-          <svg
-            className="h-5 w-5"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={1.5}
-              d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
-            />
-          </svg>
-        </span>
-      </button>
     </li>
   );
 }
@@ -345,7 +298,6 @@ export function Sidebar() {
               </svg>
             }
           />
-          <ClaudeChatToggleButton />
           <ProjectChatButton />
         </ul>
       </nav>

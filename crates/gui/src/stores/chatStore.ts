@@ -1,5 +1,40 @@
 import { create } from "zustand";
-import type { ChatMessage } from "../hooks/useClaudeChat";
+
+/**
+ * Message types for the Claude chat
+ */
+export type ChatMessage =
+  | { kind: "user"; text: string; timestamp: string }
+  | { kind: "assistant"; text: string; timestamp: string; isPartial?: boolean }
+  | {
+      kind: "tool_call";
+      toolName: string;
+      toolId: string;
+      input: string;
+      timestamp: string;
+    }
+  | {
+      kind: "tool_result";
+      toolId: string;
+      result: string;
+      isError: boolean;
+      timestamp: string;
+    }
+  | {
+      kind: "permission_request";
+      toolName: string;
+      message: string;
+      timestamp: string;
+    }
+  | { kind: "session_start"; model: string; timestamp: string }
+  | {
+      kind: "session_end";
+      durationMs: number;
+      costUsd: number;
+      numTurns: number;
+      timestamp: string;
+    }
+  | { kind: "error"; message: string; timestamp: string };
 
 /**
  * Scope levels for chat sessions.
