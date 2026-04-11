@@ -895,12 +895,11 @@ pub async fn update_step(
     options: crate::types::UpdateStepOptions,
 ) -> Result<(), CommandError> {
     log::info!(
-        "update_step called with step_id: '{}', name: {:?}, goal: {:?}, prompt: {:?}, eval_prompt: {:?}",
+        "update_step called with step_id: '{}', name: {:?}, goal: {:?}, prompt: {:?}",
         options.step_id,
         options.name,
         options.goal,
         options.prompt,
-        options.eval_prompt,
     );
     let step_id = options.step_id.clone();
     let service_guard = state.services.read().await;

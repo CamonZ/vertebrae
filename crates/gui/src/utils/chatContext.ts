@@ -138,9 +138,6 @@ async function buildStepContext(stepId: string): Promise<string | null> {
     if (step.prompt) {
       parts.push(`Prompt: ${step.prompt}`);
     }
-    if (step.eval_prompt) {
-      parts.push(`Eval prompt: ${step.eval_prompt}`);
-    }
     if (step.agent_config) {
       parts.push(`Agent: model=${step.agent_config.model ?? "default"}`);
     }

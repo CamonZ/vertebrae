@@ -42,8 +42,6 @@ pub struct StepDisplayInfo {
     pub order: i32,
     /// Prompt sent to the agent
     pub prompt: Option<String>,
-    /// Evaluation prompt for branching decisions
-    pub eval_prompt: Option<String>,
 }
 
 /// Detailed view of a workflow with all steps
@@ -125,9 +123,6 @@ impl std::fmt::Display for WorkflowDetail {
                 )?;
                 if let Some(ref prompt) = step.prompt {
                     writeln!(f, "   Prompt: {}", prompt)?;
-                }
-                if let Some(ref eval_prompt) = step.eval_prompt {
-                    writeln!(f, "   Eval Prompt: {}", eval_prompt)?;
                 }
             }
         }
@@ -219,14 +214,12 @@ mod tests {
                     model: Some("model1".to_string()),
                     order: 0,
                     prompt: None,
-                    eval_prompt: None,
                 },
                 StepDisplayInfo {
                     name: "step2".to_string(),
                     model: Some("model2".to_string()),
                     order: 1,
                     prompt: None,
-                    eval_prompt: None,
                 },
             ],
             metadata: HashMap::new(),
@@ -488,7 +481,6 @@ mod tests {
                 model: None,
                 order: 0,
                 prompt: None,
-                eval_prompt: None,
             }],
             metadata: HashMap::new(),
             created_at: None,
@@ -513,21 +505,18 @@ mod tests {
                     model: Some("m3".to_string()),
                     order: 2,
                     prompt: None,
-                    eval_prompt: None,
                 },
                 StepDisplayInfo {
                     name: "code".to_string(),
                     model: Some("m1".to_string()),
                     order: 0,
                     prompt: None,
-                    eval_prompt: None,
                 },
                 StepDisplayInfo {
                     name: "review".to_string(),
                     model: Some("m2".to_string()),
                     order: 1,
                     prompt: None,
-                    eval_prompt: None,
                 },
             ],
             metadata: HashMap::new(),
@@ -634,14 +623,12 @@ mod tests {
             model: Some("sonnet".to_string()),
             order: 1,
             prompt: Some("Review carefully".to_string()),
-            eval_prompt: None,
         };
         let cloned = step.clone();
         assert_eq!(step.name, cloned.name);
         assert_eq!(step.model, cloned.model);
         assert_eq!(step.order, cloned.order);
         assert_eq!(step.prompt, cloned.prompt);
-        assert_eq!(step.eval_prompt, cloned.eval_prompt);
     }
 
     #[test]
@@ -651,7 +638,6 @@ mod tests {
             model: Some("opus".to_string()),
             order: 0,
             prompt: None,
-            eval_prompt: None,
         };
         let debug = format!("{:?}", step);
         assert!(debug.contains("StepDisplayInfo"));
@@ -666,12 +652,11 @@ mod tests {
             model: None,
             order: 0,
             prompt: None,
-            eval_prompt: None,
         };
         assert!(step.model.is_none());
     }
 
-    // ==================== Prompt & Eval Prompt display ====================
+    // ==================== Prompt display ====================
 
     #[test]
     fn test_workflow_detail_display_step_with_prompt() {
@@ -687,7 +672,6 @@ mod tests {
                 model: None,
                 order: 0,
                 prompt: Some("Review the code for bugs".to_string()),
-                eval_prompt: None,
             }],
             metadata: HashMap::new(),
             created_at: None,
@@ -695,63 +679,6 @@ mod tests {
         };
         let output = format!("{}", detail);
         assert!(output.contains("Prompt: Review the code for bugs"));
-        assert!(!output.contains("Eval Prompt:"));
-    }
-
-    #[test]
-    fn test_workflow_detail_display_step_with_eval_prompt() {
-        let detail = WorkflowDetail {
-            id: "wf1".to_string(),
-            name: "Eval".to_string(),
-            description: None,
-            auto_advance: false,
-            is_default: false,
-            kanban_column: None,
-            steps: vec![StepDisplayInfo {
-                name: "check".to_string(),
-                model: None,
-                order: 0,
-                prompt: None,
-                eval_prompt: Some("Did the tests pass?".to_string()),
-            }],
-            metadata: HashMap::new(),
-            created_at: None,
-            updated_at: None,
-        };
-        let output = format!("{}", detail);
-        // "   Prompt: " is the standalone prompt line, distinct from "   Eval Prompt: "
-        assert!(!output.contains("   Prompt: "));
-        assert!(output.contains("Eval Prompt: Did the tests pass?"));
-    }
-
-    #[test]
-    fn test_workflow_detail_display_step_with_both_prompts() {
-        let detail = WorkflowDetail {
-            id: "wf1".to_string(),
-            name: "Both".to_string(),
-            description: None,
-            auto_advance: false,
-            is_default: false,
-            kanban_column: None,
-            steps: vec![StepDisplayInfo {
-                name: "implement".to_string(),
-                model: Some("opus".to_string()),
-                order: 0,
-                prompt: Some("Write the feature".to_string()),
-                eval_prompt: Some("Is the feature complete?".to_string()),
-            }],
-            metadata: HashMap::new(),
-            created_at: None,
-            updated_at: None,
-        };
-        let output = format!("{}", detail);
-        assert!(output.contains("1. implement (model: opus)"));
-        assert!(output.contains("Prompt: Write the feature"));
-        assert!(output.contains("Eval Prompt: Is the feature complete?"));
-        // Verify prompt appears before eval_prompt
-        let prompt_pos = output.find("Prompt: Write").unwrap();
-        let eval_pos = output.find("Eval Prompt:").unwrap();
-        assert!(prompt_pos < eval_pos);
     }
 
     #[test]
@@ -768,7 +695,6 @@ mod tests {
                 model: None,
                 order: 0,
                 prompt: None,
-                eval_prompt: None,
             }],
             metadata: HashMap::new(),
             created_at: None,
@@ -777,7 +703,6 @@ mod tests {
         let output = format!("{}", detail);
         assert!(output.contains("1. basic (model: default)"));
         assert!(!output.contains("Prompt:"));
-        assert!(!output.contains("Eval Prompt:"));
     }
 
     // ==================== WorkflowSummary edge cases ====================

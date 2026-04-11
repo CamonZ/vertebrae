@@ -1063,8 +1063,7 @@ mod tests {
             "goal": "Deploy to production",
             "context": {"title": "Some task"},
             "is_final": true,
-            "transitions_to": ["next-step"],
-            "eval_prompt": "Check output"
+            "transitions_to": ["next-step"]
         });
 
         let result = parse_run_step_payload(&payload).unwrap();

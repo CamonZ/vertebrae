@@ -6,7 +6,6 @@ pub const STEP_FIELDS: &str = r#"
         name
         goal
         prompt
-        eval_prompt
         agents
         skills
         agent_config
@@ -48,7 +47,6 @@ pub const CREATE_STEP: &str = r#"
         $name: String!,
         $goal: String,
         $prompt: String,
-        $eval_prompt: String,
         $agents: [String!],
         $skills: [String!],
         $agent_config: Json,
@@ -60,7 +58,6 @@ pub const CREATE_STEP: &str = r#"
             name: $name,
             goal: $goal,
             prompt: $prompt,
-            eval_prompt: $eval_prompt,
             agents: $agents,
             skills: $skills,
             agent_config: $agent_config,
@@ -78,7 +75,6 @@ pub const UPDATE_STEP: &str = r#"
         $name: String,
         $goal: String,
         $prompt: String,
-        $eval_prompt: String,
         $agents: [String!],
         $skills: [String!],
         $agent_config: Json,
@@ -90,7 +86,6 @@ pub const UPDATE_STEP: &str = r#"
             name: $name,
             goal: $goal,
             prompt: $prompt,
-            eval_prompt: $eval_prompt,
             agents: $agents,
             skills: $skills,
             agent_config: $agent_config,
