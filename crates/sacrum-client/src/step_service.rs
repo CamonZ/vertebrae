@@ -532,6 +532,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_get_step_graphql_error_propagates() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": null,
+                "errors": [{"message": "validation failed", "path": ["workflow_step"]}]
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let result = service.get_step("step-1").await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
     async fn test_list_steps_for_workflow() {
         let server = MockServer::start().await;
 
@@ -720,8 +739,6 @@ mod tests {
                         "is_default": false, "display_order": 0,
                         "metadata": null, "initial_step_id": null,
                         "project_id": "test-project",
-                        "on_done_workflow_id": null,
-                        "on_reject_workflow_id": null,
                         "inserted_at": null, "updated_at": null,
                         "transitions": []
                     }
