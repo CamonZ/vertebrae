@@ -108,13 +108,26 @@ describe("chatStore", () => {
       expect(useChatStore.getState().activeSessionId).toBeNull();
     });
 
+    it("does nothing for non-existent session", () => {
+      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+      useChatStore.getState().closeSession("non-existent");
+
+      expect(useChatStore.getState().sessions[id]).toBeDefined();
+      expect(useChatStore.getState().activeSessionId).toBe(id);
+    });
+
     it("does not change active session if non-active is closed", () => {
       const id1 = useChatStore.getState().openSession("task", "t-1", "T1");
-      const id2 = useChatStore.getState().openSession("task", "t-2", "T2");
+      useChatStore.getState().openSession("task", "t-2", "T2");
+      const id3 = useChatStore.getState().openSession("task", "t-3", "T3");
 
-      expect(useChatStore.getState().activeSessionId).toBe(id2);
-      useChatStore.getState().closeSession(id1);
-      expect(useChatStore.getState().activeSessionId).toBe(id2);
+      // Make id1 active (not the last in the session list)
+      useChatStore.getState().focusSession(id1);
+      expect(useChatStore.getState().activeSessionId).toBe(id1);
+
+      // Close id3 (non-active); active should remain id1, not jump to last session
+      useChatStore.getState().closeSession(id3);
+      expect(useChatStore.getState().activeSessionId).toBe(id1);
     });
 
     it("preserves panelOpen when other sessions remain", () => {
@@ -300,6 +313,11 @@ describe("chatStore", () => {
       const session = useChatStore.getState().sessions[id];
       expect(session.claudeSessionId).toBe("claude-session-abc");
     });
+
+    it("does nothing for non-existent session", () => {
+      useChatStore.getState().setClaudeSessionId("non-existent", "abc");
+      expect(Object.keys(useChatStore.getState().sessions)).toHaveLength(0);
+    });
   });
 
   describe("setClaudeConversationId", () => {
@@ -327,6 +345,11 @@ describe("chatStore", () => {
       const session = useChatStore.getState().sessions[id];
       expect(session.contextSummary).toBe("[Context: Task]\nTask: My Task");
     });
+
+    it("does nothing for non-existent session", () => {
+      useChatStore.getState().setContextSummary("non-existent", "summary");
+      expect(Object.keys(useChatStore.getState().sessions)).toHaveLength(0);
+    });
   });
 
   describe("markSessionClosed", () => {
@@ -337,6 +360,14 @@ describe("chatStore", () => {
 
       const session = useChatStore.getState().sessions[id];
       expect(session.status).toBe("closed");
+    });
+
+    it("does nothing for non-existent session", () => {
+      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+      useChatStore.getState().markSessionClosed("non-existent");
+
+      expect(useChatStore.getState().sessions[id].status).toBe("open");
+      expect(Object.keys(useChatStore.getState().sessions)).toHaveLength(1);
     });
   });
 
@@ -354,6 +385,19 @@ describe("chatStore", () => {
 
       useChatStore.getState().clearMessages(id);
       expect(useChatStore.getState().sessions[id].messages).toHaveLength(0);
+    });
+
+    it("does nothing for non-existent session", () => {
+      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+      useChatStore.getState().addMessage(id, {
+        kind: "user",
+        text: "Hello",
+        timestamp: "2024-01-01T00:00:00Z",
+      });
+
+      useChatStore.getState().clearMessages("non-existent");
+      expect(useChatStore.getState().sessions[id].messages).toHaveLength(1);
+      expect(Object.keys(useChatStore.getState().sessions)).toHaveLength(1);
     });
   });
 
@@ -387,6 +431,15 @@ describe("chatStore", () => {
       expect(session.scope).toBe("task");
       expect(session.entityId).toBe("task-1");
       expect(session.label).toBe("Task Chat");
+    });
+
+    it("does nothing for non-existent session", () => {
+      const id = useChatStore.getState().openSession("step", "step-1", "Step 1");
+      useChatStore.getState().widenScope("non-existent", "task", "task-1", "Task Chat");
+
+      const session = useChatStore.getState().sessions[id];
+      expect(session.scope).toBe("step");
+      expect(Object.keys(useChatStore.getState().sessions)).toHaveLength(1);
     });
   });
 
