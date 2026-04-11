@@ -12,8 +12,6 @@ pub const WORKFLOW_FIELDS: &str = r#"
         initial_step_id
         kanban_column
         project_id
-        on_done_workflow_id
-        on_reject_workflow_id
         inserted_at
         updated_at
         workflow_steps {
@@ -87,8 +85,6 @@ pub const UPDATE_WORKFLOW: &str = r#"
         $display_order: Int,
         $is_default: Boolean,
         $initial_step_id: Uuid4,
-        $on_done_workflow_id: Uuid4,
-        $on_reject_workflow_id: Uuid4,
         $kanban_column: String
     ) {
         update_workflow(
@@ -99,8 +95,6 @@ pub const UPDATE_WORKFLOW: &str = r#"
             display_order: $display_order,
             is_default: $is_default,
             initial_step_id: $initial_step_id,
-            on_done_workflow_id: $on_done_workflow_id,
-            on_reject_workflow_id: $on_reject_workflow_id,
             kanban_column: $kanban_column
         ) {
             id
