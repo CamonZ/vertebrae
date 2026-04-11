@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useUIStore } from "./uiStore";
 
 describe("uiStore", () => {
@@ -6,7 +6,6 @@ describe("uiStore", () => {
     // Reset store state before each test
     useUIStore.setState({
       theme: "system",
-      claudeSidebarOpen: false,
     });
   });
 
@@ -16,10 +15,6 @@ describe("uiStore", () => {
       expect(state.theme).toBe("system");
     });
 
-    it("has Claude sidebar closed by default", () => {
-      const state = useUIStore.getState();
-      expect(state.claudeSidebarOpen).toBe(false);
-    });
   });
 
   describe("setTheme", () => {
@@ -44,46 +39,20 @@ describe("uiStore", () => {
     });
   });
 
-  describe("toggleClaudeSidebar", () => {
-    it("opens Claude sidebar when closed", () => {
-      useUIStore.getState().toggleClaudeSidebar();
+  describe("persistence", () => {
+    it("partializes theme into persisted state", () => {
+      const setItemSpy = vi.spyOn(Storage.prototype, "setItem");
 
-      expect(useUIStore.getState().claudeSidebarOpen).toBe(true);
-    });
+      useUIStore.getState().setTheme("dark");
 
-    it("closes Claude sidebar when open", () => {
-      useUIStore.setState({ claudeSidebarOpen: true });
+      const persistCall = setItemSpy.mock.calls.find(
+        ([key]) => key === "vertebrae-ui-storage"
+      );
+      expect(persistCall).toBeDefined();
+      const persisted = JSON.parse(persistCall![1]);
+      expect(persisted.state).toEqual({ theme: "dark" });
 
-      useUIStore.getState().toggleClaudeSidebar();
-
-      expect(useUIStore.getState().claudeSidebarOpen).toBe(false);
-    });
-
-    it("toggles multiple times correctly", () => {
-      useUIStore.getState().toggleClaudeSidebar();
-      expect(useUIStore.getState().claudeSidebarOpen).toBe(true);
-
-      useUIStore.getState().toggleClaudeSidebar();
-      expect(useUIStore.getState().claudeSidebarOpen).toBe(false);
-
-      useUIStore.getState().toggleClaudeSidebar();
-      expect(useUIStore.getState().claudeSidebarOpen).toBe(true);
-    });
-  });
-
-  describe("setClaudeSidebarOpen", () => {
-    it("sets Claude sidebar to open", () => {
-      useUIStore.getState().setClaudeSidebarOpen(true);
-
-      expect(useUIStore.getState().claudeSidebarOpen).toBe(true);
-    });
-
-    it("sets Claude sidebar to closed", () => {
-      useUIStore.setState({ claudeSidebarOpen: true });
-
-      useUIStore.getState().setClaudeSidebarOpen(false);
-
-      expect(useUIStore.getState().claudeSidebarOpen).toBe(false);
+      setItemSpy.mockRestore();
     });
   });
 });

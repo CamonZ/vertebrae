@@ -24,4 +24,4 @@ export { useSessionLogStore } from "./sessionLogStore";
 export type { SessionLogStore } from "./sessionLogStore";
 
 export { useChatStore, getParentScope } from "./chatStore";
-export type { ChatStore, ChatSession, ChatScope } from "./chatStore";
+export type { ChatStore, ChatSession, ChatScope, ChatMessage } from "./chatStore";

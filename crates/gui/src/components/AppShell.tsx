@@ -3,7 +3,6 @@ import { Sidebar } from "./Sidebar";
 import { Header } from "./Header";
 import { ContentArea } from "./ContentArea";
 import { ToastContainer } from "./Toast";
-import { ClaudeChatSidebar } from "./ClaudeChatSidebar";
 import { ChatWindowManager } from "./ChatWindow";
 
 interface AppShellProps {
@@ -24,7 +23,6 @@ export function AppShell({
         <Header title={title} subtitle={subtitle} />
         <ContentArea>{children}</ContentArea>
       </div>
-      <ClaudeChatSidebar />
       <ChatWindowManager />
       <ToastContainer />
     </div>

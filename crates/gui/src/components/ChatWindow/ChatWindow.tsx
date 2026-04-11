@@ -1,8 +1,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
-import type { ChatMessage } from "../../hooks/useClaudeChat";
 import { useScopedChat } from "../../hooks/useScopedChat";
 import { useChatStore, getParentScope } from "../../stores/chatStore";
-import type { ChatScope } from "../../stores/chatStore";
+import type { ChatScope, ChatMessage } from "../../stores/chatStore";
 import { scopeLabel } from "../../utils/chatContext";
 
 /**
