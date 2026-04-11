@@ -59,7 +59,6 @@ impl SacrumStepService {
             workflow_id: response.workflow_id.clone(),
             goal: response.goal.clone(),
             prompt: response.prompt.clone(),
-            eval_prompt: response.eval_prompt.clone(),
             agents: response.agents.clone(),
             skills: response.skills.clone(),
             agent_config,
@@ -83,7 +82,6 @@ impl StepService for SacrumStepService {
             "name": step.name,
             "goal": step.goal,
             "prompt": step.prompt,
-            "eval_prompt": step.eval_prompt,
             "agents": step.agents,
             "skills": step.skills,
             "agent_config": agent_config_str,
@@ -180,9 +178,6 @@ impl StepService for SacrumStepService {
         }
         if let Some(prompt) = &updates.prompt {
             variables["prompt"] = json!(prompt);
-        }
-        if let Some(eval_prompt) = &updates.eval_prompt {
-            variables["eval_prompt"] = json!(eval_prompt);
         }
         if let Some(agents) = &updates.agents {
             variables["agents"] = json!(agents);
@@ -306,7 +301,6 @@ mod tests {
             name: "Review".to_string(),
             goal: Some("Review the code".to_string()),
             prompt: Some("Review the PR for issues".to_string()),
-            eval_prompt: Some("Did the review pass?".to_string()),
             agents: vec!["claude".to_string()],
             skills: vec!["code-review".to_string()],
             agent_config: None,
@@ -328,7 +322,6 @@ mod tests {
         assert_eq!(step.name, "Review");
         assert_eq!(step.goal.as_deref(), Some("Review the code"));
         assert_eq!(step.prompt.as_deref(), Some("Review the PR for issues"));
-        assert_eq!(step.eval_prompt.as_deref(), Some("Did the review pass?"));
         assert_eq!(step.agents, vec!["claude"]);
         assert_eq!(step.skills, vec!["code-review"]);
         assert!(!step.is_final);
@@ -345,7 +338,6 @@ mod tests {
             name: "Minimal".to_string(),
             goal: None,
             prompt: None,
-            eval_prompt: None,
             agents: vec![],
             skills: vec![],
             agent_config: None,
@@ -363,7 +355,6 @@ mod tests {
         assert_eq!(step.name, "Minimal");
         assert!(step.goal.is_none());
         assert!(step.prompt.is_none());
-        assert!(step.eval_prompt.is_none());
         assert!(step.agents.is_empty());
         assert!(step.skills.is_empty());
         assert!(step.is_final);
@@ -378,7 +369,6 @@ mod tests {
             name: "Configured".to_string(),
             goal: None,
             prompt: None,
-            eval_prompt: None,
             agents: vec![],
             skills: vec![],
             agent_config: Some(json!({"model": "claude-opus"})),

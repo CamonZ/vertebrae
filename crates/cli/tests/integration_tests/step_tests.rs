@@ -35,7 +35,6 @@ mod step_create_tests {
             agent: vec![],
             skill: vec![],
             prompt: None,
-            eval_prompt: None,
             agent_config: None,
             model: None,
             order: 0,
@@ -69,7 +68,6 @@ mod step_create_tests {
             agent: vec![],
             skill: vec![],
             prompt: None,
-            eval_prompt: None,
             agent_config: None,
             model: None,
             order: 0,
@@ -113,7 +111,6 @@ mod step_create_tests {
             agent: vec![],
             skill: vec![],
             prompt: None,
-            eval_prompt: None,
             agent_config: None,
             model: None,
             order: 0,
@@ -157,7 +154,6 @@ mod step_create_tests {
             agent: vec![],
             skill: vec![],
             prompt: None,
-            eval_prompt: None,
             agent_config: None,
             model: None,
             order: 5,
@@ -193,7 +189,6 @@ mod step_create_tests {
             agent: vec![],
             skill: vec![],
             prompt: None,
-            eval_prompt: None,
             agent_config: None,
             model: None,
             order: 0,
@@ -237,7 +232,6 @@ mod step_create_tests {
             ],
             skill: vec![],
             prompt: None,
-            eval_prompt: None,
             agent_config: None,
             model: None,
             order: 0,
@@ -286,7 +280,6 @@ mod step_create_tests {
             agent: vec![],
             skill: vec!["test-writing".to_string(), "debugging".to_string()],
             prompt: None,
-            eval_prompt: None,
             agent_config: None,
             model: None,
             order: 0,
@@ -324,7 +317,6 @@ mod step_create_tests {
             agent: vec![],
             skill: vec![],
             prompt: None,
-            eval_prompt: None,
             agent_config: None,
             model: None,
             order: 0,
@@ -372,7 +364,6 @@ mod step_create_tests {
             agent: vec![],
             skill: vec![],
             prompt: None,
-            eval_prompt: None,
             agent_config: None,
             model: Some("sonnet".to_string()),
             order: 0,
@@ -423,7 +414,6 @@ mod step_list_tests {
                 agent: vec![],
                 skill: vec![],
                 prompt: None,
-                eval_prompt: None,
                 agent_config: None,
                 model: None,
                 order: i,
@@ -490,7 +480,6 @@ mod step_list_tests {
             agent: vec![],
             skill: vec![],
             prompt: None,
-            eval_prompt: None,
             agent_config: None,
             model: None,
             order: 0,
@@ -538,7 +527,6 @@ mod step_show_tests {
             agent: vec![],
             skill: vec![],
             prompt: None,
-            eval_prompt: None,
             agent_config: None,
             model: None,
             order: 1,
@@ -582,7 +570,6 @@ mod step_show_tests {
             agent: vec![".claude/agents/reviewer.md".to_string()],
             skill: vec!["code-review".to_string(), "lint".to_string()],
             prompt: None,
-            eval_prompt: None,
             agent_config: None,
             model: Some("opus".to_string()),
             order: 0,
@@ -623,7 +610,6 @@ mod step_show_tests {
             agent: vec![],
             skill: vec![],
             prompt: None,
-            eval_prompt: None,
             agent_config: None,
             model: None,
             order: 10,
@@ -674,7 +660,6 @@ mod step_show_tests {
             agent: vec![],
             skill: vec![],
             prompt: None,
-            eval_prompt: None,
             agent_config: None,
             model: None,
             order: 0,
@@ -721,7 +706,6 @@ mod step_update_tests {
             agent: vec![],
             skill: vec![],
             prompt: None,
-            eval_prompt: None,
             agent_config: None,
             model: None,
             order: 0,
@@ -740,7 +724,6 @@ mod step_update_tests {
             skill: vec![],
             clear_skills: false,
             prompt: None,
-            eval_prompt: None,
             agent_config: None,
             model: None,
             order: None,
@@ -774,7 +757,6 @@ mod step_update_tests {
             agent: vec![],
             skill: vec![],
             prompt: None,
-            eval_prompt: None,
             agent_config: None,
             model: None,
             order: 0,
@@ -793,7 +775,6 @@ mod step_update_tests {
             skill: vec![],
             clear_skills: false,
             prompt: None,
-            eval_prompt: None,
             agent_config: None,
             model: None,
             order: None,
@@ -827,7 +808,6 @@ mod step_update_tests {
             agent: vec![],
             skill: vec![],
             prompt: None,
-            eval_prompt: None,
             agent_config: None,
             model: None,
             order: 0,
@@ -846,7 +826,6 @@ mod step_update_tests {
             skill: vec![],
             clear_skills: false,
             prompt: None,
-            eval_prompt: None,
             agent_config: None,
             model: None,
             order: Some(5),
@@ -880,7 +859,6 @@ mod step_update_tests {
             agent: vec![],
             skill: vec![],
             prompt: None,
-            eval_prompt: None,
             agent_config: None,
             model: None,
             order: 0,
@@ -899,7 +877,6 @@ mod step_update_tests {
             skill: vec![],
             clear_skills: false,
             prompt: None,
-            eval_prompt: None,
             agent_config: None,
             model: None,
             order: None,
@@ -941,7 +918,6 @@ mod step_update_tests {
             agent: vec![".claude/agents/old.md".to_string()],
             skill: vec![],
             prompt: None,
-            eval_prompt: None,
             agent_config: None,
             model: None,
             order: 0,
@@ -960,7 +936,6 @@ mod step_update_tests {
             skill: vec![],
             clear_skills: false,
             prompt: None,
-            eval_prompt: None,
             agent_config: None,
             model: None,
             order: None,
@@ -994,7 +969,6 @@ mod step_update_tests {
             agent: vec![],
             skill: vec![],
             prompt: None,
-            eval_prompt: None,
             agent_config: None,
             model: None,
             order: 0,
@@ -1013,7 +987,6 @@ mod step_update_tests {
             skill: vec![],
             clear_skills: false,
             prompt: None,
-            eval_prompt: None,
             agent_config: None,
             model: None,
             order: None,
@@ -1060,7 +1033,6 @@ mod step_update_tests {
             agent: vec![],
             skill: vec![],
             prompt: None,
-            eval_prompt: None,
             agent_config: None,
             model: None,
             order: 0,
@@ -1079,7 +1051,6 @@ mod step_update_tests {
             skill: vec![],
             clear_skills: false,
             prompt: None,
-            eval_prompt: None,
             agent_config: None,
             model: None,
             order: None,
@@ -1112,7 +1083,6 @@ mod step_update_tests {
             agent: vec![],
             skill: vec![],
             prompt: None,
-            eval_prompt: None,
             agent_config: None,
             model: None,
             order: 0,
@@ -1130,7 +1100,6 @@ mod step_update_tests {
             skill: vec!["code-review".to_string(), "testing".to_string()],
             clear_skills: false,
             prompt: None,
-            eval_prompt: None,
             agent_config: None,
             model: None,
             order: None,
@@ -1185,7 +1154,6 @@ mod step_dispatcher_tests {
             agent: vec![],
             skill: vec![],
             prompt: None,
-            eval_prompt: None,
             agent_config: None,
             model: None,
             order: 0,
@@ -1231,7 +1199,6 @@ mod step_delete_tests {
             agent: vec![],
             skill: vec![],
             prompt: None,
-            eval_prompt: None,
             agent_config: None,
             model: None,
             order: 0,
@@ -1291,7 +1258,6 @@ mod step_delete_tests {
             agent: vec![],
             skill: vec![],
             prompt: None,
-            eval_prompt: None,
             agent_config: None,
             model: None,
             order: 0,
@@ -1330,7 +1296,6 @@ mod step_delete_tests {
             agent: vec![],
             skill: vec![],
             prompt: None,
-            eval_prompt: None,
             agent_config: None,
             model: None,
             order: 0,
@@ -1351,7 +1316,7 @@ mod step_delete_tests {
 }
 
 // ============================================================================
-// Step prompt, eval_prompt, and agent_config tests
+// Step prompt and agent_config tests
 // ============================================================================
 
 #[cfg(test)]
@@ -1377,7 +1342,7 @@ mod step_prompt_and_agent_config_tests {
             agent: vec![],
             skill: vec![],
             prompt: Some("Review the code for quality and best practices".to_string()),
-            eval_prompt: None,
+
             agent_config: None,
             model: None,
             order: 0,
@@ -1391,47 +1356,6 @@ mod step_prompt_and_agent_config_tests {
         assert_eq!(
             step.prompt,
             Some("Review the code for quality and best practices".to_string())
-        );
-    }
-
-    #[tokio::test]
-    async fn test_create_step_with_eval_prompt() {
-        let services = mock_services();
-
-        let workflow_options = CreateWorkflowOptions::new("Default", vec![]);
-        let workflow_id = services
-            .workflows()
-            .create_workflow(workflow_options)
-            .await
-            .unwrap();
-
-        let cmd = StepAddCommand {
-            name: "Evaluate".to_string(),
-            workflow: workflow_id,
-            id: Some("evaluate".to_string()),
-            goal: None,
-            agent: vec![],
-            skill: vec![],
-            prompt: None,
-            eval_prompt: Some("Did the step produce valid output?".to_string()),
-            agent_config: None,
-            model: None,
-            order: 0,
-            r#final: false,
-            transitions_to: vec![],
-        };
-
-        cmd.execute(services.steps()).await.unwrap();
-
-        let step = services
-            .steps()
-            .get_step("evaluate")
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            step.eval_prompt,
-            Some("Did the step produce valid output?".to_string())
         );
     }
 
@@ -1454,7 +1378,6 @@ mod step_prompt_and_agent_config_tests {
             agent: vec![],
             skill: vec![],
             prompt: None,
-            eval_prompt: None,
             agent_config: Some(r#"{"model":"opus","max_budget_usd":5.0}"#.to_string()),
             model: None,
             order: 0,
@@ -1489,7 +1412,6 @@ mod step_prompt_and_agent_config_tests {
             agent: vec![],
             skill: vec![],
             prompt: None,
-            eval_prompt: None,
             agent_config: Some(r#"{"model":"sonnet","max_budget_usd":10.0}"#.to_string()),
             model: Some("opus".to_string()),
             order: 0,
@@ -1536,7 +1458,6 @@ mod step_prompt_and_agent_config_tests {
             agent: vec![],
             skill: vec![],
             prompt: None,
-            eval_prompt: None,
             agent_config: Some("not valid json".to_string()),
             model: None,
             order: 0,
@@ -1552,56 +1473,6 @@ mod step_prompt_and_agent_config_tests {
             "Error should mention --agent-config JSON, got: {}",
             err_msg
         );
-    }
-
-    #[tokio::test]
-    async fn test_update_step_with_eval_prompt() {
-        let services = mock_services();
-
-        let workflow_options = CreateWorkflowOptions::new("Default", vec![]);
-        let workflow_id = services
-            .workflows()
-            .create_workflow(workflow_options)
-            .await
-            .unwrap();
-
-        let add_cmd = StepAddCommand {
-            name: "Step".to_string(),
-            workflow: workflow_id,
-            id: Some("step".to_string()),
-            goal: None,
-            agent: vec![],
-            skill: vec![],
-            prompt: None,
-            eval_prompt: None,
-            agent_config: None,
-            model: None,
-            order: 0,
-            r#final: false,
-            transitions_to: vec![],
-        };
-        add_cmd.execute(services.steps()).await.unwrap();
-
-        let update_cmd = StepUpdateCommand {
-            id: "step".to_string(),
-            name: None,
-            goal: None,
-            agent: vec![],
-            clear_agents: false,
-            skill: vec![],
-            clear_skills: false,
-            prompt: None,
-            eval_prompt: Some("Was the output satisfactory?".to_string()),
-            agent_config: None,
-            model: None,
-            order: None,
-            r#final: None,
-            transitions_to: vec![],
-            clear_transitions: false,
-        };
-
-        let result = update_cmd.execute(services.steps()).await.unwrap();
-        assert!(result.contains("Updated step: step"));
     }
 
     #[tokio::test]
@@ -1623,7 +1494,6 @@ mod step_prompt_and_agent_config_tests {
             agent: vec![],
             skill: vec![],
             prompt: None,
-            eval_prompt: None,
             agent_config: None,
             model: Some("sonnet".to_string()),
             order: 0,
@@ -1641,7 +1511,6 @@ mod step_prompt_and_agent_config_tests {
             skill: vec![],
             clear_skills: false,
             prompt: None,
-            eval_prompt: None,
             agent_config: Some(r#"{"model":"haiku","max_budget_usd":2.5}"#.to_string()),
             model: None,
             order: None,
@@ -1673,7 +1542,6 @@ mod step_prompt_and_agent_config_tests {
             agent: vec![],
             skill: vec![],
             prompt: None,
-            eval_prompt: None,
             agent_config: None,
             model: None,
             order: 0,
@@ -1692,7 +1560,6 @@ mod step_prompt_and_agent_config_tests {
             skill: vec![],
             clear_skills: false,
             prompt: None,
-            eval_prompt: None,
             agent_config: Some(r#"{"model":"sonnet","max_budget_usd":3.0}"#.to_string()),
             model: Some("opus".to_string()),
             order: None,
@@ -1724,7 +1591,6 @@ mod step_prompt_and_agent_config_tests {
             agent: vec![],
             skill: vec![],
             prompt: None,
-            eval_prompt: None,
             agent_config: None,
             model: None,
             order: 0,
@@ -1742,7 +1608,6 @@ mod step_prompt_and_agent_config_tests {
             skill: vec![],
             clear_skills: false,
             prompt: None,
-            eval_prompt: None,
             agent_config: Some("{bad json}".to_string()),
             model: None,
             order: None,
@@ -1762,7 +1627,7 @@ mod step_prompt_and_agent_config_tests {
     }
 
     #[tokio::test]
-    async fn test_create_step_with_prompt_and_eval_prompt_together() {
+    async fn test_create_step_with_prompt_and_agent_config_together() {
         let services = mock_services();
 
         let workflow_options = CreateWorkflowOptions::new("Default", vec![]);
@@ -1780,7 +1645,6 @@ mod step_prompt_and_agent_config_tests {
             agent: vec![],
             skill: vec![],
             prompt: Some("Analyze the codebase".to_string()),
-            eval_prompt: Some("Is the analysis complete?".to_string()),
             agent_config: Some(r#"{"model":"opus","max_budget_usd":15.0}"#.to_string()),
             model: None,
             order: 2,
@@ -1792,10 +1656,6 @@ mod step_prompt_and_agent_config_tests {
 
         let step = services.steps().get_step("full").await.unwrap().unwrap();
         assert_eq!(step.prompt, Some("Analyze the codebase".to_string()));
-        assert_eq!(
-            step.eval_prompt,
-            Some("Is the analysis complete?".to_string())
-        );
         assert_eq!(step.goal, Some("Complete review".to_string()));
         assert_eq!(step.agent_config.model, Some("opus".to_string()));
         assert_eq!(step.agent_config.max_budget_usd, Some(15.0));

@@ -194,23 +194,6 @@ async fn then_step_should_have_prompt(world: &mut SmokeWorld, step_name: String,
     );
 }
 
-#[then(expr = "the step {string} in the workflow should have eval_prompt {string}")]
-async fn then_step_should_have_eval_prompt(
-    world: &mut SmokeWorld,
-    step_name: String,
-    expected: String,
-) {
-    let json = get_step_json(world, &step_name)
-        .await
-        .unwrap_or_else(|| panic!("step '{}' not found in workflow", step_name));
-    let actual = json["eval_prompt"].as_str().unwrap_or("");
-    assert_eq!(
-        actual, expected,
-        "step '{}' eval_prompt mismatch: expected '{}', got '{}'\nJSON: {}",
-        step_name, expected, actual, json
-    );
-}
-
 #[then(expr = "the step {string} in the workflow should have agent model {string}")]
 async fn then_step_should_have_agent_model(
     world: &mut SmokeWorld,
