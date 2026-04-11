@@ -896,10 +896,6 @@ goal: string | null;
  */
 prompt: string | null; 
 /**
- * Evaluation prompt used to assess step output for branching decisions
- */
-eval_prompt: string | null; 
-/**
  * Paths to .claude/agents/ files for this step
  */
 agents?: string[]; 
@@ -1161,7 +1157,7 @@ export type TaskStepChangedEvent = { task_id: string; step_id: string; step_name
  * Only fields that are Some will be updated.
  * Note: agent_config is intentionally omitted — not editable from the GUI.
  */
-export type UpdateStepOptions = { step_id: string; name: string | null; goal: string | null; prompt: string | null; eval_prompt: string | null; agents: string[] | null; skills: string[] | null; order: number | null; is_final: boolean | null; transitions_to: string[] | null }
+export type UpdateStepOptions = { step_id: string; name: string | null; goal: string | null; prompt: string | null; agents: string[] | null; skills: string[] | null; order: number | null; is_final: boolean | null; transitions_to: string[] | null }
 /**
  * Options for updating a task - allows updating multiple fields at once
  */

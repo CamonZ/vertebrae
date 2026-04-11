@@ -121,7 +121,6 @@ export function StepDetailPanel({
       name?: string;
       goal?: string | null;
       prompt?: string | null;
-      eval_prompt?: string | null;
       agents?: string[];
       skills?: string[];
       order?: number;
@@ -135,7 +134,6 @@ export function StepDetailPanel({
         name: updates.name ?? null,
         goal: updates.goal ?? null,
         prompt: updates.prompt ?? null,
-        eval_prompt: updates.eval_prompt ?? null,
         agents: updates.agents ?? null,
         skills: updates.skills ?? null,
         order: updates.order ?? null,
@@ -411,21 +409,6 @@ export function StepDetailPanel({
               />
             </div>
 
-            {/* Eval Prompt - inline editable with warning styling */}
-            <div className="mt-3">
-              <h3 className="mb-2 font-mono text-[10px] uppercase tracking-wider text-warning">
-                Eval Prompt
-              </h3>
-              <InlineEditField
-                value={step.eval_prompt || ""}
-                placeholder="Click to add eval prompt..."
-                multiline
-                rows={4}
-                onSave={async (value) => {
-                  await handleUpdateField({ eval_prompt: value || null });
-                }}
-              />
-            </div>
           </div>
 
           {/* Content */}

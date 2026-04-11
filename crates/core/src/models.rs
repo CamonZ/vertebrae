@@ -1036,10 +1036,6 @@ pub struct Step {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prompt: Option<String>,
 
-    /// Evaluation prompt used to assess step output for branching decisions
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub eval_prompt: Option<String>,
-
     /// Agent file paths
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub agents: Vec<String>,
@@ -1082,7 +1078,6 @@ impl Step {
             workflow_id: workflow_id.into(),
             goal: None,
             prompt: None,
-            eval_prompt: None,
             agents: Vec::new(),
             skills: Vec::new(),
             agent_config: AgentConfig::default(),
@@ -1103,12 +1098,6 @@ impl Step {
     /// Set the prompt
     pub fn with_prompt(mut self, prompt: impl Into<String>) -> Self {
         self.prompt = Some(prompt.into());
-        self
-    }
-
-    /// Set the evaluation prompt
-    pub fn with_eval_prompt(mut self, eval_prompt: impl Into<String>) -> Self {
-        self.eval_prompt = Some(eval_prompt.into());
         self
     }
 
@@ -1632,8 +1621,6 @@ pub struct StepUpdate {
     pub goal: Option<String>,
     /// New prompt
     pub prompt: Option<String>,
-    /// New evaluation prompt
-    pub eval_prompt: Option<String>,
     /// New agents list
     pub agents: Option<Vec<String>>,
     /// New skills list
@@ -1669,12 +1656,6 @@ impl StepUpdate {
     /// Set a new prompt
     pub fn with_prompt(mut self, prompt: impl Into<String>) -> Self {
         self.prompt = Some(prompt.into());
-        self
-    }
-
-    /// Set a new evaluation prompt
-    pub fn with_eval_prompt(mut self, eval_prompt: impl Into<String>) -> Self {
-        self.eval_prompt = Some(eval_prompt.into());
         self
     }
 

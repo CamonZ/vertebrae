@@ -16,7 +16,6 @@ function createStep(id: string, name: string, order: number): Step {
     workflow_id: "test_workflow",
     goal: null,
     prompt: null,
-    eval_prompt: null,
     agent_config: {
       model: "haiku",
       fallback_model: null,

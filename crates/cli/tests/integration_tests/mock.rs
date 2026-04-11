@@ -1062,9 +1062,6 @@ impl StepService for MockStepService {
         if let Some(prompt) = &updates.prompt {
             step.prompt = Some(prompt.clone());
         }
-        if let Some(eval_prompt) = &updates.eval_prompt {
-            step.eval_prompt = Some(eval_prompt.clone());
-        }
         if let Some(agents) = &updates.agents {
             step.agents = agents.clone();
         }
