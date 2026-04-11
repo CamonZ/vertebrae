@@ -25,7 +25,6 @@ function createStep(overrides?: Partial<Step>): Step {
     workflow_id: "workflow-1",
     goal: null,
     prompt: null,
-    eval_prompt: null,
     order: 0,
     is_final: false,
     transitions_to: [],

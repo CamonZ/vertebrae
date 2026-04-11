@@ -78,7 +78,6 @@ vi.mock("../bindings", () => ({
         id: "step-1",
         name: "Review Step",
         prompt: "Review the code for {{task}}",
-        eval_prompt: null,
         agent_config: { model: "claude-sonnet-4" },
       },
     }),
@@ -433,14 +432,13 @@ describe("buildContextSummary", () => {
 
   // --- Step context edge cases ---
 
-  it("step context omits prompt and eval_prompt when absent", async () => {
+  it("step context omits prompt when absent", async () => {
     mockedCommands.getStep.mockResolvedValueOnce({
       status: "ok",
       data: {
         id: "step-bare",
         name: "Bare Step",
         prompt: null,
-        eval_prompt: null,
         agent_config: null,
       },
     } as never);
@@ -450,18 +448,16 @@ describe("buildContextSummary", () => {
 
     expect(result).toContain("Step: Bare Step");
     expect(result).not.toContain("Prompt:");
-    expect(result).not.toContain("Eval prompt:");
     expect(result).not.toContain("Agent:");
   });
 
-  it("step context includes eval_prompt when present", async () => {
+  it("step context includes prompt when present", async () => {
     mockedCommands.getStep.mockResolvedValueOnce({
       status: "ok",
       data: {
         id: "step-eval",
         name: "Eval Step",
         prompt: "Do the thing",
-        eval_prompt: "Check the thing",
         agent_config: null,
       },
     } as never);
@@ -470,7 +466,6 @@ describe("buildContextSummary", () => {
     const result = await buildContextSummary("step", "step-eval");
 
     expect(result).toContain("Prompt: Do the thing");
-    expect(result).toContain("Eval prompt: Check the thing");
   });
 
   it("step context shows default model when agent_config.model is null", async () => {
@@ -480,7 +475,6 @@ describe("buildContextSummary", () => {
         id: "step-def",
         name: "Default Model Step",
         prompt: null,
-        eval_prompt: null,
         agent_config: { model: null },
       },
     } as never);

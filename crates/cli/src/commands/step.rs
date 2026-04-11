@@ -73,10 +73,6 @@ pub struct StepAddCommand {
     #[arg(long)]
     pub prompt: Option<String>,
 
-    /// Evaluation prompt used to assess step output for branching decisions
-    #[arg(long)]
-    pub eval_prompt: Option<String>,
-
     /// Full agent config as a JSON string (e.g. '{"model":"opus","max_budget_usd":5.0}')
     #[arg(long, value_name = "JSON")]
     pub agent_config: Option<String>,
@@ -149,11 +145,6 @@ impl StepAddCommand {
         // Set prompt if provided
         if let Some(prompt) = &self.prompt {
             step = step.with_prompt(prompt);
-        }
-
-        // Set eval_prompt if provided
-        if let Some(eval_prompt) = &self.eval_prompt {
-            step = step.with_eval_prompt(eval_prompt);
         }
 
         // Set agents if provided
@@ -385,10 +376,6 @@ pub struct StepUpdateCommand {
     #[arg(long)]
     pub prompt: Option<String>,
 
-    /// New evaluation prompt for the step
-    #[arg(long)]
-    pub eval_prompt: Option<String>,
-
     /// Full agent config as a JSON string (e.g. '{"model":"opus","max_budget_usd":5.0}')
     #[arg(long, value_name = "JSON")]
     pub agent_config: Option<String>,
@@ -449,10 +436,6 @@ impl StepUpdateCommand {
 
         if let Some(prompt) = &self.prompt {
             updates = updates.with_prompt(prompt);
-        }
-
-        if let Some(eval_prompt) = &self.eval_prompt {
-            updates = updates.with_eval_prompt(eval_prompt);
         }
 
         if self.clear_agents {
@@ -883,7 +866,7 @@ mod tests {
     }
 
     #[test]
-    fn test_step_add_with_prompt_and_eval_prompt() {
+    fn test_step_add_with_prompt() {
         let cli = TestCli::try_parse_from([
             "test",
             "add",
@@ -892,14 +875,11 @@ mod tests {
             "a1b2c3d4-0000-4000-8000-000000000006",
             "--prompt",
             "Review the code for quality",
-            "--eval-prompt",
-            "Did the review pass?",
         ]);
         assert!(cli.is_ok());
         match cli.unwrap().command {
             StepCommand::Add(cmd) => {
                 assert_eq!(cmd.prompt, Some("Review the code for quality".to_string()));
-                assert_eq!(cmd.eval_prompt, Some("Did the review pass?".to_string()));
             }
             _ => panic!("Expected Add command"),
         }
@@ -955,21 +935,18 @@ mod tests {
     }
 
     #[test]
-    fn test_step_update_with_prompt_and_eval_prompt() {
+    fn test_step_update_with_prompt() {
         let cli = TestCli::try_parse_from([
             "test",
             "update",
             "a1b2c3d4-0000-4000-8000-00000000000b",
             "--prompt",
             "New prompt text",
-            "--eval-prompt",
-            "New eval prompt",
         ]);
         assert!(cli.is_ok());
         match cli.unwrap().command {
             StepCommand::Update(cmd) => {
                 assert_eq!(cmd.prompt, Some("New prompt text".to_string()));
-                assert_eq!(cmd.eval_prompt, Some("New eval prompt".to_string()));
             }
             _ => panic!("Expected Update command"),
         }

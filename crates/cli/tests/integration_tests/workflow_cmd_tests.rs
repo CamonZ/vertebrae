@@ -170,7 +170,6 @@ async fn test_workflow_list_includes_step_count() {
             workflow_id: wf_id.clone(),
             goal: None,
             prompt: None,
-            eval_prompt: None,
             agents: vec![],
             skills: vec![],
             agent_config: Default::default(),

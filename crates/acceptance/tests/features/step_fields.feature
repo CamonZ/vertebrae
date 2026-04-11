@@ -1,4 +1,4 @@
-Feature: Step fields: prompt, eval-prompt, and agent-config
+Feature: Step fields: prompt and agent-config
 
   Background:
     Given a configured Sacrum client
@@ -8,11 +8,6 @@ Feature: Step fields: prompt, eval-prompt, and agent-config
     When I add a step "Review" to the workflow with flag "--prompt" and value "Check all tests pass"
     Then the command should succeed
     And the step "Review" in the workflow should have prompt "Check all tests pass"
-
-  Scenario: Create a step with --eval-prompt
-    When I add a step "QA" to the workflow with flag "--eval-prompt" and value "Did all checks pass?"
-    Then the command should succeed
-    And the step "QA" in the workflow should have eval_prompt "Did all checks pass?"
 
   Scenario: Create a step with --agent-config JSON sets agent model
     When I add a step "Deploy" to the workflow with --agent-config model "claude-opus-4-6"
@@ -34,8 +29,3 @@ Feature: Step fields: prompt, eval-prompt, and agent-config
     Then the command should succeed
     And the step "Review" in the workflow should have prompt "Updated prompt text"
 
-  Scenario: Update a step's eval-prompt
-    When I add a step "Review" to the workflow
-    And I update the step "Review" in the workflow with flag "--eval-prompt" and value "Pass or fail?"
-    Then the command should succeed
-    And the step "Review" in the workflow should have eval_prompt "Pass or fail?"
