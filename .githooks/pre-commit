@@ -10,15 +10,34 @@ echo "Running pre-commit checks..."
 echo "==> Checking Rust code formatting..."
 cargo fmt --check
 
-# Run independent checks in parallel
-echo "==> Running clippy, coverage, GUI tests, and linting in parallel..."
+# Phase 1: Rust checks in parallel (heavy compilation — keep CPU for these)
+echo "==> Running clippy and coverage in parallel..."
 
-# Start background jobs
 cargo clippy --quiet --workspace --exclude acceptance --exclude gui-acceptance -- -D warnings &
 CLIPPY_PID=$!
 
 cargo llvm-cov --quiet --workspace --exclude acceptance --exclude gui-acceptance --fail-under-lines 75 &
 LLVM_COV_PID=$!
+
+CLIPPY_EXIT=0
+LLVM_COV_EXIT=0
+
+wait $CLIPPY_PID || CLIPPY_EXIT=$?
+wait $LLVM_COV_PID || LLVM_COV_EXIT=$?
+
+if [ $CLIPPY_EXIT -ne 0 ]; then
+    echo "ERROR: clippy failed"
+fi
+if [ $LLVM_COV_EXIT -ne 0 ]; then
+    echo "ERROR: tests or coverage failed"
+fi
+
+if [ $CLIPPY_EXIT -ne 0 ] || [ $LLVM_COV_EXIT -ne 0 ]; then
+    exit 1
+fi
+
+# Phase 2: GUI checks in parallel (lightweight — run after Rust frees CPU)
+echo "==> Running GUI tests, linting, and type checking in parallel..."
 
 (cd crates/gui && npm run test) &
 GUI_PID=$!
@@ -29,26 +48,14 @@ LINT_PID=$!
 (cd crates/gui && npm run typecheck) &
 TYPECHECK_PID=$!
 
-# Wait for all jobs and capture exit codes
-CLIPPY_EXIT=0
-LLVM_COV_EXIT=0
 GUI_EXIT=0
 LINT_EXIT=0
 TYPECHECK_EXIT=0
 
-wait $CLIPPY_PID || CLIPPY_EXIT=$?
-wait $LLVM_COV_PID || LLVM_COV_EXIT=$?
 wait $GUI_PID || GUI_EXIT=$?
 wait $LINT_PID || LINT_EXIT=$?
 wait $TYPECHECK_PID || TYPECHECK_EXIT=$?
 
-# Report failures
-if [ $CLIPPY_EXIT -ne 0 ]; then
-    echo "ERROR: clippy failed"
-fi
-if [ $LLVM_COV_EXIT -ne 0 ]; then
-    echo "ERROR: tests or coverage failed"
-fi
 if [ $GUI_EXIT -ne 0 ]; then
     echo "ERROR: GUI tests failed"
 fi
@@ -59,8 +66,7 @@ if [ $TYPECHECK_EXIT -ne 0 ]; then
     echo "ERROR: TypeScript type checking failed"
 fi
 
-# Exit with error if any failed
-if [ $CLIPPY_EXIT -ne 0 ] || [ $LLVM_COV_EXIT -ne 0 ] || [ $GUI_EXIT -ne 0 ] || [ $LINT_EXIT -ne 0 ] || [ $TYPECHECK_EXIT -ne 0 ]; then
+if [ $GUI_EXIT -ne 0 ] || [ $LINT_EXIT -ne 0 ] || [ $TYPECHECK_EXIT -ne 0 ]; then
     exit 1
 fi
 

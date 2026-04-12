@@ -103,7 +103,10 @@ impl StepService for SacrumStepService {
             "step_order": step.order,
         });
         if let Some(schema) = &step.output_schema {
-            variables["output_schema"] = json!(schema);
+            let schema_str = serde_json::to_string(schema).map_err(|e| {
+                ServiceError::validation_failed(format!("Invalid output schema: {}", e))
+            })?;
+            variables["output_schema"] = json!(schema_str);
         }
 
         let response: WorkflowStepResponse = self
@@ -217,8 +220,17 @@ impl StepService for SacrumStepService {
         if let Some(step_type) = &updates.step_type {
             variables["step_type"] = json!(step_type.as_str());
         }
-        if let Some(Some(output_schema)) = &updates.output_schema {
-            variables["output_schema"] = json!(output_schema);
+        match &updates.output_schema {
+            Some(Some(output_schema)) => {
+                let schema_str = serde_json::to_string(output_schema).map_err(|e| {
+                    ServiceError::validation_failed(format!("Invalid output schema: {}", e))
+                })?;
+                variables["output_schema"] = json!(schema_str);
+            }
+            Some(None) => {
+                variables["clear_output_schema"] = json!(true);
+            }
+            None => {}
         }
 
         let _response: WorkflowStepResponse = self
