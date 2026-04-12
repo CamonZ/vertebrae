@@ -139,6 +139,32 @@ impl SectionType {
     }
 }
 
+/// The type of a workflow step
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StepType {
+    #[default]
+    Execute,
+    Evaluate,
+    Route,
+}
+
+impl StepType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            StepType::Execute => "execute",
+            StepType::Evaluate => "evaluate",
+            StepType::Route => "route",
+        }
+    }
+}
+
+impl std::fmt::Display for StepType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 /// Execution status for a workflow step
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1048,6 +1074,14 @@ pub struct Step {
     #[serde(default)]
     pub agent_config: AgentConfig,
 
+    /// The type of this step (execute, evaluate, route)
+    #[serde(default)]
+    pub step_type: StepType,
+
+    /// JSON Schema describing the expected output of this step
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_schema: Option<serde_json::Value>,
+
     /// Whether this is a final step
     #[serde(default)]
     pub is_final: bool,
@@ -1081,6 +1115,8 @@ impl Step {
             agents: Vec::new(),
             skills: Vec::new(),
             agent_config: AgentConfig::default(),
+            step_type: StepType::default(),
+            output_schema: None,
             is_final: false,
             transitions_to: Vec::new(),
             order: 0,
@@ -1128,6 +1164,18 @@ impl Step {
     /// Set the agent configuration
     pub fn with_agent_config(mut self, agent_config: AgentConfig) -> Self {
         self.agent_config = agent_config;
+        self
+    }
+
+    /// Set the step type
+    pub fn with_step_type(mut self, step_type: StepType) -> Self {
+        self.step_type = step_type;
+        self
+    }
+
+    /// Set the output schema
+    pub fn with_output_schema(mut self, schema: serde_json::Value) -> Self {
+        self.output_schema = Some(schema);
         self
     }
 
@@ -1627,6 +1675,10 @@ pub struct StepUpdate {
     pub skills: Option<Vec<String>>,
     /// New agent config
     pub agent_config: Option<serde_json::Value>,
+    /// New step type
+    pub step_type: Option<StepType>,
+    /// New output schema
+    pub output_schema: Option<Option<serde_json::Value>>,
     /// New is_final value
     pub is_final: Option<bool>,
     /// New transitions_to list (string IDs)
@@ -1674,6 +1726,18 @@ impl StepUpdate {
     /// Set a new agent config
     pub fn with_agent_config(mut self, config: serde_json::Value) -> Self {
         self.agent_config = Some(config);
+        self
+    }
+
+    /// Set the step type
+    pub fn with_step_type(mut self, step_type: StepType) -> Self {
+        self.step_type = Some(step_type);
+        self
+    }
+
+    /// Set the output schema (Some to set, None to clear)
+    pub fn with_output_schema(mut self, schema: Option<serde_json::Value>) -> Self {
+        self.output_schema = Some(schema);
         self
     }
 
@@ -1989,6 +2053,104 @@ mod tests {
         assert_eq!(u.is_final, Some(true));
         assert_eq!(u.transitions_to.as_ref().unwrap(), &vec!["s2".to_string()]);
         assert_eq!(u.order, Some(3));
+    }
+
+    // ─── StepType Enum Tests ────────────────────────────────────────
+
+    #[test]
+    fn step_type_default_is_execute() {
+        assert_eq!(StepType::default(), StepType::Execute);
+    }
+
+    #[test]
+    fn step_type_as_str() {
+        assert_eq!(StepType::Execute.as_str(), "execute");
+        assert_eq!(StepType::Evaluate.as_str(), "evaluate");
+        assert_eq!(StepType::Route.as_str(), "route");
+    }
+
+    #[test]
+    fn step_type_display() {
+        assert_eq!(StepType::Execute.to_string(), "execute");
+        assert_eq!(StepType::Evaluate.to_string(), "evaluate");
+        assert_eq!(StepType::Route.to_string(), "route");
+    }
+
+    #[test]
+    fn step_type_serde_roundtrip() {
+        for (variant, expected_json) in [
+            (StepType::Execute, "\"execute\""),
+            (StepType::Evaluate, "\"evaluate\""),
+            (StepType::Route, "\"route\""),
+        ] {
+            let serialized = serde_json::to_string(&variant).unwrap();
+            assert_eq!(serialized, expected_json);
+
+            let deserialized: StepType = serde_json::from_str(&serialized).unwrap();
+            assert_eq!(deserialized, variant);
+        }
+    }
+
+    #[test]
+    fn step_with_step_type_and_output_schema() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "score": { "type": "number" }
+            }
+        });
+        let step = Step::new("eval", "wf1")
+            .with_step_type(StepType::Evaluate)
+            .with_output_schema(schema.clone());
+
+        assert_eq!(step.step_type, StepType::Evaluate);
+        assert_eq!(step.output_schema, Some(schema));
+    }
+
+    #[test]
+    fn step_new_defaults_step_type_to_execute() {
+        let step = Step::new("run", "wf1");
+        assert_eq!(step.step_type, StepType::Execute);
+        assert_eq!(step.output_schema, None);
+    }
+
+    #[test]
+    fn step_serde_roundtrip_with_new_fields() {
+        let schema = serde_json::json!({"type": "string"});
+        let step = Step::new("route_step", "wf1")
+            .with_step_type(StepType::Route)
+            .with_output_schema(schema.clone());
+
+        let json = serde_json::to_string(&step).unwrap();
+        let deserialized: Step = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.step_type, StepType::Route);
+        assert_eq!(deserialized.output_schema, Some(schema));
+    }
+
+    #[test]
+    fn step_deserializes_without_new_fields() {
+        let json = r#"{"name":"legacy","workflow_id":"wf1"}"#;
+        let step: Step = serde_json::from_str(json).unwrap();
+        assert_eq!(step.step_type, StepType::Execute);
+        assert_eq!(step.output_schema, None);
+    }
+
+    #[test]
+    fn step_update_with_step_type_and_output_schema() {
+        let schema = serde_json::json!({"type": "boolean"});
+        let u = StepUpdate::new()
+            .with_step_type(StepType::Evaluate)
+            .with_output_schema(Some(schema.clone()));
+
+        assert_eq!(u.step_type, Some(StepType::Evaluate));
+        assert_eq!(u.output_schema, Some(Some(schema)));
+    }
+
+    #[test]
+    fn step_update_clear_output_schema() {
+        let u = StepUpdate::new().with_output_schema(None);
+        assert_eq!(u.output_schema, Some(None));
     }
 
     // ─── Level Enum Tests ───────────────────────────────────────────
