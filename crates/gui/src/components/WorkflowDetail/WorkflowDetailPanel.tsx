@@ -202,16 +202,18 @@ export function WorkflowDetailPanel({
                     const nextOrder = Math.max(...steps.map((s) => s.order ?? 0), -1) + 1;
                     const workflowId = workflow?.id || "";
                     void commands
-                      .createStep(
-                        workflowId,
-                        "",
-                        null,
-                        [],
-                        [],
-                        nextOrder,
-                        false,
-                        []
-                      )
+                      .createStep({
+                        workflow_id: workflowId,
+                        name: "",
+                        goal: null,
+                        agents: [],
+                        skills: [],
+                        order: nextOrder,
+                        is_final: false,
+                        transitions_to: [],
+                        step_type: "execute",
+                        output_schema: null,
+                      })
                       .then((result) => {
                         if (result.status === "ok") {
                           onStepCreated();

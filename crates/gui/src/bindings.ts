@@ -486,9 +486,9 @@ async getStep(stepId: string) : Promise<Result<Step | null, CommandError>> {
  * 
  * Creates a new first-class Step entity with the given properties.
  */
-async createStep(workflowId: string, name: string, goal: string | null, agents: string[], skills: string[], order: number, isFinal: boolean, transitionsTo: string[]) : Promise<Result<Step, CommandError>> {
+async createStep(options: CreateStepOptions) : Promise<Result<Step, CommandError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("create_step", { workflowId, name, goal, agents, skills, order, isFinal, transitionsTo }) };
+    return { status: "ok", data: await TAURI_INVOKE("create_step", { options }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -775,9 +775,14 @@ description: string | null }
  */
 export type CommandError = { message: string }
 /**
+ * Options for creating a workflow step.
+ */
+export type CreateStepOptions = { workflow_id: string; name: string; goal: string | null; agents: string[]; skills: string[]; order: number; is_final: boolean; transitions_to: string[]; step_type?: StepType; output_schema: JsonValue | null }
+/**
  * Execution status - mirrors db::ExecutionStatus
  */
 export type ExecutionStatus = "in_progress" | "completed" | "failed"
+export type JsonValue = null | boolean | number | string | JsonValue[] | Partial<{ [key in string]: JsonValue }>
 /**
  * Permission mode for agent sessions - mirrors db::PermissionMode
  */
@@ -908,6 +913,14 @@ skills?: string[];
  */
 agent_config?: AgentConfig; 
 /**
+ * The type of this step (execute, evaluate, route)
+ */
+step_type?: StepType; 
+/**
+ * JSON Schema describing the expected output of this step
+ */
+output_schema?: JsonValue | null; 
+/**
  * Whether this is a final step (no outgoing transitions)
  */
 is_final?: boolean; 
@@ -992,6 +1005,10 @@ export type StepTransitionChangeType = "Created" | "Deleted"
  * Emitted when a step transition is created or deleted.
  */
 export type StepTransitionChangedEvent = { transition_id: string; change_type: StepTransitionChangeType }
+/**
+ * Step type - mirrors core::StepType
+ */
+export type StepType = "execute" | "evaluate" | "route"
 /**
  * Full task details - mirrors core::Task with string IDs and dates
  */
@@ -1157,7 +1174,7 @@ export type TaskStepChangedEvent = { task_id: string; step_id: string; step_name
  * Only fields that are Some will be updated.
  * Note: agent_config is intentionally omitted — not editable from the GUI.
  */
-export type UpdateStepOptions = { step_id: string; name: string | null; goal: string | null; prompt: string | null; agents: string[] | null; skills: string[] | null; order: number | null; is_final: boolean | null; transitions_to: string[] | null }
+export type UpdateStepOptions = { step_id: string; name: string | null; goal: string | null; prompt: string | null; agents: string[] | null; skills: string[] | null; step_type: StepType | null; output_schema: JsonValue | null; order: number | null; is_final: boolean | null; transitions_to: string[] | null }
 /**
  * Options for updating a task - allows updating multiple fields at once
  */

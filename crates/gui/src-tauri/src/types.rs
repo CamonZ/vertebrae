@@ -433,6 +433,36 @@ impl From<vertebrae_core::AgentConfig> for AgentConfig {
     }
 }
 
+/// Step type - mirrors core::StepType
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum StepType {
+    #[default]
+    Execute,
+    Evaluate,
+    Route,
+}
+
+impl From<vertebrae_core::StepType> for StepType {
+    fn from(st: vertebrae_core::StepType) -> Self {
+        match st {
+            vertebrae_core::StepType::Execute => StepType::Execute,
+            vertebrae_core::StepType::Evaluate => StepType::Evaluate,
+            vertebrae_core::StepType::Route => StepType::Route,
+        }
+    }
+}
+
+impl From<StepType> for vertebrae_core::StepType {
+    fn from(st: StepType) -> Self {
+        match st {
+            StepType::Execute => vertebrae_core::StepType::Execute,
+            StepType::Evaluate => vertebrae_core::StepType::Evaluate,
+            StepType::Route => vertebrae_core::StepType::Route,
+        }
+    }
+}
+
 /// Workflow step entity - mirrors db::Step
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct Step {
@@ -455,6 +485,12 @@ pub struct Step {
     /// Agent configuration for this step
     #[serde(default)]
     pub agent_config: AgentConfig,
+    /// The type of this step (execute, evaluate, route)
+    #[serde(default)]
+    pub step_type: StepType,
+    /// JSON Schema describing the expected output of this step
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_schema: Option<serde_json::Value>,
     /// Whether this is a final step (no outgoing transitions)
     #[serde(default)]
     pub is_final: bool,
@@ -482,6 +518,8 @@ impl From<vertebrae_core::Step> for Step {
             agents: step.agents,
             skills: step.skills,
             agent_config: step.agent_config.into(),
+            step_type: step.step_type.into(),
+            output_schema: step.output_schema,
             is_final: step.is_final,
             transitions_to: step.transitions_to,
             order: step.order,
@@ -678,6 +716,22 @@ pub struct PipelineData {
     pub transitions: Vec<WorkflowTransition>,
 }
 
+/// Options for creating a workflow step.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct CreateStepOptions {
+    pub workflow_id: String,
+    pub name: String,
+    pub goal: Option<String>,
+    pub agents: Vec<String>,
+    pub skills: Vec<String>,
+    pub order: i32,
+    pub is_final: bool,
+    pub transitions_to: Vec<String>,
+    #[serde(default)]
+    pub step_type: StepType,
+    pub output_schema: Option<serde_json::Value>,
+}
+
 /// Options for updating a workflow step.
 /// Only fields that are Some will be updated.
 /// Note: agent_config is intentionally omitted — not editable from the GUI.
@@ -689,6 +743,8 @@ pub struct UpdateStepOptions {
     pub prompt: Option<String>,
     pub agents: Option<Vec<String>>,
     pub skills: Option<Vec<String>>,
+    pub step_type: Option<StepType>,
+    pub output_schema: Option<serde_json::Value>,
     pub order: Option<i32>,
     pub is_final: Option<bool>,
     pub transitions_to: Option<Vec<String>>,
@@ -714,6 +770,12 @@ impl From<UpdateStepOptions> for vertebrae_core::StepUpdate {
         }
         if let Some(order) = opts.order {
             update = update.with_order(order);
+        }
+        if let Some(step_type) = opts.step_type {
+            update = update.with_step_type(step_type.into());
+        }
+        if let Some(output_schema) = opts.output_schema {
+            update = update.with_output_schema(Some(output_schema));
         }
         if let Some(is_final) = opts.is_final {
             update = update.with_is_final(is_final);
