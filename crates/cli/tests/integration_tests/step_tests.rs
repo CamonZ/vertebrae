@@ -40,6 +40,8 @@ mod step_create_tests {
             order: 0,
             r#final: false,
             transitions_to: vec![],
+            step_type: CliStepType::Execute,
+            output_schema: None,
         };
 
         let result = cmd.execute(services.steps()).await.unwrap();
@@ -73,6 +75,8 @@ mod step_create_tests {
             order: 0,
             r#final: false,
             transitions_to: vec![],
+            step_type: CliStepType::Execute,
+            output_schema: None,
         };
 
         let result = cmd.execute(services.steps()).await.unwrap();
@@ -116,6 +120,8 @@ mod step_create_tests {
             order: 0,
             r#final: false,
             transitions_to: vec![],
+            step_type: CliStepType::Execute,
+            output_schema: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -159,6 +165,8 @@ mod step_create_tests {
             order: 5,
             r#final: false,
             transitions_to: vec![],
+            step_type: CliStepType::Execute,
+            output_schema: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -194,6 +202,8 @@ mod step_create_tests {
             order: 0,
             r#final: true,
             transitions_to: vec![],
+            step_type: CliStepType::Execute,
+            output_schema: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -237,6 +247,8 @@ mod step_create_tests {
             order: 0,
             r#final: false,
             transitions_to: vec![],
+            step_type: CliStepType::Execute,
+            output_schema: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -285,6 +297,8 @@ mod step_create_tests {
             order: 0,
             r#final: false,
             transitions_to: vec![],
+            step_type: CliStepType::Execute,
+            output_schema: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -326,6 +340,8 @@ mod step_create_tests {
                 "rejected".to_string(),
                 "needs_revision".to_string(),
             ],
+            step_type: CliStepType::Execute,
+            output_schema: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -369,6 +385,8 @@ mod step_create_tests {
             order: 0,
             r#final: false,
             transitions_to: vec![],
+            step_type: CliStepType::Execute,
+            output_schema: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -419,6 +437,8 @@ mod step_list_tests {
                 order: i,
                 r#final: i == 2,
                 transitions_to: vec![],
+                step_type: CliStepType::Execute,
+                output_schema: None,
             };
             cmd.execute(services.steps()).await.unwrap();
         }
@@ -485,6 +505,8 @@ mod step_list_tests {
             order: 0,
             r#final: false,
             transitions_to: vec![],
+            step_type: CliStepType::Execute,
+            output_schema: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -532,6 +554,8 @@ mod step_show_tests {
             order: 1,
             r#final: false,
             transitions_to: vec!["approved".to_string(), "rejected".to_string()],
+            step_type: CliStepType::Execute,
+            output_schema: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -575,6 +599,8 @@ mod step_show_tests {
             order: 0,
             r#final: false,
             transitions_to: vec![],
+            step_type: CliStepType::Execute,
+            output_schema: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -615,6 +641,8 @@ mod step_show_tests {
             order: 10,
             r#final: true,
             transitions_to: vec![],
+            step_type: CliStepType::Execute,
+            output_schema: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -665,6 +693,8 @@ mod step_show_tests {
             order: 0,
             r#final: false,
             transitions_to: vec![],
+            step_type: CliStepType::Execute,
+            output_schema: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -711,6 +741,8 @@ mod step_update_tests {
             order: 0,
             r#final: false,
             transitions_to: vec![],
+            step_type: CliStepType::Execute,
+            output_schema: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -730,6 +762,9 @@ mod step_update_tests {
             r#final: None,
             transitions_to: vec![],
             clear_transitions: false,
+            step_type: None,
+            output_schema: None,
+            clear_output_schema: false,
         };
 
         let result = update_cmd.execute(services.steps()).await.unwrap();
@@ -762,6 +797,8 @@ mod step_update_tests {
             order: 0,
             r#final: false,
             transitions_to: vec![],
+            step_type: CliStepType::Execute,
+            output_schema: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -781,6 +818,9 @@ mod step_update_tests {
             r#final: None,
             transitions_to: vec![],
             clear_transitions: false,
+            step_type: None,
+            output_schema: None,
+            clear_output_schema: false,
         };
 
         let result = update_cmd.execute(services.steps()).await.unwrap();
@@ -813,6 +853,8 @@ mod step_update_tests {
             order: 0,
             r#final: false,
             transitions_to: vec![],
+            step_type: CliStepType::Execute,
+            output_schema: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -832,6 +874,9 @@ mod step_update_tests {
             r#final: Some(true),
             transitions_to: vec![],
             clear_transitions: false,
+            step_type: None,
+            output_schema: None,
+            clear_output_schema: false,
         };
 
         let result = update_cmd.execute(services.steps()).await.unwrap();
@@ -864,6 +909,8 @@ mod step_update_tests {
             order: 0,
             r#final: false,
             transitions_to: vec![],
+            step_type: CliStepType::Execute,
+            output_schema: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -883,6 +930,9 @@ mod step_update_tests {
             r#final: None,
             transitions_to: vec![],
             clear_transitions: false,
+            step_type: None,
+            output_schema: None,
+            clear_output_schema: false,
         };
 
         let result = update_cmd.execute(services.steps()).await.unwrap();
@@ -923,6 +973,8 @@ mod step_update_tests {
             order: 0,
             r#final: false,
             transitions_to: vec![],
+            step_type: CliStepType::Execute,
+            output_schema: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -942,6 +994,9 @@ mod step_update_tests {
             r#final: None,
             transitions_to: vec![],
             clear_transitions: false,
+            step_type: None,
+            output_schema: None,
+            clear_output_schema: false,
         };
 
         let result = update_cmd.execute(services.steps()).await.unwrap();
@@ -974,6 +1029,8 @@ mod step_update_tests {
             order: 0,
             r#final: false,
             transitions_to: vec![],
+            step_type: CliStepType::Execute,
+            output_schema: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -993,6 +1050,9 @@ mod step_update_tests {
             r#final: None,
             transitions_to: vec!["next".to_string(), "retry".to_string()],
             clear_transitions: false,
+            step_type: None,
+            output_schema: None,
+            clear_output_schema: false,
         };
 
         let result = update_cmd.execute(services.steps()).await.unwrap();
@@ -1038,6 +1098,8 @@ mod step_update_tests {
             order: 0,
             r#final: false,
             transitions_to: vec!["old".to_string()],
+            step_type: CliStepType::Execute,
+            output_schema: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -1057,6 +1119,9 @@ mod step_update_tests {
             r#final: None,
             transitions_to: vec![],
             clear_transitions: true,
+            step_type: None,
+            output_schema: None,
+            clear_output_schema: false,
         };
 
         let result = update_cmd.execute(services.steps()).await.unwrap();
@@ -1088,6 +1153,8 @@ mod step_update_tests {
             order: 0,
             r#final: false,
             transitions_to: vec![],
+            step_type: CliStepType::Execute,
+            output_schema: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -1106,6 +1173,9 @@ mod step_update_tests {
             r#final: None,
             transitions_to: vec![],
             clear_transitions: false,
+            step_type: None,
+            output_schema: None,
+            clear_output_schema: false,
         };
 
         let result = update_cmd.execute(services.steps()).await.unwrap();
@@ -1159,6 +1229,8 @@ mod step_dispatcher_tests {
             order: 0,
             r#final: false,
             transitions_to: vec![],
+            step_type: CliStepType::Execute,
+            output_schema: None,
         });
 
         // Call through the dispatcher, not the inner command directly
@@ -1204,6 +1276,8 @@ mod step_delete_tests {
             order: 0,
             r#final: false,
             transitions_to: vec![],
+            step_type: CliStepType::Execute,
+            output_schema: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -1263,6 +1337,8 @@ mod step_delete_tests {
             order: 0,
             r#final: false,
             transitions_to: vec![],
+            step_type: CliStepType::Execute,
+            output_schema: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -1301,6 +1377,8 @@ mod step_delete_tests {
             order: 0,
             r#final: false,
             transitions_to: vec![],
+            step_type: CliStepType::Execute,
+            output_schema: None,
         };
         cmd.execute(services.steps()).await.unwrap();
 
@@ -1348,6 +1426,8 @@ mod step_prompt_and_agent_config_tests {
             order: 0,
             r#final: false,
             transitions_to: vec![],
+            step_type: CliStepType::Execute,
+            output_schema: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -1383,6 +1463,8 @@ mod step_prompt_and_agent_config_tests {
             order: 0,
             r#final: false,
             transitions_to: vec![],
+            step_type: CliStepType::Execute,
+            output_schema: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -1417,6 +1499,8 @@ mod step_prompt_and_agent_config_tests {
             order: 0,
             r#final: false,
             transitions_to: vec![],
+            step_type: CliStepType::Execute,
+            output_schema: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();
@@ -1463,6 +1547,8 @@ mod step_prompt_and_agent_config_tests {
             order: 0,
             r#final: false,
             transitions_to: vec![],
+            step_type: CliStepType::Execute,
+            output_schema: None,
         };
 
         let result = cmd.execute(services.steps()).await;
@@ -1499,6 +1585,8 @@ mod step_prompt_and_agent_config_tests {
             order: 0,
             r#final: false,
             transitions_to: vec![],
+            step_type: CliStepType::Execute,
+            output_schema: None,
         };
         add_cmd.execute(services.steps()).await.unwrap();
 
@@ -1517,6 +1605,9 @@ mod step_prompt_and_agent_config_tests {
             r#final: None,
             transitions_to: vec![],
             clear_transitions: false,
+            step_type: None,
+            output_schema: None,
+            clear_output_schema: false,
         };
 
         let result = update_cmd.execute(services.steps()).await.unwrap();
@@ -1547,6 +1638,8 @@ mod step_prompt_and_agent_config_tests {
             order: 0,
             r#final: false,
             transitions_to: vec![],
+            step_type: CliStepType::Execute,
+            output_schema: None,
         };
         add_cmd.execute(services.steps()).await.unwrap();
 
@@ -1566,6 +1659,9 @@ mod step_prompt_and_agent_config_tests {
             r#final: None,
             transitions_to: vec![],
             clear_transitions: false,
+            step_type: None,
+            output_schema: None,
+            clear_output_schema: false,
         };
 
         let result = update_cmd.execute(services.steps()).await.unwrap();
@@ -1596,6 +1692,8 @@ mod step_prompt_and_agent_config_tests {
             order: 0,
             r#final: false,
             transitions_to: vec![],
+            step_type: CliStepType::Execute,
+            output_schema: None,
         };
         add_cmd.execute(services.steps()).await.unwrap();
 
@@ -1614,6 +1712,9 @@ mod step_prompt_and_agent_config_tests {
             r#final: None,
             transitions_to: vec![],
             clear_transitions: false,
+            step_type: None,
+            output_schema: None,
+            clear_output_schema: false,
         };
 
         let result = update_cmd.execute(services.steps()).await;
@@ -1650,6 +1751,8 @@ mod step_prompt_and_agent_config_tests {
             order: 2,
             r#final: false,
             transitions_to: vec![],
+            step_type: CliStepType::Execute,
+            output_schema: None,
         };
 
         cmd.execute(services.steps()).await.unwrap();

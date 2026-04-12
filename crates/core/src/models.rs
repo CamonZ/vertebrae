@@ -157,6 +157,20 @@ impl StepType {
             StepType::Route => "route",
         }
     }
+
+    /// The JSON Schema that route steps must use as their output_schema.
+    /// Must match the Sacrum backend's `routing_contract_schema/0`.
+    pub fn routing_contract_schema() -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "transition_to": {"type": "string", "format": "uuid"},
+                "transition_type": {"type": "string", "enum": ["intra_workflow", "inter_workflow"]}
+            },
+            "required": ["transition_to", "transition_type"],
+            "additionalProperties": false
+        })
+    }
 }
 
 impl std::fmt::Display for StepType {
