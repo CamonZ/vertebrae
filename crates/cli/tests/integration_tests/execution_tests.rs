@@ -59,21 +59,7 @@ async fn test_execution_create_success() {
         .unwrap();
 
     // Create a step
-    let step = Step {
-        id: Some("step1".to_string()),
-        name: "Review".to_string(),
-        workflow_id: workflow_id.clone(),
-        goal: None,
-        prompt: None,
-        agents: vec![],
-        skills: vec![],
-        agent_config: Default::default(),
-        is_final: false,
-        order: 0,
-        transitions_to: vec![],
-        created_at: None,
-        updated_at: None,
-    };
+    let step = Step::new("Review", &workflow_id);
     services
         .steps()
         .create_step_with_id("step1", &step)
@@ -154,21 +140,7 @@ async fn test_execution_create_with_context_and_prompt() {
         .await
         .unwrap();
 
-    let step = Step {
-        id: Some("step_id".to_string()),
-        name: "Execute".to_string(),
-        workflow_id: workflow_id.clone(),
-        goal: None,
-        prompt: None,
-        agents: vec![],
-        skills: vec![],
-        agent_config: Default::default(),
-        is_final: false,
-        order: 0,
-        transitions_to: vec![],
-        created_at: None,
-        updated_at: None,
-    };
+    let step = Step::new("Execute", &workflow_id);
     services
         .steps()
         .create_step_with_id("step_id", &step)
@@ -243,21 +215,7 @@ async fn test_execution_create_invalid_context_json_fails() {
         .await
         .unwrap();
 
-    let step = Step {
-        id: Some("s".to_string()),
-        name: "S".to_string(),
-        workflow_id,
-        goal: None,
-        prompt: None,
-        agents: vec![],
-        skills: vec![],
-        agent_config: Default::default(),
-        is_final: false,
-        order: 0,
-        transitions_to: vec![],
-        created_at: None,
-        updated_at: None,
-    };
+    let step = Step::new("S", workflow_id);
     services
         .steps()
         .create_step_with_id("s", &step)
