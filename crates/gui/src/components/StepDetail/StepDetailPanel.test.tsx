@@ -40,6 +40,8 @@ function createStep(overrides?: Partial<Step>): Step {
     skills: [],
     goal: null,
     prompt: null,
+    step_type: "execute",
+    output_schema: null,
     created_at: null,
     updated_at: null,
     agent_config: {
@@ -554,6 +556,115 @@ describe("StepDetailPanel", () => {
       render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
       expect(screen.getByText("Prompt")).toBeInTheDocument();
       expect(screen.getByText("Click to add prompt...")).toBeInTheDocument();
+    });
+
+    it("displays step type badge with 'execute' for execute steps", () => {
+      const step = createStep({ step_type: "execute" });
+      vi.mocked(hooks.useStep).mockReturnValue({
+        step,
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+        applyUpdate: vi.fn(),
+      });
+
+      render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
+      const badge = screen.getByTestId("step-type-badge");
+      expect(badge).toHaveTextContent("execute");
+    });
+
+    it("displays step type badge with 'evaluate' for evaluate steps", () => {
+      const step = createStep({ step_type: "evaluate" });
+      vi.mocked(hooks.useStep).mockReturnValue({
+        step,
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+        applyUpdate: vi.fn(),
+      });
+
+      render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
+      const badge = screen.getByTestId("step-type-badge");
+      expect(badge).toHaveTextContent("evaluate");
+      expect(badge.className).toContain("info");
+    });
+
+    it("displays step type badge with 'route' for route steps", () => {
+      const step = createStep({ step_type: "route" });
+      vi.mocked(hooks.useStep).mockReturnValue({
+        step,
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+        applyUpdate: vi.fn(),
+      });
+
+      render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
+      const badge = screen.getByTestId("step-type-badge");
+      expect(badge).toHaveTextContent("route");
+      expect(badge.className).toContain("warning");
+    });
+
+    it("displays output schema as a type tree when present", () => {
+      const schema = {
+        type: "object",
+        required: ["result"],
+        properties: {
+          result: { type: "string", description: "The output" },
+          score: { type: "number" },
+        },
+      };
+      const step = createStep({ output_schema: schema });
+      vi.mocked(hooks.useStep).mockReturnValue({
+        step,
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+        applyUpdate: vi.fn(),
+      });
+
+      render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
+      expect(screen.getByText("Output Schema")).toBeInTheDocument();
+      expect(screen.getByTestId("schema-tree")).toBeInTheDocument();
+      // Property names rendered
+      expect(screen.getByText("result")).toBeInTheDocument();
+      expect(screen.getByText("score")).toBeInTheDocument();
+      // Types rendered
+      expect(screen.getAllByText("string").length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText("number").length).toBeGreaterThanOrEqual(1);
+      // Description rendered
+      expect(screen.getByText("The output")).toBeInTheDocument();
+    });
+
+    it("does not display output schema section when output_schema is null", () => {
+      const step = createStep({ output_schema: null });
+      vi.mocked(hooks.useStep).mockReturnValue({
+        step,
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+        applyUpdate: vi.fn(),
+      });
+
+      render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
+      expect(screen.queryByText("Output Schema")).not.toBeInTheDocument();
+    });
+
+    it("defaults step type to execute when step_type is undefined", () => {
+      const step = createStep();
+      // Remove step_type to simulate undefined
+      delete (step as Record<string, unknown>).step_type;
+      vi.mocked(hooks.useStep).mockReturnValue({
+        step,
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+        applyUpdate: vi.fn(),
+      });
+
+      render(<StepDetailPanel stepId="step-test" allSteps={[]} />);
+      const badge = screen.getByTestId("step-type-badge");
+      expect(badge).toHaveTextContent("execute");
     });
 
   });

@@ -834,23 +834,15 @@ pub async fn get_step(
 /// Creates a new first-class Step entity with the given properties.
 #[tauri::command]
 #[specta::specta]
-#[allow(clippy::too_many_arguments)]
 pub async fn create_step(
     state: State<'_, AppState>,
-    workflow_id: String,
-    name: String,
-    goal: Option<String>,
-    agents: Vec<String>,
-    skills: Vec<String>,
-    order: i32,
-    is_final: bool,
-    transitions_to: Vec<String>,
+    options: crate::types::CreateStepOptions,
 ) -> Result<Step, CommandError> {
     log::info!(
         "create_step called: workflow={}, name={}, order={}",
-        workflow_id,
-        name,
-        order
+        options.workflow_id,
+        options.name,
+        options.order
     );
     let service_guard = state.services.read().await;
     let service = service_guard
@@ -858,18 +850,27 @@ pub async fn create_step(
         .ok_or_else(CommandError::no_project_selected)?;
 
     // Build transitions_to list
-    let transitions: Vec<String> = transitions_to.iter().map(|id| id.to_lowercase()).collect();
+    let transitions: Vec<String> = options
+        .transitions_to
+        .iter()
+        .map(|id| id.to_lowercase())
+        .collect();
 
     // Build the step
-    let mut step = vertebrae_core::Step::new(&name, workflow_id)
-        .with_agents(agents)
-        .with_skills(skills)
-        .with_order(order)
-        .with_is_final(is_final)
-        .with_transitions_to(transitions);
+    let mut step = vertebrae_core::Step::new(&options.name, options.workflow_id)
+        .with_agents(options.agents)
+        .with_skills(options.skills)
+        .with_order(options.order)
+        .with_is_final(options.is_final)
+        .with_transitions_to(transitions)
+        .with_step_type(options.step_type.into());
 
-    if let Some(goal) = goal {
+    if let Some(goal) = options.goal {
         step = step.with_goal(&goal);
+    }
+
+    if let Some(schema) = options.output_schema {
+        step = step.with_output_schema(schema);
     }
 
     match service.steps().create_step(&step).await {
@@ -2628,40 +2629,52 @@ mod tests {
 
         create_step(
             state.clone(),
-            wf1_id.clone(),
-            "Step A1".to_string(),
-            None,
-            vec![],
-            vec![],
-            0,
-            false,
-            vec![],
+            crate::types::CreateStepOptions {
+                workflow_id: wf1_id.clone(),
+                name: "Step A1".to_string(),
+                goal: None,
+                agents: vec![],
+                skills: vec![],
+                order: 0,
+                is_final: false,
+                transitions_to: vec![],
+                step_type: Default::default(),
+                output_schema: None,
+            },
         )
         .await
         .unwrap();
         create_step(
             state.clone(),
-            wf1_id.clone(),
-            "Step A2".to_string(),
-            None,
-            vec![],
-            vec![],
-            1,
-            false,
-            vec![],
+            crate::types::CreateStepOptions {
+                workflow_id: wf1_id.clone(),
+                name: "Step A2".to_string(),
+                goal: None,
+                agents: vec![],
+                skills: vec![],
+                order: 1,
+                is_final: false,
+                transitions_to: vec![],
+                step_type: Default::default(),
+                output_schema: None,
+            },
         )
         .await
         .unwrap();
         create_step(
             state.clone(),
-            wf2_id.clone(),
-            "Step B1".to_string(),
-            None,
-            vec![],
-            vec![],
-            0,
-            false,
-            vec![],
+            crate::types::CreateStepOptions {
+                workflow_id: wf2_id.clone(),
+                name: "Step B1".to_string(),
+                goal: None,
+                agents: vec![],
+                skills: vec![],
+                order: 0,
+                is_final: false,
+                transitions_to: vec![],
+                step_type: Default::default(),
+                output_schema: None,
+            },
         )
         .await
         .unwrap();
@@ -2741,14 +2754,18 @@ mod tests {
         let state: tauri::State<'_, AppState> = app.state();
         let step = create_step(
             state.clone(),
-            "wf-1".to_string(),
-            "Review".to_string(),
-            Some("Review the code".to_string()),
-            vec!["sonnet".to_string()],
-            vec![],
-            0,
-            false,
-            vec![],
+            crate::types::CreateStepOptions {
+                workflow_id: "wf-1".to_string(),
+                name: "Review".to_string(),
+                goal: Some("Review the code".to_string()),
+                agents: vec!["sonnet".to_string()],
+                skills: vec![],
+                order: 0,
+                is_final: false,
+                transitions_to: vec![],
+                step_type: Default::default(),
+                output_schema: None,
+            },
         )
         .await
         .unwrap();
@@ -2774,27 +2791,35 @@ mod tests {
         let state: tauri::State<'_, AppState> = app.state();
         create_step(
             state.clone(),
-            "wf-x".to_string(),
-            "Step1".to_string(),
-            None,
-            vec![],
-            vec![],
-            0,
-            false,
-            vec![],
+            crate::types::CreateStepOptions {
+                workflow_id: "wf-x".to_string(),
+                name: "Step1".to_string(),
+                goal: None,
+                agents: vec![],
+                skills: vec![],
+                order: 0,
+                is_final: false,
+                transitions_to: vec![],
+                step_type: Default::default(),
+                output_schema: None,
+            },
         )
         .await
         .unwrap();
         create_step(
             state.clone(),
-            "wf-x".to_string(),
-            "Step2".to_string(),
-            None,
-            vec![],
-            vec![],
-            1,
-            true,
-            vec![],
+            crate::types::CreateStepOptions {
+                workflow_id: "wf-x".to_string(),
+                name: "Step2".to_string(),
+                goal: None,
+                agents: vec![],
+                skills: vec![],
+                order: 1,
+                is_final: true,
+                transitions_to: vec![],
+                step_type: Default::default(),
+                output_schema: None,
+            },
         )
         .await
         .unwrap();

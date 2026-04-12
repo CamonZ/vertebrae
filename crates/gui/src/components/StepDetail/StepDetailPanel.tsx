@@ -1,5 +1,5 @@
-import { useState, useCallback, useMemo } from "react";
-import type { Step, Task, StepExecutionStatus } from "../../bindings";
+import { useState, useCallback, useMemo, type ReactNode } from "react";
+import type { Step, StepType, Task, StepExecutionStatus, JsonValue } from "../../bindings";
 import { commands } from "../../bindings";
 import { useStep, useStepChangeListener, useExpandedNodes } from "../../hooks";
 import { DeleteConfirmation } from "../DeleteConfirmation";
@@ -55,6 +55,170 @@ function SectionHeader({ title }: { title: string }) {
     <h3 className="mb-2 font-mono text-[10px] uppercase tracking-wider text-text-muted">
       {title}
     </h3>
+  );
+}
+
+const STEP_TYPE_STYLES: Record<StepType, string> = {
+  execute: "border-text-muted/30 bg-text-muted/10 text-text-secondary",
+  evaluate: "border-info/30 bg-info/10 text-info",
+  route: "border-warning/30 bg-warning/10 text-warning",
+};
+
+function StepTypeBadge({ stepType }: { stepType: StepType }) {
+  const style = STEP_TYPE_STYLES[stepType] ?? STEP_TYPE_STYLES.execute;
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border px-2 py-0.5 font-mono text-xs ${style}`}
+      data-testid="step-type-badge"
+    >
+      {stepType}
+    </span>
+  );
+}
+
+// JSON Schema type → color mapping
+const SCHEMA_TYPE_COLORS: Record<string, string> = {
+  string: "text-success",
+  number: "text-info",
+  integer: "text-info",
+  boolean: "text-warning",
+  object: "text-primary",
+  array: "text-accent",
+  null: "text-text-muted",
+};
+
+function SchemaTypeBadge({ type }: { type: string }) {
+  return (
+    <span className={`font-mono text-xs ${SCHEMA_TYPE_COLORS[type] ?? "text-text-secondary"}`}>
+      {type}
+    </span>
+  );
+}
+
+function SchemaNode({
+  name,
+  schema,
+  required = false,
+  depth = 0,
+  isLast = true,
+}: {
+  name?: string;
+  schema: Record<string, unknown>;
+  required?: boolean;
+  depth?: number;
+  isLast?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(depth < 2);
+
+  const type = schema.type as string | undefined;
+  const description = schema.description as string | undefined;
+  const properties = schema.properties as Record<string, Record<string, unknown>> | undefined;
+  const requiredFields = (schema.required as string[]) ?? [];
+  const items = schema.items as Record<string, unknown> | undefined;
+  const title = schema.title as string | undefined;
+
+  const isExpandable = type === "object" && properties && Object.keys(properties).length > 0;
+  const propertyEntries = properties ? Object.entries(properties) : [];
+
+  // Format type display: arrays show itemType[]
+  let typeDisplay: ReactNode;
+  if (type === "array" && items) {
+    const itemType = (items.type as string) ?? "any";
+    typeDisplay = (
+      <>
+        <SchemaTypeBadge type={itemType} />
+        <span className="font-mono text-xs text-text-muted">{"[]"}</span>
+      </>
+    );
+  } else {
+    typeDisplay = <SchemaTypeBadge type={type ?? "any"} />;
+  }
+
+  // Tree connector characters
+  const connector = depth > 0 ? (isLast ? "└─ " : "├─ ") : "";
+
+  return (
+    <div data-testid={name ? `schema-node-${name}` : "schema-root"}>
+      {/* Node row */}
+      <div className="flex items-baseline gap-1 py-px">
+        {depth > 0 && (
+          <span className="select-none whitespace-pre font-mono text-xs text-text-muted/40">
+            {connector}
+          </span>
+        )}
+
+        {/* Expand/collapse toggle for objects */}
+        {isExpandable ? (
+          <button
+            type="button"
+            onClick={() => setExpanded(!expanded)}
+            className="inline-flex cursor-pointer items-center text-text-muted hover:text-text-primary"
+            aria-label={expanded ? "Collapse" : "Expand"}
+          >
+            <svg
+              className={`h-3 w-3 transition-transform ${expanded ? "rotate-90" : ""}`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+          </button>
+        ) : depth > 0 ? (
+          <span className="inline-block w-3" />
+        ) : null}
+
+        {/* Property name */}
+        {name && (
+          <span className="font-mono text-xs font-medium text-text-primary">{name}</span>
+        )}
+        {name && <span className="font-mono text-xs text-text-muted/60">:</span>}
+
+        {/* Type */}
+        {typeDisplay}
+
+        {/* Required marker */}
+        {required && (
+          <span className="font-mono text-[10px] text-error/70" title="required">*</span>
+        )}
+
+        {/* Root title */}
+        {title && depth === 0 && (
+          <span className="ml-1 text-xs text-text-muted">— {title}</span>
+        )}
+      </div>
+
+      {/* Description */}
+      {description && depth > 0 && (
+        <div className="ml-8 pl-1">
+          <span className="text-[10px] italic leading-tight text-text-muted/70">{description}</span>
+        </div>
+      )}
+
+      {/* Nested properties */}
+      {isExpandable && expanded && (
+        <div className={depth > 0 ? "ml-4" : "ml-1"}>
+          {propertyEntries.map(([key, value], index) => (
+            <SchemaNode
+              key={key}
+              name={key}
+              schema={value}
+              required={requiredFields.includes(key)}
+              depth={depth + 1}
+              isLast={index === propertyEntries.length - 1}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SchemaTree({ schema }: { schema: Record<string, unknown> }) {
+  return (
+    <div className="overflow-auto rounded-lg border border-border bg-bg-tertiary p-3" data-testid="schema-tree">
+      <SchemaNode schema={schema} />
+    </div>
   );
 }
 
@@ -123,6 +287,8 @@ export function StepDetailPanel({
       prompt?: string | null;
       agents?: string[];
       skills?: string[];
+      step_type?: StepType;
+      output_schema?: JsonValue | null;
       order?: number;
       is_final?: boolean;
       transitions_to?: string[];
@@ -136,6 +302,8 @@ export function StepDetailPanel({
         prompt: updates.prompt ?? null,
         agents: updates.agents ?? null,
         skills: updates.skills ?? null,
+        step_type: updates.step_type ?? null,
+        output_schema: updates.output_schema ?? null,
         order: updates.order ?? null,
         is_final: updates.is_final ?? null,
         transitions_to: updates.transitions_to ?? null,
@@ -417,6 +585,9 @@ export function StepDetailPanel({
             <div className="p-4">
               <SectionHeader title="Overview" />
               <div className="space-y-1">
+                <DetailRow label="Type">
+                  <StepTypeBadge stepType={step.step_type ?? "execute"} />
+                </DetailRow>
                 <DetailRow label="Order">
                   <input
                     type="number"
@@ -439,6 +610,14 @@ export function StepDetailPanel({
                 </DetailRow>
               </div>
             </div>
+
+            {/* Output Schema */}
+            {step.output_schema && (
+              <div className="p-4">
+                <SectionHeader title="Output Schema" />
+                <SchemaTree schema={step.output_schema as Record<string, unknown>} />
+              </div>
+            )}
 
             {/* Agents */}
             <div className="p-4">

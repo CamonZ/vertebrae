@@ -31,6 +31,8 @@ function createStep(id: string, name: string, order: number): Step {
       plugin_dirs: [],
       json_schema: null,
     },
+    step_type: "execute",
+    output_schema: null,
     is_final: false,
     transitions_to: [],
     order,
