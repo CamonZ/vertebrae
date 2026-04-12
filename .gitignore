@@ -19,7 +19,6 @@ Thumbs.db
 
 # Debug files
 *.pdb
-/docs
 /scratch
 /.claude
 /crates/gui/coverage
