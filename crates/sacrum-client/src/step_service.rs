@@ -53,6 +53,17 @@ impl SacrumStepService {
             .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
             .map(|dt| dt.with_timezone(&chrono::Utc));
 
+        let step_type = response
+            .step_type
+            .as_deref()
+            .map(|s| match s {
+                "execute" => StepType::Execute,
+                "evaluate" => StepType::Evaluate,
+                "route" => StepType::Route,
+                _ => StepType::Execute,
+            })
+            .unwrap_or_default();
+
         Step {
             id: Some(response.id.clone()),
             name: response.name.clone(),
@@ -62,8 +73,8 @@ impl SacrumStepService {
             agents: response.agents.clone(),
             skills: response.skills.clone(),
             agent_config,
-            step_type: StepType::default(),
-            output_schema: None,
+            step_type,
+            output_schema: response.output_schema.clone(),
             is_final: response.is_final,
             transitions_to,
             order: response.step_order,
@@ -79,7 +90,7 @@ impl StepService for SacrumStepService {
         let query = with_fragments(CREATE_STEP, &[STEP_FIELDS]);
         let agent_config_str = serde_json::to_string(&step.agent_config)
             .map_err(|e| ServiceError::validation_failed(format!("Invalid agent config: {}", e)))?;
-        let variables = json!({
+        let mut variables = json!({
             "workflow_id": step.workflow_id,
             "name": step.name,
             "goal": step.goal,
@@ -87,9 +98,13 @@ impl StepService for SacrumStepService {
             "agents": step.agents,
             "skills": step.skills,
             "agent_config": agent_config_str,
+            "step_type": step.step_type.as_str(),
             "is_final": step.is_final,
             "step_order": step.order,
         });
+        if let Some(schema) = &step.output_schema {
+            variables["output_schema"] = json!(schema);
+        }
 
         let response: WorkflowStepResponse = self
             .client
@@ -199,6 +214,12 @@ impl StepService for SacrumStepService {
         if let Some(order) = updates.order {
             variables["step_order"] = json!(order);
         }
+        if let Some(step_type) = &updates.step_type {
+            variables["step_type"] = json!(step_type.as_str());
+        }
+        if let Some(Some(output_schema)) = &updates.output_schema {
+            variables["output_schema"] = json!(output_schema);
+        }
 
         let _response: WorkflowStepResponse = self
             .client
@@ -306,6 +327,8 @@ mod tests {
             agents: vec!["claude".to_string()],
             skills: vec!["code-review".to_string()],
             agent_config: None,
+            step_type: Some("evaluate".to_string()),
+            output_schema: Some(json!({"type": "object"})),
             is_final: false,
             step_order: 0,
             workflow_id: "wf-1".to_string(),
@@ -326,6 +349,8 @@ mod tests {
         assert_eq!(step.prompt.as_deref(), Some("Review the PR for issues"));
         assert_eq!(step.agents, vec!["claude"]);
         assert_eq!(step.skills, vec!["code-review"]);
+        assert_eq!(step.step_type, StepType::Evaluate);
+        assert_eq!(step.output_schema, Some(json!({"type": "object"})));
         assert!(!step.is_final);
         assert_eq!(step.order, 0);
         assert_eq!(step.workflow_id, "wf-1");
@@ -343,6 +368,8 @@ mod tests {
             agents: vec![],
             skills: vec![],
             agent_config: None,
+            step_type: None,
+            output_schema: None,
             is_final: true,
             step_order: 5,
             workflow_id: "wf-1".to_string(),
@@ -359,6 +386,8 @@ mod tests {
         assert!(step.prompt.is_none());
         assert!(step.agents.is_empty());
         assert!(step.skills.is_empty());
+        assert_eq!(step.step_type, StepType::Execute);
+        assert!(step.output_schema.is_none());
         assert!(step.is_final);
         assert_eq!(step.order, 5);
         assert!(step.transitions_to.is_empty());
@@ -374,6 +403,8 @@ mod tests {
             agents: vec![],
             skills: vec![],
             agent_config: Some(json!({"model": "claude-opus"})),
+            step_type: Some("route".to_string()),
+            output_schema: None,
             is_final: false,
             step_order: 0,
             workflow_id: "wf-1".to_string(),
@@ -385,6 +416,64 @@ mod tests {
         let step = SacrumStepService::response_to_step(&response);
 
         assert_eq!(step.agent_config.model.as_deref(), Some("claude-opus"));
+    }
+
+    #[test]
+    fn test_response_to_step_unknown_step_type_defaults_to_execute() {
+        let response = WorkflowStepResponse {
+            id: "step-unk".to_string(),
+            name: "Unknown".to_string(),
+            goal: None,
+            prompt: None,
+            agents: vec![],
+            skills: vec![],
+            agent_config: None,
+            step_type: Some("future_type".to_string()),
+            output_schema: None,
+            is_final: false,
+            step_order: 0,
+            workflow_id: "wf-1".to_string(),
+            transitions: None,
+            inserted_at: None,
+            updated_at: None,
+        };
+
+        let step = SacrumStepService::response_to_step(&response);
+        assert_eq!(step.step_type, StepType::Execute);
+    }
+
+    #[test]
+    fn test_response_to_step_maps_all_step_type_variants() {
+        for (input, expected) in [
+            ("execute", StepType::Execute),
+            ("evaluate", StepType::Evaluate),
+            ("route", StepType::Route),
+        ] {
+            let response = WorkflowStepResponse {
+                id: "step-x".to_string(),
+                name: "X".to_string(),
+                goal: None,
+                prompt: None,
+                agents: vec![],
+                skills: vec![],
+                agent_config: None,
+                step_type: Some(input.to_string()),
+                output_schema: None,
+                is_final: false,
+                step_order: 0,
+                workflow_id: "wf-1".to_string(),
+                transitions: None,
+                inserted_at: None,
+                updated_at: None,
+            };
+
+            let step = SacrumStepService::response_to_step(&response);
+            assert_eq!(
+                step.step_type, expected,
+                "step_type '{}' should map to {:?}",
+                input, expected
+            );
+        }
     }
 
     #[test]
