@@ -9,6 +9,8 @@ pub const STEP_FIELDS: &str = r#"
         agents
         skills
         agent_config
+        step_type
+        output_schema
         is_final
         step_order
         workflow_id
@@ -50,6 +52,8 @@ pub const CREATE_STEP: &str = r#"
         $agents: [String!],
         $skills: [String!],
         $agent_config: Json,
+        $step_type: String,
+        $output_schema: Json,
         $is_final: Boolean,
         $step_order: Int
     ) {
@@ -61,6 +65,8 @@ pub const CREATE_STEP: &str = r#"
             agents: $agents,
             skills: $skills,
             agent_config: $agent_config,
+            step_type: $step_type,
+            output_schema: $output_schema,
             is_final: $is_final,
             step_order: $step_order
         ) {
@@ -78,6 +84,8 @@ pub const UPDATE_STEP: &str = r#"
         $agents: [String!],
         $skills: [String!],
         $agent_config: Json,
+        $step_type: String,
+        $output_schema: Json,
         $is_final: Boolean,
         $step_order: Int
     ) {
@@ -89,6 +97,8 @@ pub const UPDATE_STEP: &str = r#"
             agents: $agents,
             skills: $skills,
             agent_config: $agent_config,
+            step_type: $step_type,
+            output_schema: $output_schema,
             is_final: $is_final,
             step_order: $step_order
         ) {

@@ -208,6 +208,10 @@ pub struct WorkflowStepResponse {
     #[serde(default)]
     pub agent_config: Option<serde_json::Value>,
     #[serde(default)]
+    pub step_type: Option<String>,
+    #[serde(default)]
+    pub output_schema: Option<serde_json::Value>,
+    #[serde(default)]
     pub is_final: bool,
     #[serde(default)]
     pub step_order: i32,
