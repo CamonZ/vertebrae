@@ -35,7 +35,7 @@ tauri-plugin-window-state = "2"
 dirs = "6"
 
 # Type generation for frontend bindings
-specta = { version = "=2.0.0-rc.22", features = ["derive", "function", "tokio"] }
+specta = { version = "=2.0.0-rc.22", features = ["derive", "function", "tokio", "serde_json"] }
 specta-typescript = "0.0.9"
 tauri-specta = { version = "=2.0.0-rc.21", features = ["derive", "typescript"] }
 tokio = { version = "1", features = ["full"] }
