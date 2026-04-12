@@ -2,8 +2,28 @@
 //!
 //! Implements the `vtb step` subcommand group for creating and managing steps.
 
-use clap::{Args, Subcommand};
-use vertebrae_core::{AgentConfig, ServiceError, Step, StepService, StepUpdate, VertebraeServices};
+use clap::{Args, Subcommand, ValueEnum};
+use vertebrae_core::{
+    AgentConfig, ServiceError, Step, StepService, StepType, StepUpdate, VertebraeServices,
+};
+
+/// CLI representation of step types, maps to `vertebrae_core::StepType`.
+#[derive(Debug, Clone, ValueEnum)]
+pub enum CliStepType {
+    Execute,
+    Evaluate,
+    Route,
+}
+
+impl From<CliStepType> for StepType {
+    fn from(cli: CliStepType) -> Self {
+        match cli {
+            CliStepType::Execute => StepType::Execute,
+            CliStepType::Evaluate => StepType::Evaluate,
+            CliStepType::Route => StepType::Route,
+        }
+    }
+}
 
 /// Step management commands
 #[derive(Debug, Subcommand)]
@@ -81,6 +101,14 @@ pub struct StepAddCommand {
     #[arg(long, short)]
     pub model: Option<String>,
 
+    /// Type of this step (execute, evaluate, route)
+    #[arg(long, value_enum, default_value = "execute")]
+    pub step_type: CliStepType,
+
+    /// JSON Schema describing the expected output of this step (raw JSON string)
+    #[arg(long, value_name = "JSON")]
+    pub output_schema: Option<String>,
+
     /// Step order (0-indexed, defaults to 0)
     #[arg(long, short, default_value = "0")]
     pub order: i32,
@@ -110,10 +138,9 @@ impl StepAddCommand {
     /// - The workflow doesn't exist
     /// - Service operations fail
     pub async fn execute(&self, service: &dyn StepService) -> Result<String, ServiceError> {
-        // Build the workflow ID string
         let workflow_id = self.workflow.to_lowercase();
 
-        // Build agent config: start from --agent-config JSON, then overlay --model
+        // Start from --agent-config JSON, then overlay --model
         let mut agent_config = match &self.agent_config {
             Some(json_str) => serde_json::from_str::<AgentConfig>(json_str).map_err(|e| {
                 ServiceError::validation_failed(format!("Invalid --agent-config JSON: {}", e))
@@ -124,45 +151,61 @@ impl StepAddCommand {
             agent_config = agent_config.with_model(model);
         }
 
-        // Build transitions_to list (string IDs)
         let transitions_to: Vec<String> = self
             .transitions_to
             .iter()
             .map(|id| id.to_lowercase())
             .collect();
 
-        // Build the step
+        let output_schema = self
+            .output_schema
+            .as_deref()
+            .map(|json_str| {
+                serde_json::from_str::<serde_json::Value>(json_str).map_err(|e| {
+                    ServiceError::validation_failed(format!("Invalid --output-schema JSON: {}", e))
+                })
+            })
+            .transpose()?;
+
+        let step_type: StepType = self.step_type.clone().into();
+
+        if step_type == StepType::Route
+            && let Some(ref schema) = output_schema
+        {
+            let expected = StepType::routing_contract_schema();
+            if *schema != expected {
+                return Err(ServiceError::validation_failed(format!(
+                    "Route step has invalid output schema. Route steps must use the routing contract schema:\n{}",
+                    serde_json::to_string_pretty(&expected).unwrap()
+                )));
+            }
+        }
+
         let mut step = Step::new(&self.name, workflow_id)
             .with_agent_config(agent_config)
+            .with_step_type(step_type)
             .with_order(self.order)
             .with_is_final(self.r#final);
 
-        // Set goal if provided
+        if let Some(schema) = output_schema {
+            step = step.with_output_schema(schema);
+        }
         if let Some(goal) = &self.goal {
             step = step.with_goal(goal);
         }
-
-        // Set prompt if provided
         if let Some(prompt) = &self.prompt {
             step = step.with_prompt(prompt);
         }
-
-        // Set agents if provided
         if !self.agent.is_empty() {
             step = step.with_agents(self.agent.clone());
         }
-
-        // Set skills if provided
         if !self.skill.is_empty() {
             step = step.with_skills(self.skill.clone());
         }
-
-        // Add transitions
         for transition in transitions_to {
             step = step.with_transition(transition);
         }
 
-        // Create the step
         let created = if let Some(id) = &self.id {
             service
                 .create_step_with_id(&id.to_lowercase(), &step)
@@ -222,12 +265,14 @@ impl StepListCommand {
                         .map(|t| t.to_string())
                         .unwrap_or_else(|| "?".to_string());
                 let model = s.agent_config.model.as_deref().unwrap_or("default");
+                let step_type = s.step_type.to_string();
                 let final_marker = if s.is_final { " [FINAL]" } else { "" };
                 format!(
-                    "{}. {} (id: {}, model: {}){}",
+                    "{}. {} (id: {}, type: {}, model: {}){}",
                     s.order + 1,
                     s.name,
                     id,
+                    step_type,
                     model,
                     final_marker
                 )
@@ -292,12 +337,14 @@ impl StepShowCommand {
                 let transitions = if s.transitions_to.is_empty() {
                     "(none)".to_string()
                 } else {
-                    s.transitions_to
-                        .iter()
-                        .map(|t| t.to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ")
+                    s.transitions_to.join(", ")
                 };
+
+                let output_schema = s
+                    .output_schema
+                    .as_ref()
+                    .map(|v| serde_json::to_string_pretty(v).unwrap_or_else(|_| v.to_string()))
+                    .unwrap_or_else(|| "(none)".to_string());
 
                 let output = format!(
                     r#"Step: {} - {}
@@ -305,10 +352,12 @@ impl StepShowCommand {
 
 Workflow:      {}
 Order:         {}
+Step Type:     {}
 Goal:          {}
 Agents:        {}
 Skills:        {}
 Model:         {}
+Output Schema: {}
 Is Final:      {}
 Transitions:   {}
 Created:       {}
@@ -317,10 +366,12 @@ Updated:       {}"#,
                     s.name,
                     workflow_id,
                     s.order,
+                    s.step_type,
                     goal,
                     agents,
                     skills,
                     model,
+                    output_schema,
                     if s.is_final { "Yes" } else { "No" },
                     transitions,
                     s.created_at
@@ -384,6 +435,18 @@ pub struct StepUpdateCommand {
     #[arg(long, short)]
     pub model: Option<String>,
 
+    /// New step type (execute, evaluate, route)
+    #[arg(long, value_enum)]
+    pub step_type: Option<CliStepType>,
+
+    /// New output schema as a JSON string
+    #[arg(long, value_name = "JSON")]
+    pub output_schema: Option<String>,
+
+    /// Clear the output schema
+    #[arg(long)]
+    pub clear_output_schema: bool,
+
     /// New order for the step
     #[arg(long, short)]
     pub order: Option<i32>,
@@ -414,7 +477,6 @@ impl StepUpdateCommand {
     ///
     /// Returns `ServiceError` if the step doesn't exist or service operations fail.
     pub async fn execute(&self, service: &dyn StepService) -> Result<String, ServiceError> {
-        // Check if step exists
         let existing = service.get_step(&self.id.to_lowercase()).await?;
         if existing.is_none() {
             return Err(ServiceError::validation_failed(format!(
@@ -423,7 +485,6 @@ impl StepUpdateCommand {
             )));
         }
 
-        // Build the update
         let mut updates = StepUpdate::new();
 
         if let Some(name) = &self.name {
@@ -450,6 +511,19 @@ impl StepUpdateCommand {
             updates = updates.with_skills(self.skill.clone());
         }
 
+        if let Some(step_type) = &self.step_type {
+            updates = updates.with_step_type(step_type.clone().into());
+        }
+
+        if self.clear_output_schema {
+            updates = updates.with_output_schema(None);
+        } else if let Some(json_str) = &self.output_schema {
+            let value: serde_json::Value = serde_json::from_str(json_str).map_err(|e| {
+                ServiceError::validation_failed(format!("Invalid --output-schema JSON: {}", e))
+            })?;
+            updates = updates.with_output_schema(Some(value));
+        }
+
         if let Some(order) = self.order {
             updates = updates.with_order(order);
         }
@@ -458,8 +532,7 @@ impl StepUpdateCommand {
             updates = updates.with_is_final(is_final);
         }
 
-        // Build agent_config: start from --agent-config JSON (merged onto existing),
-        // then overlay --model if provided
+        // Start from --agent-config JSON (merged onto existing), then overlay --model
         if self.agent_config.is_some() || self.model.is_some() {
             let existing_step = existing.as_ref().unwrap();
             let mut agent_config = match &self.agent_config {
@@ -486,6 +559,25 @@ impl StepUpdateCommand {
                 .map(|id| id.to_lowercase())
                 .collect();
             updates = updates.with_transitions_to(transitions);
+        }
+
+        // Validate route step output_schema
+        let effective_step_type = self
+            .step_type
+            .as_ref()
+            .map(|st| StepType::from(st.clone()))
+            .unwrap_or_else(|| existing.as_ref().unwrap().step_type.clone());
+
+        if effective_step_type == StepType::Route
+            && let Some(Some(schema)) = &updates.output_schema
+        {
+            let expected = StepType::routing_contract_schema();
+            if *schema != expected {
+                return Err(ServiceError::validation_failed(format!(
+                    "Route step has invalid output schema. Route steps must use the routing contract schema:\n{}",
+                    serde_json::to_string_pretty(&expected).unwrap()
+                )));
+            }
         }
 
         service
@@ -521,8 +613,8 @@ impl StepDeleteCommand {
     ///
     /// Returns `ServiceError` if the step doesn't exist or service operations fail.
     pub async fn execute(&self, service: &dyn StepService) -> Result<String, ServiceError> {
-        // Check if step exists
-        let existing = service.get_step(&self.id.to_lowercase()).await?;
+        let id = self.id.to_lowercase();
+        let existing = service.get_step(&id).await?;
         if existing.is_none() {
             return Err(ServiceError::validation_failed(format!(
                 "Step not found: {}",
@@ -530,7 +622,7 @@ impl StepDeleteCommand {
             )));
         }
 
-        service.delete_step(&self.id.to_lowercase()).await?;
+        service.delete_step(&id).await?;
 
         Ok(format!("Deleted step: {}", self.id))
     }
@@ -968,6 +1060,201 @@ mod tests {
                     cmd.agent_config,
                     Some(r#"{"model":"haiku","permission_mode":"plan"}"#.to_string())
                 );
+            }
+            _ => panic!("Expected Update command"),
+        }
+    }
+
+    #[test]
+    fn test_step_add_defaults_step_type_to_execute() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "add",
+            "Review",
+            "--workflow",
+            "a1b2c3d4-0000-4000-8000-000000000006",
+        ])
+        .unwrap();
+        match cli.command {
+            StepCommand::Add(cmd) => {
+                let core_type: StepType = cmd.step_type.into();
+                assert_eq!(core_type, StepType::Execute);
+            }
+            _ => panic!("Expected Add command"),
+        }
+    }
+
+    #[test]
+    fn test_step_add_with_step_type_route() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "add",
+            "Router",
+            "--workflow",
+            "a1b2c3d4-0000-4000-8000-000000000006",
+            "--step-type",
+            "route",
+        ])
+        .unwrap();
+        match cli.command {
+            StepCommand::Add(cmd) => {
+                let core_type: StepType = cmd.step_type.into();
+                assert_eq!(core_type, StepType::Route);
+            }
+            _ => panic!("Expected Add command"),
+        }
+    }
+
+    #[test]
+    fn test_step_add_with_step_type_evaluate() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "add",
+            "Checker",
+            "--workflow",
+            "a1b2c3d4-0000-4000-8000-000000000006",
+            "--step-type",
+            "evaluate",
+        ])
+        .unwrap();
+        match cli.command {
+            StepCommand::Add(cmd) => {
+                let core_type: StepType = cmd.step_type.into();
+                assert_eq!(core_type, StepType::Evaluate);
+            }
+            _ => panic!("Expected Add command"),
+        }
+    }
+
+    #[test]
+    fn test_step_add_with_output_schema() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "add",
+            "Evaluator",
+            "--workflow",
+            "a1b2c3d4-0000-4000-8000-000000000006",
+            "--output-schema",
+            r#"{"type":"object","properties":{"score":{"type":"number"}}}"#,
+        ])
+        .unwrap();
+        match cli.command {
+            StepCommand::Add(cmd) => {
+                assert_eq!(
+                    cmd.output_schema,
+                    Some(
+                        r#"{"type":"object","properties":{"score":{"type":"number"}}}"#.to_string()
+                    )
+                );
+            }
+            _ => panic!("Expected Add command"),
+        }
+    }
+
+    #[test]
+    fn test_step_add_with_step_type_and_output_schema() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "add",
+            "Evaluator",
+            "--workflow",
+            "a1b2c3d4-0000-4000-8000-000000000006",
+            "--step-type",
+            "evaluate",
+            "--output-schema",
+            r#"{"type":"object"}"#,
+        ])
+        .unwrap();
+        match cli.command {
+            StepCommand::Add(cmd) => {
+                let core_type: StepType = cmd.step_type.into();
+                assert_eq!(core_type, StepType::Evaluate);
+                assert_eq!(cmd.output_schema, Some(r#"{"type":"object"}"#.to_string()));
+            }
+            _ => panic!("Expected Add command"),
+        }
+    }
+
+    #[test]
+    fn test_step_add_rejects_invalid_step_type() {
+        let result = TestCli::try_parse_from([
+            "test",
+            "add",
+            "Bad",
+            "--workflow",
+            "a1b2c3d4-0000-4000-8000-000000000006",
+            "--step-type",
+            "nonexistent",
+        ]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_step_update_with_step_type() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "update",
+            "a1b2c3d4-0000-4000-8000-00000000000b",
+            "--step-type",
+            "evaluate",
+        ])
+        .unwrap();
+        match cli.command {
+            StepCommand::Update(cmd) => {
+                let core_type: StepType = cmd.step_type.unwrap().into();
+                assert_eq!(core_type, StepType::Evaluate);
+            }
+            _ => panic!("Expected Update command"),
+        }
+    }
+
+    #[test]
+    fn test_step_update_with_output_schema() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "update",
+            "a1b2c3d4-0000-4000-8000-00000000000b",
+            "--output-schema",
+            r#"{"type":"string"}"#,
+        ])
+        .unwrap();
+        match cli.command {
+            StepCommand::Update(cmd) => {
+                assert_eq!(cmd.output_schema, Some(r#"{"type":"string"}"#.to_string()));
+                assert!(!cmd.clear_output_schema);
+            }
+            _ => panic!("Expected Update command"),
+        }
+    }
+
+    #[test]
+    fn test_step_update_with_clear_output_schema() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "update",
+            "a1b2c3d4-0000-4000-8000-00000000000b",
+            "--clear-output-schema",
+        ])
+        .unwrap();
+        match cli.command {
+            StepCommand::Update(cmd) => {
+                assert!(cmd.clear_output_schema);
+                assert!(cmd.output_schema.is_none());
+            }
+            _ => panic!("Expected Update command"),
+        }
+    }
+
+    #[test]
+    fn test_step_update_without_step_type_defaults_to_none() {
+        let cli =
+            TestCli::try_parse_from(["test", "update", "a1b2c3d4-0000-4000-8000-00000000000b"])
+                .unwrap();
+        match cli.command {
+            StepCommand::Update(cmd) => {
+                assert!(cmd.step_type.is_none());
+                assert!(cmd.output_schema.is_none());
+                assert!(!cmd.clear_output_schema);
             }
             _ => panic!("Expected Update command"),
         }

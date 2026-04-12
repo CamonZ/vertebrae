@@ -29,3 +29,41 @@ Feature: Step fields: prompt and agent-config
     Then the command should succeed
     And the step "Review" in the workflow should have prompt "Updated prompt text"
 
+  Scenario: Create a step with --step-type route
+    When I add a step "Router" to the workflow with flag "--step-type" and value "route"
+    Then the command should succeed
+    And the step "Router" in the workflow should have step_type "route"
+
+  Scenario: Create a step with --step-type evaluate and --output-schema
+    When I add a step "Checker" to the workflow with --step-type "evaluate" and --output-schema
+    Then the command should succeed
+    And the step "Checker" in the workflow should have step_type "evaluate"
+    And the step "Checker" in the workflow should have an output_schema
+
+  Scenario: Step type defaults to execute
+    When I add a step "Default" to the workflow
+    Then the command should succeed
+    And the step "Default" in the workflow should have step_type "execute"
+
+  Scenario: Update a step's step_type
+    When I add a step "Worker" to the workflow
+    And I update the step "Worker" in the workflow with flag "--step-type" and value "evaluate"
+    Then the command should succeed
+    And the step "Worker" in the workflow should have step_type "evaluate"
+
+  Scenario: Update a step with --output-schema then --clear-output-schema
+    When I add a step "Evaluator" to the workflow with --step-type "evaluate" and --output-schema
+    And I update the step "Evaluator" in the workflow with flag "--clear-output-schema" and no value
+    Then the command should succeed
+    And the step "Evaluator" in the workflow should not have an output_schema
+
+  Scenario: Creating a route step with invalid output schema fails
+    When I add a route step "BadRoute" to the workflow with an invalid --output-schema
+    Then the command should fail with "routing contract schema"
+
+  Scenario: Step show displays step type and output schema
+    When I add a step "Visible" to the workflow with --step-type "route" and --output-schema
+    And I show the step "Visible"
+    Then the output should contain "Step Type:     route"
+    And the output should contain "Output Schema:"
+
