@@ -164,21 +164,7 @@ async fn test_workflow_list_includes_step_count() {
     let wf_id = create_workflow(&services, "Counted Workflow", None).await;
 
     for name in ["Review", "Deploy"] {
-        let step = Step {
-            id: None,
-            name: name.to_string(),
-            workflow_id: wf_id.clone(),
-            goal: None,
-            prompt: None,
-            agents: vec![],
-            skills: vec![],
-            agent_config: Default::default(),
-            is_final: false,
-            transitions_to: vec![],
-            order: 0,
-            created_at: None,
-            updated_at: None,
-        };
+        let step = Step::new(name, &wf_id);
         services.steps().create_step(&step).await.unwrap();
     }
 

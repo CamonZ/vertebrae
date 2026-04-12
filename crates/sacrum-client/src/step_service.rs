@@ -6,7 +6,7 @@
 use async_trait::async_trait;
 use serde_json::json;
 use vertebrae_core::error::{ServiceError, ServiceResult};
-use vertebrae_core::models::{AgentConfig, Step, StepUpdate};
+use vertebrae_core::models::{AgentConfig, Step, StepType, StepUpdate};
 use vertebrae_core::step_service::StepService;
 
 use crate::api_types::{WorkflowResponse, WorkflowStepResponse};
@@ -62,6 +62,8 @@ impl SacrumStepService {
             agents: response.agents.clone(),
             skills: response.skills.clone(),
             agent_config,
+            step_type: StepType::default(),
+            output_schema: None,
             is_final: response.is_final,
             transitions_to,
             order: response.step_order,
