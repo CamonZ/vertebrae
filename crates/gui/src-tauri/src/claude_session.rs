@@ -18,6 +18,30 @@ use tokio::sync::{mpsc, oneshot, RwLock};
 
 use crate::helpers::find_claude_binary;
 
+/// Build an augmented PATH that prepends commonly needed directories for macOS GUI apps.
+///
+/// macOS GUI applications inherit a minimal PATH (typically just `/usr/bin:/bin:/usr/sbin:/sbin`)
+/// because they don't source shell profiles. This function prepends `~/.cargo/bin`,
+/// `/opt/homebrew/bin`, and `/usr/local/bin` so that tools installed via cargo, Homebrew, or
+/// manually into `/usr/local/bin` are discoverable by subprocesses.
+fn build_augmented_path() -> String {
+    let mut parts: Vec<String> = Vec::new();
+
+    if let Some(home) = dirs::home_dir() {
+        parts.push(home.join(".cargo/bin").to_string_lossy().into_owned());
+    }
+
+    parts.push("/opt/homebrew/bin".to_string());
+    parts.push("/usr/local/bin".to_string());
+
+    let current_path = std::env::var("PATH").unwrap_or_default();
+    if !current_path.is_empty() {
+        parts.push(current_path);
+    }
+
+    parts.join(":")
+}
+
 /// Truncate a string to at most `max_bytes` bytes without splitting a multi-byte UTF-8 character.
 /// Walks backwards from the target offset to find the nearest char boundary.
 fn truncate_utf8(s: &str, max_bytes: usize) -> &str {
@@ -365,6 +389,13 @@ impl ClaudeSessionManager {
                 );
             }
         }
+
+        let augmented_path = build_augmented_path();
+        log::info!(
+            "Setting augmented PATH for Claude subprocess: {}",
+            augmented_path
+        );
+        cmd.env("PATH", &augmented_path);
 
         cmd.stdin(Stdio::piped());
         cmd.stdout(Stdio::piped());
@@ -1812,5 +1843,99 @@ mod tests {
         // Should have processed the one valid line before the error
         assert_eq!(errors.len(), 1);
         assert_eq!(errors[0], "[stderr] first error");
+    }
+
+    // ========================================================================
+    // build_augmented_path tests
+    // ========================================================================
+
+    #[test]
+    fn test_build_augmented_path_contains_cargo_bin() {
+        let path = build_augmented_path();
+        let home = dirs::home_dir().expect("test requires HOME to be set");
+        let cargo_bin = home.join(".cargo").join("bin");
+        let cargo_bin_str = cargo_bin.to_string_lossy();
+
+        assert!(
+            path.contains(&*cargo_bin_str),
+            "PATH should contain {}, got: {}",
+            cargo_bin_str,
+            path
+        );
+    }
+
+    #[test]
+    fn test_build_augmented_path_contains_homebrew_bin() {
+        let path = build_augmented_path();
+        assert!(
+            path.contains("/opt/homebrew/bin"),
+            "PATH should contain /opt/homebrew/bin, got: {}",
+            path
+        );
+    }
+
+    #[test]
+    fn test_build_augmented_path_contains_usr_local_bin() {
+        let path = build_augmented_path();
+        assert!(
+            path.contains("/usr/local/bin"),
+            "PATH should contain /usr/local/bin, got: {}",
+            path
+        );
+    }
+
+    #[test]
+    fn test_build_augmented_path_preserves_existing_path() {
+        // The current process PATH should appear in the augmented result
+        let current = std::env::var("PATH").unwrap_or_default();
+        if !current.is_empty() {
+            let path = build_augmented_path();
+            assert!(
+                path.contains(&current),
+                "Augmented PATH should contain the original PATH '{}', got: {}",
+                current,
+                path
+            );
+        }
+    }
+
+    #[test]
+    fn test_build_augmented_path_cargo_bin_before_existing_path() {
+        let path = build_augmented_path();
+        let home = dirs::home_dir().expect("test requires HOME to be set");
+        let cargo_bin = home
+            .join(".cargo")
+            .join("bin")
+            .to_string_lossy()
+            .to_string();
+
+        let cargo_pos = path.find(&cargo_bin).expect("cargo/bin should be in PATH");
+        let current = std::env::var("PATH").unwrap_or_default();
+        if !current.is_empty() {
+            // Find the start of the original PATH within the augmented one.
+            // The original PATH is appended as the last segment, so find it from the end.
+            let original_pos = path
+                .rfind(&current)
+                .expect("original PATH should be in PATH");
+            assert!(
+                cargo_pos < original_pos,
+                "~/.cargo/bin (pos {}) should appear before the original PATH (pos {})",
+                cargo_pos,
+                original_pos
+            );
+        }
+    }
+
+    #[test]
+    fn test_build_augmented_path_is_colon_separated() {
+        let path = build_augmented_path();
+        let segments: Vec<&str> = path.split(':').collect();
+        // At minimum: ~/.cargo/bin, /opt/homebrew/bin, /usr/local/bin
+        assert!(
+            segments.len() >= 3,
+            "PATH should have at least 3 segments, got {}: {}",
+            segments.len(),
+            path
+        );
     }
 }
