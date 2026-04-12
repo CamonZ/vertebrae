@@ -8,9 +8,9 @@ on:
   workflow_dispatch:
 
 jobs:
-  cli-acceptance:
-    name: CLI Acceptance Tests
-    runs-on: ubuntu-latest
+  acceptance:
+    name: Acceptance Tests
+    runs-on: homelab
     permissions:
       contents: read
       packages: read
@@ -18,6 +18,12 @@ jobs:
     steps:
       - name: Checkout vertebrae
         uses: actions/checkout@v4
+
+      - name: Install Docker Compose plugin
+        run: |
+          mkdir -p ~/.docker/cli-plugins
+          curl -SL https://github.com/docker/compose/releases/latest/download/docker-compose-linux-$(uname -m) -o ~/.docker/cli-plugins/docker-compose
+          chmod +x ~/.docker/cli-plugins/docker-compose
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -28,28 +34,6 @@ jobs:
 
       - name: Run CLI acceptance tests
         run: docker compose run --rm test-runner
-
-      - name: Tear down
-        if: always()
-        run: docker compose down -v
-
-  gui-acceptance:
-    name: GUI Acceptance Tests
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: read
-
-    steps:
-      - name: Checkout vertebrae
-        uses: actions/checkout@v4
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GHCR_TOKEN }}
 
       - name: Run GUI acceptance tests
         run: docker compose run --rm gui-test-runner
