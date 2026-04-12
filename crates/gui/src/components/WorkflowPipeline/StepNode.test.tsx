@@ -37,6 +37,8 @@ function createStep(overrides?: Partial<Step>): Step {
     goal: null,
     prompt: null,
     agent_config: createAgentConfig({ model: "claude-3-sonnet" }),
+    step_type: "execute",
+    output_schema: null,
     is_final: false,
     transitions_to: [],
     order: 0,

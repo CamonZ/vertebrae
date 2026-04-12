@@ -28,6 +28,8 @@ function createStep(overrides?: Partial<Step>): Step {
     order: 0,
     is_final: false,
     transitions_to: [],
+    step_type: "execute",
+    output_schema: null,
     created_at: null,
     updated_at: null,
     agent_config: {

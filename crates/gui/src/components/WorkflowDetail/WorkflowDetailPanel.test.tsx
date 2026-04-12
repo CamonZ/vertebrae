@@ -31,6 +31,8 @@ function createStep(overrides?: Partial<Step>): Step {
     transitions_to: [],
     goal: null,
     prompt: null,
+    step_type: "execute",
+    output_schema: null,
     created_at: null,
     updated_at: null,
     agent_config: {
