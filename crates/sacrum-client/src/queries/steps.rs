@@ -86,6 +86,7 @@ pub const UPDATE_STEP: &str = r#"
         $agent_config: Json,
         $step_type: String,
         $output_schema: Json,
+        $clear_output_schema: Boolean,
         $is_final: Boolean,
         $step_order: Int
     ) {
@@ -99,6 +100,7 @@ pub const UPDATE_STEP: &str = r#"
             agent_config: $agent_config,
             step_type: $step_type,
             output_schema: $output_schema,
+            clear_output_schema: $clear_output_schema,
             is_final: $is_final,
             step_order: $step_order
         ) {
