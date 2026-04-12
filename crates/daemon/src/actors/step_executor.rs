@@ -985,6 +985,75 @@ mod tests {
         );
     }
 
+    #[test]
+    fn build_command_includes_json_schema_flag_when_output_schema_provided() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "summary": { "type": "string" },
+                "passed": { "type": "boolean" }
+            },
+            "required": ["summary", "passed"]
+        });
+
+        let config = StepExecutorConfig {
+            execution_id: "exec-os".to_string(),
+            task_id: "task-os".to_string(),
+            step_config: StepConfig {
+                prompt: "Evaluate this".to_string(),
+                agent_config: AgentConfig::new().with_json_schema(schema.clone()),
+                agents: Vec::new(),
+                skills: Vec::new(),
+            },
+            project_root: PathBuf::from("/tmp"),
+            worktree: None,
+            claude_binary: PathBuf::from("/usr/local/bin/claude"),
+            shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
+            execution_service: test_execution_service(),
+        };
+
+        let cmd = build_claude_command(&config);
+        let args: Vec<String> = cmd
+            .as_std()
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+
+        assert!(
+            args.contains(&"--json-schema".to_string()),
+            "CLI args should contain --json-schema when output_schema is provided"
+        );
+
+        let schema_idx = args
+            .iter()
+            .position(|a| a == "--json-schema")
+            .expect("--json-schema flag should be present");
+        let schema_value: serde_json::Value =
+            serde_json::from_str(&args[schema_idx + 1]).expect("schema arg should be valid JSON");
+        assert_eq!(schema_value["type"], "object");
+        assert_eq!(schema_value["properties"]["summary"]["type"], "string");
+        assert_eq!(schema_value["properties"]["passed"]["type"], "boolean");
+        assert_eq!(
+            schema_value["required"],
+            serde_json::json!(["summary", "passed"])
+        );
+    }
+
+    #[test]
+    fn build_command_no_json_schema_flag_when_output_schema_absent() {
+        let cmd = build_claude_command(&test_config("exec-no-os"));
+        let args: Vec<String> = cmd
+            .as_std()
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+
+        assert!(
+            !args.contains(&"--json-schema".to_string()),
+            "CLI args should NOT contain --json-schema when output_schema is absent"
+        );
+    }
+
     #[tokio::test]
     async fn step_executor_spawn_failure_reports_to_parent() {
         use ractor::Actor;

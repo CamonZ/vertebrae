@@ -179,6 +179,10 @@ pub struct RunStepPayload {
     /// When present, the daemon uses this instead of the project root.
     #[serde(default)]
     pub worktree: Option<String>,
+    /// Optional JSON Schema for structured output.
+    /// When present, overrides `agent_config.json_schema` (step-level contract).
+    #[serde(default)]
+    pub output_schema: Option<serde_json::Value>,
 }
 
 /// Parsed payload for a `cancel_step` channel event from Sacrum.
@@ -218,8 +222,13 @@ pub fn build_step_config_from_payload(payload: &RunStepPayload) -> StepConfig {
         None => "Execute step".to_string(),
     };
 
-    let agent_config: AgentConfig =
+    let mut agent_config: AgentConfig =
         serde_json::from_value(payload.agent_config.clone()).unwrap_or_default();
+
+    // Step-level contract from Sacrum overrides agent_config.
+    if let Some(schema) = payload.output_schema.as_ref().filter(|v| !v.is_null()) {
+        agent_config = agent_config.with_json_schema(schema.clone());
+    }
 
     StepConfig {
         prompt,
@@ -1292,5 +1301,188 @@ mod tests {
         };
         let debug = format!("{:?}", pm);
         assert!(debug.contains("worktree-abc"));
+    }
+
+    // ===== output_schema tests =====
+
+    #[test]
+    fn parse_run_step_payload_deserializes_output_schema() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "summary": { "type": "string" },
+                "score": { "type": "integer" }
+            },
+            "required": ["summary", "score"]
+        });
+
+        let payload = serde_json::json!({
+            "id": "exec-os-1",
+            "task_id": "task-os-1",
+            "prompt": "Evaluate the code",
+            "output_schema": schema
+        });
+
+        let result = parse_run_step_payload(&payload).unwrap();
+        let os = result
+            .output_schema
+            .expect("output_schema should be present");
+        assert_eq!(os["type"], "object");
+        assert_eq!(os["properties"]["summary"]["type"], "string");
+        assert_eq!(os["properties"]["score"]["type"], "integer");
+        assert_eq!(os["required"], serde_json::json!(["summary", "score"]));
+    }
+
+    #[test]
+    fn parse_run_step_payload_output_schema_defaults_to_none() {
+        let absent = parse_run_step_payload(&serde_json::json!({
+            "id": "exec-os-2",
+            "task_id": "task-os-2"
+        }))
+        .unwrap();
+        assert!(
+            absent.output_schema.is_none(),
+            "absent key should default to None"
+        );
+
+        let explicit_null = parse_run_step_payload(&serde_json::json!({
+            "id": "exec-os-3",
+            "task_id": "task-os-3",
+            "output_schema": null
+        }))
+        .unwrap();
+        assert!(
+            explicit_null.output_schema.is_none(),
+            "explicit null should be None"
+        );
+    }
+
+    #[test]
+    fn build_step_config_sets_json_schema_when_output_schema_present() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "result": { "type": "string" }
+            }
+        });
+
+        let payload = parse_run_step_payload(&serde_json::json!({
+            "id": "exec-os-4",
+            "task_id": "task-os-4",
+            "output_schema": schema
+        }))
+        .unwrap();
+
+        let config = build_step_config_from_payload(&payload);
+        let json_schema = config
+            .agent_config
+            .json_schema
+            .expect("json_schema should be set from output_schema");
+        assert_eq!(json_schema["type"], "object");
+        assert_eq!(json_schema["properties"]["result"]["type"], "string");
+    }
+
+    #[test]
+    fn build_step_config_leaves_json_schema_none_when_output_schema_absent() {
+        let payload = parse_run_step_payload(&serde_json::json!({
+            "id": "exec-os-5",
+            "task_id": "task-os-5"
+        }))
+        .unwrap();
+
+        let config = build_step_config_from_payload(&payload);
+        assert!(
+            config.agent_config.json_schema.is_none(),
+            "json_schema should be None when output_schema is absent"
+        );
+    }
+
+    #[test]
+    fn build_step_config_ignores_null_output_schema() {
+        let payload = RunStepPayload {
+            id: "exec-os-null".to_string(),
+            task_id: "task-os-null".to_string(),
+            prompt: None,
+            agent_config: serde_json::json!({}),
+            agents: Vec::new(),
+            skills: Vec::new(),
+            worktree: None,
+            output_schema: Some(serde_json::Value::Null),
+        };
+
+        let config = build_step_config_from_payload(&payload);
+        assert!(
+            config.agent_config.json_schema.is_none(),
+            "Value::Null output_schema should not be merged into agent_config"
+        );
+    }
+
+    #[test]
+    fn build_step_config_output_schema_takes_precedence_over_agent_config_json_schema() {
+        let agent_schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "old_field": { "type": "string" }
+            }
+        });
+        let output_schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "new_field": { "type": "integer" }
+            }
+        });
+
+        let payload = parse_run_step_payload(&serde_json::json!({
+            "id": "exec-os-6",
+            "task_id": "task-os-6",
+            "agent_config": {
+                "json_schema": agent_schema
+            },
+            "output_schema": output_schema
+        }))
+        .unwrap();
+
+        let config = build_step_config_from_payload(&payload);
+        let json_schema = config
+            .agent_config
+            .json_schema
+            .expect("json_schema should be set");
+
+        // output_schema should win over agent_config.json_schema
+        assert!(
+            json_schema["properties"].get("new_field").is_some(),
+            "json_schema should contain the output_schema's new_field"
+        );
+        assert!(
+            json_schema["properties"].get("old_field").is_none(),
+            "json_schema should NOT contain the agent_config's old_field"
+        );
+        assert_eq!(json_schema["properties"]["new_field"]["type"], "integer");
+    }
+
+    #[test]
+    fn build_step_config_preserves_agent_config_json_schema_when_no_output_schema() {
+        let agent_schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "agent_field": { "type": "boolean" }
+            }
+        });
+
+        let payload = parse_run_step_payload(&serde_json::json!({
+            "id": "exec-os-7",
+            "task_id": "task-os-7",
+            "agent_config": {
+                "json_schema": agent_schema
+            }
+        }))
+        .unwrap();
+
+        let config = build_step_config_from_payload(&payload);
+        let json_schema = config
+            .agent_config
+            .json_schema
+            .expect("json_schema from agent_config should be preserved");
+        assert_eq!(json_schema["properties"]["agent_field"]["type"], "boolean");
     }
 }
