@@ -61,6 +61,18 @@ Feature: Step fields: prompt and agent-config
     When I add a route step "BadRoute" to the workflow with an invalid --output-schema
     Then the command should fail with "routing contract schema"
 
+  Scenario: Create a route step with the with-handoff routing contract schema
+    When I add a route step "HandoffRoute" to the workflow with the with-handoff schema
+    Then the command should succeed
+    And the step "HandoffRoute" in the workflow should have step_type "route"
+    And the step "HandoffRoute" in the workflow should have a handoff property in its output_schema
+
+  Scenario: Update a route step to switch to the with-handoff schema
+    When I add a step "SwapRoute" to the workflow with --step-type "route" and --output-schema
+    And I update the route step "SwapRoute" to use the with-handoff schema
+    Then the command should succeed
+    And the step "SwapRoute" in the workflow should have a handoff property in its output_schema
+
   Scenario: Step show displays step type and output schema
     When I add a step "Visible" to the workflow with --step-type "route" and --output-schema
     And I show the step "Visible"
