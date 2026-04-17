@@ -160,7 +160,21 @@ impl StepType {
 
     /// The JSON Schema that route steps must use as their output_schema.
     /// Must match the Sacrum backend's `routing_contract_schema/0`.
+    ///
+    /// The `handoff` property is optional; route steps that do not emit a
+    /// handoff payload may use [`Self::routing_contract_schema_without_handoff`]
+    /// instead. Both shapes are accepted by the Sacrum validator.
     pub fn routing_contract_schema() -> serde_json::Value {
+        let mut schema = Self::routing_contract_schema_without_handoff();
+        schema["properties"]["handoff"] = serde_json::json!({"type": "object"});
+        schema
+    }
+
+    /// The routing contract shape without the optional `handoff` property.
+    /// Kept as a canonical alternative so route steps that do not emit a
+    /// handoff payload still pass validation. Must match the Sacrum backend's
+    /// `routing_contract_schema_without_handoff/0`.
+    pub fn routing_contract_schema_without_handoff() -> serde_json::Value {
         serde_json::json!({
             "type": "object",
             "properties": {
@@ -2088,6 +2102,37 @@ mod tests {
         assert_eq!(StepType::Execute.to_string(), "execute");
         assert_eq!(StepType::Evaluate.to_string(), "evaluate");
         assert_eq!(StepType::Route.to_string(), "route");
+    }
+
+    #[test]
+    fn routing_contract_schema_includes_optional_handoff() {
+        let schema = StepType::routing_contract_schema();
+        let expected = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "transition_to": {"type": "string", "format": "uuid"},
+                "transition_type": {"type": "string", "enum": ["intra_workflow", "inter_workflow"]},
+                "handoff": {"type": "object"}
+            },
+            "required": ["transition_to", "transition_type"],
+            "additionalProperties": false
+        });
+        assert_eq!(schema, expected);
+    }
+
+    #[test]
+    fn routing_contract_schema_without_handoff_matches_previous_shape() {
+        let schema = StepType::routing_contract_schema_without_handoff();
+        let expected = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "transition_to": {"type": "string", "format": "uuid"},
+                "transition_type": {"type": "string", "enum": ["intra_workflow", "inter_workflow"]}
+            },
+            "required": ["transition_to", "transition_type"],
+            "additionalProperties": false
+        });
+        assert_eq!(schema, expected);
     }
 
     #[test]

@@ -1077,6 +1077,12 @@ impl StepService for MockStepService {
         if let Some(transitions) = &updates.transitions_to {
             step.transitions_to = transitions.clone();
         }
+        if let Some(step_type) = &updates.step_type {
+            step.step_type = step_type.clone();
+        }
+        if let Some(schema_update) = &updates.output_schema {
+            step.output_schema = schema_update.clone();
+        }
         Ok(())
     }
     async fn delete_step(&self, id: &str) -> ServiceResult<()> {
