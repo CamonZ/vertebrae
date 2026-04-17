@@ -1765,3 +1765,234 @@ mod step_prompt_and_agent_config_tests {
         assert_eq!(step.order, 2);
     }
 }
+
+// ============================================================================
+// Route step output_schema validation tests
+// ============================================================================
+
+#[cfg(test)]
+mod route_step_schema_tests {
+    use super::*;
+    use vertebrae_core::models::StepType;
+
+    async fn workflow_id_for(services: &vertebrae_core::VertebraeServices) -> String {
+        let workflow_options = CreateWorkflowOptions::new("Default", vec![]);
+        services
+            .workflows()
+            .create_workflow(workflow_options)
+            .await
+            .unwrap()
+    }
+
+    fn route_add_cmd(workflow_id: String, id: &str, schema_json: String) -> StepAddCommand {
+        StepAddCommand {
+            name: "Router".to_string(),
+            workflow: workflow_id,
+            id: Some(id.to_string()),
+            goal: None,
+            agent: vec![],
+            skill: vec![],
+            prompt: None,
+            agent_config: None,
+            model: None,
+            order: 0,
+            r#final: false,
+            transitions_to: vec![],
+            step_type: CliStepType::Route,
+            output_schema: Some(schema_json),
+        }
+    }
+
+    fn route_update_cmd(id: &str, schema_json: String) -> StepUpdateCommand {
+        StepUpdateCommand {
+            id: id.to_string(),
+            name: None,
+            goal: None,
+            agent: vec![],
+            clear_agents: false,
+            skill: vec![],
+            clear_skills: false,
+            prompt: None,
+            agent_config: None,
+            model: None,
+            order: None,
+            r#final: None,
+            transitions_to: vec![],
+            clear_transitions: false,
+            step_type: Some(CliStepType::Route),
+            output_schema: Some(schema_json),
+            clear_output_schema: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_step_add_route_accepts_schema_with_handoff() {
+        let services = mock_services();
+        let workflow_id = workflow_id_for(&services).await;
+
+        let schema = StepType::routing_contract_schema();
+        let cmd = route_add_cmd(workflow_id, "route-with-handoff", schema.to_string());
+
+        let result = cmd.execute(services.steps()).await.unwrap();
+        assert!(result.contains("Created step:"));
+
+        let step = services
+            .steps()
+            .get_step("route-with-handoff")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(step.step_type, StepType::Route);
+        assert_eq!(step.output_schema, Some(schema));
+    }
+
+    #[tokio::test]
+    async fn test_step_add_route_accepts_schema_without_handoff() {
+        let services = mock_services();
+        let workflow_id = workflow_id_for(&services).await;
+
+        let schema = StepType::routing_contract_schema_without_handoff();
+        let cmd = route_add_cmd(workflow_id, "route-without-handoff", schema.to_string());
+
+        let result = cmd.execute(services.steps()).await.unwrap();
+        assert!(result.contains("Created step:"));
+
+        let step = services
+            .steps()
+            .get_step("route-without-handoff")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(step.step_type, StepType::Route);
+        assert_eq!(step.output_schema, Some(schema));
+    }
+
+    #[tokio::test]
+    async fn test_step_add_route_rejects_unrelated_schema() {
+        let services = mock_services();
+        let workflow_id = workflow_id_for(&services).await;
+
+        let bogus_schema = serde_json::json!({
+            "type": "object",
+            "properties": {"score": {"type": "number"}},
+            "required": ["score"],
+            "additionalProperties": false
+        });
+        let cmd = route_add_cmd(workflow_id, "route-bad", bogus_schema.to_string());
+
+        let err = cmd.execute(services.steps()).await.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("routing contract schema"),
+            "Error should mention routing contract schema, got: {}",
+            msg
+        );
+        assert!(
+            msg.contains("handoff"),
+            "Error should surface both variants (mentioning handoff), got: {}",
+            msg
+        );
+
+        // And the step should not have been created.
+        let maybe_step = services.steps().get_step("route-bad").await.unwrap();
+        assert!(
+            maybe_step.is_none(),
+            "Route step with invalid schema must not be persisted"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_step_update_route_accepts_schema_with_handoff() {
+        let services = mock_services();
+        let workflow_id = workflow_id_for(&services).await;
+
+        // Seed with the without-handoff shape.
+        let initial_schema = StepType::routing_contract_schema_without_handoff();
+        route_add_cmd(workflow_id, "route-upd", initial_schema.to_string())
+            .execute(services.steps())
+            .await
+            .unwrap();
+
+        let new_schema = StepType::routing_contract_schema();
+        let update_cmd = route_update_cmd("route-upd", new_schema.to_string());
+
+        let msg = update_cmd.execute(services.steps()).await.unwrap();
+        assert!(msg.contains("Updated step: route-upd"));
+
+        let step = services
+            .steps()
+            .get_step("route-upd")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(step.output_schema, Some(new_schema));
+    }
+
+    #[tokio::test]
+    async fn test_step_update_route_accepts_schema_without_handoff() {
+        let services = mock_services();
+        let workflow_id = workflow_id_for(&services).await;
+
+        // Seed with the with-handoff shape.
+        let initial_schema = StepType::routing_contract_schema();
+        route_add_cmd(workflow_id, "route-upd2", initial_schema.to_string())
+            .execute(services.steps())
+            .await
+            .unwrap();
+
+        let new_schema = StepType::routing_contract_schema_without_handoff();
+        let update_cmd = route_update_cmd("route-upd2", new_schema.to_string());
+
+        let msg = update_cmd.execute(services.steps()).await.unwrap();
+        assert!(msg.contains("Updated step: route-upd2"));
+
+        let step = services
+            .steps()
+            .get_step("route-upd2")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(step.output_schema, Some(new_schema));
+    }
+
+    #[tokio::test]
+    async fn test_step_update_route_rejects_unrelated_schema() {
+        let services = mock_services();
+        let workflow_id = workflow_id_for(&services).await;
+
+        let initial_schema = StepType::routing_contract_schema();
+        route_add_cmd(
+            workflow_id,
+            "route-upd3",
+            initial_schema.clone().to_string(),
+        )
+        .execute(services.steps())
+        .await
+        .unwrap();
+
+        let bogus_schema = serde_json::json!({
+            "type": "object",
+            "properties": {"foo": {"type": "string"}},
+            "required": ["foo"],
+            "additionalProperties": false
+        });
+        let update_cmd = route_update_cmd("route-upd3", bogus_schema.to_string());
+
+        let err = update_cmd.execute(services.steps()).await.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("routing contract schema"),
+            "Error should mention routing contract schema, got: {}",
+            msg
+        );
+
+        // Original schema should remain intact.
+        let step = services
+            .steps()
+            .get_step("route-upd3")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(step.output_schema, Some(initial_schema));
+    }
+}
