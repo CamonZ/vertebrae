@@ -122,6 +122,21 @@ pub struct StepAddCommand {
     pub transitions_to: Vec<String>,
 }
 
+/// Validate that a route step's output_schema matches one of the two accepted
+/// routing contract shapes (with or without the optional `handoff` property).
+fn validate_route_output_schema(schema: &serde_json::Value) -> Result<(), ServiceError> {
+    let with_handoff = StepType::routing_contract_schema();
+    let without_handoff = StepType::routing_contract_schema_without_handoff();
+    if *schema == with_handoff || *schema == without_handoff {
+        return Ok(());
+    }
+    Err(ServiceError::validation_failed(format!(
+        "Route step has invalid output schema. Route steps must use the routing contract schema (with optional handoff):\n{}\n\nor the variant without handoff:\n{}",
+        serde_json::to_string_pretty(&with_handoff).unwrap(),
+        serde_json::to_string_pretty(&without_handoff).unwrap()
+    )))
+}
+
 impl StepAddCommand {
     /// Execute the add step command.
     ///
@@ -172,13 +187,7 @@ impl StepAddCommand {
         if step_type == StepType::Route
             && let Some(ref schema) = output_schema
         {
-            let expected = StepType::routing_contract_schema();
-            if *schema != expected {
-                return Err(ServiceError::validation_failed(format!(
-                    "Route step has invalid output schema. Route steps must use the routing contract schema:\n{}",
-                    serde_json::to_string_pretty(&expected).unwrap()
-                )));
-            }
+            validate_route_output_schema(schema)?;
         }
 
         let mut step = Step::new(&self.name, workflow_id)
@@ -571,13 +580,7 @@ impl StepUpdateCommand {
         if effective_step_type == StepType::Route
             && let Some(Some(schema)) = &updates.output_schema
         {
-            let expected = StepType::routing_contract_schema();
-            if *schema != expected {
-                return Err(ServiceError::validation_failed(format!(
-                    "Route step has invalid output schema. Route steps must use the routing contract schema:\n{}",
-                    serde_json::to_string_pretty(&expected).unwrap()
-                )));
-            }
+            validate_route_output_schema(schema)?;
         }
 
         service
