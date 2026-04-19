@@ -129,6 +129,17 @@ pub const RUN_STEP: &str = r#"
     }
 "#;
 
+/// Cancel a running step execution. Sacrum sets the status to `cancelling`
+/// and broadcasts `cancel_step` to the daemon, which kills the child process.
+/// NOTE: Prepend EXECUTION_FIELDS when sending.
+pub const CANCEL_STEP_EXECUTION: &str = r#"
+    mutation CancelStepExecution($step_execution_id: Uuid4!) {
+        cancel_step_execution(step_execution_id: $step_execution_id) {
+            ...ExecutionFields
+        }
+    }
+"#;
+
 /// Orchestrate a task through its entire workflow via the TaskOrchestrator FSM.
 /// Sacrum schedules the task and drives it through all steps automatically.
 pub const ORCHESTRATE_TASK: &str = r#"

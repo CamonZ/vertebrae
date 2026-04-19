@@ -7,6 +7,9 @@
 #   # GUI acceptance tests (headless Tauri via Xvfb + tauri-driver):
 #   docker compose run --rm gui-test-runner
 #
+#   # Daemon acceptance tests (drives vtb-daemon end-to-end with a mock claude CLI):
+#   docker compose run --rm daemon-test-runner
+#
 #   # Tear down:
 #   docker compose down -v
 
@@ -79,6 +82,27 @@ services:
       - cargo-cache:/cargo
     working_dir: /app
     command: ["/bin/sh", "-c", "cargo build --bin vtb --quiet && cargo test -p acceptance --test acceptance"]
+
+  daemon-test-runner:
+    build:
+      context: docker
+      dockerfile: daemon-test-runner.Dockerfile
+    network_mode: "service:sacrum"
+    depends_on:
+      sacrum:
+        condition: service_healthy
+      seeder:
+        condition: service_completed_successfully
+    environment:
+      VTB_URL: "http://localhost:4000"
+      VTB_TOKEN: "sac_acceptance-test-token-vertebrae"
+      CARGO_HOME: "/cargo"
+    volumes:
+      - .:/app
+      - cargo-cache:/cargo
+      - ./crates/daemon-acceptance/mocks:/mocks
+    working_dir: /app
+    command: ["/app/docker/daemon-test-entrypoint.sh"]
 
   gui-test-runner:
     build:

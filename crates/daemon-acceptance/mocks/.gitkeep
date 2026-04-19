@@ -1,0 +1,9 @@
+# Fixture directory for the daemon-acceptance test suite.
+#
+# Per-scenario stdout/stderr fixture files are written here at test time by
+# `MockResponse::build` and consumed by the mock claude binary at
+# /usr/local/bin/mock-claude (inside the container).
+#
+# Filename convention: <feature>__<scenario_slug>__<step>.{stdout,stderr}.jsonl
+#
+# Contents are ephemeral — checked-in files are only placeholders.
