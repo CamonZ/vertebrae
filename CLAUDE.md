@@ -31,10 +31,10 @@ Prefix every commit message with a ticket reference:
 cargo build --quiet
 
 # Test (excludes acceptance tests — those need Docker)
-cargo test --quiet --workspace --exclude acceptance --exclude gui-acceptance
+cargo test --quiet --workspace --exclude acceptance --exclude gui-acceptance --exclude daemon-acceptance
 
 # Test with coverage threshold (used in pre-commit)
-cargo llvm-cov --quiet --workspace --exclude acceptance --exclude gui-acceptance --fail-under-lines 75
+cargo llvm-cov --quiet --workspace --exclude acceptance --exclude gui-acceptance --exclude daemon-acceptance --fail-under-lines 75
 
 # Lint
 cargo clippy --quiet -- -D warnings

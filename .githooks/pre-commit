@@ -13,10 +13,10 @@ cargo fmt --check
 # Phase 1: Rust checks in parallel (heavy compilation — keep CPU for these)
 echo "==> Running clippy and coverage in parallel..."
 
-cargo clippy --quiet --workspace --exclude acceptance --exclude gui-acceptance -- -D warnings &
+cargo clippy --quiet --workspace --exclude acceptance --exclude gui-acceptance --exclude daemon-acceptance -- -D warnings &
 CLIPPY_PID=$!
 
-cargo llvm-cov --quiet --workspace --exclude acceptance --exclude gui-acceptance --fail-under-lines 75 &
+cargo llvm-cov --quiet --workspace --exclude acceptance --exclude gui-acceptance --exclude daemon-acceptance --fail-under-lines 75 &
 LLVM_COV_PID=$!
 
 CLIPPY_EXIT=0
