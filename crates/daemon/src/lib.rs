@@ -3,6 +3,7 @@ pub mod config;
 pub mod helpers;
 pub mod output_validator;
 pub mod phoenix;
+pub mod settings_synthesis;
 pub mod stream_json;
 
 pub use actors::project_supervisor::{
