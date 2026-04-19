@@ -23,6 +23,7 @@ use vertebrae_core::models::{AgentConfig, PermissionMode, SessionLog};
 
 use crate::actors::project_supervisor::ProjectMessage;
 use crate::output_validator::{CompiledSchema, SchemaError, SchemaValidationError};
+use crate::settings_synthesis::SyntheticSettings;
 
 /// Default model used when agent_config does not specify one.
 pub const DEFAULT_MODEL: &str = "claude-sonnet-4-20250514";
@@ -124,10 +125,19 @@ impl std::fmt::Debug for StepExecutorMessage {
     }
 }
 
-pub fn build_claude_command(config: &StepExecutorConfig) -> Command {
+/// Build the `claude` invocation. When `settings_path` is `Some`, emits
+/// `--settings <path>` before `agent_config` flags so CLI overrides win.
+pub fn build_claude_command_with_settings(
+    config: &StepExecutorConfig,
+    settings_path: Option<&Path>,
+) -> Command {
     let mut cmd = Command::new(&config.claude_binary);
 
     let step = &config.step_config;
+
+    if let Some(path) = settings_path {
+        cmd.arg("--settings").arg(path);
+    }
 
     // Ensure a default model when agent_config doesn't specify one.
     let mut agent_config = step.agent_config.clone();
@@ -190,6 +200,8 @@ pub struct StepExecutorState {
     /// Written by the streaming task, read by the actor on process exit.
     stream_result: std::sync::Arc<std::sync::Mutex<Option<crate::stream_json::ParsedStreamResult>>>,
     compiled_schema: Option<Result<CompiledSchema, SchemaError>>,
+    /// Owns the temp dir for this execution's `--settings` bundle; dropped on stop.
+    settings_guard: Option<SyntheticSettings>,
 }
 
 pub struct StepExecutor;
@@ -236,6 +248,7 @@ impl Actor for StepExecutor {
             stream_handle: None,
             stream_result: std::sync::Arc::new(std::sync::Mutex::new(None)),
             compiled_schema,
+            settings_guard: None,
         })
     }
 
@@ -278,6 +291,10 @@ impl Actor for StepExecutor {
             handle.abort();
         }
 
+        // Drop the settings guard only after killing the child, so the hook
+        // script outlives claude.
+        state.settings_guard.take();
+
         Ok(())
     }
 }
@@ -315,7 +332,32 @@ impl StepExecutor {
             state.config.working_dir().display()
         );
 
-        let mut cmd = build_claude_command(&state.config);
+        let settings_guard = match SyntheticSettings::create(&state.execution_id) {
+            Ok(guard) => Some(guard),
+            Err(err) => {
+                tracing::error!(
+                    "Failed to synthesize daemon settings for execution {}: {}",
+                    state.execution_id,
+                    err
+                );
+                let _ = state.parent.cast(ProjectMessage::StepFinished {
+                    execution_id: state.execution_id.clone(),
+                    task_id: state.task_id.clone(),
+                    result: StepResult::failed(
+                        None,
+                        format!("Failed to synthesize daemon settings: {err}"),
+                    ),
+                });
+                myself.stop(Some("settings synthesis failed".to_string()));
+                return Ok(());
+            }
+        };
+
+        let settings_path = settings_guard
+            .as_ref()
+            .map(|g| g.settings_path().to_path_buf());
+        let mut cmd = build_claude_command_with_settings(&state.config, settings_path.as_deref());
+        state.settings_guard = settings_guard;
 
         match cmd.spawn() {
             Ok(mut child) => {
@@ -747,7 +789,7 @@ mod tests {
             execution_service: test_execution_service(),
         };
 
-        let cmd = build_claude_command(&config);
+        let cmd = build_claude_command_with_settings(&config, None);
         let program = cmd.as_std().get_program();
         assert_eq!(program, "/usr/local/bin/claude");
     }
@@ -765,7 +807,7 @@ mod tests {
             execution_service: test_execution_service(),
         };
 
-        let cmd = build_claude_command(&config);
+        let cmd = build_claude_command_with_settings(&config, None);
         let args: Vec<String> = cmd
             .as_std()
             .get_args()
@@ -805,7 +847,7 @@ mod tests {
             execution_service: test_execution_service(),
         };
 
-        let cmd = build_claude_command(&config);
+        let cmd = build_claude_command_with_settings(&config, None);
         let args: Vec<String> = cmd
             .as_std()
             .get_args()
@@ -834,7 +876,7 @@ mod tests {
             execution_service: test_execution_service(),
         };
 
-        let cmd = build_claude_command(&config);
+        let cmd = build_claude_command_with_settings(&config, None);
         let args: Vec<String> = cmd
             .as_std()
             .get_args()
@@ -870,7 +912,7 @@ mod tests {
             execution_service: test_execution_service(),
         };
 
-        let cmd = build_claude_command(&config);
+        let cmd = build_claude_command_with_settings(&config, None);
         let args: Vec<String> = cmd
             .as_std()
             .get_args()
@@ -901,7 +943,7 @@ mod tests {
             execution_service: test_execution_service(),
         };
 
-        let cmd = build_claude_command(&config);
+        let cmd = build_claude_command_with_settings(&config, None);
         let args: Vec<String> = cmd
             .as_std()
             .get_args()
@@ -939,7 +981,7 @@ mod tests {
             execution_service: test_execution_service(),
         };
 
-        let cmd = build_claude_command(&config);
+        let cmd = build_claude_command_with_settings(&config, None);
         let args: Vec<String> = cmd
             .as_std()
             .get_args()
@@ -973,7 +1015,7 @@ mod tests {
             execution_service: test_execution_service(),
         };
 
-        let cmd = build_claude_command(&config);
+        let cmd = build_claude_command_with_settings(&config, None);
         let args: Vec<String> = cmd
             .as_std()
             .get_args()
@@ -997,7 +1039,7 @@ mod tests {
             execution_service: test_execution_service(),
         };
 
-        let cmd = build_claude_command(&config);
+        let cmd = build_claude_command_with_settings(&config, None);
         let cwd = cmd.as_std().get_current_dir().unwrap();
         assert_eq!(cwd, PathBuf::from("/home/user/code"));
     }
@@ -1020,7 +1062,7 @@ mod tests {
             execution_service: test_execution_service(),
         };
 
-        let cmd = build_claude_command(&config);
+        let cmd = build_claude_command_with_settings(&config, None);
         let args: Vec<String> = cmd
             .as_std()
             .get_args()
@@ -1059,7 +1101,7 @@ mod tests {
             execution_service: test_execution_service(),
         };
 
-        let cmd = build_claude_command(&config);
+        let cmd = build_claude_command_with_settings(&config, None);
         let args: Vec<String> = cmd
             .as_std()
             .get_args()
@@ -1088,7 +1130,7 @@ mod tests {
 
     #[test]
     fn build_command_no_json_schema_flag_when_output_schema_absent() {
-        let cmd = build_claude_command(&test_config("exec-no-os"));
+        let cmd = build_claude_command_with_settings(&test_config("exec-no-os"), None);
         let args: Vec<String> = cmd
             .as_std()
             .get_args()
@@ -1487,7 +1529,7 @@ mod tests {
             execution_service: test_execution_service(),
         };
 
-        let cmd = build_claude_command(&config);
+        let cmd = build_claude_command_with_settings(&config, None);
         let cwd = cmd.as_std().get_current_dir().unwrap();
         assert_eq!(
             cwd,
@@ -1509,7 +1551,7 @@ mod tests {
             execution_service: test_execution_service(),
         };
 
-        let cmd = build_claude_command(&config);
+        let cmd = build_claude_command_with_settings(&config, None);
         let cwd = cmd.as_std().get_current_dir().unwrap();
         assert_eq!(
             cwd,
@@ -1599,6 +1641,7 @@ mod tests {
             stream_handle: None,
             stream_result: std::sync::Arc::new(std::sync::Mutex::new(None)),
             compiled_schema,
+            settings_guard: None,
         }
     }
 
@@ -1723,5 +1766,120 @@ mod tests {
         let executor = StepExecutor;
         let output = "Some preamble about the analysis.\n\n```json\n{\"result\":\"yay\"}\n```\n\nTrailing thoughts.";
         assert_eq!(executor.validate_output(&state, Some(output)), Ok(()));
+    }
+
+    // ===== Synthesized --settings injection tests =====
+
+    fn collect_args(cmd: &Command) -> Vec<String> {
+        cmd.as_std()
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn build_command_with_settings_injects_flag_before_agent_config() {
+        let config = test_config("exec-settings");
+        let settings = PathBuf::from("/tmp/vtb-daemon-fake/settings.json");
+        let cmd = build_claude_command_with_settings(&config, Some(&settings));
+        let args = collect_args(&cmd);
+
+        let settings_idx = args
+            .iter()
+            .position(|a| a == "--settings")
+            .expect("--settings flag must be present when path is provided");
+        assert_eq!(
+            args[settings_idx + 1],
+            settings.to_string_lossy(),
+            "--settings must be followed by the synthesized path"
+        );
+
+        let model_idx = args
+            .iter()
+            .position(|a| a == "--model")
+            .expect("agent_config should still emit --model");
+        assert!(
+            settings_idx < model_idx,
+            "--settings must appear before agent_config flags so later flags can override JSON values"
+        );
+
+        // agent_config still wins on permission mode (bypassPermissions auto-injected).
+        assert!(args.contains(&"--permission-mode".to_string()));
+        assert!(args.contains(&"bypassPermissions".to_string()));
+    }
+
+    #[test]
+    fn build_command_without_settings_does_not_emit_flag() {
+        let config = test_config("exec-no-settings");
+        let cmd = build_claude_command_with_settings(&config, None);
+        let args = collect_args(&cmd);
+        assert!(
+            !args.contains(&"--settings".to_string()),
+            "--settings must not be emitted when no path is supplied"
+        );
+    }
+
+    #[test]
+    fn build_command_with_settings_preserves_explicit_permission_mode() {
+        // Composition: step sets permission_mode=plan, daemon still ships
+        // --settings for the deny hook. Both must appear.
+        let config = StepExecutorConfig {
+            execution_id: "exec-compose".to_string(),
+            task_id: "task-compose".to_string(),
+            step_config: StepConfig {
+                prompt: "test".to_string(),
+                agent_config: AgentConfig::new().with_permission_mode(PermissionMode::Plan),
+                agents: Vec::new(),
+                skills: Vec::new(),
+            },
+            project_root: PathBuf::from("/tmp"),
+            worktree: None,
+            claude_binary: PathBuf::from("/usr/local/bin/claude"),
+            shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
+            execution_service: test_execution_service(),
+        };
+        let settings = PathBuf::from("/tmp/vtb-daemon-compose/settings.json");
+        let cmd = build_claude_command_with_settings(&config, Some(&settings));
+        let args = collect_args(&cmd);
+
+        // Settings flag present.
+        assert!(args.contains(&"--settings".to_string()));
+        assert!(args.contains(&settings.to_string_lossy().to_string()));
+
+        // Explicit permission_mode=plan is NOT overridden by default bypass injection.
+        assert!(args.contains(&"plan".to_string()));
+        assert!(
+            !args.contains(&"bypassPermissions".to_string()),
+            "explicit permission_mode=plan must not be replaced with bypassPermissions"
+        );
+    }
+
+    #[test]
+    fn build_command_with_settings_preserves_disallowed_tools_from_agent_config() {
+        // Composition: deny hook + per-step disallowed_tools. Both must reach
+        // the CLI independently.
+        let config = StepExecutorConfig {
+            execution_id: "exec-deny".to_string(),
+            task_id: "task-deny".to_string(),
+            step_config: StepConfig {
+                prompt: "test".to_string(),
+                agent_config: AgentConfig::new()
+                    .with_disallowed_tools(vec!["Bash(rm -rf *)".to_string()]),
+                agents: Vec::new(),
+                skills: Vec::new(),
+            },
+            project_root: PathBuf::from("/tmp"),
+            worktree: None,
+            claude_binary: PathBuf::from("/usr/local/bin/claude"),
+            shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
+            execution_service: test_execution_service(),
+        };
+        let settings = PathBuf::from("/tmp/vtb-daemon-deny/settings.json");
+        let cmd = build_claude_command_with_settings(&config, Some(&settings));
+        let args = collect_args(&cmd);
+
+        assert!(args.contains(&"--settings".to_string()));
+        assert!(args.contains(&"--disallowed-tools".to_string()));
+        assert!(args.contains(&"Bash(rm -rf *)".to_string()));
     }
 }
