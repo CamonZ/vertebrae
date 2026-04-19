@@ -33,7 +33,7 @@ jobs:
         run: cargo fmt --check
 
       - name: Run clippy
-        run: cargo clippy --workspace --exclude acceptance --exclude gui-acceptance -- -D warnings
+        run: cargo clippy --workspace --exclude acceptance --exclude gui-acceptance --exclude daemon-acceptance -- -D warnings
 
       - name: Run tests with coverage
-        run: cargo llvm-cov --workspace --exclude gui --exclude acceptance --exclude gui-acceptance --fail-under-lines 75
+        run: cargo llvm-cov --workspace --exclude gui --exclude acceptance --exclude gui-acceptance --exclude daemon-acceptance --fail-under-lines 75

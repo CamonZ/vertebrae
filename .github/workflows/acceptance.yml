@@ -38,6 +38,9 @@ jobs:
       - name: Run GUI acceptance tests
         run: docker compose run --rm gui-test-runner
 
+      - name: Run daemon acceptance tests
+        run: docker compose run --rm daemon-test-runner
+
       - name: Tear down
         if: always()
         run: docker compose down -v
