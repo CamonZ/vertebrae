@@ -22,6 +22,7 @@ use vertebrae_core::execution_service::ExecutionService;
 use vertebrae_core::models::{AgentConfig, PermissionMode, SessionLog};
 
 use crate::actors::project_supervisor::ProjectMessage;
+use crate::output_validator::{CompiledSchema, SchemaError, SchemaValidationError};
 
 /// Default model used when agent_config does not specify one.
 pub const DEFAULT_MODEL: &str = "claude-sonnet-4-20250514";
@@ -47,7 +48,29 @@ pub enum StepResult {
     Failed {
         exit_code: Option<i32>,
         error: String,
+        schema_errors: Option<Vec<SchemaValidationError>>,
     },
+}
+
+impl StepResult {
+    pub(crate) fn failed(exit_code: Option<i32>, error: impl Into<String>) -> Self {
+        Self::Failed {
+            exit_code,
+            error: error.into(),
+            schema_errors: None,
+        }
+    }
+
+    pub(crate) fn failed_schema(
+        error: impl Into<String>,
+        schema_errors: Vec<SchemaValidationError>,
+    ) -> Self {
+        Self::Failed {
+            exit_code: None,
+            error: error.into(),
+            schema_errors: Some(schema_errors),
+        }
+    }
 }
 
 /// Configuration for spawning a StepExecutor actor.
@@ -166,6 +189,7 @@ pub struct StepExecutorState {
     /// Shared slot for the parsed stream-json result (metrics + result text).
     /// Written by the streaming task, read by the actor on process exit.
     stream_result: std::sync::Arc<std::sync::Mutex<Option<crate::stream_json::ParsedStreamResult>>>,
+    compiled_schema: Option<Result<CompiledSchema, SchemaError>>,
 }
 
 pub struct StepExecutor;
@@ -188,6 +212,21 @@ impl Actor for StepExecutor {
             config.task_id
         );
 
+        let compiled_schema = config
+            .step_config
+            .agent_config
+            .json_schema
+            .as_ref()
+            .map(CompiledSchema::compile);
+
+        if let Some(Err(ref err)) = compiled_schema {
+            tracing::error!(
+                "Failed to compile output_schema for execution {}: {}",
+                config.execution_id,
+                err
+            );
+        }
+
         Ok(StepExecutorState {
             execution_id: config.execution_id.clone(),
             task_id: config.task_id.clone(),
@@ -196,6 +235,7 @@ impl Actor for StepExecutor {
             child_process: None,
             stream_handle: None,
             stream_result: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            compiled_schema,
         })
     }
 
@@ -243,6 +283,18 @@ impl Actor for StepExecutor {
 }
 
 impl StepExecutor {
+    fn validate_output(
+        &self,
+        state: &StepExecutorState,
+        output: Option<&str>,
+    ) -> Result<(), SchemaError> {
+        match &state.compiled_schema {
+            None => Ok(()),
+            Some(Err(compile_err)) => Err(compile_err.clone()),
+            Some(Ok(schema)) => schema.validate_output(output),
+        }
+    }
+
     async fn handle_execute(
         &self,
         myself: ActorRef<StepExecutorMessage>,
@@ -336,10 +388,7 @@ impl StepExecutor {
                 let _ = state.parent.cast(ProjectMessage::StepFinished {
                     execution_id: state.execution_id.clone(),
                     task_id: state.task_id.clone(),
-                    result: StepResult::Failed {
-                        exit_code: None,
-                        error: format!("Failed to spawn process: {e}"),
-                    },
+                    result: StepResult::failed(None, format!("Failed to spawn process: {e}")),
                 });
 
                 myself.stop(Some("spawn failed".to_string()));
@@ -368,10 +417,7 @@ impl StepExecutor {
         let _ = state.parent.cast(ProjectMessage::StepFinished {
             execution_id: state.execution_id.clone(),
             task_id: state.task_id.clone(),
-            result: StepResult::Failed {
-                exit_code: None,
-                error: "Cancelled".to_string(),
-            },
+            result: StepResult::failed(None, "Cancelled"),
         });
 
         myself.stop(Some("cancelled".to_string()));
@@ -406,10 +452,26 @@ impl StepExecutor {
                             metrics,
                             result_text.is_some(),
                         );
-                        StepResult::Completed {
-                            exit_code: code,
-                            metrics,
-                            output: result_text,
+                        match self.validate_output(state, result_text.as_deref()) {
+                            Ok(()) => StepResult::Completed {
+                                exit_code: code,
+                                metrics,
+                                output: result_text,
+                            },
+                            Err(err) => {
+                                tracing::warn!(
+                                    "Output-schema validation failed for execution {}: {}",
+                                    state.execution_id,
+                                    err
+                                );
+                                let summary = err.summary();
+                                match err {
+                                    SchemaError::SchemaViolation(errors) => {
+                                        StepResult::failed_schema(summary, errors)
+                                    }
+                                    _ => StepResult::failed(None, summary),
+                                }
+                            }
                         }
                     } else {
                         tracing::warn!(
@@ -417,10 +479,7 @@ impl StepExecutor {
                             state.execution_id,
                             code
                         );
-                        StepResult::Failed {
-                            exit_code: Some(code),
-                            error: format!("Process exited with code {code}"),
-                        }
+                        StepResult::failed(Some(code), format!("Process exited with code {code}"))
                     }
                 }
                 Err(e) => {
@@ -429,10 +488,7 @@ impl StepExecutor {
                         state.execution_id,
                         e
                     );
-                    StepResult::Failed {
-                        exit_code: None,
-                        error: e.to_string(),
-                    }
+                    StepResult::failed(None, e.to_string())
                 }
             }
         } else {
@@ -440,10 +496,7 @@ impl StepExecutor {
                 "ProcessExited received but no child process for execution {}",
                 state.execution_id
             );
-            StepResult::Failed {
-                exit_code: None,
-                error: "No child process".to_string(),
-            }
+            StepResult::failed(None, "No child process")
         };
 
         let _ = state.parent.cast(ProjectMessage::StepFinished {
@@ -628,10 +681,7 @@ mod tests {
 
     #[test]
     fn step_result_failed_debug() {
-        let result = StepResult::Failed {
-            exit_code: Some(1),
-            error: "something went wrong".to_string(),
-        };
+        let result = StepResult::failed(Some(1), "something went wrong");
         let debug = format!("{:?}", result);
         assert!(debug.contains("Failed"));
         assert!(debug.contains("something went wrong"));
@@ -639,10 +689,7 @@ mod tests {
 
     #[test]
     fn step_result_failed_no_exit_code_debug() {
-        let result = StepResult::Failed {
-            exit_code: None,
-            error: "spawn error".to_string(),
-        };
+        let result = StepResult::failed(None, "spawn error");
         let debug = format!("{:?}", result);
         assert!(debug.contains("None"));
         assert!(debug.contains("spawn error"));
@@ -1488,5 +1535,193 @@ mod tests {
             debug.contains("project-wt-abc"),
             "Debug output should include the worktree path"
         );
+    }
+
+    // ===== Integration tests for schema-validation plumbing =====
+
+    async fn spawn_dummy_parent() -> ActorRef<ProjectMessage> {
+        struct DummyParent;
+        impl Actor for DummyParent {
+            type Msg = ProjectMessage;
+            type State = ();
+            type Arguments = ();
+            async fn pre_start(
+                &self,
+                _myself: ActorRef<Self::Msg>,
+                _args: Self::Arguments,
+            ) -> Result<Self::State, ActorProcessingErr> {
+                Ok(())
+            }
+            async fn handle(
+                &self,
+                _myself: ActorRef<Self::Msg>,
+                _message: Self::Msg,
+                _state: &mut Self::State,
+            ) -> Result<(), ActorProcessingErr> {
+                Ok(())
+            }
+        }
+        let (parent_ref, _handle) = Actor::spawn(None, DummyParent, ())
+            .await
+            .expect("dummy parent spawn");
+        parent_ref
+    }
+
+    async fn build_state(agent_config: AgentConfig) -> StepExecutorState {
+        let parent = spawn_dummy_parent().await;
+        let config = StepExecutorConfig {
+            execution_id: "exec-validate".to_string(),
+            task_id: "task-validate".to_string(),
+            step_config: StepConfig {
+                prompt: "test".to_string(),
+                agent_config,
+                agents: Vec::new(),
+                skills: Vec::new(),
+            },
+            project_root: PathBuf::from("/tmp"),
+            worktree: None,
+            claude_binary: PathBuf::from("/usr/local/bin/claude"),
+            shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
+            execution_service: test_execution_service(),
+        };
+        let compiled_schema = config
+            .step_config
+            .agent_config
+            .json_schema
+            .as_ref()
+            .map(crate::output_validator::CompiledSchema::compile);
+        StepExecutorState {
+            execution_id: config.execution_id.clone(),
+            task_id: config.task_id.clone(),
+            config,
+            parent,
+            child_process: None,
+            stream_handle: None,
+            stream_result: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            compiled_schema,
+        }
+    }
+
+    #[tokio::test]
+    async fn validate_output_skipped_when_no_schema_declared() {
+        let state = build_state(AgentConfig::default()).await;
+        assert!(state.compiled_schema.is_none());
+        let executor = StepExecutor;
+        assert_eq!(executor.validate_output(&state, None), Ok(()));
+        assert_eq!(executor.validate_output(&state, Some("not json")), Ok(()));
+        assert_eq!(
+            executor.validate_output(&state, Some("```json\n{\"x\":1}\n```")),
+            Ok(())
+        );
+    }
+
+    #[tokio::test]
+    async fn validate_output_accepts_valid_fenced_json_matching_schema() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {"summary": {"type": "string"}},
+            "required": ["summary"]
+        });
+        let state = build_state(AgentConfig::new().with_json_schema(schema)).await;
+        assert!(
+            matches!(state.compiled_schema, Some(Ok(_))),
+            "schema should have compiled"
+        );
+        let executor = StepExecutor;
+        let output = "Here:\n```json\n{\"summary\":\"all good\"}\n```";
+        assert_eq!(executor.validate_output(&state, Some(output)), Ok(()));
+    }
+
+    #[tokio::test]
+    async fn validate_output_rejects_violating_output_with_structured_errors() {
+        use crate::output_validator::SchemaError;
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {"summary": {"type": "string"}},
+            "required": ["summary"]
+        });
+        let state = build_state(AgentConfig::new().with_json_schema(schema)).await;
+        let executor = StepExecutor;
+        let output = "```json\n{\"summary\":42}\n```";
+        match executor.validate_output(&state, Some(output)) {
+            Err(SchemaError::SchemaViolation(errors)) => {
+                assert!(!errors.is_empty());
+                assert!(
+                    errors.iter().any(|e| e.instance_path.contains("summary")),
+                    "expected path to mention summary, got {errors:?}"
+                );
+            }
+            other => panic!("expected SchemaViolation, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn validate_output_rejects_missing_output_when_schema_declared() {
+        use crate::output_validator::SchemaError;
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {"x": {"type": "integer"}},
+            "required": ["x"]
+        });
+        let state = build_state(AgentConfig::new().with_json_schema(schema)).await;
+        let executor = StepExecutor;
+        assert_eq!(
+            executor.validate_output(&state, None),
+            Err(SchemaError::MissingOutput)
+        );
+        assert_eq!(
+            executor.validate_output(&state, Some("")),
+            Err(SchemaError::MissingOutput)
+        );
+        assert_eq!(
+            executor.validate_output(&state, Some("no fence here at all")),
+            Err(SchemaError::MissingOutput)
+        );
+    }
+
+    #[tokio::test]
+    async fn validate_output_rejects_invalid_json_inside_fence() {
+        use crate::output_validator::SchemaError;
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {"x": {"type": "integer"}}
+        });
+        let state = build_state(AgentConfig::new().with_json_schema(schema)).await;
+        let executor = StepExecutor;
+        let output = "```json\n{not json}\n```";
+        match executor.validate_output(&state, Some(output)) {
+            Err(SchemaError::InvalidJson(msg)) => assert!(!msg.is_empty()),
+            other => panic!("expected InvalidJson, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn validate_output_surfaces_malformed_schema_as_compile_error() {
+        use crate::output_validator::SchemaError;
+        // `type` must be a string or array of strings.
+        let bad_schema = serde_json::json!({"type": {"nested": "wrong"}});
+        let state = build_state(AgentConfig::new().with_json_schema(bad_schema)).await;
+        assert!(
+            matches!(state.compiled_schema, Some(Err(_))),
+            "malformed schema should be recorded as compile error"
+        );
+        let executor = StepExecutor;
+        match executor.validate_output(&state, Some("```json\n{}\n```")) {
+            Err(SchemaError::SchemaCompile(msg)) => assert!(!msg.is_empty()),
+            other => panic!("expected SchemaCompile, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn validate_output_accepts_prose_on_both_sides_of_fence() {
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {"result": {"type": "string"}},
+            "required": ["result"]
+        });
+        let state = build_state(AgentConfig::new().with_json_schema(schema)).await;
+        let executor = StepExecutor;
+        let output = "Some preamble about the analysis.\n\n```json\n{\"result\":\"yay\"}\n```\n\nTrailing thoughts.";
+        assert_eq!(executor.validate_output(&state, Some(output)), Ok(()));
     }
 }
