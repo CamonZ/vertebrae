@@ -18,7 +18,26 @@ use vertebrae_core::models::{AgentConfig, ExecutionStatus};
 use crate::actors::step_executor::{
     StepConfig, StepExecutor, StepExecutorConfig, StepExecutorMessage, StepResult,
 };
+use crate::output_validator::SchemaValidationError;
 use crate::phoenix::PhoenixMessage;
+
+pub(crate) fn build_failure_output_payload(
+    error: &str,
+    schema_errors: Option<&[SchemaValidationError]>,
+) -> String {
+    match schema_errors {
+        Some(errors) => {
+            let payload = serde_json::json!({
+                "kind": "schema_validation_failure",
+                "error": error,
+                "schema_errors": errors,
+            });
+            serde_json::to_string(&payload)
+                .expect("failure payload is composed of serializable primitives")
+        }
+        None => error.to_string(),
+    }
+}
 
 /// Configuration needed to start a ProjectSupervisor.
 pub struct ProjectConfig {
@@ -684,15 +703,22 @@ impl ProjectSupervisor {
                     );
                 }
             }
-            StepResult::Failed { exit_code, error } => {
+            StepResult::Failed {
+                exit_code,
+                error,
+                schema_errors,
+            } => {
                 tracing::warn!(
-                    "[project:{}] Step failed: execution_id={}, task_id={}, exit_code={:?}, error={}",
+                    "[project:{}] Step failed: execution_id={}, task_id={}, exit_code={:?}, error={}, schema_errors={}",
                     state.project_id,
                     execution_id,
                     task_id,
                     exit_code,
-                    error
+                    error,
+                    schema_errors.as_ref().map(|e| e.len()).unwrap_or(0),
                 );
+
+                let output_payload = build_failure_output_payload(error, schema_errors.as_deref());
 
                 // Report failed status to Sacrum via updateStepExecution.
                 if let Err(e) = state
@@ -701,7 +727,7 @@ impl ProjectSupervisor {
                     .update_execution_status(
                         execution_id,
                         UpdateExecutionStatusParams::new(ExecutionStatus::Failed)
-                            .with_output(error.clone()),
+                            .with_output(output_payload),
                     )
                     .await
                 {
@@ -984,10 +1010,7 @@ mod tests {
         let pm = ProjectMessage::StepFinished {
             execution_id: "exec-456".to_string(),
             task_id: "task-def".to_string(),
-            result: StepResult::Failed {
-                exit_code: Some(1),
-                error: "process crashed".to_string(),
-            },
+            result: StepResult::failed(Some(1), "process crashed"),
         };
         let debug = format!("{:?}", pm);
         assert!(debug.contains("StepFinished"));
@@ -1484,5 +1507,119 @@ mod tests {
             .json_schema
             .expect("json_schema from agent_config should be preserved");
         assert_eq!(json_schema["properties"]["agent_field"]["type"], "boolean");
+    }
+
+    // ===== build_failure_output_payload tests =====
+
+    #[test]
+    fn failure_payload_without_schema_errors_is_plain_string() {
+        let payload = build_failure_output_payload("process exited with code 2", None);
+        assert_eq!(payload, "process exited with code 2");
+    }
+
+    #[test]
+    fn failure_payload_with_schema_errors_is_structured_json() {
+        let errors = vec![
+            SchemaValidationError {
+                instance_path: "/summary".to_string(),
+                schema_path: "/properties/summary/type".to_string(),
+                message: "42 is not of type \"string\"".to_string(),
+            },
+            SchemaValidationError {
+                instance_path: "/passed".to_string(),
+                schema_path: "/properties/passed/type".to_string(),
+                message: "\"yes\" is not of type \"boolean\"".to_string(),
+            },
+        ];
+        let payload = build_failure_output_payload(
+            "step output violated output_schema (2 error(s))",
+            Some(&errors),
+        );
+
+        let parsed: serde_json::Value =
+            serde_json::from_str(&payload).expect("payload must be valid JSON");
+        assert_eq!(parsed["kind"], "schema_validation_failure");
+        assert_eq!(
+            parsed["error"],
+            "step output violated output_schema (2 error(s))"
+        );
+        let errs = parsed["schema_errors"]
+            .as_array()
+            .expect("schema_errors should be an array");
+        assert_eq!(errs.len(), 2);
+        assert_eq!(errs[0]["instance_path"], "/summary");
+        assert_eq!(errs[0]["schema_path"], "/properties/summary/type");
+        assert_eq!(errs[0]["message"], "42 is not of type \"string\"");
+        assert_eq!(errs[1]["instance_path"], "/passed");
+    }
+
+    #[test]
+    fn failure_payload_with_empty_schema_errors_still_structured() {
+        // An empty slice still signals a schema-validation failure, so we keep
+        // the structured wrapper rather than degrading to a plain string.
+        let payload = build_failure_output_payload("some validation error", Some(&[]));
+        let parsed: serde_json::Value =
+            serde_json::from_str(&payload).expect("payload must be valid JSON");
+        assert_eq!(parsed["kind"], "schema_validation_failure");
+        assert_eq!(parsed["schema_errors"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn end_to_end_schema_violation_preserves_structured_detail() {
+        use crate::output_validator::{CompiledSchema, SchemaError};
+
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "summary": {"type": "string"},
+                "passed": {"type": "boolean"}
+            },
+            "required": ["summary", "passed"]
+        });
+        let compiled = CompiledSchema::compile(&schema).expect("schema must compile");
+
+        let result_text =
+            "Here is my answer:\n\n```json\n{\"summary\":42,\"passed\":\"nope\"}\n```";
+
+        let err = compiled
+            .validate_output(Some(result_text))
+            .expect_err("must fail validation");
+        let summary = err.summary();
+        let schema_errors = match err {
+            SchemaError::SchemaViolation(list) => list,
+            other => panic!("expected SchemaViolation, got {other:?}"),
+        };
+
+        let failed = StepResult::failed_schema(summary, schema_errors.clone());
+
+        let (error_msg, errs) = match &failed {
+            StepResult::Failed {
+                error,
+                schema_errors,
+                ..
+            } => (error.clone(), schema_errors.clone()),
+            _ => panic!("expected Failed"),
+        };
+        let payload = build_failure_output_payload(&error_msg, errs.as_deref());
+
+        let parsed: serde_json::Value =
+            serde_json::from_str(&payload).expect("payload must be valid JSON");
+        assert_eq!(parsed["kind"], "schema_validation_failure");
+        let errs_json = parsed["schema_errors"]
+            .as_array()
+            .expect("schema_errors should be an array");
+        assert_eq!(errs_json.len(), schema_errors.len());
+        let paths: Vec<&str> = errs_json
+            .iter()
+            .map(|e| e["instance_path"].as_str().unwrap())
+            .collect();
+        assert!(
+            paths.iter().any(|p| p.contains("summary")),
+            "expected /summary in paths: {paths:?}"
+        );
+        assert!(
+            paths.iter().any(|p| p.contains("passed")),
+            "expected /passed in paths: {paths:?}"
+        );
     }
 }
