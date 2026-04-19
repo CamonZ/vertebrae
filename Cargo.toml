@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/core", "crates/sacrum-client", "crates/cli", "crates/gui/src-tauri", "crates/daemon", "crates/acceptance", "crates/gui-acceptance"]
+members = ["crates/core", "crates/sacrum-client", "crates/cli", "crates/gui/src-tauri", "crates/daemon", "crates/acceptance", "crates/gui-acceptance", "crates/daemon-acceptance"]
 resolver = "2"
 
 # Development profile - optimize for fast compilation

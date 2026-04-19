@@ -27,7 +27,7 @@ The `.githooks/pre-commit` script runs these checks:
 **Rust:**
 1. `cargo fmt --check` — code formatting
 2. `cargo clippy --quiet -- -D warnings` — no linting warnings
-3. `cargo llvm-cov --quiet --workspace --exclude acceptance --exclude gui-acceptance --fail-under-lines 75` — tests pass with >= 75% line coverage
+3. `cargo llvm-cov --quiet --workspace --exclude acceptance --exclude gui-acceptance --exclude daemon-acceptance --fail-under-lines 75` — tests pass with >= 75% line coverage
 
 **GUI (React):**
 4. `npm run test` (in `crates/gui`) — all React/TypeScript tests pass
