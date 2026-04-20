@@ -29,6 +29,8 @@ struct StreamLine {
     duration_ms: Option<f64>,
     #[serde(default)]
     usage: Option<Usage>,
+    #[serde(default)]
+    structured_output: Option<serde_json::Value>,
 }
 
 #[derive(Deserialize)]
@@ -44,6 +46,7 @@ struct Usage {
 pub struct ParsedStreamResult {
     pub metrics: Option<StreamMetrics>,
     pub result_text: Option<String>,
+    pub structured_output: Option<serde_json::Value>,
 }
 
 /// Attempt to parse a single stream-json line as a result message.
@@ -80,6 +83,7 @@ pub fn parse_stream_json_line(line: &str) -> Option<ParsedStreamResult> {
     Some(ParsedStreamResult {
         metrics,
         result_text: parsed.result,
+        structured_output: parsed.structured_output,
     })
 }
 
@@ -227,6 +231,27 @@ mod tests {
         assert!(debug.contains("50"));
         assert!(debug.contains("0.01"));
         assert!(debug.contains("500"));
+    }
+
+    #[test]
+    fn parse_result_with_structured_output_populates_field() {
+        let line = r#"{"type":"result","result":"","structured_output":{"verdict":"approved","passed":["a","b"],"failed":[]},"cost_usd":0.01,"duration_ms":1000.0,"usage":{"input_tokens":100,"output_tokens":50}}"#;
+
+        let parsed = parse_stream_json_line(line).expect("should parse result line");
+        let structured = parsed
+            .structured_output
+            .expect("structured_output should be populated");
+        assert_eq!(structured["verdict"], serde_json::json!("approved"));
+        assert_eq!(structured["passed"], serde_json::json!(["a", "b"]));
+        assert_eq!(structured["failed"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn parse_result_without_structured_output_field_is_none() {
+        let line = r#"{"type":"result","result":"Done","cost_usd":0.01,"duration_ms":1000.0,"usage":{"input_tokens":100,"output_tokens":50}}"#;
+
+        let parsed = parse_stream_json_line(line).expect("should parse result line");
+        assert!(parsed.structured_output.is_none());
     }
 
     #[test]
