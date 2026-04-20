@@ -1582,7 +1582,7 @@ mod tests {
             "Here is my answer:\n\n```json\n{\"summary\":42,\"passed\":\"nope\"}\n```";
 
         let err = compiled
-            .validate_output(Some(result_text))
+            .validate_output(None, Some(result_text))
             .expect_err("must fail validation");
         let summary = err.summary();
         let schema_errors = match err {

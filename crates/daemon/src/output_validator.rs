@@ -68,26 +68,40 @@ impl CompiledSchema {
             .map_err(|e| SchemaError::SchemaCompile(e.to_string()))
     }
 
-    pub fn validate_output(&self, output: Option<&str>) -> Result<(), SchemaError> {
-        let text = output.map(str::trim).filter(|s| !s.is_empty());
-        let Some(text) = text else {
-            return Err(SchemaError::MissingOutput);
+    /// Validate a step's output against the compiled schema.
+    ///
+    /// Prefers `structured_output` (the SDK's native structured output field
+    /// from a stream-json result line) when it is `Some`. Falls back to
+    /// scanning `output` for the last ```` ```json ``` ```` fenced block when
+    /// `structured_output` is `None` — used for older CLI versions or steps
+    /// that still embed JSON inside prose.
+    pub fn validate_output(
+        &self,
+        structured_output: Option<&serde_json::Value>,
+        output: Option<&str>,
+    ) -> Result<(), SchemaError> {
+        let parsed_from_fence;
+        let instance: &serde_json::Value = match structured_output {
+            Some(value) => value,
+            None => {
+                let text = output
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .ok_or(SchemaError::MissingOutput)?;
+                let json_text = extract_fenced_json(text).ok_or(SchemaError::MissingOutput)?;
+                parsed_from_fence = serde_json::from_str::<serde_json::Value>(json_text)
+                    .map_err(|e| SchemaError::InvalidJson(e.to_string()))?;
+                &parsed_from_fence
+            }
         };
 
-        let Some(json_text) = extract_fenced_json(text) else {
-            return Err(SchemaError::MissingOutput);
-        };
-
-        let instance: serde_json::Value =
-            serde_json::from_str(json_text).map_err(|e| SchemaError::InvalidJson(e.to_string()))?;
-
-        if self.validator.is_valid(&instance) {
+        if self.validator.is_valid(instance) {
             return Ok(());
         }
 
         let errors: Vec<SchemaValidationError> = self
             .validator
-            .iter_errors(&instance)
+            .iter_errors(instance)
             .map(|err| SchemaValidationError {
                 instance_path: err.instance_path.to_string(),
                 schema_path: err.schema_path.to_string(),
@@ -296,21 +310,21 @@ mod tests {
     fn validate_passes_for_conforming_output() {
         let schema = compiled();
         let text = "All good.\n```json\n{\"summary\":\"done\",\"passed\":true}\n```";
-        assert_eq!(schema.validate_output(Some(text)), Ok(()));
+        assert_eq!(schema.validate_output(None, Some(text)), Ok(()));
     }
 
     #[test]
     fn validate_passes_with_prose_on_both_sides_of_fence() {
         let schema = compiled();
         let text = "Here is my answer after analysis:\n\n```json\n{\"summary\":\"ok\",\"passed\":true}\n```\n\nLet me know if you need more.";
-        assert_eq!(schema.validate_output(Some(text)), Ok(()));
+        assert_eq!(schema.validate_output(None, Some(text)), Ok(()));
     }
 
     #[test]
     fn validate_missing_output_when_none() {
         let schema = compiled();
         let err = schema
-            .validate_output(None)
+            .validate_output(None, None)
             .expect_err("None output should fail");
         assert_eq!(err, SchemaError::MissingOutput);
     }
@@ -319,11 +333,11 @@ mod tests {
     fn validate_missing_output_when_empty_string() {
         let schema = compiled();
         assert_eq!(
-            schema.validate_output(Some("")),
+            schema.validate_output(None, Some("")),
             Err(SchemaError::MissingOutput)
         );
         assert_eq!(
-            schema.validate_output(Some("   \n  \t")),
+            schema.validate_output(None, Some("   \n  \t")),
             Err(SchemaError::MissingOutput)
         );
     }
@@ -333,7 +347,7 @@ mod tests {
         let schema = compiled();
         let text = "I did the thing but forgot to format my answer as JSON.";
         assert_eq!(
-            schema.validate_output(Some(text)),
+            schema.validate_output(None, Some(text)),
             Err(SchemaError::MissingOutput)
         );
     }
@@ -342,7 +356,7 @@ mod tests {
     fn validate_invalid_json_when_fence_content_is_malformed() {
         let schema = compiled();
         let text = "```json\n{not valid json}\n```";
-        match schema.validate_output(Some(text)) {
+        match schema.validate_output(None, Some(text)) {
             Err(SchemaError::InvalidJson(msg)) => {
                 assert!(!msg.is_empty(), "invalid-json error should carry a message")
             }
@@ -351,11 +365,64 @@ mod tests {
     }
 
     #[test]
+    fn validate_prefers_structured_output_over_fenced_block() {
+        let schema = compiled();
+        // structured_output is valid; result_text has no fence at all. Must pass.
+        let structured = json!({"summary": "from-field", "passed": true});
+        assert_eq!(
+            schema.validate_output(
+                Some(&structured),
+                Some("no fenced block anywhere in this prose")
+            ),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn validate_uses_structured_output_even_when_fenced_block_is_stale() {
+        let schema = compiled();
+        // structured_output is valid; the fenced block — which would NOT
+        // conform — is ignored because structured_output wins.
+        let structured = json!({"summary": "authoritative", "passed": false});
+        let stale_text = "```json\n{\"summary\": 42, \"passed\": \"nope\"}\n```";
+        assert_eq!(
+            schema.validate_output(Some(&structured), Some(stale_text)),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn validate_falls_back_to_fenced_block_when_structured_output_is_none() {
+        let schema = compiled();
+        let text = "Preamble.\n```json\n{\"summary\":\"hi\",\"passed\":true}\n```\n";
+        assert_eq!(schema.validate_output(None, Some(text)), Ok(()));
+    }
+
+    #[test]
+    fn validate_schema_violation_on_structured_output() {
+        let schema = compiled();
+        let structured = json!({"summary": 123, "passed": "yes"});
+        match schema.validate_output(Some(&structured), None) {
+            Err(SchemaError::SchemaViolation(errors)) => {
+                assert!(
+                    errors.len() >= 2,
+                    "expected >=2 errors, got {}",
+                    errors.len()
+                );
+                let paths: Vec<&str> = errors.iter().map(|e| e.instance_path.as_str()).collect();
+                assert!(paths.iter().any(|p| p.contains("summary")));
+                assert!(paths.iter().any(|p| p.contains("passed")));
+            }
+            other => panic!("expected SchemaViolation, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn validate_schema_violation_preserves_instance_path_and_message() {
         let schema = compiled();
         // summary must be a string, passed must be boolean — we give the wrong types.
         let text = "```json\n{\"summary\":42,\"passed\":\"yes\"}\n```";
-        match schema.validate_output(Some(text)) {
+        match schema.validate_output(None, Some(text)) {
             Err(SchemaError::SchemaViolation(errors)) => {
                 assert!(
                     errors.len() >= 2,
@@ -383,7 +450,7 @@ mod tests {
     fn validate_schema_violation_on_missing_required_field() {
         let schema = compiled();
         let text = "```json\n{\"summary\":\"hello\"}\n```";
-        match schema.validate_output(Some(text)) {
+        match schema.validate_output(None, Some(text)) {
             Err(SchemaError::SchemaViolation(errors)) => {
                 assert!(!errors.is_empty(), "expected at least one error");
                 assert!(
