@@ -303,12 +303,13 @@ impl StepExecutor {
     fn validate_output(
         &self,
         state: &StepExecutorState,
+        structured_output: Option<&serde_json::Value>,
         output: Option<&str>,
     ) -> Result<(), SchemaError> {
         match &state.compiled_schema {
             None => Ok(()),
             Some(Err(compile_err)) => Err(compile_err.clone()),
-            Some(Ok(schema)) => schema.validate_output(output),
+            Some(Ok(schema)) => schema.validate_output(structured_output, output),
         }
     }
 
@@ -479,8 +480,9 @@ impl StepExecutor {
             .ok()
             .and_then(|mut guard| guard.take());
 
-        let metrics = stream_result.as_ref().and_then(|r| r.metrics.clone());
-        let result_text = stream_result.and_then(|r| r.result_text);
+        let (metrics, result_text, structured_output) = stream_result
+            .map(|r| (r.metrics, r.result_text, r.structured_output))
+            .unwrap_or((None, None, None));
 
         let step_result = if let Some(ref mut child) = state.child_process {
             match child.wait().await {
@@ -488,18 +490,34 @@ impl StepExecutor {
                     let code = status.code().unwrap_or(-1);
                     if status.success() {
                         tracing::info!(
-                            "Process completed successfully for execution {} (exit code {}, metrics={:?}, has_output={})",
+                            "Process completed successfully for execution {} (exit code {}, metrics={:?}, has_output={}, has_structured_output={})",
                             state.execution_id,
                             code,
                             metrics,
                             result_text.is_some(),
+                            structured_output.is_some(),
                         );
-                        match self.validate_output(state, result_text.as_deref()) {
-                            Ok(()) => StepResult::Completed {
-                                exit_code: code,
-                                metrics,
-                                output: result_text,
-                            },
+                        match self.validate_output(
+                            state,
+                            structured_output.as_ref(),
+                            result_text.as_deref(),
+                        ) {
+                            Ok(()) => {
+                                // Re-serialize so existing text-based consumers (Sacrum
+                                // output field) keep working when structured_output is the
+                                // source of truth.
+                                let output = match &structured_output {
+                                    Some(value) => {
+                                        serde_json::to_string_pretty(value).ok().or(result_text)
+                                    }
+                                    None => result_text,
+                                };
+                                StepResult::Completed {
+                                    exit_code: code,
+                                    metrics,
+                                    output,
+                                }
+                            }
                             Err(err) => {
                                 tracing::warn!(
                                     "Output-schema validation failed for execution {}: {}",
@@ -1650,10 +1668,13 @@ mod tests {
         let state = build_state(AgentConfig::default()).await;
         assert!(state.compiled_schema.is_none());
         let executor = StepExecutor;
-        assert_eq!(executor.validate_output(&state, None), Ok(()));
-        assert_eq!(executor.validate_output(&state, Some("not json")), Ok(()));
+        assert_eq!(executor.validate_output(&state, None, None), Ok(()));
         assert_eq!(
-            executor.validate_output(&state, Some("```json\n{\"x\":1}\n```")),
+            executor.validate_output(&state, None, Some("not json")),
+            Ok(())
+        );
+        assert_eq!(
+            executor.validate_output(&state, None, Some("```json\n{\"x\":1}\n```")),
             Ok(())
         );
     }
@@ -1672,7 +1693,7 @@ mod tests {
         );
         let executor = StepExecutor;
         let output = "Here:\n```json\n{\"summary\":\"all good\"}\n```";
-        assert_eq!(executor.validate_output(&state, Some(output)), Ok(()));
+        assert_eq!(executor.validate_output(&state, None, Some(output)), Ok(()));
     }
 
     #[tokio::test]
@@ -1686,7 +1707,7 @@ mod tests {
         let state = build_state(AgentConfig::new().with_json_schema(schema)).await;
         let executor = StepExecutor;
         let output = "```json\n{\"summary\":42}\n```";
-        match executor.validate_output(&state, Some(output)) {
+        match executor.validate_output(&state, None, Some(output)) {
             Err(SchemaError::SchemaViolation(errors)) => {
                 assert!(!errors.is_empty());
                 assert!(
@@ -1709,15 +1730,15 @@ mod tests {
         let state = build_state(AgentConfig::new().with_json_schema(schema)).await;
         let executor = StepExecutor;
         assert_eq!(
-            executor.validate_output(&state, None),
+            executor.validate_output(&state, None, None),
             Err(SchemaError::MissingOutput)
         );
         assert_eq!(
-            executor.validate_output(&state, Some("")),
+            executor.validate_output(&state, None, Some("")),
             Err(SchemaError::MissingOutput)
         );
         assert_eq!(
-            executor.validate_output(&state, Some("no fence here at all")),
+            executor.validate_output(&state, None, Some("no fence here at all")),
             Err(SchemaError::MissingOutput)
         );
     }
@@ -1732,7 +1753,7 @@ mod tests {
         let state = build_state(AgentConfig::new().with_json_schema(schema)).await;
         let executor = StepExecutor;
         let output = "```json\n{not json}\n```";
-        match executor.validate_output(&state, Some(output)) {
+        match executor.validate_output(&state, None, Some(output)) {
             Err(SchemaError::InvalidJson(msg)) => assert!(!msg.is_empty()),
             other => panic!("expected InvalidJson, got {other:?}"),
         }
@@ -1749,7 +1770,7 @@ mod tests {
             "malformed schema should be recorded as compile error"
         );
         let executor = StepExecutor;
-        match executor.validate_output(&state, Some("```json\n{}\n```")) {
+        match executor.validate_output(&state, None, Some("```json\n{}\n```")) {
             Err(SchemaError::SchemaCompile(msg)) => assert!(!msg.is_empty()),
             other => panic!("expected SchemaCompile, got {other:?}"),
         }
@@ -1765,7 +1786,7 @@ mod tests {
         let state = build_state(AgentConfig::new().with_json_schema(schema)).await;
         let executor = StepExecutor;
         let output = "Some preamble about the analysis.\n\n```json\n{\"result\":\"yay\"}\n```\n\nTrailing thoughts.";
-        assert_eq!(executor.validate_output(&state, Some(output)), Ok(()));
+        assert_eq!(executor.validate_output(&state, None, Some(output)), Ok(()));
     }
 
     // ===== Synthesized --settings injection tests =====
