@@ -147,6 +147,8 @@ pub enum StepType {
     Execute,
     Evaluate,
     Route,
+    #[serde(rename = "wait_children")]
+    WaitChildren,
 }
 
 impl StepType {
@@ -155,6 +157,7 @@ impl StepType {
             StepType::Execute => "execute",
             StepType::Evaluate => "evaluate",
             StepType::Route => "route",
+            StepType::WaitChildren => "wait_children",
         }
     }
 
@@ -2095,6 +2098,7 @@ mod tests {
         assert_eq!(StepType::Execute.as_str(), "execute");
         assert_eq!(StepType::Evaluate.as_str(), "evaluate");
         assert_eq!(StepType::Route.as_str(), "route");
+        assert_eq!(StepType::WaitChildren.as_str(), "wait_children");
     }
 
     #[test]
@@ -2102,6 +2106,7 @@ mod tests {
         assert_eq!(StepType::Execute.to_string(), "execute");
         assert_eq!(StepType::Evaluate.to_string(), "evaluate");
         assert_eq!(StepType::Route.to_string(), "route");
+        assert_eq!(StepType::WaitChildren.to_string(), "wait_children");
     }
 
     #[test]
@@ -2141,6 +2146,7 @@ mod tests {
             (StepType::Execute, "\"execute\""),
             (StepType::Evaluate, "\"evaluate\""),
             (StepType::Route, "\"route\""),
+            (StepType::WaitChildren, "\"wait_children\""),
         ] {
             let serialized = serde_json::to_string(&variant).unwrap();
             assert_eq!(serialized, expected_json);

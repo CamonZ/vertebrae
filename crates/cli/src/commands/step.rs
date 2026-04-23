@@ -13,6 +13,8 @@ pub enum CliStepType {
     Execute,
     Evaluate,
     Route,
+    #[value(name = "wait_children")]
+    WaitChildren,
 }
 
 impl From<CliStepType> for StepType {
@@ -21,6 +23,7 @@ impl From<CliStepType> for StepType {
             CliStepType::Execute => StepType::Execute,
             CliStepType::Evaluate => StepType::Evaluate,
             CliStepType::Route => StepType::Route,
+            CliStepType::WaitChildren => StepType::WaitChildren,
         }
     }
 }
@@ -101,7 +104,7 @@ pub struct StepAddCommand {
     #[arg(long, short)]
     pub model: Option<String>,
 
-    /// Type of this step (execute, evaluate, route)
+    /// Type of this step (execute, evaluate, route, wait_children)
     #[arg(long, value_enum, default_value = "execute")]
     pub step_type: CliStepType,
 
@@ -444,7 +447,7 @@ pub struct StepUpdateCommand {
     #[arg(long, short)]
     pub model: Option<String>,
 
-    /// New step type (execute, evaluate, route)
+    /// New step type (execute, evaluate, route, wait_children)
     #[arg(long, value_enum)]
     pub step_type: Option<CliStepType>,
 
@@ -1126,6 +1129,46 @@ mod tests {
                 assert_eq!(core_type, StepType::Evaluate);
             }
             _ => panic!("Expected Add command"),
+        }
+    }
+
+    #[test]
+    fn test_step_add_with_step_type_wait_children() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "add",
+            "Waiter",
+            "--workflow",
+            "a1b2c3d4-0000-4000-8000-000000000006",
+            "--step-type",
+            "wait_children",
+        ])
+        .unwrap();
+        match cli.command {
+            StepCommand::Add(cmd) => {
+                let core_type: StepType = cmd.step_type.into();
+                assert_eq!(core_type, StepType::WaitChildren);
+            }
+            _ => panic!("Expected Add command"),
+        }
+    }
+
+    #[test]
+    fn test_step_update_with_step_type_wait_children() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "update",
+            "a1b2c3d4-0000-4000-8000-00000000000b",
+            "--step-type",
+            "wait_children",
+        ])
+        .unwrap();
+        match cli.command {
+            StepCommand::Update(cmd) => {
+                let core_type: StepType = cmd.step_type.unwrap().into();
+                assert_eq!(core_type, StepType::WaitChildren);
+            }
+            _ => panic!("Expected Update command"),
         }
     }
 
