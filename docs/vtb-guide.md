@@ -385,7 +385,7 @@ vtb step delete <step-id>
 | `agents` | Agent file paths for AI-assisted execution |
 | `skills` | Slash commands available during this step |
 | `transition-to` | Restrict which steps can follow this one |
-| `step-type` | Type of step: `execute`, `evaluate`, or `route` (see below) |
+| `step-type` | Type of step: `execute`, `evaluate`, `route`, or `wait_children` (see below) |
 | `output-schema` | JSON Schema for structured output enforcement (see below) |
 
 ### Step Types
@@ -397,6 +397,7 @@ Each step has a `--step-type` that determines its role in the workflow:
 | `execute` | **Default.** Runs the step's prompt via Claude and produces output. |
 | `evaluate` | Assesses the output of a previous step. Used with `eval_prompt` to determine which transition to follow when a step has multiple outgoing paths. |
 | `route` | Directs work to different paths based on conditions. Uses a fixed routing contract schema. |
+| `wait_children` | Parent/child orchestration barrier — pauses the parent until all child tasks complete. Handled server-side by Sacrum; the daemon does not execute this step type directly. |
 
 ```bash
 # Set step type on creation
