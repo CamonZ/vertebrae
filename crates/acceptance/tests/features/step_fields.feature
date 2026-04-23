@@ -34,6 +34,17 @@ Feature: Step fields: prompt and agent-config
     Then the command should succeed
     And the step "Router" in the workflow should have step_type "route"
 
+  Scenario: Create a step with --step-type wait_children
+    When I add a step "Barrier" to the workflow with flag "--step-type" and value "wait_children"
+    Then the command should succeed
+    And the step "Barrier" in the workflow should have step_type "wait_children"
+
+  Scenario: Update a step's step_type to wait_children
+    When I add a step "Waiter" to the workflow
+    And I update the step "Waiter" in the workflow with flag "--step-type" and value "wait_children"
+    Then the command should succeed
+    And the step "Waiter" in the workflow should have step_type "wait_children"
+
   Scenario: Create a step with --step-type evaluate and --output-schema
     When I add a step "Checker" to the workflow with --step-type "evaluate" and --output-schema
     Then the command should succeed
