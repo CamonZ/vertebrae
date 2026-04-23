@@ -441,6 +441,7 @@ pub enum StepType {
     Execute,
     Evaluate,
     Route,
+    WaitChildren,
 }
 
 impl From<vertebrae_core::StepType> for StepType {
@@ -449,6 +450,7 @@ impl From<vertebrae_core::StepType> for StepType {
             vertebrae_core::StepType::Execute => StepType::Execute,
             vertebrae_core::StepType::Evaluate => StepType::Evaluate,
             vertebrae_core::StepType::Route => StepType::Route,
+            vertebrae_core::StepType::WaitChildren => StepType::WaitChildren,
         }
     }
 }
@@ -459,6 +461,7 @@ impl From<StepType> for vertebrae_core::StepType {
             StepType::Execute => vertebrae_core::StepType::Execute,
             StepType::Evaluate => vertebrae_core::StepType::Evaluate,
             StepType::Route => vertebrae_core::StepType::Route,
+            StepType::WaitChildren => vertebrae_core::StepType::WaitChildren,
         }
     }
 }

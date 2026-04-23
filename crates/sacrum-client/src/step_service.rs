@@ -60,6 +60,7 @@ impl SacrumStepService {
                 "execute" => StepType::Execute,
                 "evaluate" => StepType::Evaluate,
                 "route" => StepType::Route,
+                "wait_children" => StepType::WaitChildren,
                 _ => StepType::Execute,
             })
             .unwrap_or_default();
@@ -460,6 +461,7 @@ mod tests {
             ("execute", StepType::Execute),
             ("evaluate", StepType::Evaluate),
             ("route", StepType::Route),
+            ("wait_children", StepType::WaitChildren),
         ] {
             let response = WorkflowStepResponse {
                 id: "step-x".to_string(),
