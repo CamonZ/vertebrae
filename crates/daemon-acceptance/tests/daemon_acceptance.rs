@@ -30,6 +30,14 @@ pub struct DaemonWorld {
     pub created_workflow_ids: Vec<String>,
     pub created_project_ids: Vec<String>,
 
+    // Parent/child orchestration scenario state.
+    pub parent_workflow_id: Option<String>,
+    pub child_workflow_id: Option<String>,
+    pub parent_task_id: Option<String>,
+    pub intermediate_task_id: Option<String>,
+    pub child_task_ids: Vec<String>,
+    pub grandchild_task_ids: Vec<String>,
+
     pub last_stdout: String,
     pub last_stderr: String,
     pub last_exit_code: i32,
@@ -88,6 +96,12 @@ impl DaemonWorld {
             created_task_ids: Vec::new(),
             created_workflow_ids: Vec::new(),
             created_project_ids: Vec::new(),
+            parent_workflow_id: None,
+            child_workflow_id: None,
+            parent_task_id: None,
+            intermediate_task_id: None,
+            child_task_ids: Vec::new(),
+            grandchild_task_ids: Vec::new(),
             last_stdout: String::new(),
             last_stderr: String::new(),
             last_exit_code: 0,
