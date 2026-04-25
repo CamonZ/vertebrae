@@ -56,9 +56,11 @@ pub mod task_service;
 pub mod workflow_service;
 
 pub use api_types::{
-    CodeRefResponse, CreateProjectRequest, ErrorResponse, ProjectListResponse, ProjectResponse,
-    SectionResponse, SessionLogResponse, StepExecutionResponse, StepTransitionResponse,
-    TaskResponse, WorkflowResponse, WorkflowStepResponse, WorkflowTransitionResponse,
+    CodeRefResponse, CreateProjectRequest, ErrorResponse, PipelineStepResponse,
+    PipelineStepTransitionResponse, PipelineTaskCountsResponse, PipelineWorkflowResponse,
+    PipelineWorkflowTransitionResponse, ProjectListResponse, ProjectResponse, SectionResponse,
+    SessionLogResponse, StepExecutionResponse, StepTransitionResponse, TaskResponse,
+    WorkflowResponse, WorkflowStepResponse, WorkflowTransitionResponse,
 };
 pub use client::{GraphqlClient, with_fragments};
 pub use config::{

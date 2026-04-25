@@ -94,7 +94,7 @@ fn create_builder() -> Builder {
             commands::get_workflow,
             commands::get_workflow_with_tasks,
             commands::get_workflow_with_task_details,
-            commands::get_pipeline_data,
+            commands::get_pipeline_summary,
             commands::list_workflow_transitions,
             // Execution commands
             commands::get_task_executions,
@@ -179,15 +179,20 @@ pub fn run() {
                 }
             });
 
-            let service = sacrum_config.as_ref().map(|config| {
-                let client = GraphqlClient::new(config.clone());
-                let client_arc = Arc::new(client);
-                vertebrae_sacrum_client::from_sacrum(client_arc)
-            });
+            let (service, client_arc) = match sacrum_config.as_ref() {
+                Some(config) => {
+                    let client = GraphqlClient::new(config.clone());
+                    let client_arc = Arc::new(client);
+                    let services = vertebrae_sacrum_client::from_sacrum(client_arc.clone());
+                    (Some(services), Some(client_arc))
+                }
+                None => (None, None),
+            };
 
             // Manage application state with optional services
             app.manage(AppState {
                 services: RwLock::new(service),
+                sacrum_client: RwLock::new(client_arc),
                 project_config,
             });
 
