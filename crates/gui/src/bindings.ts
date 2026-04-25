@@ -398,17 +398,20 @@ async getWorkflowWithTaskDetails(id: string) : Promise<Result<WorkflowWithTaskDe
 }
 },
 /**
- * Get all pipeline data in a single command.
+ * Fetch the full pipeline summary in a single GraphQL round-trip.
  * 
- * Fetches workflows, all tasks (as lightweight summaries), all steps grouped
- * by workflow, and workflow transitions. Replaces the N+1 sequential fetch
- * pattern where each workflow triggers individual task and step queries.
+ * Returns one entry per workflow with preloaded steps (each carrying
+ * `task_counts` and `running_count` aggregates plus their outbound
+ * transitions) and inter-workflow transitions. The Sacrum resolver runs at
+ * most 4 SQL queries regardless of project size.
  * 
- * Makes 3-4 service calls total instead of 2N+2.
+ * The frontend keeps these aggregates fresh from WebSocket events; it does
+ * NOT refetch on every change, and it does NOT issue a per-task execution
+ * query on mount.
  */
-async getPipelineData() : Promise<Result<PipelineData, CommandError>> {
+async getPipelineSummary() : Promise<Result<PipelineSummary, CommandError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("get_pipeline_data") };
+    return { status: "ok", data: await TAURI_INVOKE("get_pipeline_summary") };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -788,10 +791,45 @@ export type JsonValue = null | boolean | number | string | JsonValue[] | Partial
  */
 export type PermissionMode = "accept_edits" | "bypass_permissions" | "default" | "delegate" | "dont_ask" | "plan"
 /**
- * Aggregated data for the pipeline view, loaded in a single command.
- * Replaces N+1 sequential HTTP calls with 3 batch calls.
+ * Workflow step entry in the pipeline summary payload, including the
+ * resolver-computed `task_counts` and `running_count` aggregates and the
+ * preloaded list of intra-workflow `transitions_to` step IDs.
  */
-export type PipelineData = { workflows: Workflow[]; workflow_steps: Partial<{ [key in string]: Step[] }>; tasks: Task[]; transitions: WorkflowTransition[] }
+export type PipelineStep = { id: string; name: string; workflow_id: string; goal: string | null; step_order: number; step_type: string | null; is_final: boolean; 
+/**
+ * IDs of the steps that this step transitions into within the same workflow.
+ */
+transitions_to: string[]; 
+/**
+ * Per-level task counts for tasks currently parked at this step.
+ */
+task_counts: PipelineTaskCounts; 
+/**
+ * Number of step executions in the `started` (running) state for this step.
+ */
+running_count: number }
+/**
+ * Full pipeline summary payload returned by `get_pipeline_summary`.
+ * 
+ * One `PipelineWorkflow` per workflow in the project. There is intentionally
+ * no top-level flat task index — the GUI builds one incrementally from
+ * `taskChangedEvent` to drive count deltas.
+ */
+export type PipelineSummary = { workflows: PipelineWorkflow[] }
+/**
+ * Per-step task counts grouped by hierarchy level — direct mirror of the
+ * Sacrum `pipeline_summary.workflow_steps[].task_counts` field.
+ */
+export type PipelineTaskCounts = { epic: number; ticket: number; task: number }
+/**
+ * Single workflow entry in the pipeline summary payload, with its preloaded
+ * steps (carrying aggregates) and outbound inter-workflow transitions.
+ */
+export type PipelineWorkflow = { id: string; name: string; description: string | null; initial_step_id: string | null; kanban_column: string | null; is_default: boolean; display_order: number; workflow_steps: PipelineStep[]; transitions: PipelineWorkflowTransition[] }
+/**
+ * Inter-workflow transition entry returned by `pipeline_summary`.
+ */
+export type PipelineWorkflowTransition = { id: string; from_workflow_id: string; to_workflow_id: string; target_step_id: string | null; label: string }
 /**
  * A saved project in the project list
  */
@@ -1008,7 +1046,7 @@ export type StepTransitionChangedEvent = { transition_id: string; change_type: S
 /**
  * Step type - mirrors core::StepType
  */
-export type StepType = "execute" | "evaluate" | "route"
+export type StepType = "execute" | "evaluate" | "route" | "wait_children"
 /**
  * Full task details - mirrors core::Task with string IDs and dates
  */

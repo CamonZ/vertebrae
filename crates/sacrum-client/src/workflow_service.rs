@@ -12,8 +12,11 @@ use vertebrae_core::workflow_service::{
     AssignResult, CreateWorkflowOptions, UpdateWorkflowOptions, WorkflowInfo, WorkflowService,
 };
 
-use crate::api_types::{WorkflowResponse, WorkflowStepResponse, WorkflowTransitionResponse};
+use crate::api_types::{
+    PipelineWorkflowResponse, WorkflowResponse, WorkflowStepResponse, WorkflowTransitionResponse,
+};
 use crate::client::{GraphqlClient, with_fragments};
+use crate::queries::pipeline::PIPELINE_SUMMARY;
 use crate::queries::steps::{CREATE_STEP, STEP_FIELDS, SYNC_STEP_TRANSITIONS};
 use crate::queries::tasks::{ASSIGN_WORKFLOW, UNASSIGN_WORKFLOW};
 use crate::queries::workflows::{
@@ -117,6 +120,26 @@ impl SacrumWorkflowService {
             step_count: response.workflow_steps.len(),
             is_default: response.is_default.unwrap_or(false),
         }
+    }
+
+    /// Fetch the entire pipeline summary in a single GraphQL round-trip.
+    ///
+    /// The resolver runs at most 4 SQL queries regardless of workflow / step /
+    /// task count. Returns workflows with preloaded `workflow_steps` (each
+    /// carrying `task_counts` and `running_count` aggregates plus their
+    /// outgoing intra-workflow transitions) and the inter-workflow
+    /// `transitions` list.
+    ///
+    /// This is the data backing the All Workflows pipeline view; the GUI is
+    /// expected to maintain incremental updates from WebSocket events instead
+    /// of refetching after the initial load.
+    pub async fn get_pipeline_summary(&self) -> ServiceResult<Vec<PipelineWorkflowResponse>> {
+        let variables = json!({ "project_id": self.client.project_id() });
+        let workflows: Vec<PipelineWorkflowResponse> = self
+            .client
+            .execute(PIPELINE_SUMMARY, variables, "pipeline_summary")
+            .await?;
+        Ok(workflows)
     }
 
     fn extract_transitions(
@@ -1423,6 +1446,108 @@ mod tests {
         assert_eq!(transitions[0].from_workflow, "wf-1");
         assert_eq!(transitions[0].to_workflow, "wf-2");
         assert_eq!(transitions[0].label, "on_done");
+    }
+
+    #[tokio::test]
+    async fn test_get_pipeline_summary_success() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "pipeline_summary": [
+                        {
+                            "id": "wf-1",
+                            "name": "Backlog",
+                            "is_default": true,
+                            "display_order": 0,
+                            "workflow_steps": [
+                                {
+                                    "id": "step-1",
+                                    "name": "todo",
+                                    "step_order": 0,
+                                    "is_final": false,
+                                    "workflow_id": "wf-1",
+                                    "task_counts": { "epic": 1, "ticket": 2, "task": 3 },
+                                    "running_count": 4,
+                                    "transitions": [
+                                        { "id": "t-1", "from_step_id": "step-1", "to_step_id": "step-2", "label": null }
+                                    ]
+                                },
+                                {
+                                    "id": "step-2",
+                                    "name": "done",
+                                    "step_order": 1,
+                                    "is_final": true,
+                                    "workflow_id": "wf-1",
+                                    "task_counts": { "epic": 0, "ticket": 0, "task": 0 },
+                                    "running_count": 0,
+                                    "transitions": []
+                                }
+                            ],
+                            "transitions": [
+                                {
+                                    "id": "wt-1",
+                                    "from_workflow_id": "wf-1",
+                                    "to_workflow_id": "wf-2",
+                                    "target_step_id": null,
+                                    "label": "promote"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let workflows = service.get_pipeline_summary().await.unwrap();
+
+        assert_eq!(workflows.len(), 1);
+        let wf = &workflows[0];
+        assert_eq!(wf.id, "wf-1");
+        assert_eq!(wf.name, "Backlog");
+        assert_eq!(wf.is_default, Some(true));
+        assert_eq!(wf.workflow_steps.len(), 2);
+
+        let step1 = &wf.workflow_steps[0];
+        assert_eq!(step1.id, "step-1");
+        assert_eq!(step1.task_counts.epic, 1);
+        assert_eq!(step1.task_counts.ticket, 2);
+        assert_eq!(step1.task_counts.task, 3);
+        assert_eq!(step1.running_count, 4);
+        assert_eq!(step1.transitions.len(), 1);
+        assert_eq!(step1.transitions[0].to_step_id, "step-2");
+
+        let step2 = &wf.workflow_steps[1];
+        assert_eq!(step2.id, "step-2");
+        assert_eq!(step2.task_counts.epic, 0);
+        assert_eq!(step2.running_count, 0);
+        assert!(step2.transitions.is_empty());
+
+        assert_eq!(wf.transitions.len(), 1);
+        assert_eq!(wf.transitions[0].from_workflow_id, "wf-1");
+        assert_eq!(wf.transitions[0].to_workflow_id, "wf-2");
+        assert_eq!(wf.transitions[0].label.as_deref(), Some("promote"));
+    }
+
+    #[tokio::test]
+    async fn test_get_pipeline_summary_empty() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "pipeline_summary": [] }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let workflows = service.get_pipeline_summary().await.unwrap();
+        assert!(workflows.is_empty());
     }
 
     #[test]

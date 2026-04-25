@@ -16,6 +16,9 @@ use vertebrae_core::VertebraeServices;
 pub struct AppState {
     /// Unified services container (None until a project is selected)
     pub services: RwLock<Option<VertebraeServices>>,
+    /// Raw Sacrum GraphQL client used for queries that bypass the service
+    /// trait abstractions (e.g. `pipeline_summary`, which is GUI-specific).
+    pub sacrum_client: RwLock<Option<std::sync::Arc<vertebrae_sacrum_client::GraphqlClient>>>,
     /// Project configuration manager
     pub project_config: ProjectConfig,
 }
@@ -210,6 +213,8 @@ pub async fn remove_project(
 
         let mut service_lock = state.services.write().await;
         *service_lock = None;
+        let mut client_lock = state.sacrum_client.write().await;
+        *client_lock = None;
 
         let mut socket = socket_state.lock().await;
         socket.disconnect();
@@ -287,11 +292,19 @@ pub async fn set_current_project(
     // Update REST services
     {
         let mut service_lock = state.services.write().await;
-        *service_lock = sacrum_config.as_ref().map(|config| {
-            let client = vertebrae_sacrum_client::GraphqlClient::new(config.clone());
-            let client_arc = std::sync::Arc::new(client);
-            vertebrae_sacrum_client::from_sacrum(client_arc)
-        });
+        let mut client_lock = state.sacrum_client.write().await;
+        match sacrum_config.as_ref() {
+            Some(config) => {
+                let client = vertebrae_sacrum_client::GraphqlClient::new(config.clone());
+                let client_arc = std::sync::Arc::new(client);
+                *service_lock = Some(vertebrae_sacrum_client::from_sacrum(client_arc.clone()));
+                *client_lock = Some(client_arc);
+            }
+            None => {
+                *service_lock = None;
+                *client_lock = None;
+            }
+        }
     }
 
     // Restart WebSocket with new project credentials.
@@ -584,117 +597,46 @@ pub async fn get_workflow_with_task_details(
     })
 }
 
-/// Get all pipeline data in a single command.
+/// Fetch the full pipeline summary in a single GraphQL round-trip.
 ///
-/// Fetches workflows, all tasks (as lightweight summaries), all steps grouped
-/// by workflow, and workflow transitions. Replaces the N+1 sequential fetch
-/// pattern where each workflow triggers individual task and step queries.
+/// Returns one entry per workflow with preloaded steps (each carrying
+/// `task_counts` and `running_count` aggregates plus their outbound
+/// transitions) and inter-workflow transitions. The Sacrum resolver runs at
+/// most 4 SQL queries regardless of project size.
 ///
-/// Makes 3-4 service calls total instead of 2N+2.
+/// The frontend keeps these aggregates fresh from WebSocket events; it does
+/// NOT refetch on every change, and it does NOT issue a per-task execution
+/// query on mount.
 #[tauri::command]
 #[specta::specta]
-pub async fn get_pipeline_data(
+pub async fn get_pipeline_summary(
     state: State<'_, AppState>,
-) -> Result<crate::types::PipelineData, CommandError> {
-    log::info!("[get_pipeline_data] Starting");
+) -> Result<crate::types::PipelineSummary, CommandError> {
+    log::info!("[get_pipeline_summary] Starting");
     let start_time = std::time::Instant::now();
 
-    let service_guard = state.services.read().await;
-    let service = service_guard
+    let client_guard = state.sacrum_client.read().await;
+    let client = client_guard
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    // 1. List all workflows (single HTTP call, full details including transitions)
-    let wf_start = std::time::Instant::now();
-    let workflows_full = service.workflows().list_workflows_full().await?;
-    let workflows_gui: Vec<crate::types::Workflow> = workflows_full
-        .iter()
-        .cloned()
-        .map(crate::types::Workflow::from)
-        .collect();
-    let workflow_names: std::collections::HashMap<String, String> = workflows_full
-        .iter()
-        .filter_map(|w| w.id.as_ref().map(|id| (id.clone(), w.name.clone())))
-        .collect();
+    let service = vertebrae_sacrum_client::SacrumWorkflowService::new((**client).clone());
+    let workflows = service.get_pipeline_summary().await?;
 
-    // Extract transitions from workflows (no separate API call needed)
-    let transitions: Vec<crate::types::WorkflowTransition> = workflows_full
-        .iter()
-        .flat_map(|w| {
-            w.transitions.iter().map(|t| {
-                let from_id = &t.from_workflow;
-                let to_id = &t.to_workflow;
-                crate::types::WorkflowTransition {
-                    id: t.id.clone(),
-                    from_workflow_id: from_id.clone(),
-                    from_workflow_name: workflow_names
-                        .get(from_id)
-                        .cloned()
-                        .unwrap_or_else(|| from_id.clone()),
-                    to_workflow_id: to_id.clone(),
-                    to_workflow_name: workflow_names
-                        .get(to_id)
-                        .cloned()
-                        .unwrap_or_else(|| to_id.clone()),
-                    label: t.label.clone(),
-                    target_step_id: t.target_step.clone(),
-                }
-            })
-        })
-        .collect();
-    log::info!(
-        "[get_pipeline_data] Fetched {} workflows with {} transitions in {}ms",
-        workflows_gui.len(),
-        transitions.len(),
-        wf_start.elapsed().as_millis()
-    );
-
-    // 2. List all steps (single HTTP call), build step_names map for task lookup
-    let steps_start = std::time::Instant::now();
-    let all_steps = service.steps().list_all_steps().await?;
-    let step_names: std::collections::HashMap<String, String> = all_steps
-        .iter()
-        .filter_map(|s| s.id.as_ref().map(|id| (id.clone(), s.name.clone())))
-        .collect();
-    let mut workflow_steps: std::collections::HashMap<String, Vec<crate::types::Step>> =
-        std::collections::HashMap::new();
-    for step in all_steps {
-        workflow_steps
-            .entry(step.workflow_id.clone())
-            .or_default()
-            .push(crate::types::Step::from(step));
-    }
-    log::info!(
-        "[get_pipeline_data] Fetched steps for {} workflows in {}ms",
-        workflow_steps.len(),
-        steps_start.elapsed().as_millis()
-    );
-
-    // 3. List all tasks with pre-fetched lookups (avoids duplicate HTTP calls)
-    let tasks_start = std::time::Instant::now();
-    let filter = vertebrae_core::TaskFilter::new().include_done();
-    let task_summaries = service
-        .tasks()
-        .list_tasks_with_lookups(&filter, Some(&workflow_names), Some(&step_names))
-        .await?;
-    let tasks: Vec<crate::types::Task> = task_summaries.into_iter().map(Into::into).collect();
-    log::info!(
-        "[get_pipeline_data] Fetched {} tasks in {}ms",
-        tasks.len(),
-        tasks_start.elapsed().as_millis()
-    );
+    let summary = crate::types::PipelineSummary {
+        workflows: workflows
+            .into_iter()
+            .map(crate::types::PipelineWorkflow::from)
+            .collect(),
+    };
 
     log::info!(
-        "[get_pipeline_data] Total time: {}ms",
+        "[get_pipeline_summary] Returned {} workflows in {}ms",
+        summary.workflows.len(),
         start_time.elapsed().as_millis()
     );
 
-    Ok(crate::types::PipelineData {
-        workflows: workflows_gui,
-        workflow_steps,
-        tasks,
-        transitions,
-    })
+    Ok(summary)
 }
 
 // ============================================================================
@@ -1860,6 +1802,7 @@ mod tests {
         tauri::test::mock_builder()
             .manage(AppState {
                 services: RwLock::new(Some(services)),
+                sacrum_client: RwLock::new(None),
                 project_config,
             })
             .manage(tokio::sync::Mutex::new(
@@ -1877,6 +1820,7 @@ mod tests {
         tauri::test::mock_builder()
             .manage(AppState {
                 services: RwLock::new(None),
+                sacrum_client: RwLock::new(None),
                 project_config,
             })
             .manage(tokio::sync::Mutex::new(
@@ -2530,168 +2474,21 @@ mod tests {
     }
 
     // ========================================================================
-    // get_pipeline_data tests
+    // get_pipeline_summary tests
+    //
+    // The command path requires a real Sacrum GraphQL client (it bypasses the
+    // mock service trait by design — the resolver is what enforces the SQL
+    // query budget). The error path is exercised here; success-path coverage
+    // lives in the SacrumWorkflowService wiremock tests.
     // ========================================================================
 
     #[tokio::test]
-    async fn get_pipeline_data_empty_returns_empty_collections() {
-        let app = build_app_with_services();
-        let state: tauri::State<'_, AppState> = app.state();
-        let data = get_pipeline_data(state).await.unwrap();
-        assert!(data.workflows.is_empty());
-        assert!(data.tasks.is_empty());
-        assert!(data.workflow_steps.is_empty());
-        assert!(data.transitions.is_empty());
-    }
-
-    #[tokio::test]
-    async fn get_pipeline_data_no_project_returns_error() {
+    async fn get_pipeline_summary_no_project_returns_error() {
         let app = build_app_without_services();
         let state: tauri::State<'_, AppState> = app.state();
-        let result = get_pipeline_data(state).await;
+        let result = get_pipeline_summary(state).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().message.contains("No project selected"));
-    }
-
-    #[tokio::test]
-    async fn get_pipeline_data_includes_workflows_and_tasks() {
-        let app = build_app_with_services();
-        let state: tauri::State<'_, AppState> = app.state();
-
-        // Create a workflow via the service directly
-        {
-            let guard = state.services.read().await;
-            let svc = guard.as_ref().unwrap();
-            svc.workflows()
-                .create_workflow(vertebrae_core::CreateWorkflowOptions {
-                    name: "Pipeline WF".to_string(),
-                    description: Some("Test pipeline".to_string()),
-                    steps: vec![],
-                    auto_advance: false,
-                    order: 0,
-                    is_default: false,
-                    kanban_column: None,
-                })
-                .await
-                .unwrap();
-        }
-        create_task(state.clone(), "Pipeline Task".to_string(), None, None, None)
-            .await
-            .unwrap();
-
-        let data = get_pipeline_data(state).await.unwrap();
-        assert_eq!(data.workflows.len(), 1);
-        assert_eq!(data.workflows[0].name, "Pipeline WF");
-        assert_eq!(
-            data.workflows[0].description,
-            Some("Test pipeline".to_string())
-        );
-        assert_eq!(data.tasks.len(), 1);
-        assert_eq!(data.tasks[0].title, "Pipeline Task");
-    }
-
-    #[tokio::test]
-    async fn get_pipeline_data_groups_steps_by_workflow() {
-        let app = build_app_with_services();
-        let state: tauri::State<'_, AppState> = app.state();
-
-        let (wf1_id, wf2_id) = {
-            let guard = state.services.read().await;
-            let svc = guard.as_ref().unwrap();
-            let id1 = svc
-                .workflows()
-                .create_workflow(vertebrae_core::CreateWorkflowOptions {
-                    name: "WF A".to_string(),
-                    description: None,
-                    steps: vec![],
-                    auto_advance: false,
-                    order: 0,
-                    is_default: false,
-                    kanban_column: None,
-                })
-                .await
-                .unwrap();
-            let id2 = svc
-                .workflows()
-                .create_workflow(vertebrae_core::CreateWorkflowOptions {
-                    name: "WF B".to_string(),
-                    description: None,
-                    steps: vec![],
-                    auto_advance: false,
-                    order: 1,
-                    is_default: false,
-                    kanban_column: None,
-                })
-                .await
-                .unwrap();
-            (id1, id2)
-        };
-
-        create_step(
-            state.clone(),
-            crate::types::CreateStepOptions {
-                workflow_id: wf1_id.clone(),
-                name: "Step A1".to_string(),
-                goal: None,
-                agents: vec![],
-                skills: vec![],
-                order: 0,
-                is_final: false,
-                transitions_to: vec![],
-                step_type: Default::default(),
-                output_schema: None,
-            },
-        )
-        .await
-        .unwrap();
-        create_step(
-            state.clone(),
-            crate::types::CreateStepOptions {
-                workflow_id: wf1_id.clone(),
-                name: "Step A2".to_string(),
-                goal: None,
-                agents: vec![],
-                skills: vec![],
-                order: 1,
-                is_final: false,
-                transitions_to: vec![],
-                step_type: Default::default(),
-                output_schema: None,
-            },
-        )
-        .await
-        .unwrap();
-        create_step(
-            state.clone(),
-            crate::types::CreateStepOptions {
-                workflow_id: wf2_id.clone(),
-                name: "Step B1".to_string(),
-                goal: None,
-                agents: vec![],
-                skills: vec![],
-                order: 0,
-                is_final: false,
-                transitions_to: vec![],
-                step_type: Default::default(),
-                output_schema: None,
-            },
-        )
-        .await
-        .unwrap();
-
-        let data = get_pipeline_data(state).await.unwrap();
-
-        assert_eq!(data.workflow_steps.len(), 2);
-
-        let steps_a = data.workflow_steps.get(&wf1_id).unwrap();
-        assert_eq!(steps_a.len(), 2);
-        let step_names_a: Vec<&str> = steps_a.iter().map(|s| s.name.as_str()).collect();
-        assert!(step_names_a.contains(&"Step A1"));
-        assert!(step_names_a.contains(&"Step A2"));
-
-        let steps_b = data.workflow_steps.get(&wf2_id).unwrap();
-        assert_eq!(steps_b.len(), 1);
-        assert_eq!(steps_b[0].name, "Step B1");
     }
 
     // ========================================================================

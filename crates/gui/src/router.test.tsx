@@ -9,7 +9,10 @@ vi.mock("./bindings", () => ({
     hasProjectSelected: vi.fn(),
     listWorkflows: vi.fn(),
     getWorkflowWithTaskDetails: vi.fn(),
-    getPipelineData: vi.fn(),
+    getPipelineSummary: vi.fn(),
+    getWebsocketStatus: vi.fn(() =>
+      Promise.resolve({ status: "ok", data: "connected" }),
+    ),
     listTasks: vi.fn(),
     getTask: vi.fn(),
     listStepsForWorkflow: vi.fn(),
@@ -90,14 +93,9 @@ describe("Router Acceptance Tests", () => {
       data: [],
     });
 
-    (commands.getPipelineData as ReturnType<typeof vi.fn>).mockResolvedValue({
+    (commands.getPipelineSummary as ReturnType<typeof vi.fn>).mockResolvedValue({
       status: "ok",
-      data: {
-        workflows: [],
-        workflow_steps: {},
-        tasks: [],
-        transitions: [],
-      },
+      data: { workflows: [] },
     });
 
     (commands.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue({
@@ -266,7 +264,7 @@ describe("Router Acceptance Tests", () => {
     });
 
     it("displays workflows when they exist", async () => {
-      (commands.getPipelineData as ReturnType<typeof vi.fn>).mockResolvedValue({
+      (commands.getPipelineSummary as ReturnType<typeof vi.fn>).mockResolvedValue({
         status: "ok",
         data: {
           workflows: [
@@ -274,30 +272,27 @@ describe("Router Acceptance Tests", () => {
               id: "workflow-1",
               name: "Development Workflow",
               description: "Main dev workflow",
-              metadata: {},
+              initial_step_id: "step-backlog",
+              kanban_column: null,
+              is_default: false,
+              display_order: 0,
+              workflow_steps: [
+                {
+                  id: "step-backlog",
+                  name: "backlog",
+                  workflow_id: "workflow-1",
+                  goal: null,
+                  step_order: 0,
+                  step_type: "execute",
+                  is_final: false,
+                  transitions_to: [],
+                  task_counts: { epic: 0, ticket: 0, task: 0 },
+                  running_count: 0,
+                },
+              ],
+              transitions: [],
             },
           ],
-          workflow_steps: {
-            "workflow-1": [
-              {
-                id: "step-backlog",
-                name: "backlog",
-                workflow_id: "workflow-1",
-                order: 0,
-                is_final: false,
-                transitions_to: [],
-                agent_config: {
-                  tools: [],
-                  allowed_tools: [],
-                  disallowed_tools: [],
-                  mcp_config: [],
-                  plugin_dirs: [],
-                },
-              },
-            ],
-          },
-          tasks: [],
-          transitions: [],
         },
       });
 
@@ -519,8 +514,29 @@ describe("Router Acceptance Tests", () => {
   });
 
   describe("Unified canvas with workflow zones", () => {
+    function makePipelineStep(
+      id: string,
+      workflowId: string,
+      name: string,
+      order: number,
+      isFinal = false,
+    ) {
+      return {
+        id,
+        name,
+        workflow_id: workflowId,
+        goal: null,
+        step_order: order,
+        step_type: "execute",
+        is_final: isFinal,
+        transitions_to: [] as string[],
+        task_counts: { epic: 0, ticket: 0, task: 0 },
+        running_count: 0,
+      };
+    }
+
     it("displays multiple workflows as zones in a single canvas", async () => {
-      (commands.getPipelineData as ReturnType<typeof vi.fn>).mockResolvedValue({
+      (commands.getPipelineSummary as ReturnType<typeof vi.fn>).mockResolvedValue({
         status: "ok",
         data: {
           workflows: [
@@ -528,53 +544,25 @@ describe("Router Acceptance Tests", () => {
               id: "workflow-1",
               name: "Workflow One",
               description: null,
-              metadata: {},
+              initial_step_id: "step-1",
+              kanban_column: null,
+              is_default: false,
+              display_order: 0,
+              workflow_steps: [makePipelineStep("step-1", "workflow-1", "backlog", 0)],
+              transitions: [],
             },
             {
               id: "workflow-2",
               name: "Workflow Two",
               description: null,
-              metadata: {},
+              initial_step_id: "step-2",
+              kanban_column: null,
+              is_default: false,
+              display_order: 1,
+              workflow_steps: [makePipelineStep("step-2", "workflow-2", "backlog", 0)],
+              transitions: [],
             },
           ],
-          workflow_steps: {
-            "workflow-1": [
-              {
-                id: "step-1",
-                name: "backlog",
-                workflow_id: "workflow-1",
-                order: 0,
-                is_final: false,
-                transitions_to: [],
-                agent_config: {
-                  tools: [],
-                  allowed_tools: [],
-                  disallowed_tools: [],
-                  mcp_config: [],
-                  plugin_dirs: [],
-                },
-              },
-            ],
-            "workflow-2": [
-              {
-                id: "step-2",
-                name: "backlog",
-                workflow_id: "workflow-2",
-                order: 0,
-                is_final: false,
-                transitions_to: [],
-                agent_config: {
-                  tools: [],
-                  allowed_tools: [],
-                  disallowed_tools: [],
-                  mcp_config: [],
-                  plugin_dirs: [],
-                },
-              },
-            ],
-          },
-          tasks: [],
-          transitions: [],
         },
       });
 
@@ -593,7 +581,7 @@ describe("Router Acceptance Tests", () => {
     });
 
     it("displays workflow zones with step counts", async () => {
-      (commands.getPipelineData as ReturnType<typeof vi.fn>).mockResolvedValue({
+      (commands.getPipelineSummary as ReturnType<typeof vi.fn>).mockResolvedValue({
         status: "ok",
         data: {
           workflows: [
@@ -601,60 +589,18 @@ describe("Router Acceptance Tests", () => {
               id: "workflow-multi",
               name: "Multi-Step Workflow",
               description: null,
-              metadata: {},
+              initial_step_id: "step-backlog",
+              kanban_column: null,
+              is_default: false,
+              display_order: 0,
+              workflow_steps: [
+                makePipelineStep("step-backlog", "workflow-multi", "backlog", 0),
+                makePipelineStep("step-todo", "workflow-multi", "todo", 1),
+                makePipelineStep("step-done", "workflow-multi", "done", 2, true),
+              ],
+              transitions: [],
             },
           ],
-          workflow_steps: {
-            "workflow-multi": [
-              {
-                id: "step-backlog",
-                name: "backlog",
-                workflow_id: "workflow-multi",
-                order: 0,
-                is_final: false,
-                transitions_to: [],
-                agent_config: {
-                  tools: [],
-                  allowed_tools: [],
-                  disallowed_tools: [],
-                  mcp_config: [],
-                  plugin_dirs: [],
-                },
-              },
-              {
-                id: "step-todo",
-                name: "todo",
-                workflow_id: "workflow-multi",
-                order: 1,
-                is_final: false,
-                transitions_to: [],
-                agent_config: {
-                  tools: [],
-                  allowed_tools: [],
-                  disallowed_tools: [],
-                  mcp_config: [],
-                  plugin_dirs: [],
-                },
-              },
-              {
-                id: "step-done",
-                name: "done",
-                workflow_id: "workflow-multi",
-                order: 2,
-                is_final: true,
-                transitions_to: [],
-                agent_config: {
-                  tools: [],
-                  allowed_tools: [],
-                  disallowed_tools: [],
-                  mcp_config: [],
-                  plugin_dirs: [],
-                },
-              },
-            ],
-          },
-          tasks: [],
-          transitions: [],
         },
       });
 

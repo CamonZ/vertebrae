@@ -62,6 +62,7 @@ const STEP_TYPE_STYLES: Record<StepType, string> = {
   execute: "border-text-muted/30 bg-text-muted/10 text-text-secondary",
   evaluate: "border-info/30 bg-info/10 text-info",
   route: "border-warning/30 bg-warning/10 text-warning",
+  wait_children: "border-accent/30 bg-accent/10 text-accent",
 };
 
 function StepTypeBadge({ stepType }: { stepType: StepType }) {
