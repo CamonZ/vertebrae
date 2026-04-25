@@ -311,6 +311,105 @@ pub struct ErrorResponse {
     pub errors: serde_json::Value,
 }
 
+/// Per-step task counts grouped by hierarchy level.
+///
+/// Returned by `pipelineSummary.workflow_steps[].task_counts`. Counts only
+/// include non-archived tasks whose `current_step_id` matches the step.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PipelineTaskCountsResponse {
+    #[serde(default)]
+    pub epic: i32,
+    #[serde(default)]
+    pub ticket: i32,
+    #[serde(default)]
+    pub task: i32,
+}
+
+/// Inter-workflow transition as returned by `pipelineSummary` (preloaded).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PipelineWorkflowTransitionResponse {
+    pub id: String,
+    pub from_workflow_id: String,
+    pub to_workflow_id: String,
+    #[serde(default)]
+    pub target_step_id: Option<String>,
+    #[serde(default)]
+    pub label: Option<String>,
+}
+
+/// Intra-workflow step transition as returned nested under each workflow step
+/// in `pipelineSummary`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PipelineStepTransitionResponse {
+    pub id: String,
+    pub from_step_id: String,
+    pub to_step_id: String,
+    #[serde(default)]
+    pub label: Option<String>,
+}
+
+/// Workflow step entry in the `pipelineSummary` payload — includes the
+/// aggregates computed by the resolver (`task_counts`, `running_count`) and
+/// the preloaded list of intra-workflow transitions out of this step.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PipelineStepResponse {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub goal: Option<String>,
+    #[serde(default)]
+    pub step_order: i32,
+    #[serde(default)]
+    pub step_type: Option<String>,
+    #[serde(default)]
+    pub is_final: bool,
+    pub workflow_id: String,
+    #[serde(default)]
+    pub project_id: Option<String>,
+    #[serde(default)]
+    pub inserted_at: Option<String>,
+    #[serde(default)]
+    pub updated_at: Option<String>,
+    #[serde(default)]
+    pub task_counts: PipelineTaskCountsResponse,
+    #[serde(default)]
+    pub running_count: i32,
+    #[serde(default)]
+    pub transitions: Vec<PipelineStepTransitionResponse>,
+}
+
+/// Workflow entry in the `pipelineSummary` payload. Carries preloaded
+/// `workflow_steps` (with aggregates) and inter-workflow `transitions`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PipelineWorkflowResponse {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub auto_advance: Option<bool>,
+    #[serde(default)]
+    pub is_default: Option<bool>,
+    #[serde(default)]
+    pub display_order: Option<i32>,
+    #[serde(default)]
+    pub metadata: Option<serde_json::Value>,
+    #[serde(default)]
+    pub initial_step_id: Option<String>,
+    #[serde(default)]
+    pub kanban_column: Option<String>,
+    #[serde(default)]
+    pub project_id: Option<String>,
+    #[serde(default)]
+    pub inserted_at: Option<String>,
+    #[serde(default)]
+    pub updated_at: Option<String>,
+    #[serde(default)]
+    pub workflow_steps: Vec<PipelineStepResponse>,
+    #[serde(default)]
+    pub transitions: Vec<PipelineWorkflowTransitionResponse>,
+}
+
 /// Project response from Sacrum API
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectResponse {
@@ -753,6 +852,99 @@ mod tests {
 
         let workflow: WorkflowResponse = serde_json::from_str(json).unwrap();
         assert_eq!(workflow.is_default, Some(false));
+    }
+
+    #[test]
+    fn test_pipeline_summary_response_deserialization() {
+        let json = r#"[
+            {
+                "id": "wf-1",
+                "name": "Backlog",
+                "description": null,
+                "auto_advance": false,
+                "is_default": true,
+                "display_order": 0,
+                "metadata": null,
+                "initial_step_id": "step-1",
+                "kanban_column": null,
+                "project_id": "proj-1",
+                "inserted_at": "2026-04-25T00:00:00Z",
+                "updated_at": "2026-04-25T00:00:00Z",
+                "workflow_steps": [
+                    {
+                        "id": "step-1",
+                        "name": "todo",
+                        "goal": null,
+                        "step_order": 0,
+                        "step_type": "execute",
+                        "is_final": false,
+                        "workflow_id": "wf-1",
+                        "project_id": "proj-1",
+                        "inserted_at": null,
+                        "updated_at": null,
+                        "task_counts": { "epic": 1, "ticket": 4, "task": 9 },
+                        "running_count": 2,
+                        "transitions": [
+                            { "id": "t-1", "from_step_id": "step-1", "to_step_id": "step-2", "label": "next" }
+                        ]
+                    }
+                ],
+                "transitions": [
+                    {
+                        "id": "wt-1",
+                        "from_workflow_id": "wf-1",
+                        "to_workflow_id": "wf-2",
+                        "target_step_id": "step-x",
+                        "label": "promote"
+                    }
+                ]
+            }
+        ]"#;
+
+        let workflows: Vec<PipelineWorkflowResponse> = serde_json::from_str(json).unwrap();
+        assert_eq!(workflows.len(), 1);
+        let wf = &workflows[0];
+        assert_eq!(wf.id, "wf-1");
+        assert_eq!(wf.name, "Backlog");
+        assert_eq!(wf.is_default, Some(true));
+        assert_eq!(wf.workflow_steps.len(), 1);
+
+        let step = &wf.workflow_steps[0];
+        assert_eq!(step.id, "step-1");
+        assert_eq!(step.name, "todo");
+        assert_eq!(step.workflow_id, "wf-1");
+        assert_eq!(step.task_counts.epic, 1);
+        assert_eq!(step.task_counts.ticket, 4);
+        assert_eq!(step.task_counts.task, 9);
+        assert_eq!(step.running_count, 2);
+        assert_eq!(step.transitions.len(), 1);
+        assert_eq!(step.transitions[0].from_step_id, "step-1");
+        assert_eq!(step.transitions[0].to_step_id, "step-2");
+        assert_eq!(step.transitions[0].label.as_deref(), Some("next"));
+
+        assert_eq!(wf.transitions.len(), 1);
+        assert_eq!(wf.transitions[0].from_workflow_id, "wf-1");
+        assert_eq!(wf.transitions[0].to_workflow_id, "wf-2");
+        assert_eq!(wf.transitions[0].target_step_id.as_deref(), Some("step-x"));
+        assert_eq!(wf.transitions[0].label.as_deref(), Some("promote"));
+    }
+
+    #[test]
+    fn test_pipeline_summary_step_with_zero_aggregates() {
+        let json = r#"{
+            "id": "step-empty",
+            "name": "review",
+            "step_order": 1,
+            "is_final": false,
+            "workflow_id": "wf-1"
+        }"#;
+
+        let step: PipelineStepResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(step.id, "step-empty");
+        assert_eq!(step.task_counts, PipelineTaskCountsResponse::default());
+        assert_eq!(step.task_counts.epic, 0);
+        assert_eq!(step.running_count, 0);
+        assert!(step.transitions.is_empty());
     }
 
     #[test]

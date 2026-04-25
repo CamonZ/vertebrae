@@ -709,14 +709,134 @@ impl From<vertebrae_core::SessionLog> for SessionLog {
 // Pipeline Types
 // ============================================================================
 
-/// Aggregated data for the pipeline view, loaded in a single command.
-/// Replaces N+1 sequential HTTP calls with 3 batch calls.
+/// Per-step task counts grouped by hierarchy level — direct mirror of the
+/// Sacrum `pipeline_summary.workflow_steps[].task_counts` field.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
+pub struct PipelineTaskCounts {
+    pub epic: i32,
+    pub ticket: i32,
+    pub task: i32,
+}
+
+/// Workflow step entry in the pipeline summary payload, including the
+/// resolver-computed `task_counts` and `running_count` aggregates and the
+/// preloaded list of intra-workflow `transitions_to` step IDs.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
-pub struct PipelineData {
-    pub workflows: Vec<Workflow>,
-    pub workflow_steps: std::collections::HashMap<String, Vec<Step>>,
-    pub tasks: Vec<Task>,
-    pub transitions: Vec<WorkflowTransition>,
+pub struct PipelineStep {
+    pub id: String,
+    pub name: String,
+    pub workflow_id: String,
+    pub goal: Option<String>,
+    pub step_order: i32,
+    pub step_type: Option<String>,
+    pub is_final: bool,
+    /// IDs of the steps that this step transitions into within the same workflow.
+    pub transitions_to: Vec<String>,
+    /// Per-level task counts for tasks currently parked at this step.
+    pub task_counts: PipelineTaskCounts,
+    /// Number of step executions in the `started` (running) state for this step.
+    pub running_count: i32,
+}
+
+/// Inter-workflow transition entry returned by `pipeline_summary`.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct PipelineWorkflowTransition {
+    pub id: String,
+    pub from_workflow_id: String,
+    pub to_workflow_id: String,
+    pub target_step_id: Option<String>,
+    pub label: String,
+}
+
+/// Single workflow entry in the pipeline summary payload, with its preloaded
+/// steps (carrying aggregates) and outbound inter-workflow transitions.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct PipelineWorkflow {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub initial_step_id: Option<String>,
+    pub kanban_column: Option<String>,
+    pub is_default: bool,
+    pub display_order: i32,
+    pub workflow_steps: Vec<PipelineStep>,
+    pub transitions: Vec<PipelineWorkflowTransition>,
+}
+
+/// Full pipeline summary payload returned by `get_pipeline_summary`.
+///
+/// One `PipelineWorkflow` per workflow in the project. There is intentionally
+/// no top-level flat task index — the GUI builds one incrementally from
+/// `taskChangedEvent` to drive count deltas.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct PipelineSummary {
+    pub workflows: Vec<PipelineWorkflow>,
+}
+
+impl From<vertebrae_sacrum_client::PipelineWorkflowResponse> for PipelineWorkflow {
+    fn from(wf: vertebrae_sacrum_client::PipelineWorkflowResponse) -> Self {
+        let workflow_steps = wf
+            .workflow_steps
+            .into_iter()
+            .map(PipelineStep::from)
+            .collect();
+        let transitions = wf
+            .transitions
+            .into_iter()
+            .map(PipelineWorkflowTransition::from)
+            .collect();
+        PipelineWorkflow {
+            id: wf.id,
+            name: wf.name,
+            description: wf.description,
+            initial_step_id: wf.initial_step_id,
+            kanban_column: wf.kanban_column,
+            is_default: wf.is_default.unwrap_or(false),
+            display_order: wf.display_order.unwrap_or(0),
+            workflow_steps,
+            transitions,
+        }
+    }
+}
+
+impl From<vertebrae_sacrum_client::PipelineStepResponse> for PipelineStep {
+    fn from(step: vertebrae_sacrum_client::PipelineStepResponse) -> Self {
+        let transitions_to = step
+            .transitions
+            .iter()
+            .map(|t| t.to_step_id.clone())
+            .collect();
+        PipelineStep {
+            id: step.id,
+            name: step.name,
+            workflow_id: step.workflow_id,
+            goal: step.goal,
+            step_order: step.step_order,
+            step_type: step.step_type,
+            is_final: step.is_final,
+            transitions_to,
+            task_counts: PipelineTaskCounts {
+                epic: step.task_counts.epic,
+                ticket: step.task_counts.ticket,
+                task: step.task_counts.task,
+            },
+            running_count: step.running_count,
+        }
+    }
+}
+
+impl From<vertebrae_sacrum_client::PipelineWorkflowTransitionResponse>
+    for PipelineWorkflowTransition
+{
+    fn from(t: vertebrae_sacrum_client::PipelineWorkflowTransitionResponse) -> Self {
+        PipelineWorkflowTransition {
+            id: t.id,
+            from_workflow_id: t.from_workflow_id,
+            to_workflow_id: t.to_workflow_id,
+            target_step_id: t.target_step_id,
+            label: t.label.unwrap_or_default(),
+        }
+    }
 }
 
 /// Options for creating a workflow step.
