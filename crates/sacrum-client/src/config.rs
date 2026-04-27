@@ -10,7 +10,7 @@
 use crate::error::{SacrumClientError, SacrumClientResult};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Configuration for Sacrum client
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -111,14 +111,7 @@ impl SacrumConfig {
         {
             Some(id) => id,
             None => {
-                let cwd = std::env::current_dir().map_err(|e| {
-                    SacrumClientError::ConfigError(format!(
-                        "Failed to get current directory: {}",
-                        e
-                    ))
-                })?;
-
-                let cwd = cwd.canonicalize().unwrap_or(cwd);
+                let cwd = resolve_project_root()?;
                 let (_name, section) = find_project_by_path(&config, &cwd)?;
                 section.id.clone()
             }
@@ -166,6 +159,47 @@ impl SacrumConfig {
             project_id,
         }
     }
+}
+
+/// Resolve the main repo root for the current working directory.
+///
+/// Worktree paths do not prefix the main repo path, so configured project paths
+/// would never match. `git rev-parse --git-common-dir` returns the main repo's
+/// `.git` directory even from a worktree; stripping `/.git` yields the main root.
+/// Falls back to the input `cwd` when not in a repo or git is unavailable.
+fn resolve_project_root_at(cwd: &Path) -> PathBuf {
+    let mut cmd = std::process::Command::new("git");
+    cmd.args(["rev-parse", "--path-format=absolute", "--git-common-dir"])
+        .current_dir(cwd);
+    for (key, _) in std::env::vars_os() {
+        if key.to_string_lossy().starts_with("GIT_") {
+            cmd.env_remove(key);
+        }
+    }
+    let Ok(out) = cmd.output() else {
+        return cwd.to_path_buf();
+    };
+    if !out.status.success() {
+        return cwd.to_path_buf();
+    }
+    let raw = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if raw.is_empty() {
+        return cwd.to_path_buf();
+    }
+    let git_dir = PathBuf::from(raw);
+    let root = if git_dir.file_name() == Some(std::ffi::OsStr::new(".git")) {
+        git_dir.parent().map(Path::to_path_buf).unwrap_or(git_dir)
+    } else {
+        git_dir
+    };
+    root.canonicalize().unwrap_or(root)
+}
+
+fn resolve_project_root() -> SacrumClientResult<PathBuf> {
+    let cwd = std::env::current_dir().map_err(|e| {
+        SacrumClientError::ConfigError(format!("Failed to get current directory: {}", e))
+    })?;
+    Ok(resolve_project_root_at(&cwd))
 }
 
 /// Find the project whose path is the longest prefix of the given directory.
@@ -523,11 +557,9 @@ path = "/Users/test/other"
     }
 
     /// Helper: build a VertebraeConfigFile with a token and a project whose path
-    /// matches the current working directory so CWD-based resolution succeeds.
+    /// matches the resolved project root so CWD-based resolution succeeds.
     fn config_with_cwd_project() -> VertebraeConfigFile {
-        let cwd = std::env::current_dir()
-            .unwrap()
-            .canonicalize()
+        let cwd = resolve_project_root()
             .unwrap()
             .to_string_lossy()
             .to_string();
@@ -695,6 +727,69 @@ path = "/Users/test/other"
         assert_eq!(result.api_token, "file-token");
         assert_eq!(result.project_id, "file-project-id");
         clear_vtb_env_vars();
+    }
+
+    fn run_git(repo: &Path, args: &[&str]) {
+        let mut cmd = std::process::Command::new("git");
+        cmd.args(args).current_dir(repo);
+        for (key, _) in std::env::vars_os() {
+            if key.to_string_lossy().starts_with("GIT_") {
+                cmd.env_remove(key);
+            }
+        }
+        let status = cmd.status().unwrap();
+        assert!(status.success(), "git {:?} failed", args);
+    }
+
+    #[test]
+    fn test_resolve_project_root_in_repo() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path().canonicalize().unwrap();
+        run_git(&repo, &["init", "-q"]);
+
+        let subdir = repo.join("src");
+        std::fs::create_dir_all(&subdir).unwrap();
+
+        assert_eq!(resolve_project_root_at(&subdir), repo);
+    }
+
+    #[test]
+    fn test_resolve_project_root_in_worktree_returns_main_repo_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let main_repo = tmp.path().join("main");
+        std::fs::create_dir_all(&main_repo).unwrap();
+        let main_repo = main_repo.canonicalize().unwrap();
+
+        run_git(&main_repo, &["init", "-q", "-b", "main"]);
+        run_git(&main_repo, &["config", "user.email", "test@example.com"]);
+        run_git(&main_repo, &["config", "user.name", "Test"]);
+        std::fs::write(main_repo.join("README.md"), "init").unwrap();
+        run_git(&main_repo, &["add", "."]);
+        run_git(&main_repo, &["commit", "-q", "-m", "init"]);
+
+        let worktree_path = tmp.path().join("wt");
+        run_git(
+            &main_repo,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "feature",
+                worktree_path.to_str().unwrap(),
+            ],
+        );
+        let worktree_path = worktree_path.canonicalize().unwrap();
+
+        assert_eq!(resolve_project_root_at(&worktree_path), main_repo);
+    }
+
+    #[test]
+    fn test_resolve_project_root_outside_repo_falls_back_to_cwd() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().canonicalize().unwrap();
+
+        assert_eq!(resolve_project_root_at(&dir), dir);
     }
 
     #[test]
