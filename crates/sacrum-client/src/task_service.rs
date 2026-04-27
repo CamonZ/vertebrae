@@ -213,6 +213,9 @@ impl SacrumTaskService {
         if let Some(ref workflow_id) = filter.workflow_id {
             variables["workflow_id"] = json!(workflow_id);
         }
+        if let Some(ref step_id) = filter.step_id {
+            variables["step_id"] = json!(step_id);
+        }
         if filter.root_only {
             variables["root_only"] = json!(true);
         }
@@ -2066,5 +2069,41 @@ mod tests {
         let result = service.delete_task("task-1", true).await;
 
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_filter_to_variables_default_omits_step_id() {
+        let service = SacrumTaskService::new(create_test_client());
+        let vars = service.filter_to_variables(&TaskFilter::default());
+
+        assert_eq!(vars["project_id"], json!("test-project"));
+        assert!(vars.get("step_id").is_none());
+    }
+
+    #[test]
+    fn test_filter_to_variables_includes_step_id_when_set() {
+        let service = SacrumTaskService::new(create_test_client());
+        let step_uuid = "11111111-2222-3333-4444-555555555555";
+        let filter = TaskFilter::new().with_step_id(step_uuid);
+
+        let vars = service.filter_to_variables(&filter);
+
+        assert_eq!(vars["step_id"], json!(step_uuid));
+    }
+
+    #[test]
+    fn test_filter_to_variables_step_id_does_not_set_status() {
+        let service = SacrumTaskService::new(create_test_client());
+        let filter = TaskFilter::new().with_step_id("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+
+        let vars = service.filter_to_variables(&filter);
+
+        assert!(vars.get("status").is_none());
+    }
+
+    #[test]
+    fn test_list_tasks_query_declares_step_id_argument() {
+        assert!(crate::queries::tasks::LIST_TASKS.contains("$step_id: Uuid4"));
+        assert!(crate::queries::tasks::LIST_TASKS.contains("step_id: $step_id"));
     }
 }
