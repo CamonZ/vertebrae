@@ -7,3 +7,4 @@ pub mod state;
 pub mod step;
 pub mod task;
 pub mod workflow;
+pub mod worktree;

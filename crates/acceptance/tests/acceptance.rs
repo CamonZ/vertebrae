@@ -24,6 +24,15 @@ pub struct SmokeWorld {
     last_exit_code: i32,
 
     graphql_client: Option<GraphqlClient>,
+
+    worktree: Option<WorktreeFixture>,
+}
+
+pub struct WorktreeFixture {
+    pub _tmp: tempfile::TempDir,
+    pub home: PathBuf,
+    pub main_repo: PathBuf,
+    pub worktree_path: PathBuf,
 }
 
 impl std::fmt::Debug for SmokeWorld {
@@ -52,7 +61,33 @@ impl SmokeWorld {
             last_stderr: String::new(),
             last_exit_code: 0,
             graphql_client: None,
+            worktree: None,
         }
+    }
+
+    async fn run_vtb_in(
+        &mut self,
+        cwd: &std::path::Path,
+        env_overrides: &[(&str, Option<&str>)],
+        args: &[&str],
+    ) {
+        let resolved_args: Vec<String> = args.iter().map(|a| self.resolve_vars(a)).collect();
+        let mut cmd = tokio::process::Command::new(&self.vtb_binary);
+        cmd.args(&resolved_args).envs(&self.env).current_dir(cwd);
+        for (k, v) in env_overrides {
+            match v {
+                Some(val) => {
+                    cmd.env(k, val);
+                }
+                None => {
+                    cmd.env_remove(k);
+                }
+            }
+        }
+        let output = cmd.output().await.expect("failed to execute vtb");
+        self.last_stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        self.last_stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        self.last_exit_code = output.status.code().unwrap_or(-1);
     }
 
     async fn run_vtb(&mut self, args: &[&str]) {
