@@ -23,7 +23,7 @@ vtb list --tag backend            # By tag
 
 ```bash
 vtb list --workflow <workflow-id>   # Tasks in specific workflow
-vtb list --step review             # Tasks at specific step
+vtb list --step <step-id>          # Tasks at a specific step (UUID)
 ```
 
 ## Filtering by parent
@@ -51,7 +51,7 @@ vtb list --search "auth"          # Search in title and description
 | `--priority` | `-p` | Filter by priority (repeatable) |
 | `--tag` | `-t` | Filter by tag (repeatable) |
 | `--workflow` | `-w` | Filter by workflow ID |
-| `--step` | | Filter by current step name |
+| `--step` | | Filter by current step UUID |
 | `--root` | | Show only root items |
 | `--parent` | | Show children of task |
 | `--all` | | Include done items |

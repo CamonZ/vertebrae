@@ -111,6 +111,13 @@ async fn given_workflow_with_steps(world: &mut SmokeWorld, name: String, steps_s
         .collect();
     ordered.sort_by_key(|(_, _, order)| *order);
 
+    // Store each step's ID under "step:<name>" so scenarios can reference them
+    for (id, step_name, _) in &ordered {
+        world
+            .stored_ids
+            .insert(format!("step:{}", step_name), id.clone());
+    }
+
     // Mark last step as final
     let last_id = &ordered.last().unwrap().0;
     world

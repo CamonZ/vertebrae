@@ -312,6 +312,93 @@ mod query_tests {
     }
 
     #[tokio::test]
+    async fn test_list_tasks_filters_by_step_id() {
+        let services = mock_services();
+
+        // Create three tasks
+        let mut ids = Vec::new();
+        for title in ["Task A", "Task B", "Task C"] {
+            let cmd = AddCommand {
+                title: title.to_string(),
+                level: None,
+                description: None,
+                priority: None,
+                tags: vec![],
+                parent: None,
+                depends_on: vec![],
+                needs_review: false,
+                workflow: None,
+            };
+            ids.push(cmd.execute(&services).await.unwrap());
+        }
+
+        // Place tasks at two different step IDs
+        let target_step = "11111111-2222-3333-4444-555555555555";
+        let other_step = "99999999-8888-7777-6666-555555555555";
+        services
+            .tasks()
+            .set_current_step(&ids[0], target_step)
+            .await
+            .unwrap();
+        services
+            .tasks()
+            .set_current_step(&ids[1], target_step)
+            .await
+            .unwrap();
+        services
+            .tasks()
+            .set_current_step(&ids[2], other_step)
+            .await
+            .unwrap();
+
+        // Filter by --step <target>
+        let list = ListCommand {
+            levels: vec![],
+            statuses: vec![],
+            priorities: vec![],
+            tags: vec![],
+            workflow: None,
+            step: Some(target_step.to_string()),
+            parent: None,
+            root: false,
+            all: true,
+            include_archived: false,
+            search: None,
+            flat: true,
+        };
+        let tasks = list.execute(&services).await.unwrap();
+        assert_eq!(
+            tasks.len(),
+            2,
+            "expected 2 tasks at target step, got {}: {:?}",
+            tasks.len(),
+            tasks.iter().map(|t| &t.id).collect::<Vec<_>>()
+        );
+        let returned_ids: Vec<&String> = tasks.iter().map(|t| &t.id).collect();
+        assert!(returned_ids.contains(&&ids[0]));
+        assert!(returned_ids.contains(&&ids[1]));
+        assert!(!returned_ids.contains(&&ids[2]));
+
+        // No --step filter returns all 3
+        let list_all = ListCommand {
+            levels: vec![],
+            statuses: vec![],
+            priorities: vec![],
+            tags: vec![],
+            workflow: None,
+            step: None,
+            parent: None,
+            root: false,
+            all: true,
+            include_archived: false,
+            search: None,
+            flat: true,
+        };
+        let all_tasks = list_all.execute(&services).await.unwrap();
+        assert_eq!(all_tasks.len(), 3);
+    }
+
+    #[tokio::test]
     async fn test_show_task_details() {
         let services = mock_services();
 
