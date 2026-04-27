@@ -104,11 +104,12 @@ pub const GET_TASK: &str = r#"
 "#;
 
 /// Resolve a short ID prefix to a full task.
-/// NOTE: Prepend TASK_FIELDS when sending.
+/// Only the `id` is needed by callers, so we deliberately skip TASK_FIELDS
+/// to avoid loading sections, code_refs, and other heavy associations.
 pub const RESOLVE_SHORT_ID: &str = r#"
     query ResolveShortId($project_id: Uuid4!, $prefix: String!) {
         resolveShortId(project_id: $project_id, prefix: $prefix) {
-            ...TaskFields
+            id
         }
     }
 "#;
