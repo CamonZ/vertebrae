@@ -13,7 +13,9 @@ use vertebrae_core::models::{
 };
 use vertebrae_core::service::{CreateTaskOptions, TaskService, UpdateTaskOptions};
 
-use crate::api_types::{CodeRefResponse, SectionResponse, TaskResponse, WorkflowResponse};
+use crate::api_types::{
+    CodeRefResponse, SectionResponse, ShortIdResponse, TaskResponse, WorkflowResponse,
+};
 use crate::client::{GraphqlClient, with_fragments};
 use crate::queries::tasks;
 use crate::queries::workflows as wf_queries;
@@ -366,15 +368,14 @@ impl TaskService for SacrumTaskService {
     }
 
     async fn resolve_short_id(&self, prefix: &str) -> ServiceResult<String> {
-        let query = with_fragments(tasks::RESOLVE_SHORT_ID, &[tasks::TASK_FIELDS]);
         let variables = json!({
             "project_id": self.client.project_id,
             "prefix": prefix,
         });
 
-        let response: TaskResponse = self
+        let response: ShortIdResponse = self
             .client
-            .execute(&query, variables, "resolveShortId")
+            .execute(tasks::RESOLVE_SHORT_ID, variables, "resolveShortId")
             .await
             .map_err(|_| ServiceError::task_not_found(prefix))?;
 
