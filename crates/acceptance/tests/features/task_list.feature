@@ -162,3 +162,24 @@ Feature: List tasks
     When I list tasks with:
       | search | |
     Then the command should fail with "Validation failed: Search query cannot be empty"
+
+  Scenario: Filter by step UUID returns only tasks at that step
+    Given a workflow "step-filter-wf" with steps "backlog, in_progress, done"
+    And I create a task with:
+      | title | At in_progress |
+    And I store the task ID as "in_progress_id"
+    And I assign the workflow to the task
+    And I transition the task to step "in_progress"
+    And I create a task with:
+      | title | Still backlog |
+    And I store the task ID as "backlog_id"
+    And I assign the workflow to the task
+    When I list tasks with:
+      | step | <step:in_progress> |
+    Then the output should contain "<in_progress_id>"
+    And the output should not contain "<backlog_id>"
+
+  Scenario: --step with invalid UUID errors clearly
+    When I list tasks with:
+      | step | not-a-uuid |
+    Then the command should fail with "step ID 'not-a-uuid' is not a valid UUID"

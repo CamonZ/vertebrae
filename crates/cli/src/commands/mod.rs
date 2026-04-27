@@ -942,6 +942,58 @@ mod tests {
     }
 
     #[test]
+    fn test_command_list_with_step_full_uuid() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "list",
+            "--step",
+            "a1b2c3d4-0000-4000-8000-000000000001",
+        ]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::List(cmd) => {
+                assert_eq!(
+                    cmd.step,
+                    Some("a1b2c3d4-0000-4000-8000-000000000001".to_string())
+                );
+            }
+            _ => panic!("Expected List command"),
+        }
+    }
+
+    #[test]
+    fn test_command_list_with_step_short_id() {
+        let cli = TestCli::try_parse_from(["test", "list", "--step", "a1b2c3d4"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::List(cmd) => {
+                assert_eq!(cmd.step, Some("a1b2c3d4".to_string()));
+            }
+            _ => panic!("Expected List command"),
+        }
+    }
+
+    #[test]
+    fn test_command_list_invalid_step_uuid_errors_clearly() {
+        let result = TestCli::try_parse_from(["test", "list", "--step", "not-a-uuid"]);
+        let err = match result {
+            Ok(_) => panic!("expected --step with invalid UUID to fail, but parsing succeeded"),
+            Err(e) => e,
+        };
+        let err_msg = err.to_string();
+        assert!(
+            err_msg.contains("step ID"),
+            "expected error message to mention 'step ID', got: {}",
+            err_msg
+        );
+        assert!(
+            err_msg.contains("not a valid UUID"),
+            "expected error message to mention validity, got: {}",
+            err_msg
+        );
+    }
+
+    #[test]
     fn test_command_result_display_message() {
         let result = CommandResult::Message("Test message".to_string());
         assert_eq!(format!("{}", result), "Test message");
