@@ -1192,7 +1192,11 @@ search: string | null;
 /**
  * Filter by workflow_id (tasks assigned to a specific workflow)
  */
-workflow_id: string | null }
+workflow_id: string | null; 
+/**
+ * Filter by current_step_id (tasks currently sitting at a specific step)
+ */
+step_id: string | null }
 /**
  * Task hierarchy level - mirrors db::Level
  */

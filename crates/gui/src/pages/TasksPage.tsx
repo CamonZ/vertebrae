@@ -20,6 +20,7 @@ const INITIAL_FILTERS: TaskFilterOptions = {
   include_done: true, // Include done tasks by default when showing 'All' statuses
   search: null,
   workflow_id: null,
+  step_id: null,
 };
 
 /**

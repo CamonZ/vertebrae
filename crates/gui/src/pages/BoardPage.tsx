@@ -141,6 +141,7 @@ const TASK_FILTER: TaskFilterOptions = {
   include_done: true,
   search: null,
   workflow_id: null,
+  step_id: null,
 };
 
 export function BoardPage() {

@@ -29,6 +29,7 @@ import {
   type LayoutNode,
   type LayoutEdge,
   usePipelineSummary,
+  useStepTasks,
 } from "../hooks";
 import type { PipelineStep, PipelineWorkflow } from "../hooks/usePipelineSummary";
 import { useToastStore } from "../stores";
@@ -216,6 +217,10 @@ function AllWorkflowsPipelineInner() {
   // Selection state
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
+
+  // On-demand per-step task fetch — only triggers when a step is selected.
+  // Keeps the page from doing a project-wide listTasks on mount.
+  const { tasks: stepTasks } = useStepTasks(selectedStepId);
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(
     null,
   );
@@ -767,6 +772,7 @@ function AllWorkflowsPipelineInner() {
         <StepDetailPanel
           stepId={selectedStepId}
           allSteps={allSteps}
+          tasks={stepTasks}
           onTaskSelect={handleRelatedTaskSelect}
           selectedTaskId={selectedTaskId}
           onClose={handleCloseStepPanel}
