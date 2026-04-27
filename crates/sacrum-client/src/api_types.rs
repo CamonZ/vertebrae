@@ -86,6 +86,13 @@ pub struct TaskResponse {
     pub updated_at: Option<String>,
 }
 
+/// Minimal response for resolveShortId — only the `id` is read by callers,
+/// so we avoid pulling the full TaskFields payload.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShortIdResponse {
+    pub id: String,
+}
+
 /// Section response from Sacrum API
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SectionResponse {
