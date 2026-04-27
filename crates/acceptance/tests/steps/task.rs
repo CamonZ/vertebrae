@@ -225,6 +225,14 @@ async fn list_tasks_with_table(world: &mut SmokeWorld, step: &cucumber::gherkin:
                     args.push("--include-archived".to_string());
                 }
             }
+            "step" => {
+                args.push("--step".to_string());
+                args.push(value);
+            }
+            "workflow" => {
+                args.push("--workflow".to_string());
+                args.push(value);
+            }
             other => panic!("unsupported table key in list tasks: '{}'", other),
         }
     }

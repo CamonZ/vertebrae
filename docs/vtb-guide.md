@@ -636,8 +636,8 @@ vtb unref <id> --all
 vtb list                              # All tasks (tree view, excludes done/archived)
 vtb list --flat                       # Flat table view
 vtb list --workflow <workflow-id>     # By workflow
-vtb list --step <step-name>           # By current step name
-vtb list -w <wf-id> --step <step>     # Combine workflow and step
+vtb list --step <step-id>             # By current step UUID
+vtb list -w <wf-id> --step <step-id>  # Combine workflow and step UUID
 vtb list --level ticket               # By level (can repeat: -l epic -l ticket)
 vtb list --priority high              # By priority (can repeat)
 vtb list --tag backend                # By tag (can repeat)

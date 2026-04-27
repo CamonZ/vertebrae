@@ -55,8 +55,8 @@ pub struct ListCommand {
     #[arg(short = 'w', long = "workflow", value_parser = crate::commands::parse_uuid("workflow ID"))]
     pub workflow: Option<String>,
 
-    /// Filter by current step name within the workflow
-    #[arg(long = "step")]
+    /// Filter by current step UUID (tasks whose current_step_id matches)
+    #[arg(long = "step", value_parser = crate::commands::parse_uuid("step ID"))]
     pub step: Option<String>,
 
     /// Show only root items (no parent)
@@ -201,9 +201,9 @@ impl ListCommand {
             filter = filter.with_workflow_id(workflow_id);
         }
 
-        // Add step filter
-        if let Some(ref step_name) = self.step {
-            filter = filter.with_current_step(step_name);
+        // Add step filter (by UUID, forwards to TaskFilter.step_id)
+        if let Some(ref step_id) = self.step {
+            filter = filter.with_step_id(step_id);
         }
 
         // Set structural filters
