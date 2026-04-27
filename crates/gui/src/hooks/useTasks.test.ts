@@ -100,6 +100,7 @@ describe("useTasks", () => {
       include_done: false,
       search: null,
       workflow_id: null,
+      step_id: null,
     };
 
     renderHook(() => useTasks(filter));

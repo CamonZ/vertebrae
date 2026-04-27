@@ -1,5 +1,6 @@
 // Barrel export for all hooks
 export { useTasks } from "./useTasks";
+export { useStepTasks } from "./useStepTasks";
 export { useTask } from "./useTask";
 export { useDeleteTask } from "./useDeleteTask";
 export { useTaskExecutions } from "./useTaskExecutions";
