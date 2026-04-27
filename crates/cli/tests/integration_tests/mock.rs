@@ -288,6 +288,11 @@ impl TaskService for MockTaskService {
                 if !filter.levels.is_empty() && !filter.levels.contains(&t.level) {
                     return false;
                 }
+                if let Some(ref step_id) = filter.step_id
+                    && t.current_step_id.as_deref() != Some(step_id.as_str())
+                {
+                    return false;
+                }
                 true
             })
             .cloned()
