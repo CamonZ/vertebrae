@@ -472,6 +472,7 @@ pub struct TaskFilter {
     pub search: Option<String>,
     pub workflow_id: Option<String>,
     pub current_step: Option<String>,
+    pub step_id: Option<String>,
 }
 
 impl TaskFilter {
@@ -555,6 +556,11 @@ impl TaskFilter {
 
     pub fn with_current_step(mut self, step_name: impl Into<String>) -> Self {
         self.current_step = Some(step_name.into());
+        self
+    }
+
+    pub fn with_step_id(mut self, step_id: impl Into<String>) -> Self {
+        self.step_id = Some(step_id.into());
         self
     }
 }
@@ -2653,6 +2659,19 @@ mod tests {
     fn task_filter_with_current_step() {
         let filter = TaskFilter::new().with_current_step("review");
         assert_eq!(filter.current_step, Some("review".to_string()));
+    }
+
+    #[test]
+    fn task_filter_step_id_defaults_to_none() {
+        let filter = TaskFilter::new();
+        assert!(filter.step_id.is_none());
+    }
+
+    #[test]
+    fn task_filter_with_step_id() {
+        let uuid = "11111111-2222-3333-4444-555555555555";
+        let filter = TaskFilter::new().with_step_id(uuid);
+        assert_eq!(filter.step_id.as_deref(), Some(uuid));
     }
 
     #[test]
