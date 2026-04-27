@@ -943,6 +943,83 @@ describe("StepDetailPanel", () => {
     });
   });
 
+  describe("fetched task list rendering (per-step on-demand fetch)", () => {
+    it("renders each fetched task title in the Tasks tab", async () => {
+      const user = userEvent.setup();
+      const tasks = [
+        createTask({ id: "t-a", title: "Implement feature A", current_step_id: "step-test" }),
+        createTask({ id: "t-b", title: "Investigate bug B", current_step_id: "step-test" }),
+        createTask({ id: "t-c", title: "Document API C", current_step_id: "step-test" }),
+      ];
+
+      render(
+        <StepDetailPanel stepId="step-test" allSteps={[]} tasks={tasks} />
+      );
+
+      await user.click(screen.getByText("Tasks"));
+
+      // Every fetched task title is rendered exactly once.
+      expect(screen.getByText("Implement feature A")).toBeInTheDocument();
+      expect(screen.getByText("Investigate bug B")).toBeInTheDocument();
+      expect(screen.getByText("Document API C")).toBeInTheDocument();
+
+      // The badge reflects the fetched count.
+      expect(screen.getByText("3")).toBeInTheDocument();
+    });
+
+    it("re-renders the visible task list when the tasks prop changes (move-in)", async () => {
+      const user = userEvent.setup();
+      const initial = [
+        createTask({ id: "t-1", title: "Original task", current_step_id: "step-test" }),
+      ];
+
+      const { rerender } = render(
+        <StepDetailPanel stepId="step-test" allSteps={[]} tasks={initial} />
+      );
+      await user.click(screen.getByText("Tasks"));
+
+      expect(screen.getByText("Original task")).toBeInTheDocument();
+      expect(screen.queryByText("New arrival")).not.toBeInTheDocument();
+
+      const updated = [
+        ...initial,
+        createTask({ id: "t-2", title: "New arrival", current_step_id: "step-test" }),
+      ];
+      rerender(
+        <StepDetailPanel stepId="step-test" allSteps={[]} tasks={updated} />
+      );
+
+      expect(screen.getByText("Original task")).toBeInTheDocument();
+      expect(screen.getByText("New arrival")).toBeInTheDocument();
+    });
+
+    it("removes a task title from the list when the prop drops it (move-out)", async () => {
+      const user = userEvent.setup();
+      const initial = [
+        createTask({ id: "t-1", title: "Stays put", current_step_id: "step-test" }),
+        createTask({ id: "t-2", title: "About to leave", current_step_id: "step-test" }),
+      ];
+
+      const { rerender } = render(
+        <StepDetailPanel stepId="step-test" allSteps={[]} tasks={initial} />
+      );
+      await user.click(screen.getByText("Tasks"));
+
+      expect(screen.getByText("About to leave")).toBeInTheDocument();
+
+      rerender(
+        <StepDetailPanel
+          stepId="step-test"
+          allSteps={[]}
+          tasks={[initial[0]]}
+        />
+      );
+
+      expect(screen.getByText("Stays put")).toBeInTheDocument();
+      expect(screen.queryByText("About to leave")).not.toBeInTheDocument();
+    });
+  });
+
   describe("execution state tracking", () => {
     it("accepts taskExecutionStates prop without error", async () => {
       const user = userEvent.setup();

@@ -81,6 +81,7 @@ export function TaskFilters({
       include_done: true, // Include done tasks when showing 'All' statuses
       search: null,
       workflow_id: null,
+      step_id: null,
     });
   }, [onFiltersChange]);
 

@@ -271,6 +271,8 @@ pub struct TaskFilterOptions {
     pub search: Option<String>,
     /// Filter by workflow_id (tasks assigned to a specific workflow)
     pub workflow_id: Option<String>,
+    /// Filter by current_step_id (tasks currently sitting at a specific step)
+    pub step_id: Option<String>,
 }
 
 impl From<TaskFilterOptions> for vertebrae_core::TaskFilter {
@@ -315,6 +317,10 @@ impl From<TaskFilterOptions> for vertebrae_core::TaskFilter {
 
         if let Some(workflow_id) = opts.workflow_id {
             filter = filter.with_workflow_id(workflow_id);
+        }
+
+        if let Some(step_id) = opts.step_id {
+            filter = filter.with_step_id(step_id);
         }
 
         filter
@@ -1289,6 +1295,16 @@ mod tests {
     }
 
     #[test]
+    fn task_filter_from_gui_with_step_id() {
+        let gui_filter = TaskFilterOptions {
+            step_id: Some("step-abc".to_string()),
+            ..Default::default()
+        };
+        let core_filter = vertebrae_core::TaskFilter::from(gui_filter);
+        assert_eq!(core_filter.step_id, Some("step-abc".to_string()));
+    }
+
+    #[test]
     fn task_filter_from_gui_complex() {
         let gui_filter = TaskFilterOptions {
             levels: Some(vec![TaskLevel::Epic]),
@@ -1299,6 +1315,7 @@ mod tests {
             search: Some("auth".to_string()),
             children_of: None,
             workflow_id: Some("wf1".to_string()),
+            step_id: Some("step-1".to_string()),
         };
         let core_filter = vertebrae_core::TaskFilter::from(gui_filter);
         assert_eq!(core_filter.levels.len(), 1);
@@ -1308,6 +1325,7 @@ mod tests {
         assert!(!core_filter.include_done);
         assert_eq!(core_filter.search, Some("auth".to_string()));
         assert_eq!(core_filter.workflow_id, Some("wf1".to_string()));
+        assert_eq!(core_filter.step_id, Some("step-1".to_string()));
     }
 
     // ─── PermissionMode Conversion Tests ────────────────────────────
