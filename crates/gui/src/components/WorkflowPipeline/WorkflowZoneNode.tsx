@@ -22,6 +22,7 @@ export type WorkflowZoneNodeData = {
   /** When true, renders as a compact card without internal details */
   isCollapsed?: boolean;
   isFlashing?: boolean;
+  isWorkflowHighlighted?: boolean;
 };
 
 export type WorkflowZoneNodeType = Node<WorkflowZoneNodeData, "workflowZoneNode">;
@@ -44,6 +45,7 @@ function WorkflowZoneNodeComponent({
     isWorkflowSelected,
     isCollapsed = false,
     isFlashing = false,
+    isWorkflowHighlighted = false,
   } = data;
 
   const handleWorkflowClick = () => {
@@ -58,7 +60,7 @@ function WorkflowZoneNodeComponent({
       <div
         className={`relative rounded-xl bg-bg-secondary/80 backdrop-blur-sm transition-all cursor-pointer hover:bg-bg-secondary ${
           isWorkflowSelected ? "ring-2 ring-primary" : ""
-        }`}
+        } ${isWorkflowHighlighted ? "ring-2 ring-primary" : ""}`}
         style={{
           width: `${COLLAPSED_WORKFLOW_WIDTH}px`,
           height: `${COLLAPSED_WORKFLOW_HEIGHT}px`,
@@ -105,11 +107,13 @@ function WorkflowZoneNodeComponent({
   // Expanded view - full zone with dashed border
   return (
     <div
-      className={`relative rounded-xl bg-bg-secondary/30 transition-all ${isFlashing ? 'animate-flash-border' : ''}`}
+      className={`relative rounded-xl bg-bg-secondary/30 transition-all ${isFlashing ? 'animate-flash-border' : ''} ${isWorkflowHighlighted ? 'ring-2 ring-primary' : ''}`}
       style={{
         width: `${width}px`,
         height: `${height}px`,
-        border: "2px dashed rgba(100, 116, 139, 0.4)",
+        border: isWorkflowHighlighted
+          ? "2px dashed #f59e0b"
+          : "2px dashed rgba(100, 116, 139, 0.4)",
       }}
     >
       {/* Handles for workflow-to-workflow transition edges */}
