@@ -31,7 +31,10 @@ import {
   usePipelineSummary,
   useStepTasks,
 } from "../hooks";
-import type { PipelineStep, PipelineWorkflow } from "../hooks/usePipelineSummary";
+import type {
+  PipelineStep,
+  PipelineWorkflow,
+} from "../hooks/usePipelineSummary";
 import { useToastStore } from "../stores";
 import {
   StepNode,
@@ -134,7 +137,7 @@ function AllWorkflowsPipelineInner() {
   // Synthetic frontend entities for the detail panels and node data.
   const workflows: Workflow[] = useMemo(
     () => pipelineWorkflows.map(pipelineWorkflowToWorkflow),
-    [pipelineWorkflows],
+    [pipelineWorkflows]
   );
 
   const workflowStepsMap = useMemo(() => {
@@ -142,9 +145,9 @@ function AllWorkflowsPipelineInner() {
     for (const wf of pipelineWorkflows) {
       map.set(
         wf.id,
-        wf.workflow_steps.map(pipelineStepToStep).sort(
-          (a, b) => (a.order ?? 0) - (b.order ?? 0),
-        ),
+        wf.workflow_steps
+          .map(pipelineStepToStep)
+          .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
       );
     }
     return map;
@@ -160,7 +163,10 @@ function AllWorkflowsPipelineInner() {
   const stepAggregates = useMemo(() => {
     const map = new Map<
       string,
-      { taskCounts: { epic: number; ticket: number; task: number }; running: number }
+      {
+        taskCounts: { epic: number; ticket: number; task: number };
+        running: number;
+      }
     >();
     for (const wf of pipelineWorkflows) {
       for (const step of wf.workflow_steps) {
@@ -222,20 +228,40 @@ function AllWorkflowsPipelineInner() {
   // Keeps the page from doing a project-wide listTasks on mount.
   const { tasks: stepTasks } = useStepTasks(selectedStepId);
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(
-    null,
+    null
   );
   const selectedWorkflow = useMemo(
     () => workflows.find((w) => w.id === selectedWorkflowId) ?? null,
-    [workflows, selectedWorkflowId],
+    [workflows, selectedWorkflowId]
   );
 
   const [panelHistory, setPanelHistory] = useState<PanelEntry[]>([]);
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [selectedTransitionEdgeId, setSelectedTransitionEdgeId] = useState<
+    string | null
+  >(null);
+
+  const highlightedTransitionWorkflowIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (!selectedTransitionEdgeId) return ids;
+    const t = workflowTransitions.find(
+      (tr) =>
+        `workflow-transition-${tr.from_workflow_id}-${tr.to_workflow_id}` ===
+        selectedTransitionEdgeId
+    );
+    if (t) {
+      ids.add(t.from_workflow_id);
+      ids.add(t.to_workflow_id);
+    }
+    return ids;
+  }, [selectedTransitionEdgeId, workflowTransitions]);
 
   const [flashingWorkflowIds, setFlashingWorkflowIds] = useState<Set<string>>(
-    new Set(),
+    new Set()
   );
-  const [flashingStepIds, setFlashingStepIds] = useState<Set<string>>(new Set());
+  const [flashingStepIds, setFlashingStepIds] = useState<Set<string>>(
+    new Set()
+  );
 
   function currentPanelEntry(): PanelEntry | null {
     if (selectedTaskId) return { type: "task", id: selectedTaskId };
@@ -258,7 +284,7 @@ function AllWorkflowsPipelineInner() {
       setSelectedWorkflowId(null);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [selectedTaskId, selectedStepId, selectedWorkflowId],
+    [selectedTaskId, selectedStepId, selectedWorkflowId]
   );
 
   const handleStepClick = useCallback((step: Step) => {
@@ -297,7 +323,7 @@ function AllWorkflowsPipelineInner() {
       setSelectedWorkflowId(null);
       setSelectedTaskId(null);
     },
-    [selectedWorkflowId],
+    [selectedWorkflowId]
   );
 
   const handleBack = useCallback(() => {
@@ -390,7 +416,7 @@ function AllWorkflowsPipelineInner() {
   const { nodes: elkPositions, edges: elkEdgePaths } = useElkLayout(
     elkLayoutNodes,
     elkLayoutEdges,
-    { direction: "DOWN", nodeSpacing: 60, layerSpacing: 120 },
+    { direction: "DOWN", nodeSpacing: 60, layerSpacing: 120 }
   );
 
   // Toggle collapsed view with 'c'
@@ -447,6 +473,7 @@ function AllWorkflowsPipelineInner() {
           isWorkflowSelected: selectedWorkflow?.id === wf.id,
           isCollapsed,
           isFlashing: flashingWorkflowIds.has(wf.id),
+          isWorkflowHighlighted: highlightedTransitionWorkflowIds.has(wf.id),
         } as WorkflowZoneNodeData,
         draggable: false,
         selectable: false,
@@ -455,11 +482,10 @@ function AllWorkflowsPipelineInner() {
       if (!isCollapsed) {
         sortedSteps.forEach((step, index) => {
           const isStepSelected = selectedStepId === step.id;
-          const aggregates =
-            (step.id && stepAggregates.get(step.id)) || {
-              taskCounts: { epic: 0, ticket: 0, task: 0 },
-              running: 0,
-            };
+          const aggregates = (step.id && stepAggregates.get(step.id)) || {
+            taskCounts: { epic: 0, ticket: 0, task: 0 },
+            running: 0,
+          };
 
           nodes.push({
             id: `step-${wf.id}-${step.order ?? 0}`,
@@ -513,6 +539,7 @@ function AllWorkflowsPipelineInner() {
     isCollapsed,
     flashingWorkflowIds,
     flashingStepIds,
+    highlightedTransitionWorkflowIds,
   ]);
 
   const allEdges = useMemo(() => {
@@ -561,19 +588,24 @@ function AllWorkflowsPipelineInner() {
           ? elkEdgePaths.get(elkEdgeId)
           : undefined;
 
+        const edgeId = `workflow-transition-${transition.from_workflow_id}-${transition.to_workflow_id}`;
+        const isSelected = selectedTransitionEdgeId === edgeId;
+
         edges.push({
-          id: `workflow-transition-${transition.from_workflow_id}-${transition.to_workflow_id}`,
+          id: edgeId,
           source: `workflow-zone-${transition.from_workflow_id}`,
           target: `workflow-zone-${transition.to_workflow_id}`,
-          type: elkEdgePath ? "elkRouted" : "smoothstep",
-          animated: true,
+          selected: isSelected,
+          type: "elkRouted",
+          animated: false,
           data: elkEdgePath
             ? ({
-                sourcePoint: elkEdgePath.sourcePoint,
-                targetPoint: elkEdgePath.targetPoint,
-                bendPoints: elkEdgePath.bendPoints,
-                label: transition.label,
-              } as ElkRoutedEdgeData)
+              sourcePoint: elkEdgePath.sourcePoint,
+              targetPoint: elkEdgePath.targetPoint,
+              bendPoints: elkEdgePath.bendPoints,
+              label: transition.label,
+              highlighted: isSelected,
+            } as ElkRoutedEdgeData)
             : undefined,
           label: elkEdgePath ? undefined : transition.label,
           labelStyle: !elkEdgePath
@@ -582,24 +614,33 @@ function AllWorkflowsPipelineInner() {
           labelBgStyle: !elkEdgePath
             ? { fill: "#18181b", fillOpacity: 0.9 }
             : undefined,
-          labelBgPadding: !elkEdgePath ? ([6, 3] as [number, number]) : undefined,
+          labelBgPadding: !elkEdgePath
+            ? ([6, 3] as [number, number])
+            : undefined,
           labelBgBorderRadius: !elkEdgePath ? 4 : undefined,
           style: {
-            stroke: "rgba(251, 146, 60, 0.6)",
-            strokeWidth: 2,
+            stroke: isSelected ? "#f59e0b" : "rgba(251, 146, 60, 0.6)",
+            strokeWidth: isSelected ? 2.5 : 2,
             strokeDasharray: "5,5",
           },
           markerEnd: {
             type: MarkerType.ArrowClosed,
-            color: "rgba(251, 146, 60, 0.8)",
-            width: 24,
-            height: 24,
+            color: isSelected ? "#f59e0b" : "#a1a1a1",
+            width: 18,
+            height: 18,
           },
         });
       });
 
     return edges;
-  }, [pipelineWorkflows, workflowStepsMap, workflowTransitions, elkEdgePaths, isCollapsed]);
+  }, [
+    pipelineWorkflows,
+    workflowStepsMap,
+    workflowTransitions,
+    elkEdgePaths,
+    isCollapsed,
+    selectedTransitionEdgeId,
+  ]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(allNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(allEdges);
@@ -712,11 +753,10 @@ function AllWorkflowsPipelineInner() {
             </div>
             <button
               onClick={() => setIsCollapsed((prev) => !prev)}
-              className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
-                isCollapsed
+              className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${isCollapsed
                   ? "bg-accent/20 text-accent hover:bg-accent/30"
                   : "bg-bg-secondary text-text-muted hover:bg-bg-elevated"
-              }`}
+                }`}
               title="Press 'c' to toggle"
             >
               {isCollapsed ? "Collapsed" : "Expanded"}
@@ -733,6 +773,12 @@ function AllWorkflowsPipelineInner() {
             edges={edges}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
+            onEdgeClick={(_, edge) => {
+              setSelectedTransitionEdgeId((prev) =>
+                prev === edge.id ? null : edge.id
+              );
+            }}
+            onPaneClick={() => setSelectedTransitionEdgeId(null)}
             nodeTypes={nodeTypes}
             edgeTypes={edgeTypes}
             fitView
