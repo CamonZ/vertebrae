@@ -18,7 +18,7 @@ function SectionList({
   if (items.length === 0) return null;
 
   return (
-    <div className="space-y-1">
+    <div className="space-y-2">
       <h4 className="font-mono text-[10px] uppercase tracking-wider text-text-muted">
         {label}
       </h4>
@@ -71,9 +71,9 @@ export function SpecSection({ description, sections, onDescriptionChange }: Spec
   // Always render — description is always shown (editable when callback provided)
 
   return (
-    <div className="space-y-3 px-4 py-3" data-testid="spec-section">
+    <div className="space-y-5 px-4 py-2" data-testid="spec-section">
       {grouped.goals.length > 0 && (
-        <div className="space-y-1">
+        <div className="space-y-2">
           <h4 className="font-mono text-[10px] uppercase tracking-wider text-text-muted">
             Goal
           </h4>
@@ -88,7 +88,7 @@ export function SpecSection({ description, sections, onDescriptionChange }: Spec
         </div>
       )}
 
-      <div className="space-y-1">
+      <div className="space-y-2">
         <h4 className="font-mono text-[10px] uppercase tracking-wider text-text-muted">
           Description
         </h4>

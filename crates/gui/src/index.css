@@ -1,35 +1,36 @@
-/* Google Fonts - Geist family for Swiss precision */
+/* Google Fonts - Geist family */
 @import url("https://fonts.googleapis.com/css2?family=Geist:wght@100;200;300;400;500;600;700;800;900&family=Geist+Mono:wght@100;200;300;400;500;600;700;800;900&display=swap");
 
 @import "tailwindcss";
 
 /* =============================================================================
-   VERTEBRAE - Neural Pathways Design System
-   A dark, technical aesthetic inspired by neural signal transmission
+   VERTEBRAE - Articulated design system
+   Monochrome warm neutrals, single persimmon accent, flat by default.
+   Glow is reserved as a semantic signal for live execution state.
    ============================================================================= */
 
 @theme {
   /* -------------------------------------------------------------------------
-     COLOR SYSTEM - Warm Neural Palette
-     True dark backgrounds with amber/gold accents
+     COLOR SYSTEM - Articulated palette (dark theme defaults)
+     One accent, warm neutrals, no pure black/white.
      ------------------------------------------------------------------------- */
 
-  /* Primary - Warm Amber (synaptic fire) */
-  --color-primary: #f59e0b;
-  --color-primary-hover: #fbbf24;
-  --color-primary-dim: rgba(245, 158, 11, 0.12);
-  --color-primary-glow: rgba(245, 158, 11, 0.35);
+  /* Single accent - Persimmon. Used for primary actions, focus, running state. */
+  --color-primary: #ff5c2e;
+  --color-primary-hover: #e84a1e;
+  --color-primary-dim: rgba(255, 92, 46, 0.12);
+  --color-primary-glow: rgba(255, 92, 46, 0.35);
 
-  /* Accent - Vibrant Orange (heat signature) */
-  --color-accent: #ea580c;
-  --color-accent-hover: #f97316;
-  --color-accent-dim: rgba(234, 88, 12, 0.12);
-  --color-accent-glow: rgba(234, 88, 12, 0.35);
+  /* Accent aliases resolve to the same persimmon - kept for component compat */
+  --color-accent: #ff5c2e;
+  --color-accent-hover: #e84a1e;
+  --color-accent-dim: rgba(255, 92, 46, 0.12);
+  --color-accent-glow: rgba(255, 92, 46, 0.35);
 
-  /* Secondary - Warm gray */
-  --color-secondary: #78716c;
+  /* Secondary - warm neutral */
+  --color-secondary: #6f6c66;
 
-  /* Status colors - Clear signals */
+  /* Status colors - per-theme accessible against bg */
   --color-success: #22c55e;
   --color-success-dim: rgba(34, 197, 94, 0.12);
   --color-warning: #eab308;
@@ -39,24 +40,25 @@
   --color-info: #a78bfa;
   --color-info-dim: rgba(167, 139, 250, 0.12);
 
-  /* Background colors - True dark neutrals */
-  --color-bg-primary: #09090b;
-  --color-bg-secondary: #0c0c0e;
-  --color-bg-tertiary: #18181b;
-  --color-bg-elevated: #1f1f23;
-  --color-bg-hover: rgba(245, 158, 11, 0.06);
+  /* Background tones - warm neutrals, ~6 lightness steps apart */
+  --color-bg-primary: #0a0a0a;
+  --color-bg-secondary: #111111;
+  --color-bg-tertiary: #161616;
+  --color-bg-elevated: #161616;
+  --color-bg-hover: rgba(244, 241, 236, 0.04);
 
-  /* Text colors - Warm neutrals */
-  --color-text-primary: #fafaf9;
-  --color-text-secondary: #a8a29e;
-  --color-text-muted: #57534e;
-  --color-text-accent: #f59e0b;
+  /* Text - warm off-whites, never pure white */
+  --color-text-primary: #f4f1ec;
+  --color-text-secondary: #b8b5af;
+  --color-text-muted: #6f6c66;
+  --color-text-accent: #ff5c2e;
 
-  /* Border colors - Warm tints */
-  --color-border: rgba(168, 162, 158, 0.12);
-  --color-border-subtle: rgba(168, 162, 158, 0.06);
-  --color-border-focus: #f59e0b;
-  --color-border-glow: rgba(245, 158, 11, 0.4);
+  /* Borders - solid tones, not translucent */
+  --color-border: #1f1f1f;
+  --color-border-subtle: #161616;
+  --color-border-focus: #ff5c2e;
+  --color-border-glow: rgba(255, 92, 46, 0.4);
+  --color-border-strong: #2a2a2a;
 
   /* -------------------------------------------------------------------------
      SPACING SCALE
@@ -102,9 +104,10 @@
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
   --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.6);
-  --shadow-glow: 0 0 20px rgba(6, 182, 212, 0.3);
-  --shadow-glow-sm: 0 0 10px rgba(6, 182, 212, 0.2);
-  --shadow-inner-glow: inset 0 0 20px rgba(6, 182, 212, 0.1);
+  /* Glow uses persimmon and is reserved for live execution state */
+  --shadow-glow: 0 0 20px rgba(255, 92, 46, 0.3);
+  --shadow-glow-sm: 0 0 10px rgba(255, 92, 46, 0.2);
+  --shadow-inner-glow: inset 0 0 20px rgba(255, 92, 46, 0.1);
 
   /* -------------------------------------------------------------------------
      TRANSITIONS
@@ -119,24 +122,25 @@
    LIGHT MODE OVERRIDES (Optional - for users who prefer light)
    ============================================================================= */
 .light {
-  --color-bg-primary: #fafaf9;
-  --color-bg-secondary: #f5f5f4;
-  --color-bg-tertiary: #e7e5e4;
+  --color-bg-primary: #f7f4ee;
+  --color-bg-secondary: #ffffff;
+  --color-bg-tertiary: #ffffff;
   --color-bg-elevated: #ffffff;
-  --color-bg-hover: rgba(245, 158, 11, 0.08);
+  --color-bg-hover: rgba(10, 10, 10, 0.04);
 
-  --color-text-primary: #1c1917;
-  --color-text-secondary: #57534e;
-  --color-text-muted: #a8a29e;
+  --color-text-primary: #0a0a0a;
+  --color-text-secondary: #4a4742;
+  --color-text-muted: #807c75;
 
-  --color-border: rgba(28, 25, 23, 0.1);
-  --color-border-subtle: rgba(28, 25, 23, 0.05);
+  --color-border: #e6e1d7;
+  --color-border-subtle: #efeae0;
+  --color-border-strong: #c9c3b5;
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
   --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
-  --shadow-glow: 0 0 20px rgba(245, 158, 11, 0.2);
-  --shadow-inner-glow: inset 0 0 20px rgba(245, 158, 11, 0.08);
+  --shadow-glow: 0 0 20px rgba(255, 92, 46, 0.2);
+  --shadow-inner-glow: inset 0 0 20px rgba(255, 92, 46, 0.08);
 }
 
 /* =============================================================================
@@ -208,13 +212,10 @@ body {
    NEURAL GRID BACKGROUND
    Subtle dot pattern that feels like a neural network
    ============================================================================= */
+/* Articulated is flat — the dot pattern is intentionally suppressed.
+   Class kept so call sites don't break; renders nothing. */
 .neural-grid {
-  background-image: radial-gradient(
-    circle at center,
-    var(--color-border) 1px,
-    transparent 1px
-  );
-  background-size: 24px 24px;
+  background-image: none;
 }
 
 /* =============================================================================
@@ -332,29 +333,10 @@ body {
 /* =============================================================================
    GLOWING BORDERS
    ============================================================================= */
+/* Decorative hover-glow border removed under Articulated.
+   Kept as a no-op so any references continue to compile. */
 .glow-border {
   position: relative;
-}
-
-.glow-border::before {
-  content: "";
-  position: absolute;
-  inset: -1px;
-  border-radius: inherit;
-  background: linear-gradient(
-    135deg,
-    var(--color-primary-glow) 0%,
-    transparent 50%,
-    var(--color-primary-glow) 100%
-  );
-  opacity: 0;
-  transition: opacity var(--transition-normal);
-  z-index: -1;
-}
-
-.glow-border:hover::before,
-.glow-border:focus-within::before {
-  opacity: 1;
 }
 
 /* =============================================================================
@@ -405,14 +387,11 @@ body {
   background-color: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
-  transition:
-    border-color var(--transition-normal),
-    box-shadow var(--transition-normal);
+  transition: border-color var(--transition-normal);
 }
 
 .card:hover {
-  border-color: var(--color-border-focus);
-  box-shadow: var(--shadow-glow-sm);
+  border-color: var(--color-border-strong);
 }
 
 .card--elevated {
@@ -496,7 +475,6 @@ body {
 
 .btn--primary:hover {
   background-color: var(--color-primary-hover);
-  box-shadow: var(--shadow-glow-sm);
 }
 
 .btn--ghost {
@@ -544,7 +522,6 @@ body {
 .input:focus {
   outline: none;
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px var(--color-primary-dim);
 }
 
 /* =============================================================================
@@ -576,7 +553,6 @@ body {
   right: 0;
   height: 2px;
   background-color: var(--color-primary);
-  box-shadow: var(--shadow-glow-sm);
 }
 
 /* =============================================================================
@@ -650,7 +626,8 @@ body {
 }
 
 .react-flow__node.selected {
-  box-shadow: var(--shadow-glow);
+  outline: 1px solid var(--color-primary);
+  outline-offset: 2px;
 }
 
 /* Remove focus/selection glow from step and task zone nodes */
@@ -662,10 +639,9 @@ body {
   outline: none !important;
 }
 
-/* Hover glow for task zone nodes */
-.react-flow__node-taskZoneNode:hover {
-  box-shadow: var(--shadow-glow-sm);
-  transition: box-shadow 0.2s ease;
+/* Hover state for task zone nodes — tonal, no glow */
+.react-flow__node-taskZoneNode:hover .taskZoneNode {
+  border-color: var(--color-border-strong) !important;
 }
 
 /* Task zone node specific styling for light mode compatibility */
