@@ -15,6 +15,7 @@ import { InlineEditField } from "./InlineEditField";
 import { Toggle } from "../Toggle";
 import { AcceptanceCriteria } from "./AcceptanceCriteria";
 import { CollapsibleSection } from "./CollapsibleSection";
+import { SpineRule } from "../SpineRule";
 import { DependenciesSummary } from "./DependenciesSummary";
 import { CodeRefsSummary } from "./CodeRefsSummary";
 import { SpecSection } from "./SpecSection";
@@ -584,7 +585,7 @@ export function TaskDetailPanel({
               type="button"
               onClick={handleRunStep}
               disabled={isRunningStep || isRunningWorkflow}
-              className="cursor-pointer flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary bg-primary/10 text-primary hover:bg-primary/20 hover:shadow-glow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              className="cursor-pointer flex items-center gap-1.5 rounded-md border border-border-strong px-2.5 py-1.5 text-xs font-medium text-text-primary transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary hover:bg-bg-hover disabled:opacity-50 disabled:cursor-not-allowed"
               aria-label="Run current step"
               title="Run the current workflow step"
             >
@@ -604,7 +605,7 @@ export function TaskDetailPanel({
               type="button"
               onClick={handleRunWorkflow}
               disabled={isRunningStep || isRunningWorkflow}
-              className="cursor-pointer flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-accent bg-accent/10 text-accent hover:bg-accent/20 hover:shadow-glow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              className="cursor-pointer flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary bg-primary text-bg-primary hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed"
               aria-label="Run entire workflow"
               title="Run the entire workflow for this task"
             >
@@ -631,7 +632,7 @@ export function TaskDetailPanel({
           <button
             type="button"
             onClick={handleShowDeleteConfirmation}
-            className="cursor-pointer flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-error bg-error/10 text-error hover:bg-error/20 hover:shadow-glow-sm"
+            className="cursor-pointer flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-error hover:bg-error/10 hover:text-error"
             aria-label="Delete task"
             title="Delete this task"
           >
@@ -729,7 +730,7 @@ export function TaskDetailPanel({
       {taskData && !isLoading && !error && (
         <div className="flex-1 overflow-auto">
           {/* Title + badges row */}
-          <div className="border-b border-border px-4 py-3">
+          <div className="px-4 pt-4 pb-3">
             {editingField === "title" ? (
               <div className="space-y-2">
                 <input
@@ -781,6 +782,9 @@ export function TaskDetailPanel({
               </code>
             </div>
           </div>
+          <div className="px-4 py-3">
+            <SpineRule />
+          </div>
 
           {/* Rejection Reason Banner */}
           {taskData.rejection_reason && (
@@ -812,8 +816,8 @@ export function TaskDetailPanel({
           )}
 
           {/* === ACCEPTANCE CRITERIA (most prominent) === */}
-          <div className="border-b border-border">
-            <div className="flex items-center justify-between px-4 pt-3 pb-1">
+          <div>
+            <div className="flex items-center justify-between px-4 pt-4 pb-2">
               <div className="flex items-center gap-2">
                 <svg
                   className="h-4 w-4 text-success"
@@ -838,6 +842,9 @@ export function TaskDetailPanel({
               taskId={taskData.id}
               onSectionsChanged={refetch}
             />
+            <div className="px-4 py-3">
+              <SpineRule />
+            </div>
           </div>
 
           {/* === PROGRESS / EXECUTION TIMELINE === */}
@@ -862,7 +869,7 @@ export function TaskDetailPanel({
             }
             badge={
               checklistItems.length > 0 ? (
-                <span className="rounded-full bg-bg-tertiary px-2 py-0.5 text-[10px] text-text-muted">
+                <span className="font-mono text-[10px] text-text-muted">
                   {checklistItems.filter((c) => c.done).length}/
                   {checklistItems.length}
                 </span>
@@ -975,7 +982,7 @@ export function TaskDetailPanel({
                 </svg>
               }
               badge={
-                <span className="rounded-full bg-bg-tertiary px-2 py-0.5 text-[10px] text-text-muted">
+                <span className="font-mono text-[10px] text-text-muted">
                   {children.length}
                 </span>
               }
@@ -1069,7 +1076,7 @@ export function TaskDetailPanel({
             }
             badge={
               (taskData.code_refs?.length ?? 0) > 0 ? (
-                <span className="rounded-full bg-bg-tertiary px-2 py-0.5 text-[10px] text-text-muted">
+                <span className="font-mono text-[10px] text-text-muted">
                   {taskData.code_refs?.length}
                 </span>
               ) : undefined

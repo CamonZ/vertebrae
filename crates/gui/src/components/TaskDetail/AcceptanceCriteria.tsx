@@ -63,9 +63,7 @@ function StatusIndicator({ status }: { status: CriterionStatus }) {
       );
     case "pending":
       return (
-        <div className="flex h-5 w-5 items-center justify-center rounded-full bg-bg-tertiary text-text-muted">
-          <div className="h-2 w-2 rounded-full bg-text-muted/40" />
-        </div>
+        <div className="h-5 w-5 rounded-full border border-border-strong" />
       );
   }
 }

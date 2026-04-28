@@ -60,11 +60,13 @@ function WorkflowZoneNodeComponent({
       <div
         className={`relative rounded-xl bg-bg-secondary/80 backdrop-blur-sm transition-all cursor-pointer hover:bg-bg-secondary ${
           isWorkflowSelected ? "ring-2 ring-primary" : ""
-        } ${isWorkflowHighlighted ? "ring-2 ring-primary" : ""}`}
+        }`}
         style={{
           width: `${COLLAPSED_WORKFLOW_WIDTH}px`,
           height: `${COLLAPSED_WORKFLOW_HEIGHT}px`,
-          border: "1px solid rgba(100, 116, 139, 0.5)",
+          border: isWorkflowHighlighted
+            ? "2px dashed #ff5c2e"
+            : "1px solid rgba(100, 116, 139, 0.5)",
         }}
         onClick={handleWorkflowClick}
       >
@@ -107,12 +109,12 @@ function WorkflowZoneNodeComponent({
   // Expanded view - full zone with dashed border
   return (
     <div
-      className={`relative rounded-xl bg-bg-secondary/30 transition-all ${isFlashing ? 'animate-flash-border' : ''} ${isWorkflowHighlighted ? 'ring-2 ring-primary' : ''}`}
+      className={`relative rounded-xl bg-bg-secondary/30 transition-all ${isFlashing ? 'animate-flash-border' : ''}`}
       style={{
         width: `${width}px`,
         height: `${height}px`,
         border: isWorkflowHighlighted
-          ? "2px dashed #f59e0b"
+          ? "2px dashed #ff5c2e"
           : "2px dashed rgba(100, 116, 139, 0.4)",
       }}
     >
