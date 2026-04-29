@@ -4,3 +4,4 @@ export { WorkflowsPage } from "./WorkflowsPage";
 export { AllWorkflowsPipeline } from "./AllWorkflowsPipeline";
 export { OperationsPage } from "./OperationsPage";
 export { BoardPage } from "./BoardPage";
+export { TracesPage } from "./TracesPage";
