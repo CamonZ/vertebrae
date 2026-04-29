@@ -22,6 +22,7 @@ export type WorkflowZoneNodeData = {
   /** When true, renders as a compact card without internal details */
   isCollapsed?: boolean;
   isFlashing?: boolean;
+  isWorkflowHighlighted?: boolean;
 };
 
 export type WorkflowZoneNodeType = Node<WorkflowZoneNodeData, "workflowZoneNode">;
@@ -44,6 +45,7 @@ function WorkflowZoneNodeComponent({
     isWorkflowSelected,
     isCollapsed = false,
     isFlashing = false,
+    isWorkflowHighlighted = false,
   } = data;
 
   const handleWorkflowClick = () => {
@@ -62,7 +64,9 @@ function WorkflowZoneNodeComponent({
         style={{
           width: `${COLLAPSED_WORKFLOW_WIDTH}px`,
           height: `${COLLAPSED_WORKFLOW_HEIGHT}px`,
-          border: "1px solid rgba(100, 116, 139, 0.5)",
+          border: isWorkflowHighlighted
+            ? "2px dashed #ff5c2e"
+            : "1px solid rgba(100, 116, 139, 0.5)",
         }}
         onClick={handleWorkflowClick}
       >
@@ -109,7 +113,9 @@ function WorkflowZoneNodeComponent({
       style={{
         width: `${width}px`,
         height: `${height}px`,
-        border: "2px dashed rgba(100, 116, 139, 0.4)",
+        border: isWorkflowHighlighted
+          ? "2px dashed #ff5c2e"
+          : "2px dashed rgba(100, 116, 139, 0.4)",
       }}
     >
       {/* Handles for workflow-to-workflow transition edges */}

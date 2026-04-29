@@ -11,6 +11,7 @@ import { OpenChatButton } from "../OpenChatButton";
 import type { ViewMode } from "../TaskList";
 import { TaskList, TaskTreeView } from "../TaskList";
 import { buildTreeFromTasks } from "../../utils/buildTreeFromTasks";
+import { LiquidHighlight } from "./LiquidHighlight";
 
 interface StepDetailPanelProps {
   stepId: string | null;
@@ -489,7 +490,7 @@ export function StepDetailPanel({
             type="button"
             onClick={handleShowDeleteConfirmation}
             disabled={isDeleting || showDeleteConfirmation}
-            className="cursor-pointer flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-error bg-error/10 text-error hover:bg-error/20 hover:shadow-glow-sm disabled:opacity-50"
+            className="cursor-pointer flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-error hover:bg-error/10 hover:text-error disabled:opacity-50"
             aria-label="Delete step"
             title="Delete this step"
           >
@@ -530,9 +531,12 @@ export function StepDetailPanel({
 
       {/* Configuration Tab Content */}
       {activeTab === "config" && (
-        <>
-          {/* Step title */}
-          <div className="border-b border-border px-4 py-3">
+        <div
+          className="flex-1 divide-y divide-border overflow-auto"
+          data-testid="step-config-scroll"
+        >
+          {/* Step title + Goal + Prompt scroll with the rest of the config. */}
+          <div className="px-4 py-3">
             <div className="flex items-center gap-3">
               <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-primary/30 bg-primary/10 font-mono text-sm font-bold text-primary">
                 {(step.order ?? 0) + 1}
@@ -564,170 +568,172 @@ export function StepDetailPanel({
               />
             </div>
 
-            {/* Prompt - inline editable */}
+            {/* Prompt */}
             <div className="mt-3">
               <SectionHeader title="Prompt" />
-              <InlineEditField
-                value={step.prompt || ""}
-                placeholder="Click to add prompt..."
-                multiline
-                rows={4}
-                onSave={async (value) => {
-                  await handleUpdateField({ prompt: value || null });
-                }}
-              />
+              <div className="rounded-lg border border-border bg-bg-tertiary p-3">
+                <InlineEditField
+                  value={step.prompt || ""}
+                  placeholder="Click to add prompt..."
+                  multiline
+                  rows={4}
+                  monospace
+                  renderDisplay={(value) => (
+                    <LiquidHighlight source={value} data-testid="prompt-liquid-display" />
+                  )}
+                  onSave={async (value) => {
+                    await handleUpdateField({ prompt: value || null });
+                  }}
+                />
+              </div>
             </div>
-
           </div>
 
-          {/* Content */}
-          <div className="flex-1 divide-y divide-border overflow-auto">
-            {/* Overview */}
-            <div className="p-4">
-              <SectionHeader title="Overview" />
-              <div className="space-y-1">
-                <DetailRow label="Type">
-                  <StepTypeBadge stepType={step.step_type ?? "execute"} />
-                </DetailRow>
-                <DetailRow label="Order">
-                  <input
-                    type="number"
-                    value={step.order}
-                    onChange={(e) => {
-                      const newOrder = parseInt(e.target.value, 10);
-                      if (!isNaN(newOrder)) {
-                        void handleOrderChange(newOrder);
-                      }
-                    }}
-                    className="w-20 rounded border border-border bg-bg-tertiary px-2 py-1 font-mono text-xs text-right focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-                  />
-                </DetailRow>
-                <DetailRow label="Final Step">
-                  <Toggle
-                    checked={step.is_final ?? false}
-                    onChange={handleToggleIsFinal}
-                    label={`Final step: ${step.is_final ? "enabled" : "disabled"}`}
-                  />
-                </DetailRow>
-              </div>
+          {/* Overview */}
+          <div className="p-4">
+            <SectionHeader title="Overview" />
+            <div className="space-y-1">
+              <DetailRow label="Type">
+                <StepTypeBadge stepType={step.step_type ?? "execute"} />
+              </DetailRow>
+              <DetailRow label="Order">
+                <input
+                  type="number"
+                  value={step.order}
+                  onChange={(e) => {
+                    const newOrder = parseInt(e.target.value, 10);
+                    if (!isNaN(newOrder)) {
+                      void handleOrderChange(newOrder);
+                    }
+                  }}
+                  className="w-20 rounded border border-border bg-bg-tertiary px-2 py-1 font-mono text-xs text-right focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                />
+              </DetailRow>
+              <DetailRow label="Final Step">
+                <Toggle
+                  checked={step.is_final ?? false}
+                  onChange={handleToggleIsFinal}
+                  label={`Final step: ${step.is_final ? "enabled" : "disabled"}`}
+                />
+              </DetailRow>
             </div>
+          </div>
 
-            {/* Output Schema */}
-            {step.output_schema && (
-              <div className="p-4">
-                <SectionHeader title="Output Schema" />
-                <SchemaTree schema={step.output_schema as Record<string, unknown>} />
+          {/* Output Schema */}
+          {step.output_schema && (
+            <div className="p-4">
+              <SectionHeader title="Output Schema" />
+              <SchemaTree schema={step.output_schema as Record<string, unknown>} />
+            </div>
+          )}
+
+          {/* Agents */}
+          <div className="p-4">
+            <SectionHeader title={`Agents (${(step.agents || []).length})`} />
+            <EditableList
+              items={step.agents || []}
+              emptyText="No agents"
+              placeholder="Add agent (e.g., .claude/agents/reviewer.md)..."
+              onAdd={handleAddAgent}
+              onEdit={handleEditAgent}
+              onDelete={handleDeleteAgent}
+              monospace
+            />
+          </div>
+
+          {/* Skills */}
+          <div className="p-4">
+            <SectionHeader title={`Skills (${(step.skills || []).length})`} />
+            <EditableList
+              items={step.skills || []}
+              emptyText="No skills"
+              placeholder="Add skill (e.g., code-review)..."
+              onAdd={handleAddSkill}
+              onEdit={handleEditSkill}
+              onDelete={handleDeleteSkill}
+              monospace
+            />
+          </div>
+
+          {/* Transitions */}
+          <div className="p-4">
+            <SectionHeader
+              title={`Transitions (${(step.transitions_to ?? []).length})`}
+            />
+            {(step.transitions_to ?? []).length === 0 ? (
+              <p className="text-xs italic text-text-muted">No transitions</p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {(step.transitions_to ?? []).map((targetId, index) => {
+                  const targetStep = allSteps.find((s) => s.id === targetId);
+                  return (
+                    <span
+                      key={`${targetId}-${index}`}
+                      className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 font-mono text-xs text-primary"
+                    >
+                      <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                      </svg>
+                      {targetStep?.name || targetId.replace(/^step:/, "")}
+                    </span>
+                  );
+                })}
               </div>
             )}
+          </div>
 
-            {/* Agents */}
-            <div className="p-4">
-              <SectionHeader title={`Agents (${(step.agents || []).length})`} />
-              <EditableList
-                items={step.agents || []}
-                emptyText="No agents"
-                placeholder="Add agent (e.g., .claude/agents/reviewer.md)..."
-                onAdd={handleAddAgent}
-                onEdit={handleEditAgent}
-                onDelete={handleDeleteAgent}
-                monospace
-              />
-            </div>
-
-            {/* Skills */}
-            <div className="p-4">
-              <SectionHeader title={`Skills (${(step.skills || []).length})`} />
-              <EditableList
-                items={step.skills || []}
-                emptyText="No skills"
-                placeholder="Add skill (e.g., code-review)..."
-                onAdd={handleAddSkill}
-                onEdit={handleEditSkill}
-                onDelete={handleDeleteSkill}
-                monospace
-              />
-            </div>
-
-            {/* Transitions */}
-            <div className="p-4">
-              <SectionHeader
-                title={`Transitions (${(step.transitions_to ?? []).length})`}
-              />
-              {(step.transitions_to ?? []).length === 0 ? (
-                <p className="text-xs italic text-text-muted">No transitions</p>
-              ) : (
-                <div className="flex flex-wrap gap-1.5">
-                  {(step.transitions_to ?? []).map((targetId, index) => {
-                    const targetStep = allSteps.find((s) => s.id === targetId);
-                    return (
-                      <span
-                        key={`${targetId}-${index}`}
-                        className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 font-mono text-xs text-primary"
-                      >
-                        <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 7l5 5m0 0l-5 5m5-5H6" />
-                        </svg>
-                        {targetStep?.name || targetId.replace(/^step:/, "")}
-                      </span>
-                    );
-                  })}
-                </div>
+          {/* Model Configuration */}
+          <div className="p-4">
+            <SectionHeader title="Model" />
+            <div className="space-y-1">
+              <DetailRow label="Primary">
+                {step.agent_config?.model ? (
+                  <code className="rounded bg-bg-tertiary px-1.5 py-0.5 font-mono text-xs">
+                    {step.agent_config.model}
+                  </code>
+                ) : (
+                  <span className="text-xs italic text-text-muted">Default</span>
+                )}
+              </DetailRow>
+              {step.agent_config?.fallback_model && (
+                <DetailRow label="Fallback">
+                  <code className="rounded bg-bg-tertiary px-1.5 py-0.5 font-mono text-xs">
+                    {step.agent_config.fallback_model}
+                  </code>
+                </DetailRow>
               )}
             </div>
-
-            {/* Model Configuration */}
-            <div className="p-4">
-              <SectionHeader title="Model" />
-              <div className="space-y-1">
-                <DetailRow label="Primary">
-                  {step.agent_config?.model ? (
-                    <code className="rounded bg-bg-tertiary px-1.5 py-0.5 font-mono text-xs">
-                      {step.agent_config.model}
-                    </code>
-                  ) : (
-                    <span className="text-xs italic text-text-muted">Default</span>
-                  )}
-                </DetailRow>
-                {step.agent_config?.fallback_model && (
-                  <DetailRow label="Fallback">
-                    <code className="rounded bg-bg-tertiary px-1.5 py-0.5 font-mono text-xs">
-                      {step.agent_config.fallback_model}
-                    </code>
-                  </DetailRow>
-                )}
-              </div>
-            </div>
-
-            {/* Timeline */}
-            <div className="p-4">
-              <SectionHeader title="Timeline" />
-              <div className="space-y-1">
-                <DetailRow label="Created">
-                  {step.created_at
-                    ? new Date(step.created_at).toLocaleString()
-                    : "—"}
-                </DetailRow>
-                <DetailRow label="Updated">
-                  {step.updated_at
-                    ? new Date(step.updated_at).toLocaleString()
-                    : "—"}
-                </DetailRow>
-              </div>
-            </div>
-
-            {/* Delete Confirmation Section */}
-            {showDeleteConfirmation && (
-              <DeleteConfirmation
-                itemType="Step"
-                itemName={step.name}
-                isDeleting={isDeleting}
-                error={deleteError}
-                onConfirm={handleConfirmDelete}
-                onCancel={handleCancelDelete}
-              />
-            )}
           </div>
-        </>
+
+          {/* Timeline */}
+          <div className="p-4">
+            <SectionHeader title="Timeline" />
+            <div className="space-y-1">
+              <DetailRow label="Created">
+                {step.created_at
+                  ? new Date(step.created_at).toLocaleString()
+                  : "—"}
+              </DetailRow>
+              <DetailRow label="Updated">
+                {step.updated_at
+                  ? new Date(step.updated_at).toLocaleString()
+                  : "—"}
+              </DetailRow>
+            </div>
+          </div>
+
+          {/* Delete Confirmation Section */}
+          {showDeleteConfirmation && (
+            <DeleteConfirmation
+              itemType="Step"
+              itemName={step.name}
+              isDeleting={isDeleting}
+              error={deleteError}
+              onConfirm={handleConfirmDelete}
+              onCancel={handleCancelDelete}
+            />
+          )}
+        </div>
       )}
 
       {/* Tasks Tab Content */}
