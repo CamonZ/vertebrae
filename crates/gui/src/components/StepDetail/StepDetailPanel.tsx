@@ -489,7 +489,7 @@ export function StepDetailPanel({
             type="button"
             onClick={handleShowDeleteConfirmation}
             disabled={isDeleting || showDeleteConfirmation}
-            className="cursor-pointer flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-error bg-error/10 text-error hover:bg-error/20 hover:shadow-glow-sm disabled:opacity-50"
+            className="cursor-pointer flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-error hover:bg-error/10 hover:text-error disabled:opacity-50"
             aria-label="Delete step"
             title="Delete this step"
           >

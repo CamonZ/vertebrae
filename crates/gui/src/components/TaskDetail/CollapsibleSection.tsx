@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { SpineRule } from "../SpineRule";
 
 interface CollapsibleSectionProps {
   title: string;
@@ -20,11 +21,11 @@ export function CollapsibleSection({
   const [isOpen, setIsOpen] = useState(defaultOpen);
 
   return (
-    <div className="border-b border-border" data-testid={testId}>
+    <div data-testid={testId}>
       <button
         type="button"
         onClick={() => setIsOpen(!isOpen)}
-        className="flex w-full items-center justify-between px-4 py-2.5 text-left transition-colors hover:bg-bg-tertiary/50 cursor-pointer"
+        className="flex w-full items-center justify-between px-4 py-3.5 text-left transition-colors hover:bg-bg-hover cursor-pointer"
         aria-expanded={isOpen}
         aria-label={`Toggle ${title} section`}
       >
@@ -54,7 +55,10 @@ export function CollapsibleSection({
           />
         </svg>
       </button>
-      {isOpen && children}
+      {isOpen && <div className="pb-6">{children}</div>}
+      <div className="px-4 py-3">
+        <SpineRule />
+      </div>
     </div>
   );
 }
