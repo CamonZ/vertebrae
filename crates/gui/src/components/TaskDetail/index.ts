@@ -2,7 +2,7 @@ export { TaskDetailPanel } from './TaskDetailPanel';
 export { TaskSections } from './TaskSections';
 export { TaskCodeRefs } from './TaskCodeRefs';
 export { TaskRelations } from './TaskRelations';
-export { ExecutionHistory } from './ExecutionHistory';
+export { TraceMiniView } from './TraceMiniView';
 export { AcceptanceCriteria } from './AcceptanceCriteria';
 export { CollapsibleSection } from './CollapsibleSection';
 export { DependenciesSummary } from './DependenciesSummary';
