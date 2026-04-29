@@ -4,6 +4,8 @@ export { useStepTasks } from "./useStepTasks";
 export { useTask } from "./useTask";
 export { useDeleteTask } from "./useDeleteTask";
 export { useTaskExecutions } from "./useTaskExecutions";
+export { useSubtreeExecutions } from "./useSubtreeExecutions";
+export type { UseSubtreeExecutionsResult } from "./useSubtreeExecutions";
 export { useTaskChangeListener } from "./useTaskChangeListener";
 export { useTaskStepChangeListener } from "./useTaskStepChangeListener";
 export { useWorkflows } from "./useWorkflows";
