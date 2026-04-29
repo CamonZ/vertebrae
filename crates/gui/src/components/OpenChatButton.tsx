@@ -27,7 +27,7 @@ export function OpenChatButton({
   return (
     <button
       onClick={handleClick}
-      className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-accent transition-colors hover:bg-accent/10 ${className}`}
+      className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary ${className}`}
       title={`Open chat for this ${scope}`}
     >
       <svg
