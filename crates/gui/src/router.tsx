@@ -13,6 +13,7 @@ import {
   AllWorkflowsPipeline,
   OperationsPage,
   BoardPage,
+  TracesPage,
 } from "./pages";
 import { commands } from "./bindings";
 
@@ -116,6 +117,22 @@ export const router = createBrowserRouter([
         element: (
           <ProjectGuard>
             <TasksPage />
+          </ProjectGuard>
+        ),
+      },
+      {
+        path: "traces/:taskId",
+        element: (
+          <ProjectGuard>
+            <TracesPage />
+          </ProjectGuard>
+        ),
+      },
+      {
+        path: "traces",
+        element: (
+          <ProjectGuard>
+            <TracesPage />
           </ProjectGuard>
         ),
       },
