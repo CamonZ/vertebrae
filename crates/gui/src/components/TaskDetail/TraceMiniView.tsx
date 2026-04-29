@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import type { ExecutionStatus, StepExecution } from "../../bindings";
 import { useTaskExecutions } from "../../hooks";
 import { useSubtreeExecutions } from "../../hooks/useSubtreeExecutions";
-import { computeExecutionRollups } from "../../utils";
+import { computeExecutionRollups, formatCost } from "../../utils";
 import { formatDuration } from "../Operations/formatDuration";
 
 interface TraceMiniViewProps {
@@ -39,12 +39,6 @@ function StatusPill({ status }: { status: ExecutionStatus }) {
       {status.replace(/_/g, " ")}
     </span>
   );
-}
-
-function formatCost(cost: number): string {
-  if (cost === 0) return "$0";
-  if (cost < 0.01) return `$${cost.toFixed(4)}`;
-  return `$${cost.toFixed(2)}`;
 }
 
 function pickLastExecution(
