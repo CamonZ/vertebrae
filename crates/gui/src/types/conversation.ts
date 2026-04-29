@@ -292,3 +292,87 @@ export function parseSessionLogs(logs: SessionLog[]): ConversationEvent[] {
 
   return events;
 }
+
+// ============================================================================
+// Cross-execution merging (UnifiedChatView)
+// ============================================================================
+
+/**
+ * Conversation event tagged with the execution and task it originated from.
+ * Used by UnifiedChatView to merge events across multiple executions in a
+ * subtree while still being able to draw step boundaries and delegation
+ * blocks per (execution, step) and (task) tuple.
+ */
+export interface TaggedConversationEvent {
+  event: ConversationEvent;
+  executionId: string;
+  taskId: string;
+  workflowId: string | null;
+  stepName: string | null;
+  /** Execution start time, used as a stable tie-breaker. */
+  executionStartedAt: string | null;
+  /** Original index of this event within its parent execution's stream. */
+  eventIndex: number;
+}
+
+/** Minimal execution shape needed by `mergeExecutionEvents`. */
+export interface ExecutionLike {
+  id: string | null;
+  task_id?: string;
+  workflow_id?: string;
+  step_name?: string;
+  started_at?: string;
+}
+
+/**
+ * Merge session logs across many executions into one chronologically-ordered
+ * stream of tagged events.
+ *
+ * Sort order:
+ *   1. event.timestamp (ascending)
+ *   2. execution.started_at (ascending) — break timestamp ties between
+ *      events from different executions
+ *   3. eventIndex (ascending) — preserve original ordering within a single
+ *      execution when multiple events share a timestamp
+ */
+export function mergeExecutionEvents(
+  executions: readonly ExecutionLike[],
+  logsByExecutionId: Readonly<Record<string, SessionLog[]>>
+): TaggedConversationEvent[] {
+  const merged: TaggedConversationEvent[] = [];
+
+  const tsMs: number[] = [];
+  const startedMs: number[] = [];
+
+  for (const exec of executions) {
+    const execId = exec.id;
+    if (!execId) continue;
+    const logs = logsByExecutionId[execId] ?? [];
+    const events = parseSessionLogs(logs);
+    const execStartedMs = exec.started_at ? Date.parse(exec.started_at) : 0;
+    const execStartedSafe = Number.isNaN(execStartedMs) ? 0 : execStartedMs;
+    events.forEach((event, idx) => {
+      const t = Date.parse(event.timestamp);
+      merged.push({
+        event,
+        executionId: execId,
+        taskId: exec.task_id ?? "",
+        workflowId: exec.workflow_id ?? null,
+        stepName: exec.step_name ?? null,
+        executionStartedAt: exec.started_at ?? null,
+        eventIndex: idx,
+      });
+      tsMs.push(Number.isNaN(t) ? 0 : t);
+      startedMs.push(execStartedSafe);
+    });
+  }
+
+  const indices = merged.map((_, i) => i);
+  indices.sort((a, b) => {
+    if (tsMs[a] !== tsMs[b]) return tsMs[a] - tsMs[b];
+    if (startedMs[a] !== startedMs[b]) return startedMs[a] - startedMs[b];
+    return merged[a].eventIndex - merged[b].eventIndex;
+  });
+
+  return indices.map((i) => merged[i]);
+}
