@@ -7,7 +7,7 @@ import type {
 import { commands, events } from "../../bindings";
 import { useTask } from "../../hooks/useTask";
 import { useTaskStore } from "../../stores";
-import { ExecutionHistory } from "./ExecutionHistory";
+import { TraceMiniView } from "./TraceMiniView";
 import { DeleteConfirmation } from "../DeleteConfirmation";
 import { ResizablePanel } from "../ResizablePanel";
 import { Spinner } from "../Spinner";
@@ -926,8 +926,14 @@ export function TaskDetailPanel({
                   ))}
               </div>
             )}
-            {/* Execution timeline */}
-            {taskData.id && <ExecutionHistory taskId={taskData.id} />}
+            {/* Trace mini-view (entry into dedicated /traces explorer) */}
+            {taskData.id && (
+              <TraceMiniView
+                taskId={taskData.id}
+                workflowName={taskData.workflow_name}
+                stepName={taskData.step_name}
+              />
+            )}
           </CollapsibleSection>
 
           {/* === SPEC (description, goal, constraints) === */}
