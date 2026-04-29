@@ -127,9 +127,9 @@ describe("TracesPage", () => {
   it("renders the mode toggle and switches the placeholder when clicked", () => {
     renderAt("/traces/root");
     expect(screen.getByTestId("trace-mode-toggle")).toBeInTheDocument();
-    expect(
-      screen.getByTestId("trace-mode-placeholder").getAttribute("data-mode")
-    ).toBe("thread");
+    // THREAD mode now renders the UnifiedChatView (not the placeholder).
+    expect(screen.getByTestId("unified-chat-empty")).toBeInTheDocument();
+    expect(screen.queryByTestId("trace-mode-placeholder")).toBeNull();
     fireEvent.click(screen.getByTestId("trace-mode-option-corridor"));
     expect(
       screen.getByTestId("trace-mode-placeholder").getAttribute("data-mode")
