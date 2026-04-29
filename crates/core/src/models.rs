@@ -1435,6 +1435,16 @@ pub struct StepExecution {
     /// Duration in milliseconds
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u64>,
+
+    /// Model provider (e.g., "anthropic", "openai")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_provider: Option<String>,
+
+    /// Handoff payload from a route step — JSON-encoded string mirroring the
+    /// sacrum `handoff` map field. Optional because most executions do not
+    /// emit a handoff.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub handoff: Option<String>,
 }
 
 impl StepExecution {
@@ -1461,7 +1471,21 @@ impl StepExecution {
             token_usage: None,
             cost_usd: None,
             duration_ms: None,
+            model_provider: None,
+            handoff: None,
         }
+    }
+
+    /// Set model provider
+    pub fn with_model_provider(mut self, provider: impl Into<String>) -> Self {
+        self.model_provider = Some(provider.into());
+        self
+    }
+
+    /// Set handoff payload (JSON-encoded string)
+    pub fn with_handoff(mut self, handoff: impl Into<String>) -> Self {
+        self.handoff = Some(handoff.into());
+        self
     }
 
     /// Set started_at
@@ -1990,6 +2014,31 @@ mod tests {
         assert_eq!(exec.cost_usd, Some(0.05));
         assert_eq!(exec.duration_ms, Some(1500));
         assert_eq!(exec.status, ExecutionStatus::InProgress);
+    }
+
+    #[test]
+    fn step_execution_handoff_and_model_provider_round_trip() {
+        let exec = StepExecution::new("t", "w", "route")
+            .with_model_provider("anthropic")
+            .with_handoff(r#"{"to":"impl_step","reason":"approved"}"#);
+        assert_eq!(exec.model_provider.as_deref(), Some("anthropic"));
+        assert_eq!(
+            exec.handoff.as_deref(),
+            Some(r#"{"to":"impl_step","reason":"approved"}"#)
+        );
+
+        let json = serde_json::to_string(&exec).expect("serialize");
+        assert!(json.contains("\"handoff\""));
+        assert!(json.contains("\"model_provider\""));
+        let back: StepExecution = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back.handoff, exec.handoff);
+        assert_eq!(back.model_provider, exec.model_provider);
+
+        // When unset the fields should be omitted from the wire format.
+        let bare = StepExecution::new("t", "w", "s");
+        let bare_json = serde_json::to_string(&bare).expect("serialize bare");
+        assert!(!bare_json.contains("\"handoff\""));
+        assert!(!bare_json.contains("\"model_provider\""));
     }
 
     #[test]

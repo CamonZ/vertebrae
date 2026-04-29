@@ -640,7 +640,12 @@ impl From<vertebrae_core::ExecutionStatus> for ExecutionStatus {
     }
 }
 
-/// Step execution record - mirrors db::StepExecution
+/// Step execution record - mirrors db::StepExecution.
+///
+/// Carries the full sacrum field set so the traces UI can render prompt,
+/// output, context, transition_result, model/provider, token usage, cost,
+/// duration, handoff, and session_id. All extended fields are `Option`-typed
+/// because historical executions and minimal payloads may not populate them.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct StepExecution {
     /// Execution ID (string form)
@@ -662,6 +667,42 @@ pub struct StepExecution {
     /// Current status of this step execution
     #[serde(default = "StepExecution::default_status")]
     pub status: ExecutionStatus,
+    /// Prompt text/JSON that drove the execution
+    #[serde(default)]
+    pub prompt: Option<String>,
+    /// Final output of the execution
+    #[serde(default)]
+    pub output: Option<String>,
+    /// Execution context (arbitrary JSON serialized as string)
+    #[serde(default)]
+    pub context: Option<String>,
+    /// Transition decision payload (route/evaluate steps)
+    #[serde(default)]
+    pub transition_result: Option<String>,
+    /// Model identifier (e.g. "claude-opus-4")
+    #[serde(default)]
+    pub model: Option<String>,
+    /// Model provider (e.g. "anthropic")
+    #[serde(default)]
+    pub model_provider: Option<String>,
+    /// Input tokens consumed
+    #[serde(default)]
+    pub input_tokens: Option<u32>,
+    /// Output tokens emitted
+    #[serde(default)]
+    pub output_tokens: Option<u32>,
+    /// Cost in USD
+    #[serde(default)]
+    pub cost: Option<f64>,
+    /// Wall-clock duration in milliseconds
+    #[serde(default)]
+    pub duration_ms: Option<u32>,
+    /// Handoff payload from a route step (JSON encoded)
+    #[serde(default)]
+    pub handoff: Option<String>,
+    /// Provider session identifier (e.g. Claude session ID)
+    #[serde(default)]
+    pub session_id: Option<String>,
 }
 
 impl StepExecution {
@@ -670,8 +711,19 @@ impl StepExecution {
     }
 }
 
+fn saturating_u64_to_u32(v: u64) -> u32 {
+    u32::try_from(v).unwrap_or(u32::MAX)
+}
+
 impl From<vertebrae_core::StepExecution> for StepExecution {
     fn from(exec: vertebrae_core::StepExecution) -> Self {
+        let (input_tokens, output_tokens) = match exec.token_usage.as_ref() {
+            Some(tu) => (
+                Some(saturating_u64_to_u32(tu.input_tokens)),
+                Some(saturating_u64_to_u32(tu.output_tokens)),
+            ),
+            None => (None, None),
+        };
         StepExecution {
             id: exec.id,
             task_id: exec.task_id,
@@ -680,6 +732,18 @@ impl From<vertebrae_core::StepExecution> for StepExecution {
             started_at: exec.started_at.to_rfc3339(),
             completed_at: exec.completed_at.map(|dt| dt.to_rfc3339()),
             status: exec.status.into(),
+            prompt: exec.prompt,
+            output: exec.output,
+            context: exec.context,
+            transition_result: exec.transition_result,
+            model: exec.model_used,
+            model_provider: exec.model_provider,
+            input_tokens,
+            output_tokens,
+            cost: exec.cost_usd,
+            duration_ms: exec.duration_ms.map(saturating_u64_to_u32),
+            handoff: exec.handoff,
+            session_id: exec.session_id,
         }
     }
 }
@@ -1518,6 +1582,123 @@ mod tests {
         let gui = StepExecution::from(core);
         chrono::DateTime::parse_from_rfc3339(&gui.started_at)
             .expect("started_at should be valid RFC3339");
+    }
+
+    #[test]
+    fn step_execution_from_core_maps_full_field_set() {
+        let core = vertebrae_core::StepExecution::new("task1", "wf1", "review")
+            .with_prompt("the prompt")
+            .with_output("the output")
+            .with_context(r#"{"k":"v"}"#)
+            .with_transition_result("approved")
+            .with_model_used("claude-opus")
+            .with_model_provider("anthropic")
+            .with_session_id("sess-42")
+            .with_token_usage(vertebrae_core::TokenUsage::new(1000, 500))
+            .with_cost_usd(0.0123)
+            .with_duration_ms(2_500)
+            .with_handoff(r#"{"to":"next"}"#);
+
+        let gui = StepExecution::from(core);
+        assert_eq!(gui.prompt.as_deref(), Some("the prompt"));
+        assert_eq!(gui.output.as_deref(), Some("the output"));
+        assert_eq!(gui.context.as_deref(), Some(r#"{"k":"v"}"#));
+        assert_eq!(gui.transition_result.as_deref(), Some("approved"));
+        assert_eq!(gui.model.as_deref(), Some("claude-opus"));
+        assert_eq!(gui.model_provider.as_deref(), Some("anthropic"));
+        assert_eq!(gui.session_id.as_deref(), Some("sess-42"));
+        assert_eq!(gui.input_tokens, Some(1000));
+        assert_eq!(gui.output_tokens, Some(500));
+        assert_eq!(gui.cost, Some(0.0123));
+        assert_eq!(gui.duration_ms, Some(2_500));
+        assert_eq!(gui.handoff.as_deref(), Some(r#"{"to":"next"}"#));
+    }
+
+    #[test]
+    fn step_execution_round_trip_serialization_with_full_field_set() {
+        // Mirrors the shape sacrum sends over the WS channel and ensures we
+        // do not drop any rich field on its way to the frontend.
+        let payload = serde_json::json!({
+            "id": "exec-1",
+            "task_id": "task-1",
+            "workflow_id": "wf-1",
+            "step_name": "review",
+            "started_at": "2024-01-01T00:00:00Z",
+            "completed_at": "2024-01-01T00:00:05Z",
+            "status": "completed",
+            "prompt": "do the thing",
+            "output": "done",
+            "context": "{\"k\":\"v\"}",
+            "transition_result": "approved",
+            "model": "claude-opus",
+            "model_provider": "anthropic",
+            "input_tokens": 1234u32,
+            "output_tokens": 567u32,
+            "cost": 0.025,
+            "duration_ms": 4321u32,
+            "handoff": "{\"to\":\"next\"}",
+            "session_id": "sess-99",
+        });
+
+        let exec: StepExecution = serde_json::from_value(payload.clone()).unwrap();
+        assert_eq!(exec.id.as_deref(), Some("exec-1"));
+        assert_eq!(exec.task_id, "task-1");
+        assert_eq!(exec.status, ExecutionStatus::Completed);
+        assert_eq!(exec.prompt.as_deref(), Some("do the thing"));
+        assert_eq!(exec.output.as_deref(), Some("done"));
+        assert_eq!(exec.context.as_deref(), Some("{\"k\":\"v\"}"));
+        assert_eq!(exec.transition_result.as_deref(), Some("approved"));
+        assert_eq!(exec.model.as_deref(), Some("claude-opus"));
+        assert_eq!(exec.model_provider.as_deref(), Some("anthropic"));
+        assert_eq!(exec.input_tokens, Some(1234));
+        assert_eq!(exec.output_tokens, Some(567));
+        assert_eq!(exec.cost, Some(0.025));
+        assert_eq!(exec.duration_ms, Some(4321));
+        assert_eq!(exec.handoff.as_deref(), Some("{\"to\":\"next\"}"));
+        assert_eq!(exec.session_id.as_deref(), Some("sess-99"));
+
+        // Re-serialize and re-deserialize to round-trip.
+        let again: StepExecution =
+            serde_json::from_value(serde_json::to_value(&exec).unwrap()).unwrap();
+        assert_eq!(again.prompt, exec.prompt);
+        assert_eq!(again.output, exec.output);
+        assert_eq!(again.context, exec.context);
+        assert_eq!(again.transition_result, exec.transition_result);
+        assert_eq!(again.model, exec.model);
+        assert_eq!(again.model_provider, exec.model_provider);
+        assert_eq!(again.input_tokens, exec.input_tokens);
+        assert_eq!(again.output_tokens, exec.output_tokens);
+        assert_eq!(again.cost, exec.cost);
+        assert_eq!(again.duration_ms, exec.duration_ms);
+        assert_eq!(again.handoff, exec.handoff);
+        assert_eq!(again.session_id, exec.session_id);
+    }
+
+    #[test]
+    fn step_execution_deserializes_with_missing_optional_fields() {
+        // Historical executions / minimal payloads only include the timeline
+        // fields. The new fields must default to None and not error.
+        let payload = serde_json::json!({
+            "id": "exec-min",
+            "task_id": "task-1",
+            "workflow_id": "wf-1",
+            "step_name": "todo",
+            "started_at": "2024-01-01T00:00:00Z",
+            "status": "in_progress",
+        });
+        let exec: StepExecution = serde_json::from_value(payload).unwrap();
+        assert!(exec.prompt.is_none());
+        assert!(exec.output.is_none());
+        assert!(exec.context.is_none());
+        assert!(exec.transition_result.is_none());
+        assert!(exec.model.is_none());
+        assert!(exec.model_provider.is_none());
+        assert!(exec.input_tokens.is_none());
+        assert!(exec.output_tokens.is_none());
+        assert!(exec.cost.is_none());
+        assert!(exec.duration_ms.is_none());
+        assert!(exec.handoff.is_none());
+        assert!(exec.session_id.is_none());
     }
 
     // ─── SessionLog Conversion Tests ────────────────────────────────

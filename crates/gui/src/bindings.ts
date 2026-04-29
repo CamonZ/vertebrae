@@ -445,6 +445,21 @@ async getTaskExecutions(taskId: string) : Promise<Result<StepExecution[], Comman
 }
 },
 /**
+ * Fetch a single step execution by ID with full detail.
+ * 
+ * Returns the full StepExecution struct (including prompt, output, context,
+ * transition_result, model, tokens, cost, duration_ms, handoff, session_id)
+ * or `None` when no execution matches the given ID.
+ */
+async getExecution(executionId: string) : Promise<Result<StepExecution | null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_execution", { executionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Get all session logs for a step execution
  * 
  * Returns a chronological list of all session logs for the given execution.
@@ -989,7 +1004,12 @@ export type StepChangeType = "Created" | "Updated" | "Deleted"
  */
 export type StepChangedEvent = { step_id: string; workflow_id: string; change_type: StepChangeType; step: Step | null }
 /**
- * Step execution record - mirrors db::StepExecution
+ * Step execution record - mirrors db::StepExecution.
+ * 
+ * Carries the full sacrum field set so the traces UI can render prompt,
+ * output, context, transition_result, model/provider, token usage, cost,
+ * duration, handoff, and session_id. All extended fields are `Option`-typed
+ * because historical executions and minimal payloads may not populate them.
  */
 export type StepExecution = { 
 /**
@@ -1019,7 +1039,55 @@ completed_at: string | null;
 /**
  * Current status of this step execution
  */
-status?: ExecutionStatus }
+status?: ExecutionStatus; 
+/**
+ * Prompt text/JSON that drove the execution
+ */
+prompt?: string | null; 
+/**
+ * Final output of the execution
+ */
+output?: string | null; 
+/**
+ * Execution context (arbitrary JSON serialized as string)
+ */
+context?: string | null; 
+/**
+ * Transition decision payload (route/evaluate steps)
+ */
+transition_result?: string | null; 
+/**
+ * Model identifier (e.g. "claude-opus-4")
+ */
+model?: string | null; 
+/**
+ * Model provider (e.g. "anthropic")
+ */
+model_provider?: string | null; 
+/**
+ * Input tokens consumed
+ */
+input_tokens?: number | null; 
+/**
+ * Output tokens emitted
+ */
+output_tokens?: number | null; 
+/**
+ * Cost in USD
+ */
+cost?: number | null; 
+/**
+ * Wall-clock duration in milliseconds
+ */
+duration_ms?: number | null; 
+/**
+ * Handoff payload from a route step (JSON encoded)
+ */
+handoff?: string | null; 
+/**
+ * Provider session identifier (e.g. Claude session ID)
+ */
+session_id?: string | null }
 /**
  * The type of change that occurred on a step execution.
  */

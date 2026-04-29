@@ -949,6 +949,75 @@ mod tests {
         );
     }
 
+    // ===== WS Payload Deserialization Tests =====
+
+    /// A sacrum step_execution_status_changed payload should hydrate the full
+    /// StepExecution including prompt, output, context, transition_result,
+    /// model, model_provider, tokens, cost, duration_ms, handoff, and
+    /// session_id without dropping any fields on the way to the frontend.
+    #[test]
+    fn step_execution_ws_payload_preserves_full_field_set() {
+        let payload = serde_json::json!({
+            "id": "exec-ws-1",
+            "task_id": "task-1",
+            "workflow_id": "wf-1",
+            "step_name": "review",
+            "started_at": "2024-01-01T00:00:00Z",
+            "completed_at": "2024-01-01T00:00:09Z",
+            "status": "completed",
+            "prompt": "ws prompt",
+            "output": "ws output",
+            "context": "{\"src\":\"ws\"}",
+            "transition_result": "approved",
+            "model": "claude-opus",
+            "model_provider": "anthropic",
+            "input_tokens": 200u32,
+            "output_tokens": 80u32,
+            "cost": 0.0042,
+            "duration_ms": 9001u32,
+            "handoff": "{\"to\":\"next-step\"}",
+            "session_id": "ws-session-1",
+        });
+
+        let exec = try_deserialize::<types::StepExecution>(&payload, "StepExecution")
+            .expect("WS payload must deserialize into StepExecution");
+
+        assert_eq!(exec.id.as_deref(), Some("exec-ws-1"));
+        assert_eq!(exec.prompt.as_deref(), Some("ws prompt"));
+        assert_eq!(exec.output.as_deref(), Some("ws output"));
+        assert_eq!(exec.context.as_deref(), Some("{\"src\":\"ws\"}"));
+        assert_eq!(exec.transition_result.as_deref(), Some("approved"));
+        assert_eq!(exec.model.as_deref(), Some("claude-opus"));
+        assert_eq!(exec.model_provider.as_deref(), Some("anthropic"));
+        assert_eq!(exec.input_tokens, Some(200));
+        assert_eq!(exec.output_tokens, Some(80));
+        assert_eq!(exec.cost, Some(0.0042));
+        assert_eq!(exec.duration_ms, Some(9001));
+        assert_eq!(exec.handoff.as_deref(), Some("{\"to\":\"next-step\"}"));
+        assert_eq!(exec.session_id.as_deref(), Some("ws-session-1"));
+    }
+
+    /// Minimal payload (only the historical timeline fields) must still
+    /// deserialize successfully — the new fields are all optional.
+    #[test]
+    fn step_execution_ws_payload_minimal_still_deserializes() {
+        let payload = serde_json::json!({
+            "id": "exec-min",
+            "task_id": "task-1",
+            "workflow_id": "wf-1",
+            "step_name": "todo",
+            "started_at": "2024-01-01T00:00:00Z",
+            "status": "in_progress",
+        });
+
+        let exec = try_deserialize::<types::StepExecution>(&payload, "StepExecution")
+            .expect("minimal WS payload must deserialize");
+        assert_eq!(exec.id.as_deref(), Some("exec-min"));
+        assert!(exec.prompt.is_none());
+        assert!(exec.handoff.is_none());
+        assert!(exec.session_id.is_none());
+    }
+
     // ===== Disconnect Flag Tests =====
 
     #[test]
