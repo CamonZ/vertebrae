@@ -1,6 +1,7 @@
-import { useCallback, useState, type ReactNode } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
+  FlightStrip,
   ModePlaceholder,
   ModeToggle,
   SubtreeRail,
@@ -10,6 +11,7 @@ import {
 } from "../components/Traces";
 import { useTask } from "../hooks";
 import { useSubtreeExecutions } from "../hooks/useSubtreeExecutions";
+import { useSubtreeSessionLogs } from "../hooks/useSubtreeSessionLogs";
 import { useTaskStore } from "../stores/taskStore";
 
 export function TracesPage(): ReactNode {
@@ -19,6 +21,7 @@ export function TracesPage(): ReactNode {
 
   const [mode, setMode] = useState<TraceMode>("thread");
   const [railCollapsed, setRailCollapsed] = useState(false);
+  const threadScrollRef = useRef<HTMLDivElement | null>(null);
 
   const safeTaskId = taskId ?? null;
   const { task, isLoading: isTaskLoading, error: taskError } = useTask(safeTaskId);
@@ -29,6 +32,7 @@ export function TracesPage(): ReactNode {
     isLoading: isSubtreeLoading,
     error: subtreeError,
   } = useSubtreeExecutions(safeTaskId);
+  const { logsByExecutionId } = useSubtreeSessionLogs(executions);
 
   const handleBack = useCallback(() => {
     navigate(-1);
@@ -97,14 +101,25 @@ export function TracesPage(): ReactNode {
           className="flex min-w-0 flex-1 flex-col gap-3 p-4"
         >
           <ModeToggle mode={mode} onChange={setMode} />
+          {mode === "thread" && executions.length > 0 && (
+            <FlightStrip
+              rootTaskId={taskId}
+              executions={executions}
+              tasks={tasks}
+              logsByExecutionId={logsByExecutionId}
+              threadScrollRef={threadScrollRef}
+            />
+          )}
           <div className="flex-1 min-h-0">
             {mode === "thread" ? (
               <UnifiedChatView
                 rootTaskId={taskId}
                 executions={executions}
                 tasks={tasks}
+                logsByExecutionId={logsByExecutionId}
                 isLoading={isSubtreeLoading}
                 error={subtreeError}
+                scrollRef={threadScrollRef}
               />
             ) : (
               <ModePlaceholder mode={mode} />
