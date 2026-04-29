@@ -5,6 +5,7 @@ import {
   ModeToggle,
   SubtreeRail,
   TracesHeader,
+  UnifiedChatView,
   type TraceMode,
 } from "../components/Traces";
 import { useTask } from "../hooks";
@@ -93,11 +94,21 @@ export function TracesPage(): ReactNode {
 
         <main
           data-testid="traces-center-pane"
-          className="flex min-w-0 flex-1 flex-col gap-3 overflow-y-auto p-4"
+          className="flex min-w-0 flex-1 flex-col gap-3 p-4"
         >
           <ModeToggle mode={mode} onChange={setMode} />
           <div className="flex-1 min-h-0">
-            <ModePlaceholder mode={mode} />
+            {mode === "thread" ? (
+              <UnifiedChatView
+                rootTaskId={taskId}
+                executions={executions}
+                tasks={tasks}
+                isLoading={isSubtreeLoading}
+                error={subtreeError}
+              />
+            ) : (
+              <ModePlaceholder mode={mode} />
+            )}
           </div>
         </main>
       </div>
