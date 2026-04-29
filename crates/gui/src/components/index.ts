@@ -8,7 +8,7 @@ export {
   TaskSections,
   TaskCodeRefs,
   TaskRelations,
-  ExecutionHistory,
+  TraceMiniView,
 } from "./TaskDetail";
 export { WorkflowCard, WorkflowGrid } from "./WorkflowGrid";
 export { ToastContainer } from "./Toast";
