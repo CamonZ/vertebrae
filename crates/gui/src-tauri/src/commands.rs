@@ -678,6 +678,38 @@ pub async fn get_task_executions(
     }
 }
 
+/// Fetch a single step execution by ID with full detail.
+///
+/// Returns the full StepExecution struct (including prompt, output, context,
+/// transition_result, model, tokens, cost, duration_ms, handoff, session_id)
+/// or `None` when no execution matches the given ID.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_execution(
+    state: State<'_, AppState>,
+    execution_id: String,
+) -> Result<Option<StepExecution>, CommandError> {
+    log::info!("get_execution called for execution: {}", execution_id);
+    let service_guard = state.services.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    match service.executions().get_execution(&execution_id).await {
+        Ok(execution) => {
+            log::info!(
+                "get_execution returned {}",
+                if execution.is_some() { "Some" } else { "None" }
+            );
+            Ok(execution.map(Into::into))
+        }
+        Err(e) => {
+            log::error!("get_execution error: {:?}", e);
+            Err(e.into())
+        }
+    }
+}
+
 /// Get all session logs for a step execution
 ///
 /// Returns a chronological list of all session logs for the given execution.
@@ -2529,6 +2561,64 @@ mod tests {
         let state: tauri::State<'_, AppState> = app.state();
         let result = get_execution_logs(state, "exec".to_string()).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn get_execution_returns_none_for_unknown_id() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let result = get_execution(state, "missing-exec-id".to_string())
+            .await
+            .unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn get_execution_no_project_returns_error() {
+        let app = build_app_without_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let result = get_execution(state, "exec".to_string()).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn get_execution_returns_full_field_set() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+
+        let exec_id = {
+            let app_state = app.state::<AppState>();
+            let services_guard = app_state.services.read().await;
+            let services = services_guard.as_ref().expect("services initialized");
+            let core_exec = services
+                .executions()
+                .run_step("task-1", "step-1")
+                .await
+                .expect("run_step succeeds");
+            core_exec.id.clone().expect("execution id assigned")
+        };
+
+        let fetched = get_execution(state, exec_id.clone())
+            .await
+            .unwrap()
+            .expect("execution found");
+        assert_eq!(fetched.id.as_deref(), Some(exec_id.as_str()));
+        assert_eq!(fetched.task_id, "task-1");
+        assert_eq!(fetched.prompt.as_deref(), Some("mock prompt"));
+        assert_eq!(fetched.output.as_deref(), Some("mock output"));
+        assert_eq!(fetched.context.as_deref(), Some(r#"{"mock":"context"}"#));
+        assert_eq!(fetched.transition_result.as_deref(), Some("mock_next_step"));
+        assert_eq!(fetched.model.as_deref(), Some("claude-opus-4"));
+        assert_eq!(fetched.model_provider.as_deref(), Some("anthropic"));
+        assert_eq!(fetched.session_id.as_deref(), Some("mock-session-id"));
+        assert_eq!(fetched.input_tokens, Some(123));
+        assert_eq!(fetched.output_tokens, Some(45));
+        assert_eq!(fetched.cost, Some(0.001));
+        assert_eq!(fetched.duration_ms, Some(250));
+        assert_eq!(
+            fetched.handoff.as_deref(),
+            Some(r#"{"to":"mock_next_step"}"#)
+        );
     }
 
     // ========================================================================

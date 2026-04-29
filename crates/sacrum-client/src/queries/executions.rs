@@ -17,6 +17,7 @@ pub const EXECUTION_FIELDS: &str = r#"
         output_tokens
         cost
         duration_ms
+        handoff
         inserted_at
         updated_at
     }
