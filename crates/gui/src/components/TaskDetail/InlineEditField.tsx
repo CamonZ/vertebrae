@@ -31,6 +31,11 @@ export interface InlineEditFieldProps {
   onDelete?: () => void;
   /** Whether delete is in progress */
   isDeleting?: boolean;
+  /** Render the input/textarea (and display text) with a monospace font */
+  monospace?: boolean;
+  /** Custom renderer for non-empty display mode (e.g. syntax-highlighted prompts).
+   *  Empty values still fall back to the muted placeholder. */
+  renderDisplay?: (value: string) => React.ReactNode;
 }
 
 /**
@@ -53,6 +58,8 @@ export function InlineEditField({
   compact = false,
   onDelete,
   isDeleting = false,
+  monospace = false,
+  renderDisplay,
 }: InlineEditFieldProps) {
   const [isEditing, setIsEditing] = useState(startInEditMode);
   const [editValue, setEditValue] = useState(value);
@@ -178,7 +185,7 @@ export function InlineEditField({
               disabled={isSubmitting || isDeleting}
               placeholder={placeholder}
               rows={rows}
-              className={`flex-1 bg-bg-secondary border border-border rounded ${inputPadding} text-sm text-text-primary placeholder-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 disabled:opacity-50 resize-none`}
+              className={`flex-1 bg-bg-secondary border border-border rounded ${inputPadding} text-sm ${monospace ? 'font-mono' : ''} text-text-primary placeholder-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 disabled:opacity-50 resize-none`}
             />
           ) : (
             <input
@@ -189,7 +196,7 @@ export function InlineEditField({
               onKeyDown={handleKeyDown}
               disabled={isSubmitting || isDeleting}
               placeholder={placeholder}
-              className={`flex-1 bg-bg-secondary border border-border rounded ${inputPadding} text-sm text-text-primary placeholder-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 disabled:opacity-50`}
+              className={`flex-1 bg-bg-secondary border border-border rounded ${inputPadding} text-sm ${monospace ? 'font-mono' : ''} text-text-primary placeholder-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/30 disabled:opacity-50`}
             />
           )}
 
@@ -257,8 +264,8 @@ export function InlineEditField({
   }
 
   // Display mode
-  const displayText = value || placeholder;
   const isEmpty = !value;
+  const displayText = value || placeholder;
 
   return (
     <div
@@ -266,9 +273,13 @@ export function InlineEditField({
       className={`cursor-pointer rounded p-2 hover:bg-bg-hover transition-colors ${displayClassName}`}
       title="Click to edit"
     >
-      <p className={`text-sm ${isEmpty ? 'text-text-muted italic' : 'text-text-secondary whitespace-pre-wrap leading-relaxed'}`}>
-        {displayText}
-      </p>
+      {!isEmpty && renderDisplay ? (
+        renderDisplay(value)
+      ) : (
+        <p className={`text-sm ${monospace && !isEmpty ? 'font-mono' : ''} ${isEmpty ? 'text-text-muted italic' : 'text-text-secondary whitespace-pre-wrap leading-relaxed'}`}>
+          {displayText}
+        </p>
+      )}
     </div>
   );
 }
