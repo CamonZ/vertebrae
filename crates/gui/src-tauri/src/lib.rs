@@ -98,6 +98,7 @@ fn create_builder() -> Builder {
             commands::list_workflow_transitions,
             // Execution commands
             commands::get_task_executions,
+            commands::get_execution,
             commands::get_execution_logs,
             // Step commands (first-class workflow steps)
             commands::list_steps_for_workflow,
