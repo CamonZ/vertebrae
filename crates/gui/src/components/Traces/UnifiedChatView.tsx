@@ -14,7 +14,7 @@
  * own boundary header.
  */
 
-import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useMemo, useState, type ReactNode, type RefObject } from "react";
 import type { SessionLog, StepExecution, Task } from "../../bindings";
 import {
   mergeExecutionEvents,
@@ -38,6 +38,11 @@ interface UnifiedChatViewProps {
   logsByExecutionId?: Record<string, SessionLog[]>;
   isLoading?: boolean;
   error?: string | null;
+  /**
+   * Optional ref forwarded to the scroll container so a sibling FlightStrip
+   * can read scroll position and write to it on click/scrub.
+   */
+  scrollRef?: RefObject<HTMLDivElement | null>;
 }
 
 function buildDepthMap(
@@ -97,6 +102,7 @@ export function UnifiedChatView({
   logsByExecutionId: providedLogs,
   isLoading: externalLoading,
   error: externalError,
+  scrollRef,
 }: UnifiedChatViewProps): ReactNode {
   const [timeMode, setTimeMode] = useState<TimeMode>("absolute");
   const fetched = useSubtreeSessionLogs(providedLogs ? [] : executions);
@@ -176,6 +182,7 @@ export function UnifiedChatView({
   return (
     <TimeModeContext.Provider value={timeModeContextValue}>
       <div
+        ref={scrollRef}
         data-testid="unified-chat-view"
         className="relative h-full overflow-y-auto bg-bg-primary"
       >
