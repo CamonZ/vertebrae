@@ -17,7 +17,7 @@ function createMockExecution(overrides?: Partial<StepExecution>): StepExecution 
 
 describe("executionStore", () => {
   beforeEach(() => {
-    useExecutionStore.setState({ executions: [] });
+    useExecutionStore.setState({ executions: [], executionsByTaskId: {} });
   });
 
   describe("initial state", () => {
@@ -92,6 +92,88 @@ describe("executionStore", () => {
       expect(state.executions[1].step_name).toBe("second-updated");
       expect(state.executions[1].status).toBe("completed");
       expect(state.executions[2].id).toBe("exec-3");
+    });
+
+    it("also populates the per-task bucket cache", () => {
+      const e = createMockExecution({ id: "exec-7", task_id: "task-A" });
+      useExecutionStore.getState().upsertExecution(e);
+
+      const state = useExecutionStore.getState();
+      expect(state.executionsByTaskId["task-A"]).toHaveLength(1);
+      expect(state.executionsByTaskId["task-A"][0].id).toBe("exec-7");
+    });
+  });
+
+  describe("setExecutionsForTask", () => {
+    it("scopes writes to a single task bucket without touching others", () => {
+      const a1 = createMockExecution({ id: "a1", task_id: "task-A" });
+      const a2 = createMockExecution({ id: "a2", task_id: "task-A" });
+      const b1 = createMockExecution({ id: "b1", task_id: "task-B" });
+
+      useExecutionStore.getState().setExecutionsForTask("task-A", [a1, a2]);
+      useExecutionStore.getState().setExecutionsForTask("task-B", [b1]);
+
+      const state = useExecutionStore.getState();
+      expect(state.executionsByTaskId["task-A"].map((e) => e.id)).toEqual(["a1", "a2"]);
+      expect(state.executionsByTaskId["task-B"].map((e) => e.id)).toEqual(["b1"]);
+    });
+
+    it("supports parallel writes to distinct buckets without clobbering", () => {
+      // Simulate Promise.all fan-out by calling setExecutionsForTask for
+      // many task ids in immediate succession.
+      const writes = Array.from({ length: 10 }, (_, i) => ({
+        taskId: `task-${i}`,
+        execs: [createMockExecution({ id: `e-${i}`, task_id: `task-${i}` })],
+      }));
+      for (const w of writes) {
+        useExecutionStore.getState().setExecutionsForTask(w.taskId, w.execs);
+      }
+      const state = useExecutionStore.getState();
+      expect(Object.keys(state.executionsByTaskId)).toHaveLength(10);
+      for (let i = 0; i < 10; i++) {
+        expect(state.executionsByTaskId[`task-${i}`][0].id).toBe(`e-${i}`);
+      }
+    });
+  });
+
+  describe("upsertExecution writes through to the per-task bucket", () => {
+    it("merges an in-flight WS upsert into an already-populated bucket", () => {
+      const a1 = createMockExecution({ id: "a1", task_id: "task-A", status: "in_progress" });
+      useExecutionStore.getState().setExecutionsForTask("task-A", [a1]);
+
+      const a1Updated = createMockExecution({
+        id: "a1",
+        task_id: "task-A",
+        status: "completed",
+      });
+      useExecutionStore.getState().upsertExecution(a1Updated);
+
+      const bucket = useExecutionStore.getState().executionsByTaskId["task-A"];
+      expect(bucket).toHaveLength(1);
+      expect(bucket[0].status).toBe("completed");
+    });
+
+    it("creates a new bucket on first upsert when no fetch has populated it yet", () => {
+      const fresh = createMockExecution({ id: "new", task_id: "task-Z" });
+      useExecutionStore.getState().upsertExecution(fresh);
+
+      const bucket = useExecutionStore.getState().executionsByTaskId["task-Z"];
+      expect(bucket).toEqual([fresh]);
+    });
+  });
+
+  describe("clearExecutionsForTask", () => {
+    it("removes a single task bucket and leaves others intact", () => {
+      const a = createMockExecution({ id: "a", task_id: "task-A" });
+      const b = createMockExecution({ id: "b", task_id: "task-B" });
+      useExecutionStore.getState().setExecutionsForTask("task-A", [a]);
+      useExecutionStore.getState().setExecutionsForTask("task-B", [b]);
+
+      useExecutionStore.getState().clearExecutionsForTask("task-A");
+
+      const state = useExecutionStore.getState();
+      expect(state.executionsByTaskId).not.toHaveProperty("task-A");
+      expect(state.executionsByTaskId["task-B"]).toHaveLength(1);
     });
   });
 });
