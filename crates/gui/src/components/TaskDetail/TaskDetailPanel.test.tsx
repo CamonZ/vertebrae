@@ -140,8 +140,10 @@ describe("TaskDetailPanel - Restructured Layout", () => {
         <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
       );
 
-      expect(screen.getByText("Implementation")).toBeInTheDocument();
-      expect(screen.getByText("in progress")).toBeInTheDocument();
+      // "Implementation" + "in progress" appear both in the header breadcrumb
+      // and inside TraceMiniView — assert presence rather than uniqueness.
+      expect(screen.getAllByText("Implementation").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("in progress").length).toBeGreaterThan(0);
     });
 
     it("displays status badge with glow animation for in_progress", () => {
