@@ -269,6 +269,8 @@ pub struct StepExecutionResponse {
     #[serde(default)]
     pub duration_ms: Option<i64>,
     #[serde(default)]
+    pub handoff: Option<serde_json::Value>,
+    #[serde(default)]
     pub inserted_at: Option<String>,
     #[serde(default)]
     pub updated_at: Option<String>,

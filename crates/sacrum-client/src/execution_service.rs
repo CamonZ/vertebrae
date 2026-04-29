@@ -23,6 +23,13 @@ struct IdOnly {
     id: String,
 }
 
+fn json_value_to_string(v: &serde_json::Value) -> String {
+    match v {
+        serde_json::Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }
+}
+
 /// ExecutionService implementation for Sacrum GraphQL client
 pub struct SacrumExecutionService {
     client: GraphqlClient,
@@ -63,18 +70,23 @@ impl SacrumExecutionService {
             started_at,
             completed_at,
             status,
-            context: response.context.as_ref().map(|v| match v {
-                serde_json::Value::String(s) => s.clone(),
-                other => other.to_string(),
-            }),
+            context: response.context.as_ref().map(json_value_to_string),
             prompt: response.prompt.clone(),
             output: response.output.clone(),
             transition_result: response.transition_result.clone(),
             model_used: response.model.clone(),
             session_id: None,
-            token_usage: None,
+            token_usage: (response.input_tokens.is_some() || response.output_tokens.is_some())
+                .then(|| {
+                    vertebrae_core::TokenUsage::new(
+                        response.input_tokens.unwrap_or(0).max(0) as u64,
+                        response.output_tokens.unwrap_or(0).max(0) as u64,
+                    )
+                }),
             cost_usd: response.cost,
             duration_ms: response.duration_ms.map(|v| v as u64),
+            model_provider: response.model_provider.clone(),
+            handoff: response.handoff.as_ref().map(json_value_to_string),
         }
     }
 
@@ -289,6 +301,7 @@ mod tests {
             output_tokens: Some(500),
             cost: Some(0.05),
             duration_ms: Some(1500),
+            handoff: Some(serde_json::json!({"to": "next-task"})),
             inserted_at: Some("2024-01-01T00:00:00Z".to_string()),
             updated_at: Some("2024-01-01T00:01:00Z".to_string()),
         };
@@ -306,6 +319,10 @@ mod tests {
         assert_eq!(execution.cost_usd, Some(0.05));
         assert_eq!(execution.duration_ms, Some(1500));
         assert!(execution.completed_at.is_some());
+        let token_usage = execution.token_usage.expect("token_usage populated");
+        assert_eq!(token_usage.input_tokens, 1000);
+        assert_eq!(token_usage.output_tokens, 500);
+        assert_eq!(execution.handoff.as_deref(), Some(r#"{"to":"next-task"}"#));
     }
 
     #[test]
@@ -326,6 +343,7 @@ mod tests {
             output_tokens: None,
             cost: None,
             duration_ms: None,
+            handoff: None,
             inserted_at: None,
             updated_at: None,
         };
@@ -334,6 +352,8 @@ mod tests {
 
         assert_eq!(execution.status, ExecutionStatus::InProgress);
         assert!(execution.completed_at.is_none());
+        assert!(execution.token_usage.is_none());
+        assert!(execution.handoff.is_none());
     }
 
     #[test]
