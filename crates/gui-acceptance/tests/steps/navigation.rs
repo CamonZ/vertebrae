@@ -244,6 +244,79 @@ async fn gui_should_show_element_with_title_within(
         .await;
 }
 
+#[then(expr = "the GUI should show an element with test id {string} within {int} seconds")]
+async fn gui_should_show_element_with_test_id_within(
+    world: &mut GuiWorld,
+    test_id: String,
+    timeout: u64,
+) {
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+
+    world
+        .screenshot(&client, &format!("before-assert-testid-{test_id}"))
+        .await;
+
+    let element = client
+        .wait()
+        .at_most(std::time::Duration::from_secs(timeout))
+        .for_element(Locator::Css(&format!("[data-testid=\"{}\"]", test_id)))
+        .await;
+
+    if element.is_err() {
+        world
+            .screenshot(&client, &format!("fail-testid-{test_id}"))
+            .await;
+    }
+
+    assert!(
+        element.is_ok(),
+        "expected the GUI to show an element with test id '{}' within {} seconds, but it was not found",
+        test_id,
+        timeout
+    );
+
+    world
+        .screenshot(&client, &format!("after-assert-testid-{test_id}"))
+        .await;
+}
+
+#[when(expr = "I click on the element with test id {string}")]
+async fn click_element_with_test_id(world: &mut GuiWorld, test_id: String) {
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+
+    let element = client
+        .wait()
+        .at_most(std::time::Duration::from_secs(5))
+        .for_element(Locator::Css(&format!("[data-testid=\"{}\"]", test_id)))
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "element with test id '{}' not found within 5 seconds",
+                test_id
+            )
+        });
+
+    element
+        .click()
+        .await
+        .unwrap_or_else(|_| panic!("failed to click element with test id '{}'", test_id));
+
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    world
+        .screenshot(&client, &format!("after-click-testid-{test_id}"))
+        .await;
+}
+
 #[then(expr = "the GUI should not show an element with title {string} within {int} seconds")]
 async fn gui_should_not_show_element_with_title_within(
     world: &mut GuiWorld,
