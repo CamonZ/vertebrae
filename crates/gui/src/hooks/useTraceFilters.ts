@@ -1,0 +1,108 @@
+/**
+ * Shared trace-filter state for /traces/:taskId, persisted in URL query params
+ * so the view is shareable. The same state is consumed by THREAD, FLIGHT-STRIP
+ * and CORRIDOR modes.
+ *
+ * Query keys:
+ *   - status   : execution status filter (one of "pending" | "in_progress" |
+ *                "completed" | "failed" | "skipped")
+ *   - step     : step name filter (free-form string match, exact)
+ *   - model    : execution model id filter (exact)
+ *   - q        : free-text search across event content
+ *   - rootOnly : "1" to collapse the subtree to just the root task
+ */
+
+import { useCallback, useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
+
+export interface TraceFilters {
+  status: string | null;
+  stepName: string | null;
+  model: string | null;
+  search: string;
+  rootOnly: boolean;
+}
+
+export interface UseTraceFiltersResult {
+  filters: TraceFilters;
+  setStatus: (v: string | null) => void;
+  setStepName: (v: string | null) => void;
+  setModel: (v: string | null) => void;
+  setSearch: (v: string) => void;
+  setRootOnly: (v: boolean) => void;
+  clear: () => void;
+}
+
+const FILTER_PARAM_KEYS = ["status", "step", "model", "q", "rootOnly"] as const;
+
+export function useTraceFilters(): UseTraceFiltersResult {
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const filters = useMemo<TraceFilters>(
+    () => ({
+      status: searchParams.get("status") || null,
+      stepName: searchParams.get("step") || null,
+      model: searchParams.get("model") || null,
+      search: searchParams.get("q") ?? "",
+      rootOnly: searchParams.get("rootOnly") === "1",
+    }),
+    [searchParams]
+  );
+
+  const updateParam = useCallback(
+    (key: string, value: string | null) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (value === null || value === "") next.delete(key);
+          else next.set(key, value);
+          return next;
+        },
+        { replace: true }
+      );
+    },
+    [setSearchParams]
+  );
+
+  const setStatus = useCallback(
+    (v: string | null) => updateParam("status", v),
+    [updateParam]
+  );
+  const setStepName = useCallback(
+    (v: string | null) => updateParam("step", v),
+    [updateParam]
+  );
+  const setModel = useCallback(
+    (v: string | null) => updateParam("model", v),
+    [updateParam]
+  );
+  const setSearch = useCallback(
+    (v: string) => updateParam("q", v),
+    [updateParam]
+  );
+  const setRootOnly = useCallback(
+    (v: boolean) => updateParam("rootOnly", v ? "1" : null),
+    [updateParam]
+  );
+
+  const clear = useCallback(() => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        for (const key of FILTER_PARAM_KEYS) next.delete(key);
+        return next;
+      },
+      { replace: true }
+    );
+  }, [setSearchParams]);
+
+  return {
+    filters,
+    setStatus,
+    setStepName,
+    setModel,
+    setSearch,
+    setRootOnly,
+    clear,
+  };
+}
