@@ -14,7 +14,16 @@
  * own boundary header.
  */
 
-import { useCallback, useMemo, useState, type ReactNode, type RefObject } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import type { SessionLog, StepExecution, Task } from "../../bindings";
 import {
   mergeExecutionEvents,
@@ -43,6 +52,26 @@ interface UnifiedChatViewProps {
    * can read scroll position and write to it on click/scrub.
    */
   scrollRef?: RefObject<HTMLDivElement | null>;
+  /**
+   * Optional predicate to filter merged events. If returns false, the event
+   * is hidden. Empty segments (no surviving events) are dropped.
+   */
+  eventFilter?: (tagged: TaggedConversationEvent) => boolean;
+  /**
+   * Optional predicate to filter executions before merging. Events whose
+   * executionId is rejected here are dropped. Used by FilterBar to narrow
+   * by status/step/model/rootOnly.
+   */
+  executionFilter?: (executionId: string) => boolean;
+  /** When true, append-on-new-event auto-scrolls to the bottom. */
+  autoScroll?: boolean;
+  /**
+   * Execution id from URL fragment (#exec=…). When provided, the matching
+   * segment is scrolled into view on first paint.
+   */
+  focusExecutionId?: string | null;
+  /** Currently keyboard-focused execution id (j/k cycles). */
+  activeExecutionId?: string | null;
 }
 
 function buildDepthMap(
@@ -103,6 +132,11 @@ export function UnifiedChatView({
   isLoading: externalLoading,
   error: externalError,
   scrollRef,
+  eventFilter,
+  executionFilter,
+  autoScroll = false,
+  focusExecutionId = null,
+  activeExecutionId = null,
 }: UnifiedChatViewProps): ReactNode {
   const [timeMode, setTimeMode] = useState<TimeMode>("absolute");
   const fetched = useSubtreeSessionLogs(providedLogs ? [] : executions);
@@ -133,7 +167,61 @@ export function UnifiedChatView({
     () => mergeExecutionEvents(executions, logsByExecutionId),
     [executions, logsByExecutionId]
   );
-  const segments = useMemo(() => groupByExecution(merged), [merged]);
+
+  const filteredMerged = useMemo(() => {
+    if (!eventFilter && !executionFilter) return merged;
+    return merged.filter((tagged) => {
+      if (executionFilter && !executionFilter(tagged.executionId)) return false;
+      if (eventFilter && !eventFilter(tagged)) return false;
+      return true;
+    });
+  }, [merged, eventFilter, executionFilter]);
+
+  const segments = useMemo(
+    () => groupByExecution(filteredMerged),
+    [filteredMerged]
+  );
+
+  // Local fallback ref so live-tail effects work even when no scrollRef is
+  // forwarded by a parent (kept stable across renders).
+  const internalScrollRef = useRef<HTMLDivElement | null>(null);
+  const setScrollEl = useCallback(
+    (el: HTMLDivElement | null) => {
+      internalScrollRef.current = el;
+      if (scrollRef) {
+        // RefObject with a writable .current — assign through.
+        (scrollRef as { current: HTMLDivElement | null }).current = el;
+      }
+    },
+    [scrollRef]
+  );
+
+  // Auto-scroll on new events when enabled. Compares against previous total
+  // event count so we only scroll on append, not on filter narrowing.
+  const lastEventCountRef = useRef(filteredMerged.length);
+  useLayoutEffect(() => {
+    const prev = lastEventCountRef.current;
+    lastEventCountRef.current = filteredMerged.length;
+    if (!autoScroll) return;
+    if (filteredMerged.length <= prev) return;
+    const el = internalScrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [filteredMerged.length, autoScroll]);
+
+  // Deep-link / activeExecutionId focus: scroll the matching segment into view.
+  useEffect(() => {
+    const target = focusExecutionId ?? activeExecutionId;
+    if (!target) return;
+    const root = internalScrollRef.current;
+    if (!root) return;
+    const node = root.querySelector<HTMLElement>(
+      `[data-segment-execution-id="${target}"]`
+    );
+    if (node?.scrollIntoView) {
+      node.scrollIntoView({ behavior: "auto", block: "start" });
+    }
+  }, [focusExecutionId, activeExecutionId]);
 
   const toggleTimeMode = useCallback(
     () => setTimeMode((m) => (m === "absolute" ? "differential" : "absolute")),
@@ -182,8 +270,9 @@ export function UnifiedChatView({
   return (
     <TimeModeContext.Provider value={timeModeContextValue}>
       <div
-        ref={scrollRef}
+        ref={setScrollEl}
         data-testid="unified-chat-view"
+        data-auto-scroll={autoScroll ? "1" : "0"}
         className="relative h-full overflow-y-auto bg-bg-primary"
       >
         <div className="flex justify-end px-4 pt-2">
@@ -252,8 +341,18 @@ export function UnifiedChatView({
               </>
             );
 
+            const isActive = activeExecutionId === segment.executionId;
             return (
-              <div key={segment.executionId}>
+              <div
+                key={segment.executionId}
+                data-segment-execution-id={segment.executionId}
+                data-active={isActive ? "1" : "0"}
+                className={
+                  isActive
+                    ? "rounded ring-2 ring-accent-primary/60"
+                    : undefined
+                }
+              >
                 {showTransition && (
                   <TransitionMarker
                     fromStep={previousSegment?.stepName ?? null}
