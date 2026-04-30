@@ -11,6 +11,7 @@ vi.mock("../bindings", () => ({
 
 import { useSubtreeSessionLogs } from "./useSubtreeSessionLogs";
 import type { SessionLog, StepExecution } from "../bindings";
+import { useSessionLogStore } from "../stores";
 
 function exec(id: string | null): StepExecution {
   return {
@@ -36,6 +37,9 @@ function log(id: string, content = "{}"): SessionLog {
 describe("useSubtreeSessionLogs", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    act(() => {
+      useSessionLogStore.setState({ logsByExecutionId: {} });
+    });
   });
 
   it("returns empty map and skips fetching when there are no execution ids", async () => {
@@ -91,6 +95,57 @@ describe("useSubtreeSessionLogs", () => {
     expect(result.current.error).toBe("kaboom");
     expect(result.current.logsByExecutionId.good).toBeDefined();
     expect(result.current.logsByExecutionId.bad).toBeUndefined();
+  });
+
+  it("merges live store appends over the fetched baseline (live wins when superset)", async () => {
+    const fetched = [log("e1-fetched-1")];
+    mockGetExecutionLogs.mockResolvedValue({ status: "ok", data: fetched });
+    const { result } = renderHook(() => useSubtreeSessionLogs([exec("e1")]));
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+    expect(result.current.logsByExecutionId.e1).toEqual(fetched);
+
+    const liveSuperset = [log("e1-fetched-1"), log("e1-live-2")];
+    act(() => {
+      useSessionLogStore.setState({
+        logsByExecutionId: { e1: liveSuperset },
+      });
+    });
+    expect(result.current.logsByExecutionId.e1).toBe(liveSuperset);
+    expect(result.current.logsByExecutionId.e1).toHaveLength(2);
+  });
+
+  it("falls back to fetched baseline when live store is empty for that execution", async () => {
+    const fetched = [log("e1-fetched-1")];
+    mockGetExecutionLogs.mockResolvedValue({ status: "ok", data: fetched });
+    const { result } = renderHook(() => useSubtreeSessionLogs([exec("e1")]));
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+    expect(result.current.logsByExecutionId.e1).toEqual(fetched);
+
+    act(() => {
+      useSessionLogStore.setState({ logsByExecutionId: { e1: [] } });
+    });
+    // Empty live bucket must NOT clobber the fetched baseline.
+    expect(result.current.logsByExecutionId.e1).toEqual(fetched);
+  });
+
+  it("does not include executions that have neither fetched nor live logs", async () => {
+    mockGetExecutionLogs.mockImplementation((id: string) =>
+      id === "missing"
+        ? Promise.resolve({ status: "err", error: { message: "x" } })
+        : Promise.resolve({ status: "ok", data: [log(`${id}-l1`)] })
+    );
+    const { result } = renderHook(() =>
+      useSubtreeSessionLogs([exec("present"), exec("missing")])
+    );
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+    expect(result.current.logsByExecutionId.present).toBeDefined();
+    expect("missing" in result.current.logsByExecutionId).toBe(false);
   });
 
   it("refetch reissues the requests", async () => {

@@ -1,4 +1,10 @@
 export { TracesHeader } from "./TracesHeader";
+export { FilterBar } from "./FilterBar";
+export {
+  filterExecutions,
+  filterTaggedEvents,
+  matchesSearch,
+} from "./applyFilters";
 export { SubtreeRail } from "./SubtreeRail";
 export { ModeToggle, ModePlaceholder, TRACE_MODES } from "./ModeToggle";
 export type { TraceMode } from "./ModeToggle";
