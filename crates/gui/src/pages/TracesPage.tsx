@@ -1,14 +1,17 @@
 import {
   useCallback,
+  useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
   type RefObject,
 } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import type { SessionLog, StepExecution, Task } from "../bindings";
 import {
   CorridorView,
+  FilterBar,
   FlightStrip,
   ModePlaceholder,
   ModeToggle,
@@ -17,10 +20,16 @@ import {
   UnifiedChatView,
   type TraceMode,
 } from "../components/Traces";
+import {
+  filterExecutions,
+  matchesSearch,
+} from "../components/Traces/applyFilters";
 import { useTask } from "../hooks";
 import { useSubtreeExecutions } from "../hooks/useSubtreeExecutions";
 import { useSubtreeSessionLogs } from "../hooks/useSubtreeSessionLogs";
+import { useTraceFilters } from "../hooks/useTraceFilters";
 import { useTaskStore } from "../stores/taskStore";
+import type { TaggedConversationEvent } from "../types/conversation";
 
 interface ModeContentProps {
   mode: TraceMode;
@@ -32,6 +41,10 @@ interface ModeContentProps {
   subtreeError: string | null;
   threadScrollRef: RefObject<HTMLDivElement | null>;
   onPinExecution: (id: string) => void;
+  search: string;
+  autoScroll: boolean;
+  focusExecutionId: string | null;
+  activeExecutionId: string | null;
 }
 
 function renderModeContent(props: ModeContentProps): ReactNode {
@@ -45,6 +58,10 @@ function renderModeContent(props: ModeContentProps): ReactNode {
     subtreeError,
     threadScrollRef,
     onPinExecution,
+    search,
+    autoScroll,
+    focusExecutionId,
+    activeExecutionId,
   } = props;
   switch (mode) {
     case "thread":
@@ -57,6 +74,14 @@ function renderModeContent(props: ModeContentProps): ReactNode {
           isLoading={isSubtreeLoading}
           error={subtreeError}
           scrollRef={threadScrollRef}
+          eventFilter={
+            search
+              ? (tagged: TaggedConversationEvent) => matchesSearch(tagged, search)
+              : undefined
+          }
+          autoScroll={autoScroll}
+          focusExecutionId={focusExecutionId}
+          activeExecutionId={activeExecutionId}
         />
       );
     case "corridor":
@@ -74,9 +99,21 @@ function renderModeContent(props: ModeContentProps): ReactNode {
   }
 }
 
+/** Parse `#exec=<id>` from a hash like "#exec=ab12". */
+function parseExecHash(hash: string): string | null {
+  if (!hash) return null;
+  const cleaned = hash.startsWith("#") ? hash.slice(1) : hash;
+  for (const part of cleaned.split("&")) {
+    const [k, v] = part.split("=");
+    if (k === "exec" && v) return decodeURIComponent(v);
+  }
+  return null;
+}
+
 export function TracesPage(): ReactNode {
   const { taskId } = useParams<{ taskId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const tasks = useTaskStore((state) => state.tasks);
 
   const [mode, setMode] = useState<TraceMode>("thread");
@@ -84,7 +121,12 @@ export function TracesPage(): ReactNode {
   const [pinnedExecutionId, setPinnedExecutionId] = useState<string | null>(
     null
   );
+  const [autoScroll, setAutoScroll] = useState(false);
+  const [activeExecutionId, setActiveExecutionId] = useState<string | null>(
+    null
+  );
   const threadScrollRef = useRef<HTMLDivElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   const safeTaskId = taskId ?? null;
   const { task, isLoading: isTaskLoading, error: taskError } = useTask(safeTaskId);
@@ -96,6 +138,74 @@ export function TracesPage(): ReactNode {
     error: subtreeError,
   } = useSubtreeExecutions(safeTaskId);
   const { logsByExecutionId } = useSubtreeSessionLogs(executions);
+
+  const { filters, setStatus, setStepName, setModel, setSearch, setRootOnly } =
+    useTraceFilters();
+
+  const filteredExecutions = useMemo(() => {
+    if (!safeTaskId) return [] as StepExecution[];
+    return filterExecutions(executions, filters, { rootTaskId: safeTaskId });
+  }, [executions, filters, safeTaskId]);
+
+  const focusExecutionId = useMemo(
+    () => parseExecHash(location.hash),
+    [location.hash]
+  );
+
+  // On first mount with a deep-link, prime activeExecutionId so j/k starts
+  // from the linked node.
+  useEffect(() => {
+    if (focusExecutionId && !activeExecutionId) {
+      setActiveExecutionId(focusExecutionId);
+    }
+  }, [focusExecutionId, activeExecutionId]);
+
+  // Keyboard navigation: j/k cycle executions, / focuses search.
+  // We compute the navigable list lazily in the handler so it tracks
+  // filtered executions without re-binding the listener every render.
+  const filteredExecutionsRef = useRef(filteredExecutions);
+  useEffect(() => {
+    filteredExecutionsRef.current = filteredExecutions;
+  }, [filteredExecutions]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent): void => {
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      const isEditable =
+        tag === "input" ||
+        tag === "textarea" ||
+        tag === "select" ||
+        target?.isContentEditable === true;
+
+      if (e.key === "/" && !isEditable) {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+        return;
+      }
+
+      if (isEditable) return;
+      if (e.key !== "j" && e.key !== "k") return;
+      const list = filteredExecutionsRef.current;
+      if (list.length === 0) return;
+      e.preventDefault();
+      setActiveExecutionId((current) => {
+        const ids = list
+          .map((x) => x.id)
+          .filter((id): id is string => !!id);
+        if (ids.length === 0) return current;
+        const idx = current ? ids.indexOf(current) : -1;
+        if (idx < 0) return ids[0];
+        const lastIdx = ids.length - 1;
+        const delta = e.key === "j" ? 1 : -1;
+        const nextIdx = Math.max(0, Math.min(lastIdx, idx + delta));
+        return ids[nextIdx];
+      });
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
 
   const handleBack = useCallback(() => {
     navigate(-1);
@@ -135,10 +245,7 @@ export function TracesPage(): ReactNode {
   const taskLevel = task?.level ?? null;
 
   return (
-    <div
-      data-testid="traces-page"
-      className="flex h-full min-h-0 flex-col"
-    >
+    <div data-testid="traces-page" className="flex h-full min-h-0 flex-col">
       <TracesHeader
         taskId={taskId}
         title={taskTitle}
@@ -149,12 +256,23 @@ export function TracesPage(): ReactNode {
         onBack={handleBack}
       />
 
+      <FilterBar
+        ref={searchInputRef}
+        filters={filters}
+        executions={executions}
+        onStatusChange={setStatus}
+        onStepNameChange={setStepName}
+        onModelChange={setModel}
+        onSearchChange={setSearch}
+        onRootOnlyChange={setRootOnly}
+      />
+
       <div className="flex min-h-0 flex-1 flex-row">
         <SubtreeRail
           rootTaskId={taskId}
           tasks={tasks}
           subtreeTaskIds={subtreeTaskIds}
-          executions={executions}
+          executions={filteredExecutions}
           collapsed={railCollapsed}
           onToggleCollapsed={handleToggleRail}
         />
@@ -163,11 +281,28 @@ export function TracesPage(): ReactNode {
           data-testid="traces-center-pane"
           className="flex min-w-0 flex-1 flex-col gap-3 p-4"
         >
-          <ModeToggle mode={mode} onChange={setMode} />
-          {mode === "thread" && executions.length > 0 && (
+          <div className="flex items-center justify-between gap-3">
+            <ModeToggle mode={mode} onChange={setMode} />
+            {mode === "thread" && (
+              <label
+                data-testid="traces-auto-scroll-label"
+                className="flex cursor-pointer items-center gap-1 text-[10px] text-text-secondary"
+              >
+                <input
+                  data-testid="traces-auto-scroll"
+                  type="checkbox"
+                  checked={autoScroll}
+                  onChange={(e) => setAutoScroll(e.target.checked)}
+                  className="h-3 w-3"
+                />
+                Auto-scroll
+              </label>
+            )}
+          </div>
+          {mode === "thread" && filteredExecutions.length > 0 && (
             <FlightStrip
               rootTaskId={taskId}
-              executions={executions}
+              executions={filteredExecutions}
               tasks={tasks}
               logsByExecutionId={logsByExecutionId}
               threadScrollRef={threadScrollRef}
@@ -178,13 +313,17 @@ export function TracesPage(): ReactNode {
               {renderModeContent({
                 mode,
                 taskId,
-                executions,
+                executions: filteredExecutions,
                 tasks,
                 logsByExecutionId,
                 isSubtreeLoading,
                 subtreeError,
                 threadScrollRef,
                 onPinExecution: setPinnedExecutionId,
+                search: filters.search,
+                autoScroll,
+                focusExecutionId,
+                activeExecutionId,
               })}
             </div>
             {mode === "corridor" && pinnedExecutionId && (
