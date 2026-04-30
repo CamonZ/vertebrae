@@ -1,6 +1,14 @@
-import { useCallback, useRef, useState, type ReactNode } from "react";
-import { useNavigate, useParams } from "react-router-dom";
 import {
+  useCallback,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import type { SessionLog, StepExecution, Task } from "../bindings";
+import {
+  CorridorView,
   FlightStrip,
   ModePlaceholder,
   ModeToggle,
@@ -14,6 +22,58 @@ import { useSubtreeExecutions } from "../hooks/useSubtreeExecutions";
 import { useSubtreeSessionLogs } from "../hooks/useSubtreeSessionLogs";
 import { useTaskStore } from "../stores/taskStore";
 
+interface ModeContentProps {
+  mode: TraceMode;
+  taskId: string;
+  executions: StepExecution[];
+  tasks: Task[];
+  logsByExecutionId: Record<string, SessionLog[]>;
+  isSubtreeLoading: boolean;
+  subtreeError: string | null;
+  threadScrollRef: RefObject<HTMLDivElement | null>;
+  onPinExecution: (id: string) => void;
+}
+
+function renderModeContent(props: ModeContentProps): ReactNode {
+  const {
+    mode,
+    taskId,
+    executions,
+    tasks,
+    logsByExecutionId,
+    isSubtreeLoading,
+    subtreeError,
+    threadScrollRef,
+    onPinExecution,
+  } = props;
+  switch (mode) {
+    case "thread":
+      return (
+        <UnifiedChatView
+          rootTaskId={taskId}
+          executions={executions}
+          tasks={tasks}
+          logsByExecutionId={logsByExecutionId}
+          isLoading={isSubtreeLoading}
+          error={subtreeError}
+          scrollRef={threadScrollRef}
+        />
+      );
+    case "corridor":
+      return (
+        <CorridorView
+          rootTaskId={taskId}
+          executions={executions}
+          tasks={tasks}
+          threadScrollRef={threadScrollRef}
+          onPinExecution={onPinExecution}
+        />
+      );
+    default:
+      return <ModePlaceholder mode={mode} />;
+  }
+}
+
 export function TracesPage(): ReactNode {
   const { taskId } = useParams<{ taskId: string }>();
   const navigate = useNavigate();
@@ -21,6 +81,9 @@ export function TracesPage(): ReactNode {
 
   const [mode, setMode] = useState<TraceMode>("thread");
   const [railCollapsed, setRailCollapsed] = useState(false);
+  const [pinnedExecutionId, setPinnedExecutionId] = useState<string | null>(
+    null
+  );
   const threadScrollRef = useRef<HTMLDivElement | null>(null);
 
   const safeTaskId = taskId ?? null;
@@ -110,19 +173,33 @@ export function TracesPage(): ReactNode {
               threadScrollRef={threadScrollRef}
             />
           )}
-          <div className="flex-1 min-h-0">
-            {mode === "thread" ? (
-              <UnifiedChatView
-                rootTaskId={taskId}
-                executions={executions}
-                tasks={tasks}
-                logsByExecutionId={logsByExecutionId}
-                isLoading={isSubtreeLoading}
-                error={subtreeError}
-                scrollRef={threadScrollRef}
-              />
-            ) : (
-              <ModePlaceholder mode={mode} />
+          <div className="flex-1 min-h-0 flex flex-row gap-3">
+            <div className="flex-1 min-w-0">
+              {renderModeContent({
+                mode,
+                taskId,
+                executions,
+                tasks,
+                logsByExecutionId,
+                isSubtreeLoading,
+                subtreeError,
+                threadScrollRef,
+                onPinExecution: setPinnedExecutionId,
+              })}
+            </div>
+            {mode === "corridor" && pinnedExecutionId && (
+              <aside
+                data-testid="corridor-detail-pin"
+                data-execution-id={pinnedExecutionId}
+                className="w-[300px] shrink-0 overflow-auto rounded border border-border bg-bg-tertiary p-3 text-xs"
+              >
+                <div className="mb-2 font-mono text-[10px] uppercase tracking-wider text-text-muted">
+                  Pinned execution
+                </div>
+                <div className="break-all font-mono text-text-primary">
+                  {pinnedExecutionId}
+                </div>
+              </aside>
             )}
           </div>
         </main>

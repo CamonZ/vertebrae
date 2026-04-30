@@ -130,10 +130,15 @@ describe("TracesPage", () => {
     // THREAD mode now renders the UnifiedChatView (not the placeholder).
     expect(screen.getByTestId("unified-chat-empty")).toBeInTheDocument();
     expect(screen.queryByTestId("trace-mode-placeholder")).toBeNull();
+    // CORRIDOR mode renders the real CorridorView, not the placeholder.
     fireEvent.click(screen.getByTestId("trace-mode-option-corridor"));
+    expect(screen.getByTestId("corridor-view")).toBeInTheDocument();
+    expect(screen.queryByTestId("trace-mode-placeholder")).toBeNull();
+    // STRIP mode is still the placeholder.
+    fireEvent.click(screen.getByTestId("trace-mode-option-strip"));
     expect(
       screen.getByTestId("trace-mode-placeholder").getAttribute("data-mode")
-    ).toBe("corridor");
+    ).toBe("strip");
   });
 
   it("collapses and expands the subtree rail", () => {
