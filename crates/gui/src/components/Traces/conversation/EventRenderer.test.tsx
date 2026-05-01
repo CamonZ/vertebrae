@@ -37,32 +37,43 @@ describe("formatting helpers", () => {
     expect(out.endsWith(".123")).toBe(true);
   });
 
-  it("formatDifferential returns scaled 'before' string", () => {
+  it("formatDifferential returns scaled 'after' string for forward-in-time delta", () => {
+    // Events render oldest-to-newest, so the delta from event N to event
+    // N+1 represents how long *after* event N the next one happened.
     const a = "2026-01-15T13:45:30.000Z";
     const b = "2026-01-15T13:45:30.250Z";
-    expect(formatDifferential(b, a)).toBe("250ms before");
-    expect(formatDifferential(a, null)).toBe("0ms before");
+    expect(formatDifferential(b, a)).toBe("250ms after");
     const later = "2026-01-15T13:45:32.500Z";
-    expect(formatDifferential(later, a)).toBe("2.5s before");
+    expect(formatDifferential(later, a)).toBe("2.5s after");
+    const minutes = "2026-01-15T13:47:35.000Z";
+    expect(formatDifferential(minutes, a)).toBe("2m 5s after");
+  });
+
+  it("formatDifferential returns em-dash for the first event (no previous)", () => {
+    const a = "2026-01-15T13:45:30.000Z";
+    expect(formatDifferential(a, null)).toBe("—");
   });
 });
 
 describe("EventRenderer", () => {
   const ts = "2026-01-15T13:45:30.123Z";
 
-  it("renders session_start with model", () => {
+  it("does NOT render a Session Started card — facts are folded into the StepBoundary header", () => {
     const event: SessionStartEvent = {
       kind: "session_start",
       timestamp: ts,
       model: "claude-opus-4-7",
       sessionId: "sess-1",
     };
-    render(<EventRenderer event={event} previousTimestamp={null} />);
-    expect(screen.getByText("Session Started")).toBeInTheDocument();
-    expect(screen.getByText(/claude-opus-4-7/)).toBeInTheDocument();
+    const { container } = render(
+      <EventRenderer event={event} previousTimestamp={null} />
+    );
+    expect(screen.queryByText("Session Started")).toBeNull();
+    expect(screen.queryByText(/claude-opus-4-7/)).toBeNull();
+    expect(container.firstChild).toBeNull();
   });
 
-  it("renders session_end with cost when > 0", () => {
+  it("does NOT render a Session Complete card — facts are folded into the StepBoundary header", () => {
     const event: SessionEndEvent = {
       kind: "session_end",
       timestamp: ts,
@@ -70,26 +81,35 @@ describe("EventRenderer", () => {
       numTurns: 3,
       costUsd: 0.05,
     };
-    render(<EventRenderer event={event} previousTimestamp={null} />);
-    expect(screen.getByText("Session Complete")).toBeInTheDocument();
-    expect(screen.getByText("3 turns")).toBeInTheDocument();
-    expect(screen.getByText("$0.0500")).toBeInTheDocument();
+    const { container } = render(
+      <EventRenderer event={event} previousTimestamp={null} />
+    );
+    expect(screen.queryByText("Session Complete")).toBeNull();
+    expect(screen.queryByText("3 turns")).toBeNull();
+    expect(screen.queryByText("$0.0500")).toBeNull();
+    expect(container.firstChild).toBeNull();
   });
 
-  it("renders thinking text and toggles long content", () => {
-    const longText = "x".repeat(300);
+  it("renders thinking text in full with no Show more / Show less affordance", () => {
+    const longText = "x".repeat(500);
     const event: ThinkingEvent = {
       kind: "thinking",
       timestamp: ts,
       text: longText,
     };
     render(<EventRenderer event={event} previousTimestamp={null} />);
-    const more = screen.getByText("Show more");
-    fireEvent.click(more);
-    expect(screen.getByText("Show less")).toBeInTheDocument();
+    expect(screen.queryByText("Show more")).toBeNull();
+    expect(screen.queryByText("Show less")).toBeNull();
+    // Full content rendered, no ellipsis truncation
+    expect(screen.getByText(longText)).toBeInTheDocument();
   });
 
-  it("renders tool_call and toggles input details on click", () => {
+  it("renders tool_call summary in full with no truncation and toggles input details", () => {
+    // Long string > 200 chars, the legacy mid-string truncation threshold.
+    // Use a continuous string with no trailing whitespace so the
+    // testing-library text matcher (whitespace-normalizing) finds it.
+    const longArg = "x".repeat(500);
+    const longSummary = `ls -la ${longArg}`;
     const event: ToolCallEvent = {
       kind: "tool_call",
       timestamp: ts,
@@ -97,27 +117,43 @@ describe("EventRenderer", () => {
       toolName: "Bash",
       displayName: "Bash",
       icon: "terminal",
-      summary: "ls -la",
-      input: { command: "ls -la" },
+      summary: longSummary,
+      input: { command: longArg },
     };
     render(<EventRenderer event={event} previousTimestamp={null} />);
     expect(screen.getByText("Bash")).toBeInTheDocument();
-    expect(screen.getByText("ls -la")).toBeInTheDocument();
+    // Full summary visible; no horizontal truncation marker.
+    expect(screen.getByText(longSummary)).toBeInTheDocument();
+    // No legacy mid-string ellipsis '…' or three-dot truncation.
+    expect(screen.queryByText(/…/)).toBeNull();
+
     expect(screen.queryByText(/command:/)).toBeNull();
-    fireEvent.click(screen.getByText("ls -la"));
+    fireEvent.click(screen.getByText(longSummary));
     expect(screen.getByText(/command:/)).toBeInTheDocument();
+    // The argument value is also rendered in full inside the input panel —
+    // legacy code chopped string args at 200 chars with '...'.
+    expect(screen.getByText(longArg)).toBeInTheDocument();
   });
 
-  it("renders tool_result and styles errors differently", () => {
+  it("renders tool_result in full and styles errors differently", () => {
+    // Use a long single-line string (no newlines, since testing-library
+    // collapses whitespace differently across nodes). 500 chars exceeds
+    // the legacy 100-char truncation threshold.
+    const longResult = "y".repeat(500);
     const ok: ToolResultEvent = {
       kind: "tool_result",
       timestamp: ts,
       toolUseId: "t",
       isError: false,
-      result: "done",
+      result: longResult,
     };
-    const { rerender } = render(<EventRenderer event={ok} previousTimestamp={null} />);
-    expect(screen.getByText("done")).toBeInTheDocument();
+    const { rerender } = render(
+      <EventRenderer event={ok} previousTimestamp={null} />
+    );
+    expect(screen.getByText(longResult)).toBeInTheDocument();
+    // Legacy truncation appended '...' once result.length > 100.
+    expect(screen.queryByText(/y{100}\.\.\./)).toBeNull();
+
     const err: ToolResultEvent = { ...ok, isError: true, result: "boom" };
     rerender(<EventRenderer event={err} previousTimestamp={null} />);
     const text = screen.getByText("boom");
