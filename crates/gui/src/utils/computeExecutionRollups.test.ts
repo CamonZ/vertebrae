@@ -1,6 +1,21 @@
 import { describe, expect, it } from "vitest";
 import { computeExecutionRollups } from "./computeExecutionRollups";
-import type { StepExecution } from "../bindings";
+import type { SessionLog, StepExecution } from "../bindings";
+
+function sessionEndLog(execId: string, costUsd: number, idx = 0): SessionLog {
+  return {
+    id: `log-${execId}-${idx}`,
+    step_execution_id: execId,
+    content: JSON.stringify({
+      type: "result",
+      subtype: "success",
+      duration_ms: 1234,
+      num_turns: 3,
+      total_cost_usd: costUsd,
+    }),
+    created_at: "2026-01-01T00:00:00.000Z",
+  };
+}
 
 function exec(overrides: Partial<StepExecution> = {}): StepExecution {
   return {
@@ -57,5 +72,57 @@ describe("computeExecutionRollups", () => {
     expect(rollups.totalCost).toBeCloseTo(0.4, 10);
     expect(rollups.totalTokens).toBe(30);
     expect(rollups.totalWallTimeMs).toBe(500);
+  });
+
+  it("falls back to session_end log cost_usd when StepExecution.cost is null", () => {
+    // Reproduces the bug from ticket ae4283f5: backend never persisted
+    // StepExecution.cost on completed runs, but the session-end log entries
+    // carry the real cost. The rollup must walk the logs to recover Σ COST.
+    const e1 = exec({ id: "exec-1", cost: null });
+    const e2 = exec({ id: "exec-2", cost: null });
+    const logsByExecutionId = {
+      "exec-1": [sessionEndLog("exec-1", 0.0742)],
+      "exec-2": [sessionEndLog("exec-2", 0.1166)],
+    };
+    const rollups = computeExecutionRollups([e1, e2], logsByExecutionId);
+    expect(rollups.totalRuns).toBe(2);
+    expect(rollups.totalCost).toBeCloseTo(0.0742 + 0.1166, 10);
+  });
+
+  it("sums multiple session_end events within a single execution", () => {
+    // A resumed execution can emit more than one `result` line; we want all
+    // of them counted, not just the first or last.
+    const e = exec({ id: "exec-1", cost: null });
+    const logsByExecutionId = {
+      "exec-1": [
+        sessionEndLog("exec-1", 0.05, 0),
+        sessionEndLog("exec-1", 0.07, 1),
+      ],
+    };
+    expect(
+      computeExecutionRollups([e], logsByExecutionId).totalCost
+    ).toBeCloseTo(0.12, 10);
+  });
+
+  it("prefers StepExecution.cost over log fallback when both are present", () => {
+    // The backend value is canonical; the log fallback only fires when
+    // StepExecution.cost is null. This avoids double-counting on healthy rows.
+    const e = exec({ id: "exec-1", cost: 0.01 });
+    const logsByExecutionId = {
+      "exec-1": [sessionEndLog("exec-1", 0.99)],
+    };
+    expect(
+      computeExecutionRollups([e], logsByExecutionId).totalCost
+    ).toBeCloseTo(0.01, 10);
+  });
+
+  it("ignores logs whose execution.id is missing", () => {
+    const e = exec({ id: null, cost: null });
+    const logsByExecutionId = {
+      "exec-1": [sessionEndLog("exec-1", 0.5)],
+    };
+    expect(
+      computeExecutionRollups([e], logsByExecutionId).totalCost
+    ).toBe(0);
   });
 });
