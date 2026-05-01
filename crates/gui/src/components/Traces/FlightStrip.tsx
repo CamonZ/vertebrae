@@ -279,7 +279,7 @@ export function FlightStrip({
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
-        className="relative w-full cursor-crosshair touch-none"
+        className="relative w-full cursor-pointer touch-none active:cursor-grabbing"
         style={{ height: totalHeight }}
       >
         <Lane
