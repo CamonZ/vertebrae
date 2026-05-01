@@ -294,6 +294,164 @@ describe("UnifiedChatView", () => {
     expect(texts[2]).toContain("A-late");
   });
 
+  it("does NOT render Session Started or Session Complete cards — facts fold into the boundary header", () => {
+    const tasks = [makeTask({ id: "t-root", title: "Root" })];
+    const exec = makeExec({
+      id: "exec-a",
+      task_id: "t-root",
+      step_name: "implement",
+      cost: 0,
+    });
+    // Session start (system/init) and session end (result) wrapped per the
+    // raw payload shapes parseSessionLog accepts.
+    const sessionStart = {
+      type: "system",
+      subtype: "init",
+      session_id: "sess-1",
+      model: "claude-sonnet-4-6",
+    };
+    const sessionEnd = {
+      type: "result",
+      subtype: "success",
+      duration_ms: 12500,
+      num_turns: 4,
+      total_cost_usd: 0.31,
+    };
+    const logs = {
+      "exec-a": [
+        makeLog("exec-a", sessionStart, "2024-01-01T10:00:00.000Z", 0),
+        makeLog(
+          "exec-a",
+          thinking("doing the thing"),
+          "2024-01-01T10:00:05.000Z",
+          1
+        ),
+        makeLog("exec-a", sessionEnd, "2024-01-01T10:00:12.500Z", 2),
+      ],
+    };
+    render(
+      <UnifiedChatView
+        rootTaskId="t-root"
+        executions={[exec]}
+        tasks={tasks}
+        logsByExecutionId={logs}
+      />
+    );
+
+    // No standalone session banner cards anywhere in the DOM.
+    expect(screen.queryByText("Session Started")).toBeNull();
+    expect(screen.queryByText("Session Complete")).toBeNull();
+    // The thinking event still renders.
+    expect(screen.getByText("doing the thing")).toBeInTheDocument();
+
+    // Folded facts appear in the boundary header.
+    const boundary = screen.getByTestId("unified-chat-step-boundary");
+    expect(within(boundary).getByText("claude-sonnet-4-6")).toBeInTheDocument();
+    expect(within(boundary).getByTestId("step-boundary-duration").textContent)
+      .toBe("12.5s");
+    expect(within(boundary).getByTestId("step-boundary-turns").textContent)
+      .toBe("4 turns");
+    expect(within(boundary).getByTestId("step-boundary-cost").textContent)
+      .toBe("$0.31");
+
+    // Only the thinking event survives in the renderable event list — the
+    // session_start / session_end events were folded out.
+    const events = screen.getAllByTestId("unified-chat-event");
+    expect(events).toHaveLength(1);
+    expect(events[0].textContent).toContain("doing the thing");
+  });
+
+  it("hides the task title in the boundary when the segment is on the root task (single-task scope)", () => {
+    const tasks = [makeTask({ id: "t-root", title: "Root Task Title" })];
+    const exec = makeExec({
+      id: "exec-a",
+      task_id: "t-root",
+      step_name: "plan",
+    });
+    const logs = {
+      "exec-a": [makeLog("exec-a", thinking("hi"), "2024-01-01T10:00:01.000Z", 0)],
+    };
+    render(
+      <UnifiedChatView
+        rootTaskId="t-root"
+        executions={[exec]}
+        tasks={tasks}
+        logsByExecutionId={logs}
+      />
+    );
+    const boundary = screen.getByTestId("unified-chat-step-boundary");
+    expect(boundary.getAttribute("data-task-title-placement")).toBe("hidden");
+    expect(within(boundary).queryByText("Root Task Title")).toBeNull();
+  });
+
+  it("renders descendant task titles as a subtitle in subtree views (multi-task scope)", () => {
+    const tasks = [
+      makeTask({ id: "t-root", title: "Root" }),
+      makeTask({ id: "t-child", title: "Child Task Subtitle", parent_id: "t-root" }),
+    ];
+    const parentExec = makeExec({
+      id: "exec-parent",
+      task_id: "t-root",
+      step_name: "implement",
+      started_at: "2024-01-01T10:00:00.000Z",
+    });
+    const childExec = makeExec({
+      id: "exec-child",
+      task_id: "t-child",
+      step_name: "review",
+      started_at: "2024-01-01T10:01:00.000Z",
+    });
+    const logs = {
+      "exec-parent": [
+        makeLog("exec-parent", thinking("p"), "2024-01-01T10:00:30.000Z", 0),
+      ],
+      "exec-child": [
+        makeLog("exec-child", thinking("c"), "2024-01-01T10:01:30.000Z", 0),
+      ],
+    };
+    render(
+      <UnifiedChatView
+        rootTaskId="t-root"
+        executions={[parentExec, childExec]}
+        tasks={tasks}
+        logsByExecutionId={logs}
+      />
+    );
+    const boundaries = screen.getAllByTestId("unified-chat-step-boundary");
+    const childBoundary = boundaries.find(
+      (b) => b.getAttribute("data-task-id") === "t-child"
+    );
+    expect(childBoundary).toBeDefined();
+    expect(childBoundary!.getAttribute("data-task-title-placement")).toBe(
+      "subtitle"
+    );
+    const subtitle = within(childBoundary!).getByTestId(
+      "step-boundary-task-subtitle"
+    );
+    expect(subtitle.textContent).toBe("Child Task Subtitle");
+  });
+
+  it("uses 'time after' (not 'time before') as the differential-mode hint label", () => {
+    const tasks = [makeTask({ id: "t-root" })];
+    const exec = makeExec({ id: "exec-a", task_id: "t-root" });
+    const logs = {
+      "exec-a": [makeLog("exec-a", thinking("hi"), "2024-01-01T10:00:01.000Z", 0)],
+    };
+    render(
+      <UnifiedChatView
+        rootTaskId="t-root"
+        executions={[exec]}
+        tasks={tasks}
+        logsByExecutionId={logs}
+      />
+    );
+    // Default mode is absolute; flipping the affordance reads "time after".
+    const view = screen.getByTestId("unified-chat-view");
+    // The label is the static affordance hint at the top of the view.
+    expect(within(view).getByText(/HH:MM:SS\.mmm/)).toBeInTheDocument();
+    expect(within(view).queryByText(/time before/)).toBeNull();
+  });
+
   it("step boundary is visually distinct from event rows (not a plain hr)", () => {
     const tasks = [makeTask({ id: "t-root" })];
     const exec = makeExec({
