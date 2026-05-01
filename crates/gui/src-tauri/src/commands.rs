@@ -2613,7 +2613,7 @@ mod tests {
         assert_eq!(fetched.session_id.as_deref(), Some("mock-session-id"));
         assert_eq!(fetched.input_tokens, Some(123));
         assert_eq!(fetched.output_tokens, Some(45));
-        assert_eq!(fetched.cost, Some(0.001));
+        assert_eq!(fetched.cost.as_deref(), Some("0.001"));
         assert_eq!(fetched.duration_ms, Some(250));
         assert_eq!(
             fetched.handoff.as_deref(),

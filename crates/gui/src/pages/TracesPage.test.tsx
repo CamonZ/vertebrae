@@ -31,20 +31,13 @@ vi.mock("../hooks", () => ({
   }),
 }));
 
-const subtreeRollups = {
-  totalRuns: 4,
-  totalCost: 0.42,
-  totalTokens: 8000,
-  totalWallTimeMs: 30000,
-};
-
 const subtreeExecutions = [
   createMockStepExecution({
     id: "ex-1",
     task_id: "root",
     status: "completed",
     step_name: "in_progress",
-    cost: 0.2,
+    cost: "0.2",
     duration_ms: 10000,
   }),
   createMockStepExecution({
@@ -52,10 +45,19 @@ const subtreeExecutions = [
     task_id: "child",
     status: "failed",
     step_name: "in_progress",
-    cost: 0.22,
+    cost: "0.22",
     duration_ms: 20000,
   }),
 ];
+
+// TracesPage recomputes its own rollups from executions + logs, so this
+// hook field only satisfies the mock shape — the page no longer reads it.
+const subtreeRollups = {
+  totalRuns: subtreeExecutions.length,
+  totalCost: 0.42,
+  totalTokens: 8000,
+  totalWallTimeMs: 30000,
+};
 
 vi.mock("../hooks/useSubtreeExecutions", () => ({
   useSubtreeExecutions: () => ({
@@ -109,7 +111,7 @@ describe("TracesPage", () => {
   it("renders header with task title and subtree rollup", () => {
     renderAt("/traces/root");
     expect(screen.getByTestId("traces-title").textContent).toBe("Root Epic");
-    expect(screen.getByTestId("traces-rollup-runs").textContent).toMatch(/4/);
+    expect(screen.getByTestId("traces-rollup-runs").textContent).toMatch(/2/);
     expect(screen.getByTestId("traces-rollup-cost").textContent).toMatch(
       /\$0\.42/
     );

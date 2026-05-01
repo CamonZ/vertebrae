@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { commands, type StepExecution } from "../bindings";
 import { useExecutionStore } from "../stores";
+import { useSessionLogStore } from "../stores/sessionLogStore";
 import { useTaskStore } from "../stores/taskStore";
 import {
   computeExecutionRollups,
@@ -104,9 +105,13 @@ export function useSubtreeExecutions(
     return merged;
   }, [subtreeTaskIds, executionsByTaskId]);
 
+  const logsByExecutionId = useSessionLogStore(
+    (state) => state.logsByExecutionId
+  );
+
   const rollups = useMemo(
-    () => computeExecutionRollups(executions),
-    [executions]
+    () => computeExecutionRollups(executions, logsByExecutionId),
+    [executions, logsByExecutionId]
   );
 
   return {

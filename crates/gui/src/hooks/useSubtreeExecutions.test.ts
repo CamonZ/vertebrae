@@ -64,7 +64,7 @@ describe("useSubtreeExecutions", () => {
           exec({
             id: `${taskId}-e1`,
             task_id: taskId,
-            cost: 0.1,
+            cost: "0.1",
             input_tokens: 50,
             output_tokens: 25,
             duration_ms: 1000,
@@ -122,7 +122,7 @@ describe("useSubtreeExecutions", () => {
           exec({
             id: `${taskId}-e1`,
             task_id: taskId,
-            cost: 0.1,
+            cost: "0.1",
             input_tokens: 10,
             output_tokens: 0,
             duration_ms: 100,
@@ -142,7 +142,7 @@ describe("useSubtreeExecutions", () => {
         exec({
           id: "new-exec",
           task_id: "task-1",
-          cost: 1.0,
+          cost: "1.0",
           input_tokens: 100,
           output_tokens: 200,
           duration_ms: 5000,
@@ -167,7 +167,7 @@ describe("useSubtreeExecutions", () => {
     act(() => {
       useExecutionStore
         .getState()
-        .upsertExecution(exec({ id: "stray", task_id: "unrelated", cost: 99 }));
+        .upsertExecution(exec({ id: "stray", task_id: "unrelated", cost: "99" }));
     });
 
     expect(result.current.executions).toHaveLength(0);

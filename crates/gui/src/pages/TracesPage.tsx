@@ -31,6 +31,7 @@ import { useSubtreeSessionLogs } from "../hooks/useSubtreeSessionLogs";
 import { useTraceFilters } from "../hooks/useTraceFilters";
 import { useTaskStore } from "../stores/taskStore";
 import type { TaggedConversationEvent } from "../types/conversation";
+import { computeExecutionRollups } from "../utils";
 
 interface ModeContentProps {
   mode: TraceMode;
@@ -132,13 +133,19 @@ export function TracesPage(): ReactNode {
   const safeTaskId = taskId ?? null;
   const { task, isLoading: isTaskLoading, error: taskError } = useTask(safeTaskId);
   const {
-    rollups,
     executions,
     subtreeTaskIds,
     isLoading: isSubtreeLoading,
     error: subtreeError,
   } = useSubtreeExecutions(safeTaskId);
   const { logsByExecutionId } = useSubtreeSessionLogs(executions);
+
+  // Recompute rollups with the fetched logs so the Σ COST fallback (for
+  // executions where StepExecution.cost was never persisted) takes effect.
+  const rollups = useMemo(
+    () => computeExecutionRollups(executions, logsByExecutionId),
+    [executions, logsByExecutionId]
+  );
 
   const { filters, setStatus, setStepName, setModel, setSearch, setRootOnly } =
     useTraceFilters();
@@ -278,6 +285,7 @@ export function TracesPage(): ReactNode {
             tasks={tasks}
             subtreeTaskIds={subtreeTaskIds}
             executions={filteredExecutions}
+            logsByExecutionId={logsByExecutionId}
             collapsed={railCollapsed}
             onToggleCollapsed={handleToggleRail}
             onSwitchTask={() => setPickerInRail(true)}

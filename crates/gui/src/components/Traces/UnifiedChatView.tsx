@@ -30,6 +30,7 @@ import {
   type TaggedConversationEvent,
 } from "../../types/conversation";
 import { useSubtreeSessionLogs } from "../../hooks/useSubtreeSessionLogs";
+import { parseCost } from "../../utils";
 import {
   EventRenderer,
   TimeModeContext,
@@ -359,7 +360,7 @@ export function UnifiedChatView({
                 stepName={segment.stepName}
                 startedAt={segment.startedAt}
                 model={facts.model ?? exec?.model ?? null}
-                costUsd={facts.costUsd ?? exec?.cost ?? null}
+                costUsd={facts.costUsd ?? parseCost(exec?.cost)}
                 durationMs={facts.durationMs ?? exec?.duration_ms ?? null}
                 numTurns={facts.numTurns}
                 depth={depth}
