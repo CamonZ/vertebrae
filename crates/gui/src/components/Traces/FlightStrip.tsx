@@ -43,10 +43,11 @@ export function FlightStrip({
   projection: projectionOverride,
 }: FlightStripProps): ReactNode {
   const [thresholdsOnly, setThresholdsOnly] = useState(false);
-  const [viewport, setViewport] = useState<{ start: number; end: number }>({
-    start: 0,
-    end: 1,
-  });
+  const [viewport, setViewport] = useState<{
+    start: number;
+    end: number;
+    measured: boolean;
+  }>({ start: 0, end: 1, measured: false });
   const viewportRef = useRef(viewport);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const rafRef = useRef<number | null>(null);
@@ -65,24 +66,29 @@ export function FlightStrip({
   );
 
   useEffect(() => {
-    const el = threadScrollRef?.current ?? null;
-    if (!el) return;
-    const onScroll = (): void => {
+    let attached: HTMLElement | null = null;
+    let rafId: number | null = null;
+    let resizeObs: ResizeObserver | null = null;
+    let mutationObs: MutationObserver | null = null;
+    let cancelled = false;
+
+    const measure = (el: HTMLElement): void => {
       const max = el.scrollHeight - el.clientHeight;
-      let next: { start: number; end: number };
-      if (max <= 0) {
-        next = { start: 0, end: 1 };
-      } else {
-        const start = el.scrollTop / max;
-        const visible = el.clientHeight / el.scrollHeight;
-        const clampedStart = Math.max(0, Math.min(1, start * (1 - visible)));
-        next = {
-          start: clampedStart,
-          end: Math.max(0, Math.min(1, clampedStart + visible)),
-        };
-      }
+      // Not yet measurable (layout hasn't happened or content hasn't loaded).
+      // Leave the previous viewport state alone and wait for the next tick —
+      // ResizeObserver / MutationObserver / scroll will retry.
+      if (max <= 0) return;
+      const start = el.scrollTop / max;
+      const visible = el.clientHeight / el.scrollHeight;
+      const clampedStart = Math.max(0, Math.min(1, start * (1 - visible)));
+      const next = {
+        start: clampedStart,
+        end: Math.max(0, Math.min(1, clampedStart + visible)),
+        measured: true,
+      };
       const prev = viewportRef.current;
       if (
+        prev.measured &&
         Math.abs(next.start - prev.start) < 1e-4 &&
         Math.abs(next.end - prev.end) < 1e-4
       ) {
@@ -91,9 +97,46 @@ export function FlightStrip({
       viewportRef.current = next;
       setViewport(next);
     };
-    onScroll();
-    el.addEventListener("scroll", onScroll, { passive: true });
-    return () => el.removeEventListener("scroll", onScroll);
+
+    const onScroll = (): void => {
+      if (attached) measure(attached);
+    };
+
+    const attach = (el: HTMLElement): void => {
+      attached = el;
+      measure(el);
+      el.addEventListener("scroll", onScroll, { passive: true });
+      // Container resize → re-measure (e.g. window resize, splitter drag).
+      resizeObs = new ResizeObserver(() => measure(el));
+      resizeObs.observe(el);
+      // Subtree mutations → re-measure. Async content rendering changes
+      // scrollHeight but doesn't fire ResizeObserver on the container itself.
+      mutationObs = new MutationObserver(() => measure(el));
+      mutationObs.observe(el, { childList: true, subtree: true });
+    };
+
+    const tryAttach = (): void => {
+      if (cancelled) return;
+      const el = threadScrollRef?.current ?? null;
+      if (el) {
+        attach(el);
+        return;
+      }
+      // Ref hasn't been wired yet — re-check on next frame. The effect's
+      // dependency only retriggers on the ref object identity, not on
+      // .current mutation, so we have to poll until it lands.
+      rafId = window.requestAnimationFrame(tryAttach);
+    };
+
+    tryAttach();
+
+    return () => {
+      cancelled = true;
+      if (rafId !== null) window.cancelAnimationFrame(rafId);
+      if (attached) attached.removeEventListener("scroll", onScroll);
+      resizeObs?.disconnect();
+      mutationObs?.disconnect();
+    };
   }, [threadScrollRef]);
 
   // rAF-coalesce scrub writes so drag stays interactive at 60fps even with
@@ -373,10 +416,12 @@ export function FlightStrip({
             {
               left: xPct(viewport.start),
               width: xPct(Math.max(0.005, viewport.end - viewport.start)),
+              visibility: viewport.measured ? "visible" : "hidden",
             } as CSSProperties
           }
           data-start={viewport.start.toFixed(4)}
           data-end={viewport.end.toFixed(4)}
+          data-measured={viewport.measured ? "true" : "false"}
         />
       </div>
     </div>
