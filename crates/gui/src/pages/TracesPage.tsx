@@ -17,7 +17,9 @@ import {
   ModeToggle,
   SubtreeRail,
   TracesHeader,
+  TracesPickerRail,
   UnifiedChatView,
+  type TaskPickerHandle,
   type TraceMode,
 } from "../components/Traces";
 import {
@@ -125,8 +127,10 @@ export function TracesPage(): ReactNode {
   const [activeExecutionId, setActiveExecutionId] = useState<string | null>(
     null
   );
+  const [pickerInRail, setPickerInRail] = useState(false);
   const threadScrollRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const pickerRef = useRef<TaskPickerHandle | null>(null);
 
   const safeTaskId = taskId ?? null;
   const { task, isLoading: isTaskLoading, error: taskError } = useTask(safeTaskId);
@@ -180,9 +184,16 @@ export function TracesPage(): ReactNode {
 
       if (e.key === "/" && !isEditable) {
         e.preventDefault();
-        searchInputRef.current?.focus();
-        searchInputRef.current?.select();
+        if (pickerRef.current) {
+          pickerRef.current.focus();
+        } else {
+          searchInputRef.current?.focus();
+          searchInputRef.current?.select();
+        }
         return;
+      }
+      if (e.key === "Escape" && !isEditable) {
+        setPickerInRail(false);
       }
 
       if (isEditable) return;
@@ -215,132 +226,154 @@ export function TracesPage(): ReactNode {
     setRailCollapsed((v) => !v);
   }, []);
 
-  if (!taskId) {
-    return (
-      <div
-        data-testid="traces-empty-state"
-        className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center"
-      >
-        <h1 className="text-base font-semibold text-text-primary">
-          No task selected
-        </h1>
-        <p className="max-w-md text-sm text-text-muted">
-          Open a task from the task list and use Explore traces to view its
-          subtree here.
-        </p>
-        <button
-          type="button"
-          onClick={() => navigate("/tasks")}
-          className="mt-2 rounded border border-border bg-bg-tertiary px-3 py-1 text-xs text-text-secondary transition-colors hover:bg-bg-hover"
-        >
-          Go to tasks
-        </button>
-      </div>
-    );
-  }
+  const handlePickTask = useCallback(
+    (id: string) => {
+      setPickerInRail(false);
+      navigate(`/traces/${id}`);
+    },
+    [navigate]
+  );
 
-  const headerError = taskError ?? subtreeError;
-  const headerLoading = isTaskLoading || isSubtreeLoading;
+  const showPickerRail = !taskId || pickerInRail;
+  const headerError = taskId ? (taskError ?? subtreeError) : null;
+  const headerLoading = taskId ? isTaskLoading || isSubtreeLoading : false;
   const taskTitle = task?.title ?? null;
   const taskLevel = task?.level ?? null;
 
   return (
     <div data-testid="traces-page" className="flex h-full min-h-0 flex-col">
       <TracesHeader
-        taskId={taskId}
+        taskId={taskId ?? null}
         title={taskTitle}
         level={taskLevel}
         rollups={rollups}
         isLoading={headerLoading}
         error={headerError}
-        onBack={handleBack}
+        onBack={taskId ? handleBack : undefined}
       />
 
-      <FilterBar
-        ref={searchInputRef}
-        filters={filters}
-        executions={executions}
-        onStatusChange={setStatus}
-        onStepNameChange={setStepName}
-        onModelChange={setModel}
-        onSearchChange={setSearch}
-        onRootOnlyChange={setRootOnly}
-      />
+      {taskId && (
+        <FilterBar
+          ref={searchInputRef}
+          filters={filters}
+          executions={executions}
+          onStatusChange={setStatus}
+          onStepNameChange={setStepName}
+          onModelChange={setModel}
+          onSearchChange={setSearch}
+          onRootOnlyChange={setRootOnly}
+        />
+      )}
 
       <div className="flex min-h-0 flex-1 flex-row">
-        <SubtreeRail
-          rootTaskId={taskId}
-          tasks={tasks}
-          subtreeTaskIds={subtreeTaskIds}
-          executions={filteredExecutions}
-          collapsed={railCollapsed}
-          onToggleCollapsed={handleToggleRail}
-        />
+        {showPickerRail ? (
+          <TracesPickerRail
+            tasks={tasks}
+            onSelect={handlePickTask}
+            pickerRef={pickerRef}
+            collapsed={railCollapsed}
+            onToggleCollapsed={handleToggleRail}
+            onCancel={taskId ? () => setPickerInRail(false) : undefined}
+          />
+        ) : (
+          <SubtreeRail
+            rootTaskId={taskId!}
+            tasks={tasks}
+            subtreeTaskIds={subtreeTaskIds}
+            executions={filteredExecutions}
+            collapsed={railCollapsed}
+            onToggleCollapsed={handleToggleRail}
+            onSwitchTask={() => setPickerInRail(true)}
+          />
+        )}
 
         <main
           data-testid="traces-center-pane"
           className="flex min-w-0 flex-1 flex-col gap-3 p-4"
         >
-          <div className="flex items-center justify-between gap-3">
-            <ModeToggle mode={mode} onChange={setMode} />
-            {mode === "thread" && (
-              <label
-                data-testid="traces-auto-scroll-label"
-                className="flex cursor-pointer items-center gap-1 text-[10px] text-text-secondary"
-              >
-                <input
-                  data-testid="traces-auto-scroll"
-                  type="checkbox"
-                  checked={autoScroll}
-                  onChange={(e) => setAutoScroll(e.target.checked)}
-                  className="h-3 w-3"
-                />
-                Auto-scroll
-              </label>
-            )}
-          </div>
-          {mode === "thread" && filteredExecutions.length > 0 && (
-            <FlightStrip
-              rootTaskId={taskId}
-              executions={filteredExecutions}
-              tasks={tasks}
-              logsByExecutionId={logsByExecutionId}
-              threadScrollRef={threadScrollRef}
-            />
-          )}
-          <div className="flex-1 min-h-0 flex flex-row gap-3">
-            <div className="flex-1 min-w-0">
-              {renderModeContent({
-                mode,
-                taskId,
-                executions: filteredExecutions,
-                tasks,
-                logsByExecutionId,
-                isSubtreeLoading,
-                subtreeError,
-                threadScrollRef,
-                onPinExecution: setPinnedExecutionId,
-                search: filters.search,
-                autoScroll,
-                focusExecutionId,
-                activeExecutionId,
-              })}
+          {!taskId ? (
+            <div
+              data-testid="traces-no-task-hint"
+              className="flex h-full flex-col justify-center px-8 text-center"
+            >
+              <div className="mx-auto" style={{ maxWidth: "28rem" }}>
+                <h2 className="text-base font-medium text-text-secondary">
+                  No task selected
+                </h2>
+                <p className="mt-2 text-sm text-text-muted">
+                  Search for a task in the panel on the left to view its
+                  execution traces. Press{" "}
+                  <kbd className="rounded border border-border bg-bg-tertiary px-1 font-mono text-[10px] text-text-secondary">
+                    /
+                  </kbd>{" "}
+                  to focus the search field.
+                </p>
+              </div>
             </div>
-            {mode === "corridor" && pinnedExecutionId && (
-              <aside
-                data-testid="corridor-detail-pin"
-                data-execution-id={pinnedExecutionId}
-                className="w-[300px] shrink-0 overflow-auto rounded border border-border bg-bg-tertiary p-3 text-xs"
-              >
-                <div className="mb-2 font-mono text-[10px] uppercase tracking-wider text-text-muted">
-                  Pinned execution
+          ) : (
+            <>
+              <div className="flex items-center justify-between gap-3">
+                <ModeToggle mode={mode} onChange={setMode} />
+                {mode === "thread" && (
+                  <label
+                    data-testid="traces-auto-scroll-label"
+                    className="flex cursor-pointer items-center gap-1 text-[10px] text-text-secondary"
+                  >
+                    <input
+                      data-testid="traces-auto-scroll"
+                      type="checkbox"
+                      checked={autoScroll}
+                      onChange={(e) => setAutoScroll(e.target.checked)}
+                      className="h-3 w-3"
+                    />
+                    Auto-scroll
+                  </label>
+                )}
+              </div>
+              {mode === "thread" && filteredExecutions.length > 0 && (
+                <FlightStrip
+                  rootTaskId={taskId}
+                  executions={filteredExecutions}
+                  tasks={tasks}
+                  logsByExecutionId={logsByExecutionId}
+                  threadScrollRef={threadScrollRef}
+                />
+              )}
+              <div className="flex min-h-0 flex-1 flex-row gap-3">
+                <div className="min-w-0 flex-1">
+                  {renderModeContent({
+                    mode,
+                    taskId,
+                    executions: filteredExecutions,
+                    tasks,
+                    logsByExecutionId,
+                    isSubtreeLoading,
+                    subtreeError,
+                    threadScrollRef,
+                    onPinExecution: setPinnedExecutionId,
+                    search: filters.search,
+                    autoScroll,
+                    focusExecutionId,
+                    activeExecutionId,
+                  })}
                 </div>
-                <div className="break-all font-mono text-text-primary">
-                  {pinnedExecutionId}
-                </div>
-              </aside>
-            )}
-          </div>
+                {mode === "corridor" && pinnedExecutionId && (
+                  <aside
+                    data-testid="corridor-detail-pin"
+                    data-execution-id={pinnedExecutionId}
+                    className="w-[300px] shrink-0 overflow-auto rounded border border-border bg-bg-tertiary p-3 text-xs"
+                  >
+                    <div className="mb-2 font-mono text-[10px] uppercase tracking-wider text-text-muted">
+                      Pinned execution
+                    </div>
+                    <div className="break-all font-mono text-text-primary">
+                      {pinnedExecutionId}
+                    </div>
+                  </aside>
+                )}
+              </div>
+            </>
+          )}
         </main>
       </div>
     </div>

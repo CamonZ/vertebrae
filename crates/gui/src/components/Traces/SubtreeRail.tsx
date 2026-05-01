@@ -17,6 +17,7 @@ interface SubtreeRailProps {
   executions: readonly StepExecution[];
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
+  onSwitchTask?: () => void;
 }
 
 interface GroupRow {
@@ -245,6 +246,7 @@ export function SubtreeRail({
   executions,
   collapsed,
   onToggleCollapsed,
+  onSwitchTask,
 }: SubtreeRailProps): ReactNode {
   const rows = useMemo<GroupRow[]>(() => {
     const taskById = new Map<string, Task>();
@@ -317,17 +319,30 @@ export function SubtreeRail({
         <span className="font-mono text-[10px] uppercase tracking-wider text-text-muted">
           Subtree
         </span>
-        {onToggleCollapsed && (
-          <button
-            type="button"
-            onClick={onToggleCollapsed}
-            data-testid="subtree-rail-toggle"
-            aria-label="Collapse subtree rail"
-            className="rounded p-1 text-text-muted hover:bg-bg-hover hover:text-text-secondary"
-          >
-            <Chevron direction="left" className="h-3 w-3" />
-          </button>
-        )}
+        <div className="flex items-center gap-1">
+          {onSwitchTask && (
+            <button
+              type="button"
+              onClick={onSwitchTask}
+              data-testid="subtree-rail-switch-task"
+              aria-label="Switch task"
+              className="rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-text-muted hover:bg-bg-hover hover:text-text-secondary"
+            >
+              Switch
+            </button>
+          )}
+          {onToggleCollapsed && (
+            <button
+              type="button"
+              onClick={onToggleCollapsed}
+              data-testid="subtree-rail-toggle"
+              aria-label="Collapse subtree rail"
+              className="rounded p-1 text-text-muted hover:bg-bg-hover hover:text-text-secondary"
+            >
+              <Chevron direction="left" className="h-3 w-3" />
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto">

@@ -1,4 +1,6 @@
 export { TracesHeader } from "./TracesHeader";
+export { TaskPicker, filterTasksForPicker } from "./TaskPicker";
+export type { TaskPickerHandle, TaskPickerProps } from "./TaskPicker";
 export { FilterBar } from "./FilterBar";
 export {
   filterExecutions,
@@ -6,6 +8,7 @@ export {
   matchesSearch,
 } from "./applyFilters";
 export { SubtreeRail } from "./SubtreeRail";
+export { TracesPickerRail } from "./TracesPickerRail";
 export { ModeToggle, ModePlaceholder, TRACE_MODES } from "./ModeToggle";
 export type { TraceMode } from "./ModeToggle";
 export { UnifiedChatView } from "./UnifiedChatView";

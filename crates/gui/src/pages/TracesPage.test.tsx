@@ -158,9 +158,10 @@ describe("TracesPage", () => {
     expect(mockNavigate).toHaveBeenCalledWith(-1);
   });
 
-  it("shows an empty state when no taskId is provided", () => {
+  it("renders the picker rail and no-task hint when no taskId is provided", () => {
     renderAt("/traces");
-    expect(screen.getByTestId("traces-empty-state")).toBeInTheDocument();
-    expect(screen.queryByTestId("traces-page")).toBeNull();
+    expect(screen.getByTestId("traces-page")).toBeInTheDocument();
+    expect(screen.getByTestId("traces-picker-rail")).toBeInTheDocument();
+    expect(screen.getByTestId("traces-no-task-hint")).toBeInTheDocument();
   });
 });
