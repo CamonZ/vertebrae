@@ -973,7 +973,7 @@ mod tests {
             "model_provider": "anthropic",
             "input_tokens": 200u32,
             "output_tokens": 80u32,
-            "cost": 0.0042,
+            "cost": "0.0042",
             "duration_ms": 9001u32,
             "handoff": "{\"to\":\"next-step\"}",
             "session_id": "ws-session-1",
@@ -991,7 +991,7 @@ mod tests {
         assert_eq!(exec.model_provider.as_deref(), Some("anthropic"));
         assert_eq!(exec.input_tokens, Some(200));
         assert_eq!(exec.output_tokens, Some(80));
-        assert_eq!(exec.cost, Some(0.0042));
+        assert_eq!(exec.cost.as_deref(), Some("0.0042"));
         assert_eq!(exec.duration_ms, Some(9001));
         assert_eq!(exec.handoff.as_deref(), Some("{\"to\":\"next-step\"}"));
         assert_eq!(exec.session_id.as_deref(), Some("ws-session-1"));

@@ -1073,9 +1073,10 @@ input_tokens?: number | null;
  */
 output_tokens?: number | null; 
 /**
- * Cost in USD
+ * Cost in USD, serialized as a string to preserve Decimal precision
+ * across the Sacrum WS / GraphQL boundary.
  */
-cost?: number | null; 
+cost?: string | null; 
 /**
  * Wall-clock duration in milliseconds
  */

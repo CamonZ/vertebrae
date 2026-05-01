@@ -20,6 +20,16 @@ export interface ExecutionRollups {
   totalWallTimeMs: number;
 }
 
+/**
+ * Parse a `StepExecution.cost` value (string-encoded Decimal from Sacrum)
+ * into a finite number, or null when missing/unparseable.
+ */
+export function parseCost(cost: string | null | undefined): number | null {
+  if (cost == null) return null;
+  const n = Number(cost);
+  return Number.isFinite(n) ? n : null;
+}
+
 function durationMs(execution: StepExecution): number {
   if (typeof execution.duration_ms === "number") return execution.duration_ms;
   if (execution.started_at && execution.completed_at) {
@@ -67,8 +77,9 @@ export function computeExecutionRollups(
   let totalTokens = 0;
   let totalWallTimeMs = 0;
   for (const exec of executions) {
-    if (typeof exec.cost === "number") {
-      totalCost += exec.cost;
+    const execCost = parseCost(exec.cost);
+    if (execCost !== null) {
+      totalCost += execCost;
     } else if (logsByExecutionId && exec.id) {
       totalCost += costFromSessionLogs(logsByExecutionId[exec.id]);
     }
