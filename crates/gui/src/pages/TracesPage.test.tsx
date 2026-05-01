@@ -37,7 +37,7 @@ const subtreeExecutions = [
     task_id: "root",
     status: "completed",
     step_name: "in_progress",
-    cost: 0.2,
+    cost: "0.2",
     duration_ms: 10000,
   }),
   createMockStepExecution({
@@ -45,7 +45,7 @@ const subtreeExecutions = [
     task_id: "child",
     status: "failed",
     step_name: "in_progress",
-    cost: 0.22,
+    cost: "0.22",
     duration_ms: 20000,
   }),
 ];

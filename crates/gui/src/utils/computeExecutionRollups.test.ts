@@ -42,9 +42,9 @@ describe("computeExecutionRollups", () => {
 
   it("sums cost, tokens (input + output), and duration_ms across executions", () => {
     const rollups = computeExecutionRollups([
-      exec({ cost: 0.25, input_tokens: 100, output_tokens: 50, duration_ms: 1200 }),
-      exec({ cost: 0.5, input_tokens: 200, output_tokens: 75, duration_ms: 800 }),
-      exec({ cost: 0.1, input_tokens: 10, output_tokens: 5, duration_ms: 100 }),
+      exec({ cost: "0.25", input_tokens: 100, output_tokens: 50, duration_ms: 1200 }),
+      exec({ cost: "0.5", input_tokens: 200, output_tokens: 75, duration_ms: 800 }),
+      exec({ cost: "0.1", input_tokens: 10, output_tokens: 5, duration_ms: 100 }),
     ]);
     expect(rollups.totalRuns).toBe(3);
     expect(rollups.totalCost).toBeCloseTo(0.85, 10);
@@ -66,7 +66,7 @@ describe("computeExecutionRollups", () => {
   it("treats missing fields as zero contribution", () => {
     const rollups = computeExecutionRollups([
       exec({ cost: null, input_tokens: null, output_tokens: null, duration_ms: null }),
-      exec({ cost: 0.4, input_tokens: 10, output_tokens: 20, duration_ms: 500 }),
+      exec({ cost: "0.4", input_tokens: 10, output_tokens: 20, duration_ms: 500 }),
     ]);
     expect(rollups.totalRuns).toBe(2);
     expect(rollups.totalCost).toBeCloseTo(0.4, 10);
@@ -107,7 +107,7 @@ describe("computeExecutionRollups", () => {
   it("prefers StepExecution.cost over log fallback when both are present", () => {
     // The backend value is canonical; the log fallback only fires when
     // StepExecution.cost is null. This avoids double-counting on healthy rows.
-    const e = exec({ id: "exec-1", cost: 0.01 });
+    const e = exec({ id: "exec-1", cost: "0.01" });
     const logsByExecutionId = {
       "exec-1": [sessionEndLog("exec-1", 0.99)],
     };
