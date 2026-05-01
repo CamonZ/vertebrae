@@ -645,7 +645,7 @@ describe("Router Acceptance Tests", () => {
       expect(screen.getByTestId("trace-mode-toggle")).toBeInTheDocument();
     });
 
-    it("renders an empty state at bare /traces with no taskId", async () => {
+    it("renders the picker rail at bare /traces with no taskId", async () => {
       const router = createTestRouter(["/traces"]);
 
       render(
@@ -655,7 +655,8 @@ describe("Router Acceptance Tests", () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByTestId("traces-empty-state")).toBeInTheDocument();
+        expect(screen.getByTestId("traces-picker-rail")).toBeInTheDocument();
+        expect(screen.getByTestId("traces-no-task-hint")).toBeInTheDocument();
       });
     });
 

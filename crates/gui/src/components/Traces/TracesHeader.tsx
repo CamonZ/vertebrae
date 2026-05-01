@@ -4,7 +4,7 @@ import { formatCost, type ExecutionRollups } from "../../utils";
 import { formatDurationMs } from "../Operations/formatDuration";
 
 interface TracesHeaderProps {
-  taskId: string;
+  taskId: string | null;
   title: string | null;
   level: TaskLevel | null;
   rollups: ExecutionRollups;
@@ -48,13 +48,14 @@ export function TracesHeader({
   error,
   onBack,
 }: TracesHeaderProps): ReactNode {
-  const displayTitle = title ?? "Unknown task";
+  const hasTask = taskId != null;
+  const displayTitle = hasTask ? (title ?? "Unknown task") : "Pick a task to explore traces";
   const displayLevel = level ?? "task";
 
   return (
     <header
       data-testid="traces-header"
-      data-task-id={taskId}
+      data-task-id={taskId ?? ""}
       className="flex flex-col gap-3 border-b border-border bg-bg-secondary px-4 py-3"
     >
       <div className="flex items-center gap-3">
@@ -90,13 +91,17 @@ export function TracesHeader({
           className="flex items-center gap-1 text-xs text-text-muted"
         >
           <span>Traces</span>
-          <span aria-hidden="true">/</span>
-          <span
-            data-testid="traces-breadcrumb-level"
-            className="font-mono uppercase tracking-wider"
-          >
-            {displayLevel}
-          </span>
+          {hasTask && (
+            <>
+              <span aria-hidden="true">/</span>
+              <span
+                data-testid="traces-breadcrumb-level"
+                className="font-mono uppercase tracking-wider"
+              >
+                {displayLevel}
+              </span>
+            </>
+          )}
         </nav>
 
         <h1
@@ -107,6 +112,7 @@ export function TracesHeader({
         </h1>
       </div>
 
+      {hasTask && (
       <div
         data-testid="traces-rollup"
         className="flex flex-wrap items-stretch gap-2"
@@ -148,6 +154,7 @@ export function TracesHeader({
           </span>
         )}
       </div>
+      )}
     </header>
   );
 }
