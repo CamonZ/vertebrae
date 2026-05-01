@@ -3,7 +3,8 @@ import { useNavigate } from "react-router-dom";
 import type { ExecutionStatus, StepExecution } from "../../bindings";
 import { useTaskExecutions } from "../../hooks";
 import { useSubtreeExecutions } from "../../hooks/useSubtreeExecutions";
-import { computeExecutionRollups, formatCost } from "../../utils";
+import { useSessionLogStore } from "../../stores/sessionLogStore";
+import { computeExecutionRollups, formatCost, parseCost } from "../../utils";
 import { formatDuration } from "../Operations/formatDuration";
 
 interface TraceMiniViewProps {
@@ -105,9 +106,13 @@ export function TraceMiniView({
     error: subtreeError,
   } = useSubtreeExecutions(taskId);
 
+  const logsByExecutionId = useSessionLogStore(
+    (state) => state.logsByExecutionId
+  );
+
   const taskRollups = useMemo(
-    () => computeExecutionRollups(taskExecutions),
-    [taskExecutions]
+    () => computeExecutionRollups(taskExecutions, logsByExecutionId),
+    [taskExecutions, logsByExecutionId]
   );
 
   const lastExecution = useMemo(
@@ -177,9 +182,10 @@ export function TraceMiniView({
               ? " (running)"
               : ""}
           </span>
-          {typeof lastExecution.cost === "number" && (
-            <span>{formatCost(lastExecution.cost)}</span>
-          )}
+          {(() => {
+            const c = parseCost(lastExecution.cost);
+            return c !== null ? <span>{formatCost(c)}</span> : null;
+          })()}
         </div>
       )}
 
