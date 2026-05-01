@@ -9,7 +9,7 @@ export {
 } from "./applyFilters";
 export { SubtreeRail } from "./SubtreeRail";
 export { TracesPickerRail } from "./TracesPickerRail";
-export { ModeToggle, ModePlaceholder, TRACE_MODES } from "./ModeToggle";
+export { ModeToggle, TRACE_MODES } from "./ModeToggle";
 export type { TraceMode } from "./ModeToggle";
 export { UnifiedChatView } from "./UnifiedChatView";
 export { FlightStrip } from "./FlightStrip";

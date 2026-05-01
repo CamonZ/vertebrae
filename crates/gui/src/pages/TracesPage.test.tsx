@@ -124,21 +124,27 @@ describe("TracesPage", () => {
     ]);
   });
 
-  it("renders the mode toggle and switches the placeholder when clicked", () => {
+  it("renders the mode toggle and switches between THREAD and CORRIDOR", () => {
     renderAt("/traces/root");
     expect(screen.getByTestId("trace-mode-toggle")).toBeInTheDocument();
-    // THREAD mode now renders the UnifiedChatView (not the placeholder).
+    // STRIP mode has been removed from the toggle.
+    expect(screen.queryByTestId("trace-mode-option-strip")).toBeNull();
+    // THREAD mode renders the UnifiedChatView.
     expect(screen.getByTestId("unified-chat-empty")).toBeInTheDocument();
-    expect(screen.queryByTestId("trace-mode-placeholder")).toBeNull();
-    // CORRIDOR mode renders the real CorridorView, not the placeholder.
+    // CORRIDOR mode renders the real CorridorView.
     fireEvent.click(screen.getByTestId("trace-mode-option-corridor"));
     expect(screen.getByTestId("corridor-view")).toBeInTheDocument();
-    expect(screen.queryByTestId("trace-mode-placeholder")).toBeNull();
-    // STRIP mode is still the placeholder.
-    fireEvent.click(screen.getByTestId("trace-mode-option-strip"));
-    expect(
-      screen.getByTestId("trace-mode-placeholder").getAttribute("data-mode")
-    ).toBe("strip");
+  });
+
+  it("renders the FlightStrip in THREAD mode but not in CORRIDOR mode", () => {
+    renderAt("/traces/root");
+    // THREAD: FlightStrip is mounted above the chat view.
+    expect(screen.getByTestId("flight-strip")).toBeInTheDocument();
+    // CORRIDOR: per-task lanes don't have a chronological axis, so the
+    // chronological minimap is intentionally hidden.
+    fireEvent.click(screen.getByTestId("trace-mode-option-corridor"));
+    expect(screen.queryByTestId("flight-strip")).toBeNull();
+    expect(screen.getByTestId("corridor-view")).toBeInTheDocument();
   });
 
   it("collapses and expands the subtree rail", () => {
