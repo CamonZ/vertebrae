@@ -10,6 +10,7 @@ import {
   computeExecutionRollups,
   costFromSessionLogs,
   formatCost,
+  parseCost,
   type ExecutionRollups,
 } from "../../utils";
 
@@ -125,10 +126,8 @@ function ExecutionRow({
   execution: StepExecution;
   logs: SessionLog[] | undefined;
 }): ReactNode {
-  let displayCost: number | null = null;
-  if (typeof execution.cost === "number") {
-    displayCost = execution.cost;
-  } else {
+  let displayCost: number | null = parseCost(execution.cost);
+  if (displayCost === null) {
     const fromLogs = costFromSessionLogs(logs);
     if (fromLogs > 0) displayCost = fromLogs;
   }

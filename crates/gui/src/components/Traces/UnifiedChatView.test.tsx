@@ -48,7 +48,7 @@ const makeExec = (overrides: Partial<StepExecution> & { id: string; task_id: str
   model_provider: "anthropic",
   input_tokens: null,
   output_tokens: null,
-  cost: overrides.cost ?? 0.05,
+  cost: overrides.cost ?? "0.05",
   duration_ms: null,
   handoff: null,
   session_id: null,
@@ -300,7 +300,7 @@ describe("UnifiedChatView", () => {
       id: "exec-a",
       task_id: "t-root",
       step_name: "implement",
-      cost: 0,
+      cost: "0",
     });
     // Session start (system/init) and session end (result) wrapped per the
     // raw payload shapes parseSessionLog accepts.

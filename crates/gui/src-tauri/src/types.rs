@@ -691,9 +691,10 @@ pub struct StepExecution {
     /// Output tokens emitted
     #[serde(default)]
     pub output_tokens: Option<u32>,
-    /// Cost in USD
+    /// Cost in USD, serialized as a string to preserve Decimal precision
+    /// across the Sacrum WS / GraphQL boundary.
     #[serde(default)]
-    pub cost: Option<f64>,
+    pub cost: Option<String>,
     /// Wall-clock duration in milliseconds
     #[serde(default)]
     pub duration_ms: Option<u32>,
@@ -740,7 +741,7 @@ impl From<vertebrae_core::StepExecution> for StepExecution {
             model_provider: exec.model_provider,
             input_tokens,
             output_tokens,
-            cost: exec.cost_usd,
+            cost: exec.cost_usd.map(|c| c.to_string()),
             duration_ms: exec.duration_ms.map(saturating_u64_to_u32),
             handoff: exec.handoff,
             session_id: exec.session_id,
@@ -1609,7 +1610,7 @@ mod tests {
         assert_eq!(gui.session_id.as_deref(), Some("sess-42"));
         assert_eq!(gui.input_tokens, Some(1000));
         assert_eq!(gui.output_tokens, Some(500));
-        assert_eq!(gui.cost, Some(0.0123));
+        assert_eq!(gui.cost.as_deref(), Some("0.0123"));
         assert_eq!(gui.duration_ms, Some(2_500));
         assert_eq!(gui.handoff.as_deref(), Some(r#"{"to":"next"}"#));
     }
@@ -1634,7 +1635,7 @@ mod tests {
             "model_provider": "anthropic",
             "input_tokens": 1234u32,
             "output_tokens": 567u32,
-            "cost": 0.025,
+            "cost": "0.025",
             "duration_ms": 4321u32,
             "handoff": "{\"to\":\"next\"}",
             "session_id": "sess-99",
@@ -1652,7 +1653,7 @@ mod tests {
         assert_eq!(exec.model_provider.as_deref(), Some("anthropic"));
         assert_eq!(exec.input_tokens, Some(1234));
         assert_eq!(exec.output_tokens, Some(567));
-        assert_eq!(exec.cost, Some(0.025));
+        assert_eq!(exec.cost.as_deref(), Some("0.025"));
         assert_eq!(exec.duration_ms, Some(4321));
         assert_eq!(exec.handoff.as_deref(), Some("{\"to\":\"next\"}"));
         assert_eq!(exec.session_id.as_deref(), Some("sess-99"));
@@ -1699,6 +1700,24 @@ mod tests {
         assert!(exec.duration_ms.is_none());
         assert!(exec.handoff.is_none());
         assert!(exec.session_id.is_none());
+    }
+
+    /// Sacrum's `project_channel.ex` serializes Decimal cost via
+    /// `Decimal.to_string`, so the WS payload arrives as a JSON string. The
+    /// field must deserialize without dropping the entire StepExecution.
+    #[test]
+    fn step_execution_accepts_decimal_string_cost_from_sacrum() {
+        let payload = serde_json::json!({
+            "id": "exec-decimal",
+            "task_id": "task-1",
+            "workflow_id": "wf-1",
+            "step_name": "review",
+            "started_at": "2024-01-01T00:00:00Z",
+            "status": "completed",
+            "cost": "0.0742",
+        });
+        let exec: StepExecution = serde_json::from_value(payload).unwrap();
+        assert_eq!(exec.cost.as_deref(), Some("0.0742"));
     }
 
     // ─── SessionLog Conversion Tests ────────────────────────────────

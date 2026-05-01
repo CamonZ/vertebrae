@@ -31,7 +31,7 @@ const executions = [
     task_id: "root",
     step_name: "review",
     status: "completed",
-    cost: 0.5,
+    cost: "0.5",
     duration_ms: 1000,
   }),
   createMockStepExecution({
@@ -39,7 +39,7 @@ const executions = [
     task_id: "child",
     step_name: "in_progress",
     status: "failed",
-    cost: 0.25,
+    cost: "0.25",
     duration_ms: 1000,
   }),
   createMockStepExecution({
@@ -47,7 +47,7 @@ const executions = [
     task_id: "child",
     step_name: "in_progress",
     status: "completed",
-    cost: 0.1,
+    cost: "0.1",
     duration_ms: 500,
   }),
   createMockStepExecution({
@@ -55,7 +55,7 @@ const executions = [
     task_id: "grand",
     step_name: "in_progress",
     status: "in_progress",
-    cost: 0.0,
+    cost: "0.0",
   }),
 ];
 
