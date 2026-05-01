@@ -24,7 +24,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import type { SessionLog, StepExecution, Task } from "../../bindings";
+import type { SessionLog, StepExecution, Task, Workflow } from "../../bindings";
 import {
   mergeExecutionEvents,
   type TaggedConversationEvent,
@@ -44,6 +44,16 @@ interface UnifiedChatViewProps {
   rootTaskId: string;
   executions: readonly StepExecution[];
   tasks: readonly Task[];
+  /**
+   * Optional list of workflows used to resolve the workflow tag shown on each
+   * execution row's StepBoundary header. The tag must reflect the workflow the
+   * execution actually ran under (via `StepExecution.workflow_id`), not the
+   * task's current workflow — a task that started in Backlog and was routed
+   * into Implementation should still show BACKLOG on its early executions.
+   * When omitted (or no match is found), the boundary falls back to the
+   * task's current `workflow_name`.
+   */
+  workflows?: readonly Workflow[];
   /** Optional: pass logs in directly (used by tests); otherwise fetched. */
   logsByExecutionId?: Record<string, SessionLog[]>;
   isLoading?: boolean;
@@ -173,6 +183,7 @@ export function UnifiedChatView({
   rootTaskId,
   executions,
   tasks,
+  workflows,
   logsByExecutionId: providedLogs,
   isLoading: externalLoading,
   error: externalError,
@@ -202,6 +213,14 @@ export function UnifiedChatView({
     }
     return m;
   }, [executions]);
+
+  const workflowNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const w of workflows ?? []) {
+      if (w.id) m.set(w.id, w.name);
+    }
+    return m;
+  }, [workflows]);
 
   const depthByTaskId = useMemo(
     () => buildDepthMap(rootTaskId, tasksById),
@@ -350,13 +369,25 @@ export function UnifiedChatView({
               segment.taskId === rootTaskId ? "hidden" : "subtitle";
             const facts = segment.sessionFacts;
 
+            // Resolve the workflow tag from the execution's own `workflow_id`
+            // so historical executions keep their original workflow label even
+            // after the task has been routed into a different workflow. Falls
+            // back to the task's current workflow_name only when the workflow
+            // can't be resolved (e.g. no workflow list provided, or the
+            // execution lacks a workflow_id).
+            const execWorkflowId = exec?.workflow_id ?? segment.workflowId;
+            const resolvedWorkflowName =
+              (execWorkflowId ? workflowNameById.get(execWorkflowId) : null) ??
+              task?.workflow_name ??
+              null;
+
             const boundary = (
               <StepBoundary
                 executionId={segment.executionId}
                 taskId={segment.taskId}
                 taskTitle={task?.title ?? null}
                 taskTitlePlacement={taskTitlePlacement}
-                workflowName={task?.workflow_name ?? null}
+                workflowName={resolvedWorkflowName}
                 stepName={segment.stepName}
                 startedAt={segment.startedAt}
                 model={facts.model ?? exec?.model ?? null}
