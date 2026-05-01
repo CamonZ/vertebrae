@@ -391,6 +391,171 @@ describe("FlightStrip", () => {
     expect(screen.queryAllByTestId("flight-strip-marker-main")).toHaveLength(0);
   });
 
+  it("updates viewport indicator from hidden/full-width to the correct slice when scrollHeight grows after mount (async content load)", async () => {
+    // ResizeObserver poly-mock — observe() should fire once immediately with
+    // current size, then again whenever we manually call .trigger().
+    const observers: Array<{ cb: ResizeObserverCallback; targets: Element[] }> =
+      [];
+    class FakeRO {
+      cb: ResizeObserverCallback;
+      targets: Element[] = [];
+      constructor(cb: ResizeObserverCallback) {
+        this.cb = cb;
+        observers.push(this);
+      }
+      observe(t: Element): void {
+        this.targets.push(t);
+        this.cb(
+          [{ target: t } as unknown as ResizeObserverEntry],
+          this as unknown as ResizeObserver
+        );
+      }
+      unobserve(): void {}
+      disconnect(): void {}
+    }
+    const originalRO = (globalThis as unknown as { ResizeObserver: unknown })
+      .ResizeObserver;
+    (globalThis as unknown as { ResizeObserver: typeof FakeRO }).ResizeObserver =
+      FakeRO;
+
+    const tasks = [makeTask({ id: "t-root" })];
+    const e1 = makeExec({
+      id: "e1",
+      task_id: "t-root",
+      started_at: "2024-01-01T10:00:00.000Z",
+    });
+
+    // Mount with scrollHeight === clientHeight → max <= 0, not measurable.
+    render(
+      <FlightStripHarness
+        rootTaskId="t-root"
+        executions={[e1]}
+        tasks={tasks}
+        logsByExecutionId={{}}
+        scrollHeight={200}
+        clientHeight={200}
+      />
+    );
+
+    // Before content has laid out: viewport must NOT be marked measured,
+    // i.e. it must not be displayed full-width (the bug).
+    const viewportEl = screen.getByTestId("flight-strip-viewport");
+    expect(viewportEl.getAttribute("data-measured")).toBe("false");
+
+    // Now simulate content loading: scrollHeight grows much larger than
+    // clientHeight, then a ResizeObserver entry fires.
+    const scrollEl = screen.getByTestId("thread-scroll");
+    Object.defineProperty(scrollEl, "scrollHeight", {
+      configurable: true,
+      value: 1000,
+    });
+    Object.defineProperty(scrollEl, "clientHeight", {
+      configurable: true,
+      value: 200,
+    });
+
+    act(() => {
+      // Re-fire all live observers' callbacks against their first target.
+      for (const o of observers) {
+        if (o.targets.length > 0) {
+          o.cb(
+            [{ target: o.targets[0] } as unknown as ResizeObserverEntry],
+            o as unknown as ResizeObserver
+          );
+        }
+      }
+    });
+
+    const after = screen.getByTestId("flight-strip-viewport");
+    expect(after.getAttribute("data-measured")).toBe("true");
+    // visible fraction = 200/1000 = 0.2 → end - start ≈ 0.2.
+    const start = Number(after.getAttribute("data-start"));
+    const end = Number(after.getAttribute("data-end"));
+    expect(end - start).toBeCloseTo(0.2, 2);
+    expect(start).toBeCloseTo(0, 2);
+
+    (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver =
+      originalRO;
+  });
+
+  it("seeds viewport once threadScrollRef.current is attached on a later tick (ref starts null)", () => {
+    // Component that delays attaching the ref via state flip on next tick.
+    function DelayedRefHarness(): ReactNode {
+      const ref = useRef<HTMLElement | null>(null);
+      const tasks = [makeTask({ id: "t-root" })];
+      const e1 = makeExec({
+        id: "e1",
+        task_id: "t-root",
+        started_at: "2024-01-01T10:00:00.000Z",
+      });
+      return (
+        <div>
+          <FlightStrip
+            rootTaskId="t-root"
+            executions={[e1]}
+            tasks={tasks}
+            logsByExecutionId={{}}
+            threadScrollRef={ref}
+          />
+          <div
+            data-testid="thread-scroll"
+            ref={(el) => {
+              if (el) {
+                Object.defineProperty(el, "scrollHeight", {
+                  configurable: true,
+                  value: 1000,
+                });
+                Object.defineProperty(el, "clientHeight", {
+                  configurable: true,
+                  value: 250,
+                });
+              }
+              // Simulate ref being wired on the next tick by deferring.
+              setTimeout(() => {
+                ref.current = el;
+              }, 0);
+            }}
+            style={{ height: 250, overflowY: "auto" }}
+          />
+        </div>
+      );
+    }
+
+    // requestAnimationFrame is synchronously stubbed in beforeEach. The
+    // effect's poll loop will keep recursing until ref.current is non-null;
+    // we therefore replace it with a one-shot stub that schedules via real
+    // setTimeout(0) so the ref can land first.
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation(
+      (cb: FrameRequestCallback) =>
+        setTimeout(() => cb(0), 0) as unknown as number
+    );
+
+    vi.useFakeTimers();
+    try {
+      render(<DelayedRefHarness />);
+
+      // Before timers run: ref still null, viewport not measured.
+      const before = screen.getByTestId("flight-strip-viewport");
+      expect(before.getAttribute("data-measured")).toBe("false");
+
+      // Advance: ref attach setTimeout(0) fires, then poll-rAF setTimeout(0)
+      // notices ref.current is set and measures.
+      act(() => {
+        vi.runAllTimers();
+      });
+
+      const after = screen.getByTestId("flight-strip-viewport");
+      expect(after.getAttribute("data-measured")).toBe("true");
+      const start = Number(after.getAttribute("data-start"));
+      const end = Number(after.getAttribute("data-end"));
+      // visible = 250/1000 = 0.25
+      expect(end - start).toBeCloseTo(0.25, 2);
+      expect(start).toBeCloseTo(0, 2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("renders nothing-but-thresholds when there are no tools or thinking events", () => {
     const tasks = [makeTask({ id: "t-root" })];
     const e1 = makeExec({
