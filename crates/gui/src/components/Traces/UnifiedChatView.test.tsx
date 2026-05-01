@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import { UnifiedChatView } from "./UnifiedChatView";
-import type { SessionLog, StepExecution, Task } from "../../bindings";
+import type { SessionLog, StepExecution, Task, Workflow } from "../../bindings";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -482,5 +482,125 @@ describe("UnifiedChatView", () => {
     expect(within(boundary).getByText("claude-opus-4")).toBeInTheDocument();
     // Not an <hr>
     expect(boundary.tagName).not.toBe("HR");
+  });
+
+  it("each execution's workflow tag reflects the workflow it ran in, not the task's current workflow", () => {
+    // Task currently lives in the Implementation workflow (post-routing).
+    const tasks = [
+      makeTask({
+        id: "t-root",
+        workflow_id: "wf-impl",
+        workflow_name: "Implementation",
+      }),
+    ];
+    // Two historical executions: the first ran under Backlog (wf-backlog),
+    // the second under Implementation (wf-impl) after the route.
+    const execBacklog = makeExec({
+      id: "exec-backlog",
+      task_id: "t-root",
+      workflow_id: "wf-backlog",
+      step_name: "triage",
+      started_at: "2024-01-01T09:00:00.000Z",
+    });
+    const execImpl = makeExec({
+      id: "exec-impl",
+      task_id: "t-root",
+      workflow_id: "wf-impl",
+      step_name: "implement",
+      started_at: "2024-01-01T10:00:00.000Z",
+    });
+    const logs = {
+      "exec-backlog": [
+        makeLog(
+          "exec-backlog",
+          thinking("triaging"),
+          "2024-01-01T09:00:01.000Z",
+          0
+        ),
+      ],
+      "exec-impl": [
+        makeLog(
+          "exec-impl",
+          thinking("implementing"),
+          "2024-01-01T10:00:01.000Z",
+          0
+        ),
+      ],
+    };
+    const workflows: Workflow[] = [
+      {
+        id: "wf-backlog",
+        name: "Backlog",
+        description: null,
+        initial_step: null,
+        kanban_column: null,
+        steps: [],
+        position: 0,
+      } as unknown as Workflow,
+      {
+        id: "wf-impl",
+        name: "Implementation",
+        description: null,
+        initial_step: null,
+        kanban_column: null,
+        steps: [],
+        position: 1,
+      } as unknown as Workflow,
+    ];
+
+    render(
+      <UnifiedChatView
+        rootTaskId="t-root"
+        executions={[execBacklog, execImpl]}
+        tasks={tasks}
+        workflows={workflows}
+        logsByExecutionId={logs}
+      />
+    );
+
+    const boundaries = screen.getAllByTestId("unified-chat-step-boundary");
+    expect(boundaries).toHaveLength(2);
+    // Boundaries are ordered chronologically — Backlog first, then Implementation.
+    const [backlogBoundary, implBoundary] = boundaries;
+    expect(backlogBoundary.getAttribute("data-execution-id")).toBe(
+      "exec-backlog"
+    );
+    expect(implBoundary.getAttribute("data-execution-id")).toBe("exec-impl");
+    expect(within(backlogBoundary).getByText("Backlog")).toBeInTheDocument();
+    expect(within(backlogBoundary).queryByText("Implementation")).toBeNull();
+    expect(within(implBoundary).getByText("Implementation")).toBeInTheDocument();
+  });
+
+  it("falls back to the task's current workflow_name when no workflows prop is provided", () => {
+    const tasks = [
+      makeTask({
+        id: "t-root",
+        workflow_id: "wf-impl",
+        workflow_name: "Implementation",
+      }),
+    ];
+    const exec = makeExec({
+      id: "exec-a",
+      task_id: "t-root",
+      workflow_id: "wf-backlog",
+      step_name: "triage",
+    });
+    const logs = {
+      "exec-a": [
+        makeLog("exec-a", thinking("hi"), "2024-01-01T10:00:01.000Z", 0),
+      ],
+    };
+    render(
+      <UnifiedChatView
+        rootTaskId="t-root"
+        executions={[exec]}
+        tasks={tasks}
+        logsByExecutionId={logs}
+      />
+    );
+    const boundary = screen.getByTestId("unified-chat-step-boundary");
+    // Without a workflows lookup table, resolution can't map wf-backlog →
+    // "Backlog" so we fall back to the task's current workflow name.
+    expect(within(boundary).getByText("Implementation")).toBeInTheDocument();
   });
 });

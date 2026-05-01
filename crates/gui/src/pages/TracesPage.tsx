@@ -8,7 +8,7 @@ import {
   type RefObject,
 } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import type { SessionLog, StepExecution, Task } from "../bindings";
+import type { SessionLog, StepExecution, Task, Workflow } from "../bindings";
 import {
   CorridorView,
   FilterBar,
@@ -26,6 +26,7 @@ import {
   matchesSearch,
 } from "../components/Traces/applyFilters";
 import { useTask } from "../hooks";
+import { useWorkflows } from "../hooks/useWorkflows";
 import { useSubtreeExecutions } from "../hooks/useSubtreeExecutions";
 import { useSubtreeSessionLogs } from "../hooks/useSubtreeSessionLogs";
 import { useTraceFilters } from "../hooks/useTraceFilters";
@@ -38,6 +39,7 @@ interface ModeContentProps {
   taskId: string;
   executions: StepExecution[];
   tasks: Task[];
+  workflows: readonly Workflow[];
   logsByExecutionId: Record<string, SessionLog[]>;
   isSubtreeLoading: boolean;
   subtreeError: string | null;
@@ -55,6 +57,7 @@ function renderModeContent(props: ModeContentProps): ReactNode {
     taskId,
     executions,
     tasks,
+    workflows,
     logsByExecutionId,
     isSubtreeLoading,
     subtreeError,
@@ -72,6 +75,7 @@ function renderModeContent(props: ModeContentProps): ReactNode {
           rootTaskId={taskId}
           executions={executions}
           tasks={tasks}
+          workflows={workflows}
           logsByExecutionId={logsByExecutionId}
           isLoading={isSubtreeLoading}
           error={subtreeError}
@@ -115,6 +119,7 @@ export function TracesPage(): ReactNode {
   const navigate = useNavigate();
   const location = useLocation();
   const tasks = useTaskStore((state) => state.tasks);
+  const { workflows } = useWorkflows();
 
   const [mode, setMode] = useState<TraceMode>("thread");
   const [railCollapsed, setRailCollapsed] = useState(false);
@@ -351,6 +356,7 @@ export function TracesPage(): ReactNode {
                     taskId,
                     executions: filteredExecutions,
                     tasks,
+                    workflows,
                     logsByExecutionId,
                     isSubtreeLoading,
                     subtreeError,
