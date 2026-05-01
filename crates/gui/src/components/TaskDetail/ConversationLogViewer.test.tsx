@@ -70,22 +70,21 @@ describe("ConversationLogViewer", () => {
   });
 
   describe("session events", () => {
-    it("displays session start with model info", () => {
+    it("does NOT render a Session Started banner — facts fold into the boundary header in the unified view", () => {
       const logs = [createSessionStartLog("claude-3-opus", "2024-01-01T10:00:00Z")];
       render(<ConversationLogViewer logs={logs} />);
 
-      expect(screen.getByText("Session Started")).toBeInTheDocument();
-      expect(screen.getByText("Model: claude-3-opus")).toBeInTheDocument();
+      expect(screen.queryByText("Session Started")).toBeNull();
+      expect(screen.queryByText("Model: claude-3-opus")).toBeNull();
     });
 
-    it("displays session end with stats", () => {
+    it("does NOT render a Session Complete banner — facts fold into the boundary header in the unified view", () => {
       const logs = [createSessionEndLog(5000, 10, 0.05, "2024-01-01T10:00:00Z")];
       render(<ConversationLogViewer logs={logs} />);
 
-      expect(screen.getByText("Session Complete")).toBeInTheDocument();
-      expect(screen.getByText("5.0s")).toBeInTheDocument();
-      expect(screen.getByText("10 turns")).toBeInTheDocument();
-      expect(screen.getByText("$0.0500")).toBeInTheDocument();
+      expect(screen.queryByText("Session Complete")).toBeNull();
+      expect(screen.queryByText("10 turns")).toBeNull();
+      expect(screen.queryByText("$0.0500")).toBeNull();
     });
   });
 
@@ -97,22 +96,17 @@ describe("ConversationLogViewer", () => {
       expect(screen.getByText("Let me analyze this...")).toBeInTheDocument();
     });
 
-    it("truncates long thinking text", () => {
-      const longText = "A".repeat(300);
+    it("renders long thinking text in full with no Show more / Show less affordance", () => {
+      const longText = "A".repeat(500);
       const logs = [createThinkingLog(longText, "2024-01-01T10:00:00Z")];
       render(<ConversationLogViewer logs={logs} />);
 
-      // Should show truncated text with Show more button
-      expect(screen.getByText("Show more")).toBeInTheDocument();
-    });
-
-    it("expands truncated thinking text on click", () => {
-      const longText = "A".repeat(300);
-      const logs = [createThinkingLog(longText, "2024-01-01T10:00:00Z")];
-      render(<ConversationLogViewer logs={logs} />);
-
-      fireEvent.click(screen.getByText("Show more"));
-      expect(screen.getByText("Show less")).toBeInTheDocument();
+      // Legacy threshold was 200 chars; the row used to collapse into a
+      // truncated preview with a Show more button. The new behavior is
+      // "this view exists for expanded reading" — render the full text.
+      expect(screen.queryByText("Show more")).toBeNull();
+      expect(screen.queryByText("Show less")).toBeNull();
+      expect(screen.getByText(longText)).toBeInTheDocument();
     });
   });
 
@@ -190,10 +184,14 @@ describe("ConversationLogViewer", () => {
 
       render(<ConversationLogViewer logs={logs} />);
 
-      expect(screen.getByText("Session Started")).toBeInTheDocument();
+      // Session start / end banners are intentionally omitted — their
+      // facts are folded into the StepBoundary header in the unified
+      // chat view. The legacy ConversationLogViewer inherits the same
+      // EventRenderer dispatch table so it also drops the banners here.
+      expect(screen.queryByText("Session Started")).toBeNull();
+      expect(screen.queryByText("Session Complete")).toBeNull();
       expect(screen.getByText("Let me check that file...")).toBeInTheDocument();
       expect(screen.getByText("Read")).toBeInTheDocument();
-      expect(screen.getByText("Session Complete")).toBeInTheDocument();
     });
   });
 });

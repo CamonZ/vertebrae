@@ -94,13 +94,30 @@ function buildDepthMap(
   return depths;
 }
 
+interface SessionFacts {
+  /** Model from the session_start event (preferred over StepExecution.model). */
+  model: string | null;
+  /** Wall-time of the session from the session_end event, in ms. */
+  durationMs: number | null;
+  /** Assistant turn count from the session_end event. */
+  numTurns: number | null;
+  /** Cost in USD from the session_end event. */
+  costUsd: number | null;
+}
+
 interface Segment {
   executionId: string;
   taskId: string;
   workflowId: string | null;
   stepName: string | null;
   startedAt: string | null;
+  /**
+   * Renderable events only — `session_start` / `session_end` are stripped out
+   * and surfaced via `sessionFacts` on the StepBoundary header instead.
+   */
   events: TaggedConversationEvent[];
+  /** Folded session_start / session_end facts for the boundary header. */
+  sessionFacts: SessionFacts;
 }
 
 /** Group consecutive tagged events by executionId, preserving order. */
@@ -109,19 +126,46 @@ function groupByExecution(events: TaggedConversationEvent[]): Segment[] {
   for (const tagged of events) {
     const last = segments[segments.length - 1];
     if (last && last.executionId === tagged.executionId) {
-      last.events.push(tagged);
+      foldOrPush(last, tagged);
       continue;
     }
-    segments.push({
+    const seg: Segment = {
       executionId: tagged.executionId,
       taskId: tagged.taskId,
       workflowId: tagged.workflowId,
       stepName: tagged.stepName,
       startedAt: tagged.executionStartedAt,
-      events: [tagged],
-    });
+      events: [],
+      sessionFacts: {
+        model: null,
+        durationMs: null,
+        numTurns: null,
+        costUsd: null,
+      },
+    };
+    foldOrPush(seg, tagged);
+    segments.push(seg);
   }
   return segments;
+}
+
+/**
+ * Either fold session_start / session_end metadata into the segment's
+ * `sessionFacts`, or push the event onto the renderable list.
+ */
+function foldOrPush(seg: Segment, tagged: TaggedConversationEvent): void {
+  const ev = tagged.event;
+  if (ev.kind === "session_start") {
+    seg.sessionFacts.model = ev.model;
+    return;
+  }
+  if (ev.kind === "session_end") {
+    seg.sessionFacts.durationMs = ev.durationMs;
+    seg.sessionFacts.numTurns = ev.numTurns;
+    seg.sessionFacts.costUsd = ev.costUsd;
+    return;
+  }
+  seg.events.push(tagged);
 }
 
 export function UnifiedChatView({
@@ -278,7 +322,7 @@ export function UnifiedChatView({
         <div className="flex justify-end px-4 pt-2">
           <span className="text-[10px] text-text-muted">
             Click timestamps to toggle:{" "}
-            {timeMode === "absolute" ? "HH:MM:SS.mmm" : "time before"}
+            {timeMode === "absolute" ? "HH:MM:SS.mmm" : "time after"}
           </span>
         </div>
         <div className="px-2 pb-4">
@@ -298,16 +342,26 @@ export function UnifiedChatView({
               previousSegment.taskId !== segment.taskId &&
               depth > (depthByTaskId.get(previousSegment.taskId) ?? 0);
 
+            // Hide the title on root-task segments (page header already shows
+            // it); descendants render it as a subtitle so delegations read as
+            // "delegated to: ...".
+            const taskTitlePlacement =
+              segment.taskId === rootTaskId ? "hidden" : "subtitle";
+            const facts = segment.sessionFacts;
+
             const boundary = (
               <StepBoundary
                 executionId={segment.executionId}
                 taskId={segment.taskId}
                 taskTitle={task?.title ?? null}
+                taskTitlePlacement={taskTitlePlacement}
                 workflowName={task?.workflow_name ?? null}
                 stepName={segment.stepName}
                 startedAt={segment.startedAt}
-                model={exec?.model ?? null}
-                costUsd={exec?.cost ?? null}
+                model={facts.model ?? exec?.model ?? null}
+                costUsd={facts.costUsd ?? exec?.cost ?? null}
+                durationMs={facts.durationMs ?? exec?.duration_ms ?? null}
+                numTurns={facts.numTurns}
                 depth={depth}
               />
             );

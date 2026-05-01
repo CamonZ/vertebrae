@@ -19,8 +19,6 @@ import {
 } from "react";
 import type {
   ConversationEvent,
-  SessionStartEvent,
-  SessionEndEvent,
   ThinkingEvent,
   ToolCallEvent,
   ToolResultEvent,
@@ -69,27 +67,34 @@ export function formatTimeWithMs(isoString: string): string {
   }
 }
 
+/**
+ * Format the time delta from `previousTs` to `currentTs` using forward-in-time
+ * wording. Events render oldest-to-newest in the chat view, so the delta from
+ * event N to event N+1 means how long *after* event N the next one happened.
+ *
+ * For the very first event there is no previous, so we return an em-dash.
+ */
 export function formatDifferential(
   currentTs: string,
   previousTs: string | null
 ): string {
-  if (!previousTs) return "0ms before";
+  if (!previousTs) return "—";
   try {
     const current = new Date(currentTs).getTime();
     const previous = new Date(previousTs).getTime();
     const diffMs = Math.abs(current - previous);
-    if (diffMs < 1000) return `${diffMs}ms before`;
-    if (diffMs < 60000) return `${(diffMs / 1000).toFixed(1)}s before`;
+    if (diffMs < 1000) return `${diffMs}ms after`;
+    if (diffMs < 60000) return `${(diffMs / 1000).toFixed(1)}s after`;
     if (diffMs < 3600000) {
       const mins = Math.floor(diffMs / 60000);
       const secs = Math.round((diffMs % 60000) / 1000);
-      return `${mins}m ${secs}s before`;
+      return `${mins}m ${secs}s after`;
     }
     const hours = Math.floor(diffMs / 3600000);
     const mins = Math.round((diffMs % 3600000) / 60000);
-    return `${hours}h ${mins}m before`;
+    return `${hours}h ${mins}m after`;
   } catch {
-    return "? before";
+    return "? after";
   }
 }
 
@@ -137,16 +142,6 @@ export function Timestamp({
 // ---------------------------------------------------------------------------
 
 const Icons = {
-  cpu: (
-    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 3v2m6-2v2M9 19v2m6-2v2M3 9h2m-2 6h2m14-6h2m-2 6h2M7 7h10v10H7z" />
-    </svg>
-  ),
-  check: (
-    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-    </svg>
-  ),
   checkSmall: (
     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -155,11 +150,6 @@ const Icons = {
   x: (
     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-    </svg>
-  ),
-  clock: (
-    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
     </svg>
   ),
   message: (
@@ -229,51 +219,10 @@ function getToolIcon(toolName: string): ReactNode {
 // ---------------------------------------------------------------------------
 // Sub-components per event kind
 // ---------------------------------------------------------------------------
-
-export function SessionStart({
-  event,
-  previousTimestamp,
-}: {
-  event: SessionStartEvent;
-  previousTimestamp: string | null;
-}) {
-  return (
-    <div className="flex items-center gap-3 py-3 px-4 bg-success/10 rounded-lg border border-success/20">
-      <span className="text-success">{Icons.cpu}</span>
-      <div className="flex-1">
-        <div className="text-sm font-medium text-text-primary">Session Started</div>
-        <div className="text-xs text-text-muted">Model: {event.model}</div>
-      </div>
-      <Timestamp timestamp={event.timestamp} previousTimestamp={previousTimestamp} />
-    </div>
-  );
-}
-
-export function SessionEnd({
-  event,
-  previousTimestamp,
-}: {
-  event: SessionEndEvent;
-  previousTimestamp: string | null;
-}) {
-  return (
-    <div className="flex items-center gap-3 py-3 px-4 bg-info/10 rounded-lg border border-info/20">
-      <span className="text-info">{Icons.check}</span>
-      <div className="flex-1">
-        <div className="text-sm font-medium text-text-primary">Session Complete</div>
-        <div className="flex gap-4 text-xs text-text-muted">
-          <span className="flex items-center gap-1">
-            {Icons.clock}
-            {formatDurationShort(event.durationMs)}
-          </span>
-          <span>{event.numTurns} turns</span>
-          {event.costUsd > 0 && <span>${event.costUsd.toFixed(4)}</span>}
-        </div>
-      </div>
-      <Timestamp timestamp={event.timestamp} previousTimestamp={previousTimestamp} />
-    </div>
-  );
-}
+//
+// `session_start` / `session_end` events have no inline rendering — their
+// facts are folded into the StepBoundary header (see UnifiedChatView's
+// `foldOrPush`). The dispatch switch below returns `null` for both kinds.
 
 export function ThinkingBlock({
   event,
@@ -282,27 +231,14 @@ export function ThinkingBlock({
   event: ThinkingEvent;
   previousTimestamp: string | null;
 }) {
-  const [isExpanded, setIsExpanded] = useState(false);
-  const isLong = event.text.length > 200;
-  const displayText =
-    isExpanded || !isLong ? event.text : event.text.slice(0, 200) + "...";
-
   return (
     <div className="py-2">
       <div className="flex items-start gap-2">
         <span className="text-text-muted mt-1 flex-shrink-0">{Icons.message}</span>
         <div className="flex-1 min-w-0">
           <p className="text-sm text-text-secondary whitespace-pre-wrap break-words">
-            {displayText}
+            {event.text}
           </p>
-          {isLong && (
-            <button
-              onClick={() => setIsExpanded(!isExpanded)}
-              className="text-xs text-primary hover:text-primary-hover mt-1"
-            >
-              {isExpanded ? "Show less" : "Show more"}
-            </button>
-          )}
         </div>
         <Timestamp timestamp={event.timestamp} previousTimestamp={previousTimestamp} />
       </div>
@@ -316,8 +252,7 @@ function formatInputValue(value: unknown): ReactNode {
   if (typeof value === "boolean") return <span className="text-info">{value.toString()}</span>;
   if (typeof value === "number") return <span className="text-warning">{value}</span>;
   if (typeof value === "string") {
-    const displayValue = value.length > 200 ? value.slice(0, 200) + "..." : value;
-    return <span className="text-success break-all">{displayValue}</span>;
+    return <span className="text-success whitespace-pre-wrap break-words">{value}</span>;
   }
   if (Array.isArray(value)) {
     if (value.length === 0) return <span className="text-text-muted">[]</span>;
@@ -359,23 +294,27 @@ export function ToolCall({
     <div className="py-2">
       <button
         type="button"
-        className="flex items-center gap-2 w-full text-left group"
+        className="flex items-start gap-2 w-full text-left group"
         onClick={() => setShowInput(!showInput)}
       >
         <div className="w-6 h-6 rounded bg-bg-tertiary flex items-center justify-center flex-shrink-0">
           <span className="text-primary">{getToolIcon(event.toolName)}</span>
         </div>
-        <span className="text-sm font-medium text-text-primary">{event.displayName}</span>
-        <span className="text-sm text-text-muted truncate flex-1">{event.summary}</span>
+        <span className="text-sm font-medium text-text-primary flex-shrink-0">
+          {event.displayName}
+        </span>
+        <span className="text-sm text-text-muted whitespace-pre-wrap break-words flex-1 min-w-0">
+          {event.summary}
+        </span>
         <span
-          className={`text-text-muted transition-transform ${showInput ? "rotate-90" : ""}`}
+          className={`text-text-muted transition-transform flex-shrink-0 ${showInput ? "rotate-90" : ""}`}
         >
           {Icons.chevronRight}
         </span>
         <Timestamp timestamp={event.timestamp} previousTimestamp={previousTimestamp} />
       </button>
       {showInput && (
-        <div className="mt-2 ml-8 p-3 bg-bg-tertiary rounded text-xs font-mono overflow-x-auto">
+        <div className="mt-2 ml-8 p-3 bg-bg-tertiary rounded text-xs font-mono whitespace-pre-wrap break-words">
           {Object.entries(event.input).map(([key, value]) => (
             <div key={key} className="py-0.5">
               <span className="text-primary font-medium">{key}:</span>{" "}
@@ -397,11 +336,9 @@ export function ToolResult({ event }: { event: ToolResultEvent }) {
         {event.isError ? Icons.x : Icons.checkSmall}
       </span>
       <span
-        className={`text-xs ${event.isError ? "text-error" : "text-text-muted"} truncate`}
-        title={event.result}
+        className={`text-xs whitespace-pre-wrap break-words ${event.isError ? "text-error" : "text-text-muted"}`}
       >
-        {event.result.slice(0, 100)}
-        {event.result.length > 100 && "..."}
+        {event.result}
       </span>
     </div>
   );
@@ -417,9 +354,9 @@ export function EventRenderer({
 }) {
   switch (event.kind) {
     case "session_start":
-      return <SessionStart event={event} previousTimestamp={previousTimestamp} />;
     case "session_end":
-      return <SessionEnd event={event} previousTimestamp={previousTimestamp} />;
+      // Folded into the StepBoundary header — see file-top note.
+      return null;
     case "thinking":
       return <ThinkingBlock event={event} previousTimestamp={previousTimestamp} />;
     case "tool_call":

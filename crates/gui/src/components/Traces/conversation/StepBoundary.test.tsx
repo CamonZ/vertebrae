@@ -26,6 +26,68 @@ describe("StepBoundary", () => {
     expect(screen.getByText("claude-opus-4-7")).toBeInTheDocument();
   });
 
+  it("renders folded session facts (duration, turns, cost) in the right-side trio", () => {
+    render(
+      <StepBoundary
+        {...baseProps}
+        durationMs={125000}
+        numTurns={3}
+        costUsd={0.42}
+      />
+    );
+    expect(screen.getByTestId("step-boundary-duration").textContent).toBe(
+      "2m 5s"
+    );
+    expect(screen.getByTestId("step-boundary-turns").textContent).toBe(
+      "3 turns"
+    );
+    expect(screen.getByTestId("step-boundary-cost").textContent).toBe(
+      "$0.42"
+    );
+  });
+
+  it("singularizes 'turn' for a single-turn execution", () => {
+    render(<StepBoundary {...baseProps} numTurns={1} />);
+    expect(screen.getByTestId("step-boundary-turns").textContent).toBe("1 turn");
+  });
+
+  it("hides the task title when placement is 'hidden' (single-task scope)", () => {
+    render(
+      <StepBoundary
+        {...baseProps}
+        taskTitle="Redundant title"
+        taskTitlePlacement="hidden"
+      />
+    );
+    expect(screen.queryByText("Redundant title")).toBeNull();
+    expect(screen.queryByTestId("step-boundary-task-title")).toBeNull();
+    expect(screen.queryByTestId("step-boundary-task-subtitle")).toBeNull();
+  });
+
+  it("renders the task title on a subtitle line when placement is 'subtitle' (delegation)", () => {
+    render(
+      <StepBoundary
+        {...baseProps}
+        taskTitle="Child Task Title"
+        taskTitlePlacement="subtitle"
+      />
+    );
+    const subtitle = screen.getByTestId("step-boundary-task-subtitle");
+    expect(subtitle.textContent).toBe("Child Task Title");
+    expect(screen.queryByTestId("step-boundary-task-title")).toBeNull();
+  });
+
+  it("omits duration/turns when null or zero", () => {
+    const { rerender } = render(
+      <StepBoundary {...baseProps} durationMs={null} numTurns={null} />
+    );
+    expect(screen.queryByTestId("step-boundary-duration")).toBeNull();
+    expect(screen.queryByTestId("step-boundary-turns")).toBeNull();
+    rerender(<StepBoundary {...baseProps} durationMs={0} numTurns={0} />);
+    expect(screen.queryByTestId("step-boundary-duration")).toBeNull();
+    expect(screen.queryByTestId("step-boundary-turns")).toBeNull();
+  });
+
   it("falls back to 'workflow' / 'step' when names are null", () => {
     render(
       <StepBoundary
