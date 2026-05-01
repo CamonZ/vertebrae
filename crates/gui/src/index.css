@@ -163,6 +163,31 @@ body {
   color: var(--color-text-primary);
 }
 
+/* Restore pointer cursor on interactive elements.
+   Tailwind v4 preflight drops the historical user-agent 'cursor: pointer'
+   for native buttons, so this base rule re-establishes the affordance
+   app-wide without requiring a cursor-pointer utility on every site. */
+@layer base {
+  button,
+  a,
+  [role="button"],
+  summary,
+  label[for],
+  input[type="checkbox"],
+  input[type="radio"],
+  input[type="submit"],
+  input[type="button"],
+  select {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  [aria-disabled="true"],
+  [role="button"][aria-disabled="true"] {
+    cursor: not-allowed;
+  }
+}
+
 /* Selection styling */
 ::selection {
   background-color: var(--color-primary-dim);
