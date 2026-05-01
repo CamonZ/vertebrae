@@ -202,6 +202,14 @@ pub struct RunStepPayload {
     /// When present, overrides `agent_config.json_schema` (step-level contract).
     #[serde(default)]
     pub output_schema: Option<serde_json::Value>,
+    /// When true, the daemon emits detailed diagnostic logs for this step
+    /// execution at well-known checkpoints (raw payload, resolved agent_config,
+    /// final claude argv, claude stderr, stream-json system/init line).
+    ///
+    /// Defaults to false. Sacrum omits this field from the broadcast payload
+    /// when false, so older daemons (and the non-verbose path) see no change.
+    #[serde(default)]
+    pub verbose_daemon_logging: bool,
 }
 
 /// Parsed payload for a `cancel_step` channel event from Sacrum.
@@ -254,8 +262,19 @@ pub fn build_step_config_from_payload(payload: &RunStepPayload) -> StepConfig {
         agent_config,
         agents: payload.agents.clone(),
         skills: payload.skills.clone(),
+        verbose_daemon_logging: payload.verbose_daemon_logging,
     }
 }
+
+/// Stable tracing target for verbose daemon diagnostics.
+///
+/// Lines emitted under this target are gated behind a step's
+/// `verbose_daemon_logging` flag and intentionally include full schema /
+/// argv / stderr content. Greppable from logs as `daemon::verbose`.
+pub const VERBOSE_LOG_TARGET: &str = "daemon::verbose";
+
+pub const CHECKPOINT_RUN_STEP_PAYLOAD: &str = "run_step_payload";
+pub const CHECKPOINT_STEP_CONFIG_BUILT: &str = "step_config_built";
 
 /// Runtime state held by the ProjectSupervisor actor.
 pub struct ProjectState {
@@ -429,7 +448,58 @@ impl ProjectSupervisor {
                         payload.task_id,
                     );
 
+                    let verbose = payload.verbose_daemon_logging;
+
+                    // Verbose checkpoint 1: raw RunStepPayload — confirms whether
+                    // output_schema arrived from Sacrum at all (and what shape it has).
+                    if verbose {
+                        let output_schema_json = payload
+                            .output_schema
+                            .as_ref()
+                            .map(|v| {
+                                serde_json::to_string(v)
+                                    .unwrap_or_else(|_| "<unserializable>".to_string())
+                            })
+                            .unwrap_or_else(|| "<absent>".to_string());
+                        tracing::info!(
+                            target: VERBOSE_LOG_TARGET,
+                            execution_id = %payload.id,
+                            task_id = %payload.task_id,
+                            checkpoint = CHECKPOINT_RUN_STEP_PAYLOAD,
+                            output_schema_present = payload.output_schema.is_some(),
+                            output_schema = %output_schema_json,
+                            agents = ?payload.agents,
+                            skills = ?payload.skills,
+                            "verbose: parsed run_step payload"
+                        );
+                    }
+
                     let step_config = build_step_config_from_payload(&payload);
+
+                    // Verbose checkpoint 2: post build_step_config_from_payload —
+                    // confirms whether output_schema merged into agent_config.json_schema.
+                    if verbose {
+                        let json_schema_json = step_config
+                            .agent_config
+                            .json_schema
+                            .as_ref()
+                            .map(|v| {
+                                serde_json::to_string(v)
+                                    .unwrap_or_else(|_| "<unserializable>".to_string())
+                            })
+                            .unwrap_or_else(|| "<absent>".to_string());
+                        tracing::info!(
+                            target: VERBOSE_LOG_TARGET,
+                            execution_id = %payload.id,
+                            task_id = %payload.task_id,
+                            checkpoint = CHECKPOINT_STEP_CONFIG_BUILT,
+                            json_schema_present = step_config.agent_config.json_schema.is_some(),
+                            json_schema = %json_schema_json,
+                            model = ?step_config.agent_config.model,
+                            "verbose: resolved agent_config after build_step_config_from_payload"
+                        );
+                    }
+
                     let worktree = payload.worktree.map(PathBuf::from);
 
                     if let Err(e) = myself.cast(ProjectMessage::ExecuteStep {
@@ -949,6 +1019,7 @@ mod tests {
                 agent_config: AgentConfig::new().with_model("claude-sonnet-4-20250514"),
                 agents: Vec::new(),
                 skills: Vec::new(),
+                verbose_daemon_logging: false,
             }),
             worktree: None,
         };
@@ -1319,6 +1390,7 @@ mod tests {
                 agent_config: AgentConfig::default(),
                 agents: Vec::new(),
                 skills: Vec::new(),
+                verbose_daemon_logging: false,
             }),
             worktree: Some(PathBuf::from("/home/user/code/worktree-abc")),
         };
@@ -1431,6 +1503,7 @@ mod tests {
             skills: Vec::new(),
             worktree: None,
             output_schema: Some(serde_json::Value::Null),
+            verbose_daemon_logging: false,
         };
 
         let config = build_step_config_from_payload(&payload);
@@ -1620,6 +1693,77 @@ mod tests {
         assert!(
             paths.iter().any(|p| p.contains("passed")),
             "expected /passed in paths: {paths:?}"
+        );
+    }
+
+    // ===== verbose_daemon_logging tests =====
+
+    #[test]
+    fn parse_run_step_payload_omitted_verbose_flag_defaults_to_false() {
+        // Backward-compat: a Sacrum payload without the field at all must
+        // deserialize and yield false (this is the pre-PR-58 daemon behavior).
+        let payload = parse_run_step_payload(&serde_json::json!({
+            "id": "exec-vrb-1",
+            "task_id": "task-vrb-1"
+        }))
+        .expect("payload without verbose_daemon_logging must parse");
+        assert!(
+            !payload.verbose_daemon_logging,
+            "missing key must default to false"
+        );
+    }
+
+    #[test]
+    fn parse_run_step_payload_explicit_true_verbose_flag_round_trips() {
+        let payload = parse_run_step_payload(&serde_json::json!({
+            "id": "exec-vrb-2",
+            "task_id": "task-vrb-2",
+            "verbose_daemon_logging": true
+        }))
+        .expect("payload with verbose_daemon_logging=true must parse");
+        assert!(
+            payload.verbose_daemon_logging,
+            "explicit true must round-trip as true"
+        );
+    }
+
+    #[test]
+    fn parse_run_step_payload_explicit_false_verbose_flag_is_false() {
+        let payload = parse_run_step_payload(&serde_json::json!({
+            "id": "exec-vrb-3",
+            "task_id": "task-vrb-3",
+            "verbose_daemon_logging": false
+        }))
+        .expect("payload with verbose_daemon_logging=false must parse");
+        assert!(!payload.verbose_daemon_logging);
+    }
+
+    #[test]
+    fn build_step_config_propagates_verbose_flag_when_true() {
+        let payload = parse_run_step_payload(&serde_json::json!({
+            "id": "exec-vrb-4",
+            "task_id": "task-vrb-4",
+            "verbose_daemon_logging": true
+        }))
+        .unwrap();
+        let config = build_step_config_from_payload(&payload);
+        assert!(
+            config.verbose_daemon_logging,
+            "StepConfig must carry verbose_daemon_logging=true from payload"
+        );
+    }
+
+    #[test]
+    fn build_step_config_propagates_verbose_flag_when_false() {
+        let payload = parse_run_step_payload(&serde_json::json!({
+            "id": "exec-vrb-5",
+            "task_id": "task-vrb-5"
+        }))
+        .unwrap();
+        let config = build_step_config_from_payload(&payload);
+        assert!(
+            !config.verbose_daemon_logging,
+            "StepConfig must default verbose_daemon_logging to false"
         );
     }
 }
