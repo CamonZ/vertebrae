@@ -1,11 +1,14 @@
 import { useMemo, useState, type ReactNode } from "react";
 import type {
   ExecutionStatus,
+  SessionLog,
   StepExecution,
   Task,
 } from "../../bindings";
+import { useSessionLogStore } from "../../stores/sessionLogStore";
 import {
   computeExecutionRollups,
+  costFromSessionLogs,
   formatCost,
   type ExecutionRollups,
 } from "../../utils";
@@ -15,6 +18,13 @@ interface SubtreeRailProps {
   tasks: readonly Task[];
   subtreeTaskIds: readonly string[];
   executions: readonly StepExecution[];
+  /**
+   * Per-execution session logs. When an execution lacks a populated
+   * `cost` field, the per-task and per-execution rollups fall back to
+   * summing `cost_usd` from `session_end` log entries. Defaults to the
+   * global live `sessionLogStore` map when omitted.
+   */
+  logsByExecutionId?: Readonly<Record<string, SessionLog[]>>;
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
   onSwitchTask?: () => void;
@@ -110,9 +120,18 @@ function StatusPip({ status }: { status: ExecutionStatus }): ReactNode {
 
 function ExecutionRow({
   execution,
+  logs,
 }: {
   execution: StepExecution;
+  logs: SessionLog[] | undefined;
 }): ReactNode {
+  let displayCost: number | null = null;
+  if (typeof execution.cost === "number") {
+    displayCost = execution.cost;
+  } else {
+    const fromLogs = costFromSessionLogs(logs);
+    if (fromLogs > 0) displayCost = fromLogs;
+  }
   return (
     <li
       data-testid="subtree-rail-execution"
@@ -124,9 +143,9 @@ function ExecutionRow({
       <span className="truncate font-mono">
         {(execution.step_name ?? "").replace(/_/g, " ") || "step"}
       </span>
-      {typeof execution.cost === "number" && (
+      {displayCost !== null && (
         <span className="ml-auto font-mono text-[10px] text-text-muted">
-          {formatCost(execution.cost)}
+          {formatCost(displayCost)}
         </span>
       )}
     </li>
@@ -136,9 +155,14 @@ function ExecutionRow({
 interface GroupSectionProps {
   row: GroupRow;
   initiallyExpanded: boolean;
+  logsByExecutionId: Readonly<Record<string, SessionLog[]>>;
 }
 
-function GroupSection({ row, initiallyExpanded }: GroupSectionProps): ReactNode {
+function GroupSection({
+  row,
+  initiallyExpanded,
+  logsByExecutionId,
+}: GroupSectionProps): ReactNode {
   const [expanded, setExpanded] = useState(initiallyExpanded);
   const { task, depth, executions, rollups } = row;
 
@@ -230,6 +254,7 @@ function GroupSection({ row, initiallyExpanded }: GroupSectionProps): ReactNode 
               <ExecutionRow
                 key={exec.id ?? `${task.id}-${idx}`}
                 execution={exec}
+                logs={exec.id ? logsByExecutionId[exec.id] : undefined}
               />
             ))
           )}
@@ -244,10 +269,13 @@ export function SubtreeRail({
   tasks,
   subtreeTaskIds,
   executions,
+  logsByExecutionId: providedLogs,
   collapsed,
   onToggleCollapsed,
   onSwitchTask,
 }: SubtreeRailProps): ReactNode {
+  const liveLogs = useSessionLogStore((state) => state.logsByExecutionId);
+  const logsByExecutionId = providedLogs ?? liveLogs;
   const rows = useMemo<GroupRow[]>(() => {
     const taskById = new Map<string, Task>();
     for (const t of tasks) taskById.set(t.id, t);
@@ -275,7 +303,7 @@ export function SubtreeRail({
         task,
         depth: depths.get(id) ?? 0,
         executions: taskExecs,
-        rollups: computeExecutionRollups(taskExecs),
+        rollups: computeExecutionRollups(taskExecs, logsByExecutionId),
       });
     }
 
@@ -285,7 +313,7 @@ export function SubtreeRail({
     });
 
     return built;
-  }, [rootTaskId, tasks, subtreeTaskIds, executions]);
+  }, [rootTaskId, tasks, subtreeTaskIds, executions, logsByExecutionId]);
 
   if (collapsed) {
     return (
@@ -359,6 +387,7 @@ export function SubtreeRail({
               key={row.task.id}
               row={row}
               initiallyExpanded={row.depth === 0}
+              logsByExecutionId={logsByExecutionId}
             />
           ))
         )}
