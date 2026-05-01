@@ -13,7 +13,6 @@ import {
   CorridorView,
   FilterBar,
   FlightStrip,
-  ModePlaceholder,
   ModeToggle,
   SubtreeRail,
   TracesHeader,
@@ -96,8 +95,6 @@ function renderModeContent(props: ModeContentProps): ReactNode {
           onPinExecution={onPinExecution}
         />
       );
-    default:
-      return <ModePlaceholder mode={mode} />;
   }
 }
 
