@@ -49,6 +49,74 @@ pub struct ParsedStreamResult {
     pub structured_output: Option<serde_json::Value>,
 }
 
+/// Minimal deserializable shape of a stream-json `system`/`init` line.
+///
+/// Claude Code emits one of these at session start. Its `tools` array lists
+/// the tools advertised to the model; the `StructuredOutput` entry is the
+/// source of truth for whether `--json-schema` was honored. Used for verbose
+/// daemon logging only.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StreamInitLine {
+    pub session_id: Option<String>,
+    /// Raw `tools` JSON value as emitted by claude. Sometimes a list of strings,
+    /// sometimes a list of `{name, ...}` objects depending on CLI version, so we
+    /// keep the raw shape and let consumers (and `structured_output_advertised`)
+    /// inspect it. Logged verbatim by the daemon for diagnostic clarity.
+    pub tools: serde_json::Value,
+}
+
+impl StreamInitLine {
+    /// True if `StructuredOutput` appears anywhere in the advertised tool list,
+    /// whether the entries are strings (`"StructuredOutput"`) or objects
+    /// (`{"name":"StructuredOutput", ...}`).
+    pub fn structured_output_advertised(&self) -> bool {
+        let Some(arr) = self.tools.as_array() else {
+            return false;
+        };
+        arr.iter().any(|t| match t {
+            serde_json::Value::String(s) => s == "StructuredOutput",
+            serde_json::Value::Object(map) => {
+                map.get("name").and_then(|n| n.as_str()) == Some("StructuredOutput")
+            }
+            _ => false,
+        })
+    }
+}
+
+#[derive(Deserialize)]
+struct InitLine {
+    #[serde(rename = "type")]
+    msg_type: String,
+    #[serde(default)]
+    subtype: Option<String>,
+    #[serde(default)]
+    session_id: Option<String>,
+    #[serde(default)]
+    tools: serde_json::Value,
+}
+
+/// Attempt to parse a single stream-json line as a `system`/`init` message.
+///
+/// Returns `Some(StreamInitLine)` only for `{"type":"system","subtype":"init",...}`.
+/// Returns `None` for any other line (including non-init system messages,
+/// result/assistant lines, and unparseable input).
+pub fn parse_stream_json_init_line(line: &str) -> Option<StreamInitLine> {
+    // Fast-path: avoid full JSON deserialization for non-system lines.
+    if !line.contains("\"type\":\"system\"") {
+        return None;
+    }
+
+    let parsed: InitLine = serde_json::from_str(line).ok()?;
+    if parsed.msg_type != "system" || parsed.subtype.as_deref() != Some("init") {
+        return None;
+    }
+
+    Some(StreamInitLine {
+        session_id: parsed.session_id,
+        tools: parsed.tools,
+    })
+}
+
 /// Attempt to parse a single stream-json line as a result message.
 ///
 /// Returns `Some(ParsedStreamResult)` if the line is a valid result message,
@@ -264,5 +332,54 @@ mod tests {
         assert_eq!(metrics.output_tokens, 1000);
         assert!((metrics.cost_usd - 0.005).abs() < f64::EPSILON);
         assert_eq!(metrics.duration_ms, 3000);
+    }
+
+    // ===== parse_stream_json_init_line tests =====
+
+    #[test]
+    fn parse_init_line_with_string_tools_array_extracts_session_and_tools() {
+        let line = r#"{"type":"system","subtype":"init","session_id":"sess-1","tools":["Bash","Read","StructuredOutput"]}"#;
+        let init = parse_stream_json_init_line(line).expect("should parse init line");
+        assert_eq!(init.session_id.as_deref(), Some("sess-1"));
+        assert_eq!(
+            init.tools,
+            serde_json::json!(["Bash", "Read", "StructuredOutput"])
+        );
+        assert!(init.structured_output_advertised());
+    }
+
+    #[test]
+    fn parse_init_line_with_object_tools_array_detects_structured_output() {
+        let line = r#"{"type":"system","subtype":"init","session_id":"sess-2","tools":[{"name":"Bash"},{"name":"StructuredOutput","description":"x"}]}"#;
+        let init = parse_stream_json_init_line(line).expect("should parse init line");
+        assert!(init.structured_output_advertised());
+    }
+
+    #[test]
+    fn parse_init_line_without_structured_output_returns_false() {
+        let line =
+            r#"{"type":"system","subtype":"init","session_id":"sess-3","tools":["Bash","Read"]}"#;
+        let init = parse_stream_json_init_line(line).expect("should parse init line");
+        assert!(!init.structured_output_advertised());
+    }
+
+    #[test]
+    fn parse_init_line_returns_none_for_non_init_system_message() {
+        // Other system subtypes (e.g. "stats") must not be parsed as init.
+        let line = r#"{"type":"system","subtype":"stats","session_id":"sess-4"}"#;
+        assert!(parse_stream_json_init_line(line).is_none());
+    }
+
+    #[test]
+    fn parse_init_line_returns_none_for_result_line() {
+        let line = r#"{"type":"result","result":"done"}"#;
+        assert!(parse_stream_json_init_line(line).is_none());
+    }
+
+    #[test]
+    fn parse_init_line_returns_none_for_malformed_json() {
+        assert!(parse_stream_json_init_line("not json").is_none());
+        assert!(parse_stream_json_init_line(r#"{"type":"system",broken"#).is_none());
+        assert!(parse_stream_json_init_line("").is_none());
     }
 }

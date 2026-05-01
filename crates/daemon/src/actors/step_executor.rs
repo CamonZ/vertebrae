@@ -21,12 +21,16 @@ use tokio::process::{Child, Command};
 use vertebrae_core::execution_service::ExecutionService;
 use vertebrae_core::models::{AgentConfig, PermissionMode, SessionLog};
 
-use crate::actors::project_supervisor::ProjectMessage;
+use crate::actors::project_supervisor::{ProjectMessage, VERBOSE_LOG_TARGET};
 use crate::output_validator::{CompiledSchema, SchemaError, SchemaValidationError};
 use crate::settings_synthesis::SyntheticSettings;
 
 /// Default model used when agent_config does not specify one.
 pub const DEFAULT_MODEL: &str = "claude-sonnet-4-20250514";
+
+pub const CHECKPOINT_CLAUDE_ARGV: &str = "claude_argv";
+pub const CHECKPOINT_CLAUDE_STDERR: &str = "claude_stderr";
+pub const CHECKPOINT_STREAM_JSON_INIT: &str = "stream_json_init";
 
 #[derive(Debug, Clone)]
 pub struct StepConfig {
@@ -37,6 +41,10 @@ pub struct StepConfig {
     pub agents: Vec<String>,
     /// Skill names to pass as --allowedTools flags.
     pub skills: Vec<String>,
+    /// When true, the executor emits detailed diagnostic logs at the
+    /// build/spawn/stream checkpoints. Defaults to false; toggled per-step
+    /// from the Sacrum `run_step` payload.
+    pub verbose_daemon_logging: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -185,6 +193,28 @@ pub fn build_claude_command_with_settings(
     // Set PATH from the user's login shell so the child process can find
     // tools like `mix`, `node`, `vtb`, etc. that aren't in launchd's minimal PATH.
     cmd.env("PATH", &config.shell_path);
+
+    // Verbose checkpoint 3: final claude argv — confirms `--json-schema` (and
+    // every other resolved flag, including the rendered prompt) reaches the
+    // child process. Logs the raw argv verbatim; debugging verbose mode is
+    // opt-in per-step and needs full fidelity.
+    if step.verbose_daemon_logging {
+        let program = cmd.as_std().get_program().to_string_lossy().to_string();
+        let argv: Vec<String> = cmd
+            .as_std()
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
+        tracing::info!(
+            target: VERBOSE_LOG_TARGET,
+            execution_id = %config.execution_id,
+            task_id = %config.task_id,
+            checkpoint = CHECKPOINT_CLAUDE_ARGV,
+            program = %program,
+            argv = ?argv,
+            "verbose: built claude CLI command"
+        );
+    }
 
     cmd
 }
@@ -371,6 +401,8 @@ impl StepExecutor {
 
                 let actor_ref = myself;
                 let execution_id = state.execution_id.clone();
+                let task_id = state.task_id.clone();
+                let verbose = state.config.step_config.verbose_daemon_logging;
                 let execution_service = Arc::clone(&state.config.execution_service);
                 let result_slot = Arc::clone(&state.stream_result);
 
@@ -388,6 +420,25 @@ impl StepExecutor {
                                 *slot = Some(parsed);
                             }
 
+                            // Verbose checkpoint 5: parse and log the stream-json
+                            // system/init line — its `tools` array is the source of
+                            // the StructuredOutput-advertisement metric (0/39 vs 39/39).
+                            if verbose
+                                && let Some(init) =
+                                    crate::stream_json::parse_stream_json_init_line(&line)
+                            {
+                                tracing::info!(
+                                    target: VERBOSE_LOG_TARGET,
+                                    execution_id = %execution_id,
+                                    task_id = %task_id,
+                                    checkpoint = CHECKPOINT_STREAM_JSON_INIT,
+                                    session_id = ?init.session_id,
+                                    tools = ?init.tools,
+                                    structured_output_advertised = init.structured_output_advertised(),
+                                    "verbose: claude system/init line"
+                                );
+                            }
+
                             let log = SessionLog::new(execution_id.clone(), line);
 
                             if let Err(e) = execution_service.add_log(log).await {
@@ -401,12 +452,25 @@ impl StepExecutor {
                     }
 
                     // Drain stderr and log it (not posted to Sacrum).
+                    // Verbose checkpoint 4: mirror stderr verbatim to the verbose
+                    // target so init-time schema-rejection messages are captured.
                     if let Some(stderr) = stderr {
                         let reader = BufReader::new(stderr);
                         let mut lines = reader.lines();
 
                         while let Ok(Some(line)) = lines.next_line().await {
-                            tracing::warn!("stderr [{}]: {}", execution_id, line);
+                            if verbose {
+                                tracing::info!(
+                                    target: VERBOSE_LOG_TARGET,
+                                    execution_id = %execution_id,
+                                    task_id = %task_id,
+                                    checkpoint = CHECKPOINT_CLAUDE_STDERR,
+                                    line = %line,
+                                    "verbose: claude stderr"
+                                );
+                            } else {
+                                tracing::warn!("stderr [{}]: {}", execution_id, line);
+                            }
                         }
                     }
 
@@ -593,6 +657,7 @@ mod tests {
             agent_config: AgentConfig::default(),
             agents: Vec::new(),
             skills: Vec::new(),
+            verbose_daemon_logging: false,
         }
     }
 
@@ -616,6 +681,7 @@ mod tests {
             agent_config: AgentConfig::new().with_model("claude-sonnet-4-20250514"),
             agents: vec!["reviewer.md".to_string()],
             skills: vec!["search".to_string()],
+            verbose_daemon_logging: false,
         };
         let debug = format!("{:?}", config);
         assert!(debug.contains("Implement feature X"));
@@ -631,6 +697,7 @@ mod tests {
             agent_config: AgentConfig::new().with_model("claude-sonnet-4-20250514"),
             agents: vec!["agent.md".to_string()],
             skills: Vec::new(),
+            verbose_daemon_logging: false,
         };
         let cloned = config.clone();
         assert_eq!(cloned.prompt, "Do something");
@@ -857,6 +924,7 @@ mod tests {
                 agent_config: AgentConfig::new().with_model("claude-opus-4-20250514"),
                 agents: Vec::new(),
                 skills: Vec::new(),
+                verbose_daemon_logging: false,
             },
             project_root: PathBuf::from("/tmp"),
             worktree: None,
@@ -886,6 +954,7 @@ mod tests {
                 agent_config: AgentConfig::default(),
                 agents: vec!["reviewer.md".to_string(), "coder.md".to_string()],
                 skills: Vec::new(),
+                verbose_daemon_logging: false,
             },
             project_root: PathBuf::from("/tmp"),
             worktree: None,
@@ -922,6 +991,7 @@ mod tests {
                 agent_config: AgentConfig::default(),
                 agents: Vec::new(),
                 skills: vec!["WebSearch".to_string(), "Read".to_string()],
+                verbose_daemon_logging: false,
             },
             project_root: PathBuf::from("/tmp"),
             worktree: None,
@@ -953,6 +1023,7 @@ mod tests {
                     .with_allowed_tools(vec!["Bash".to_string(), "WebSearch".to_string()]),
                 agents: Vec::new(),
                 skills: vec!["WebSearch".to_string(), "Edit".to_string()],
+                verbose_daemon_logging: false,
             },
             project_root: PathBuf::from("/tmp"),
             worktree: None,
@@ -991,6 +1062,7 @@ mod tests {
                     .with_disallowed_tools(vec!["Bash(rm*)".to_string()]),
                 agents: Vec::new(),
                 skills: Vec::new(),
+                verbose_daemon_logging: false,
             },
             project_root: PathBuf::from("/tmp"),
             worktree: None,
@@ -1025,6 +1097,7 @@ mod tests {
                 agent_config: AgentConfig::new().with_permission_mode(PermissionMode::Plan),
                 agents: Vec::new(),
                 skills: Vec::new(),
+                verbose_daemon_logging: false,
             },
             project_root: PathBuf::from("/tmp"),
             worktree: None,
@@ -1072,6 +1145,7 @@ mod tests {
                 agent_config: AgentConfig::default(),
                 agents: Vec::new(),
                 skills: Vec::new(),
+                verbose_daemon_logging: false,
             },
             project_root: PathBuf::from("/tmp"),
             worktree: None,
@@ -1111,6 +1185,7 @@ mod tests {
                 agent_config: AgentConfig::new().with_json_schema(schema.clone()),
                 agents: Vec::new(),
                 skills: Vec::new(),
+                verbose_daemon_logging: false,
             },
             project_root: PathBuf::from("/tmp"),
             worktree: None,
@@ -1637,6 +1712,7 @@ mod tests {
                 agent_config,
                 agents: Vec::new(),
                 skills: Vec::new(),
+                verbose_daemon_logging: false,
             },
             project_root: PathBuf::from("/tmp"),
             worktree: None,
@@ -1852,6 +1928,7 @@ mod tests {
                 agent_config: AgentConfig::new().with_permission_mode(PermissionMode::Plan),
                 agents: Vec::new(),
                 skills: Vec::new(),
+                verbose_daemon_logging: false,
             },
             project_root: PathBuf::from("/tmp"),
             worktree: None,
@@ -1888,6 +1965,7 @@ mod tests {
                     .with_disallowed_tools(vec!["Bash(rm -rf *)".to_string()]),
                 agents: Vec::new(),
                 skills: Vec::new(),
+                verbose_daemon_logging: false,
             },
             project_root: PathBuf::from("/tmp"),
             worktree: None,
@@ -1902,5 +1980,73 @@ mod tests {
         assert!(args.contains(&"--settings".to_string()));
         assert!(args.contains(&"--disallowed-tools".to_string()));
         assert!(args.contains(&"Bash(rm -rf *)".to_string()));
+    }
+
+    // ===== verbose_daemon_logging tests =====
+
+    fn argv_of(cmd: &Command) -> Vec<String> {
+        cmd.as_std()
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    fn verbose_step_config(verbose: bool) -> StepConfig {
+        StepConfig {
+            prompt: "Implement Z".to_string(),
+            agent_config: AgentConfig::new()
+                .with_model("claude-sonnet-4-20250514")
+                .with_json_schema(serde_json::json!({
+                    "type": "object",
+                    "properties": {"verdict": {"type": "string"}}
+                })),
+            agents: Vec::new(),
+            skills: Vec::new(),
+            verbose_daemon_logging: verbose,
+        }
+    }
+
+    fn verbose_test_config(verbose: bool) -> StepExecutorConfig {
+        StepExecutorConfig {
+            execution_id: "exec-vrb".to_string(),
+            task_id: "task-vrb".to_string(),
+            step_config: verbose_step_config(verbose),
+            project_root: PathBuf::from("/tmp"),
+            worktree: None,
+            claude_binary: PathBuf::from("/usr/local/bin/claude"),
+            shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
+            execution_service: test_execution_service(),
+        }
+    }
+
+    #[test]
+    fn build_command_argv_is_identical_regardless_of_verbose_flag() {
+        // Constraint #1: when the flag is absent or false, the non-verbose path
+        // must remain byte-identical. Toggling the flag may emit a log line but
+        // must not alter the resolved argv passed to the child process.
+        let off = build_claude_command_with_settings(&verbose_test_config(false), None);
+        let on = build_claude_command_with_settings(&verbose_test_config(true), None);
+        assert_eq!(
+            argv_of(&off),
+            argv_of(&on),
+            "verbose flag must not alter the claude argv"
+        );
+    }
+
+    #[test]
+    fn build_command_with_verbose_includes_full_json_schema_in_argv() {
+        // Sanity: the argv we promise to log under verbose actually contains
+        // --json-schema with the full schema JSON.
+        let cmd = build_claude_command_with_settings(&verbose_test_config(true), None);
+        let args = argv_of(&cmd);
+        let idx = args
+            .iter()
+            .position(|a| a == "--json-schema")
+            .expect("--json-schema flag should be present when json_schema set");
+        let schema_str = &args[idx + 1];
+        let parsed: serde_json::Value =
+            serde_json::from_str(schema_str).expect("schema arg must be valid JSON");
+        assert_eq!(parsed["type"], "object");
+        assert_eq!(parsed["properties"]["verdict"]["type"], "string");
     }
 }
