@@ -23,6 +23,7 @@ import type {
   ToolCallEvent,
   ToolResultEvent,
 } from "../../../types/conversation";
+import { MarkdownContent } from "../../shared/MarkdownContent";
 
 // ---------------------------------------------------------------------------
 // Time mode
@@ -236,9 +237,7 @@ export function ThinkingBlock({
       <div className="flex items-start gap-2">
         <span className="text-text-muted mt-1 flex-shrink-0">{Icons.message}</span>
         <div className="flex-1 min-w-0">
-          <p className="text-sm text-text-secondary whitespace-pre-wrap break-words">
-            {event.text}
-          </p>
+          <MarkdownContent text={event.text} />
         </div>
         <Timestamp timestamp={event.timestamp} previousTimestamp={previousTimestamp} />
       </div>
