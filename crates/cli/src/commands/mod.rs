@@ -8,7 +8,6 @@ pub mod add;
 pub mod archive;
 pub mod blockers;
 pub mod check_item;
-pub mod complete_step;
 pub mod criterion_ref;
 pub mod daemon;
 pub mod delete;
@@ -20,14 +19,12 @@ pub mod path;
 pub mod ready;
 pub mod r#ref;
 pub mod refs;
-pub mod reject_step;
 pub mod review;
 pub mod run;
 pub mod run_workflow;
 pub mod section;
 pub mod sections;
 pub mod show;
-pub mod start_step;
 pub mod step;
 pub mod transition_to;
 pub mod uncheck_item;
@@ -41,7 +38,6 @@ pub use add::AddCommand;
 pub use archive::{ArchiveCommand, UnarchiveCommand};
 pub use blockers::BlockersCommand;
 pub use check_item::CheckItemCommand;
-pub use complete_step::CompleteStepCommand;
 pub use criterion_ref::CriterionRefCommand;
 pub use daemon::DaemonCommand;
 pub use delete::DeleteCommand;
@@ -53,14 +49,12 @@ pub use path::PathCommand;
 pub use ready::ReadyCommand;
 pub use r#ref::RefCommand;
 pub use refs::RefsCommand;
-pub use reject_step::RejectStepCommand;
 pub use review::ReviewCommand;
 pub use run::RunCommand;
 pub use run_workflow::RunWorkflowCommand;
 pub use section::SectionCommand;
 pub use sections::SectionsCommand;
 pub use show::ShowCommand;
-pub use start_step::StartStepCommand;
 pub use step::StepCommand;
 pub use transition_to::TransitionToCommand;
 pub use uncheck_item::UncheckItemCommand;
@@ -138,9 +132,6 @@ pub enum Command {
     Archive(ArchiveCommand),
     /// Show all tasks blocking a given task (recursive)
     Blockers(BlockersCommand),
-    /// Complete a workflow step for a task
-    #[command(name = "complete-step")]
-    CompleteStep(CompleteStepCommand),
     /// Add a code reference to a testing criterion
     #[command(name = "criterion-ref")]
     CriterionRef(CriterionRefCommand),
@@ -162,9 +153,6 @@ pub enum Command {
     Path(PathCommand),
     /// Show highest-level actionable items (entry points for work/triage)
     Ready(ReadyCommand),
-    /// Reject a workflow step with optional feedback
-    #[command(name = "reject-step")]
-    RejectStep(RejectStepCommand),
     /// Add a code reference to a task
     Ref(RefCommand),
     /// List all code references for a task
@@ -182,9 +170,6 @@ pub enum Command {
     Sections(SectionsCommand),
     /// Show full details of a task
     Show(ShowCommand),
-    /// Start a workflow step for a task
-    #[command(name = "start-step")]
-    StartStep(StartStepCommand),
     /// Mark a checklist item as done within a task
     #[command(name = "check-item")]
     CheckItem(CheckItemCommand),
@@ -333,7 +318,6 @@ impl Command {
             }
             Command::Archive(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::Blockers(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
-            Command::CompleteStep(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::CriterionRef(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::Delete(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::Depend(cmd) => {
@@ -349,7 +333,6 @@ impl Command {
                 cmd.from_id = resolve_id(&cmd.from_id, services).await?;
                 cmd.to_id = resolve_id(&cmd.to_id, services).await?;
             }
-            Command::RejectStep(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::Ref(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::Refs(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::Review(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
@@ -358,7 +341,6 @@ impl Command {
             Command::Section(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::Sections(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::Show(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
-            Command::StartStep(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::Unarchive(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::UncheckItem(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::Undepend(cmd) => {
@@ -401,10 +383,6 @@ impl Command {
                 Ok(CommandResult::Message(result))
             }
             Command::Blockers(cmd) => {
-                let result = cmd.execute(services).await?;
-                Ok(CommandResult::Message(format!("{}", result)))
-            }
-            Command::CompleteStep(cmd) => {
                 let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
@@ -465,10 +443,6 @@ impl Command {
                 let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
-            Command::RejectStep(cmd) => {
-                let result = cmd.execute(services).await?;
-                Ok(CommandResult::Message(format!("{}", result)))
-            }
             Command::Ref(cmd) => {
                 // Service handles notification via callback
                 let result = cmd.execute(services).await?;
@@ -502,10 +476,6 @@ impl Command {
                 // Service handles notification via callback if needed
                 let detail = cmd.execute(services).await?;
                 Ok(CommandResult::Message(format!("{}", detail)))
-            }
-            Command::StartStep(cmd) => {
-                let result = cmd.execute(services).await?;
-                Ok(CommandResult::Message(format!("{}", result)))
             }
             Command::Unarchive(cmd) => {
                 let result = cmd.execute(services).await?;

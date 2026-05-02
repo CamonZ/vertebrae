@@ -63,5 +63,3 @@ Unblocked tasks:
 ## See Also
 
 - `/workflow assign` - Assign a workflow to a task (for cross-workflow moves)
-- `/start-step` - Start the current step
-- `/complete-step` - Complete the current step

@@ -64,5 +64,4 @@ Task abc123 has no current step. Assign a workflow first.
 ## See Also
 
 - `/workflow assign` - Assign a workflow to a task
-- `/start-step` - Start a workflow step
-- `/complete-step` - Complete a workflow step
+- `/transition-to` - Move a task to a specific workflow step

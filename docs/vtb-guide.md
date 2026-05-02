@@ -472,13 +472,7 @@ vtb workflow transition delete <from-workflow> <to-workflow>
 
 ### Step Lifecycle (within a workflow)
 
-Steps exist within a workflow. The step lifecycle commands manage a task's progression:
-
-| Command | Purpose |
-|---------|---------|
-| `start-step` | Marks the current step as actively being worked on |
-| `complete-step` | Marks the current step as done |
-| `reject-step` | Rejects the current step and moves to a target step with optional feedback |
+Steps exist within a workflow. Use `transition-to` to move a task between steps:
 
 #### Working Through a Workflow
 
@@ -489,62 +483,28 @@ Given a workflow with steps: Coding (order 0) -> Testing (order 1) -> Review (or
 vtb show <id>
 vtb step list <workflow-id>
 
-# 2. Work on the current step (Coding)
-vtb start-step <id>
+# 2. Move through the workflow steps as work progresses
+vtb transition-to <id> coding
 # ... do the coding work ...
-vtb complete-step <id>
-
-# 3. Transition to the next step
 vtb transition-to <id> testing
-
-# 4. Work on the next step (Testing)
-vtb start-step <id>
 # ... write and run tests ...
-vtb complete-step <id>
-
-# 5. Transition to the final step
 vtb transition-to <id> review
-
-# 6. Work on the final step (Review)
-vtb start-step <id>
 # ... review the work ...
-vtb complete-step <id>           # Final step -> workflow complete
+# Transitioning past the final step completes the workflow.
 ```
 
 #### Handling Rejections
 
 ```bash
-# Reviewer finds issues during the Review step
-vtb reject-step <id> <coding-step-id> -f "Missing error handling for invalid contracts"
-
-# Task is now back at Coding step with feedback attached
-vtb start-step <id>
+# Reviewer finds issues during the Review step — send the task back to coding
+vtb transition-to <id> coding
 # ... fix the issues ...
-vtb complete-step <id>
 vtb transition-to <id> testing     # Re-advance through the workflow
-```
-
-#### Step Lifecycle Summary
-
-```
-For each step in the workflow:
-  1. vtb show <id>                              — confirm current step
-  2. vtb start-step <id>                        — mark step as in progress
-  3. (do the work for this step)
-  4. vtb complete-step <id>                     — mark step as done
-  5. vtb transition-to <id> <next-step>         — move to the next step
-
-Repeat until the final step is completed.
-
-On rejection:
-  vtb reject-step <id> <target-step-id> -f "..."  — send back to a previous step
-  (restart the cycle from that step)
 ```
 
 ### Key Rules
 
 - **`transition-to`** is for moving to any step (by name or UUID)
-- **`start-step` / `complete-step` / `reject-step`** manage the lifecycle within the current step
 - **Never use `vtb update`** for workflow/step changes — always use `transition-to`
 - Transitions are validated against workflow rules
 - Use `--skip-validation` only as an escape hatch
@@ -792,24 +752,18 @@ vtb transition-to <ticket-id> todo
 # 3. Assign workflow and start work
 vtb workflow assign <ticket-id> <impl-workflow-id>
 vtb transition-to <ticket-id> coding
-vtb start-step <ticket-id>
 
 # 4. Work through steps
 vtb step-done <ticket-id> 1
 vtb step-done <ticket-id> 2
 vtb check-item <ticket-id> 1
-vtb complete-step <ticket-id>
 vtb transition-to <ticket-id> testing
 
-vtb start-step <ticket-id>
 # ... run tests ...
 vtb check-item <ticket-id> 2
-vtb complete-step <ticket-id>
 
 # 5. Review and complete
 vtb transition-to <ticket-id> review
-vtb start-step <ticket-id>
-vtb complete-step <ticket-id>
 
 # 6. Or run the whole workflow automatically via daemon
 vtb run-workflow <ticket-id>
@@ -846,9 +800,6 @@ vtb ready
 | Command | Description |
 |---------|-------------|
 | `vtb transition-to <id> <target>` | Move to a step (by name or UUID) |
-| `vtb start-step <id>` | Mark current step as in progress |
-| `vtb complete-step <id>` | Mark current step as done |
-| `vtb reject-step <id> <target> [-f "..."]` | Reject step, move to target with feedback |
 | `vtb step-done <id> <n>` | Mark implementation step n as done |
 
 ### Workflow Management

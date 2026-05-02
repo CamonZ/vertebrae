@@ -254,30 +254,6 @@ pub const ADVANCE_TO_STEP: &str = r#"
     }
 "#;
 
-pub const START_STEP: &str = r#"
-    mutation StartStep($task_id: Uuid4!) {
-        start_step(task_id: $task_id) {
-            id current_step_id
-        }
-    }
-"#;
-
-pub const COMPLETE_STEP: &str = r#"
-    mutation CompleteStep($task_id: Uuid4!) {
-        complete_step(task_id: $task_id) {
-            id current_step_id
-        }
-    }
-"#;
-
-pub const REJECT_STEP: &str = r#"
-    mutation RejectStep($task_id: Uuid4!, $target_step_id: Uuid4!, $feedback: String) {
-        reject_step(task_id: $task_id, target_step_id: $target_step_id, feedback: $feedback) {
-            id current_step_id
-        }
-    }
-"#;
-
 // -- Sections --
 
 pub const CREATE_SECTION: &str = r#"
