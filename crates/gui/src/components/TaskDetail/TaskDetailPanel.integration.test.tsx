@@ -114,6 +114,7 @@ vi.mock("../../bindings", () => ({
     deleteTask: vi.fn().mockResolvedValue({ status: "ok", data: null }),
     runStep: vi.fn().mockResolvedValue({ status: "ok", data: null }),
     orchestrateTask: vi.fn().mockResolvedValue({ status: "ok", data: null }),
+    stopOrchestrator: vi.fn().mockResolvedValue({ status: "ok", data: null }),
   },
   events: {
     taskChangedEvent: {

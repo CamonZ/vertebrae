@@ -109,6 +109,7 @@ fn create_builder() -> Builder {
             // Workflow execution commands
             commands::run_step,
             commands::orchestrate_task,
+            commands::stop_orchestrator,
             // Claude session commands (JSONL streaming)
             commands::create_claude_session,
             commands::send_claude_message,

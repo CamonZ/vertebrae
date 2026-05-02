@@ -101,6 +101,7 @@ vi.mock("../../bindings", () => ({
     runWorkflow: vi.fn(),
     runStep: vi.fn(),
     orchestrateTask: vi.fn(),
+    stopOrchestrator: vi.fn(),
     deleteTask: vi.fn(),
     toggleChecklistItemDone: vi.fn(),
   },
@@ -485,6 +486,59 @@ describe("TaskDetailPanel - Restructured Layout", () => {
 
       expect(
         screen.getByRole("button", { name: /run entire workflow/i })
+      ).toBeInTheDocument();
+    });
+
+    it("shows Stop button while a step is running (step_name=in_progress)", () => {
+      render(
+        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
+      );
+
+      const stopBtn = screen.getByRole("button", {
+        name: /stop running workflow/i,
+      });
+      expect(stopBtn).toBeInTheDocument();
+      expect(stopBtn).toHaveTextContent(/^Stop$/);
+    });
+
+    it("calls stopOrchestrator with the task id when Stop is clicked", async () => {
+      vi.mocked(eventsModule.commands.stopOrchestrator).mockResolvedValue({
+        status: "ok",
+        data: null,
+      });
+
+      render(
+        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
+      );
+
+      const stopBtn = screen.getByRole("button", {
+        name: /stop running workflow/i,
+      });
+      fireEvent.click(stopBtn);
+
+      expect(eventsModule.commands.stopOrchestrator).toHaveBeenCalledTimes(1);
+      expect(eventsModule.commands.stopOrchestrator).toHaveBeenCalledWith(
+        mockTaskData.id
+      );
+    });
+
+    it("surfaces stopOrchestrator error message when the call fails", async () => {
+      vi.mocked(eventsModule.commands.stopOrchestrator).mockResolvedValue({
+        status: "error",
+        error: { message: "no orchestrator running" } as never,
+      });
+
+      render(
+        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
+      );
+
+      const stopBtn = screen.getByRole("button", {
+        name: /stop running workflow/i,
+      });
+      fireEvent.click(stopBtn);
+
+      expect(
+        await screen.findByText(/no orchestrator running/i)
       ).toBeInTheDocument();
     });
   });
