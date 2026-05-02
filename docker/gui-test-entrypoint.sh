@@ -52,9 +52,16 @@ for i in $(seq 1 30); do
 done
 cd /app
 
-# Build the Tauri app binary and vtb CLI (debug mode for speed)
-echo "==> Building Tauri app and vtb CLI binaries..."
-cargo build --bin gui --bin vtb --quiet
+# Build the Tauri app, vtb CLI, vtb-daemon, and mock-claude (debug mode for speed)
+echo "==> Building Tauri app, vtb, vtb-daemon, mock-claude binaries..."
+cargo build --bin gui --bin vtb --bin vtb-daemon --quiet
+cargo build -p daemon-acceptance --bin mock-claude --quiet
+
+# Install mock-claude where the daemon expects it.
+ln -sf /app/target/debug/mock-claude /usr/local/bin/mock-claude
+export CLAUDE_CODE_PATH=/usr/local/bin/mock-claude
+mkdir -p /mocks
+export MOCK_OUTPUT_DIR=/mocks
 
 # Start tauri-driver in the background on port 4444
 echo "==> Starting tauri-driver on port 4444..."

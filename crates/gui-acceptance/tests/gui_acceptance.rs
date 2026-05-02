@@ -2,10 +2,13 @@ mod steps;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::process::Stdio;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use cucumber::World;
 use fantoccini::Client;
+use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 use vertebrae_sacrum_client::GraphqlClient;
 
@@ -68,6 +71,18 @@ pub struct GuiWorld {
 
     /// Per-scenario screenshot sequence counter for ordered filenames.
     screenshot_seq: u32,
+
+    /// Running vtb-daemon process for the current scenario, if any.
+    pub daemon: Option<Child>,
+
+    /// Slugified feature name, used to namespace mock fixtures.
+    pub feature_slug: String,
+
+    /// Slugified scenario name, used to namespace mock fixtures.
+    pub scenario_slug: String,
+
+    /// Output dir for mock-claude fixtures (matches MOCK_OUTPUT_DIR env).
+    pub mock_output_dir: PathBuf,
 }
 
 impl std::fmt::Debug for GuiWorld {
@@ -104,6 +119,77 @@ impl GuiWorld {
             last_exit_code: 0,
             scenario_name: String::new(),
             screenshot_seq: 0,
+            daemon: None,
+            feature_slug: String::new(),
+            scenario_slug: String::new(),
+            mock_output_dir: PathBuf::from(
+                std::env::var("MOCK_OUTPUT_DIR").unwrap_or_else(|_| "/mocks".to_string()),
+            ),
+        }
+    }
+
+    pub fn mock_response(&self, step_label: &str) -> daemon_acceptance::MockResponse {
+        daemon_acceptance::MockResponse::new(
+            self.mock_output_dir.clone(),
+            &self.feature_slug,
+            &self.scenario_slug,
+            step_label,
+        )
+    }
+
+    /// Spawn vtb-daemon for the project this scenario configured, sharing
+    /// HOME=/root with the GUI (the setup hook registers the project there).
+    /// Blocks until the daemon logs that it joined the Phoenix channel.
+    pub async fn start_daemon(&mut self) {
+        assert!(self.daemon.is_none(), "daemon already running");
+        let project_id = self
+            .project_id
+            .as_ref()
+            .expect("project_id not set — setup hook must run first")
+            .clone();
+
+        let daemon_binary = std::env::var("VTB_DAEMON_BINARY")
+            .unwrap_or_else(|_| "/app/target/debug/vtb-daemon".to_string());
+        let claude_path = std::env::var("CLAUDE_CODE_PATH")
+            .unwrap_or_else(|_| "/usr/local/bin/mock-claude".to_string());
+        let mock_dir = self.mock_output_dir.clone();
+        let log_path = PathBuf::from(format!("/tmp/gui-acc-daemon-{project_id}.log"));
+        let log = std::fs::File::create(&log_path).expect("create daemon log");
+        let log_dup = log.try_clone().expect("dup daemon log");
+
+        let mut cmd = Command::new(&daemon_binary);
+        cmd.env("HOME", "/root")
+            .env("CLAUDE_CODE_PATH", claude_path)
+            .env("MOCK_OUTPUT_DIR", &mock_dir)
+            .env("RUST_LOG", "info")
+            .stdout(Stdio::from(log_dup))
+            .stderr(Stdio::from(log))
+            .kill_on_drop(true);
+
+        let child = cmd.spawn().expect("spawn vtb-daemon");
+        self.daemon = Some(child);
+
+        let expected = format!("Joined channel for project {project_id}");
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            if Instant::now() >= deadline {
+                let tail = std::fs::read_to_string(&log_path).unwrap_or_default();
+                self.stop_daemon().await;
+                panic!("daemon did not log {expected:?} within 30s. log:\n{tail}");
+            }
+            if let Ok(text) = std::fs::read_to_string(&log_path)
+                && text.contains(&expected)
+            {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
+    pub async fn stop_daemon(&mut self) {
+        if let Some(mut child) = self.daemon.take() {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
         }
     }
 
@@ -199,9 +285,12 @@ impl GuiWorld {
 async fn main() {
     GuiWorld::cucumber()
         .max_concurrent_scenarios(Some(1))
-        .before(|_feature, _rule, scenario, world| {
+        .before(|feature, _rule, scenario, world| {
             let scenario_name = scenario.name.clone();
+            let feature_name = feature.name.clone();
             Box::pin(async move {
+                world.feature_slug = slugify(&feature_name);
+                world.scenario_slug = slugify(&scenario_name);
                 steps::setup::before_scenario(world, &scenario_name).await;
             })
         })
@@ -231,6 +320,9 @@ async fn main() {
                 }
 
                 if let Some(world) = world {
+                    // Stop the daemon first so it can't hold DB locks while we
+                    // delete the workflows/tasks underneath it.
+                    world.stop_daemon().await;
                     // Clean up tasks created during the scenario
                     if let Some(client) = &world.graphql_client {
                         let task_service =
@@ -264,4 +356,21 @@ async fn main() {
         .await;
 
     gui_acceptance::close_webdriver().await;
+}
+
+fn slugify(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for c in input.chars() {
+        if c.is_ascii_alphanumeric() {
+            out.push(c.to_ascii_lowercase());
+        } else if !out.ends_with('_') && !out.is_empty() {
+            out.push('_');
+        }
+    }
+    let trimmed = out.trim_matches('_');
+    if trimmed.is_empty() {
+        "scenario".to_string()
+    } else {
+        trimmed.to_string()
+    }
 }
