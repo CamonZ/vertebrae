@@ -70,5 +70,4 @@ Orchestration is already running for this task
 
 - `/run` - Run the current step only
 - `/workflow assign` - Assign a workflow to a task
-- `/start-step` - Start a workflow step manually
-- `/complete-step` - Complete a workflow step manually
+- `/transition-to` - Move a task to a specific workflow step

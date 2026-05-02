@@ -16,7 +16,6 @@ mod run_tests;
 mod run_workflow_tests;
 mod sections_tests;
 mod show_tests;
-mod step_lifecycle_tests;
 mod step_tests;
 mod uncheck_item_tests;
 mod unref_tests;

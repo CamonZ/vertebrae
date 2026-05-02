@@ -359,9 +359,6 @@ vtb path <from-id> <to-id>       # Shortest path between tasks
 vtb workflow advance <task>      # Move to next step
 vtb workflow retreat <task>      # Move to previous step
 vtb transition-to <task> <step>  # Jump to specific step
-vtb start-step <task>
-vtb complete-step <task>
-vtb reject-step <task> --target <step> --feedback "reason"
 ```
 
 ### Execution
@@ -416,7 +413,7 @@ The `ExecutionPool` limits how many step executions run simultaneously, preventi
 
 ### 6. Human-in-the-Loop Gates
 
-Tasks can be flagged `needs_human_review`. Workflows can include steps that wait for human confirmation before proceeding. The `reject_step` operation sends a task backward in the workflow with feedback, allowing humans to override AI decisions.
+Tasks can be flagged `needs_human_review`. Workflows can include steps that wait for human confirmation before proceeding. The `transition-to` operation can send a task backward in the workflow, allowing humans to override AI decisions.
 
 ### 7. Multi-Agent Coordination
 

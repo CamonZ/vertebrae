@@ -206,41 +206,6 @@ impl TaskService for MockTaskService {
         self.set_current_step(task_id, step_id).await
     }
 
-    async fn start_step(&self, task_id: &str) -> ServiceResult<()> {
-        let mut s = self.state.lock().unwrap();
-        let task = s
-            .tasks
-            .get_mut(task_id)
-            .ok_or_else(|| ServiceError::task_not_found(task_id))?;
-        task.updated_at = Some(Utc::now());
-        Ok(())
-    }
-
-    async fn complete_step(&self, task_id: &str) -> ServiceResult<()> {
-        let mut s = self.state.lock().unwrap();
-        let task = s
-            .tasks
-            .get_mut(task_id)
-            .ok_or_else(|| ServiceError::task_not_found(task_id))?;
-        task.updated_at = Some(Utc::now());
-        Ok(())
-    }
-
-    async fn reject_step(
-        &self,
-        task_id: &str,
-        _target_step_id: &str,
-        _feedback: Option<&str>,
-    ) -> ServiceResult<()> {
-        let mut s = self.state.lock().unwrap();
-        let task = s
-            .tasks
-            .get_mut(task_id)
-            .ok_or_else(|| ServiceError::task_not_found(task_id))?;
-        task.updated_at = Some(Utc::now());
-        Ok(())
-    }
-
     async fn delete_task(&self, id: &str, cascade: bool) -> ServiceResult<()> {
         let mut s = self.state.lock().unwrap();
         if !s.tasks.contains_key(id) {

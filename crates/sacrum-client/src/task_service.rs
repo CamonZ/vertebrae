@@ -480,43 +480,6 @@ impl TaskService for SacrumTaskService {
         Ok(())
     }
 
-    async fn start_step(&self, task_id: &str) -> ServiceResult<()> {
-        let variables = json!({
-            "task_id": task_id,
-        });
-        self.client
-            .execute_void(tasks::START_STEP, variables)
-            .await?;
-        Ok(())
-    }
-
-    async fn complete_step(&self, task_id: &str) -> ServiceResult<()> {
-        let variables = json!({
-            "task_id": task_id,
-        });
-        self.client
-            .execute_void(tasks::COMPLETE_STEP, variables)
-            .await?;
-        Ok(())
-    }
-
-    async fn reject_step(
-        &self,
-        task_id: &str,
-        target_step_id: &str,
-        feedback: Option<&str>,
-    ) -> ServiceResult<()> {
-        let variables = json!({
-            "task_id": task_id,
-            "target_step_id": target_step_id,
-            "feedback": feedback,
-        });
-        self.client
-            .execute_void(tasks::REJECT_STEP, variables)
-            .await?;
-        Ok(())
-    }
-
     async fn delete_task(&self, id: &str, cascade: bool) -> ServiceResult<()> {
         let variables = json!({
             "id": id,
