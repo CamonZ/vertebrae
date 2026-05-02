@@ -36,9 +36,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
       return (
         <div className="flex justify-end">
           <div className="max-w-[85%] rounded-lg bg-primary/20 px-4 py-3">
-            <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-text-primary antialiased">
-              {message.text}
-            </p>
+            <MarkdownContent text={message.text} />
             <p className="mt-2 text-right text-xs text-text-muted">
               {new Date(message.timestamp).toLocaleTimeString()}
             </p>
