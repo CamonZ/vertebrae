@@ -121,9 +121,6 @@ vtb uncheck-item <task> 2
 
 # Workflow navigation
 vtb transition-to <task> <step-name>
-vtb start-step <task>
-vtb complete-step <task>
-vtb reject-step <task> <target-step> -f "reason"
 
 # Viewing
 vtb show <task>
@@ -160,9 +157,6 @@ See `skills/` for detailed command guides:
 **Status and workflows:**
 - `/workflow` - Manage workflows (add, list, show, assign, advance, retreat)
 - `/step` - Manage workflow steps
-- `/start-step` - Start a workflow step for a task
-- `/complete-step` - Complete a workflow step for a task
-- `/reject-step` - Reject a workflow step with optional feedback
 - `/review` - Toggle human review flag
 - `/check-item` - Check a checklist item as done
 - `/uncheck-item` - Uncheck a checklist item
