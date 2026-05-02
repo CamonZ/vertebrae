@@ -285,6 +285,33 @@ async fn gui_should_show_element_with_test_id_within(
         .await;
 }
 
+#[when(expr = "I click on the element with title {string}")]
+async fn click_element_with_title(world: &mut GuiWorld, title: String) {
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+
+    let element = client
+        .wait()
+        .at_most(std::time::Duration::from_secs(5))
+        .for_element(Locator::XPath(&format!("//*[@title='{}']", title)))
+        .await
+        .unwrap_or_else(|_| panic!("element with title '{}' not found within 5 seconds", title));
+
+    element
+        .click()
+        .await
+        .unwrap_or_else(|_| panic!("failed to click element with title '{}'", title));
+
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    world
+        .screenshot(&client, &format!("after-click-title-{title}"))
+        .await;
+}
+
 #[when(expr = "I click on the element with test id {string}")]
 async fn click_element_with_test_id(world: &mut GuiWorld, test_id: String) {
     let wd = world

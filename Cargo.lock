@@ -1989,6 +1989,7 @@ name = "gui-acceptance"
 version = "0.1.0"
 dependencies = [
  "cucumber",
+ "daemon-acceptance",
  "fantoccini",
  "serde_json",
  "tempfile",
