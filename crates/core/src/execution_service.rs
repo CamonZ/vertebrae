@@ -225,6 +225,18 @@ pub trait ExecutionService: Send + Sync {
     /// Returns an error if the task has no workflow assigned, is already completed,
     /// or if orchestration is already running.
     async fn orchestrate_task(&self, task_id: &str) -> ServiceResult<()>;
+
+    /// Stop the running TaskOrchestrator for a task.
+    ///
+    /// Calls the `stop_orchestrator` mutation on Sacrum, which terminates the
+    /// orchestrator FSM and cancels any in-flight step execution. The mutation
+    /// is idempotent: calling it for a task with no running orchestrator is a
+    /// no-op and returns successfully.
+    ///
+    /// # Arguments
+    ///
+    /// * `task_id` - The task whose orchestrator should be stopped
+    async fn stop_orchestrator(&self, task_id: &str) -> ServiceResult<()>;
 }
 
 #[cfg(test)]

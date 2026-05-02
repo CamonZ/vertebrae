@@ -14,7 +14,7 @@ use crate::api_types::{SessionLogResponse, StepExecutionResponse};
 use crate::client::{GraphqlClient, with_fragments};
 use crate::queries::executions::{
     CREATE_EXECUTION, CREATE_LOG, EXECUTION_FIELDS, GET_EXECUTION, LIST_EXECUTIONS, LIST_LOGS,
-    ORCHESTRATE_TASK, RUN_STEP, UPDATE_EXECUTION,
+    ORCHESTRATE_TASK, RUN_STEP, STOP_ORCHESTRATOR, UPDATE_EXECUTION,
 };
 
 /// Response shape for mutations that return only an id
@@ -258,6 +258,19 @@ impl ExecutionService for SacrumExecutionService {
         let _: IdOnly = self
             .client
             .execute(ORCHESTRATE_TASK, variables, "orchestrate_task")
+            .await?;
+
+        Ok(())
+    }
+
+    async fn stop_orchestrator(&self, task_id: &str) -> ServiceResult<()> {
+        let variables = json!({
+            "task_id": task_id,
+        });
+
+        let _: IdOnly = self
+            .client
+            .execute(STOP_ORCHESTRATOR, variables, "stop_orchestrator")
             .await?;
 
         Ok(())
@@ -1039,6 +1052,53 @@ mod tests {
         assert!(
             err_msg.contains("completed task"),
             "Expected error about completed task, got: {}",
+            err_msg
+        );
+    }
+
+    #[tokio::test]
+    async fn test_stop_orchestrator_success() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "stop_orchestrator": {
+                        "id": "task-running"
+                    }
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let result = service.stop_orchestrator("task-running").await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_stop_orchestrator_task_not_found_error() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": null,
+                "errors": [{"message": "Task not found"}]
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_wiremock_service(&server.uri());
+        let result = service.stop_orchestrator("missing-task").await;
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("not found"),
+            "Expected error about not found, got: {}",
             err_msg
         );
     }

@@ -1014,6 +1014,31 @@ pub async fn orchestrate_task(
     Ok(())
 }
 
+/// Stop the running TaskOrchestrator for a task via Sacrum.
+///
+/// Idempotent: if no orchestrator is running for the task, the call still
+/// resolves successfully. The daemon receives the corresponding cancel_step
+/// event and terminates any in-flight child process.
+#[tauri::command]
+#[specta::specta]
+pub async fn stop_orchestrator(
+    state: State<'_, AppState>,
+    task_id: String,
+) -> Result<(), CommandError> {
+    let service_guard = state.services.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    service.executions().stop_orchestrator(&task_id).await?;
+
+    log::info!(
+        "Workflow orchestration stop requested for task: {}",
+        task_id
+    );
+    Ok(())
+}
+
 // ============================================================================
 // Claude Session Commands (JSONL streaming)
 // ============================================================================
@@ -3097,5 +3122,23 @@ mod tests {
 
         let err = CommandError::no_project_selected();
         assert!(err.message.contains("No project selected"));
+    }
+
+    #[tokio::test]
+    async fn stop_orchestrator_no_project_returns_error() {
+        let app = build_app_without_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let result = stop_orchestrator(state, "task-1".to_string()).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.message.contains("No project selected"));
+    }
+
+    #[tokio::test]
+    async fn stop_orchestrator_succeeds() {
+        let app = build_app_with_services();
+        let state: tauri::State<'_, AppState> = app.state();
+        let result = stop_orchestrator(state, "task-1".to_string()).await;
+        assert!(result.is_ok(), "expected ok, got {:?}", result.err());
     }
 }
