@@ -193,6 +193,7 @@ export function TaskDetailPanel({
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isRunningStep, setIsRunningStep] = useState(false);
   const [isRunningWorkflow, setIsRunningWorkflow] = useState(false);
+  const [isStoppingWorkflow, setIsStoppingWorkflow] = useState(false);
   const [workflowError, setWorkflowError] = useState<string | null>(null);
   const { task: taskData, isLoading, error, refetch } = useTask(taskId);
   const allTasks = useTaskStore((s) => s.tasks);
@@ -506,6 +507,24 @@ export function TaskDetailPanel({
     }
   }, [taskData?.id]);
 
+  const handleStopWorkflow = useCallback(async () => {
+    if (!taskData?.id) return;
+    setIsStoppingWorkflow(true);
+    setWorkflowError(null);
+    try {
+      const result = await commands.stopOrchestrator(taskData.id);
+      if (result.status === "error") {
+        setWorkflowError(result.error.message);
+      }
+    } catch (err) {
+      setWorkflowError(
+        err instanceof Error ? err.message : "Failed to stop workflow"
+      );
+    } finally {
+      setIsStoppingWorkflow(false);
+    }
+  }, [taskData?.id]);
+
   if (!taskId) {
     return null;
   }
@@ -618,6 +637,30 @@ export function TaskDetailPanel({
                 </svg>
               )}
               <span>{isRunningWorkflow ? "Running..." : "Run Workflow"}</span>
+            </button>
+          )}
+          {taskData?.workflow_id && isExecuting && (
+            <button
+              type="button"
+              onClick={handleStopWorkflow}
+              disabled={isStoppingWorkflow}
+              className="cursor-pointer flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-error bg-error text-white hover:bg-error/90 disabled:opacity-50 disabled:cursor-not-allowed"
+              aria-label="Stop running workflow"
+              title="Stop the running orchestrator for this task"
+            >
+              {isStoppingWorkflow ? (
+                <Spinner />
+              ) : (
+                <svg
+                  className="h-3.5 w-3.5"
+                  fill="currentColor"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                >
+                  <rect x="6" y="6" width="12" height="12" rx="1.5" />
+                </svg>
+              )}
+              <span>{isStoppingWorkflow ? "Stopping..." : "Stop"}</span>
             </button>
           )}
           {/* Open Chat Button */}
