@@ -923,6 +923,10 @@ impl ExecutionService for MockExecutionService {
         }
         Ok(())
     }
+
+    async fn stop_orchestrator(&self, _task_id: &str) -> ServiceResult<()> {
+        Ok(())
+    }
 }
 
 // ============================================================================

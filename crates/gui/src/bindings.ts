@@ -564,6 +564,21 @@ async orchestrateTask(taskId: string) : Promise<Result<null, CommandError>> {
 }
 },
 /**
+ * Stop the running TaskOrchestrator for a task via Sacrum.
+ * 
+ * Idempotent: if no orchestrator is running for the task, the call still
+ * resolves successfully. The daemon receives the corresponding cancel_step
+ * event and terminates any in-flight child process.
+ */
+async stopOrchestrator(taskId: string) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("stop_orchestrator", { taskId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Create a new Claude session with JSONL streaming
  * 
  * Spawns the Claude CLI with streaming JSON input/output mode.

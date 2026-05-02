@@ -150,3 +150,14 @@ pub const ORCHESTRATE_TASK: &str = r#"
         }
     }
 "#;
+
+/// Stop the running TaskOrchestrator for a task. Idempotent.
+/// Sacrum calls Sacrum.Orchestrator.stop/1, which terminates the FSM
+/// and cancels any in-flight step execution. Returns the task.
+pub const STOP_ORCHESTRATOR: &str = r#"
+    mutation StopOrchestrator($task_id: Uuid4!) {
+        stop_orchestrator(task_id: $task_id) {
+            id
+        }
+    }
+"#;
