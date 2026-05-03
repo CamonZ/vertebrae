@@ -22,8 +22,8 @@ use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig};
 
 use claude_session::{
     ClaudePermissionRequestEvent, ClaudeSessionEndEvent, ClaudeSessionErrorEvent,
-    ClaudeSessionInitEvent, ClaudeSessionManager, ClaudeTextEvent, ClaudeToolCallEvent,
-    ClaudeToolResultEvent,
+    ClaudeSessionInitEvent, ClaudeSessionManager, ClaudeSessionUsageEvent, ClaudeTextEvent,
+    ClaudeToolCallEvent, ClaudeToolResultEvent,
 };
 use commands::AppState;
 use events::{
@@ -131,6 +131,7 @@ fn create_builder() -> Builder {
             ClaudeTextEvent,
             ClaudeToolCallEvent,
             ClaudeToolResultEvent,
+            ClaudeSessionUsageEvent,
             ClaudeSessionEndEvent,
             ClaudeSessionErrorEvent,
             ClaudePermissionRequestEvent

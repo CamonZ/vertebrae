@@ -97,6 +97,23 @@ pub struct ClaudeToolResultEvent {
     pub is_error: bool,
 }
 
+/// Event emitted after each assistant message with the latest context-size figure.
+///
+/// `context_tokens` is the non-cached input token count for the most recent
+/// assistant turn — the source of truth for "how full is the context window".
+/// Cache reads, cache creation, and output tokens are cost signals and are
+/// intentionally excluded.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct ClaudeSessionUsageEvent {
+    pub session_id: String,
+    /// Model name reported by the assistant message
+    pub model: String,
+    /// Non-cached input tokens for the latest assistant turn
+    pub context_tokens: u32,
+    /// Backend-reported context window (fallback when frontend lookup misses)
+    pub context_window: u32,
+}
+
 /// Event emitted when Claude session ends
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct ClaudeSessionEndEvent {
@@ -201,6 +218,18 @@ struct ContentDelta {
 struct ClaudeMessageContent {
     role: Option<String>,
     content: Option<Vec<ClaudeContentItem>>,
+    model: Option<String>,
+    usage: Option<AssistantUsage>,
+}
+
+/// Per-turn usage info attached to the assistant `message` field.
+/// Mirrors the Anthropic API usage shape inside Claude CLI stream-json output.
+#[derive(Debug, Deserialize)]
+struct AssistantUsage {
+    input_tokens: Option<u32>,
+    cache_read_input_tokens: Option<u32>,
+    cache_creation_input_tokens: Option<u32>,
+    output_tokens: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -235,6 +264,7 @@ enum EmittedEvent {
     ToolCall(ClaudeToolCallEvent),
     ToolResult(ClaudeToolResultEvent),
     PermissionRequest(ClaudePermissionRequestEvent),
+    Usage(ClaudeSessionUsageEvent),
     SessionEnd(ClaudeSessionEndEvent),
 }
 
@@ -467,6 +497,9 @@ impl ClaudeSessionManager {
                             let _ = e.emit(&app_handle_for_reader);
                         }
                         EmittedEvent::PermissionRequest(e) => {
+                            let _ = e.emit(&app_handle_for_reader);
+                        }
+                        EmittedEvent::Usage(e) => {
                             let _ = e.emit(&app_handle_for_reader);
                         }
                         EmittedEvent::SessionEnd(e) => {
@@ -702,6 +735,20 @@ impl ClaudeSessionManager {
             }
             "assistant" => {
                 if let Some(message) = msg.message {
+                    // Emit a per-turn usage event so the UI badge updates
+                    // mid-conversation, not only at session_end.
+                    if let Some(usage) = message.usage.as_ref() {
+                        let context_tokens = usage.input_tokens.unwrap_or(0);
+                        events.push(EmittedEvent::Usage(ClaudeSessionUsageEvent {
+                            session_id: session_id.to_string(),
+                            model: message.model.clone().unwrap_or_default(),
+                            context_tokens,
+                            // Backend has no per-turn context_window; fall back to the
+                            // standard 200k. The frontend uses its own model→max
+                            // lookup table as the source of truth for the displayed max.
+                            context_window: 200_000,
+                        }));
+                    }
                     if let Some(content) = message.content {
                         for item in content {
                             match item {
@@ -1492,6 +1539,60 @@ mod tests {
         assert_eq!(events.len(), 2);
         assert!(matches!(&events[0], EmittedEvent::ToolResult(_)));
         assert!(matches!(&events[1], EmittedEvent::PermissionRequest(_)));
+    }
+
+    #[test]
+    fn test_build_events_assistant_emits_usage_event() {
+        // Per-turn usage event should fire whenever the assistant message
+        // carries a `usage` block, using `input_tokens` (non-cached) as the
+        // context-size figure.
+        let msg = parse_msg(
+            r#"{
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "model": "claude-opus-4-7-20250115",
+                    "content": [{"type": "text", "text": "hi"}],
+                    "usage": {
+                        "input_tokens": 12345,
+                        "cache_read_input_tokens": 9999,
+                        "cache_creation_input_tokens": 8888,
+                        "output_tokens": 250
+                    }
+                }
+            }"#,
+        );
+
+        let events = ClaudeSessionManager::build_events("sess-1", msg);
+        assert_eq!(events.len(), 2, "expected Usage + Text events");
+        match &events[0] {
+            EmittedEvent::Usage(e) => {
+                assert_eq!(e.session_id, "sess-1");
+                assert_eq!(e.model, "claude-opus-4-7-20250115");
+                // input_tokens only — cache_read/cache_creation/output excluded
+                assert_eq!(e.context_tokens, 12345);
+                assert_eq!(e.context_window, 200_000);
+            }
+            other => panic!("Expected Usage event first, got {:?}", other),
+        }
+        assert!(matches!(&events[1], EmittedEvent::Text(_)));
+    }
+
+    #[test]
+    fn test_build_events_assistant_no_usage_no_event() {
+        // When `usage` is absent, no Usage event is emitted.
+        let msg = parse_msg(
+            r#"{
+                "type": "assistant",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "hello"}]
+                }
+            }"#,
+        );
+        let events = ClaudeSessionManager::build_events("sess-1", msg);
+        assert_eq!(events.len(), 1);
+        assert!(matches!(&events[0], EmittedEvent::Text(_)));
     }
 
     #[test]
