@@ -352,6 +352,64 @@ describe("chatStore", () => {
     });
   });
 
+  describe("setSessionModel", () => {
+    it("stores the model name on the session", () => {
+      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+      useChatStore.getState().setSessionModel(id, "claude-opus-4-7");
+      expect(useChatStore.getState().sessions[id].model).toBe(
+        "claude-opus-4-7"
+      );
+    });
+
+    it("does nothing for non-existent session", () => {
+      useChatStore.getState().setSessionModel("non-existent", "m");
+      expect(Object.keys(useChatStore.getState().sessions)).toHaveLength(0);
+    });
+  });
+
+  describe("setSessionTokenUsage", () => {
+    it("stores used + max on the session", () => {
+      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+      useChatStore
+        .getState()
+        .setSessionTokenUsage(id, { used: 142_000, max: 1_000_000 });
+      expect(useChatStore.getState().sessions[id].tokenUsage).toEqual({
+        used: 142_000,
+        max: 1_000_000,
+      });
+    });
+
+    it("overwrites previous usage on later turns", () => {
+      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+      useChatStore
+        .getState()
+        .setSessionTokenUsage(id, { used: 100, max: 1_000_000 });
+      useChatStore
+        .getState()
+        .setSessionTokenUsage(id, { used: 200, max: 1_000_000 });
+      expect(useChatStore.getState().sessions[id].tokenUsage?.used).toBe(200);
+    });
+  });
+
+  describe("setSessionUsage", () => {
+    it("sets model and tokenUsage together in one update", () => {
+      const id = useChatStore.getState().openSession("task", "t-1", "T1");
+      useChatStore
+        .getState()
+        .setSessionUsage(id, "claude-opus-4-7", { used: 142_000, max: 1_000_000 });
+      const session = useChatStore.getState().sessions[id];
+      expect(session.model).toBe("claude-opus-4-7");
+      expect(session.tokenUsage).toEqual({ used: 142_000, max: 1_000_000 });
+    });
+
+    it("does nothing for non-existent session", () => {
+      useChatStore
+        .getState()
+        .setSessionUsage("non-existent", "m", { used: 0, max: 0 });
+      expect(Object.keys(useChatStore.getState().sessions)).toHaveLength(0);
+    });
+  });
+
   describe("markSessionClosed", () => {
     it("sets session status to closed", () => {
       const id = useChatStore.getState().openSession("task", "t-1", "T1");

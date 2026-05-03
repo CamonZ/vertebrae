@@ -74,6 +74,10 @@ export interface ChatSession {
   claudeConversationId: string | null;
   /** Injected context summary (read-only snapshot) */
   contextSummary: string | null;
+  /** Model name reported by the Claude CLI (from init or per-turn usage) */
+  model?: string;
+  /** Latest per-turn context utilization for the badge */
+  tokenUsage?: { used: number; max: number };
 }
 
 interface ChatStoreState {
@@ -114,6 +118,19 @@ interface ChatStoreActions {
   ) => void;
   /** Set context summary for a session */
   setContextSummary: (sessionId: string, summary: string) => void;
+  /** Set the model reported by the Claude CLI for a session */
+  setSessionModel: (sessionId: string, model: string) => void;
+  /** Set the latest per-turn context utilization */
+  setSessionTokenUsage: (
+    sessionId: string,
+    usage: { used: number; max: number }
+  ) => void;
+  /** Update model and token usage together in a single render */
+  setSessionUsage: (
+    sessionId: string,
+    model: string,
+    usage: { used: number; max: number }
+  ) => void;
   /** Mark a session as closed */
   markSessionClosed: (sessionId: string) => void;
   /** Clear messages in a session */
@@ -315,6 +332,58 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         sessions: {
           ...state.sessions,
           [sessionId]: { ...session, contextSummary: summary },
+        },
+      };
+    });
+  },
+
+  setSessionModel: (sessionId, model) => {
+    set((state) => {
+      const session = state.sessions[sessionId];
+      if (!session || session.model === model) return state;
+      return {
+        sessions: {
+          ...state.sessions,
+          [sessionId]: { ...session, model },
+        },
+      };
+    });
+  },
+
+  setSessionTokenUsage: (sessionId, usage) => {
+    set((state) => {
+      const session = state.sessions[sessionId];
+      if (!session) return state;
+      if (
+        session.tokenUsage?.used === usage.used &&
+        session.tokenUsage?.max === usage.max
+      ) {
+        return state;
+      }
+      return {
+        sessions: {
+          ...state.sessions,
+          [sessionId]: { ...session, tokenUsage: usage },
+        },
+      };
+    });
+  },
+
+  setSessionUsage: (sessionId, model, usage) => {
+    set((state) => {
+      const session = state.sessions[sessionId];
+      if (!session) return state;
+      if (
+        session.model === model &&
+        session.tokenUsage?.used === usage.used &&
+        session.tokenUsage?.max === usage.max
+      ) {
+        return state;
+      }
+      return {
+        sessions: {
+          ...state.sessions,
+          [sessionId]: { ...session, model, tokenUsage: usage },
         },
       };
     });

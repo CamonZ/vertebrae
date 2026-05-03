@@ -32,6 +32,7 @@ vi.mock("../../bindings", () => ({
   },
   events: {
     claudeSessionInitEvent: { listen: vi.fn(() => Promise.resolve(() => {})) },
+    claudeSessionUsageEvent: { listen: vi.fn(() => Promise.resolve(() => {})) },
     claudeTextEvent: { listen: vi.fn(() => Promise.resolve(() => {})) },
     claudeToolCallEvent: { listen: vi.fn(() => Promise.resolve(() => {})) },
     claudeToolResultEvent: { listen: vi.fn(() => Promise.resolve(() => {})) },

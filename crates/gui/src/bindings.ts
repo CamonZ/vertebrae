@@ -640,6 +640,7 @@ claudePermissionRequestEvent: ClaudePermissionRequestEvent,
 claudeSessionEndEvent: ClaudeSessionEndEvent,
 claudeSessionErrorEvent: ClaudeSessionErrorEvent,
 claudeSessionInitEvent: ClaudeSessionInitEvent,
+claudeSessionUsageEvent: ClaudeSessionUsageEvent,
 claudeTextEvent: ClaudeTextEvent,
 claudeToolCallEvent: ClaudeToolCallEvent,
 claudeToolResultEvent: ClaudeToolResultEvent,
@@ -656,6 +657,7 @@ claudePermissionRequestEvent: "claude-permission-request-event",
 claudeSessionEndEvent: "claude-session-end-event",
 claudeSessionErrorEvent: "claude-session-error-event",
 claudeSessionInitEvent: "claude-session-init-event",
+claudeSessionUsageEvent: "claude-session-usage-event",
 claudeTextEvent: "claude-text-event",
 claudeToolCallEvent: "claude-tool-call-event",
 claudeToolResultEvent: "claude-tool-result-event",
@@ -763,6 +765,27 @@ export type ClaudeSessionInitEvent = { session_id: string;
  * Claude's conversation ID - use this with --resume for multi-turn
  */
 claude_conversation_id: string | null; model: string; tools: string[] }
+/**
+ * Event emitted after each assistant message with the latest context-size figure.
+ * 
+ * `context_tokens` is the non-cached input token count for the most recent
+ * assistant turn — the source of truth for "how full is the context window".
+ * Cache reads, cache creation, and output tokens are cost signals and are
+ * intentionally excluded.
+ */
+export type ClaudeSessionUsageEvent = { session_id: string; 
+/**
+ * Model name reported by the assistant message
+ */
+model: string; 
+/**
+ * Non-cached input tokens for the latest assistant turn
+ */
+context_tokens: number; 
+/**
+ * Backend-reported context window (fallback when frontend lookup misses)
+ */
+context_window: number }
 /**
  * Event emitted when Claude produces text output
  */
