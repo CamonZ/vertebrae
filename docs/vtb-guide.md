@@ -1,44 +1,18 @@
 # Vertebrae (vtb) — CLI User Guide
 
-Vertebrae (`vtb`) is a CLI client for the Sacrum REST API. It provides structured workflows for planning, triaging, implementing, and reviewing work through a terminal interface.
+Vertebrae (`vtb`) is a CLI client for the Sacrum GraphQL API. It provides structured workflows for planning, triaging, implementing, and reviewing work through a terminal interface.
 
 > **Backend:** See [System Overview](system-overview.md) for how vtb fits into the broader Sacrum architecture.
 
 ## Configuration
 
-`vtb` reads configuration from `.vtb/config.toml` plus one environment variable:
-
-| Source | Field | Required | Description |
-|--------|-------|----------|-------------|
-| `.vtb/config.toml` | `[sacrum].url` | No | Sacrum API base URL (default: `http://localhost:4000`) |
-| `.vtb/config.toml` | `[sacrum].project_id` | Yes | Project UUID in Sacrum |
-| Environment | `SACRUM_API_TOKEN` | Yes | Bearer token for authentication (starts with `sac_`) |
-
-### Quick Setup
+Use `vtb init` to configure a project:
 
 ```bash
-# Initialize a project
 vtb init
-
-# Create .vtb/config.toml
-mkdir -p .vtb
-cat > .vtb/config.toml <<EOF
-[sacrum]
-url = "http://localhost:4000"
-project_id = "your-project-uuid"
-EOF
-
-# Set the API token
-export SACRUM_API_TOKEN=sac_your_token_here
 ```
 
-### Getting a Token
-
-1. Start Sacrum: `mix phx.server`
-2. Create a user and generate a token via IEx or the API
-3. Use the `sac_`-prefixed token in `SACRUM_API_TOKEN`
-
-See [SACRUM_CONFIG.md](SACRUM_CONFIG.md) for full configuration reference.
+The command handles registration and writes the client configuration. See [SACRUM_CONFIG.md](SACRUM_CONFIG.md) for the current config format and environment overrides.
 
 ---
 
@@ -511,23 +485,27 @@ vtb transition-to <id> testing     # Re-advance through the workflow
 
 ---
 
-## Marking Implementation Steps Done
+## Marking Checklist Items Done
 
-Track progress on a task's implementation steps (separate from checklist items):
+Track progress with checklist items:
 
 ```bash
-# Mark step 1 as done (1-based index)
-vtb step-done <task-id> 1
+# Mark checklist item 1 as done (1-based index)
+vtb check-item <task-id> 1
 
-# View step completion status
+# Mark checklist item 1 as not done
+vtb uncheck-item <task-id> 1
+
+# View checklist completion status
 vtb show <task-id>
 ```
 
-Steps display with checkboxes:
+Checklist items display with checkboxes:
 ```
-Steps:
+Checklist Items:
   1. [x] Create database schema
   2. [ ] Implement API endpoint
+```
   3. [ ] Write tests
 ```
 
@@ -753,9 +731,7 @@ vtb transition-to <ticket-id> todo
 vtb workflow assign <ticket-id> <impl-workflow-id>
 vtb transition-to <ticket-id> coding
 
-# 4. Work through steps
-vtb step-done <ticket-id> 1
-vtb step-done <ticket-id> 2
+# 4. Work through checklist items
 vtb check-item <ticket-id> 1
 vtb transition-to <ticket-id> testing
 
@@ -800,7 +776,6 @@ vtb ready
 | Command | Description |
 |---------|-------------|
 | `vtb transition-to <id> <target>` | Move to a step (by name or UUID) |
-| `vtb step-done <id> <n>` | Mark implementation step n as done |
 
 ### Workflow Management
 | Command | Description |

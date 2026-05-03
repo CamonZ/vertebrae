@@ -1,35 +1,46 @@
 # Sacrum Configuration
 
-This document describes the configuration format for the Sacrum HTTP backend.
+This document describes the configuration format for the Sacrum backend used by Vertebrae clients.
 
 ## Configuration File
 
-The Sacrum client reads configuration from `.vtb/config.toml`.
+The Sacrum client reads configuration from `~/.config/vertebrae/config.toml`.
 
 ### Format
 
 ```toml
 [sacrum]
 url = "http://localhost:4000"
-project_id = "my-project-id"
+token = "your-token"
+
+[projects.vertebrae]
+id = "my-project-id"
+path = "/Users/example/Code/vertebrae"
 ```
 
 ### Fields
+
+`[sacrum]`
 
 - **url** (optional): The base URL for the Sacrum API server
   - Default: `http://localhost:4000`
   - Example: `http://api.example.com`
 
-- **project_id** (required): The project ID in Sacrum
-  - This is included in API requests as a query parameter or path segment
+- **token** (required unless using `VTB_TOKEN`): Bearer token for GraphQL requests and Phoenix channel authentication
+
+`[projects.<slug>]`
+
+- **id** (required unless using `VTB_PROJECT_ID`): The project ID in Sacrum
   - Example: `proj-123abc`
+
+- **path** (required for CLI path matching): The git root path for the project
+  - Example: `/Users/example/Code/vertebrae`
 
 ## Environment Variables
 
-- **SACRUM_API_TOKEN** (required): The API authentication token
-  - Must be set in your environment before running Vertebrae
-  - Used for Bearer token authentication on all API requests
-  - Example: `export SACRUM_API_TOKEN=your-secret-token`
+- **VTB_URL**: Overrides `[sacrum].url`
+- **VTB_TOKEN**: Overrides `[sacrum].token`
+- **VTB_PROJECT_ID**: Overrides path-based project resolution and uses the given Sacrum project ID directly
 
 ## Example Configuration
 
@@ -37,25 +48,35 @@ project_id = "my-project-id"
 # Development configuration
 [sacrum]
 url = "http://localhost:4000"
-project_id = "dev-project"
+token = "dev-token"
+
+[projects.vertebrae]
+id = "dev-project"
+path = "/Users/example/Code/vertebrae"
 ```
 
 ```toml
 # Production configuration
 [sacrum]
 url = "https://api.sacrum.example.com"
-project_id = "prod-project"
+token = "prod-token"
+
+[projects.vertebrae]
+id = "prod-project"
+path = "/srv/vertebrae"
 ```
 
 ## Configuration Resolution
 
-The client resolves configuration in this order:
+The CLI resolves configuration in this order:
 
-1. **API Token**: From `SACRUM_API_TOKEN` environment variable (required)
-2. **Base URL**: From `[sacrum].url` in `.vtb/config.toml`, or defaults to `http://localhost:4000`
-3. **Project ID**: From `[sacrum].project_id` in `.vtb/config.toml` (required)
+1. **Base URL**: `VTB_URL`, then `[sacrum].url`, then `http://localhost:4000`
+2. **API token**: `VTB_TOKEN`, then `[sacrum].token`
+3. **Project ID**: `VTB_PROJECT_ID`, otherwise the project whose configured `path` is the longest prefix of the current git root
 
 If required fields are missing, an error will be returned.
+
+The GUI resolves configuration by selected project slug using `SacrumConfig::load_for_project()`. It reads `[sacrum].url`, `[sacrum].token`, and `[projects.<slug>].id` from the global config file.
 
 ## Task and Workflow ID Handling
 

@@ -65,8 +65,7 @@ The Rust backend in `src-tauri/src/` provides:
 
 - **~34 Tauri commands** (`commands.rs`) — each acquires `RwLock<Option<VertebraeServices>>`, calls service method, converts to GUI type
 - **WebSocket client** (`websocket_client.rs`) — Phoenix channel for real-time sync
-- **PTY manager** (`pty_manager.rs`) — embedded terminal sessions
-- **Workflow runner** (`workflow_runner/`) — automated step execution engine
+- **Claude session manager** (`claude_session.rs`) — JSONL chat/session streaming
 - **Project config** (`project_config.rs`) — multi-project management
 
 ## Real-Time Sync
@@ -82,9 +81,9 @@ The GUI maintains a WebSocket connection to Sacrum via Phoenix channels:
 ## Data Flow
 
 ```
-CLI mutation -> Sacrum REST API -> Sacrum broadcasts on WebSocket
+CLI mutation -> Sacrum GraphQL API -> Sacrum broadcasts on WebSocket
             -> GUI WebSocket receives -> Tauri event -> React hooks -> Refetch & re-render
 
-GUI mutation -> Tauri command -> VertebraeServices -> Sacrum REST API
+GUI mutation -> Tauri command -> VertebraeServices -> Sacrum GraphQL API
             -> Sacrum broadcasts on WebSocket -> React hooks -> Update state
 ```
