@@ -648,6 +648,7 @@ impl WorkflowService for MockWorkflowService {
             auto_advance: options.auto_advance,
             order: options.order,
             is_default: options.is_default,
+            is_final: options.is_final,
             kanban_column: options.kanban_column.clone(),
             transitions: Vec::new(),
             created_at: Some(Utc::now()),
@@ -708,6 +709,9 @@ impl WorkflowService for MockWorkflowService {
         }
         if let Some(is_default) = options.is_default {
             wf.is_default = is_default;
+        }
+        if let Some(is_final) = options.is_final {
+            wf.is_final = is_final;
         }
         if let Some(kanban_column) = &options.kanban_column {
             wf.kanban_column = kanban_column.clone();

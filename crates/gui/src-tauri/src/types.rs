@@ -554,6 +554,9 @@ pub struct Workflow {
     /// Whether this is the default workflow for new tasks
     #[serde(default)]
     pub is_default: bool,
+    /// Whether this is a terminal workflow (cannot transition out)
+    #[serde(default)]
+    pub is_final: bool,
     /// Additional metadata as key-value pairs
     #[serde(default)]
     pub metadata: std::collections::HashMap<String, String>,
@@ -573,10 +576,54 @@ impl From<vertebrae_core::Workflow> for Workflow {
             initial_step: workflow.initial_step,
             kanban_column: workflow.kanban_column,
             is_default: workflow.is_default,
+            is_final: workflow.is_final,
             metadata: workflow.metadata,
             created_at: workflow.created_at.map(|dt| dt.to_rfc3339()),
             updated_at: workflow.updated_at.map(|dt| dt.to_rfc3339()),
         }
+    }
+}
+
+/// Options for updating a workflow from the GUI.
+///
+/// Only fields that are Some will be updated.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct UpdateWorkflowOptions {
+    pub workflow_id: String,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub auto_advance: Option<bool>,
+    pub order: Option<i32>,
+    pub is_default: Option<bool>,
+    pub is_final: Option<bool>,
+    pub kanban_column: Option<String>,
+}
+
+impl From<UpdateWorkflowOptions> for vertebrae_core::UpdateWorkflowOptions {
+    fn from(opts: UpdateWorkflowOptions) -> Self {
+        let mut update = vertebrae_core::UpdateWorkflowOptions::new();
+        if let Some(name) = opts.name {
+            update = update.with_name(name);
+        }
+        if let Some(description) = opts.description {
+            update = update.with_description(description);
+        }
+        if let Some(auto_advance) = opts.auto_advance {
+            update = update.with_auto_advance(auto_advance);
+        }
+        if let Some(order) = opts.order {
+            update = update.with_order(order);
+        }
+        if let Some(is_default) = opts.is_default {
+            update = update.with_is_default(is_default);
+        }
+        if let Some(is_final) = opts.is_final {
+            update = update.with_is_final(is_final);
+        }
+        if let Some(kanban_column) = opts.kanban_column {
+            update = update.with_kanban_column(kanban_column);
+        }
+        update
     }
 }
 
@@ -829,6 +876,7 @@ pub struct PipelineWorkflow {
     pub initial_step_id: Option<String>,
     pub kanban_column: Option<String>,
     pub is_default: bool,
+    pub is_final: bool,
     pub display_order: i32,
     pub workflow_steps: Vec<PipelineStep>,
     pub transitions: Vec<PipelineWorkflowTransition>,
@@ -863,6 +911,7 @@ impl From<vertebrae_sacrum_client::PipelineWorkflowResponse> for PipelineWorkflo
             initial_step_id: wf.initial_step_id,
             kanban_column: wf.kanban_column,
             is_default: wf.is_default.unwrap_or(false),
+            is_final: wf.is_final.unwrap_or(false),
             display_order: wf.display_order.unwrap_or(0),
             workflow_steps,
             transitions,

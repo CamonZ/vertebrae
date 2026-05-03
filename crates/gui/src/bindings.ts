@@ -431,6 +431,21 @@ async listWorkflowTransitions() : Promise<Result<WorkflowTransition[], CommandEr
 }
 },
 /**
+ * Update an existing workflow.
+ * 
+ * Updates the workflow with the given ID. Only fields that are Some will be updated.
+ * Persists via the workflow service (Sacrum) and emits a WorkflowChangedEvent so the
+ * detail panel and pipeline view refresh without a manual refetch.
+ */
+async updateWorkflow(options: UpdateWorkflowOptions) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_workflow", { options }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Get all step executions for a task
  * 
  * Returns a chronological list of all step executions for the given task.
@@ -878,7 +893,7 @@ export type PipelineTaskCounts = { epic: number; ticket: number; task: number }
  * Single workflow entry in the pipeline summary payload, with its preloaded
  * steps (carrying aggregates) and outbound inter-workflow transitions.
  */
-export type PipelineWorkflow = { id: string; name: string; description: string | null; initial_step_id: string | null; kanban_column: string | null; is_default: boolean; display_order: number; workflow_steps: PipelineStep[]; transitions: PipelineWorkflowTransition[] }
+export type PipelineWorkflow = { id: string; name: string; description: string | null; initial_step_id: string | null; kanban_column: string | null; is_default: boolean; is_final: boolean; display_order: number; workflow_steps: PipelineStep[]; transitions: PipelineWorkflowTransition[] }
 /**
  * Inter-workflow transition entry returned by `pipeline_summary`.
  */
@@ -1369,6 +1384,12 @@ revision_feedback: string | null;
  */
 worktree: string | null }
 /**
+ * Options for updating a workflow from the GUI.
+ * 
+ * Only fields that are Some will be updated.
+ */
+export type UpdateWorkflowOptions = { workflow_id: string; name: string | null; description: string | null; auto_advance: boolean | null; order: number | null; is_default: boolean | null; is_final: boolean | null; kanban_column: string | null }
+/**
  * Workflow - mirrors db::Workflow
  */
 export type Workflow = { 
@@ -1396,6 +1417,10 @@ kanban_column: string | null;
  * Whether this is the default workflow for new tasks
  */
 is_default?: boolean; 
+/**
+ * Whether this is a terminal workflow (cannot transition out)
+ */
+is_final?: boolean; 
 /**
  * Additional metadata as key-value pairs
  */

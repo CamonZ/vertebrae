@@ -50,6 +50,7 @@ async fn test_execution_create_success() {
         steps: vec![],
         order: 0,
         is_default: false,
+        is_final: false,
         kanban_column: None,
     };
     let workflow_id = services
@@ -135,6 +136,7 @@ async fn test_execution_create_with_context_and_prompt() {
             steps: vec![],
             order: 0,
             is_default: false,
+            is_final: false,
             kanban_column: None,
         })
         .await
@@ -210,6 +212,7 @@ async fn test_execution_create_invalid_context_json_fails() {
             steps: vec![],
             order: 0,
             is_default: false,
+            is_final: false,
             kanban_column: None,
         })
         .await
