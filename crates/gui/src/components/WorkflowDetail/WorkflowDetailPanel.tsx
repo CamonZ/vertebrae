@@ -1,7 +1,9 @@
+import { useCallback, useEffect, useState } from "react";
 import type { Workflow, Step } from "../../bindings";
 import { commands } from "../../bindings";
 import { ResizablePanel } from "../ResizablePanel";
 import { OpenChatButton } from "../OpenChatButton";
+import { Toggle } from "../Toggle";
 
 interface WorkflowDetailPanelProps {
   workflow: Workflow | null;
@@ -76,6 +78,34 @@ export function WorkflowDetailPanel({
   onStepCreated,
   onBack,
 }: WorkflowDetailPanelProps) {
+  const [isFinalError, setIsFinalError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setIsFinalError(null);
+  }, [workflow?.id]);
+
+  const currentIsFinal = workflow?.is_final ?? false;
+  const handleToggleIsFinal = useCallback(
+    async (value: boolean) => {
+      if (!workflow?.id || value === currentIsFinal) return;
+      setIsFinalError(null);
+      const result = await commands.updateWorkflow({
+        workflow_id: workflow.id,
+        name: null,
+        description: null,
+        auto_advance: null,
+        order: null,
+        is_default: null,
+        is_final: value,
+        kanban_column: null,
+      });
+      if (result.status === "error") {
+        setIsFinalError(result.error.message);
+      }
+    },
+    [workflow?.id, currentIsFinal]
+  );
+
   if (!workflow) {
     return null;
   }
@@ -185,6 +215,16 @@ export function WorkflowDetailPanel({
                   {initialStep.name}
                 </code>
               </DetailRow>
+            )}
+            <DetailRow label="Final">
+              <Toggle
+                checked={workflow.is_final ?? false}
+                onChange={handleToggleIsFinal}
+                label={`Final workflow: ${workflow.is_final ? "enabled" : "disabled"}`}
+              />
+            </DetailRow>
+            {isFinalError && (
+              <p className="mt-1 text-right text-xs text-error">{isFinalError}</p>
             )}
           </div>
         </div>

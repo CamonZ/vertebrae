@@ -1283,6 +1283,10 @@ pub struct Workflow {
     #[serde(default)]
     pub is_default: bool,
 
+    /// Whether this is a terminal workflow (cannot transition out)
+    #[serde(default)]
+    pub is_final: bool,
+
     /// Optional kanban column for workflows
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kanban_column: Option<String>,
@@ -1312,6 +1316,7 @@ impl Workflow {
             auto_advance: false,
             order: 0,
             is_default: false,
+            is_final: false,
             kanban_column: None,
             transitions: Vec::new(),
             created_at: None,
@@ -1352,6 +1357,12 @@ impl Workflow {
     /// Set whether this is the default workflow
     pub fn with_is_default(mut self, is_default: bool) -> Self {
         self.is_default = is_default;
+        self
+    }
+
+    /// Set whether this is a terminal (final) workflow
+    pub fn with_is_final(mut self, is_final: bool) -> Self {
+        self.is_final = is_final;
         self
     }
 

@@ -493,6 +493,42 @@ pub async fn list_workflow_transitions(
     Ok(result)
 }
 
+/// Update an existing workflow. Only fields that are Some will be updated.
+#[tauri::command]
+#[specta::specta]
+pub async fn update_workflow(
+    state: State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+    options: crate::types::UpdateWorkflowOptions,
+) -> Result<(), CommandError> {
+    log::info!(
+        "update_workflow called for workflow_id: '{}'",
+        options.workflow_id,
+    );
+    let workflow_id = options.workflow_id.clone();
+    let service_guard = state.services.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    let core_options: vertebrae_core::UpdateWorkflowOptions = options.into();
+    service
+        .workflows()
+        .update_workflow(&workflow_id, core_options)
+        .await?;
+
+    let _ = app_handle.emit(
+        "workflow-changed-event",
+        crate::events::WorkflowChangedEvent {
+            workflow_id: workflow_id.clone(),
+            change_type: crate::events::WorkflowChangeType::Updated,
+            workflow: None,
+        },
+    );
+
+    Ok(())
+}
+
 /// Get a workflow with its associated tasks
 ///
 /// Returns the workflow along with all tasks that reference this workflow.
@@ -2382,6 +2418,7 @@ mod tests {
                     auto_advance: false,
                     order: 0,
                     is_default: false,
+                    is_final: false,
                     kanban_column: None,
                 })
                 .await
@@ -2417,6 +2454,7 @@ mod tests {
                     auto_advance: false,
                     order: 0,
                     is_default: false,
+                    is_final: false,
                     kanban_column: None,
                 })
                 .await
@@ -2443,6 +2481,7 @@ mod tests {
                     auto_advance: false,
                     order: 0,
                     is_default: false,
+                    is_final: false,
                     kanban_column: None,
                 })
                 .await
@@ -2474,6 +2513,7 @@ mod tests {
                     auto_advance: false,
                     order: 0,
                     is_default: false,
+                    is_final: false,
                     kanban_column: None,
                 })
                 .await
@@ -2505,6 +2545,7 @@ mod tests {
                     auto_advance: false,
                     order: 0,
                     is_default: false,
+                    is_final: false,
                     kanban_column: None,
                 })
                 .await
@@ -2517,6 +2558,7 @@ mod tests {
                     auto_advance: false,
                     order: 1,
                     is_default: false,
+                    is_final: false,
                     kanban_column: None,
                 })
                 .await

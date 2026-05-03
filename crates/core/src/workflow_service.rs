@@ -45,6 +45,8 @@ pub struct CreateWorkflowOptions {
     pub order: i32,
     /// Whether this is the default workflow for new tasks
     pub is_default: bool,
+    /// Whether this is a terminal workflow (cannot transition out)
+    pub is_final: bool,
     /// Optional kanban column for board placement
     pub kanban_column: Option<String>,
 }
@@ -59,6 +61,7 @@ impl CreateWorkflowOptions {
             auto_advance: false,
             order: 0,
             is_default: false,
+            is_final: false,
             kanban_column: None,
         }
     }
@@ -84,6 +87,12 @@ impl CreateWorkflowOptions {
     /// Set whether this is the default workflow
     pub fn with_is_default(mut self, is_default: bool) -> Self {
         self.is_default = is_default;
+        self
+    }
+
+    /// Set whether this is a terminal (final) workflow
+    pub fn with_is_final(mut self, is_final: bool) -> Self {
+        self.is_final = is_final;
         self
     }
 
@@ -126,6 +135,8 @@ pub struct UpdateWorkflowOptions {
     pub order: Option<i32>,
     /// Whether this is the default workflow (Some(bool) to set, None leaves unchanged)
     pub is_default: Option<bool>,
+    /// Whether this is a terminal workflow (Some(bool) to set, None leaves unchanged)
+    pub is_final: Option<bool>,
     /// Kanban column (Some(Some(x)) to set, Some(None) to clear, None leaves unchanged)
     pub kanban_column: Option<Option<String>>,
 }
@@ -172,6 +183,12 @@ impl UpdateWorkflowOptions {
         self
     }
 
+    /// Set whether this is a terminal (final) workflow
+    pub fn with_is_final(mut self, is_final: bool) -> Self {
+        self.is_final = Some(is_final);
+        self
+    }
+
     /// Set the kanban column
     pub fn with_kanban_column(mut self, kanban_column: impl Into<String>) -> Self {
         self.kanban_column = Some(Some(kanban_column.into()));
@@ -191,6 +208,7 @@ impl UpdateWorkflowOptions {
             || self.auto_advance.is_some()
             || self.order.is_some()
             || self.is_default.is_some()
+            || self.is_final.is_some()
             || self.kanban_column.is_some()
     }
 }

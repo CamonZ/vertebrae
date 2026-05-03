@@ -66,6 +66,7 @@ describe("AllWorkflowsPipeline + usePipelineSummary", () => {
             initial_step_id: "s1",
             kanban_column: null,
             is_default: true,
+            is_final: false,
             display_order: 0,
             workflow_steps: [
               makeStep("s1", "wf-1", "backlog", 0, { epic: 1, ticket: 2, task: 3 }, 1),
@@ -80,6 +81,7 @@ describe("AllWorkflowsPipeline + usePipelineSummary", () => {
             initial_step_id: "s3",
             kanban_column: null,
             is_default: false,
+            is_final: false,
             display_order: 1,
             workflow_steps: [makeStep("s3", "wf-2", "todo", 0)],
             transitions: [],

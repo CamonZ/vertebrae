@@ -36,6 +36,7 @@ async fn create_task_with_workflow(
         auto_advance: false,
         order: 0,
         is_default: false,
+        is_final: false,
         kanban_column: None,
     };
     let wf_id = services
@@ -255,6 +256,7 @@ mod run_command_tests {
             auto_advance: false,
             order: 0,
             is_default: false,
+            is_final: false,
             kanban_column: None,
         };
         let wf_id = services
@@ -340,6 +342,7 @@ mod run_command_tests {
             auto_advance: false,
             order: 0,
             is_default: false,
+            is_final: false,
             kanban_column: None,
         };
         let wf_id = services
@@ -396,6 +399,7 @@ mod run_command_tests {
             auto_advance: false,
             order: 0,
             is_default: false,
+            is_final: false,
             kanban_column: None,
         };
         let wf_id = services
