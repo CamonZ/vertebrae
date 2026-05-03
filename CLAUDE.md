@@ -22,7 +22,7 @@ Prefix every commit message with a ticket reference:
 | [Testing](docs/testing.md) | Rust tests, GUI tests, coverage, linting |
 | [Git Hooks](docs/git-hooks.md) | Pre-commit hook setup and checks |
 | [System Overview](docs/system-overview.md) | Full Sacrum + Vertebrae architecture, domain models, execution engine |
-| [Sacrum Config](docs/SACRUM_CONFIG.md) | `.vtb/config.toml` and env var reference |
+| [Sacrum Config](docs/SACRUM_CONFIG.md) | Global config and env var reference |
 
 ## Common Commands
 
