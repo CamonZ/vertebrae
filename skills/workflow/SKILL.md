@@ -7,6 +7,10 @@ description: Manage workflows for task progression
 
 Manage workflows that define how tasks progress through steps.
 
+> **Short IDs:** Every workflow/step/task argument accepts either a full UUID
+> or an 8-character short ID (the first segment of the UUID). The CLI resolves
+> short IDs uniformly across tasks, workflows, and steps.
+
 **Start here to understand available workflows:**
 ```bash
 vtb workflow list                    # See all configured workflows

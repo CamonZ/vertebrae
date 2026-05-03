@@ -37,6 +37,24 @@ vtb transition-to <id> <target>         # Move to a step by name or UUID
 
 Steps can be referenced by name (e.g., `backlog`, `in_progress`) or by UUID.
 
+### Short IDs
+
+Anywhere `vtb` accepts a UUID (task, workflow, or step), you can pass an
+**8-character short ID** — the first segment of the UUID. The CLI resolves it
+to the full UUID before calling the backend.
+
+```bash
+vtb show c249947c                    # task short ID
+vtb workflow show 9c20eacc           # workflow short ID
+vtb step show ab12cd34               # step short ID (project-wide lookup)
+vtb workflow assign c249947c 9c20eacc  # mixed short IDs
+```
+
+Resolution is entity-scoped: an unknown task prefix and an unknown workflow
+prefix surface different errors (e.g. `workflow with prefix 'deadbeef' not
+found`). Ambiguous prefixes list candidates; non-hex or over-length prefixes
+report `invalid short ID`. Full UUIDs continue to work everywhere.
+
 ### Priorities
 
 `low`, `medium`, `high`, `critical`

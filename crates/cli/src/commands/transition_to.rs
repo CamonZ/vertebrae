@@ -112,10 +112,19 @@ impl TransitionToCommand {
         let from_workflow = task.workflow_id.clone();
         let from_step = task.current_step_id.clone();
 
-        // Resolve target: full UUID or step name
-        let target_step = if uuid::Uuid::parse_str(&target_input).is_ok() {
-            // Full UUID — look up directly
-            let target_step_id = target_input.to_lowercase();
+        // Resolve target: full UUID, 8-char short ID, or step name
+        let is_full_uuid = uuid::Uuid::parse_str(&target_input).is_ok();
+        let is_short = crate::commands::is_short_id(&target_input);
+        let target_step = if is_full_uuid || is_short {
+            // Resolve via step service for short IDs (scoped to the task's
+            // workflow when present, otherwise project-wide). Full UUIDs are
+            // looked up directly.
+            let target_step_id = if is_full_uuid {
+                target_input.to_lowercase()
+            } else {
+                crate::commands::resolve_step_id(&target_input, from_workflow.as_deref(), services)
+                    .await?
+            };
             services
                 .steps()
                 .get_step(&target_step_id)

@@ -43,6 +43,17 @@ pub const GET_STEP: &str = r#"
     }
 "#;
 
+/// Resolve a short ID prefix to a full step within a workflow.
+/// Selects only `id` for the same reason as the task/workflow short-id queries —
+/// minimizing payload while sacrum's prefix lookups remain a perf hotspot.
+pub const RESOLVE_STEP_SHORT_ID: &str = r#"
+    query ResolveStepShortId($project_id: Uuid4!, $workflow_id: Uuid4!, $prefix: String!) {
+        resolve_step_short_id(project_id: $project_id, workflow_id: $workflow_id, prefix: $prefix) {
+            id
+        }
+    }
+"#;
+
 pub const CREATE_STEP: &str = r#"
     mutation CreateStep(
         $workflow_id: Uuid4!,

@@ -12,6 +12,7 @@ use vertebrae_core::workflow_service::{
     AssignResult, CreateWorkflowOptions, UpdateWorkflowOptions, WorkflowInfo, WorkflowService,
 };
 
+use crate::api_types::ShortIdResponse;
 use crate::api_types::{
     PipelineWorkflowResponse, WorkflowResponse, WorkflowStepResponse, WorkflowTransitionResponse,
 };
@@ -21,7 +22,7 @@ use crate::queries::steps::{CREATE_STEP, STEP_FIELDS, SYNC_STEP_TRANSITIONS};
 use crate::queries::tasks::{ASSIGN_WORKFLOW, UNASSIGN_WORKFLOW};
 use crate::queries::workflows::{
     CREATE_WORKFLOW, CREATE_WORKFLOW_TRANSITION, DELETE_WORKFLOW, DELETE_WORKFLOW_TRANSITION,
-    GET_WORKFLOW, LIST_WORKFLOWS, UPDATE_WORKFLOW, WORKFLOW_FIELDS,
+    GET_WORKFLOW, LIST_WORKFLOWS, RESOLVE_WORKFLOW_SHORT_ID, UPDATE_WORKFLOW, WORKFLOW_FIELDS,
 };
 
 /// Intermediate type for deserializing GET_WORKFLOW responses that include workflow_steps.
@@ -255,6 +256,24 @@ impl WorkflowService for SacrumWorkflowService {
         let response: WorkflowWithSteps =
             self.client.execute(&query, variables, "workflow").await?;
         Ok(self.response_to_workflow(&response.workflow))
+    }
+
+    async fn resolve_short_id(&self, prefix: &str) -> ServiceResult<String> {
+        let variables = json!({
+            "project_id": self.client.project_id(),
+            "prefix": prefix,
+        });
+
+        let response: ShortIdResponse = self
+            .client
+            .execute(
+                RESOLVE_WORKFLOW_SHORT_ID,
+                variables,
+                "resolve_workflow_short_id",
+            )
+            .await?;
+
+        Ok(response.id)
     }
 
     async fn list_workflows(&self) -> ServiceResult<Vec<WorkflowSummary>> {

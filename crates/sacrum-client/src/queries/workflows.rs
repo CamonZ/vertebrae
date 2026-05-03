@@ -53,6 +53,17 @@ pub const GET_WORKFLOW: &str = r#"
     }
 "#;
 
+/// Resolve a short ID prefix to a full workflow.
+/// Mirrors tasks::RESOLVE_SHORT_ID — selects only `id` to keep the
+/// round-trip minimal (sacrum has known perf concerns on prefix lookups).
+pub const RESOLVE_WORKFLOW_SHORT_ID: &str = r#"
+    query ResolveWorkflowShortId($project_id: Uuid4!, $prefix: String!) {
+        resolve_workflow_short_id(project_id: $project_id, prefix: $prefix) {
+            id
+        }
+    }
+"#;
+
 pub const CREATE_WORKFLOW: &str = r#"
     mutation CreateWorkflow(
         $project_id: Uuid4!,

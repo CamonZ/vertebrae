@@ -19,6 +19,19 @@ pub trait StepService: Send + Sync {
     /// Get a step by ID
     async fn get_step(&self, id: &str) -> ServiceResult<Option<Step>>;
 
+    /// Resolve a short ID prefix to a full step ID.
+    ///
+    /// If `workflow_id` is provided, resolution is scoped to that workflow
+    /// (a single backend call). When `None`, the resolver falls back to a
+    /// project-wide search across all workflows.
+    ///
+    /// Returns the full UUID string if exactly one step matches the prefix.
+    async fn resolve_short_id(
+        &self,
+        prefix: &str,
+        workflow_id: Option<&str>,
+    ) -> ServiceResult<String>;
+
     /// Check if a step exists by ID
     async fn step_exists(&self, id: &str) -> ServiceResult<bool>;
 
