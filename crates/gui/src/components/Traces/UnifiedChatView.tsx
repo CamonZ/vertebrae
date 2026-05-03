@@ -395,6 +395,7 @@ export function UnifiedChatView({
                 durationMs={facts.durationMs ?? exec?.duration_ms ?? null}
                 numTurns={facts.numTurns}
                 depth={depth}
+                prompt={exec?.prompt ?? null}
               />
             );
 
