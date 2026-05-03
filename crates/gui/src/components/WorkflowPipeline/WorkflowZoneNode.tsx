@@ -93,6 +93,11 @@ function WorkflowZoneNodeComponent({
                 Default
               </span>
             )}
+            {workflow.is_final && (
+              <span className="inline-flex flex-shrink-0 items-center rounded-full bg-warning/15 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-warning">
+                Final
+              </span>
+            )}
           </div>
           <div className="mt-2 flex items-center gap-4 text-xs text-text-muted">
             <span>{stepCount} steps</span>
@@ -151,6 +156,11 @@ function WorkflowZoneNodeComponent({
           {workflow.is_default && (
             <span className="inline-flex flex-shrink-0 items-center rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-primary pointer-events-none">
               Default
+            </span>
+          )}
+          {workflow.is_final && (
+            <span className="inline-flex flex-shrink-0 items-center rounded-full bg-warning/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-warning pointer-events-none">
+              Final
             </span>
           )}
         </div>

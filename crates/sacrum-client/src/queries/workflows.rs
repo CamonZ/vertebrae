@@ -7,6 +7,7 @@ pub const WORKFLOW_FIELDS: &str = r#"
         description
         auto_advance
         is_default
+        is_final
         display_order
         metadata
         initial_step_id
@@ -60,6 +61,7 @@ pub const CREATE_WORKFLOW: &str = r#"
         $auto_advance: Boolean,
         $display_order: Int,
         $is_default: Boolean,
+        $is_final: Boolean,
         $kanban_column: String
     ) {
         create_workflow(
@@ -69,6 +71,7 @@ pub const CREATE_WORKFLOW: &str = r#"
             auto_advance: $auto_advance,
             display_order: $display_order,
             is_default: $is_default,
+            is_final: $is_final,
             kanban_column: $kanban_column
         ) {
             id
@@ -84,6 +87,7 @@ pub const UPDATE_WORKFLOW: &str = r#"
         $auto_advance: Boolean,
         $display_order: Int,
         $is_default: Boolean,
+        $is_final: Boolean,
         $initial_step_id: Uuid4,
         $kanban_column: String
     ) {
@@ -94,6 +98,7 @@ pub const UPDATE_WORKFLOW: &str = r#"
             auto_advance: $auto_advance,
             display_order: $display_order,
             is_default: $is_default,
+            is_final: $is_final,
             initial_step_id: $initial_step_id,
             kanban_column: $kanban_column
         ) {

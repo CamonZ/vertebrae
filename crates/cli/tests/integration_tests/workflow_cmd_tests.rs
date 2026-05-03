@@ -25,6 +25,7 @@ async fn create_workflow(
         auto_advance: false,
         order: 0,
         is_default: false,
+        is_final: false,
         kanban_column: None,
     };
     services.workflows().create_workflow(options).await.unwrap()
@@ -126,6 +127,7 @@ async fn test_workflow_list_shows_default_marker() {
         auto_advance: false,
         order: 0,
         is_default: true,
+        is_final: false,
         kanban_column: None,
     };
     let wf_id = services.workflows().create_workflow(options).await.unwrap();
@@ -623,6 +625,7 @@ async fn test_workflow_update_no_default_flag() {
         auto_advance: false,
         order: 0,
         is_default: true,
+        is_final: false,
         kanban_column: None,
     };
     let wf_id = services.workflows().create_workflow(options).await.unwrap();
@@ -664,6 +667,7 @@ async fn test_workflow_show_displays_default_yes() {
         auto_advance: false,
         order: 0,
         is_default: true,
+        is_final: false,
         kanban_column: None,
     };
     let wf_id = services.workflows().create_workflow(options).await.unwrap();

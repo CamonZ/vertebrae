@@ -914,6 +914,7 @@ mod workflow_tests {
             auto_advance: false,
             order: 0,
             is_default: false,
+            is_final: false,
             kanban_column: None,
         };
         let wf_id = services.workflows().create_workflow(options).await.unwrap();
@@ -935,6 +936,7 @@ mod workflow_tests {
             auto_advance: false,
             order: 0,
             is_default: false,
+            is_final: false,
             kanban_column: None,
         };
         let wf_id = services
@@ -968,6 +970,7 @@ mod workflow_tests {
             auto_advance: false,
             order: 0,
             is_default: false,
+            is_final: false,
             kanban_column: None,
         };
         let wf_id = services

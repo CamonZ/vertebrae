@@ -18,6 +18,7 @@ pub const PIPELINE_SUMMARY: &str = r#"
             description
             auto_advance
             is_default
+            is_final
             display_order
             metadata
             initial_step_id

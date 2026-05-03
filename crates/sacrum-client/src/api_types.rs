@@ -169,6 +169,8 @@ pub struct WorkflowResponse {
     #[serde(default)]
     pub is_default: Option<bool>,
     #[serde(default)]
+    pub is_final: Option<bool>,
+    #[serde(default)]
     pub display_order: Option<i32>,
     #[serde(default)]
     pub metadata: Option<serde_json::Value>,
@@ -399,6 +401,8 @@ pub struct PipelineWorkflowResponse {
     pub auto_advance: Option<bool>,
     #[serde(default)]
     pub is_default: Option<bool>,
+    #[serde(default)]
+    pub is_final: Option<bool>,
     #[serde(default)]
     pub display_order: Option<i32>,
     #[serde(default)]
