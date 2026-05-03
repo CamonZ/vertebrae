@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { commands, events } from "../bindings";
 import type {
   ClaudeSessionInitEvent,
+  ClaudeSessionUsageEvent,
   ClaudeTextEvent,
   ClaudeToolCallEvent,
   ClaudeToolResultEvent,
@@ -12,6 +13,7 @@ import type {
 import { useChatStore } from "../stores/chatStore";
 import type { ChatScope, ChatSession, ChatMessage } from "../stores/chatStore";
 import { buildContextSummary, buildInitialPrompt } from "../utils/chatContext";
+import { resolveContextWindow } from "../utils/modelContextWindow";
 
 // --- Extracted event handlers (pure functions, testable without hooks) ---
 
@@ -19,11 +21,33 @@ export function handleInitEvent(
   payload: ClaudeSessionInitEvent,
   claudeSessionId: string | null,
   sessionId: string,
-  setClaudeConversationId: (sessionId: string, convId: string) => void
+  setClaudeConversationId: (sessionId: string, convId: string) => void,
+  setSessionModel: (sessionId: string, model: string) => void
 ) {
   if (payload.session_id !== claudeSessionId) return;
   if (payload.claude_conversation_id) {
     setClaudeConversationId(sessionId, payload.claude_conversation_id);
+  }
+  if (payload.model) {
+    setSessionModel(sessionId, payload.model);
+  }
+}
+
+// Frontend lookup table wins for per-model maxes; see modelContextWindow.ts.
+export function handleUsageEvent(
+  payload: ClaudeSessionUsageEvent,
+  claudeSessionId: string | null,
+  sessionId: string,
+  setSessionUsage: (
+    sessionId: string,
+    model: string,
+    usage: { used: number; max: number }
+  ) => void
+) {
+  if (payload.session_id !== claudeSessionId) return;
+  const max = resolveContextWindow(payload.model, payload.context_window);
+  if (max && max > 0) {
+    setSessionUsage(sessionId, payload.model, { used: payload.context_tokens, max });
   }
 }
 
@@ -217,6 +241,8 @@ export function useScopedChat(sessionId: string | null) {
     (s) => s.setClaudeConversationId
   );
   const setContextSummary = useChatStore((s) => s.setContextSummary);
+  const setSessionModel = useChatStore((s) => s.setSessionModel);
+  const setSessionUsage = useChatStore((s) => s.setSessionUsage);
   const markSessionClosed = useChatStore((s) => s.markSessionClosed);
 
   // Track the Claude backend session ID for event filtering
@@ -240,7 +266,8 @@ export function useScopedChat(sessionId: string | null) {
           event.payload,
           claudeSessionIdRef.current,
           sessionId,
-          setClaudeConversationId
+          setClaudeConversationId,
+          setSessionModel
         );
       });
       if (isCancelled) {
@@ -248,6 +275,20 @@ export function useScopedChat(sessionId: string | null) {
         return;
       }
       unlisteners.push(initUn);
+
+      const usageUn = await events.claudeSessionUsageEvent.listen((event) => {
+        handleUsageEvent(
+          event.payload,
+          claudeSessionIdRef.current,
+          sessionId,
+          setSessionUsage
+        );
+      });
+      if (isCancelled) {
+        usageUn();
+        return;
+      }
+      unlisteners.push(usageUn);
 
       const textUn = await events.claudeTextEvent.listen((event) => {
         handleTextEvent(
@@ -351,6 +392,8 @@ export function useScopedChat(sessionId: string | null) {
     updateLastAssistantMessage,
     finalizeLastAssistantMessage,
     setClaudeConversationId,
+    setSessionModel,
+    setSessionUsage,
     markSessionClosed,
   ]);
 

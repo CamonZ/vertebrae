@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { TaskLevel } from "../../bindings";
-import { formatCost, type ExecutionRollups } from "../../utils";
+import { formatCost, formatTokenCount, type ExecutionRollups } from "../../utils";
 import { formatDurationMs } from "../Operations/formatDuration";
 
 interface TracesHeaderProps {
@@ -11,12 +11,6 @@ interface TracesHeaderProps {
   isLoading?: boolean;
   error?: string | null;
   onBack?: () => void;
-}
-
-function formatTokens(tokens: number): string {
-  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
-  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}k`;
-  return String(tokens);
 }
 
 interface RollupStatProps {
@@ -130,7 +124,7 @@ export function TracesHeader({
         <RollupStat
           testId="traces-rollup-tokens"
           label="Σ Tokens"
-          value={formatTokens(rollups.totalTokens)}
+          value={formatTokenCount(rollups.totalTokens)}
         />
         <RollupStat
           testId="traces-rollup-walltime"

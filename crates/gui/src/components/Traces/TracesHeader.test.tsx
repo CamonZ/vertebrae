@@ -31,7 +31,7 @@ describe("TracesHeader", () => {
       /\$1\.23/
     );
     expect(screen.getByTestId("traces-rollup-tokens").textContent).toMatch(
-      /12\.3k/
+      /12k/
     );
     expect(screen.getByTestId("traces-rollup-walltime").textContent).toMatch(
       /1m 5s/
