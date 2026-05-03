@@ -5,7 +5,8 @@
   "windows": [
     "main",
     "task-*",
-    "chat-*"
+    "chat-*",
+    "traces-*"
   ],
   "permissions": [
     "core:default",

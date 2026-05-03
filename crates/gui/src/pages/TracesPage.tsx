@@ -32,7 +32,7 @@ import { useSubtreeSessionLogs } from "../hooks/useSubtreeSessionLogs";
 import { useTraceFilters } from "../hooks/useTraceFilters";
 import { useTaskStore } from "../stores/taskStore";
 import type { TaggedConversationEvent } from "../types/conversation";
-import { computeExecutionRollups } from "../utils";
+import { computeExecutionRollups, popOut } from "../utils";
 
 interface ModeContentProps {
   mode: TraceMode;
@@ -114,8 +114,33 @@ function parseExecHash(hash: string): string | null {
   return null;
 }
 
-export function TracesPage(): ReactNode {
-  const { taskId } = useParams<{ taskId: string }>();
+interface TracesPageProps {
+  /**
+   * If provided, overrides the `:taskId` route param. Used by the
+   * standalone pop-out window which routes on `/traces-window/:taskId` and
+   * swaps task in-place via `onPickTask`.
+   */
+  taskIdOverride?: string | null;
+  /**
+   * Override picker selection. The default (in-app) behaviour navigates to
+   * `/traces/:id`; the pop-out passes a local setter so the window URL/label
+   * stays stable.
+   */
+  onPickTask?: (id: string) => void;
+  /**
+   * When true, suppresses the in-app Detach button (the standalone window
+   * is already detached) and the Back button (no history to navigate).
+   */
+  standalone?: boolean;
+}
+
+export function TracesPage({
+  taskIdOverride,
+  onPickTask,
+  standalone,
+}: TracesPageProps = {}): ReactNode {
+  const { taskId: routeTaskId } = useParams<{ taskId: string }>();
+  const taskId = taskIdOverride ?? routeTaskId;
   const navigate = useNavigate();
   const location = useLocation();
   const tasks = useTaskStore((state) => state.tasks);
@@ -231,6 +256,19 @@ export function TracesPage(): ReactNode {
     navigate(-1);
   }, [navigate]);
 
+  const handleDetach = useCallback(async () => {
+    if (!taskId) return;
+    // Skip the localStorage stash: subtree executions + session logs can be
+    // large and change live, so a short fetch flash on open is preferable to
+    // serializing stale data through localStorage. Diverges from task/chat
+    // pop-outs which do stash.
+    await popOut(`/traces-window/${taskId}`, `traces-${taskId}`, {
+      title: "Traces",
+      width: 1100,
+      height: 800,
+    });
+  }, [taskId]);
+
   const handleToggleRail = useCallback(() => {
     setRailCollapsed((v) => !v);
   }, []);
@@ -238,9 +276,13 @@ export function TracesPage(): ReactNode {
   const handlePickTask = useCallback(
     (id: string) => {
       setPickerInRail(false);
-      navigate(`/traces/${id}`);
+      if (onPickTask) {
+        onPickTask(id);
+      } else {
+        navigate(`/traces/${id}`);
+      }
     },
-    [navigate]
+    [navigate, onPickTask]
   );
 
   const showPickerRail = !taskId || pickerInRail;
@@ -258,7 +300,8 @@ export function TracesPage(): ReactNode {
         rollups={rollups}
         isLoading={headerLoading}
         error={headerError}
-        onBack={taskId ? handleBack : undefined}
+        onBack={!standalone && taskId ? handleBack : undefined}
+        onDetach={!standalone && taskId ? handleDetach : undefined}
       />
 
       {taskId && (
