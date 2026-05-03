@@ -1,6 +1,28 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+
+const { popOutMock } = vi.hoisted(() => {
+  const popOutMock =
+    vi.fn<
+      (
+        route: string,
+        label: string,
+        opts?: Record<string, unknown>,
+      ) => Promise<{
+        window: { onCloseRequested: (h: () => void) => Promise<() => void> };
+        reused: boolean;
+      }>
+    >();
+  popOutMock.mockResolvedValue({
+    window: { onCloseRequested: async () => () => {} },
+    reused: false,
+  });
+  return { popOutMock };
+});
+
+vi.mock("../../utils/popOut", () => ({ popOut: popOutMock }));
+
 import { ChatWindowManager } from "./ChatWindowManager";
 import { useChatStore } from "../../stores/chatStore";
 import type { ChatSession } from "../../stores/chatStore";
@@ -373,6 +395,104 @@ describe("ChatWindowManager", () => {
     // Task icon has clipboard path "M9 5H7..."
     const path = svg!.querySelector("path");
     expect(path?.getAttribute("d")).toContain("M9 5H7");
+  });
+
+  // --- Detach / reattach ---
+
+  it("shows a detach button on each non-detached tab", () => {
+    const s1 = createSession({ id: "s1", label: "Task A" });
+    useChatStore.setState({
+      sessions: { s1 },
+      activeSessionId: "s1",
+      panelOpen: true,
+    });
+
+    render(<ChatWindowManager />);
+
+    expect(
+      screen.getByTitle("Detach into pop-out window"),
+    ).toBeInTheDocument();
+  });
+
+  it("clicking the detach button calls detachSession (which invokes popOut)", async () => {
+    const user = userEvent.setup();
+    popOutMock.mockClear();
+    const s1 = createSession({ id: "s1", label: "Task A" });
+    useChatStore.setState({
+      sessions: { s1 },
+      activeSessionId: "s1",
+      panelOpen: true,
+    });
+
+    render(<ChatWindowManager />);
+
+    await user.click(screen.getByTitle("Detach into pop-out window"));
+
+    expect(popOutMock).toHaveBeenCalledTimes(1);
+    expect(popOutMock.mock.calls[0][1]).toBe("chat-s1");
+    expect(useChatStore.getState().sessions["s1"].isDetached).toBe(true);
+  });
+
+  it("hides the detach button and shows a 'detached' badge when isDetached", () => {
+    const s1 = createSession({
+      id: "s1",
+      label: "Task A",
+      isDetached: true,
+    });
+    useChatStore.setState({
+      sessions: { s1 },
+      activeSessionId: "s1",
+      panelOpen: true,
+    });
+
+    render(<ChatWindowManager />);
+
+    expect(
+      screen.queryByTitle("Detach into pop-out window"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("detached")).toBeInTheDocument();
+  });
+
+  it("renders the detached placeholder (not the chat history) when active session is detached", () => {
+    const s1 = createSession({
+      id: "s1",
+      label: "Task A",
+      isDetached: true,
+      messages: [
+        { kind: "user", text: "should-not-render", timestamp: "2025-01-01T00:00:00Z" },
+      ],
+    });
+    useChatStore.setState({
+      sessions: { s1 },
+      activeSessionId: "s1",
+      panelOpen: true,
+    });
+
+    render(<ChatWindowManager />);
+
+    expect(screen.queryByText("should-not-render")).not.toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Session detached" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reattach to panel" })).toBeInTheDocument();
+  });
+
+  it("clicking reattach in the placeholder clears isDetached", async () => {
+    const user = userEvent.setup();
+    const s1 = createSession({
+      id: "s1",
+      label: "Task A",
+      isDetached: true,
+    });
+    useChatStore.setState({
+      sessions: { s1 },
+      activeSessionId: "s1",
+      panelOpen: true,
+    });
+
+    render(<ChatWindowManager />);
+
+    await user.click(screen.getByRole("button", { name: "Reattach to panel" }));
+
+    expect(useChatStore.getState().sessions["s1"].isDetached).toBe(false);
   });
 
   it("renders correct scope icon for step", () => {

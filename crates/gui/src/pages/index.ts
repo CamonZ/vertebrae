@@ -6,3 +6,4 @@ export { OperationsPage } from "./OperationsPage";
 export { BoardPage } from "./BoardPage";
 export { TracesPage } from "./TracesPage";
 export { TaskDetailPage } from "./TaskDetailPage";
+export { StandaloneChatWindow } from "./StandaloneChatWindow";

@@ -1,4 +1,7 @@
 import { create } from "zustand";
+import { popOut } from "../utils/popOut";
+import { stashChatSession } from "../utils/chatStash";
+import { scopeLabel } from "../utils/chatContext";
 
 /**
  * Message types for the Claude chat
@@ -78,6 +81,8 @@ export interface ChatSession {
   model?: string;
   /** Latest per-turn context utilization for the badge */
   tokenUsage?: { used: number; max: number };
+  /** Whether this session is detached into a standalone pop-out window */
+  isDetached?: boolean;
 }
 
 interface ChatStoreState {
@@ -148,6 +153,10 @@ interface ChatStoreActions {
   ) => void;
   /** Find an existing open session for a scope+entity */
   findSession: (scope: ChatScope, entityId: string | null) => string | null;
+  /** Detach a session into a standalone pop-out window. */
+  detachSession: (sessionId: string) => Promise<void>;
+  /** Reattach a previously detached session back into the main panel. */
+  reattachSession: (sessionId: string) => void;
 }
 
 export type ChatStore = ChatStoreState & ChatStoreActions;
@@ -437,6 +446,75 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             label: newLabel,
           },
         },
+      };
+    });
+  },
+
+  detachSession: async (sessionId) => {
+    const session = get().sessions[sessionId];
+    if (!session || session.isDetached) return;
+
+    // Stash the full session so the pop-out can seed its empty store
+    // synchronously before first paint. The existing claudeSessionId is
+    // carried across so useScopedChat does not double-create the backend
+    // Claude session.
+    stashChatSession({ ...session, isDetached: true });
+
+    set((state) => {
+      const s = state.sessions[sessionId];
+      if (!s) return state;
+      const remainingIds = Object.keys(state.sessions).filter(
+        (id) => id !== sessionId && !state.sessions[id].isDetached,
+      );
+      return {
+        sessions: {
+          ...state.sessions,
+          [sessionId]: { ...s, isDetached: true },
+        },
+        activeSessionId:
+          state.activeSessionId === sessionId
+            ? remainingIds[remainingIds.length - 1] ?? null
+            : state.activeSessionId,
+      };
+    });
+
+    const title = `${scopeLabel(session.scope)}: ${session.label}`;
+    const { window: webview, reused } = await popOut(
+      `/chat?sessionId=${encodeURIComponent(sessionId)}`,
+      `chat-${sessionId}`,
+      {
+        title,
+        width: 600,
+        height: 800,
+      },
+    );
+
+    // Listen once for the pop-out window's close so we reattach the session
+    // back into the main panel. `reused` means a prior detach already
+    // installed the listener — don't stack another.
+    if (!reused) {
+      try {
+        await webview.onCloseRequested(() => {
+          get().reattachSession(sessionId);
+        });
+      } catch {
+        // Listener registration can fail in tests / non-Tauri contexts;
+        // reattach will simply not fire automatically there.
+      }
+    }
+  },
+
+  reattachSession: (sessionId) => {
+    set((state) => {
+      const session = state.sessions[sessionId];
+      if (!session) return state;
+      return {
+        sessions: {
+          ...state.sessions,
+          [sessionId]: { ...session, isDetached: false },
+        },
+        activeSessionId: sessionId,
+        panelOpen: true,
       };
     });
   },
