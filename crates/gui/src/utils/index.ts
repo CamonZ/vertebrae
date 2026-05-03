@@ -13,3 +13,9 @@ export {
   buildInitialPrompt,
   scopeLabel,
 } from "./chatContext";
+export {
+  resolveContextWindow,
+  formatTokenCount,
+  utilizationLevel,
+} from "./modelContextWindow";
+export type { UtilizationLevel } from "./modelContextWindow";

@@ -3,7 +3,42 @@ import { useScopedChat } from "../../hooks/useScopedChat";
 import { useChatStore, getParentScope } from "../../stores/chatStore";
 import type { ChatScope, ChatMessage } from "../../stores/chatStore";
 import { scopeLabel } from "../../utils/chatContext";
+import {
+  formatTokenCount,
+  utilizationLevel,
+  type UtilizationLevel,
+} from "../../utils/modelContextWindow";
 import { MarkdownContent } from "../shared/MarkdownContent";
+
+const LEVEL_CLASSES: Record<UtilizationLevel, string> = {
+  danger: "border-error/40 bg-error/10 text-error",
+  warn: "border-warning/40 bg-warning/10 text-warning",
+  ok: "border-border bg-bg-tertiary text-text-muted",
+};
+
+function ContextUtilizationBadge({
+  model,
+  used,
+  max,
+}: {
+  model?: string;
+  used: number;
+  max: number;
+}) {
+  const level = utilizationLevel(used, max);
+  const pct = max > 0 ? Math.round((used / max) * 100) : 0;
+  const modelLabel = model?.replace(/^claude-/i, "");
+
+  return (
+    <span
+      className={`rounded border px-1.5 py-0.5 font-mono text-[11px] ${LEVEL_CLASSES[level]}`}
+      title={`${used.toLocaleString()} / ${max.toLocaleString()} input tokens (${pct}%)`}
+    >
+      {modelLabel ? `${modelLabel} · ` : ""}
+      {formatTokenCount(used)} / {formatTokenCount(max)} ({pct}%)
+    </span>
+  );
+}
 
 /**
  * Thinking indicator shown while waiting for Claude to respond
@@ -328,7 +363,14 @@ export function ChatWindow({ sessionId }: ChatWindowProps) {
           label={session.label}
           onWiden={canWiden ? handleWiden : null}
         />
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1.5">
+          {session.tokenUsage && (
+            <ContextUtilizationBadge
+              model={session.model}
+              used={session.tokenUsage.used}
+              max={session.tokenUsage.max}
+            />
+          )}
           {/* Active indicator */}
           {isActive && (
             <span className="relative flex h-2 w-2">

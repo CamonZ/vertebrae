@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   handleInitEvent,
+  handleUsageEvent,
   handleTextEvent,
   handleToolCallEvent,
   handleToolResultEvent,
@@ -55,8 +56,9 @@ const CLAUDE_SESSION_ID = "claude-backend-123";
 const OTHER_SESSION_ID = "other-backend-456";
 
 describe("handleInitEvent", () => {
-  it("calls setClaudeConversationId when session matches and conversation ID present", () => {
+  it("calls setClaudeConversationId and setSessionModel when session matches", () => {
     const setConvId = vi.fn();
+    const setModel = vi.fn();
     handleInitEvent(
       {
         session_id: CLAUDE_SESSION_ID,
@@ -66,13 +68,16 @@ describe("handleInitEvent", () => {
       },
       CLAUDE_SESSION_ID,
       SESSION_ID,
-      setConvId
+      setConvId,
+      setModel
     );
     expect(setConvId).toHaveBeenCalledWith(SESSION_ID, "conv-abc");
+    expect(setModel).toHaveBeenCalledWith(SESSION_ID, "claude-sonnet-4");
   });
 
-  it("does not call setClaudeConversationId when session ID does not match", () => {
+  it("does nothing when session ID does not match", () => {
     const setConvId = vi.fn();
+    const setModel = vi.fn();
     handleInitEvent(
       {
         session_id: OTHER_SESSION_ID,
@@ -82,13 +87,16 @@ describe("handleInitEvent", () => {
       },
       CLAUDE_SESSION_ID,
       SESSION_ID,
-      setConvId
+      setConvId,
+      setModel
     );
     expect(setConvId).not.toHaveBeenCalled();
+    expect(setModel).not.toHaveBeenCalled();
   });
 
   it("does not call setClaudeConversationId when conversation ID is null", () => {
     const setConvId = vi.fn();
+    const setModel = vi.fn();
     handleInitEvent(
       {
         session_id: CLAUDE_SESSION_ID,
@@ -98,9 +106,68 @@ describe("handleInitEvent", () => {
       },
       CLAUDE_SESSION_ID,
       SESSION_ID,
-      setConvId
+      setConvId,
+      setModel
     );
     expect(setConvId).not.toHaveBeenCalled();
+    expect(setModel).toHaveBeenCalledWith(SESSION_ID, "claude-sonnet-4");
+  });
+});
+
+describe("handleUsageEvent", () => {
+  it("computes max from frontend lookup table for opus 4.7 and calls setSessionUsage", () => {
+    const setUsage = vi.fn();
+    handleUsageEvent(
+      {
+        session_id: CLAUDE_SESSION_ID,
+        model: "claude-opus-4-7-20250115",
+        context_tokens: 142_000,
+        // Backend reports 200k fallback — should be overridden by lookup table.
+        context_window: 200_000,
+      },
+      CLAUDE_SESSION_ID,
+      SESSION_ID,
+      setUsage
+    );
+    expect(setUsage).toHaveBeenCalledWith(SESSION_ID, "claude-opus-4-7-20250115", {
+      used: 142_000,
+      max: 1_000_000,
+    });
+  });
+
+  it("falls back to backend context_window when model not in lookup table", () => {
+    const setUsage = vi.fn();
+    handleUsageEvent(
+      {
+        session_id: CLAUDE_SESSION_ID,
+        model: "claude-mystery-9-9",
+        context_tokens: 50_000,
+        context_window: 250_000,
+      },
+      CLAUDE_SESSION_ID,
+      SESSION_ID,
+      setUsage
+    );
+    expect(setUsage).toHaveBeenCalledWith(SESSION_ID, "claude-mystery-9-9", {
+      used: 50_000,
+      max: 250_000,
+    });
+  });
+
+  it("ignores events for a different session", () => {
+    const setUsage = vi.fn();
+    handleUsageEvent(
+      {
+        session_id: OTHER_SESSION_ID,
+        model: "claude-opus-4-7",
+        context_tokens: 1,
+        context_window: 200_000,
+      },
+      CLAUDE_SESSION_ID,
+      SESSION_ID,
+      setUsage
+    );
+    expect(setUsage).not.toHaveBeenCalled();
   });
 });
 
