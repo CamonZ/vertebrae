@@ -12,11 +12,13 @@ import {
   type Edge,
   type NodeTypes,
   type EdgeTypes,
+  type Connection,
   MarkerType,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
 import {
+  commands,
   events,
   type Step,
   type Workflow,
@@ -36,6 +38,7 @@ import type {
   PipelineWorkflow,
 } from "../hooks/usePipelineSummary";
 import { useToastStore } from "../stores";
+import { FormModal } from "../components/forms/FormModal";
 import {
   StepNode,
   type StepNodeData,
@@ -240,6 +243,118 @@ function AllWorkflowsPipelineInner() {
   const [selectedTransitionEdgeId, setSelectedTransitionEdgeId] = useState<
     string | null
   >(null);
+  const [pendingTransition, setPendingTransition] = useState<
+    { from: string; to: string } | null
+  >(null);
+  const [pendingLabel, setPendingLabel] = useState("");
+  const [pendingTargetStepId, setPendingTargetStepId] = useState<string>("");
+  const [isCreatingTransition, setIsCreatingTransition] = useState(false);
+  const [createTransitionError, setCreateTransitionError] = useState<string | undefined>(undefined);
+
+  const selectedTransition = useMemo(() => {
+    if (!selectedTransitionEdgeId) return null;
+    return (
+      workflowTransitions.find(
+        (tr) =>
+          `workflow-transition-${tr.from_workflow_id}-${tr.to_workflow_id}` ===
+          selectedTransitionEdgeId
+      ) ?? null
+    );
+  }, [selectedTransitionEdgeId, workflowTransitions]);
+
+  const handleCreateTransition = useCallback(
+    async (
+      fromWorkflowId: string,
+      toWorkflowId: string,
+      label: string,
+      targetStepId: string | null
+    ): Promise<boolean> => {
+      setIsCreatingTransition(true);
+      setCreateTransitionError(undefined);
+      const result = await commands.createWorkflowTransition(
+        fromWorkflowId,
+        toWorkflowId,
+        label.trim().length > 0 ? label.trim() : null,
+        targetStepId && targetStepId.length > 0 ? targetStepId : null
+      );
+      setIsCreatingTransition(false);
+      if (result.status === "error") {
+        setCreateTransitionError(result.error.message);
+        return false;
+      }
+      addToast("Transition created", "success");
+      return true;
+    },
+    [addToast]
+  );
+
+  const handleDeleteTransition = useCallback(
+    async (fromWorkflowId: string, toWorkflowId: string) => {
+      const result = await commands.deleteWorkflowTransition(
+        fromWorkflowId,
+        toWorkflowId
+      );
+      if (result.status === "error") {
+        addToast(result.error.message, "error");
+        return;
+      }
+      setSelectedTransitionEdgeId(null);
+      addToast("Transition deleted", "success");
+    },
+    [addToast]
+  );
+
+  const onConnect = useCallback(
+    (connection: Connection) => {
+      const sourceMatch = connection.source?.match(/^workflow-zone-(.+)$/);
+      const targetMatch = connection.target?.match(/^workflow-zone-(.+)$/);
+      if (!sourceMatch || !targetMatch) return;
+      const fromId = sourceMatch[1];
+      const toId = targetMatch[1];
+      if (fromId === toId) {
+        addToast("Cannot create a transition from a workflow to itself", "error");
+        return;
+      }
+      setPendingTransition({ from: fromId, to: toId });
+      setPendingLabel("");
+      setPendingTargetStepId("");
+      setCreateTransitionError(undefined);
+    },
+    [addToast]
+  );
+
+  useEffect(() => {
+    const unlistenPromise = events.workflowTransitionChangedEvent.listen(() => {
+      refetch();
+    });
+    return () => {
+      unlistenPromise.then((unlisten) => unlisten());
+    };
+  }, [refetch]);
+
+  const selectedTransitionRef = useRef(selectedTransition);
+  selectedTransitionRef.current = selectedTransition;
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        (target instanceof HTMLElement && target.isContentEditable)
+      ) {
+        return;
+      }
+      const tr = selectedTransitionRef.current;
+      if ((e.key === "Delete" || e.key === "Backspace") && tr) {
+        e.preventDefault();
+        void handleDeleteTransition(tr.from_workflow_id, tr.to_workflow_id);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleDeleteTransition]);
 
   const highlightedTransitionWorkflowIds = useMemo(() => {
     const ids = new Set<string>();
@@ -779,6 +894,7 @@ function AllWorkflowsPipelineInner() {
               );
             }}
             onPaneClick={() => setSelectedTransitionEdgeId(null)}
+            onConnect={onConnect}
             nodeTypes={nodeTypes}
             edgeTypes={edgeTypes}
             fitView
@@ -802,8 +918,73 @@ function AllWorkflowsPipelineInner() {
               bgColor="#0c0c0e"
             />
           </ReactFlow>
+
+          {selectedTransition && (
+            <div className="absolute right-4 top-4 z-20 flex items-center gap-3 rounded-lg border border-border bg-bg-elevated px-3 py-2 shadow-lg">
+              <div className="text-xs text-text-muted">
+                <span className="font-medium text-text-primary">
+                  {selectedTransition.from_workflow_name}
+                </span>
+                <span className="mx-1">to</span>
+                <span className="font-medium text-text-primary">
+                  {selectedTransition.to_workflow_name}
+                </span>
+                {selectedTransition.label && (
+                  <span className="ml-2 italic">"{selectedTransition.label}"</span>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  void handleDeleteTransition(
+                    selectedTransition.from_workflow_id,
+                    selectedTransition.to_workflow_id
+                  )
+                }
+                className="rounded-md bg-error/15 px-2 py-1 text-xs font-medium text-error hover:bg-error/25"
+                title="Delete transition (Delete or Backspace)"
+              >
+                Delete
+              </button>
+            </div>
+          )}
         </div>
       </div>
+
+      <CreateTransitionModal
+        pendingTransition={pendingTransition}
+        fromWorkflowName={
+          pendingTransition
+            ? workflows.find((w) => w.id === pendingTransition.from)?.name ?? pendingTransition.from
+            : ""
+        }
+        toWorkflowName={
+          pendingTransition
+            ? workflows.find((w) => w.id === pendingTransition.to)?.name ?? pendingTransition.to
+            : ""
+        }
+        targetSteps={
+          pendingTransition ? workflowStepsMap.get(pendingTransition.to) ?? [] : []
+        }
+        label={pendingLabel}
+        onLabelChange={setPendingLabel}
+        targetStepId={pendingTargetStepId}
+        onTargetStepChange={setPendingTargetStepId}
+        isSubmitting={isCreatingTransition}
+        error={createTransitionError}
+        onCancel={() => setPendingTransition(null)}
+        onConfirm={async () => {
+          if (!pendingTransition) return;
+          const ok = await handleCreateTransition(
+            pendingTransition.from,
+            pendingTransition.to,
+            pendingLabel,
+            pendingTargetStepId.length > 0 ? pendingTargetStepId : null
+          );
+          if (ok) setPendingTransition(null);
+        }}
+      />
+
 
       {selectedTaskId && (
         <TaskDetailPanel
@@ -838,6 +1019,85 @@ function AllWorkflowsPipelineInner() {
         />
       )}
     </div>
+  );
+}
+
+type CreateTransitionModalProps = {
+  pendingTransition: { from: string; to: string } | null;
+  fromWorkflowName: string;
+  toWorkflowName: string;
+  targetSteps: Step[];
+  label: string;
+  onLabelChange: (value: string) => void;
+  targetStepId: string;
+  onTargetStepChange: (value: string) => void;
+  isSubmitting: boolean;
+  error: string | undefined;
+  onCancel: () => void;
+  onConfirm: () => void;
+};
+
+function CreateTransitionModal({
+  pendingTransition,
+  fromWorkflowName,
+  toWorkflowName,
+  targetSteps,
+  label,
+  onLabelChange,
+  targetStepId,
+  onTargetStepChange,
+  isSubmitting,
+  error,
+  onCancel,
+  onConfirm,
+}: CreateTransitionModalProps) {
+  return (
+    <FormModal
+      isOpen={pendingTransition !== null}
+      title="New workflow transition"
+      onClose={onCancel}
+      onSubmit={onConfirm}
+      isSubmitting={isSubmitting}
+      error={error}
+      submitButtonText="Create transition"
+    >
+      <p className="mb-4 text-xs text-text-muted">
+        From <span className="font-medium text-text-primary">{fromWorkflowName}</span>{" "}
+        to <span className="font-medium text-text-primary">{toWorkflowName}</span>
+      </p>
+
+      <div>
+        <label className="mb-1 block text-xs font-medium text-text-muted">
+          Label (optional)
+        </label>
+        <input
+          type="text"
+          value={label}
+          onChange={(e) => onLabelChange(e.target.value)}
+          placeholder="e.g. needs review"
+          autoFocus
+          className="w-full rounded-md border border-border bg-bg-primary px-2 py-1.5 text-sm text-text-primary outline-none focus:border-primary"
+        />
+      </div>
+
+      <div className="mt-3">
+        <label className="mb-1 block text-xs font-medium text-text-muted">
+          Target step (optional)
+        </label>
+        <select
+          value={targetStepId}
+          onChange={(e) => onTargetStepChange(e.target.value)}
+          className="w-full rounded-md border border-border bg-bg-primary px-2 py-1.5 text-sm text-text-primary outline-none focus:border-primary"
+        >
+          <option value="">First step in target workflow</option>
+          {targetSteps.map((step) => (
+            <option key={step.id ?? step.name} value={step.id ?? ""}>
+              {step.name}
+            </option>
+          ))}
+        </select>
+      </div>
+    </FormModal>
   );
 }
 

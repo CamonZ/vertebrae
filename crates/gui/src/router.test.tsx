@@ -33,6 +33,9 @@ vi.mock("./bindings", () => ({
     stepExecutionChangedEvent: {
       listen: vi.fn(() => Promise.resolve(() => {})),
     },
+    workflowTransitionChangedEvent: {
+      listen: vi.fn(() => Promise.resolve(() => {})),
+    },
   },
 }));
 
