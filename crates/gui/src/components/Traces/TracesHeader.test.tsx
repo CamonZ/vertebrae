@@ -82,6 +82,36 @@ describe("TracesHeader", () => {
     expect(screen.queryByTestId("traces-back-button")).toBeNull();
   });
 
+  it("renders Detach button and fires onDetach when clicked", () => {
+    const onDetach = vi.fn();
+    render(
+      <TracesHeader
+        taskId="task-1"
+        title="X"
+        level="task"
+        rollups={baseRollups}
+        onDetach={onDetach}
+      />
+    );
+    const btn = screen.getByTestId("traces-detach-button");
+    expect(btn).toBeInTheDocument();
+    expect(btn.textContent).toMatch(/Detach/);
+    fireEvent.click(btn);
+    expect(onDetach).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides the Detach button when no onDetach is provided", () => {
+    render(
+      <TracesHeader
+        taskId="task-1"
+        title="X"
+        level="task"
+        rollups={baseRollups}
+      />
+    );
+    expect(screen.queryByTestId("traces-detach-button")).toBeNull();
+  });
+
   it("renders an error pill when error is set and not loading", () => {
     render(
       <TracesHeader
