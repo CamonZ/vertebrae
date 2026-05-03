@@ -1,0 +1,1 @@
+../../../.claude/skills/depend/SKILL.md
