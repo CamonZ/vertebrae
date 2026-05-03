@@ -1,6 +1,6 @@
 # Project Overview
 
-Vertebrae is a persistent task management and AI workflow orchestration platform written in Rust. It provides CLI (`vtb`), desktop GUI (Tauri + React), and background daemon interfaces that communicate with the [Sacrum](../sacrum/) backend (Elixir/Phoenix) via REST API.
+Vertebrae is a persistent task management and AI workflow orchestration platform written in Rust. It provides CLI (`vtb`), desktop GUI (Tauri + React), and background daemon interfaces that communicate with the Sacrum backend (Elixir/Phoenix) via GraphQL and Phoenix channels.
 
 > For the full system architecture including Sacrum, see [System Overview](system-overview.md).
 
@@ -10,7 +10,8 @@ Vertebrae is a persistent task management and AI workflow orchestration platform
 vertebrae/
 ├── Cargo.toml              # Workspace manifest
 ├── Cargo.lock              # Locked dependency versions
-├── CLAUDE.md               # Claude Code instructions (index)
+├── AGENTS.md               # Agent instructions (index-based)
+├── CLAUDE.md               # Claude Code instructions (index-based)
 ├── .claude/
 │   └── settings.json       # Claude Code hooks configuration
 ├── .githooks/
@@ -20,12 +21,13 @@ vertebrae/
 ├── skills/                 # Claude Code skills (each is a folder with SKILL.md)
 ├── crates/
 │   ├── core/               # vertebrae-core: Shared contract layer (traits + models)
-│   ├── sacrum-client/      # vertebrae-sacrum-client: HTTP client for Sacrum REST API
+│   ├── sacrum-client/      # vertebrae-sacrum-client: GraphQL client for Sacrum
 │   ├── cli/                # vertebrae-cli: CLI binary (vtb)
 │   ├── daemon/             # vertebrae-daemon: Background step executor (vtb-daemon)
 │   ├── gui/                # Tauri + React desktop application
 │   ├── acceptance/         # Acceptance tests (Docker only)
-│   └── gui-acceptance/     # GUI acceptance tests (Docker only)
+│   ├── gui-acceptance/     # GUI acceptance tests (Docker only)
+│   └── daemon-acceptance/  # Daemon acceptance tests (Docker only)
 ├── docs/                   # Documentation
 │   ├── design/             # GUI design docs and mockups
 │   └── tickets/            # Feature tickets and specs
@@ -51,7 +53,7 @@ vtb <args>
 
 | Crate | Version | Purpose |
 |-------|---------|---------|
-| `reqwest` | v0.12 | HTTP client for Sacrum REST API |
+| `reqwest` | v0.13 | HTTP client used for Sacrum GraphQL |
 | `tokio` | v1 | Async runtime |
 | `tokio-tungstenite` | v0.26 | WebSocket client for Phoenix channels |
 | `clap` | v4 | CLI argument parsing with derive macros |

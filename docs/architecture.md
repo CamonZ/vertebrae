@@ -1,6 +1,6 @@
 # Architecture
 
-Vertebrae is a Rust workspace with five crates, each with a distinct role. All crates share a trait-based service abstraction backed by the Sacrum REST API.
+Vertebrae is a Rust workspace with interface, daemon, and test crates. The production crates share a trait-based service abstraction backed by the Sacrum GraphQL API and Phoenix channels.
 
 > For the full system-level view including the Sacrum backend, daemon execution model, and real-time architecture, see [System Overview](system-overview.md).
 
@@ -32,7 +32,7 @@ flowchart TB
     end
 
     subgraph "Backend Client (crates/sacrum-client)"
-        SC["SacrumClient (reqwest)"]
+        SC["GraphqlClient (reqwest)"]
         STS["SacrumTaskService"]
         SWS["SacrumWorkflowService"]
         SES["SacrumExecutionService"]
@@ -41,7 +41,7 @@ flowchart TB
 
     subgraph "Remote Backend"
         Sacrum["Sacrum (Phoenix/Elixir)"]
-        REST["REST API + Bearer auth"]
+        GQL["GraphQL API + Bearer auth"]
         WS2["WebSocket (Phoenix Channels)"]
     end
 
@@ -56,7 +56,7 @@ flowchart TB
     SS -.-> SSS
 
     STS & SWS & SES & SSS --> SC
-    SC -->|HTTP| REST --> Sacrum
+    SC -->|POST /graphql| GQL --> Sacrum
 
     GUI -.->|Real-time sync| WS2
     Daemon -.->|Run step events| WS2
@@ -106,32 +106,34 @@ Error types: `ServiceError`, `ServiceResult`
 
 ## Sacrum Client (`crates/sacrum-client`)
 
-Concrete implementations of all service traits via HTTP REST.
+Concrete implementations of all service traits via GraphQL.
 
 ### Configuration
 
-- `.vtb/config.toml` holds `url` (default `http://localhost:4000`) and `project_id`
-- `SACRUM_API_TOKEN` env var provides bearer token
-- `SacrumConfig::load()` reads both sources
+- `~/.config/vertebrae/config.toml` holds global Sacrum settings and project registrations
+- `VTB_URL`, `VTB_TOKEN`, and `VTB_PROJECT_ID` can override CLI configuration
+- `SacrumConfig::load()` resolves the CLI project by matching the current git root against configured project paths
+- `SacrumConfig::load_for_project()` resolves a GUI-selected project by slug
 
 See [SACRUM_CONFIG.md](SACRUM_CONFIG.md) for full reference.
 
 ### HTTP Client
 
-`SacrumClient` wraps `reqwest::Client` with bearer auth:
+`GraphqlClient` wraps `reqwest::Client` with bearer auth:
 
-- Standard REST methods: `get()`, `post()`, `put()`, `delete()`
-- All responses wrapped in `DataEnvelope { data: T }` — auto-unwrapped
-- Paths scoped to project: `/projects/{project_id}/tasks`, `/projects/{project_id}/workflows`, etc.
+- Posts all operations to `{base_url}/graphql`
+- Sends `Authorization: Bearer <token>` and `Content-Type: application/json`
+- Extracts typed values from `data.<field>`
+- Reports GraphQL errors separately from HTTP errors
 
 ### Service Implementations
 
 | Struct | Implements | Maps to |
-|--------|-----------|---------|
-| `SacrumTaskService` | `TaskService` | Task REST endpoints |
-| `SacrumWorkflowService` | `WorkflowService` | Workflow REST endpoints |
-| `SacrumExecutionService` | `ExecutionService` | Execution REST endpoints |
-| `SacrumStepService` | `StepService` | Step REST endpoints |
+|--------|------------|---------|
+| `SacrumTaskService` | `TaskService` | Task GraphQL queries and mutations |
+| `SacrumWorkflowService` | `WorkflowService` | Workflow GraphQL queries and mutations |
+| `SacrumExecutionService` | `ExecutionService` | Execution GraphQL queries and mutations |
+| `SacrumStepService` | `StepService` | Step GraphQL queries and mutations |
 
 ## CLI (`crates/cli`)
 
@@ -175,5 +177,5 @@ See [GUI Development](gui-development.md) for dev setup and frontend details.
 
 - **~34 Tauri commands** wrapping `VertebraeServices`
 - **WebSocket real-time sync** via Phoenix channels
-- **PTY manager** for embedded terminal sessions
-- **Workflow runner** for automated step execution from the GUI
+- **Claude session manager** for JSONL chat sessions
+- Workflow execution commands delegate to Sacrum; daemon clients pick up execution events
