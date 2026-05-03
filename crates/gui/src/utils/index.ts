@@ -21,3 +21,5 @@ export {
 export type { UtilizationLevel } from "./modelContextWindow";
 export { popOut } from "./popOut";
 export type { PopOutOptions, PopOutResult } from "./popOut";
+export { stashTask, takeStashedTask } from "./taskStash";
+export type { TaskStashPayload } from "./taskStash";
