@@ -1,0 +1,3 @@
+[mcp_servers.hammerspoon-gui]
+args = ["/Users/camonz/Code/code_intelligence/vertebrae/hammerspoon/mcp/server.py"]
+command = "/Users/camonz/Code/code_intelligence/vertebrae/hammerspoon/mcp/.venv/bin/python"

@@ -1,0 +1,1 @@
+../../../.claude/skills/vtb-show/SKILL.md

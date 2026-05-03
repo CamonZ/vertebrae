@@ -1,0 +1,1 @@
+../../../.claude/skills/sections/SKILL.md

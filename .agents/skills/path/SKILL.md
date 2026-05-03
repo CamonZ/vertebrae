@@ -1,0 +1,1 @@
+../../../.claude/skills/path/SKILL.md
