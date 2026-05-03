@@ -14,6 +14,7 @@ import {
   OperationsPage,
   BoardPage,
   TracesPage,
+  TaskDetailPage,
 } from "./pages";
 import { commands } from "./bindings";
 
@@ -79,6 +80,10 @@ export const router = createBrowserRouter([
   {
     path: "/setup",
     element: <ProjectSetupPage />,
+  },
+  {
+    path: "/task/:taskId",
+    element: <TaskDetailPage />,
   },
   {
     path: "/",

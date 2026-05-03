@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, createMockTask, createMockWorkflow } from "../test/test-utils";
+import { render, screen, fireEvent, waitFor, createMockTask, createMockWorkflow } from "../test/test-utils";
 import { BoardPage, topologicalColumnSort } from "./BoardPage";
 import type { Task, Workflow, WorkflowTransition } from "../bindings";
 
@@ -41,15 +41,40 @@ vi.mock("../hooks/useWorkflowTransitions", () => ({
 
 // Mock TaskDetailPanel to keep tests focused on the board logic
 vi.mock("../components/TaskDetail", () => ({
-  TaskDetailPanel: ({ taskId, onClose }: { taskId: string | null; onClose?: () => void }) => (
+  TaskDetailPanel: ({
+    taskId,
+    onClose,
+    onDetach,
+  }: {
+    taskId: string | null;
+    onClose?: () => void;
+    onDetach?: () => void;
+  }) =>
     taskId ? (
       <div data-testid="task-detail-panel">
         <span data-testid="detail-task-id">{taskId}</span>
         <button onClick={onClose} data-testid="close-panel">Close</button>
+        {onDetach && (
+          <button onClick={onDetach} data-testid="detach-panel">Detach</button>
+        )}
       </div>
-    ) : null
-  ),
+    ) : null,
 }));
+
+// Track popOut + stashTask invocations so the detach test can assert on
+// the route, label, and stashed payload.
+const { popOutMock, stashTaskMock } = vi.hoisted(() => ({
+  popOutMock: vi.fn(async () => ({ window: {}, reused: false })),
+  stashTaskMock: vi.fn(),
+}));
+vi.mock("../utils", async () => {
+  const actual = await vi.importActual<typeof import("../utils")>("../utils");
+  return {
+    ...actual,
+    popOut: popOutMock,
+    stashTask: stashTaskMock,
+  };
+});
 
 describe("BoardPage", () => {
   beforeEach(() => {
@@ -60,6 +85,8 @@ describe("BoardPage", () => {
     mockWorkflowsLoading = false;
     mockTasksError = null;
     mockWorkflowsError = null;
+    popOutMock.mockClear();
+    stashTaskMock.mockClear();
   });
 
   describe("loading state", () => {
@@ -365,6 +392,56 @@ describe("BoardPage", () => {
       // Close panel
       fireEvent.click(screen.getByTestId("close-panel"));
       expect(screen.queryByTestId("task-detail-panel")).not.toBeInTheDocument();
+    });
+
+    it("opens a pop-out window and dismisses the in-app panel when detach is clicked", async () => {
+      mockWorkflows = [
+        createMockWorkflow({ id: "wf-1", kanban_column: "Active" }),
+      ];
+      mockTasks = [
+        createMockTask({ id: "task-abc123", title: "Detach Me", workflow_id: "wf-1" }),
+      ];
+      render(<BoardPage />);
+
+      fireEvent.click(screen.getByText("Detach Me"));
+      expect(screen.getByTestId("task-detail-panel")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByTestId("detach-panel"));
+
+      // The in-app panel is dismissed once the async handler resolves
+      await waitFor(() => {
+        expect(screen.queryByTestId("task-detail-panel")).not.toBeInTheDocument();
+      });
+
+      expect(popOutMock).toHaveBeenCalledTimes(1);
+      expect(popOutMock).toHaveBeenCalledWith(
+        "/task/task-abc123",
+        "task-task-abc123",
+        expect.objectContaining({ title: "Task Details" }),
+      );
+    });
+
+    it("stashes the focal task plus its children + dependents before opening the window", async () => {
+      mockWorkflows = [
+        createMockWorkflow({ id: "wf-1", kanban_column: "Active" }),
+      ];
+      mockTasks = [
+        createMockTask({ id: "parent-1", title: "Parent", workflow_id: "wf-1" }),
+        createMockTask({ id: "child-1", title: "Child", workflow_id: "wf-1", parent_id: "parent-1" }),
+        createMockTask({ id: "dep-1", title: "Dep", workflow_id: "wf-1", dependency_ids: ["parent-1"] }),
+        createMockTask({ id: "unrelated", title: "Other", workflow_id: "wf-1" }),
+      ];
+      render(<BoardPage />);
+
+      fireEvent.click(screen.getByText("Parent"));
+      fireEvent.click(screen.getByTestId("detach-panel"));
+
+      await waitFor(() => expect(stashTaskMock).toHaveBeenCalledTimes(1));
+
+      const [focal, related] = stashTaskMock.mock.calls[0];
+      expect(focal.id).toBe("parent-1");
+      const relatedIds = (related as Array<{ id: string }>).map((t) => t.id).sort();
+      expect(relatedIds).toEqual(["child-1", "dep-1"]);
     });
   });
 
