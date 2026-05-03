@@ -4,7 +4,8 @@
   "description": "enables the default permissions",
   "windows": [
     "main",
-    "task-*"
+    "task-*",
+    "chat-*"
   ],
   "permissions": [
     "core:default",
