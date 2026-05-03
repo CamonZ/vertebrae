@@ -16,6 +16,7 @@ import {
   TracesPage,
   TaskDetailPage,
   StandaloneChatWindow,
+  StandaloneTracesPage,
 } from "./pages";
 import { commands } from "./bindings";
 
@@ -89,6 +90,10 @@ export const router = createBrowserRouter([
   {
     path: "/chat",
     element: <StandaloneChatWindow />,
+  },
+  {
+    path: "/traces-window/:taskId",
+    element: <StandaloneTracesPage />,
   },
   {
     path: "/",
