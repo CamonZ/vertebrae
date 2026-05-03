@@ -3,7 +3,7 @@ import { useScopedChat } from "../../hooks/useScopedChat";
 import { useChatStore, getParentScope } from "../../stores/chatStore";
 import type { ChatScope, ChatMessage } from "../../stores/chatStore";
 import { scopeLabel } from "../../utils/chatContext";
-import { MarkdownContent } from "./MarkdownContent";
+import { MarkdownContent } from "../shared/MarkdownContent";
 
 /**
  * Thinking indicator shown while waiting for Claude to respond
