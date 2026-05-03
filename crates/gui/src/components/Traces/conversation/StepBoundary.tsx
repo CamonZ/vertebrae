@@ -12,8 +12,9 @@
  * the trio shown right of the timestamp.
  */
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { formatCost } from "../../../utils/formatCost";
+import { MarkdownContent } from "../../shared/MarkdownContent";
 import { formatDurationShort, humanizeStepName } from "./EventRenderer";
 
 /**
@@ -48,6 +49,8 @@ interface StepBoundaryProps {
   numTurns?: number | null;
   /** Indentation level for nested delegation blocks (0 = root). */
   depth?: number;
+  /** Prompt used to drive this step execution. When set, rendered as a collapsible markdown section. */
+  prompt?: string | null;
 }
 
 function formatTimestamp(ts: string | null): string {
@@ -80,10 +83,13 @@ export function StepBoundary({
   durationMs,
   numTurns,
   depth = 0,
+  prompt = null,
 }: StepBoundaryProps): ReactNode {
   const stepLabel = humanizeStepName(stepName);
   const showTitleInline = !!taskTitle && taskTitlePlacement === "inline";
   const showTitleSubtitle = !!taskTitle && taskTitlePlacement === "subtitle";
+  const hasPrompt = !!prompt && prompt.trim().length > 0;
+  const [promptExpanded, setPromptExpanded] = useState(false);
 
   return (
     <div
@@ -156,6 +162,28 @@ export function StepBoundary({
           title={taskTitle ?? undefined}
         >
           {taskTitle}
+        </div>
+      )}
+      {hasPrompt && (
+        <div className="mt-2">
+          <button
+            type="button"
+            data-testid="step-boundary-prompt-toggle"
+            aria-expanded={promptExpanded}
+            onClick={() => setPromptExpanded((v) => !v)}
+            className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-wider text-text-muted hover:text-text-secondary"
+          >
+            <span aria-hidden="true">{promptExpanded ? "▾" : "▸"}</span>
+            <span>Prompt</span>
+          </button>
+          {promptExpanded && (
+            <div
+              data-testid="step-boundary-prompt"
+              className="mt-1 max-h-96 overflow-auto rounded border border-border bg-bg-primary px-3 py-2 text-sm text-text-primary"
+            >
+              <MarkdownContent text={prompt as string} />
+            </div>
+          )}
         </div>
       )}
     </div>
