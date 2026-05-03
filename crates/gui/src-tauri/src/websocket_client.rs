@@ -16,7 +16,8 @@ use crate::events::{
     SectionChangeType, SectionChangedEvent, SessionLogCreatedEvent, StepChangeType,
     StepChangedEvent, StepExecutionChangeType, StepExecutionChangedEvent, StepExecutionStatus,
     StepTransitionChangeType, StepTransitionChangedEvent, TaskChangeType, TaskChangedEvent,
-    WorkflowChangeType, WorkflowChangedEvent,
+    WorkflowChangeType, WorkflowChangedEvent, WorkflowTransitionChangeType,
+    WorkflowTransitionChangedEvent,
 };
 use crate::types;
 
@@ -361,6 +362,9 @@ impl SacrumSocket {
                 "step_transition_created" | "step_transition_deleted" => {
                     Self::handle_step_transition_event(event, payload, app_handle)?;
                 }
+                "workflow_transition_created" | "workflow_transition_deleted" => {
+                    Self::handle_workflow_transition_event(event, payload, app_handle)?;
+                }
                 "step_execution_created" | "step_execution_status_changed" => {
                     Self::handle_step_execution_event(event, payload, app_handle)?;
                 }
@@ -665,6 +669,52 @@ impl SacrumSocket {
 
         app_handle
             .emit("step-transition-changed-event", &event)
+            .map_err(|e| format!("Failed to emit event: {}", e))?;
+
+        Ok(())
+    }
+
+    /// Handle workflow transition events and emit to Tauri
+    fn handle_workflow_transition_event<R: Runtime>(
+        event: &str,
+        payload: &serde_json::Value,
+        app_handle: &tauri::AppHandle<R>,
+    ) -> Result<(), String> {
+        let transition_id = payload
+            .get("id")
+            .and_then(|v| v.as_str())
+            .ok_or("Missing id in workflow transition payload")?
+            .to_string();
+
+        let from_workflow_id = payload
+            .get("from_workflow_id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let to_workflow_id = payload
+            .get("to_workflow_id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let change_type = match event {
+            "workflow_transition_created" => WorkflowTransitionChangeType::Created,
+            "workflow_transition_deleted" => WorkflowTransitionChangeType::Deleted,
+            _ => WorkflowTransitionChangeType::Created,
+        };
+
+        let event = WorkflowTransitionChangedEvent {
+            transition_id,
+            from_workflow_id,
+            to_workflow_id,
+            change_type,
+        };
+
+        log::debug!(
+            "[WebSocket] Emitting WorkflowTransitionChangedEvent: {:?}",
+            event
+        );
+
+        app_handle
+            .emit("workflow-transition-changed-event", &event)
             .map_err(|e| format!("Failed to emit event: {}", e))?;
 
         Ok(())

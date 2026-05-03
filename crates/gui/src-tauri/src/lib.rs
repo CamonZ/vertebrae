@@ -29,6 +29,7 @@ use commands::AppState;
 use events::{
     SectionChangedEvent, SessionLogCreatedEvent, StepChangedEvent, StepExecutionChangedEvent,
     StepTransitionChangedEvent, TaskChangedEvent, TaskStepChangedEvent, WorkflowChangedEvent,
+    WorkflowTransitionChangedEvent,
 };
 use project_config::ProjectConfig;
 
@@ -96,6 +97,8 @@ fn create_builder() -> Builder {
             commands::get_workflow_with_task_details,
             commands::get_pipeline_summary,
             commands::list_workflow_transitions,
+            commands::create_workflow_transition,
+            commands::delete_workflow_transition,
             commands::update_workflow,
             // Execution commands
             commands::get_task_executions,
@@ -125,6 +128,7 @@ fn create_builder() -> Builder {
             StepChangedEvent,
             StepExecutionChangedEvent,
             StepTransitionChangedEvent,
+            WorkflowTransitionChangedEvent,
             SessionLogCreatedEvent,
             SectionChangedEvent,
             // Claude session events
