@@ -14,8 +14,11 @@ export function ChatWindowManager() {
   const focusSession = useChatStore((s) => s.focusSession);
   const closeSession = useChatStore((s) => s.closeSession);
   const togglePanel = useChatStore((s) => s.togglePanel);
+  const detachSession = useChatStore((s) => s.detachSession);
+  const reattachSession = useChatStore((s) => s.reattachSession);
 
   const sessionList = Object.values(sessions);
+  const activeSession = activeSessionId ? sessions[activeSessionId] : null;
 
   if (!panelOpen || sessionList.length === 0) {
     return null;
@@ -73,6 +76,40 @@ export function ChatWindowManager() {
                 <span className="h-1.5 w-1.5 rounded-full bg-text-muted" />
               )}
 
+              {session.isDetached && (
+                <span
+                  className="rounded bg-accent/15 px-1 py-0.5 font-mono text-[9px] uppercase tracking-wider text-accent"
+                  title="Detached into pop-out window"
+                >
+                  detached
+                </span>
+              )}
+
+              {!session.isDetached && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void detachSession(session.id);
+                  }}
+                  className="ml-0.5 rounded p-0.5 text-text-muted opacity-0 transition-all hover:bg-bg-hover hover:text-text-primary group-hover:opacity-100"
+                  title="Detach into pop-out window"
+                >
+                  <svg
+                    className="h-3 w-3"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M14 5h5v5M19 5l-7 7M5 5h4v2H7v10h10v-2h2v4H5z"
+                    />
+                  </svg>
+                </button>
+              )}
+
               {/* Close tab button */}
               <button
                 onClick={(e) => {
@@ -122,11 +159,64 @@ export function ChatWindowManager() {
         </button>
       </div>
 
-      {/* Active chat window */}
-      {activeSessionId && sessions[activeSessionId] && (
-        <ChatWindow sessionId={activeSessionId} />
+      {/* Active chat window — show a placeholder if the session has been
+          detached into a pop-out so we don't double-render its history. */}
+      {activeSession?.isDetached && (
+        <DetachedPlaceholder
+          label={activeSession.label}
+          onReattach={() => reattachSession(activeSession.id)}
+        />
+      )}
+      {activeSession && !activeSession.isDetached && (
+        <ChatWindow sessionId={activeSession.id} />
       )}
     </ResizablePanel>
+  );
+}
+
+/**
+ * Placeholder shown in the main panel when the active tab's session has
+ * been detached into a pop-out window. Offers a one-click reattach.
+ */
+function DetachedPlaceholder({
+  label,
+  onReattach,
+}: {
+  label: string;
+  onReattach: () => void;
+}) {
+  return (
+    <div
+      role="status"
+      aria-label="Session detached"
+      className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center"
+    >
+      <span className="rounded-full bg-accent/10 p-3 text-accent">
+        <svg
+          className="h-6 w-6"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={1.5}
+            d="M14 5h5v5M19 5l-7 7M5 5h4v2H7v10h10v-2h2v4H5z"
+          />
+        </svg>
+      </span>
+      <p className="text-sm text-text-secondary">
+        <span className="font-medium text-text-primary">{label}</span> is open
+        in a pop-out window
+      </p>
+      <button
+        onClick={onReattach}
+        className="rounded-md border border-border bg-bg-secondary px-3 py-1.5 text-xs text-text-primary transition-colors hover:bg-bg-hover"
+      >
+        Reattach to panel
+      </button>
+    </div>
   );
 }
 

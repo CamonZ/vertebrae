@@ -23,3 +23,4 @@ export { popOut } from "./popOut";
 export type { PopOutOptions, PopOutResult } from "./popOut";
 export { stashTask, takeStashedTask } from "./taskStash";
 export type { TaskStashPayload } from "./taskStash";
+export { stashChatSession, takeStashedChatSession } from "./chatStash";
