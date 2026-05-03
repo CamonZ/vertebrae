@@ -223,29 +223,153 @@ impl std::fmt::Display for CommandResult {
     }
 }
 
-/// Resolve a single ID: if it's a short ID (8 hex chars), resolve via the backend.
-/// Otherwise return it unchanged.
-async fn resolve_id(id: &str, services: &VertebraeServices) -> Result<String, ServiceError> {
-    if is_short_id(id) {
-        services.tasks().resolve_short_id(id).await
-    } else {
-        Ok(id.to_string())
+/// Generic short-ID resolver helper.
+///
+/// If `id` is a short ID (8 hex chars), it is resolved through `resolve_fn`.
+/// Otherwise the value is returned unchanged. Errors from the resolver are
+/// rewrapped with an entity-scoped message to keep CLI output informative
+/// (e.g. "workflow with prefix 'deadbeef' not found").
+///
+/// This helper centralises short-ID handling so that adding a new entity is
+/// one new resolver wiring, not a copy-paste of the same shape three times.
+async fn resolve_short_id_generic<F, Fut>(
+    id: &str,
+    entity: &str,
+    resolve_fn: F,
+) -> Result<String, ServiceError>
+where
+    F: FnOnce(String) -> Fut,
+    Fut: std::future::Future<Output = Result<String, ServiceError>>,
+{
+    if !is_short_id(id) {
+        return Ok(id.to_string());
+    }
+
+    let prefix = id.to_lowercase();
+    match resolve_fn(prefix.clone()).await {
+        Ok(full_id) => Ok(full_id),
+        Err(err) => Err(scope_short_id_error(err, entity, &prefix)),
     }
 }
 
-/// Resolve an optional ID field in place.
-async fn resolve_optional_id(
-    id: &mut Option<String>,
+/// Rewrite a short-id resolution error to be entity-scoped.
+///
+/// Inspects the underlying error message for hints from the backend
+/// (`:not_found`, `:invalid_prefix`, `ambiguous`) and produces a
+/// human-readable, entity-scoped message. Falls through to the original
+/// error otherwise so unexpected failures aren't masked.
+fn scope_short_id_error(err: ServiceError, entity: &str, prefix: &str) -> ServiceError {
+    let msg = err.to_string();
+    let lower = msg.to_lowercase();
+
+    if lower.contains("invalid_prefix") || lower.contains("invalid prefix") {
+        return ServiceError::validation_failed(format!(
+            "invalid short ID '{}' for {}: must be 1-8 hex characters",
+            prefix, entity
+        ));
+    }
+
+    if lower.contains("ambiguous") {
+        // Preserve any candidate list the backend produced.
+        return ServiceError::validation_failed(format!(
+            "ambiguous {} prefix '{}': {}",
+            entity, prefix, msg
+        ));
+    }
+
+    if lower.contains("not_found") || lower.contains("not found") {
+        return ServiceError::validation_failed(format!(
+            "{} with prefix '{}' not found",
+            entity, prefix
+        ));
+    }
+
+    err
+}
+
+/// Resolve a task short ID via the task service.
+async fn resolve_id(id: &str, services: &VertebraeServices) -> Result<String, ServiceError> {
+    resolve_short_id_generic(id, "task", |p| async move {
+        services.tasks().resolve_short_id(&p).await
+    })
+    .await
+}
+
+/// Resolve a workflow short ID via the workflow service.
+async fn resolve_workflow_id(
+    id: &str,
     services: &VertebraeServices,
-) -> Result<(), ServiceError> {
+) -> Result<String, ServiceError> {
+    resolve_short_id_generic(id, "workflow", |p| async move {
+        services.workflows().resolve_short_id(&p).await
+    })
+    .await
+}
+
+/// Resolve a step short ID via the step service.
+///
+/// `workflow_id` should be the (already-resolved) full workflow UUID when the
+/// command has one in scope. Passing `None` falls back to a project-wide scan.
+pub(crate) async fn resolve_step_id(
+    id: &str,
+    workflow_id: Option<&str>,
+    services: &VertebraeServices,
+) -> Result<String, ServiceError> {
+    let wf_owned = workflow_id.map(|s| s.to_string());
+    resolve_short_id_generic(id, "step", |p| async move {
+        services
+            .steps()
+            .resolve_short_id(&p, wf_owned.as_deref())
+            .await
+    })
+    .await
+}
+
+/// Resolve an optional ID field in place using `resolver`.
+///
+/// `resolver` already short-circuits non-short-id input, so we just need to
+/// skip `None` and empty strings here.
+async fn resolve_optional<F, Fut>(id: &mut Option<String>, resolver: F) -> Result<(), ServiceError>
+where
+    F: FnOnce(String) -> Fut,
+    Fut: std::future::Future<Output = Result<String, ServiceError>>,
+{
     if let Some(val) = id.as_ref()
         && !val.is_empty()
         && is_short_id(val)
     {
-        let resolved = resolve_id(val, services).await?;
-        *id = Some(resolved);
+        *id = Some(resolver(val.clone()).await?);
     }
     Ok(())
+}
+
+async fn resolve_optional_id(
+    id: &mut Option<String>,
+    services: &VertebraeServices,
+) -> Result<(), ServiceError> {
+    resolve_optional(id, |v| async move { resolve_id(&v, services).await }).await
+}
+
+async fn resolve_optional_workflow_id(
+    id: &mut Option<String>,
+    services: &VertebraeServices,
+) -> Result<(), ServiceError> {
+    resolve_optional(
+        id,
+        |v| async move { resolve_workflow_id(&v, services).await },
+    )
+    .await
+}
+
+async fn resolve_optional_step_id(
+    id: &mut Option<String>,
+    workflow_id: Option<&str>,
+    services: &VertebraeServices,
+) -> Result<(), ServiceError> {
+    resolve_optional(id, |v| async move {
+        resolve_step_id(&v, workflow_id, services).await
+    })
+    .await
 }
 
 /// Resolved checklist item details.
@@ -315,6 +439,7 @@ impl Command {
                         *dep = resolve_id(dep, services).await?;
                     }
                 }
+                resolve_optional_workflow_id(&mut cmd.workflow, services).await?;
             }
             Command::Archive(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::Blockers(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
@@ -349,7 +474,67 @@ impl Command {
             }
             Command::Unref(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::Unsection(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
-            Command::Step(_) | Command::Workflow(_) => {}
+            Command::Step(cmd) => match cmd {
+                step::StepCommand::Add(c) => {
+                    c.workflow = resolve_workflow_id(&c.workflow, services).await?;
+                    let wf = c.workflow.clone();
+                    resolve_optional_step_id(&mut c.id, Some(&wf), services).await?;
+                    for t in &mut c.transitions_to {
+                        *t = resolve_step_id(t, Some(&wf), services).await?;
+                    }
+                }
+                step::StepCommand::List(c) => {
+                    c.workflow = resolve_workflow_id(&c.workflow, services).await?;
+                }
+                step::StepCommand::Show(c) => {
+                    c.id = resolve_step_id(&c.id, None, services).await?;
+                }
+                step::StepCommand::Update(c) => {
+                    c.id = resolve_step_id(&c.id, None, services).await?;
+                    // For --transition-to we don't have a workflow in the args,
+                    // but each target step still resolves project-wide.
+                    for t in &mut c.transitions_to {
+                        *t = resolve_step_id(t, None, services).await?;
+                    }
+                }
+                step::StepCommand::Delete(c) => {
+                    c.id = resolve_step_id(&c.id, None, services).await?;
+                }
+            },
+            Command::Workflow(cmd) => match cmd {
+                workflow::WorkflowCommand::Add(_)
+                | workflow::WorkflowCommand::List(_)
+                | workflow::WorkflowCommand::Unassign(_) => {}
+                workflow::WorkflowCommand::Show(c) => {
+                    c.id = resolve_workflow_id(&c.id, services).await?;
+                }
+                workflow::WorkflowCommand::Update(c) => {
+                    c.id = resolve_workflow_id(&c.id, services).await?;
+                }
+                workflow::WorkflowCommand::Delete(c) => {
+                    c.id = resolve_workflow_id(&c.id, services).await?;
+                }
+                workflow::WorkflowCommand::Assign(c) => {
+                    c.task_id = resolve_id(&c.task_id, services).await?;
+                    c.workflow_id = resolve_workflow_id(&c.workflow_id, services).await?;
+                }
+                workflow::WorkflowCommand::Transition(t) => match t {
+                    workflow::TransitionCommand::Add(c) => {
+                        c.from_workflow_id =
+                            resolve_workflow_id(&c.from_workflow_id, services).await?;
+                        c.to_workflow_id = resolve_workflow_id(&c.to_workflow_id, services).await?;
+                        let to_wf = c.to_workflow_id.clone();
+                        resolve_optional_step_id(&mut c.target_step, Some(&to_wf), services)
+                            .await?;
+                    }
+                    workflow::TransitionCommand::Delete(c) => {
+                        c.from_workflow_id =
+                            resolve_workflow_id(&c.from_workflow_id, services).await?;
+                        c.to_workflow_id = resolve_workflow_id(&c.to_workflow_id, services).await?;
+                    }
+                    workflow::TransitionCommand::List(_) => {}
+                },
+            },
             Command::CheckItem(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::TransitionTo(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::Update(cmd) => {

@@ -7,6 +7,10 @@ description: Manage workflow steps
 
 Manage first-class workflow steps. Steps define the stages a task moves through within a workflow.
 
+> **Short IDs:** Step, workflow, and transition-target arguments accept either
+> a full UUID or an 8-character short ID. Resolution works uniformly across
+> tasks, workflows, and steps.
+
 ## Subcommands
 
 | Command | Description |
