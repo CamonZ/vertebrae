@@ -9,11 +9,12 @@ use vertebrae_core::error::{ServiceError, ServiceResult};
 use vertebrae_core::models::{AgentConfig, Step, StepType, StepUpdate};
 use vertebrae_core::step_service::StepService;
 
-use crate::api_types::{WorkflowResponse, WorkflowStepResponse};
+use crate::api_types::{ShortIdResponse, WorkflowResponse, WorkflowStepResponse};
 use crate::client::{GraphqlClient, with_fragments};
 use crate::error::SacrumClientError;
 use crate::queries::steps::{
-    CREATE_STEP, DELETE_STEP, GET_STEP, LIST_STEPS, STEP_FIELDS, SYNC_STEP_TRANSITIONS, UPDATE_STEP,
+    CREATE_STEP, DELETE_STEP, GET_STEP, LIST_STEPS, RESOLVE_STEP_SHORT_ID, STEP_FIELDS,
+    SYNC_STEP_TRANSITIONS, UPDATE_STEP,
 };
 use crate::queries::workflows::{LIST_WORKFLOWS, WORKFLOW_FIELDS};
 
@@ -169,6 +170,53 @@ impl StepService for SacrumStepService {
 
     async fn step_exists(&self, id: &str) -> ServiceResult<bool> {
         Ok(self.get_step(id).await?.is_some())
+    }
+
+    async fn resolve_short_id(
+        &self,
+        prefix: &str,
+        workflow_id: Option<&str>,
+    ) -> ServiceResult<String> {
+        // Backend's resolve_step_short_id is scoped to a workflow. If the caller
+        // didn't supply one, iterate workflows and aggregate matches client-side.
+        if let Some(wf_id) = workflow_id {
+            let variables = json!({
+                "project_id": self.client.project_id(),
+                "workflow_id": wf_id,
+                "prefix": prefix,
+            });
+
+            let response: ShortIdResponse = self
+                .client
+                .execute(RESOLVE_STEP_SHORT_ID, variables, "resolve_step_short_id")
+                .await?;
+
+            return Ok(response.id);
+        }
+
+        // No workflow context: scan all steps in the project. We tolerate the
+        // GraphQL error we'd otherwise hit on a per-workflow miss because we
+        // want to surface a single project-scoped result.
+        let prefix_lower = prefix.to_lowercase();
+        let steps = self.list_all_steps().await?;
+        let matches: Vec<String> = steps
+            .into_iter()
+            .filter_map(|s| s.id)
+            .filter(|id| id.to_lowercase().starts_with(&prefix_lower))
+            .collect();
+
+        match matches.len() {
+            0 => Err(ServiceError::validation_failed(format!(
+                "step with prefix '{}' not found",
+                prefix
+            ))),
+            1 => Ok(matches.into_iter().next().unwrap()),
+            _ => Err(ServiceError::validation_failed(format!(
+                "ambiguous prefix '{}': multiple steps match: {}",
+                prefix,
+                matches.join(", ")
+            ))),
+        }
     }
 
     async fn get_step_by_id(&self, id: &str) -> ServiceResult<Option<Step>> {
