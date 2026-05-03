@@ -119,6 +119,23 @@ pub enum StepTransitionChangeType {
     Deleted,
 }
 
+/// Event payload for workflow transition changes.
+/// Emitted when a workflow-to-workflow transition is created or deleted.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+pub struct WorkflowTransitionChangedEvent {
+    pub transition_id: String,
+    pub from_workflow_id: Option<String>,
+    pub to_workflow_id: Option<String>,
+    pub change_type: WorkflowTransitionChangeType,
+}
+
+/// The type of change that occurred on a workflow transition.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+pub enum WorkflowTransitionChangeType {
+    Created,
+    Deleted,
+}
+
 /// Event payload for session log creation.
 /// Emitted when a new session log is created during step execution.
 /// `session_log` carries the full deserialized entity when available.
