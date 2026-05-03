@@ -620,6 +620,29 @@ impl WorkflowService for MockWorkflowService {
             .ok_or_else(|| ServiceError::validation_failed(format!("Workflow not found: {}", id)))
     }
 
+    async fn resolve_short_id(&self, prefix: &str) -> ServiceResult<String> {
+        let s = self.state.lock().unwrap();
+        let prefix_lower = prefix.to_lowercase();
+        let matches: Vec<String> = s
+            .workflows
+            .keys()
+            .filter(|id| id.to_lowercase().starts_with(&prefix_lower))
+            .cloned()
+            .collect();
+        match matches.len() {
+            0 => Err(ServiceError::validation_failed(format!(
+                "workflow with prefix '{}' not found",
+                prefix
+            ))),
+            1 => Ok(matches.into_iter().next().unwrap()),
+            _ => Err(ServiceError::validation_failed(format!(
+                "ambiguous prefix '{}': multiple workflows match: {}",
+                prefix,
+                matches.join(", ")
+            ))),
+        }
+    }
+
     async fn list_workflows(&self) -> ServiceResult<Vec<WorkflowSummary>> {
         let s = self.state.lock().unwrap();
         Ok(s.workflows
@@ -971,6 +994,36 @@ impl StepService for MockStepService {
     async fn step_exists(&self, id: &str) -> ServiceResult<bool> {
         let s = self.state.lock().unwrap();
         Ok(s.steps.contains_key(id))
+    }
+    async fn resolve_short_id(
+        &self,
+        prefix: &str,
+        workflow_id: Option<&str>,
+    ) -> ServiceResult<String> {
+        let s = self.state.lock().unwrap();
+        let prefix_lower = prefix.to_lowercase();
+        let matches: Vec<String> = s
+            .steps
+            .iter()
+            .filter(|(_, step)| match workflow_id {
+                Some(wf) => step.workflow_id == wf,
+                None => true,
+            })
+            .filter(|(id, _)| id.to_lowercase().starts_with(&prefix_lower))
+            .map(|(id, _)| id.clone())
+            .collect();
+        match matches.len() {
+            0 => Err(ServiceError::validation_failed(format!(
+                "step with prefix '{}' not found",
+                prefix
+            ))),
+            1 => Ok(matches.into_iter().next().unwrap()),
+            _ => Err(ServiceError::validation_failed(format!(
+                "ambiguous prefix '{}': multiple steps match: {}",
+                prefix,
+                matches.join(", ")
+            ))),
+        }
     }
     async fn get_step_by_id(&self, id: &str) -> ServiceResult<Option<Step>> {
         let s = self.state.lock().unwrap();

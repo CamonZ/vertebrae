@@ -291,6 +291,11 @@ pub trait WorkflowService: Send + Sync {
     /// ID lookups are case-insensitive.
     async fn get_workflow(&self, id: &str) -> ServiceResult<Workflow>;
 
+    /// Resolve a short ID prefix (first 8 hex characters of UUID) to a full workflow ID.
+    ///
+    /// Returns the full UUID string if exactly one workflow matches the prefix.
+    async fn resolve_short_id(&self, prefix: &str) -> ServiceResult<String>;
+
     /// List all workflows
     async fn list_workflows(&self) -> ServiceResult<Vec<WorkflowSummary>>;
 

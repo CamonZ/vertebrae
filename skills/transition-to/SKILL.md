@@ -5,7 +5,7 @@ description: Transition a task to a specific workflow step
 
 # /transition-to
 
-Transition a task to a specific step within its current workflow. Both arguments must be UUIDs (full or 8-char short ID for the task).
+Transition a task to a specific step within its current workflow. The task and step arguments accept full UUIDs or 8-char short IDs (uniformly, like every other vtb command).
 
 ## Usage
 
@@ -19,7 +19,7 @@ vtb transition-to <task-id> <step-uuid>
 | Argument | Description |
 |----------|-------------|
 | `task-id` | Task UUID or 8-char short ID |
-| `step-uuid` | Target step UUID (must be full UUID) |
+| `step-uuid` | Target step UUID, 8-char short ID, or step name |
 
 ## Options
 
