@@ -1,0 +1,1 @@
+../../../.claude/skills/ready/SKILL.md
