@@ -431,11 +431,30 @@ async listWorkflowTransitions() : Promise<Result<WorkflowTransition[], CommandEr
 }
 },
 /**
- * Update an existing workflow.
- * 
- * Updates the workflow with the given ID. Only fields that are Some will be updated.
- * Persists via the workflow service (Sacrum) and emits a WorkflowChangedEvent so the
- * detail panel and pipeline view refresh without a manual refetch.
+ * Create a workflow-to-workflow transition. Sacrum broadcasts the change over the
+ * project channel; clients refresh from the broadcast rather than this command.
+ */
+async createWorkflowTransition(fromWorkflowId: string, toWorkflowId: string, label: string | null, targetStepId: string | null) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("create_workflow_transition", { fromWorkflowId, toWorkflowId, label, targetStepId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Delete a workflow-to-workflow transition. Sacrum broadcasts the change.
+ */
+async deleteWorkflowTransition(fromWorkflowId: string, toWorkflowId: string) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("delete_workflow_transition", { fromWorkflowId, toWorkflowId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Update an existing workflow. Only fields that are Some will be updated.
  */
 async updateWorkflow(options: UpdateWorkflowOptions) : Promise<Result<null, CommandError>> {
     try {
@@ -666,7 +685,8 @@ stepExecutionChangedEvent: StepExecutionChangedEvent,
 stepTransitionChangedEvent: StepTransitionChangedEvent,
 taskChangedEvent: TaskChangedEvent,
 taskStepChangedEvent: TaskStepChangedEvent,
-workflowChangedEvent: WorkflowChangedEvent
+workflowChangedEvent: WorkflowChangedEvent,
+workflowTransitionChangedEvent: WorkflowTransitionChangedEvent
 }>({
 claudePermissionRequestEvent: "claude-permission-request-event",
 claudeSessionEndEvent: "claude-session-end-event",
@@ -683,7 +703,8 @@ stepExecutionChangedEvent: "step-execution-changed-event",
 stepTransitionChangedEvent: "step-transition-changed-event",
 taskChangedEvent: "task-changed-event",
 taskStepChangedEvent: "task-step-changed-event",
-workflowChangedEvent: "workflow-changed-event"
+workflowChangedEvent: "workflow-changed-event",
+workflowTransitionChangedEvent: "workflow-transition-changed-event"
 })
 
 /** user-defined constants **/
@@ -1483,6 +1504,15 @@ label: string;
  * Optional target step ID in the destination workflow
  */
 target_step_id: string | null }
+/**
+ * The type of change that occurred on a workflow transition.
+ */
+export type WorkflowTransitionChangeType = "Created" | "Deleted"
+/**
+ * Event payload for workflow transition changes.
+ * Emitted when a workflow-to-workflow transition is created or deleted.
+ */
+export type WorkflowTransitionChangedEvent = { transition_id: string; from_workflow_id: string | null; to_workflow_id: string | null; change_type: WorkflowTransitionChangeType }
 /**
  * Workflow with its associated tasks including full details
  */

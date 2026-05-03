@@ -493,6 +493,76 @@ pub async fn list_workflow_transitions(
     Ok(result)
 }
 
+/// Create a workflow-to-workflow transition. Sacrum broadcasts the change over the
+/// project channel; clients refresh from the broadcast rather than this command.
+#[tauri::command]
+#[specta::specta]
+pub async fn create_workflow_transition(
+    state: State<'_, AppState>,
+    from_workflow_id: String,
+    to_workflow_id: String,
+    label: Option<String>,
+    target_step_id: Option<String>,
+) -> Result<(), CommandError> {
+    let service_guard = state.services.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    service
+        .workflows()
+        .create_workflow_transition(
+            &from_workflow_id,
+            &to_workflow_id,
+            label.as_deref().unwrap_or(""),
+            target_step_id.as_deref(),
+        )
+        .await
+        .map_err(map_workflow_transition_error)?;
+
+    Ok(())
+}
+
+/// Delete a workflow-to-workflow transition. Sacrum broadcasts the change.
+#[tauri::command]
+#[specta::specta]
+pub async fn delete_workflow_transition(
+    state: State<'_, AppState>,
+    from_workflow_id: String,
+    to_workflow_id: String,
+) -> Result<(), CommandError> {
+    let service_guard = state.services.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    service
+        .workflows()
+        .delete_workflow_transition(&from_workflow_id, &to_workflow_id)
+        .await
+        .map_err(map_workflow_transition_error)?;
+
+    Ok(())
+}
+
+/// Translate Sacrum-side workflow transition errors into user-readable messages.
+fn map_workflow_transition_error(err: vertebrae_core::ServiceError) -> CommandError {
+    let raw = err.to_string();
+    let lower = raw.to_lowercase();
+
+    let friendly = if lower.contains("from_workflow_is_final") {
+        "Cannot create a transition from a final workflow. Unmark the source workflow as final first.".to_string()
+    } else if lower.contains("transition already exists")
+        || lower.contains("has already been taken")
+    {
+        "A transition between these workflows already exists.".to_string()
+    } else {
+        raw
+    };
+
+    CommandError { message: friendly }
+}
+
 /// Update an existing workflow. Only fields that are Some will be updated.
 #[tauri::command]
 #[specta::specta]
