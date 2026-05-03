@@ -29,6 +29,10 @@ interface TaskDetailPanelProps {
   onClose?: () => void;
   onTaskSelect?: (taskId: string) => void;
   onBack?: () => void;
+  /** When omitted, the Detach button is hidden (e.g. inside the pop-out itself). */
+  onDetach?: () => void;
+  /** Skip the ResizablePanel wrapper and fill the area — used by the pop-out window. */
+  standalone?: boolean;
 }
 
 /**
@@ -172,6 +176,8 @@ export function TaskDetailPanel({
   onClose,
   onTaskSelect,
   onBack,
+  onDetach,
+  standalone = false,
 }: TaskDetailPanelProps) {
   const [editingField, setEditingField] = useState<
     "title" | "priority" | "level" | null
@@ -541,11 +547,8 @@ export function TaskDetailPanel({
     (taskData?.step_name?.includes(":") &&
       taskData.step_name.split(":").pop() === "in_progress");
 
-  return (
-    <ResizablePanel
-      storageKey="task-detail-panel-width"
-      glowColor="from-primary/0 via-primary/30 to-primary/0"
-    >
+  const content = (
+    <>
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <div className="flex items-center gap-2">
@@ -694,6 +697,31 @@ export function TaskDetailPanel({
             </svg>
             <span>Delete</span>
           </button>
+          {onDetach && (
+            <button
+              type="button"
+              onClick={onDetach}
+              className="cursor-pointer rounded-lg p-1.5 text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              aria-label="Detach into pop-out window"
+              title="Open in a new window"
+              data-testid="detach-button"
+            >
+              <svg
+                className="h-4 w-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.5}
+                  d="M14 3h7v7m0-7L10 14m-4-7H5a2 2 0 00-2 2v12a2 2 0 002 2h12a2 2 0 002-2v-1"
+                />
+              </svg>
+            </button>
+          )}
           {onClose && (
             <button
               type="button"
@@ -1365,6 +1393,26 @@ export function TaskDetailPanel({
           )}
         </div>
       )}
+    </>
+  );
+
+  if (standalone) {
+    return (
+      <div
+        className="relative flex h-full w-full flex-col bg-bg-secondary"
+        data-testid="task-detail-panel-standalone"
+      >
+        {content}
+      </div>
+    );
+  }
+
+  return (
+    <ResizablePanel
+      storageKey="task-detail-panel-width"
+      glowColor="from-primary/0 via-primary/30 to-primary/0"
+    >
+      {content}
     </ResizablePanel>
   );
 }

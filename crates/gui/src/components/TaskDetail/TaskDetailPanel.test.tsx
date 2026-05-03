@@ -225,6 +225,47 @@ describe("TaskDetailPanel - Restructured Layout", () => {
 
       expect(mockOnClose).toHaveBeenCalledTimes(1);
     });
+
+    it("hides the Detach button when no onDetach handler is provided", () => {
+      render(
+        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />,
+      );
+
+      expect(
+        screen.queryByRole("button", { name: /detach into pop-out window/i }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("renders the Detach button and invokes onDetach when clicked", () => {
+      const mockOnDetach = vi.fn();
+      render(
+        <TaskDetailPanel
+          taskId={mockTaskData.id}
+          onClose={vi.fn()}
+          onDetach={mockOnDetach}
+        />,
+      );
+
+      const detachButton = screen.getByRole("button", {
+        name: /detach into pop-out window/i,
+      });
+      expect(detachButton).toBeInTheDocument();
+
+      fireEvent.click(detachButton);
+      expect(mockOnDetach).toHaveBeenCalledTimes(1);
+    });
+
+    it("renders the standalone wrapper and hides Detach in standalone mode", () => {
+      render(<TaskDetailPanel taskId={mockTaskData.id} standalone />);
+
+      expect(
+        screen.getByTestId("task-detail-panel-standalone"),
+      ).toBeInTheDocument();
+      // Detach is meaningless in a window that's already detached
+      expect(
+        screen.queryByRole("button", { name: /detach into pop-out window/i }),
+      ).not.toBeInTheDocument();
+    });
   });
 
   describe("Header buttons", () => {
