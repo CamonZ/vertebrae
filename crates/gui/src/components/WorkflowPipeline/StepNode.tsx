@@ -84,12 +84,19 @@ function StepNodeComponent({ data, selected }: NodeProps<StepNodeType>) {
           )}
         </div>
         <div className="flex-1 min-w-0">
-          <h3
-            className="text-sm font-semibold text-text-primary truncate"
-            title={step.goal || step.name}
-          >
-            {step.name}
-          </h3>
+          <div className="flex items-center gap-2">
+            <h3
+              className="text-sm font-semibold text-text-primary truncate"
+              title={step.goal || step.name}
+            >
+              {step.name}
+            </h3>
+            {step.is_final && (
+              <span className="inline-flex flex-shrink-0 items-center rounded-full bg-warning/15 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-warning">
+                Final
+              </span>
+            )}
+          </div>
           {step.goal && (
             <div className="w-2/3">
               <p className="mt-0.5 truncate text-[10px] text-text-secondary" title={step.goal}>
