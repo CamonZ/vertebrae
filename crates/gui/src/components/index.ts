@@ -18,3 +18,4 @@ export { SplashScreen } from "./SplashScreen";
 export { ChatWindow, ChatWindowManager } from "./ChatWindow";
 export { OpenChatButton } from "./OpenChatButton";
 export { GlobalListeners } from "./GlobalListeners";
+export { WindowLayout } from "./WindowLayout";

@@ -19,3 +19,5 @@ export {
   utilizationLevel,
 } from "./modelContextWindow";
 export type { UtilizationLevel } from "./modelContextWindow";
+export { popOut } from "./popOut";
+export type { PopOutOptions, PopOutResult } from "./popOut";
