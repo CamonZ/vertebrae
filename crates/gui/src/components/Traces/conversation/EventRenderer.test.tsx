@@ -160,6 +160,92 @@ describe("EventRenderer", () => {
     expect(text.className).toMatch(/text-error/);
   });
 
+  it("renders EventGlyph (brain) for thinking events", () => {
+    const event: ThinkingEvent = {
+      kind: "thinking",
+      timestamp: ts,
+      text: "thinking",
+    };
+    render(<EventRenderer event={event} previousTimestamp={null} />);
+    const glyph = screen.getByTestId("event-glyph");
+    expect(glyph.getAttribute("data-glyph")).toBe("brain");
+    expect(glyph.getAttribute("data-label")).toBe("thinking");
+  });
+
+  it("tints the thinking glyph by task level (epic → text-info)", () => {
+    const event: ThinkingEvent = {
+      kind: "thinking",
+      timestamp: ts,
+      text: "x",
+    };
+    render(
+      <EventRenderer event={event} previousTimestamp={null} level="epic" />
+    );
+    const glyph = screen.getByTestId("event-glyph");
+    expect(glyph.className).toMatch(/text-info/);
+  });
+
+  it("renders EventGlyph for tool_call events with tool-specific glyph (Bash → terminal)", () => {
+    const event: ToolCallEvent = {
+      kind: "tool_call",
+      timestamp: ts,
+      toolId: "tool-1",
+      toolName: "Bash",
+      displayName: "Bash",
+      icon: "terminal",
+      summary: "ls",
+      input: { command: "ls" },
+    };
+    render(<EventRenderer event={event} previousTimestamp={null} />);
+    const glyph = screen.getByTestId("event-glyph");
+    expect(glyph.getAttribute("data-glyph")).toBe("terminal");
+  });
+
+  it("renders EventGlyph for tool_call events (Edit → edit glyph)", () => {
+    const event: ToolCallEvent = {
+      kind: "tool_call",
+      timestamp: ts,
+      toolId: "tool-1",
+      toolName: "Edit",
+      displayName: "Edit",
+      icon: "edit",
+      summary: "edit foo",
+      input: {},
+    };
+    render(<EventRenderer event={event} previousTimestamp={null} />);
+    const glyph = screen.getByTestId("event-glyph");
+    expect(glyph.getAttribute("data-glyph")).toBe("edit");
+  });
+
+  it("renders EventGlyph for successful tool_result with filled variant", () => {
+    const event: ToolResultEvent = {
+      kind: "tool_result",
+      timestamp: ts,
+      toolUseId: "t",
+      isError: false,
+      result: "ok",
+    };
+    render(<EventRenderer event={event} previousTimestamp={null} />);
+    const glyph = screen.getByTestId("event-glyph");
+    expect(glyph.getAttribute("data-variant")).toBe("filled");
+    expect(glyph.getAttribute("data-label")).toBe("tool result");
+  });
+
+  it("renders EventGlyph for failing tool_result with error variant + text-error tint", () => {
+    const event: ToolResultEvent = {
+      kind: "tool_result",
+      timestamp: ts,
+      toolUseId: "t",
+      isError: true,
+      result: "boom",
+    };
+    render(<EventRenderer event={event} previousTimestamp={null} />);
+    const glyph = screen.getByTestId("event-glyph");
+    expect(glyph.getAttribute("data-variant")).toBe("error");
+    expect(glyph.getAttribute("data-label")).toBe("tool error");
+    expect(glyph.className).toMatch(/text-error/);
+  });
+
   it("returns null for unknown event kinds", () => {
     const { container } = render(
       <EventRenderer

@@ -414,6 +414,7 @@ export function UnifiedChatView({
                       <EventRenderer
                         event={tagged.event}
                         previousTimestamp={previousTimestamp}
+                        level={task?.level ?? null}
                       />
                     </div>
                   );

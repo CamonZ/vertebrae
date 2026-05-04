@@ -154,4 +154,39 @@ describe("StepBoundary", () => {
     expect(el.style.marginLeft).toBe("32px");
     expect(el.getAttribute("data-depth")).toBe("2");
   });
+
+  it("uses default primary border and no threshold callout when thresholdKind is null", () => {
+    render(<StepBoundary {...baseProps} />);
+    const el = screen.getByTestId("unified-chat-step-boundary");
+    expect(el.className).toMatch(/border-primary/);
+    expect(el.getAttribute("data-threshold-kind")).toBe("");
+    expect(screen.queryByTestId("step-boundary-threshold-callout")).toBeNull();
+  });
+
+  it("tints the left border red and shows a REJECTION callout for thresholdKind='rejection'", () => {
+    render(<StepBoundary {...baseProps} thresholdKind="rejection" />);
+    const el = screen.getByTestId("unified-chat-step-boundary");
+    expect(el.getAttribute("data-threshold-kind")).toBe("rejection");
+    expect(el.className).toMatch(/border-error/);
+    expect(el.className).not.toMatch(/border-primary/);
+    const callout = screen.getByTestId("step-boundary-threshold-callout");
+    expect(callout.getAttribute("data-kind")).toBe("rejection");
+    expect(callout.className).toMatch(/text-error/);
+    expect(callout.textContent).toBe("rejection");
+  });
+
+  it("tints the left border green and shows an APPROVAL callout for thresholdKind='approval'", () => {
+    render(<StepBoundary {...baseProps} thresholdKind="approval" />);
+    const el = screen.getByTestId("unified-chat-step-boundary");
+    expect(el.className).toMatch(/border-success/);
+    const callout = screen.getByTestId("step-boundary-threshold-callout");
+    expect(callout.getAttribute("data-kind")).toBe("approval");
+    expect(callout.className).toMatch(/text-success/);
+  });
+
+  it("humanizes underscores in the threshold callout label", () => {
+    render(<StepBoundary {...baseProps} thresholdKind="model_fallback" />);
+    const callout = screen.getByTestId("step-boundary-threshold-callout");
+    expect(callout.textContent).toBe("model fallback");
+  });
 });

@@ -33,6 +33,33 @@ describe("DelegationBlock", () => {
     expect(screen.queryByText(/delegated →/)).toBeNull();
   });
 
+  it("uses muted primary border when thresholdKind is null", () => {
+    render(
+      <DelegationBlock parentTaskId="p" childTaskId="c">
+        <span>x</span>
+      </DelegationBlock>
+    );
+    const el = screen.getByTestId("unified-chat-delegation");
+    expect(el.getAttribute("data-threshold-kind")).toBe("");
+    expect(el.className).toMatch(/border-primary\/40/);
+  });
+
+  it("tints the left border by thresholdKind (rejection → border-error)", () => {
+    render(
+      <DelegationBlock
+        parentTaskId="p"
+        childTaskId="c"
+        thresholdKind="rejection"
+      >
+        <span>x</span>
+      </DelegationBlock>
+    );
+    const el = screen.getByTestId("unified-chat-delegation");
+    expect(el.getAttribute("data-threshold-kind")).toBe("rejection");
+    expect(el.className).toMatch(/border-error/);
+    expect(el.className).not.toMatch(/border-primary\/40/);
+  });
+
   it("indents based on depth (default depth=1 → 0px)", () => {
     const { rerender } = render(
       <DelegationBlock parentTaskId="p" childTaskId="c">
