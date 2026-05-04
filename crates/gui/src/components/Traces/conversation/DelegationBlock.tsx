@@ -3,9 +3,15 @@
  * border so the user can see a parent step "spawned" a child task and is
  * waiting on its work. The wrapped section gets its own StepBoundary
  * header rendered inline by the caller.
+ *
+ * When the spawning event is itself a workflow threshold (e.g. an approval
+ * that triggered the child task's creation), `thresholdKind` tints the left
+ * border to match FlightStrip's per-kind threshold colors.
  */
 
 import type { ReactNode } from "react";
+import { thresholdKindBorderClass } from "../levelColors";
+import type { ThresholdMarkerKind } from "../timeline";
 
 interface DelegationBlockProps {
   parentTaskId: string;
@@ -13,6 +19,7 @@ interface DelegationBlockProps {
   childTaskTitle?: string | null;
   depth?: number;
   children: ReactNode;
+  thresholdKind?: ThresholdMarkerKind | null;
 }
 
 export function DelegationBlock({
@@ -21,14 +28,19 @@ export function DelegationBlock({
   childTaskTitle,
   depth = 1,
   children,
+  thresholdKind = null,
 }: DelegationBlockProps): ReactNode {
+  const borderClass = thresholdKind
+    ? thresholdKindBorderClass(thresholdKind)
+    : "border-primary/40";
   return (
     <div
       data-testid="unified-chat-delegation"
       data-parent-task-id={parentTaskId}
       data-child-task-id={childTaskId}
       data-depth={depth}
-      className="my-2 border-l-2 border-primary/40 bg-bg-tertiary/30 pl-3"
+      data-threshold-kind={thresholdKind ?? ""}
+      className={`my-2 border-l-2 ${borderClass} bg-bg-tertiary/30 pl-3`}
       style={{ marginLeft: (depth - 1) * 16 }}
     >
       {childTaskTitle && (
