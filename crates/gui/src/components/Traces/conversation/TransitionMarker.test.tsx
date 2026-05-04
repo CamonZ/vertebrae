@@ -26,4 +26,29 @@ describe("TransitionMarker", () => {
     const qmarks = screen.getAllByText("?");
     expect(qmarks).toHaveLength(2);
   });
+
+  it("uses neutral border + text when thresholdKind is null", () => {
+    render(<TransitionMarker fromStep="a" toStep="b" taskId="t" />);
+    const marker = screen.getByTestId("unified-chat-transition");
+    expect(marker.getAttribute("data-threshold-kind")).toBe("");
+    const chip = marker.querySelector("span.inline-flex");
+    expect(chip?.className).toMatch(/border-border/);
+    expect(chip?.className).toMatch(/text-text-secondary/);
+  });
+
+  it("tints the chip red for thresholdKind='rejection'", () => {
+    render(
+      <TransitionMarker
+        fromStep="pending_review"
+        toStep="in_progress"
+        taskId="t"
+        thresholdKind="rejection"
+      />
+    );
+    const marker = screen.getByTestId("unified-chat-transition");
+    expect(marker.getAttribute("data-threshold-kind")).toBe("rejection");
+    const chip = marker.querySelector("span.inline-flex");
+    expect(chip?.className).toMatch(/border-error/);
+    expect(chip?.className).toMatch(/text-error/);
+  });
 });
