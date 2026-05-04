@@ -3,6 +3,7 @@ pub mod dependencies;
 pub mod refs;
 pub mod sections;
 pub mod setup;
+pub mod short_id;
 pub mod state;
 pub mod step;
 pub mod task;

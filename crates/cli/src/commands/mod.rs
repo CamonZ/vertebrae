@@ -449,11 +449,24 @@ impl Command {
                 cmd.id = resolve_id(&cmd.id, services).await?;
                 cmd.blocker_id = resolve_id(&cmd.blocker_id, services).await?;
             }
-            Command::Daemon(_)
-            | Command::Execution(_)
-            | Command::Init(_)
-            | Command::List(_)
-            | Command::Ready(_) => {}
+            Command::Daemon(_) | Command::Init(_) | Command::Ready(_) => {}
+            Command::Execution(cmd) => match cmd {
+                execution::ExecutionCommand::Create(c) => {
+                    c.task_id = resolve_id(&c.task_id, services).await?;
+                }
+                execution::ExecutionCommand::List(c) => {
+                    c.task_id = resolve_id(&c.task_id, services).await?;
+                }
+                execution::ExecutionCommand::Show(_)
+                | execution::ExecutionCommand::Update(_)
+                | execution::ExecutionCommand::Log(_) => {}
+            },
+            Command::List(cmd) => {
+                resolve_optional_id(&mut cmd.parent, services).await?;
+                resolve_optional_workflow_id(&mut cmd.workflow, services).await?;
+                let workflow = cmd.workflow.clone();
+                resolve_optional_step_id(&mut cmd.step, workflow.as_deref(), services).await?;
+            }
             Command::Path(cmd) => {
                 cmd.from_id = resolve_id(&cmd.from_id, services).await?;
                 cmd.to_id = resolve_id(&cmd.to_id, services).await?;
@@ -502,9 +515,10 @@ impl Command {
                 }
             },
             Command::Workflow(cmd) => match cmd {
-                workflow::WorkflowCommand::Add(_)
-                | workflow::WorkflowCommand::List(_)
-                | workflow::WorkflowCommand::Unassign(_) => {}
+                workflow::WorkflowCommand::Add(_) | workflow::WorkflowCommand::List(_) => {}
+                workflow::WorkflowCommand::Unassign(c) => {
+                    c.task_id = resolve_id(&c.task_id, services).await?;
+                }
                 workflow::WorkflowCommand::Show(c) => {
                     c.id = resolve_workflow_id(&c.id, services).await?;
                 }

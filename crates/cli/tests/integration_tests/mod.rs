@@ -11,6 +11,7 @@ mod execution_tests;
 mod mock;
 mod ready_tests;
 mod refs_tests;
+mod resolve_ids_tests;
 mod review_tests;
 mod run_tests;
 mod run_workflow_tests;

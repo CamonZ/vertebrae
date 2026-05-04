@@ -71,6 +71,19 @@ async fn command_should_fail_with(world: &mut SmokeWorld, expected: String) {
     );
 }
 
+#[then(expr = "the error should not contain {string}")]
+async fn error_should_not_contain(world: &mut SmokeWorld, unexpected: String) {
+    let unexpected = world.resolve_vars(&unexpected);
+    let combined = world.combined_output();
+    assert!(
+        !combined.contains(&unexpected),
+        "expected error NOT to contain '{}', but it did.\nstdout: '{}'\nstderr: '{}'",
+        unexpected,
+        world.last_stdout,
+        world.last_stderr
+    );
+}
+
 #[then(expr = "the error should contain {string}")]
 async fn error_should_contain(world: &mut SmokeWorld, expected: String) {
     let expected = world.resolve_vars(&expected);
