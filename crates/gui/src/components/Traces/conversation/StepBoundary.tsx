@@ -15,6 +15,11 @@
 import { useState, type ReactNode } from "react";
 import { formatCost } from "../../../utils/formatCost";
 import { MarkdownContent } from "../../shared/MarkdownContent";
+import {
+  thresholdKindBorderClass,
+  thresholdKindClass,
+} from "../levelColors";
+import type { ThresholdMarkerKind } from "../timeline";
 import { formatDurationShort, humanizeStepName } from "./EventRenderer";
 
 /**
@@ -51,6 +56,14 @@ interface StepBoundaryProps {
   depth?: number;
   /** Prompt used to drive this step execution. When set, rendered as a collapsible markdown section. */
   prompt?: string | null;
+  /**
+   * When this boundary represents a workflow threshold (rejection, approval,
+   * model_fallback, etc.), the kind drives a per-kind tint on the left border
+   * and adds a kind-tagged callout chip. The mapping mirrors FlightStrip's
+   * threshold lane via `thresholdKindClass` so the chat and strip read as one
+   * system. Null = no threshold affordance (vanilla boundary).
+   */
+  thresholdKind?: ThresholdMarkerKind | null;
 }
 
 function formatTimestamp(ts: string | null): string {
@@ -84,12 +97,14 @@ export function StepBoundary({
   numTurns,
   depth = 0,
   prompt = null,
+  thresholdKind = null,
 }: StepBoundaryProps): ReactNode {
   const stepLabel = humanizeStepName(stepName);
   const showTitleInline = !!taskTitle && taskTitlePlacement === "inline";
   const showTitleSubtitle = !!taskTitle && taskTitlePlacement === "subtitle";
   const hasPrompt = !!prompt && prompt.trim().length > 0;
   const [promptExpanded, setPromptExpanded] = useState(false);
+  const borderClass = thresholdKindBorderClass(thresholdKind);
 
   return (
     <div
@@ -99,10 +114,20 @@ export function StepBoundary({
       data-step-name={stepName ?? ""}
       data-depth={depth}
       data-task-title-placement={taskTitlePlacement}
-      className="sticky top-0 z-10 -mx-2 mb-2 border-l-2 border-primary bg-bg-secondary px-3 py-2 shadow-sm"
+      data-threshold-kind={thresholdKind ?? ""}
+      className={`sticky top-0 z-10 -mx-2 mb-2 border-l-2 ${borderClass} bg-bg-secondary px-3 py-2 shadow-sm`}
       style={{ marginLeft: depth * 16, marginRight: 0 }}
     >
       <div className="flex flex-wrap items-center gap-2">
+        {thresholdKind && (
+          <span
+            data-testid="step-boundary-threshold-callout"
+            data-kind={thresholdKind}
+            className={`rounded border border-current px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider ${thresholdKindClass(thresholdKind)}`}
+          >
+            {humanizeStepName(thresholdKind)}
+          </span>
+        )}
         <span className="rounded bg-primary/10 px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider text-primary">
           {workflowName ?? "workflow"}
         </span>

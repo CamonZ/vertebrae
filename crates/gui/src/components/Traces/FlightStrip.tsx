@@ -12,6 +12,7 @@ import {
 } from "react";
 import type { SessionLog, StepExecution, Task } from "../../bindings";
 import { EventGlyph, resolveGlyph } from "./EventGlyph";
+import { levelTintClass } from "./levelColors";
 import {
   buildTimelineProjection,
   type ThresholdMarker,
@@ -71,18 +72,6 @@ export function computeCalloutVisibility(
 }
 
 const xPct = (x: number): string => `${(x * 100).toFixed(3)}%`;
-
-const LEVEL_TINT_CLASS: Record<string, string> = {
-  epic: "text-info",
-  ticket: "text-primary",
-  task: "text-text-secondary",
-};
-
-function levelTintClass(level: string | null): string {
-  return level && LEVEL_TINT_CLASS[level]
-    ? LEVEL_TINT_CLASS[level]
-    : "text-text-secondary";
-}
 
 export function FlightStrip({
   rootTaskId,
@@ -635,7 +624,7 @@ function ThresholdLane({
                 data-visible={showTitle ? "true" : "false"}
                 aria-hidden={showTitle ? undefined : "true"}
                 className={`pointer-events-none absolute left-1/2 top-0 -translate-x-1/2 whitespace-nowrap font-mono text-[8px] uppercase tracking-wider ${
-                  isError ? "text-status-error" : "text-text-secondary"
+                  isError ? "text-error" : "text-text-secondary"
                 }`}
                 style={{
                   height: calloutHeight,
