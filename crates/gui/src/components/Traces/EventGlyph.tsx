@@ -121,7 +121,7 @@ export function resolveGlyph(input: GlyphInput): ResolvedGlyph {
 const VARIANT_CLASS: Record<ResolvedGlyph["variant"], string> = {
   default: "text-text-secondary",
   filled: "text-text-primary",
-  error: "text-status-error",
+  error: "text-error",
 };
 
 interface GlyphDef {
@@ -312,6 +312,8 @@ export interface EventGlyphProps {
   event: GlyphInput;
   size?: number;
   className?: string;
+  /** Overrides the variant's default text color class (e.g. "text-info"). */
+  tintClassName?: string;
   title?: string;
 }
 
@@ -319,12 +321,14 @@ export function EventGlyph({
   event,
   size = 16,
   className,
+  tintClassName,
   title,
 }: EventGlyphProps): ReactNode {
   const resolved = resolveGlyph(event);
   const def = GLYPHS[resolved.glyph];
   const label = title ?? resolved.label;
-  const cls = [VARIANT_CLASS[resolved.variant], "inline-block flex-shrink-0", className]
+  const tint = tintClassName ?? VARIANT_CLASS[resolved.variant];
+  const cls = [tint, "inline-block flex-shrink-0", className]
     .filter(Boolean)
     .join(" ");
   return (

@@ -11,8 +11,10 @@ import {
   type RefObject,
 } from "react";
 import type { SessionLog, StepExecution, Task } from "../../bindings";
+import { EventGlyph, resolveGlyph } from "./EventGlyph";
 import {
   buildTimelineProjection,
+  type ThresholdMarker,
   type TimelineMarker,
   type TimelineProjection,
 } from "./timeline";
@@ -28,11 +30,59 @@ interface FlightStripProps {
 }
 
 const LANE_HEIGHT = 14;
-const THRESHOLD_LANE_HEIGHT = 18;
+const THRESHOLD_CALLOUT_HEIGHT = 14;
+const THRESHOLD_LANE_HEIGHT = 22;
 const TOOL_LANE_HEIGHT = 16;
 const PADDING_X = 8;
+const LANE_LABEL_WIDTH = 72;
+const CALLOUT_MIN_GAP_PX = 70;
+
+const THRESHOLD_TITLES: Record<ThresholdMarker["kind"], string | null> = {
+  approval: "APPROVAL",
+  rejection: "REJECTION",
+  model_fallback: "MODEL FALLBACK",
+  transition: "TRANSITION",
+  retry: "RETRY",
+  execution_start: null,
+  execution_end: null,
+};
+
+export function computeCalloutVisibility(
+  thresholds: readonly ThresholdMarker[],
+  canvasWidthPx: number,
+  minGapPx: number = CALLOUT_MIN_GAP_PX
+): boolean[] {
+  const visible = thresholds.map((m) => THRESHOLD_TITLES[m.kind] !== null);
+  if (canvasWidthPx <= 0) return visible;
+  const order = thresholds
+    .map((_, i) => i)
+    .sort((a, b) => thresholds[a].x - thresholds[b].x);
+  let lastShownPx: number | null = null;
+  for (const i of order) {
+    if (!visible[i]) continue;
+    const px = thresholds[i].x * canvasWidthPx;
+    if (lastShownPx !== null && px - lastShownPx < minGapPx) {
+      visible[i] = false;
+      continue;
+    }
+    lastShownPx = px;
+  }
+  return visible;
+}
 
 const xPct = (x: number): string => `${(x * 100).toFixed(3)}%`;
+
+const LEVEL_TINT_CLASS: Record<string, string> = {
+  epic: "text-info",
+  ticket: "text-primary",
+  task: "text-text-secondary",
+};
+
+function levelTintClass(level: string | null): string {
+  return level && LEVEL_TINT_CLASS[level]
+    ? LEVEL_TINT_CLASS[level]
+    : "text-text-secondary";
+}
 
 export function FlightStrip({
   rootTaskId,
@@ -43,6 +93,7 @@ export function FlightStrip({
   projection: projectionOverride,
 }: FlightStripProps): ReactNode {
   const [thresholdsOnly, setThresholdsOnly] = useState(false);
+  const [canvasWidth, setCanvasWidth] = useState(0);
   const [viewport, setViewport] = useState<{
     start: number;
     end: number;
@@ -184,9 +235,23 @@ export function FlightStrip({
     const el = containerRef.current;
     if (!el) return 0;
     const rect = el.getBoundingClientRect();
-    const inner = rect.width - PADDING_X * 2;
+    const inner = rect.width;
     if (inner <= 0) return 0;
-    return Math.max(0, Math.min(1, (clientX - rect.left - PADDING_X) / inner));
+    return Math.max(0, Math.min(1, (clientX - rect.left) / inner));
+  }, []);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const measure = (): void => {
+      const w = el.getBoundingClientRect().width;
+      setCanvasWidth((prev) => (Math.abs(prev - w) < 0.5 ? prev : w));
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
   }, []);
 
   const handleMarkerClick = useCallback(
@@ -234,12 +299,21 @@ export function FlightStrip({
   );
 
   const mainLaneHeight = projection.mainRows.length * LANE_HEIGHT;
+  const thresholdBlockHeight = THRESHOLD_CALLOUT_HEIGHT + THRESHOLD_LANE_HEIGHT;
   const totalHeight = thresholdsOnly
-    ? THRESHOLD_LANE_HEIGHT + 8
-    : THRESHOLD_LANE_HEIGHT +
+    ? thresholdBlockHeight + 8
+    : thresholdBlockHeight +
       TOOL_LANE_HEIGHT +
       Math.max(LANE_HEIGHT, mainLaneHeight) +
       16;
+
+  const calloutVisible = useMemo(
+    () => computeCalloutVisibility(projection.thresholds, canvasWidth),
+    [projection.thresholds, canvasWidth]
+  );
+
+  const toolLaneTop = thresholdBlockHeight;
+  const mainLaneTop = thresholdBlockHeight + TOOL_LANE_HEIGHT;
 
   return (
     <div
@@ -267,162 +341,159 @@ export function FlightStrip({
       </div>
 
       <div
-        ref={containerRef}
-        data-testid="flight-strip-canvas"
-        role="slider"
-        aria-label="Subtree timeline"
-        aria-valuemin={0}
-        aria-valuemax={1}
-        aria-valuenow={viewport.start}
-        tabIndex={0}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerCancel={handlePointerUp}
-        className="relative w-full cursor-pointer touch-none active:cursor-grabbing"
+        className="relative flex w-full"
         style={{ height: totalHeight }}
       >
-        <Lane
-          testId="flight-strip-lane-threshold"
-          label="THRESHOLD"
-          top={0}
-          height={THRESHOLD_LANE_HEIGHT}
-        >
-          {projection.thresholds.map((m, i) => (
-            <button
-              type="button"
-              key={`th-${i}`}
-              data-testid="flight-strip-marker-threshold"
-              data-kind={m.kind}
-              data-execution-id={m.executionId}
-              data-task-id={m.taskId}
-              title={m.label}
-              onClick={(e) => {
-                e.stopPropagation();
-                handleMarkerClick(m);
-              }}
-              className="absolute top-1/2 h-3 w-[6px] -translate-x-1/2 -translate-y-1/2 rounded-sm border border-warning/60 bg-warning/70 hover:bg-warning"
-              style={{ left: xPct(m.x) }}
-            />
-          ))}
-        </Lane>
-
-        {!thresholdsOnly && (
-          <>
-            <Lane
-              testId="flight-strip-lane-tool"
-              label="TOOL"
-              top={THRESHOLD_LANE_HEIGHT}
-              height={TOOL_LANE_HEIGHT}
-            >
-              {projection.tools.map((m, i) => (
-                <button
-                  type="button"
-                  key={`tl-${i}`}
-                  data-testid="flight-strip-marker-tool"
-                  data-kind={m.kind}
-                  data-execution-id={m.executionId}
-                  title={`${m.kind === "tool_use" ? "⊳" : "⊲"} ${m.toolName}`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleMarkerClick(m);
-                  }}
-                  className={`absolute top-1/2 h-2 w-2 -translate-x-1/2 -translate-y-1/2 rounded-full ${
-                    m.kind === "tool_use"
-                      ? "bg-accent-primary"
-                      : m.isError
-                        ? "bg-error"
-                        : "bg-accent-secondary"
-                  }`}
-                  style={{ left: xPct(m.x) }}
-                />
-              ))}
-            </Lane>
-
-            <div
-              data-testid="flight-strip-lane-main"
-              className="absolute left-0 right-0"
-              style={{
-                top: THRESHOLD_LANE_HEIGHT + TOOL_LANE_HEIGHT,
-                height: Math.max(LANE_HEIGHT, mainLaneHeight),
-              }}
-            >
-              {projection.mainRows.map((row) => (
-                <div
-                  key={row.taskId}
-                  data-testid="flight-strip-main-row"
-                  data-task-id={row.taskId}
-                  data-row-index={row.index}
-                  className="absolute left-0 right-0 border-t border-border/40"
-                  style={{
-                    top: row.index * LANE_HEIGHT,
-                    height: LANE_HEIGHT,
-                  }}
-                >
-                  {projection.mainByRow[row.index]?.map((m, i) => (
-                    <button
-                      type="button"
-                      key={`mn-${row.index}-${i}`}
-                      data-testid="flight-strip-marker-main"
-                      data-execution-id={m.executionId}
-                      data-task-id={m.taskId}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleMarkerClick(m);
-                      }}
-                      className="absolute top-1/2 h-1.5 w-[3px] -translate-x-1/2 -translate-y-1/2 rounded-sm bg-text-secondary/70 hover:bg-text-primary"
-                      style={{ left: xPct(m.x) }}
-                    />
-                  ))}
-                </div>
-              ))}
-
-              <svg
-                data-testid="flight-strip-delegation-svg"
-                className="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
-                aria-hidden="true"
-              >
-                {projection.delegations.map((d, i) => {
-                  const y1 = d.parentRowIndex * LANE_HEIGHT + LANE_HEIGHT / 2;
-                  const y2 = d.childRowIndex * LANE_HEIGHT + LANE_HEIGHT / 2;
-                  return (
-                    <line
-                      key={`dg-${i}`}
-                      data-testid="flight-strip-delegation-edge"
-                      data-parent-task-id={d.parentTaskId}
-                      data-child-task-id={d.childTaskId}
-                      x1={xPct(d.x)}
-                      x2={xPct(d.x)}
-                      y1={y1}
-                      y2={y2}
-                      stroke="currentColor"
-                      strokeOpacity={0.5}
-                      strokeWidth={1}
-                      strokeDasharray="2 2"
-                      className="text-accent-primary"
-                    />
-                  );
-                })}
-              </svg>
-            </div>
-          </>
-        )}
-
-        <div
-          data-testid="flight-strip-viewport"
-          aria-hidden="true"
-          className="pointer-events-none absolute top-0 bottom-0 border border-accent-primary/70 bg-accent-primary/10"
-          style={
-            {
-              left: xPct(viewport.start),
-              width: xPct(Math.max(0.005, viewport.end - viewport.start)),
-              visibility: viewport.measured ? "visible" : "hidden",
-            } as CSSProperties
-          }
-          data-start={viewport.start.toFixed(4)}
-          data-end={viewport.end.toFixed(4)}
-          data-measured={viewport.measured ? "true" : "false"}
+        <LaneGutter
+          thresholdsOnly={thresholdsOnly}
+          thresholdBlockHeight={thresholdBlockHeight}
+          toolLaneTop={toolLaneTop}
+          mainLaneTop={mainLaneTop}
+          mainLaneHeight={Math.max(LANE_HEIGHT, mainLaneHeight)}
+          hasDelegations={projection.delegations.length > 0}
         />
+        <div
+          ref={containerRef}
+          data-testid="flight-strip-canvas"
+          role="slider"
+          aria-label="Subtree timeline"
+          aria-valuemin={0}
+          aria-valuemax={1}
+          aria-valuenow={viewport.start}
+          tabIndex={0}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={handlePointerUp}
+          className="relative flex-1 cursor-pointer touch-none active:cursor-grabbing"
+        >
+          <ThresholdLane
+            thresholds={projection.thresholds}
+            calloutVisible={calloutVisible}
+            onMarkerClick={handleMarkerClick}
+            calloutHeight={THRESHOLD_CALLOUT_HEIGHT}
+            laneHeight={THRESHOLD_LANE_HEIGHT}
+          />
+
+          {!thresholdsOnly && (
+            <>
+              <Lane
+                testId="flight-strip-lane-tool"
+                top={toolLaneTop}
+                height={TOOL_LANE_HEIGHT}
+              >
+                {projection.tools.map((m, i) => (
+                  <button
+                    type="button"
+                    key={`tl-${i}`}
+                    data-testid="flight-strip-marker-tool"
+                    data-kind={m.kind}
+                    data-execution-id={m.executionId}
+                    title={`${m.kind === "tool_use" ? "⊳" : "⊲"} ${m.toolName}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleMarkerClick(m);
+                    }}
+                    className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 leading-none"
+                    style={{ left: xPct(m.x) }}
+                  >
+                    <EventGlyph event={m} size={12} />
+                  </button>
+                ))}
+              </Lane>
+
+              <div
+                data-testid="flight-strip-lane-main"
+                className="absolute left-0 right-0"
+                style={{
+                  top: mainLaneTop,
+                  height: Math.max(LANE_HEIGHT, mainLaneHeight),
+                }}
+              >
+                {projection.mainRows.map((row) => (
+                  <div
+                    key={row.taskId}
+                    data-testid="flight-strip-main-row"
+                    data-task-id={row.taskId}
+                    data-row-index={row.index}
+                    className="absolute left-0 right-0 border-t border-border/40"
+                    style={{
+                      top: row.index * LANE_HEIGHT,
+                      height: LANE_HEIGHT,
+                    }}
+                  >
+                    {projection.mainByRow[row.index]?.map((m, i) => (
+                      <button
+                        type="button"
+                        key={`mn-${row.index}-${i}`}
+                        data-testid="flight-strip-marker-main"
+                        data-execution-id={m.executionId}
+                        data-task-id={m.taskId}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleMarkerClick(m);
+                        }}
+                        className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 leading-none"
+                        style={{ left: xPct(m.x) }}
+                      >
+                        <EventGlyph
+                          event={m}
+                          size={10}
+                          tintClassName={levelTintClass(row.level)}
+                        />
+                      </button>
+                    ))}
+                  </div>
+                ))}
+
+                <svg
+                  data-testid="flight-strip-delegation-svg"
+                  className="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
+                  aria-hidden="true"
+                >
+                  {projection.delegations.map((d, i) => {
+                    const y1 = d.parentRowIndex * LANE_HEIGHT + LANE_HEIGHT / 2;
+                    const y2 = d.childRowIndex * LANE_HEIGHT + LANE_HEIGHT / 2;
+                    return (
+                      <line
+                        key={`dg-${i}`}
+                        data-testid="flight-strip-delegation-edge"
+                        data-parent-task-id={d.parentTaskId}
+                        data-child-task-id={d.childTaskId}
+                        data-child-level={d.childLevel ?? ""}
+                        x1={xPct(d.x)}
+                        x2={xPct(d.x)}
+                        y1={y1}
+                        y2={y2}
+                        stroke="currentColor"
+                        strokeOpacity={0.7}
+                        strokeWidth={1.5}
+                        strokeDasharray="2 2"
+                        className={levelTintClass(d.childLevel)}
+                      />
+                    );
+                  })}
+                </svg>
+              </div>
+            </>
+          )}
+
+          <div
+            data-testid="flight-strip-viewport"
+            aria-hidden="true"
+            className="pointer-events-none absolute top-0 bottom-0 border border-accent-primary/70 bg-accent-primary/10"
+            style={
+              {
+                left: xPct(viewport.start),
+                width: xPct(Math.max(0.005, viewport.end - viewport.start)),
+                visibility: viewport.measured ? "visible" : "hidden",
+              } as CSSProperties
+            }
+            data-start={viewport.start.toFixed(4)}
+            data-end={viewport.end.toFixed(4)}
+            data-measured={viewport.measured ? "true" : "false"}
+          />
+        </div>
       </div>
     </div>
   );
@@ -430,13 +501,11 @@ export function FlightStrip({
 
 function Lane({
   testId,
-  label,
   top,
   height,
   children,
 }: {
   testId: string;
-  label: string;
   top: number;
   height: number;
   children?: ReactNode;
@@ -447,13 +516,154 @@ function Lane({
       className="absolute left-0 right-0"
       style={{ top, height }}
     >
-      <span
-        aria-hidden="true"
-        className="pointer-events-none absolute left-1 top-0 z-10 font-mono text-[8px] uppercase tracking-wider text-text-muted/70"
-      >
-        {label}
-      </span>
       {children}
+    </div>
+  );
+}
+
+function GutterLabel({
+  testId,
+  label,
+  top,
+  height,
+}: {
+  testId: string;
+  label: string;
+  top: number;
+  height: number;
+}): ReactNode {
+  return (
+    <div
+      data-testid={testId}
+      className="absolute left-0 right-1 flex items-center justify-end pr-2 font-mono text-[9px] uppercase tracking-wider text-text-muted"
+      style={{ top, height }}
+    >
+      {label}
+    </div>
+  );
+}
+
+function LaneGutter({
+  thresholdsOnly,
+  thresholdBlockHeight,
+  toolLaneTop,
+  mainLaneTop,
+  mainLaneHeight,
+  hasDelegations,
+}: {
+  thresholdsOnly: boolean;
+  thresholdBlockHeight: number;
+  toolLaneTop: number;
+  mainLaneTop: number;
+  mainLaneHeight: number;
+  hasDelegations: boolean;
+}): ReactNode {
+  return (
+    <div
+      data-testid="flight-strip-gutter"
+      className="relative flex-shrink-0 border-r border-border/60"
+      style={{ width: LANE_LABEL_WIDTH }}
+    >
+      <GutterLabel
+        testId="flight-strip-gutter-label-threshold"
+        label="THRESHOLD"
+        top={0}
+        height={thresholdBlockHeight}
+      />
+      {!thresholdsOnly && (
+        <>
+          <GutterLabel
+            testId="flight-strip-gutter-label-tool"
+            label="TOOL"
+            top={toolLaneTop}
+            height={TOOL_LANE_HEIGHT}
+          />
+          <GutterLabel
+            testId="flight-strip-gutter-label-main"
+            label="MAIN"
+            top={mainLaneTop}
+            height={mainLaneHeight}
+          />
+          {hasDelegations && (
+            <GutterLabel
+              testId="flight-strip-gutter-label-delegation"
+              label="DELEGATION"
+              top={mainLaneTop + mainLaneHeight - 12}
+              height={12}
+            />
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function ThresholdLane({
+  thresholds,
+  calloutVisible,
+  onMarkerClick,
+  calloutHeight,
+  laneHeight,
+}: {
+  thresholds: readonly ThresholdMarker[];
+  calloutVisible: readonly boolean[];
+  onMarkerClick: (m: TimelineMarker) => void;
+  calloutHeight: number;
+  laneHeight: number;
+}): ReactNode {
+  return (
+    <div
+      data-testid="flight-strip-lane-threshold"
+      className="absolute left-0 right-0"
+      style={{ top: 0, height: calloutHeight + laneHeight }}
+    >
+      {thresholds.map((m, i) => {
+        const isError = resolveGlyph(m).variant === "error";
+        const title = THRESHOLD_TITLES[m.kind];
+        const showTitle = title !== null && calloutVisible[i];
+        return (
+          <div
+            key={`th-wrap-${i}`}
+            className="absolute -translate-x-1/2"
+            style={{ left: xPct(m.x), top: 0 }}
+          >
+            {title !== null && (
+              <span
+                data-testid="flight-strip-threshold-callout"
+                data-kind={m.kind}
+                data-execution-id={m.executionId}
+                data-visible={showTitle ? "true" : "false"}
+                aria-hidden={showTitle ? undefined : "true"}
+                className={`pointer-events-none absolute left-1/2 top-0 -translate-x-1/2 whitespace-nowrap font-mono text-[8px] uppercase tracking-wider ${
+                  isError ? "text-status-error" : "text-text-secondary"
+                }`}
+                style={{
+                  height: calloutHeight,
+                  visibility: showTitle ? "visible" : "hidden",
+                }}
+              >
+                {title}
+              </span>
+            )}
+            <button
+              type="button"
+              data-testid="flight-strip-marker-threshold"
+              data-kind={m.kind}
+              data-execution-id={m.executionId}
+              data-task-id={m.taskId}
+              title={m.label}
+              onClick={(e) => {
+                e.stopPropagation();
+                onMarkerClick(m);
+              }}
+              className="absolute left-1/2 -translate-x-1/2 flex items-center justify-center rounded-sm hover:bg-bg-tertiary"
+              style={{ top: calloutHeight, width: 16, height: laneHeight }}
+            >
+              <EventGlyph event={m} size={12} />
+            </button>
+          </div>
+        );
+      })}
     </div>
   );
 }

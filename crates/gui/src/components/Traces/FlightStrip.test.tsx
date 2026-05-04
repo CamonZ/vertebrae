@@ -8,7 +8,8 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { FlightStrip } from "./FlightStrip";
+import { FlightStrip, computeCalloutVisibility } from "./FlightStrip";
+import type { ThresholdMarker } from "./timeline";
 import type { SessionLog, StepExecution, Task } from "../../bindings";
 
 // ---------------------------------------------------------------------------
@@ -86,11 +87,16 @@ const toolUse = (id: string, name: string) => ({
   message: { content: [{ type: "tool_use", id, name, input: {} }] },
 });
 
-const toolResult = (toolUseId: string) => ({
+const toolResult = (toolUseId: string, isError = false) => ({
   type: "user",
   message: {
     content: [
-      { type: "tool_result", tool_use_id: toolUseId, content: "ok" },
+      {
+        type: "tool_result",
+        tool_use_id: toolUseId,
+        content: isError ? "boom" : "ok",
+        is_error: isError,
+      },
     ],
   },
 });
@@ -576,5 +582,311 @@ describe("FlightStrip", () => {
     expect(
       screen.getAllByTestId("flight-strip-marker-threshold").length
     ).toBeGreaterThan(0);
+  });
+
+  it("renders left-gutter lane labels (THRESHOLD/TOOL/MAIN/DELEGATION) outside the marker canvas", () => {
+    const tasks = [
+      makeTask({ id: "t-root", title: "Root" }),
+      makeTask({ id: "t-child", title: "Child", parent_id: "t-root" }),
+    ];
+    const e1 = makeExec({
+      id: "e1",
+      task_id: "t-root",
+      step_name: "plan",
+      started_at: "2024-01-01T10:00:00.000Z",
+    });
+    const e2 = makeExec({
+      id: "e2",
+      task_id: "t-child",
+      step_name: "implement",
+      started_at: "2024-01-01T10:05:00.000Z",
+    });
+    render(
+      <FlightStripHarness
+        rootTaskId="t-root"
+        executions={[e1, e2]}
+        tasks={tasks}
+        logsByExecutionId={{}}
+      />
+    );
+
+    const gutter = screen.getByTestId("flight-strip-gutter");
+    expect(
+      within(gutter).getByTestId("flight-strip-gutter-label-threshold")
+    ).toHaveTextContent("THRESHOLD");
+    expect(
+      within(gutter).getByTestId("flight-strip-gutter-label-tool")
+    ).toHaveTextContent("TOOL");
+    expect(
+      within(gutter).getByTestId("flight-strip-gutter-label-main")
+    ).toHaveTextContent("MAIN");
+    expect(
+      within(gutter).getByTestId("flight-strip-gutter-label-delegation")
+    ).toHaveTextContent("DELEGATION");
+
+    const canvas = screen.getByTestId("flight-strip-canvas");
+    expect(
+      within(canvas).queryByTestId("flight-strip-gutter-label-threshold")
+    ).toBeNull();
+  });
+
+  it("hides TOOL/MAIN gutter labels when 'Thresholds only' is on", async () => {
+    const tasks = [makeTask({ id: "t-root" })];
+    const e1 = makeExec({
+      id: "e1",
+      task_id: "t-root",
+      started_at: "2024-01-01T10:00:00.000Z",
+    });
+    render(
+      <FlightStripHarness
+        rootTaskId="t-root"
+        executions={[e1]}
+        tasks={tasks}
+        logsByExecutionId={{}}
+      />
+    );
+    await userEvent.click(screen.getByTestId("flight-strip-thresholds-only"));
+    expect(
+      screen.getByTestId("flight-strip-gutter-label-threshold")
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("flight-strip-gutter-label-tool")
+    ).toBeNull();
+    expect(
+      screen.queryByTestId("flight-strip-gutter-label-main")
+    ).toBeNull();
+  });
+
+  it("renders an EventGlyph and uppercase title call-out for each titled threshold", () => {
+    const tasks = [makeTask({ id: "t-root" })];
+    const e1 = makeExec({
+      id: "e1",
+      task_id: "t-root",
+      step_name: "plan",
+      started_at: "2024-01-01T10:00:00.000Z",
+    });
+    const e2 = makeExec({
+      id: "e2",
+      task_id: "t-root",
+      step_name: "approve",
+      started_at: "2024-01-01T11:00:00.000Z",
+    });
+    render(
+      <FlightStripHarness
+        rootTaskId="t-root"
+        executions={[e1, e2]}
+        tasks={tasks}
+        logsByExecutionId={{}}
+      />
+    );
+
+    const markers = screen.getAllByTestId("flight-strip-marker-threshold");
+    for (const m of markers) {
+      expect(within(m).getByTestId("event-glyph")).toBeInTheDocument();
+    }
+
+    const callouts = screen.getAllByTestId("flight-strip-threshold-callout");
+    const approvalCallout = callouts.find(
+      (c) => c.getAttribute("data-execution-id") === "e2"
+    );
+    expect(approvalCallout).toBeDefined();
+    expect(approvalCallout!).toHaveTextContent("APPROVAL");
+    expect(approvalCallout!.getAttribute("data-visible")).toBe("true");
+  });
+
+  it("collapses the title (but keeps the glyph) when two thresholds collide horizontally", () => {
+    const thresholds: ThresholdMarker[] = [
+      {
+        lane: "threshold",
+        kind: "approval",
+        x: 0.5,
+        timestampMs: 0,
+        executionId: "a",
+        taskId: "t",
+        fromStep: null,
+        toStep: "approve",
+        label: "approval",
+      },
+      {
+        lane: "threshold",
+        kind: "rejection",
+        // 0.51 * 1000px = 510 → 10px gap → well under CALLOUT_MIN_GAP_PX (70).
+        x: 0.51,
+        timestampMs: 1,
+        executionId: "b",
+        taskId: "t",
+        fromStep: null,
+        toStep: "reject",
+        label: "rejection",
+      },
+      {
+        lane: "threshold",
+        kind: "transition",
+        x: 0.9,
+        timestampMs: 2,
+        executionId: "c",
+        taskId: "t",
+        fromStep: null,
+        toStep: "next",
+        label: "transition",
+      },
+    ];
+
+    const visible = computeCalloutVisibility(thresholds, 1000);
+    expect(visible).toEqual([true, false, true]);
+  });
+
+  it("execution_start/end thresholds never get a title even when isolated", () => {
+    const thresholds: ThresholdMarker[] = [
+      {
+        lane: "threshold",
+        kind: "execution_start",
+        x: 0.1,
+        timestampMs: 0,
+        executionId: "a",
+        taskId: "t",
+        fromStep: null,
+        toStep: "start",
+        label: "start",
+      },
+      {
+        lane: "threshold",
+        kind: "approval",
+        x: 0.9,
+        timestampMs: 1,
+        executionId: "b",
+        taskId: "t",
+        fromStep: "start",
+        toStep: "approve",
+        label: "approval",
+      },
+    ];
+    expect(computeCalloutVisibility(thresholds, 1000)).toEqual([false, true]);
+  });
+
+  it("renders TOOL markers as EventGlyph icons (default for tool_use, filled for success result, error for failed result)", () => {
+    const tasks = [makeTask({ id: "t-root" })];
+    const e1 = makeExec({
+      id: "e1",
+      task_id: "t-root",
+      step_name: "plan",
+      started_at: "2024-01-01T10:00:00.000Z",
+    });
+    const logs = {
+      e1: [
+        makeLog("e1", toolUse("tu1", "Bash"), "2024-01-01T10:00:10.000Z", 0),
+        makeLog("e1", toolResult("tu1"), "2024-01-01T10:00:20.000Z", 1),
+        makeLog("e1", toolUse("tu2", "Read"), "2024-01-01T10:00:30.000Z", 2),
+        makeLog("e1", toolResult("tu2", true), "2024-01-01T10:00:40.000Z", 3),
+      ],
+    };
+    render(
+      <FlightStripHarness
+        rootTaskId="t-root"
+        executions={[e1]}
+        tasks={tasks}
+        logsByExecutionId={logs}
+      />
+    );
+
+    const markers = screen.getAllByTestId("flight-strip-marker-tool");
+    expect(markers).toHaveLength(4);
+    for (const m of markers) {
+      expect(m.querySelector("svg")).toBeTruthy();
+    }
+
+    const errored = markers.filter((m) => m.querySelector(".text-error"));
+    expect(errored).toHaveLength(1);
+    expect(errored[0]).toHaveAttribute("data-kind", "tool_result");
+  });
+
+  it("renders MAIN markers with the brain EventGlyph tinted by the row's task level", () => {
+    const tasks = [
+      makeTask({ id: "t-root", level: "epic" }),
+      makeTask({ id: "t-tk", level: "ticket", parent_id: "t-root" }),
+    ];
+    const e1 = makeExec({
+      id: "e1",
+      task_id: "t-root",
+      step_name: "plan",
+      started_at: "2024-01-01T10:00:00.000Z",
+    });
+    const e2 = makeExec({
+      id: "e2",
+      task_id: "t-tk",
+      step_name: "implement",
+      started_at: "2024-01-01T10:01:00.000Z",
+    });
+    const logs = {
+      e1: [makeLog("e1", thinking("a"), "2024-01-01T10:00:10.000Z", 0)],
+      e2: [makeLog("e2", thinking("b"), "2024-01-01T10:01:10.000Z", 0)],
+    };
+    render(
+      <FlightStripHarness
+        rootTaskId="t-root"
+        executions={[e1, e2]}
+        tasks={tasks}
+        logsByExecutionId={logs}
+      />
+    );
+    const epicMarker = screen
+      .getAllByTestId("flight-strip-marker-main")
+      .find((m) => m.getAttribute("data-task-id") === "t-root")!;
+    const ticketMarker = screen
+      .getAllByTestId("flight-strip-marker-main")
+      .find((m) => m.getAttribute("data-task-id") === "t-tk")!;
+    expect(epicMarker.querySelector(".text-info")).toBeTruthy();
+    expect(ticketMarker.querySelector(".text-primary")).toBeTruthy();
+  });
+
+  it("colors DELEGATION edges by child task level (epic/ticket/task)", () => {
+    const tasks = [
+      makeTask({ id: "t-root", level: "epic" }),
+      makeTask({ id: "t-tk", level: "ticket", parent_id: "t-root" }),
+      makeTask({ id: "t-ts", level: "task", parent_id: "t-tk" }),
+    ];
+    const e1 = makeExec({
+      id: "e1",
+      task_id: "t-root",
+      step_name: "plan",
+      started_at: "2024-01-01T10:00:00.000Z",
+    });
+    const e2 = makeExec({
+      id: "e2",
+      task_id: "t-tk",
+      step_name: "implement",
+      started_at: "2024-01-01T10:01:00.000Z",
+    });
+    const e3 = makeExec({
+      id: "e3",
+      task_id: "t-ts",
+      step_name: "subtask",
+      started_at: "2024-01-01T10:02:00.000Z",
+    });
+    const logs = {
+      e1: [makeLog("e1", thinking("a"), "2024-01-01T10:00:10.000Z", 0)],
+      e2: [makeLog("e2", thinking("b"), "2024-01-01T10:01:10.000Z", 0)],
+      e3: [makeLog("e3", thinking("c"), "2024-01-01T10:02:10.000Z", 0)],
+    };
+    render(
+      <FlightStripHarness
+        rootTaskId="t-root"
+        executions={[e1, e2, e3]}
+        tasks={tasks}
+        logsByExecutionId={logs}
+      />
+    );
+    const edges = screen.getAllByTestId("flight-strip-delegation-edge");
+    expect(edges).toHaveLength(2);
+    const ticketEdge = edges.find(
+      (e) => e.getAttribute("data-child-task-id") === "t-tk"
+    );
+    const taskEdge = edges.find(
+      (e) => e.getAttribute("data-child-task-id") === "t-ts"
+    );
+    expect(ticketEdge?.getAttribute("data-child-level")).toBe("ticket");
+    expect(ticketEdge?.getAttribute("class")).toContain("text-primary");
+    expect(taskEdge?.getAttribute("data-child-level")).toBe("task");
+    expect(taskEdge?.getAttribute("class")).toContain("text-text-secondary");
   });
 });
