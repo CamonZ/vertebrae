@@ -58,6 +58,7 @@ export interface DelegationEdge {
   childTaskId: string;
   parentRowIndex: number;
   childRowIndex: number;
+  childLevel: string | null;
 }
 
 export type TimelineMarker = ThresholdMarker | ToolMarker | MainMarker;
@@ -65,6 +66,7 @@ export type TimelineMarker = ThresholdMarker | ToolMarker | MainMarker;
 export interface MainRow {
   taskId: string;
   title: string | null;
+  level: string | null;
   /** Depth from root (0 = root). */
   depth: number;
   index: number;
@@ -116,6 +118,7 @@ function buildMainRows(
       rows.push({
         taskId,
         title: t?.title ?? null,
+        level: t?.level ?? null,
         depth,
         index: rows.length,
       });
@@ -133,6 +136,7 @@ function buildMainRows(
       rows.push({
         taskId,
         title: t?.title ?? null,
+        level: t?.level ?? null,
         depth: 0,
         index: rows.length,
       });
@@ -308,6 +312,9 @@ export function buildTimelineProjection(
     }
   }
 
+  const levelByTaskId = new Map<string, string | null>();
+  for (const t of tasks) levelByTaskId.set(t.id, t.level);
+
   const delegations: DelegationEdge[] = [];
   let prevExec: StepExecution | null = null;
   for (const exec of execsSorted) {
@@ -333,6 +340,7 @@ export function buildTimelineProjection(
           childTaskId: exec.task_id,
           parentRowIndex: parentRow,
           childRowIndex: childRow,
+          childLevel: levelByTaskId.get(exec.task_id) ?? null,
         });
       }
     }

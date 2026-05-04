@@ -64,6 +64,7 @@ const DELEGATION: DelegationEdge = {
   childTaskId: "c",
   parentRowIndex: 0,
   childRowIndex: 1,
+  childLevel: "ticket",
 };
 
 const SESSION_START: ConversationEvent = {
@@ -239,7 +240,7 @@ describe("EventGlyph component", () => {
   it("uses error variant class for rejection", () => {
     render(<EventGlyph event={threshold("rejection")} />);
     const el = screen.getByTestId("event-glyph");
-    expect(el.className).toContain("text-status-error");
+    expect(el.className).toContain("text-error");
   });
 
   it("allows overriding the title/label", () => {
