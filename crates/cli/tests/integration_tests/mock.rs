@@ -1152,11 +1152,49 @@ impl StepService for MockStepService {
 
 /// Create a `VertebraeServices` instance backed by in-memory mocks.
 pub fn mock_services() -> VertebraeServices {
+    mock_services_with_seeder().0
+}
+
+/// Handle that allows tests to seed mock state directly (e.g., to insert
+/// workflows with specific UUIDs that `create_workflow` would otherwise auto-generate).
+pub struct MockSeeder {
+    state: State,
+}
+
+impl MockSeeder {
+    /// Insert a workflow with a specific ID into the mock state.
+    pub fn insert_workflow(&self, id: &str, name: &str) {
+        let mut s = self.state.lock().unwrap();
+        s.workflows.insert(
+            id.to_string(),
+            Workflow {
+                id: Some(id.to_string()),
+                name: name.to_string(),
+                description: None,
+                initial_step: None,
+                metadata: std::collections::HashMap::new(),
+                auto_advance: false,
+                order: 0,
+                is_default: false,
+                is_final: false,
+                kanban_column: None,
+                transitions: Vec::new(),
+                created_at: Some(Utc::now()),
+                updated_at: Some(Utc::now()),
+            },
+        );
+    }
+}
+
+/// Create a `VertebraeServices` instance backed by in-memory mocks, plus a seeder
+/// for tests that need to insert state with specific IDs.
+pub fn mock_services_with_seeder() -> (VertebraeServices, MockSeeder) {
     let state: State = Arc::new(Mutex::new(MockState::default()));
-    VertebraeServices::from_services(
+    let services = VertebraeServices::from_services(
         Arc::new(MockTaskService::new(state.clone())),
         Arc::new(MockWorkflowService::new(state.clone())),
         Arc::new(MockExecutionService::new(state.clone())),
         Arc::new(MockStepService::new(state.clone())),
-    )
+    );
+    (services, MockSeeder { state })
 }
