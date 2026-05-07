@@ -1,0 +1,32 @@
+{
+  "name": "vertebrae-vtb",
+  "version": "0.1.0",
+  "description": "Vertebrae task-management skills and ticket workflows.",
+  "author": {
+    "name": "Camonz"
+  },
+  "license": "UNLICENSED",
+  "keywords": [
+    "vertebrae",
+    "vtb",
+    "tasks",
+    "workflows"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Vertebrae VTB",
+    "shortDescription": "Vertebrae task-management and workflow skills",
+    "longDescription": "Provides vtb command skills and ticket implementation workflows for the Vertebrae repository.",
+    "developerName": "Camonz",
+    "category": "Coding",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Show me the next ready Vertebrae task.",
+      "Implement a Vertebrae ticket in a worktree."
+    ]
+  }
+}
