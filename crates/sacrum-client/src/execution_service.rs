@@ -65,6 +65,7 @@ impl SacrumExecutionService {
         StepExecution {
             id: Some(response.id.clone()),
             task_id: response.task_id.clone(),
+            task_run_id: response.task_run_id.clone(),
             workflow_id: response.workflow_id.clone(),
             step_name: response.step_name.clone(),
             started_at,
@@ -301,6 +302,7 @@ mod tests {
         let response = StepExecutionResponse {
             id: "exec-1".to_string(),
             task_id: "task-1".to_string(),
+            task_run_id: Some("run-1".to_string()),
             workflow_id: "wf-1".to_string(),
             step_name: "review".to_string(),
             status: "completed".to_string(),
@@ -323,6 +325,7 @@ mod tests {
 
         assert_eq!(execution.id, Some("exec-1".to_string()));
         assert_eq!(execution.task_id, "task-1");
+        assert_eq!(execution.task_run_id.as_deref(), Some("run-1"));
         assert_eq!(execution.workflow_id, "wf-1");
         assert_eq!(execution.step_name, "review");
         assert_eq!(execution.status, ExecutionStatus::Completed);
@@ -343,6 +346,7 @@ mod tests {
         let response = StepExecutionResponse {
             id: "exec-2".to_string(),
             task_id: "task-1".to_string(),
+            task_run_id: None,
             workflow_id: "wf-1".to_string(),
             step_name: "review".to_string(),
             status: "in_progress".to_string(),
