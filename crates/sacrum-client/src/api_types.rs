@@ -247,6 +247,8 @@ pub struct StepTransitionResponse {
 pub struct StepExecutionResponse {
     pub id: String,
     pub task_id: String,
+    #[serde(default)]
+    pub task_run_id: Option<String>,
     pub workflow_id: String,
     pub step_name: String,
     pub status: String,
@@ -276,6 +278,67 @@ pub struct StepExecutionResponse {
     pub inserted_at: Option<String>,
     #[serde(default)]
     pub updated_at: Option<String>,
+}
+
+/// TaskRun response from Sacrum API (matches TaskRun GraphQL fields).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskRunResponse {
+    pub id: String,
+    pub task_id: String,
+    #[serde(default)]
+    pub project_id: Option<String>,
+    #[serde(default)]
+    pub user_id: Option<String>,
+    pub status: String,
+    #[serde(default)]
+    pub started_at: Option<String>,
+    #[serde(default)]
+    pub ended_at: Option<String>,
+    #[serde(default)]
+    pub stop_requested_at: Option<String>,
+    #[serde(default)]
+    pub latest_step_execution_id: Option<String>,
+    #[serde(default)]
+    pub outcome_kind: Option<String>,
+    #[serde(default)]
+    pub outcome_context: Option<serde_json::Value>,
+    #[serde(default)]
+    pub parent_task_run_id: Option<String>,
+    #[serde(default)]
+    pub root_task_run_id: Option<String>,
+    #[serde(default)]
+    pub triggered_by_step_execution_id: Option<String>,
+    #[serde(default)]
+    pub inserted_at: Option<String>,
+    #[serde(default)]
+    pub updated_at: Option<String>,
+}
+
+/// Task run controls response from Sacrum API.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskRunControlsResponse {
+    #[serde(default)]
+    pub runnable: bool,
+    #[serde(default)]
+    pub stoppable: bool,
+    #[serde(default)]
+    pub disabled_reason_code: Option<String>,
+    #[serde(default)]
+    pub disabled_reason: Option<String>,
+    #[serde(default)]
+    pub active_run: Option<TaskRunResponse>,
+}
+
+/// TaskRun trace response from Sacrum API.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskRunTraceResponse {
+    pub root_task_run_id: String,
+    #[serde(default)]
+    pub task_runs: Vec<TaskRunResponse>,
+    #[serde(default)]
+    pub step_executions: Vec<StepExecutionResponse>,
+    #[serde(default)]
+    pub session_logs: Vec<SessionLogResponse>,
 }
 
 /// Session log response from Sacrum API (matches SessionLogJSON)
@@ -628,10 +691,131 @@ mod tests {
         let exec: StepExecutionResponse = serde_json::from_str(json).unwrap();
         assert_eq!(exec.id, "exec-1");
         assert_eq!(exec.task_id, "task-1");
+        assert_eq!(exec.task_run_id, None);
         assert_eq!(exec.status, "completed");
         assert_eq!(exec.input_tokens, Some(1000));
         assert_eq!(exec.output_tokens, Some(500));
         assert_eq!(exec.cost, Some(0.05));
+    }
+
+    #[test]
+    fn test_step_execution_response_deserializes_task_run_id() {
+        let json = r#"{
+            "id": "exec-1",
+            "task_id": "task-1",
+            "task_run_id": "run-1",
+            "workflow_id": "wf-1",
+            "step_name": "review",
+            "status": "completed"
+        }"#;
+
+        let exec: StepExecutionResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(exec.id, "exec-1");
+        assert_eq!(exec.task_run_id.as_deref(), Some("run-1"));
+    }
+
+    #[test]
+    fn test_task_run_response_deserialization() {
+        let json = r#"{
+            "id": "run-1",
+            "task_id": "task-1",
+            "project_id": "project-1",
+            "status": "waiting",
+            "started_at": "2026-05-07T12:00:00Z",
+            "latest_step_execution_id": "exec-1",
+            "outcome_context": {"retry_count": 2},
+            "parent_task_run_id": "run-parent",
+            "root_task_run_id": "run-root",
+            "triggered_by_step_execution_id": "exec-parent",
+            "inserted_at": "2026-05-07T12:00:00Z",
+            "updated_at": "2026-05-07T12:01:00Z"
+        }"#;
+
+        let run: TaskRunResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(run.id, "run-1");
+        assert_eq!(run.task_id, "task-1");
+        assert_eq!(run.project_id.as_deref(), Some("project-1"));
+        assert_eq!(run.status, "waiting");
+        assert_eq!(run.latest_step_execution_id.as_deref(), Some("exec-1"));
+        assert_eq!(
+            run.outcome_context
+                .as_ref()
+                .and_then(|context| context.get("retry_count"))
+                .and_then(serde_json::Value::as_i64),
+            Some(2)
+        );
+        assert_eq!(run.parent_task_run_id.as_deref(), Some("run-parent"));
+        assert_eq!(run.root_task_run_id.as_deref(), Some("run-root"));
+        assert_eq!(
+            run.triggered_by_step_execution_id.as_deref(),
+            Some("exec-parent")
+        );
+    }
+
+    #[test]
+    fn test_task_run_trace_response_deserialization() {
+        let json = r#"{
+            "root_task_run_id": "run-root",
+            "task_runs": [
+                {
+                    "id": "run-root",
+                    "task_id": "task-root",
+                    "project_id": "project-1",
+                    "status": "executing",
+                    "parent_task_run_id": null,
+                    "root_task_run_id": null,
+                    "triggered_by_step_execution_id": null
+                },
+                {
+                    "id": "run-child",
+                    "task_id": "task-child",
+                    "project_id": "project-1",
+                    "status": "queued",
+                    "parent_task_run_id": "run-root",
+                    "root_task_run_id": "run-root",
+                    "triggered_by_step_execution_id": "exec-root"
+                }
+            ],
+            "step_executions": [
+                {
+                    "id": "exec-root",
+                    "task_id": "task-root",
+                    "task_run_id": "run-root",
+                    "workflow_id": "workflow-1",
+                    "step_name": "wait_children",
+                    "status": "completed"
+                }
+            ],
+            "session_logs": [
+                {
+                    "id": "log-1",
+                    "step_execution_id": "exec-root",
+                    "content": "child scheduled"
+                }
+            ]
+        }"#;
+
+        let trace: TaskRunTraceResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(trace.root_task_run_id, "run-root");
+        assert_eq!(trace.task_runs.len(), 2);
+        assert_eq!(
+            trace.task_runs[1].parent_task_run_id.as_deref(),
+            Some("run-root")
+        );
+        assert_eq!(
+            trace.task_runs[1].root_task_run_id.as_deref(),
+            Some("run-root")
+        );
+        assert_eq!(
+            trace.task_runs[1].triggered_by_step_execution_id.as_deref(),
+            Some("exec-root")
+        );
+        assert_eq!(trace.step_executions.len(), 1);
+        assert_eq!(
+            trace.step_executions[0].task_run_id.as_deref(),
+            Some("run-root")
+        );
+        assert_eq!(trace.session_logs[0].content, "child scheduled");
     }
 
     #[test]

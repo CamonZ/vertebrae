@@ -234,6 +234,76 @@ impl std::fmt::Display for ExecutionStatus {
     }
 }
 
+/// Durable lifecycle status for a task workflow run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskRunStatus {
+    Queued,
+    Executing,
+    Waiting,
+    Stopping,
+    Stopped,
+    Completed,
+    Failed,
+}
+
+impl TaskRunStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            TaskRunStatus::Queued => "queued",
+            TaskRunStatus::Executing => "executing",
+            TaskRunStatus::Waiting => "waiting",
+            TaskRunStatus::Stopping => "stopping",
+            TaskRunStatus::Stopped => "stopped",
+            TaskRunStatus::Completed => "completed",
+            TaskRunStatus::Failed => "failed",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "queued" => Some(TaskRunStatus::Queued),
+            "executing" => Some(TaskRunStatus::Executing),
+            "waiting" => Some(TaskRunStatus::Waiting),
+            "stopping" => Some(TaskRunStatus::Stopping),
+            "stopped" => Some(TaskRunStatus::Stopped),
+            "completed" => Some(TaskRunStatus::Completed),
+            "failed" => Some(TaskRunStatus::Failed),
+            _ => None,
+        }
+    }
+
+    pub fn is_active(&self) -> bool {
+        matches!(
+            self,
+            TaskRunStatus::Queued
+                | TaskRunStatus::Executing
+                | TaskRunStatus::Waiting
+                | TaskRunStatus::Stopping
+        )
+    }
+
+    pub fn is_terminal(&self) -> bool {
+        matches!(
+            self,
+            TaskRunStatus::Stopped | TaskRunStatus::Completed | TaskRunStatus::Failed
+        )
+    }
+
+    pub fn is_stoppable(&self) -> bool {
+        matches!(
+            self,
+            TaskRunStatus::Queued | TaskRunStatus::Executing | TaskRunStatus::Waiting
+        )
+    }
+}
+
+impl std::fmt::Display for TaskRunStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 /// Permission mode for Claude CLI execution
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1395,6 +1465,10 @@ pub struct StepExecution {
     /// Task ID
     pub task_id: String,
 
+    /// Task run ID, when the execution belongs to a durable TaskRun.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_run_id: Option<String>,
+
     /// Workflow ID
     pub workflow_id: String,
 
@@ -1468,6 +1542,7 @@ impl StepExecution {
         Self {
             id: None,
             task_id: task_id.into(),
+            task_run_id: None,
             workflow_id: workflow_id.into(),
             step_name: step_name.into(),
             started_at: Utc::now(),
@@ -1490,6 +1565,12 @@ impl StepExecution {
     /// Set model provider
     pub fn with_model_provider(mut self, provider: impl Into<String>) -> Self {
         self.model_provider = Some(provider.into());
+        self
+    }
+
+    /// Set task run ID
+    pub fn with_task_run_id(mut self, task_run_id: impl Into<String>) -> Self {
+        self.task_run_id = Some(task_run_id.into());
         self
     }
 
@@ -1597,6 +1678,7 @@ impl StepExecution {
 impl PartialEq for StepExecution {
     fn eq(&self, other: &Self) -> bool {
         self.task_id == other.task_id
+            && self.task_run_id == other.task_run_id
             && self.workflow_id == other.workflow_id
             && self.step_name == other.step_name
             && self.status == other.status
@@ -1604,6 +1686,147 @@ impl PartialEq for StepExecution {
 }
 
 impl Eq for StepExecution {}
+
+/// A durable workflow run for a task.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TaskRun {
+    /// Unique identifier.
+    pub id: String,
+
+    /// Task ID.
+    pub task_id: String,
+
+    /// Project ID.
+    pub project_id: String,
+
+    /// User ID, present in GraphQL responses that request it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<String>,
+
+    /// Durable run lifecycle status.
+    pub status: TaskRunStatus,
+
+    /// When the run started.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<DateTime<Utc>>,
+
+    /// When the run ended.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended_at: Option<DateTime<Utc>>,
+
+    /// When a stop was requested.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stop_requested_at: Option<DateTime<Utc>>,
+
+    /// Latest step execution ID associated with the run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_step_execution_id: Option<String>,
+
+    /// Terminal outcome kind.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome_kind: Option<String>,
+
+    /// Structured terminal outcome context.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome_context: Option<serde_json::Value>,
+
+    /// Parent task run ID for child workflow runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_task_run_id: Option<String>,
+
+    /// Root task run ID for a trace tree.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root_task_run_id: Option<String>,
+
+    /// Step execution that triggered this child run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub triggered_by_step_execution_id: Option<String>,
+
+    /// Creation timestamp from Sacrum.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inserted_at: Option<DateTime<Utc>>,
+
+    /// Last update timestamp from Sacrum.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<DateTime<Utc>>,
+}
+
+impl TaskRun {
+    pub fn is_active(&self) -> bool {
+        self.status.is_active()
+    }
+
+    pub fn is_terminal(&self) -> bool {
+        self.status.is_terminal()
+    }
+
+    pub fn is_stoppable(&self) -> bool {
+        self.status.is_stoppable()
+    }
+}
+
+/// Compact TaskRun representation for list and control surfaces.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TaskRunSummary {
+    pub id: String,
+    pub task_id: String,
+    pub status: TaskRunStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<DateTime<Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended_at: Option<DateTime<Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_step_execution_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_task_run_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root_task_run_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub triggered_by_step_execution_id: Option<String>,
+}
+
+impl From<&TaskRun> for TaskRunSummary {
+    fn from(run: &TaskRun) -> Self {
+        Self {
+            id: run.id.clone(),
+            task_id: run.task_id.clone(),
+            status: run.status.clone(),
+            started_at: run.started_at,
+            ended_at: run.ended_at,
+            latest_step_execution_id: run.latest_step_execution_id.clone(),
+            parent_task_run_id: run.parent_task_run_id.clone(),
+            root_task_run_id: run.root_task_run_id.clone(),
+            triggered_by_step_execution_id: run.triggered_by_step_execution_id.clone(),
+        }
+    }
+}
+
+/// Server-derived controls for Run/Stop task actions.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TaskRunControls {
+    #[serde(default)]
+    pub runnable: bool,
+    #[serde(default)]
+    pub stoppable: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disabled_reason_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disabled_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_run: Option<TaskRun>,
+}
+
+/// Trace tree for a root TaskRun, including child runs and related records.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TaskRunTrace {
+    pub root_task_run_id: String,
+    #[serde(default)]
+    pub task_runs: Vec<TaskRun>,
+    #[serde(default)]
+    pub step_executions: Vec<StepExecution>,
+    #[serde(default)]
+    pub session_logs: Vec<SessionLog>,
+}
 
 /// A session log entry (domain model)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1619,6 +1842,7 @@ pub struct SessionLog {
     pub content: String,
 
     /// When created
+    #[serde(alias = "inserted_at")]
     pub created_at: DateTime<Utc>,
 }
 
@@ -1992,11 +2216,171 @@ mod tests {
         assert_ne!(a, c);
     }
 
+    // ─── TaskRun ───────────────────────────────────────────────────
+
+    #[test]
+    fn task_run_status_parse_display_and_helpers() {
+        assert_eq!(TaskRunStatus::parse("queued"), Some(TaskRunStatus::Queued));
+        assert_eq!(
+            TaskRunStatus::parse("executing"),
+            Some(TaskRunStatus::Executing)
+        );
+        assert_eq!(
+            TaskRunStatus::parse("waiting"),
+            Some(TaskRunStatus::Waiting)
+        );
+        assert_eq!(
+            TaskRunStatus::parse("stopping"),
+            Some(TaskRunStatus::Stopping)
+        );
+        assert_eq!(
+            TaskRunStatus::parse("stopped"),
+            Some(TaskRunStatus::Stopped)
+        );
+        assert_eq!(
+            TaskRunStatus::parse("completed"),
+            Some(TaskRunStatus::Completed)
+        );
+        assert_eq!(TaskRunStatus::parse("failed"), Some(TaskRunStatus::Failed));
+        assert_eq!(TaskRunStatus::parse("unknown"), None);
+
+        assert_eq!(TaskRunStatus::Waiting.to_string(), "waiting");
+        assert!(TaskRunStatus::Executing.is_active());
+        assert!(TaskRunStatus::Stopping.is_active());
+        assert!(!TaskRunStatus::Stopping.is_stoppable());
+        assert!(TaskRunStatus::Completed.is_terminal());
+    }
+
+    #[test]
+    fn task_run_deserializes_snake_case_lineage_fields() {
+        let json = r#"{
+            "id": "run-child",
+            "task_id": "task-child",
+            "project_id": "project-1",
+            "user_id": "user-1",
+            "status": "waiting",
+            "started_at": "2026-05-07T12:00:00Z",
+            "ended_at": null,
+            "stop_requested_at": null,
+            "latest_step_execution_id": "exec-child",
+            "outcome_kind": null,
+            "outcome_context": {"retry_count": 1},
+            "parent_task_run_id": "run-parent",
+            "root_task_run_id": "run-root",
+            "triggered_by_step_execution_id": "exec-parent",
+            "inserted_at": "2026-05-07T12:00:00Z",
+            "updated_at": "2026-05-07T12:01:00Z"
+        }"#;
+
+        let run: TaskRun = serde_json::from_str(json).expect("deserialize task run");
+
+        assert_eq!(run.id, "run-child");
+        assert_eq!(run.task_id, "task-child");
+        assert_eq!(run.project_id, "project-1");
+        assert_eq!(run.user_id.as_deref(), Some("user-1"));
+        assert_eq!(run.status, TaskRunStatus::Waiting);
+        assert!(run.is_active());
+        assert!(run.is_stoppable());
+        assert_eq!(run.latest_step_execution_id.as_deref(), Some("exec-child"));
+        assert_eq!(
+            run.outcome_context
+                .as_ref()
+                .and_then(|context| context.get("retry_count"))
+                .and_then(serde_json::Value::as_i64),
+            Some(1)
+        );
+        assert_eq!(run.parent_task_run_id.as_deref(), Some("run-parent"));
+        assert_eq!(run.root_task_run_id.as_deref(), Some("run-root"));
+        assert_eq!(
+            run.triggered_by_step_execution_id.as_deref(),
+            Some("exec-parent")
+        );
+        assert!(run.started_at.is_some());
+        assert!(run.inserted_at.is_some());
+        assert!(run.updated_at.is_some());
+    }
+
+    #[test]
+    fn task_run_trace_deserializes_snake_case_payload() {
+        let json = r#"{
+            "root_task_run_id": "run-root",
+            "task_runs": [
+                {
+                    "id": "run-root",
+                    "task_id": "task-root",
+                    "project_id": "project-1",
+                    "status": "executing",
+                    "started_at": "2026-05-07T12:00:00Z",
+                    "parent_task_run_id": null,
+                    "root_task_run_id": null,
+                    "triggered_by_step_execution_id": null
+                },
+                {
+                    "id": "run-child",
+                    "task_id": "task-child",
+                    "project_id": "project-1",
+                    "status": "queued",
+                    "started_at": "2026-05-07T12:02:00Z",
+                    "parent_task_run_id": "run-root",
+                    "root_task_run_id": "run-root",
+                    "triggered_by_step_execution_id": "exec-root"
+                }
+            ],
+            "step_executions": [
+                {
+                    "id": "exec-root",
+                    "task_id": "task-root",
+                    "task_run_id": "run-root",
+                    "workflow_id": "workflow-1",
+                    "step_name": "wait_children",
+                    "started_at": "2026-05-07T12:01:00Z",
+                    "status": "completed"
+                }
+            ],
+            "session_logs": [
+                {
+                    "id": "log-root",
+                    "step_execution_id": "exec-root",
+                    "content": "child scheduled",
+                    "inserted_at": "2026-05-07T12:01:30Z",
+                    "updated_at": "2026-05-07T12:01:30Z"
+                }
+            ]
+        }"#;
+
+        let trace: TaskRunTrace = serde_json::from_str(json).expect("deserialize trace");
+
+        assert_eq!(trace.root_task_run_id, "run-root");
+        assert_eq!(trace.task_runs.len(), 2);
+        assert_eq!(trace.task_runs[0].parent_task_run_id, None);
+        assert_eq!(
+            trace.task_runs[1].parent_task_run_id.as_deref(),
+            Some("run-root")
+        );
+        assert_eq!(
+            trace.task_runs[1].root_task_run_id.as_deref(),
+            Some("run-root")
+        );
+        assert_eq!(
+            trace.task_runs[1].triggered_by_step_execution_id.as_deref(),
+            Some("exec-root")
+        );
+        assert_eq!(trace.step_executions.len(), 1);
+        assert_eq!(
+            trace.step_executions[0].task_run_id.as_deref(),
+            Some("run-root")
+        );
+        assert_eq!(trace.session_logs.len(), 1);
+        assert_eq!(trace.session_logs[0].id.as_deref(), Some("log-root"));
+        assert_eq!(trace.session_logs[0].content, "child scheduled");
+    }
+
     // ─── StepExecution ──────────────────────────────────────────────
 
     #[test]
     fn step_execution_new_and_builders() {
         let exec = StepExecution::new("task1", "wf1", "review")
+            .with_task_run_id("run1")
             .with_context("ctx")
             .with_prompt("do stuff")
             .with_output("done")
@@ -2013,6 +2397,7 @@ mod tests {
             .with_duration_ms(1500);
 
         assert_eq!(exec.task_id, "task1");
+        assert_eq!(exec.task_run_id.as_deref(), Some("run1"));
         assert_eq!(exec.workflow_id, "wf1");
         assert_eq!(exec.step_name, "review");
         assert_eq!(exec.context.as_deref(), Some("ctx"));
@@ -2050,6 +2435,25 @@ mod tests {
         let bare_json = serde_json::to_string(&bare).expect("serialize bare");
         assert!(!bare_json.contains("\"handoff\""));
         assert!(!bare_json.contains("\"model_provider\""));
+        assert!(!bare_json.contains("\"task_run_id\""));
+    }
+
+    #[test]
+    fn step_execution_legacy_payload_defaults_task_run_id() {
+        let json = r#"{
+            "task_id": "task-1",
+            "workflow_id": "workflow-1",
+            "step_name": "execute",
+            "started_at": "2026-05-07T12:00:00Z",
+            "status": "in_progress"
+        }"#;
+
+        let execution: StepExecution =
+            serde_json::from_str(json).expect("deserialize legacy step execution");
+
+        assert_eq!(execution.task_id, "task-1");
+        assert_eq!(execution.task_run_id, None);
+        assert_eq!(execution.status, ExecutionStatus::InProgress);
     }
 
     #[test]

@@ -60,7 +60,8 @@ pub use api_types::{
     PipelineStepTransitionResponse, PipelineTaskCountsResponse, PipelineWorkflowResponse,
     PipelineWorkflowTransitionResponse, ProjectListResponse, ProjectResponse, SectionResponse,
     SessionLogResponse, StepExecutionResponse, StepTransitionResponse, TaskResponse,
-    WorkflowResponse, WorkflowStepResponse, WorkflowTransitionResponse,
+    TaskRunControlsResponse, TaskRunResponse, TaskRunTraceResponse, WorkflowResponse,
+    WorkflowStepResponse, WorkflowTransitionResponse,
 };
 pub use client::{GraphqlClient, with_fragments};
 pub use config::{
