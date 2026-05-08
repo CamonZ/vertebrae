@@ -459,9 +459,7 @@ impl Command {
                 execution::ExecutionCommand::Create(c) => {
                     c.task_id = resolve_id(&c.task_id, services).await?;
                 }
-                execution::ExecutionCommand::List(c) => {
-                    c.task_id = resolve_id(&c.task_id, services).await?;
-                }
+                execution::ExecutionCommand::List(_) => {}
                 execution::ExecutionCommand::Show(_)
                 | execution::ExecutionCommand::Update(_)
                 | execution::ExecutionCommand::Log(_) => {}
@@ -803,6 +801,48 @@ mod tests {
     struct TestCli {
         #[command(subcommand)]
         command: Command,
+    }
+
+    #[test]
+    fn test_command_execution_list_parses_task_target() {
+        let cli = TestCli::try_parse_from(["test", "execution", "list", "a1b2c3d4"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Execution(execution::ExecutionCommand::List(cmd)) => {
+                assert_eq!(cmd.task_id.as_deref(), Some("a1b2c3d4"));
+                assert!(cmd.task_run_id.is_none());
+            }
+            _ => panic!("Expected Execution::List command"),
+        }
+    }
+
+    #[test]
+    fn test_command_execution_list_parses_task_run_mode() {
+        let task_run_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        let cli = TestCli::try_parse_from(["test", "execution", "list", "--task-run", task_run_id]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Execution(execution::ExecutionCommand::List(cmd)) => {
+                assert!(cmd.task_id.is_none());
+                assert_eq!(cmd.task_run_id.as_deref(), Some(task_run_id));
+            }
+            _ => panic!("Expected Execution::List command"),
+        }
+    }
+
+    #[test]
+    fn test_command_execution_list_rejects_task_run_short_id() {
+        let cli = TestCli::try_parse_from(["test", "execution", "list", "--task-run", "bbbbbbbb"]);
+        assert!(cli.is_err());
+        let error = match cli {
+            Ok(_) => unreachable!("short TaskRun ID should be rejected"),
+            Err(err) => err.to_string(),
+        };
+        assert!(
+            error.contains("TaskRun short IDs are not supported"),
+            "expected TaskRun short ID error, got: {}",
+            error
+        );
     }
 
     #[test]

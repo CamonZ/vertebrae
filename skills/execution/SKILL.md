@@ -12,7 +12,7 @@ Manage workflow execution records and session logs. Tracks the history of workfl
 | Command | Description |
 |---------|-------------|
 | `execution create` | Create a new execution record |
-| `execution list` | List executions for a task |
+| `execution list` | List compact TaskRun-backed executions for a task or one full TaskRun UUID |
 | `execution show` | Show execution details |
 | `execution update` | Update execution output and result |
 | `execution log` | Add a log entry to an execution |
@@ -48,19 +48,35 @@ vtb execution create abc123 \
 
 ## execution list
 
-List all executions for a task.
+List compact TaskRun-backed executions for a task or one exact TaskRun.
+
+Positional input is always a task ID. Task short IDs are supported on that path.
+Use `--task-run` to list executions for one TaskRun; TaskRun mode requires a full
+TaskRun UUID and rejects short IDs. The list output is intentionally compact:
+execution IDs, task/run grouping, step names, statuses, and timestamps. Use
+`execution show <execution-id>` for detailed output and session logs.
 
 ```bash
 vtb execution list <task-id>
+vtb execution list --task-run <task-run-id>
 ```
 
-Output:
+Task output:
 ```
-Executions for task abc123 (3 total)
-============================================================
-a1b2c3d4 | coding | COMPLETED    | 2024-01-15 10:30:45 -> 2024-01-15 10:32:30
-d4e5f6a7 | coding | FAILED       | 2024-01-15 09:15:20 -> -
-g7h8i9j0 | review | IN_PROGRESS  | 2024-01-15 11:00:15 -> -
+TaskRun Executions for task 89abcdef-0123-4567-89ab-cdef01234567 (2 total)
+================================================================================
+TaskRun: 01234567-89ab-4cde-8fab-0123456789ab
+- execution ... task=89abcdef-0123-4567-89ab-cdef01234567 taskRunId=01234567-89ab-4cde-8fab-0123456789ab step=review status=IN_PROGRESS
+  started=2026-05-09 12:00:00 UTC completed=-
+```
+
+TaskRun output:
+```
+TaskRun Executions for TaskRun 01234567-89ab-4cde-8fab-0123456789ab (1 total)
+================================================================================
+TaskRun: 01234567-89ab-4cde-8fab-0123456789ab
+- execution ... task=89abcdef-0123-4567-89ab-cdef01234567 taskRunId=01234567-89ab-4cde-8fab-0123456789ab step=review status=COMPLETED
+  started=2026-05-09 12:00:00 UTC completed=2026-05-09 12:01:00 UTC
 ```
 
 ---

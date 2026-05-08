@@ -167,19 +167,21 @@ async fn test_resolve_ids_execution_create_resolves_task_short_id() {
 }
 
 #[tokio::test]
-async fn test_resolve_ids_execution_list_resolves_task_short_id() {
+async fn test_resolve_ids_execution_list_preserves_task_target_for_command_execution() {
     let services = mock_services();
     seed_task(&services, TASK_FULL, "task").await;
 
     let mut command = Command::Execution(ExecutionCommand::List(ExecutionListCommand {
-        task_id: TASK_PREFIX.to_string(),
+        task_id: Some(TASK_PREFIX.to_string()),
+        task_run_id: None,
     }));
 
     command.resolve_ids(&services).await.unwrap();
 
     match command {
         Command::Execution(ExecutionCommand::List(c)) => {
-            assert_eq!(c.task_id, TASK_FULL);
+            assert_eq!(c.task_id.as_deref(), Some(TASK_PREFIX));
+            assert!(c.task_run_id.is_none());
         }
         _ => panic!("expected Execution::List"),
     }
