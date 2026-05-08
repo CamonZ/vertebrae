@@ -4,7 +4,7 @@
 
 use clap::Args;
 use serde::Serialize;
-use vertebrae_core::{Level, Priority, TaskFilter};
+use vertebrae_core::{Level, Priority, Task, TaskFilter};
 use vertebrae_core::{ServiceError, VertebraeServices};
 
 /// A summary of a task for display in the list
@@ -20,6 +20,12 @@ pub struct TaskSummary {
     pub workflow_name: Option<String>,
     /// Current step name (if assigned)
     pub step_name: Option<String>,
+    /// Active TaskRun lifecycle state, from runControls.activeRun.status.
+    pub run_state: Option<String>,
+    /// Active TaskRun ID, if a run is active.
+    pub active_task_run_id: Option<String>,
+    /// Latest step execution ID for the active TaskRun, if available.
+    pub latest_step_execution_id: Option<String>,
     /// Optional priority
     pub priority: Option<String>,
     /// Tags for categorization
@@ -111,21 +117,42 @@ fn parse_priority(s: &str) -> Result<Priority, String> {
     }
 }
 
-/// Convert core Task to CLI TaskSummary
-impl From<vertebrae_core::Task> for TaskSummary {
-    fn from(task: vertebrae_core::Task) -> Self {
+/// Convert a core Task to CLI TaskSummary.
+impl From<&Task> for TaskSummary {
+    fn from(task: &Task) -> Self {
+        let (run_state, active_task_run_id, latest_step_execution_id) = task
+            .run_controls
+            .as_ref()
+            .and_then(|controls| controls.active_run.as_ref())
+            .map(|run| {
+                (
+                    Some(run.status.to_string()),
+                    Some(run.id.clone()),
+                    run.latest_step_execution_id.clone(),
+                )
+            })
+            .unwrap_or((None, None, None));
         TaskSummary {
-            id: task.id,
-            title: task.title,
+            id: task.id.clone(),
+            title: task.title.clone(),
             level: task.level.as_str().to_string(),
-            workflow_name: task.workflow_name,
-            step_name: task.step_name,
-            priority: task.priority.map(|p| p.as_str().to_string()),
-            tags: task.tags,
+            workflow_name: task.workflow_name.clone(),
+            step_name: task.step_name.clone(),
+            run_state,
+            active_task_run_id,
+            latest_step_execution_id,
+            priority: task.priority.as_ref().map(|p| p.as_str().to_string()),
+            tags: task.tags.clone(),
             needs_human_review: task.needs_human_review,
             archived: task.archived,
-            parent_id: task.parent_id,
+            parent_id: task.parent_id.clone(),
         }
+    }
+}
+
+impl From<Task> for TaskSummary {
+    fn from(task: Task) -> Self {
+        Self::from(&task)
     }
 }
 
@@ -246,6 +273,9 @@ mod tests {
             level: "ticket".to_string(),
             workflow_name: Some("Implementation".to_string()),
             step_name: Some("todo".to_string()),
+            run_state: Some("executing".to_string()),
+            active_task_run_id: Some("run-1".to_string()),
+            latest_step_execution_id: Some("exec-1".to_string()),
             priority: Some("high".to_string()),
             tags: vec!["backend".to_string()],
             needs_human_review: Some(false),
@@ -259,6 +289,9 @@ mod tests {
         assert_eq!(json["level"], "ticket");
         assert_eq!(json["workflow_name"], "Implementation");
         assert_eq!(json["step_name"], "todo");
+        assert_eq!(json["run_state"], "executing");
+        assert_eq!(json["active_task_run_id"], "run-1");
+        assert_eq!(json["latest_step_execution_id"], "exec-1");
         assert_eq!(json["priority"], "high");
         assert_eq!(json["tags"][0], "backend");
         assert_eq!(json["needs_human_review"], false);
@@ -275,6 +308,9 @@ mod tests {
                 level: "epic".to_string(),
                 workflow_name: None,
                 step_name: None,
+                run_state: None,
+                active_task_run_id: None,
+                latest_step_execution_id: None,
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -287,6 +323,9 @@ mod tests {
                 level: "task".to_string(),
                 workflow_name: None,
                 step_name: None,
+                run_state: None,
+                active_task_run_id: None,
+                latest_step_execution_id: None,
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -310,6 +349,9 @@ mod tests {
             level: "task".to_string(),
             workflow_name: None,
             step_name: None,
+            run_state: None,
+            active_task_run_id: None,
+            latest_step_execution_id: None,
             priority: None,
             tags: vec![],
             needs_human_review: None,
@@ -320,6 +362,9 @@ mod tests {
         let json = serde_json::to_value(&summary).unwrap();
         assert!(json["workflow_name"].is_null());
         assert!(json["step_name"].is_null());
+        assert!(json["run_state"].is_null());
+        assert!(json["active_task_run_id"].is_null());
+        assert!(json["latest_step_execution_id"].is_null());
         assert!(json["priority"].is_null());
         assert!(json["needs_human_review"].is_null());
         assert!(json["parent_id"].is_null());

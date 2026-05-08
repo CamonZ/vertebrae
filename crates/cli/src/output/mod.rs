@@ -3,6 +3,7 @@
 //! Provides table formatting and display utilities for CLI output.
 
 use crate::commands::list::TaskSummary;
+use vertebrae_core::TaskRunSummary;
 
 /// Maximum width for the title column before truncation
 const MAX_TITLE_WIDTH: usize = 30;
@@ -21,22 +22,37 @@ fn truncate(s: &str, max_width: usize) -> String {
     }
 }
 
-/// Format the status display from workflow_name and step_name.
+/// Format the workflow position display from workflow_name and step_name.
 /// Returns "workflow_name:step_name" if both are present, otherwise "unassigned".
-fn format_status_display(task: &TaskSummary) -> String {
+fn format_workflow_position_display(task: &TaskSummary) -> String {
     match (&task.workflow_name, &task.step_name) {
         (Some(wf), Some(step)) => format!("{}:{}", wf, step),
         _ => "unassigned".to_string(),
     }
 }
 
+/// Format a compact TaskRun summary for user-facing CLI output.
+pub fn format_task_run_brief(run: &TaskRunSummary) -> String {
+    format!(
+        "{} taskRun={} latestStep={}",
+        run.status,
+        run.id,
+        run.latest_step_execution_id.as_deref().unwrap_or("none")
+    )
+}
+
+/// Format the active TaskRun lifecycle state for list output.
+fn format_run_state_display(task: &TaskSummary) -> String {
+    task.run_state.as_deref().unwrap_or("idle").to_string()
+}
+
 /// Format tasks into an aligned table string.
 ///
 /// Produces output in the format:
 /// ```text
-/// ID      Level   Status       Priority  Title                     Tags        [R]
-/// ------  ------  -----------  --------  ------------------------  ----------  ---
-/// a1b2c3  epic    in_progress  high      Authentication system     backend     [R]
+/// ID      Level   Workflow     Run   Priority  Title                  Tags      [R]
+/// ------  ------  -----------  ----  --------  ---------------------  --------  ---
+/// a1b2c3  epic    Planning:do  idle  high      Authentication system  backend   [R]
 /// ```
 ///
 /// The [R] column indicates tasks that need human review.
@@ -55,7 +71,7 @@ pub fn format_task_table(tasks: &[TaskSummary]) -> String {
 
     // Column headers
     let headers = [
-        "ID", "Level", "Status", "Priority", "Title", "Tags", "[R]", "[A]",
+        "ID", "Level", "Workflow", "Run", "Priority", "Title", "Tags", "[R]", "[A]",
     ];
 
     // Calculate column widths based on content
@@ -73,45 +89,52 @@ pub fn format_task_table(tasks: &[TaskSummary]) -> String {
         .unwrap_or(0)
         .max(headers[1].len());
 
-    let status_width = tasks
+    let workflow_width = tasks
         .iter()
-        .map(|t| format_status_display(t).len())
+        .map(|t| format_workflow_position_display(t).len())
         .max()
         .unwrap_or(0)
         .max(headers[2].len());
+
+    let run_width = tasks
+        .iter()
+        .map(|t| format_run_state_display(t).len())
+        .max()
+        .unwrap_or(0)
+        .max(headers[3].len());
 
     let priority_width = tasks
         .iter()
         .map(|t| t.priority.as_ref().map_or(1, |p| p.len()))
         .max()
         .unwrap_or(0)
-        .max(headers[3].len());
+        .max(headers[4].len());
 
     let title_width = tasks
         .iter()
         .map(|t| t.title.len().min(MAX_TITLE_WIDTH))
         .max()
         .unwrap_or(0)
-        .max(headers[4].len());
+        .max(headers[5].len());
 
     let tags_width = tasks
         .iter()
         .map(|t| format_tags(&t.tags).len().min(MAX_TAGS_WIDTH))
         .max()
         .unwrap_or(0)
-        .max(headers[5].len());
+        .max(headers[6].len());
 
     // Review column is fixed width (3 chars for "[R]")
-    let review_width = headers[6].len();
+    let review_width = headers[7].len();
 
     // Archived column is fixed width (3 chars for "[A]")
-    let archived_width = headers[7].len();
+    let archived_width = headers[8].len();
 
     let mut output = String::new();
 
     // Header row
     output.push_str(&format!(
-        "{:<id_w$}  {:<level_w$}  {:<status_w$}  {:<priority_w$}  {:<title_w$}  {:<tags_w$}  {:<review_w$}  {:<archived_w$}\n",
+        "{:<id_w$}  {:<level_w$}  {:<workflow_w$}  {:<run_w$}  {:<priority_w$}  {:<title_w$}  {:<tags_w$}  {:<review_w$}  {:<archived_w$}\n",
         headers[0],
         headers[1],
         headers[2],
@@ -120,9 +143,11 @@ pub fn format_task_table(tasks: &[TaskSummary]) -> String {
         headers[5],
         headers[6],
         headers[7],
+        headers[8],
         id_w = id_width,
         level_w = level_width,
-        status_w = status_width,
+        workflow_w = workflow_width,
+        run_w = run_width,
         priority_w = priority_width,
         title_w = title_width,
         tags_w = tags_width,
@@ -132,7 +157,8 @@ pub fn format_task_table(tasks: &[TaskSummary]) -> String {
 
     // Separator row using Unicode box-drawing character
     output.push_str(&format!(
-        "{:->id_w$}  {:->level_w$}  {:->status_w$}  {:->priority_w$}  {:->title_w$}  {:->tags_w$}  {:->review_w$}  {:->archived_w$}\n",
+        "{:->id_w$}  {:->level_w$}  {:->workflow_w$}  {:->run_w$}  {:->priority_w$}  {:->title_w$}  {:->tags_w$}  {:->review_w$}  {:->archived_w$}\n",
+        "",
         "",
         "",
         "",
@@ -143,7 +169,8 @@ pub fn format_task_table(tasks: &[TaskSummary]) -> String {
         "",
         id_w = id_width,
         level_w = level_width,
-        status_w = status_width,
+        workflow_w = workflow_width,
+        run_w = run_width,
         priority_w = priority_width,
         title_w = title_width,
         tags_w = tags_width,
@@ -158,13 +185,15 @@ pub fn format_task_table(tasks: &[TaskSummary]) -> String {
         let tags_display = truncate(&format_tags(&task.tags), MAX_TAGS_WIDTH);
         let review_display = format_review_status(task.needs_human_review);
         let archived_display = format_archived_status(task.archived);
-        let status_display = format_status_display(task);
+        let workflow_display = format_workflow_position_display(task);
+        let run_display = format_run_state_display(task);
 
         output.push_str(&format!(
-            "{:<id_w$}  {:<level_w$}  {:<status_w$}  {:<priority_w$}  {:<title_w$}  {:<tags_w$}  {:<review_w$}  {:<archived_w$}\n",
+            "{:<id_w$}  {:<level_w$}  {:<workflow_w$}  {:<run_w$}  {:<priority_w$}  {:<title_w$}  {:<tags_w$}  {:<review_w$}  {:<archived_w$}\n",
             task.id,
             task.level,
-            status_display,
+            workflow_display,
+            run_display,
             priority_display,
             title_display,
             tags_display,
@@ -172,7 +201,8 @@ pub fn format_task_table(tasks: &[TaskSummary]) -> String {
             archived_display,
             id_w = id_width,
             level_w = level_width,
-            status_w = status_width,
+            workflow_w = workflow_width,
+            run_w = run_width,
             priority_w = priority_width,
             title_w = title_width,
             tags_w = tags_width,
@@ -342,7 +372,8 @@ fn render_node(
 
     // Format task fields
     let level_display = format!("{:8}", task.level);
-    let status_display = format!("{:14}", format_status_display(task));
+    let workflow_display = format!("{:14}", format_workflow_position_display(task));
+    let run_display = format!("{:10}", format_run_state_display(task));
     let title_display = truncate(&task.title, MAX_TITLE_WIDTH);
     let review_display = if task.needs_human_review == Some(true) {
         " [R]"
@@ -353,12 +384,13 @@ fn render_node(
 
     // Write the line
     output.push_str(&format!(
-        "{}{}{:<8} {} {} {}{}{}",
+        "{}{}{:<8} {} {} {} {}{}{}",
         prefix,
         connector,
         task.id,
         level_display,
-        status_display,
+        workflow_display,
+        run_display,
         title_display,
         review_display,
         archived_display
@@ -444,6 +476,9 @@ mod tests {
             level: "task".to_string(),
             workflow_name: Some("default".to_string()),
             step_name: Some("in_progress".to_string()),
+            run_state: None,
+            active_task_run_id: None,
+            latest_step_execution_id: None,
             priority: Some("high".to_string()),
             tags: vec!["backend".to_string()],
             needs_human_review: None,
@@ -462,7 +497,7 @@ mod tests {
         assert_eq!(
             header_parts,
             vec![
-                "ID", "Level", "Status", "Priority", "Title", "Tags", "[R]", "[A]"
+                "ID", "Level", "Workflow", "Run", "Priority", "Title", "Tags", "[R]", "[A]"
             ]
         );
 
@@ -473,11 +508,12 @@ mod tests {
         let data_parts: Vec<&str> = lines[2].split_whitespace().collect();
         assert_eq!(data_parts[0], "abc123", "ID column");
         assert_eq!(data_parts[1], "task", "Level column");
-        assert_eq!(data_parts[2], "default:in_progress", "Status column");
-        assert_eq!(data_parts[3], "high", "Priority column");
-        assert_eq!(data_parts[4], "Test", "Title column (first word)");
-        assert_eq!(data_parts[5], "Task", "Title column (second word)");
-        assert_eq!(data_parts[6], "backend", "Tags column");
+        assert_eq!(data_parts[2], "default:in_progress", "Workflow column");
+        assert_eq!(data_parts[3], "idle", "Run column");
+        assert_eq!(data_parts[4], "high", "Priority column");
+        assert_eq!(data_parts[5], "Test", "Title column (first word)");
+        assert_eq!(data_parts[6], "Task", "Title column (second word)");
+        assert_eq!(data_parts[7], "backend", "Tags column");
     }
 
     #[test]
@@ -489,6 +525,9 @@ mod tests {
                 level: "epic".to_string(),
                 workflow_name: Some("default".to_string()),
                 step_name: Some("in_progress".to_string()),
+                run_state: None,
+                active_task_run_id: None,
+                latest_step_execution_id: None,
                 priority: Some("critical".to_string()),
                 tags: vec!["urgent".to_string(), "backend".to_string()],
                 needs_human_review: Some(true),
@@ -501,6 +540,9 @@ mod tests {
                 level: "task".to_string(),
                 workflow_name: Some("default".to_string()),
                 step_name: Some("in_progress".to_string()),
+                run_state: None,
+                active_task_run_id: None,
+                latest_step_execution_id: None,
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -539,6 +581,9 @@ mod tests {
             level: "task".to_string(),
             workflow_name: Some("default".to_string()),
             step_name: Some("in_progress".to_string()),
+            run_state: None,
+            active_task_run_id: None,
+            latest_step_execution_id: None,
             priority: None,
             tags: vec![],
             needs_human_review: None,
@@ -551,7 +596,7 @@ mod tests {
 
         // Verify data row - priority column (4th column, index 3) should be "-"
         let data_parts: Vec<&str> = lines[2].split_whitespace().collect();
-        assert_eq!(data_parts[3], "-", "Priority column should be '-' for None");
+        assert_eq!(data_parts[4], "-", "Priority column should be '-' for None");
     }
 
     #[test]
@@ -562,6 +607,9 @@ mod tests {
             level: "task".to_string(),
             workflow_name: Some("default".to_string()),
             step_name: Some("in_progress".to_string()),
+            run_state: None,
+            active_task_run_id: None,
+            latest_step_execution_id: None,
             priority: Some("low".to_string()),
             tags: vec![],
             needs_human_review: None,
@@ -632,6 +680,9 @@ mod tests {
             level: "task".to_string(),
             workflow_name: Some("default".to_string()),
             step_name: Some("in_progress".to_string()),
+            run_state: None,
+            active_task_run_id: None,
+            latest_step_execution_id: None,
             priority: None,
             tags: vec![],
             needs_human_review: None,
@@ -675,6 +726,9 @@ mod tests {
             level: "task".to_string(),
             workflow_name: Some("default".to_string()),
             step_name: Some("in_progress".to_string()),
+            run_state: None,
+            active_task_run_id: None,
+            latest_step_execution_id: None,
             priority: None,
             tags: tags_input.clone(),
             needs_human_review: None,
@@ -703,6 +757,9 @@ mod tests {
                 level: "epic".to_string(),
                 workflow_name: Some("default".to_string()),
                 step_name: Some("in_progress".to_string()),
+                run_state: None,
+                active_task_run_id: None,
+                latest_step_execution_id: None,
                 priority: Some("high".to_string()),
                 tags: vec!["x".to_string()],
                 needs_human_review: None,
@@ -715,6 +772,9 @@ mod tests {
                 level: "subtask".to_string(),
                 workflow_name: Some("default".to_string()),
                 step_name: Some("in_progress".to_string()),
+                run_state: None,
+                active_task_run_id: None,
+                latest_step_execution_id: None,
                 priority: Some("critical".to_string()),
                 tags: vec!["backend".to_string(), "api".to_string()],
                 needs_human_review: Some(true),
@@ -764,6 +824,9 @@ mod tests {
                 level: "task".to_string(),
                 workflow_name: Some("default".to_string()),
                 step_name: Some(step_name.to_string()),
+                run_state: None,
+                active_task_run_id: None,
+                latest_step_execution_id: None,
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -786,6 +849,9 @@ mod tests {
                 level: level.to_string(),
                 workflow_name: Some("default".to_string()),
                 step_name: Some("in_progress".to_string()),
+                run_state: None,
+                active_task_run_id: None,
+                latest_step_execution_id: None,
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -808,6 +874,9 @@ mod tests {
                 level: "task".to_string(),
                 workflow_name: Some("default".to_string()),
                 step_name: Some("in_progress".to_string()),
+                run_state: None,
+                active_task_run_id: None,
+                latest_step_execution_id: None,
                 priority: Some(priority.to_string()),
                 tags: vec![],
                 needs_human_review: None,
@@ -835,6 +904,9 @@ mod tests {
             level: "task".to_string(),
             workflow_name: Some("default".to_string()),
             step_name: Some("in_progress".to_string()),
+            run_state: None,
+            active_task_run_id: None,
+            latest_step_execution_id: None,
             priority: None,
             tags: vec![],
             needs_human_review: Some(true),
@@ -859,6 +931,9 @@ mod tests {
             level: "task".to_string(),
             workflow_name: Some("default".to_string()),
             step_name: Some("in_progress".to_string()),
+            run_state: None,
+            active_task_run_id: None,
+            latest_step_execution_id: None,
             priority: None,
             tags: vec![],
             needs_human_review: Some(false),
@@ -902,6 +977,9 @@ mod tests {
             level: "epic".to_string(),
             workflow_name: Some("default".to_string()),
             step_name: Some("in_progress".to_string()),
+            run_state: None,
+            active_task_run_id: None,
+            latest_step_execution_id: None,
             priority: None,
             tags: vec![],
             needs_human_review: None,
@@ -929,6 +1007,9 @@ mod tests {
                 level: "epic".to_string(),
                 workflow_name: Some("default".to_string()),
                 step_name: Some("in_progress".to_string()),
+                run_state: None,
+                active_task_run_id: None,
+                latest_step_execution_id: None,
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -941,6 +1022,9 @@ mod tests {
                 level: "ticket".to_string(),
                 workflow_name: Some("default".to_string()),
                 step_name: Some("in_progress".to_string()),
+                run_state: None,
+                active_task_run_id: None,
+                latest_step_execution_id: None,
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -975,6 +1059,9 @@ mod tests {
                 level: "epic".to_string(),
                 workflow_name: Some("default".to_string()),
                 step_name: Some("in_progress".to_string()),
+                run_state: None,
+                active_task_run_id: None,
+                latest_step_execution_id: None,
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -987,6 +1074,9 @@ mod tests {
                 level: "ticket".to_string(),
                 workflow_name: Some("default".to_string()),
                 step_name: Some("in_progress".to_string()),
+                run_state: None,
+                active_task_run_id: None,
+                latest_step_execution_id: None,
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -999,6 +1089,9 @@ mod tests {
                 level: "ticket".to_string(),
                 workflow_name: Some("default".to_string()),
                 step_name: Some("in_progress".to_string()),
+                run_state: None,
+                active_task_run_id: None,
+                latest_step_execution_id: None,
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -1032,6 +1125,9 @@ mod tests {
                 level: "epic".to_string(),
                 workflow_name: Some("default".to_string()),
                 step_name: Some("in_progress".to_string()),
+                run_state: None,
+                active_task_run_id: None,
+                latest_step_execution_id: None,
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -1044,6 +1140,9 @@ mod tests {
                 level: "ticket".to_string(),
                 workflow_name: Some("default".to_string()),
                 step_name: Some("in_progress".to_string()),
+                run_state: None,
+                active_task_run_id: None,
+                latest_step_execution_id: None,
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -1056,6 +1155,9 @@ mod tests {
                 level: "task".to_string(),
                 workflow_name: Some("default".to_string()),
                 step_name: Some("in_progress".to_string()),
+                run_state: None,
+                active_task_run_id: None,
+                latest_step_execution_id: None,
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -1087,6 +1189,9 @@ mod tests {
                 level: "task".to_string(),
                 workflow_name: Some("default".to_string()),
                 step_name: Some("in_progress".to_string()),
+                run_state: None,
+                active_task_run_id: None,
+                latest_step_execution_id: None,
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -1099,6 +1204,9 @@ mod tests {
                 level: "epic".to_string(),
                 workflow_name: Some("default".to_string()),
                 step_name: Some("in_progress".to_string()),
+                run_state: None,
+                active_task_run_id: None,
+                latest_step_execution_id: None,
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -1128,6 +1236,9 @@ mod tests {
             level: "ticket".to_string(),
             workflow_name: Some("default".to_string()),
             step_name: Some("in_progress".to_string()),
+            run_state: None,
+            active_task_run_id: None,
+            latest_step_execution_id: None,
             priority: None,
             tags: vec![],
             needs_human_review: None,
@@ -1156,6 +1267,9 @@ mod tests {
             level: "task".to_string(),
             workflow_name: Some("default".to_string()),
             step_name: Some("pending_review".to_string()),
+            run_state: None,
+            active_task_run_id: None,
+            latest_step_execution_id: None,
             priority: None,
             tags: vec![],
             needs_human_review: Some(true),
@@ -1186,6 +1300,9 @@ mod tests {
                 level: "task".to_string(),
                 workflow_name: Some("default".to_string()),
                 step_name: Some("in_progress".to_string()),
+                run_state: None,
+                active_task_run_id: None,
+                latest_step_execution_id: None,
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -1209,6 +1326,9 @@ mod tests {
                 level: "task".to_string(),
                 workflow_name: Some("default".to_string()),
                 step_name: Some("in_progress".to_string()),
+                run_state: None,
+                active_task_run_id: None,
+                latest_step_execution_id: None,
                 priority: None,
                 tags: vec![],
                 needs_human_review: None,
@@ -1237,6 +1357,9 @@ mod tests {
             level: "task".to_string(),
             workflow_name: Some("default".to_string()),
             step_name: Some("done".to_string()),
+            run_state: None,
+            active_task_run_id: None,
+            latest_step_execution_id: None,
             priority: None,
             tags: vec![],
             needs_human_review: None,
@@ -1259,6 +1382,9 @@ mod tests {
             level: "task".to_string(),
             workflow_name: Some("default".to_string()),
             step_name: Some("in_progress".to_string()),
+            run_state: None,
+            active_task_run_id: None,
+            latest_step_execution_id: None,
             priority: None,
             tags: vec![],
             needs_human_review: None,
@@ -1285,6 +1411,9 @@ mod tests {
             level: "task".to_string(),
             workflow_name: Some("default".to_string()),
             step_name: Some("done".to_string()),
+            run_state: None,
+            active_task_run_id: None,
+            latest_step_execution_id: None,
             priority: None,
             tags: vec![],
             needs_human_review: None,
@@ -1308,6 +1437,9 @@ mod tests {
             level: "task".to_string(),
             workflow_name: Some("default".to_string()),
             step_name: Some("pending_review".to_string()),
+            run_state: None,
+            active_task_run_id: None,
+            latest_step_execution_id: None,
             priority: None,
             tags: vec![],
             needs_human_review: Some(true),
