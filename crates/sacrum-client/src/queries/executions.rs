@@ -4,6 +4,7 @@ pub const EXECUTION_FIELDS: &str = r#"
     fragment ExecutionFields on StepExecution {
         id
         task_id
+        task_run_id
         workflow_id
         step_name
         status
@@ -20,6 +21,108 @@ pub const EXECUTION_FIELDS: &str = r#"
         handoff
         inserted_at
         updated_at
+    }
+"#;
+
+/// Fragment for task run fields.
+/// Absinthe uses snake_case for all field names.
+pub const TASK_RUN_FIELDS: &str = r#"
+    fragment TaskRunFields on TaskRun {
+        id
+        task_id
+        project_id
+        user_id
+        status
+        started_at
+        ended_at
+        stop_requested_at
+        latest_step_execution_id
+        outcome_kind
+        outcome_context
+        parent_task_run_id
+        root_task_run_id
+        triggered_by_step_execution_id
+        inserted_at
+        updated_at
+    }
+"#;
+
+/// Fragment for session log fields.
+pub const SESSION_LOG_FIELDS: &str = r#"
+    fragment SessionLogFields on SessionLog {
+        id
+        step_execution_id
+        content
+        inserted_at
+        updated_at
+    }
+"#;
+
+/// Fragment for task run trace fields.
+/// NOTE: Prepend TASK_RUN_FIELDS, EXECUTION_FIELDS, and SESSION_LOG_FIELDS when sending.
+pub const TASK_RUN_TRACE_FIELDS: &str = r#"
+    fragment TaskRunTraceFields on TaskRunTrace {
+        root_task_run_id
+        task_runs {
+            ...TaskRunFields
+        }
+        step_executions {
+            ...ExecutionFields
+        }
+        session_logs {
+            ...SessionLogFields
+        }
+    }
+"#;
+
+/// Get the active TaskRun for a task, if any.
+/// NOTE: Prepend TASK_RUN_FIELDS when sending.
+pub const ACTIVE_RUN: &str = r#"
+    query ActiveRun($task_id: Uuid4!) {
+        active_run(task_id: $task_id) {
+            ...TaskRunFields
+        }
+    }
+"#;
+
+/// List all TaskRuns for a task.
+/// NOTE: Prepend TASK_RUN_FIELDS when sending.
+pub const TASK_RUNS: &str = r#"
+    query TaskRuns($task_id: Uuid4!) {
+        task_runs(task_id: $task_id) {
+            ...TaskRunFields
+        }
+    }
+"#;
+
+/// Get the trace tree for a root TaskRun.
+/// NOTE: Prepend TASK_RUN_FIELDS, EXECUTION_FIELDS, SESSION_LOG_FIELDS, and
+/// TASK_RUN_TRACE_FIELDS when sending.
+pub const TASK_RUN_TRACE: &str = r#"
+    query TaskRunTrace($root_task_run_id: Uuid4!) {
+        task_run_trace(root_task_run_id: $root_task_run_id) {
+            ...TaskRunTraceFields
+        }
+    }
+"#;
+
+/// Start or schedule a workflow run for a task.
+/// NOTE: Prepend TASK_RUN_FIELDS when sending.
+pub const RUN_WORKFLOW: &str = r#"
+    mutation RunWorkflow($task_id: Uuid4!) {
+        run_workflow(task_id: $task_id) {
+            ...TaskRunFields
+        }
+    }
+"#;
+
+/// Stop a run by task ID or explicit TaskRun ID.
+/// NOTE: Prepend TASK_RUN_FIELDS when sending.
+pub const STOP_RUN: &str = r#"
+    mutation StopRun($task_id: Uuid4, $task_run_id: Uuid4) {
+        stop_run(task_id: $task_id, task_run_id: $task_run_id) {
+            ...TaskRunFields
+        }
     }
 "#;
 
