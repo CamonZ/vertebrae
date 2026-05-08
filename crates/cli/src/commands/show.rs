@@ -4,9 +4,10 @@
 //! including sections, relationships, and code references.
 
 use crate::commands::list::TaskSummary;
+use crate::output::format_task_run_brief;
 use clap::Args;
 use serde::Serialize;
-use vertebrae_core::{CodeRef, Section, SectionType};
+use vertebrae_core::{CodeRef, Section, SectionType, TaskRunControls, TaskRunSummary};
 use vertebrae_core::{ServiceError, VertebraeServices, WorkflowInfo, WorkflowService};
 
 /// Show full details of a task
@@ -56,6 +57,10 @@ pub struct TaskDetail {
     pub parent_id: Option<String>,
     /// Workflow assignment information
     pub workflow: Option<WorkflowInfo>,
+    /// Server-derived run controls.
+    pub run_controls: Option<TaskRunControls>,
+    /// Concise task-local run history.
+    pub run_history: Vec<TaskRunSummary>,
     /// Embedded sections
     pub sections: Vec<Section>,
     /// Embedded code references
@@ -91,6 +96,7 @@ struct TaskRow {
     rejection_reason: Option<String>,
     workflow_id: Option<String>,
     current_step_id: Option<String>,
+    run_controls: Option<TaskRunControls>,
     parent_id: Option<String>,
     sections: Vec<SectionRow>,
     code_refs: Vec<CodeRefRow>,
@@ -141,6 +147,9 @@ impl From<RelatedTaskRow> for TaskSummary {
             level: row.level,
             workflow_name: row.workflow_name,
             step_name: row.step_name,
+            run_state: None,
+            active_task_run_id: None,
+            latest_step_execution_id: None,
             priority: row.priority,
             tags: row.tags,
             needs_human_review: row.needs_human_review,
@@ -198,6 +207,15 @@ impl ShowCommand {
                 task.current_step_id.as_deref(),
             )
             .await?;
+
+        let run_controls = task.run_controls.clone();
+        let run_history: Vec<TaskRunSummary> = services
+            .executions()
+            .task_runs(&id)
+            .await?
+            .iter()
+            .map(TaskRunSummary::from)
+            .collect();
 
         // Convert sections - filter out any without required fields
         let sections: Vec<Section> = task
@@ -267,7 +285,7 @@ impl ShowCommand {
             })
             .collect();
 
-        // Compute the derived status from workflow info
+        // Compute the workflow position from workflow info.
         let (derived_workflow_name, derived_step_name) = if let Some(ref wf) = workflow {
             (Some(wf.name.clone()), Some(wf.current_step_name.clone()))
         } else {
@@ -293,6 +311,8 @@ impl ShowCommand {
             revision_feedback: task.revision_feedback,
             rejection_reason: task.rejection_reason,
             workflow,
+            run_controls,
+            run_history,
             sections,
             code_refs,
             parent,
@@ -331,6 +351,7 @@ impl ShowCommand {
             rejection_reason: task.rejection_reason,
             workflow_id: task.workflow_id,
             current_step_id: task.current_step_id,
+            run_controls: task.run_controls,
             parent_id: task.parent_id,
             sections: task
                 .sections
@@ -385,16 +406,8 @@ impl ShowCommand {
         let task = services.tasks().get_task(parent_id).await?;
 
         Ok(Some(TaskSummary {
-            id: parent_id.to_string(),
-            title: task.title,
-            level: task.level.as_str().to_string(),
-            workflow_name: task.workflow_name,
-            step_name: task.step_name,
-            priority: task.priority.map(|p| p.as_str().to_string()),
-            tags: task.tags,
-            needs_human_review: task.needs_human_review,
-            archived: task.archived,
             parent_id: None,
+            ..TaskSummary::from(task)
         }))
     }
 
@@ -420,18 +433,7 @@ impl ShowCommand {
 
 /// Convert a core Task to a TaskSummary for display in relationships.
 fn task_to_summary(task: &vertebrae_core::Task) -> TaskSummary {
-    TaskSummary {
-        id: task.id.clone(),
-        title: task.title.clone(),
-        level: task.level.as_str().to_string(),
-        workflow_name: task.workflow_name.clone(),
-        step_name: task.step_name.clone(),
-        priority: task.priority.as_ref().map(|p| p.as_str().to_string()),
-        tags: task.tags.clone(),
-        needs_human_review: task.needs_human_review,
-        archived: task.archived,
-        parent_id: task.parent_id.clone(),
-    }
+    TaskSummary::from(task)
 }
 
 /// Format a TaskDetail for display
@@ -446,11 +448,11 @@ impl std::fmt::Display for TaskDetail {
         writeln!(f, "Metadata")?;
         writeln!(f, "{}", "-".repeat(40))?;
         writeln!(f, "Level:    {}", self.level)?;
-        let status_display = match (&self.workflow_name, &self.step_name) {
+        let workflow_display = match (&self.workflow_name, &self.step_name) {
             (Some(wf), Some(step)) => format!("{}:{}", wf, step),
             _ => "unassigned".to_string(),
         };
-        writeln!(f, "Status:   {}", status_display)?;
+        writeln!(f, "Workflow: {}", workflow_display)?;
         writeln!(
             f,
             "Priority: {}",
@@ -530,6 +532,29 @@ impl std::fmt::Display for TaskDetail {
             }
             writeln!(f)?;
         }
+
+        writeln!(f, "Run")?;
+        writeln!(f, "{}", "-".repeat(40))?;
+        if let Some(active_run) = self
+            .run_controls
+            .as_ref()
+            .and_then(|controls| controls.active_run.as_ref())
+            .map(TaskRunSummary::from)
+        {
+            writeln!(f, "Run: {}", format_task_run_brief(&active_run))?;
+        } else {
+            writeln!(f, "Run: idle")?;
+        }
+        if let Some(ref controls) = self.run_controls {
+            writeln!(f, "Controls: {}", format_run_controls(controls))?;
+        }
+        if !self.run_history.is_empty() {
+            writeln!(f, "History:")?;
+            for run in self.run_history.iter().rev().take(5) {
+                writeln!(f, "  - {}", format_task_run_brief(run))?;
+            }
+        }
+        writeln!(f)?;
 
         // Description section (if present)
         if let Some(ref description) = self.description {
@@ -618,6 +643,20 @@ impl std::fmt::Display for TaskDetail {
 
         Ok(())
     }
+}
+
+fn format_run_controls(controls: &TaskRunControls) -> String {
+    let mut parts = vec![
+        format!("runnable={}", controls.runnable),
+        format!("stoppable={}", controls.stoppable),
+    ];
+    if let Some(ref code) = controls.disabled_reason_code {
+        parts.push(format!("reasonCode={}", code));
+    }
+    if let Some(ref reason) = controls.disabled_reason {
+        parts.push(format!("reason=\"{}\"", reason));
+    }
+    parts.join(" ")
 }
 
 /// Format sections of a specific type with their own heading
@@ -741,6 +780,8 @@ mod tests {
             revision_feedback: None,
             rejection_reason: None,
             workflow: None,
+            run_controls: None,
+            run_history: vec![],
             sections: vec![],
             code_refs: vec![],
             parent: None,
@@ -776,6 +817,9 @@ mod tests {
             level: "task".to_string(),
             workflow_name: None,
             step_name: None,
+            run_state: None,
+            active_task_run_id: None,
+            latest_step_execution_id: None,
             priority: None,
             tags: vec![],
             needs_human_review: None,
@@ -788,6 +832,9 @@ mod tests {
             level: "ticket".to_string(),
             workflow_name: None,
             step_name: Some("todo".to_string()),
+            run_state: None,
+            active_task_run_id: None,
+            latest_step_execution_id: None,
             priority: None,
             tags: vec![],
             needs_human_review: None,

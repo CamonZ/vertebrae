@@ -965,6 +965,10 @@ pub struct Task {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub step_name: Option<String>,
 
+    /// Server-derived TaskRun controls for Run/Stop surfaces.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_controls: Option<TaskRunControls>,
+
     /// Whether this task needs human review
     #[serde(default)]
     pub needs_human_review: Option<bool>,
@@ -1048,6 +1052,7 @@ impl Task {
             current_step_id: None,
             workflow_name: None,
             step_name: None,
+            run_controls: None,
             needs_human_review: None,
             archived: false,
             worktree: None,
@@ -1143,6 +1148,7 @@ impl PartialEq for Task {
             && self.needs_human_review == other.needs_human_review
             && self.workflow_id == other.workflow_id
             && self.current_step_id == other.current_step_id
+            && self.run_controls == other.run_controls
     }
 }
 

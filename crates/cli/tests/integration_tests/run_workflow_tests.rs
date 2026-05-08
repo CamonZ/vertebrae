@@ -1,7 +1,6 @@
 //! Integration tests for the `run-workflow` CLI command.
 //!
-//! The `run-workflow` command orchestrates a task through its entire workflow
-//! via the ExecutionService's `orchestrate_task` method.
+//! The `run-workflow` command starts a durable TaskRun for a task workflow.
 
 use super::mock::mock_services;
 use vertebrae_cli::commands::*;
@@ -129,16 +128,125 @@ mod run_workflow_command_tests {
 
         let msg = result.unwrap();
         assert!(
-            msg.contains("Workflow orchestration started"),
+            msg.contains("Run: executing"),
             "Expected success message, got: {}",
             msg
         );
-        let short_id = &task_id[..8];
         assert!(
-            msg.contains(short_id),
-            "Expected message to contain short task ID '{}', got: {}",
-            short_id,
+            msg.contains("taskRun=mock"),
+            "Expected message to contain TaskRun ID, got: {}",
             msg
+        );
+        assert!(
+            msg.contains("latestStep=mock"),
+            "Expected message to contain latest step execution ID, got: {}",
+            msg
+        );
+    }
+
+    #[tokio::test]
+    async fn test_task_run_lifecycle_surfaces_in_list_show_and_stop() {
+        let services = mock_services();
+        let (task_id, _) = create_task_with_workflow(&services, "TaskRun surfaced task").await;
+
+        let run_msg = RunWorkflowCommand {
+            task_id: task_id.clone(),
+        }
+        .execute(&services)
+        .await
+        .unwrap();
+        assert!(run_msg.contains("Run: executing"));
+
+        let list = ListCommand {
+            levels: vec![],
+            statuses: vec![],
+            priorities: vec![],
+            tags: vec![],
+            workflow: None,
+            step: None,
+            root: false,
+            parent: None,
+            all: false,
+            include_archived: false,
+            search: None,
+            flat: false,
+        }
+        .execute(&services)
+        .await
+        .unwrap();
+        let listed = list
+            .iter()
+            .find(|summary| summary.id == task_id)
+            .expect("task should be listed");
+        assert_eq!(listed.run_state.as_deref(), Some("executing"));
+        assert!(
+            listed
+                .active_task_run_id
+                .as_deref()
+                .is_some_and(|id| id.starts_with("mock")),
+            "list summary should expose active TaskRun ID: {:?}",
+            listed
+        );
+        assert!(
+            listed
+                .latest_step_execution_id
+                .as_deref()
+                .is_some_and(|id| id.starts_with("mock")),
+            "list summary should expose latest step execution ID: {:?}",
+            listed
+        );
+
+        let detail = ShowCommand {
+            id: task_id.clone(),
+        }
+        .execute(&services)
+        .await
+        .unwrap();
+        let active_run = detail
+            .run_controls
+            .as_ref()
+            .and_then(|controls| controls.active_run.as_ref())
+            .expect("active run summary");
+        assert_eq!(active_run.status.to_string(), "executing");
+        assert_eq!(detail.run_history.len(), 1);
+        assert!(
+            detail
+                .run_controls
+                .as_ref()
+                .is_some_and(|controls| !controls.runnable && controls.stoppable),
+            "show should expose server-derived run controls"
+        );
+        let display = detail.to_string();
+        assert!(
+            display.contains(&format!(
+                "Run: executing taskRun={} latestStep={}",
+                active_run.id,
+                active_run.latest_step_execution_id.as_deref().unwrap()
+            )),
+            "show output should include active TaskRun state, got:\n{}",
+            display
+        );
+        assert!(
+            display.contains("Controls: runnable=false stoppable=true"),
+            "show output should include run controls, got:\n{}",
+            display
+        );
+        assert!(
+            display.contains("History:"),
+            "show output should include concise run history, got:\n{}",
+            display
+        );
+
+        let stop_msg = StopCommand {
+            task_id: task_id.clone(),
+        }
+        .execute(&services)
+        .await
+        .unwrap();
+        assert!(
+            stop_msg.contains(&format!("Stopped run: stopping taskRun={}", active_run.id)),
+            "stop should prefer active TaskRun ID, got: {}",
+            stop_msg
         );
     }
 

@@ -51,6 +51,8 @@ pub struct TaskResponse {
     #[serde(default)]
     pub current_step_id: Option<String>,
     #[serde(default)]
+    pub run_controls: Option<TaskRunControlsResponse>,
+    #[serde(default)]
     pub needs_human_review: Option<bool>,
     #[serde(default)]
     pub archived: bool,
