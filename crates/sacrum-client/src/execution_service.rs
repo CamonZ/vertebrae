@@ -7,14 +7,19 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::json;
 use vertebrae_core::error::ServiceResult;
-use vertebrae_core::execution_service::ExecutionService;
-use vertebrae_core::models::{ExecutionStatus, SessionLog, StepExecution};
+use vertebrae_core::execution_service::{ExecutionService, StopRunTarget};
+use vertebrae_core::models::{
+    ExecutionStatus, SessionLog, StepExecution, TaskRun, TaskRunStatus, TaskRunTrace,
+};
 
-use crate::api_types::{SessionLogResponse, StepExecutionResponse};
+use crate::api_types::{
+    SessionLogResponse, StepExecutionResponse, TaskRunResponse, TaskRunTraceResponse,
+};
 use crate::client::{GraphqlClient, with_fragments};
 use crate::queries::executions::{
-    CREATE_EXECUTION, CREATE_LOG, EXECUTION_FIELDS, GET_EXECUTION, LIST_EXECUTIONS, LIST_LOGS,
-    ORCHESTRATE_TASK, RUN_STEP, STOP_ORCHESTRATOR, UPDATE_EXECUTION,
+    ACTIVE_RUN, CREATE_EXECUTION, CREATE_LOG, EXECUTION_FIELDS, GET_EXECUTION, LIST_EXECUTIONS,
+    LIST_LOGS, ORCHESTRATE_TASK, RUN_STEP, RUN_WORKFLOW, SESSION_LOG_FIELDS, STOP_ORCHESTRATOR,
+    STOP_RUN, TASK_RUN_FIELDS, TASK_RUN_TRACE, TASK_RUN_TRACE_FIELDS, TASK_RUNS, UPDATE_EXECUTION,
 };
 
 /// Response shape for mutations that return only an id
@@ -28,6 +33,12 @@ fn json_value_to_string(v: &serde_json::Value) -> String {
         serde_json::Value::String(s) => s.clone(),
         other => other.to_string(),
     }
+}
+
+fn parse_datetime(value: Option<&str>) -> Option<chrono::DateTime<chrono::Utc>> {
+    value
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|dt| dt.with_timezone(&chrono::Utc))
 }
 
 /// ExecutionService implementation for Sacrum GraphQL client
@@ -45,19 +56,11 @@ impl SacrumExecutionService {
         let status =
             ExecutionStatus::parse(&response.status).unwrap_or(ExecutionStatus::InProgress);
 
-        let started_at = response
-            .inserted_at
-            .as_deref()
-            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-            .map(|dt| dt.with_timezone(&chrono::Utc))
-            .unwrap_or_else(chrono::Utc::now);
+        let started_at =
+            parse_datetime(response.inserted_at.as_deref()).unwrap_or_else(chrono::Utc::now);
 
         let completed_at = if status.is_terminal() {
-            response
-                .updated_at
-                .as_deref()
-                .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-                .map(|dt| dt.with_timezone(&chrono::Utc))
+            parse_datetime(response.updated_at.as_deref())
         } else {
             None
         };
@@ -91,13 +94,30 @@ impl SacrumExecutionService {
         }
     }
 
+    pub(crate) fn response_to_task_run(response: &TaskRunResponse) -> TaskRun {
+        TaskRun {
+            id: response.id.clone(),
+            task_id: response.task_id.clone(),
+            project_id: response.project_id.clone().unwrap_or_default(),
+            user_id: response.user_id.clone(),
+            status: TaskRunStatus::parse(&response.status).unwrap_or(TaskRunStatus::Queued),
+            started_at: parse_datetime(response.started_at.as_deref()),
+            ended_at: parse_datetime(response.ended_at.as_deref()),
+            stop_requested_at: parse_datetime(response.stop_requested_at.as_deref()),
+            latest_step_execution_id: response.latest_step_execution_id.clone(),
+            outcome_kind: response.outcome_kind.clone(),
+            outcome_context: response.outcome_context.clone(),
+            parent_task_run_id: response.parent_task_run_id.clone(),
+            root_task_run_id: response.root_task_run_id.clone(),
+            triggered_by_step_execution_id: response.triggered_by_step_execution_id.clone(),
+            inserted_at: parse_datetime(response.inserted_at.as_deref()),
+            updated_at: parse_datetime(response.updated_at.as_deref()),
+        }
+    }
+
     fn response_to_log(response: &SessionLogResponse) -> SessionLog {
-        let created_at = response
-            .inserted_at
-            .as_deref()
-            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-            .map(|dt| dt.with_timezone(&chrono::Utc))
-            .unwrap_or_else(chrono::Utc::now);
+        let created_at =
+            parse_datetime(response.inserted_at.as_deref()).unwrap_or_else(chrono::Utc::now);
 
         SessionLog {
             id: Some(response.id.clone()),
@@ -275,6 +295,95 @@ impl ExecutionService for SacrumExecutionService {
             .await?;
 
         Ok(())
+    }
+
+    async fn active_run(&self, task_id: &str) -> ServiceResult<Option<TaskRun>> {
+        let query = with_fragments(ACTIVE_RUN, &[TASK_RUN_FIELDS]);
+        let variables = json!({ "task_id": task_id });
+
+        let response: Option<TaskRunResponse> =
+            self.client.execute(&query, variables, "active_run").await?;
+
+        Ok(response.as_ref().map(Self::response_to_task_run))
+    }
+
+    async fn task_runs(&self, task_id: &str) -> ServiceResult<Vec<TaskRun>> {
+        let query = with_fragments(TASK_RUNS, &[TASK_RUN_FIELDS]);
+        let variables = json!({ "task_id": task_id });
+
+        let responses: Vec<TaskRunResponse> =
+            self.client.execute(&query, variables, "task_runs").await?;
+
+        Ok(responses.iter().map(Self::response_to_task_run).collect())
+    }
+
+    async fn task_run_trace(&self, root_task_run_id: &str) -> ServiceResult<TaskRunTrace> {
+        let query = with_fragments(
+            TASK_RUN_TRACE,
+            &[
+                TASK_RUN_FIELDS,
+                EXECUTION_FIELDS,
+                SESSION_LOG_FIELDS,
+                TASK_RUN_TRACE_FIELDS,
+            ],
+        );
+        let variables = json!({ "root_task_run_id": root_task_run_id });
+
+        let response: TaskRunTraceResponse = self
+            .client
+            .execute(&query, variables, "task_run_trace")
+            .await?;
+
+        Ok(TaskRunTrace {
+            root_task_run_id: response.root_task_run_id,
+            task_runs: response
+                .task_runs
+                .iter()
+                .map(Self::response_to_task_run)
+                .collect(),
+            step_executions: response
+                .step_executions
+                .iter()
+                .map(Self::response_to_execution)
+                .collect(),
+            session_logs: response
+                .session_logs
+                .iter()
+                .map(Self::response_to_log)
+                .collect(),
+        })
+    }
+
+    async fn run_workflow(&self, task_id: &str) -> ServiceResult<TaskRun> {
+        let query = with_fragments(RUN_WORKFLOW, &[TASK_RUN_FIELDS]);
+        let variables = json!({ "task_id": task_id });
+
+        let response: TaskRunResponse = self
+            .client
+            .execute(&query, variables, "run_workflow")
+            .await?;
+
+        Ok(Self::response_to_task_run(&response))
+    }
+
+    async fn stop_run(&self, target: StopRunTarget) -> ServiceResult<Option<TaskRun>> {
+        let query = with_fragments(STOP_RUN, &[TASK_RUN_FIELDS]);
+        let mut variables = serde_json::Map::new();
+        match target {
+            StopRunTarget::TaskId(task_id) => {
+                variables.insert("task_id".to_string(), json!(task_id));
+            }
+            StopRunTarget::TaskRunId(task_run_id) => {
+                variables.insert("task_run_id".to_string(), json!(task_run_id));
+            }
+        }
+
+        let response: Option<TaskRunResponse> = self
+            .client
+            .execute(&query, serde_json::Value::Object(variables), "stop_run")
+            .await?;
+
+        Ok(response.as_ref().map(Self::response_to_task_run))
     }
 }
 

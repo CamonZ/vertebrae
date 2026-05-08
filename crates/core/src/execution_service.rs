@@ -5,7 +5,7 @@
 //! for both step executions and session logs.
 
 use crate::error::ServiceResult;
-use crate::models::{ExecutionStatus, SessionLog, StepExecution};
+use crate::models::{ExecutionStatus, SessionLog, StepExecution, TaskRun, TaskRunTrace};
 use async_trait::async_trait;
 use std::sync::Arc;
 
@@ -41,6 +41,15 @@ pub struct UpdateExecutionStatusParams {
     pub cost: Option<String>,
     /// Optional duration in milliseconds.
     pub duration_ms: Option<i64>,
+}
+
+/// Target used when requesting a durable TaskRun stop.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StopRunTarget {
+    /// Stop the active run for this task, if any.
+    TaskId(String),
+    /// Stop this explicit TaskRun.
+    TaskRunId(String),
 }
 
 impl UpdateExecutionStatusParams {
@@ -237,6 +246,21 @@ pub trait ExecutionService: Send + Sync {
     ///
     /// * `task_id` - The task whose orchestrator should be stopped
     async fn stop_orchestrator(&self, task_id: &str) -> ServiceResult<()>;
+
+    /// Get the active TaskRun for a task, if any.
+    async fn active_run(&self, task_id: &str) -> ServiceResult<Option<TaskRun>>;
+
+    /// List TaskRuns for a task in backend-defined order.
+    async fn task_runs(&self, task_id: &str) -> ServiceResult<Vec<TaskRun>>;
+
+    /// Get a TaskRun trace tree rooted at the provided run ID.
+    async fn task_run_trace(&self, root_task_run_id: &str) -> ServiceResult<TaskRunTrace>;
+
+    /// Start or schedule a durable workflow run for a task.
+    async fn run_workflow(&self, task_id: &str) -> ServiceResult<TaskRun>;
+
+    /// Stop a durable TaskRun by explicit run ID or by task ID fallback.
+    async fn stop_run(&self, target: StopRunTarget) -> ServiceResult<Option<TaskRun>>;
 }
 
 #[cfg(test)]

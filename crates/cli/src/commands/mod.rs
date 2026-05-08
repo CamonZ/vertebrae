@@ -26,6 +26,7 @@ pub mod section;
 pub mod sections;
 pub mod show;
 pub mod step;
+pub mod stop;
 pub mod transition_to;
 pub mod uncheck_item;
 pub mod undepend;
@@ -56,6 +57,7 @@ pub use section::SectionCommand;
 pub use sections::SectionsCommand;
 pub use show::ShowCommand;
 pub use step::StepCommand;
+pub use stop::StopCommand;
 pub use transition_to::TransitionToCommand;
 pub use uncheck_item::UncheckItemCommand;
 pub use undepend::UndependCommand;
@@ -161,8 +163,8 @@ pub enum Command {
     Review(ReviewCommand),
     /// Run the current step for a task
     Run(RunCommand),
-    /// Orchestrate a task through its entire workflow
-    #[command(name = "run-workflow")]
+    /// Start a TaskRun for a task's assigned workflow
+    #[command(name = "start-taskrun", visible_alias = "run-workflow")]
     RunWorkflow(RunWorkflowCommand),
     /// Add a typed content section to a task
     Section(SectionCommand),
@@ -170,6 +172,9 @@ pub enum Command {
     Sections(SectionsCommand),
     /// Show full details of a task
     Show(ShowCommand),
+    /// Stop the active TaskRun for a task
+    #[command(name = "stop-taskrun", visible_aliases = ["stop", "stop-workflow"])]
+    Stop(StopCommand),
     /// Mark a checklist item as done within a task
     #[command(name = "check-item")]
     CheckItem(CheckItemCommand),
@@ -479,6 +484,7 @@ impl Command {
             Command::Section(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::Sections(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::Show(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
+            Command::Stop(cmd) => cmd.task_id = resolve_id(&cmd.task_id, services).await?,
             Command::Unarchive(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::UncheckItem(cmd) => cmd.id = resolve_id(&cmd.id, services).await?,
             Command::Undepend(cmd) => {
@@ -676,6 +682,10 @@ impl Command {
                 let detail = cmd.execute(services).await?;
                 Ok(CommandResult::Message(format!("{}", detail)))
             }
+            Command::Stop(cmd) => {
+                let result = cmd.execute(services).await?;
+                Ok(CommandResult::Message(result))
+            }
             Command::Unarchive(cmd) => {
                 let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(result))
@@ -793,6 +803,66 @@ mod tests {
     struct TestCli {
         #[command(subcommand)]
         command: Command,
+    }
+
+    #[test]
+    fn test_command_start_taskrun_parses_as_run_workflow() {
+        let cli = TestCli::try_parse_from(["test", "start-taskrun", "a1b2c3d4"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::RunWorkflow(cmd) => {
+                assert_eq!(cmd.task_id, "a1b2c3d4");
+            }
+            _ => panic!("Expected RunWorkflow command"),
+        }
+    }
+
+    #[test]
+    fn test_command_run_workflow_alias_parses_as_run_workflow() {
+        let cli = TestCli::try_parse_from(["test", "run-workflow", "a1b2c3d4"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::RunWorkflow(cmd) => {
+                assert_eq!(cmd.task_id, "a1b2c3d4");
+            }
+            _ => panic!("Expected RunWorkflow command"),
+        }
+    }
+
+    #[test]
+    fn test_command_stop_taskrun_parses_as_stop() {
+        let cli = TestCli::try_parse_from(["test", "stop-taskrun", "a1b2c3d4"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Stop(cmd) => {
+                assert_eq!(cmd.task_id, "a1b2c3d4");
+            }
+            _ => panic!("Expected Stop command"),
+        }
+    }
+
+    #[test]
+    fn test_command_stop_alias_parses_as_stop() {
+        let cli = TestCli::try_parse_from(["test", "stop", "a1b2c3d4"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Stop(cmd) => {
+                assert_eq!(cmd.task_id, "a1b2c3d4");
+            }
+            _ => panic!("Expected Stop command"),
+        }
+    }
+
+    #[test]
+    fn test_command_stop_workflow_alias_parses_as_stop() {
+        let cli = TestCli::try_parse_from(["test", "stop-workflow", "a1b2c3d4"]);
+        assert!(cli.is_ok());
+        match cli.unwrap().command {
+            Command::Stop(cmd) => {
+                assert_eq!(cmd.task_id, "a1b2c3d4");
+            }
+            _ => panic!("Expected Stop command"),
+        }
     }
 
     #[test]

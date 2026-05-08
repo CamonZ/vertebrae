@@ -8,7 +8,7 @@ use chrono::Utc;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use vertebrae_core::error::{ServiceError, ServiceResult};
-use vertebrae_core::execution_service::ExecutionService;
+use vertebrae_core::execution_service::{ExecutionService, StopRunTarget};
 use vertebrae_core::models::*;
 use vertebrae_core::service::*;
 use vertebrae_core::step_service::StepService;
@@ -26,6 +26,7 @@ struct MockState {
     dependencies: HashMap<String, HashSet<String>>,
     workflows: HashMap<String, Workflow>,
     executions: HashMap<String, StepExecution>,
+    task_runs: HashMap<String, TaskRun>,
     logs: HashMap<String, SessionLog>,
     steps: HashMap<String, Step>,
     next_id: u64,
@@ -91,6 +92,7 @@ impl TaskService for MockTaskService {
             dependency_ids: vec![],
             workflow_name: None,
             step_name: None,
+            run_controls: None,
         };
         s.tasks.insert(id.clone(), task);
 
@@ -816,6 +818,47 @@ impl MockExecutionService {
     }
 }
 
+fn task_run_controls(active_run: Option<TaskRun>, has_workflow: bool) -> TaskRunControls {
+    match active_run {
+        Some(run) => TaskRunControls {
+            runnable: false,
+            stoppable: run.is_stoppable(),
+            disabled_reason_code: Some(
+                if run.is_stoppable() {
+                    "active_run"
+                } else {
+                    "stopping"
+                }
+                .to_string(),
+            ),
+            disabled_reason: Some("Task already has an active run".to_string()),
+            active_run: Some(run),
+        },
+        None => TaskRunControls {
+            runnable: has_workflow,
+            stoppable: false,
+            disabled_reason_code: (!has_workflow).then(|| "missing_workflow".to_string()),
+            disabled_reason: (!has_workflow).then(|| "Task has no workflow assigned".to_string()),
+            active_run: None,
+        },
+    }
+}
+
+fn active_run_for_task(s: &MockState, task_id: &str) -> Option<TaskRun> {
+    s.task_runs
+        .values()
+        .filter(|run| run.task_id == task_id && run.is_active())
+        .max_by(|a, b| a.inserted_at.cmp(&b.inserted_at))
+        .cloned()
+}
+
+fn sync_task_run_controls(s: &mut MockState, task_id: &str) {
+    let active_run = active_run_for_task(s, task_id);
+    if let Some(task) = s.tasks.get_mut(task_id) {
+        task.run_controls = Some(task_run_controls(active_run, task.workflow_id.is_some()));
+    }
+}
+
 #[async_trait]
 impl ExecutionService for MockExecutionService {
     async fn create_execution(&self, mut execution: StepExecution) -> ServiceResult<String> {
@@ -953,6 +996,124 @@ impl ExecutionService for MockExecutionService {
 
     async fn stop_orchestrator(&self, _task_id: &str) -> ServiceResult<()> {
         Ok(())
+    }
+
+    async fn active_run(&self, task_id: &str) -> ServiceResult<Option<TaskRun>> {
+        let s = self.state.lock().unwrap();
+        Ok(active_run_for_task(&s, task_id))
+    }
+
+    async fn task_runs(&self, task_id: &str) -> ServiceResult<Vec<TaskRun>> {
+        let s = self.state.lock().unwrap();
+        let mut runs: Vec<TaskRun> = s
+            .task_runs
+            .values()
+            .filter(|run| run.task_id == task_id)
+            .cloned()
+            .collect();
+        runs.sort_by_key(|run| run.inserted_at);
+        Ok(runs)
+    }
+
+    async fn task_run_trace(&self, root_task_run_id: &str) -> ServiceResult<TaskRunTrace> {
+        let s = self.state.lock().unwrap();
+        let runs: Vec<TaskRun> = s
+            .task_runs
+            .values()
+            .filter(|run| {
+                run.id == root_task_run_id
+                    || run.root_task_run_id.as_deref() == Some(root_task_run_id)
+            })
+            .cloned()
+            .collect();
+        let run_ids: HashSet<String> = runs.iter().map(|run| run.id.clone()).collect();
+        Ok(TaskRunTrace {
+            root_task_run_id: root_task_run_id.to_string(),
+            task_runs: runs,
+            step_executions: s
+                .executions
+                .values()
+                .filter(|execution| {
+                    execution
+                        .task_run_id
+                        .as_ref()
+                        .is_some_and(|id| run_ids.contains(id))
+                })
+                .cloned()
+                .collect(),
+            session_logs: vec![],
+        })
+    }
+
+    async fn run_workflow(&self, task_id: &str) -> ServiceResult<TaskRun> {
+        let mut s = self.state.lock().unwrap();
+        let has_workflow = s
+            .tasks
+            .get(task_id)
+            .ok_or_else(|| ServiceError::task_not_found(task_id))?
+            .workflow_id
+            .is_some();
+        if !has_workflow {
+            return Err(ServiceError::validation_failed(format!(
+                "Task {} has no assigned workflow",
+                task_id
+            )));
+        }
+
+        let run_id = s.gen_id();
+        let execution_id = s.gen_id();
+        let now = Utc::now();
+        let mut execution = StepExecution::new(task_id, "mock_workflow", "mock_step")
+            .with_task_run_id(run_id.clone());
+        execution.id = Some(execution_id.clone());
+        s.executions.insert(execution_id.clone(), execution);
+
+        let run = TaskRun {
+            id: run_id.clone(),
+            task_id: task_id.to_string(),
+            project_id: "mock-project".to_string(),
+            user_id: None,
+            status: TaskRunStatus::Executing,
+            started_at: Some(now),
+            ended_at: None,
+            stop_requested_at: None,
+            latest_step_execution_id: Some(execution_id),
+            outcome_kind: None,
+            outcome_context: None,
+            parent_task_run_id: None,
+            root_task_run_id: None,
+            triggered_by_step_execution_id: None,
+            inserted_at: Some(now),
+            updated_at: Some(now),
+        };
+        s.task_runs.insert(run_id, run.clone());
+        sync_task_run_controls(&mut s, task_id);
+        Ok(run)
+    }
+
+    async fn stop_run(&self, target: StopRunTarget) -> ServiceResult<Option<TaskRun>> {
+        let mut s = self.state.lock().unwrap();
+        let run_id = match target {
+            StopRunTarget::TaskRunId(task_run_id) => Some(task_run_id),
+            StopRunTarget::TaskId(task_id) => active_run_for_task(&s, &task_id).map(|run| run.id),
+        };
+
+        let Some(run_id) = run_id else {
+            return Ok(None);
+        };
+
+        let now = Utc::now();
+        let stopped = {
+            let run = s.task_runs.get_mut(&run_id).ok_or_else(|| {
+                ServiceError::validation_failed(format!("task run not found: {}", run_id))
+            })?;
+            run.status = TaskRunStatus::Stopping;
+            run.stop_requested_at = Some(now);
+            run.updated_at = Some(now);
+            run.clone()
+        };
+        sync_task_run_controls(&mut s, &stopped.task_id);
+        Ok(Some(stopped))
     }
 }
 
