@@ -45,7 +45,7 @@ pub mod workflow_service;
 // Re-export main types for convenience
 pub use error::{ServiceError, ServiceResult};
 pub use execution_service::{
-    ExecutionMutationCallback, ExecutionMutationEvent, ExecutionService,
+    ExecutionMutationCallback, ExecutionMutationEvent, ExecutionService, StopRunTarget,
     UpdateExecutionStatusParams,
 };
 pub use orchestrator::{

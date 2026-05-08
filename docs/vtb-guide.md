@@ -697,11 +697,20 @@ Once the daemon is running, trigger step execution:
 # Run the current step for a task (dispatches to daemon)
 vtb run <task-id>
 
-# Orchestrate a task through its entire workflow (automatic multi-step)
+# Start a TaskRun for a task's assigned workflow (automatic multi-step)
+vtb start-taskrun <task-id>
+
+# Compatibility alias
 vtb run-workflow <task-id>
+
+# Stop the active TaskRun for a task
+vtb stop-taskrun <task-id>
+
+# Compatibility alias
+vtb stop <task-id>
 ```
 
-`vtb run` executes a single step. `vtb run-workflow` orchestrates the task through all workflow steps automatically, handling transitions, eval prompts, and workflow chaining.
+`vtb run` executes a single step. `vtb start-taskrun` starts a durable TaskRun for the task's assigned workflow, handling transitions, eval prompts, and workflow chaining. `vtb run-workflow` and `vtb stop` remain available as compatibility aliases.
 
 ---
 
@@ -759,8 +768,8 @@ vtb check-item <ticket-id> 2
 # 5. Review and complete
 vtb transition-to <ticket-id> review
 
-# 6. Or run the whole workflow automatically via daemon
-vtb run-workflow <ticket-id>
+# 6. Or start a TaskRun automatically via daemon
+vtb start-taskrun <ticket-id>
 
 # 7. Move to next
 vtb ready
@@ -835,7 +844,10 @@ vtb ready
 | Command | Description |
 |---------|-------------|
 | `vtb run <id>` | Execute current step via daemon |
-| `vtb run-workflow <id>` | Orchestrate full workflow via daemon |
+| `vtb start-taskrun <id>` | Start a TaskRun via daemon |
+| `vtb stop-taskrun <id>` | Stop the active TaskRun for a task |
+| `vtb run-workflow <id>` | Compatibility alias for `start-taskrun` |
+| `vtb stop <id>` | Compatibility alias for `stop-taskrun` |
 | `vtb execution create <id>` | Create execution record |
 | `vtb execution list <id>` | List executions for task |
 | `vtb execution show <id>` | Show execution details |

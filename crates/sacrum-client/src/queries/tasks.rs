@@ -12,6 +12,18 @@ pub const TASK_FIELDS: &str = r#"
         tags
         workflow_id
         current_step_id
+        run_controls {
+            runnable
+            stoppable
+            disabled_reason_code
+            disabled_reason
+            active_run {
+                id
+                task_id
+                status
+                latest_step_execution_id
+            }
+        }
         needs_human_review
         review_comment
         rejection_reason

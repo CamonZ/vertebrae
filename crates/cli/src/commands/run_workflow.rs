@@ -1,38 +1,20 @@
 use clap::Args;
-use vertebrae_core::{ServiceError, VertebraeServices};
+use vertebrae_core::{ServiceError, TaskRunSummary, VertebraeServices};
 
 #[derive(Debug, Args)]
 pub struct RunWorkflowCommand {
-    /// Task ID to orchestrate through its entire workflow
+    /// Task ID to start a TaskRun for
     #[arg(required = true, value_parser = crate::commands::parse_uuid("task ID"))]
     pub task_id: String,
 }
 
 impl RunWorkflowCommand {
     pub async fn execute(&self, services: &VertebraeServices) -> Result<String, ServiceError> {
-        let task = services.tasks().get_task(&self.task_id).await?;
-
-        if task.workflow_id.is_none() {
-            return Err(ServiceError::validation_failed(format!(
-                "Task {} has no assigned workflow",
-                self.task_id
-            )));
-        }
-
-        services
-            .executions()
-            .orchestrate_task(&self.task_id)
-            .await?;
-
-        let short_id = if self.task_id.len() > 8 {
-            &self.task_id[..8]
-        } else {
-            &self.task_id
-        };
+        let run = services.executions().run_workflow(&self.task_id).await?;
 
         Ok(format!(
-            "Workflow orchestration started for task {}",
-            short_id
+            "Run: {}",
+            crate::output::format_task_run_brief(&TaskRunSummary::from(&run))
         ))
     }
 }

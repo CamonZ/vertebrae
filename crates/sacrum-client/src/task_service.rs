@@ -9,14 +9,16 @@ use std::collections::HashMap;
 use vertebrae_core::error::{ServiceError, ServiceResult};
 use vertebrae_core::models::Task;
 use vertebrae_core::models::{
-    BlockerNode, CodeRef, Level, Priority, Section, SectionType, TaskFilter,
+    BlockerNode, CodeRef, Level, Priority, Section, SectionType, TaskFilter, TaskRunControls,
 };
 use vertebrae_core::service::{CreateTaskOptions, TaskService, UpdateTaskOptions};
 
 use crate::api_types::{
-    CodeRefResponse, SectionResponse, ShortIdResponse, TaskResponse, WorkflowResponse,
+    CodeRefResponse, SectionResponse, ShortIdResponse, TaskResponse, TaskRunControlsResponse,
+    WorkflowResponse,
 };
 use crate::client::{GraphqlClient, with_fragments};
+use crate::execution_service::SacrumExecutionService;
 use crate::queries::tasks;
 use crate::queries::workflows as wf_queries;
 
@@ -158,6 +160,10 @@ impl SacrumTaskService {
             current_step_id: response.current_step_id.clone(),
             workflow_name,
             step_name,
+            run_controls: response
+                .run_controls
+                .as_ref()
+                .map(task_run_controls_response_to_controls),
             needs_human_review: response.needs_human_review,
             archived: response.archived,
             worktree: response.worktree.clone(),
@@ -289,6 +295,19 @@ fn code_ref_response_to_code_ref(r: &CodeRefResponse) -> CodeRef {
         line_end: r.line_end.map(|v| v as u32),
         name: r.name.clone(),
         description: r.description.clone(),
+    }
+}
+
+fn task_run_controls_response_to_controls(r: &TaskRunControlsResponse) -> TaskRunControls {
+    TaskRunControls {
+        runnable: r.runnable,
+        stoppable: r.stoppable,
+        disabled_reason_code: r.disabled_reason_code.clone(),
+        disabled_reason: r.disabled_reason.clone(),
+        active_run: r
+            .active_run
+            .as_ref()
+            .map(SacrumExecutionService::response_to_task_run),
     }
 }
 
@@ -952,6 +971,7 @@ mod tests {
             tags: vec![],
             workflow_id: None,
             current_step_id: None,
+            run_controls: None,
             needs_human_review: None,
             archived: false,
             worktree: None,
