@@ -1057,8 +1057,33 @@ impl ExecutionService for MockExecutionService {
         Ok(runs)
     }
 
+    async fn task_run(&self, task_run_id: &str) -> ServiceResult<Option<TaskRun>> {
+        let s = self.state.lock().unwrap();
+        Ok(s.task_runs.get(task_run_id).cloned())
+    }
+
     async fn task_run_trace(&self, root_task_run_id: &str) -> ServiceResult<TaskRunTrace> {
         let s = self.state.lock().unwrap();
+        match s.task_runs.get(root_task_run_id) {
+            Some(run)
+                if run.parent_task_run_id.is_none()
+                    && run
+                        .root_task_run_id
+                        .as_deref()
+                        .is_none_or(|id| id == root_task_run_id) => {}
+            Some(_) => {
+                return Err(ServiceError::validation_failed(format!(
+                    "task run trace must be requested by root TaskRun ID: {}",
+                    root_task_run_id
+                )));
+            }
+            None => {
+                return Err(ServiceError::validation_failed(format!(
+                    "task run not found: {}",
+                    root_task_run_id
+                )));
+            }
+        }
         let runs: Vec<TaskRun> = s
             .task_runs
             .values()
@@ -1068,22 +1093,41 @@ impl ExecutionService for MockExecutionService {
             })
             .cloned()
             .collect();
-        let run_ids: HashSet<String> = runs.iter().map(|run| run.id.clone()).collect();
+        if runs.is_empty() {
+            return Err(ServiceError::validation_failed(format!(
+                "task run not found: {}",
+                root_task_run_id
+            )));
+        }
+        let run_ids: HashSet<&str> = runs.iter().map(|run| run.id.as_str()).collect();
+        let step_executions: Vec<StepExecution> = s
+            .executions
+            .values()
+            .filter(|execution| {
+                execution
+                    .task_run_id
+                    .as_ref()
+                    .is_some_and(|id| run_ids.contains(id.as_str()))
+            })
+            .cloned()
+            .collect();
+        let session_logs = {
+            let execution_ids: HashSet<&str> = step_executions
+                .iter()
+                .filter_map(|execution| execution.id.as_deref())
+                .collect();
+            s.logs
+                .values()
+                .filter(|log| execution_ids.contains(log.step_execution_id.as_str()))
+                .cloned()
+                .collect()
+        };
+
         Ok(TaskRunTrace {
             root_task_run_id: root_task_run_id.to_string(),
             task_runs: runs,
-            step_executions: s
-                .executions
-                .values()
-                .filter(|execution| {
-                    execution
-                        .task_run_id
-                        .as_ref()
-                        .is_some_and(|id| run_ids.contains(id))
-                })
-                .cloned()
-                .collect(),
-            session_logs: vec![],
+            step_executions,
+            session_logs,
         })
     }
 
@@ -1345,6 +1389,29 @@ impl MockSeeder {
                 updated_at: Some(Utc::now()),
             },
         );
+    }
+
+    /// Insert a TaskRun into the mock execution state.
+    pub fn insert_task_run(&self, run: TaskRun) {
+        let mut s = self.state.lock().unwrap();
+        s.task_runs.insert(run.id.clone(), run);
+    }
+
+    /// Insert a StepExecution into the mock execution state.
+    pub fn insert_execution(&self, execution: StepExecution) {
+        let id = execution
+            .id
+            .clone()
+            .expect("seeded execution must have an ID");
+        let mut s = self.state.lock().unwrap();
+        s.executions.insert(id, execution);
+    }
+
+    /// Insert a SessionLog into the mock execution state.
+    pub fn insert_log(&self, log: SessionLog) {
+        let id = log.id.clone().expect("seeded session log must have an ID");
+        let mut s = self.state.lock().unwrap();
+        s.logs.insert(id, log);
     }
 }
 

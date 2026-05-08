@@ -728,10 +728,19 @@ vtb execution log <execution-id> "Processing..." --level info
 # Update execution status
 vtb execution update <execution-id> --status completed
 
-# View execution history
+# View execution lists/details
 vtb execution list <task-id>
+vtb execution list --task-run <task-run-id>
 vtb execution show <execution-id>
 ```
+
+`vtb execution list <task-id>` treats the positional ID as a task ID. Task short
+IDs are supported, and the output groups TaskRun-backed step executions by
+`taskRunId`. Use `vtb execution list --task-run <task-run-id>` to list only the
+executions for one exact TaskRun. TaskRun mode requires a full UUID; TaskRun
+short IDs are not supported. `execution list` stays compact and does not render
+TaskRun trees or session log content; use `execution show <execution-id>` for
+the detailed log/output view.
 
 ---
 
@@ -849,7 +858,8 @@ vtb ready
 | `vtb run-workflow <id>` | Compatibility alias for `start-taskrun` |
 | `vtb stop <id>` | Compatibility alias for `stop-taskrun` |
 | `vtb execution create <id>` | Create execution record |
-| `vtb execution list <id>` | List executions for task |
+| `vtb execution list <task-id>` | List compact TaskRun-backed executions grouped by TaskRun |
+| `vtb execution list --task-run <task-run-id>` | List compact executions for one full TaskRun UUID |
 | `vtb execution show <id>` | Show execution details |
 | `vtb execution update <id>` | Update execution status |
 | `vtb execution log <id> "msg"` | Add log entry |
