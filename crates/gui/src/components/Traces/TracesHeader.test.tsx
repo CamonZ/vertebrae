@@ -5,6 +5,7 @@ import { TracesHeader } from "./TracesHeader";
 
 const baseRollups = {
   totalRuns: 7,
+  totalAttempts: 11,
   totalCost: 1.2345,
   totalTokens: 12345,
   totalWallTimeMs: 65 * 1000, // 1m 5s
@@ -27,6 +28,11 @@ describe("TracesHeader", () => {
       "ticket"
     );
     expect(screen.getByTestId("traces-rollup-runs").textContent).toMatch(/7/);
+    // Σ Attempts must be a separate stat so callers don't confuse retries
+    // with new runs.
+    expect(screen.getByTestId("traces-rollup-attempts").textContent).toMatch(
+      /11/
+    );
     expect(screen.getByTestId("traces-rollup-cost").textContent).toMatch(
       /\$1\.23/
     );

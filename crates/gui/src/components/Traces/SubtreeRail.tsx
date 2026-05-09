@@ -230,7 +230,12 @@ function GroupSection({
         style={{ paddingLeft: `${1.75 + depth * 0.75}rem` }}
       >
         <span data-testid="subtree-rail-group-runs">
-          {rollups.totalRuns} runs
+          {rollups.totalRuns} {rollups.totalRuns === 1 ? "run" : "runs"}
+        </span>
+        <span aria-hidden="true">·</span>
+        <span data-testid="subtree-rail-group-attempts">
+          {rollups.totalAttempts}{" "}
+          {rollups.totalAttempts === 1 ? "attempt" : "attempts"}
         </span>
         <span aria-hidden="true">·</span>
         <span data-testid="subtree-rail-group-cost">

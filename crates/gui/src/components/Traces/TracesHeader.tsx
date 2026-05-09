@@ -146,6 +146,11 @@ export function TracesHeader({
           value={String(rollups.totalRuns)}
         />
         <RollupStat
+          testId="traces-rollup-attempts"
+          label="Σ Attempts"
+          value={String(rollups.totalAttempts)}
+        />
+        <RollupStat
           testId="traces-rollup-cost"
           label="Σ Cost"
           value={formatCost(rollups.totalCost)}

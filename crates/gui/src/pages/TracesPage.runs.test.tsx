@@ -84,6 +84,7 @@ vi.mock("../hooks/useSubtreeExecutions", () => ({
     executions: subtreeExecutions,
     rollups: {
       totalRuns: subtreeExecutions.length,
+      totalAttempts: subtreeExecutions.length,
       totalCost: 0,
       totalTokens: 0,
       totalWallTimeMs: 0,
