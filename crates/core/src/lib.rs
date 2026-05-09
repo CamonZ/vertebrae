@@ -35,6 +35,7 @@
 pub mod error;
 pub mod execution_service;
 pub mod id_generator;
+pub mod model_catalog;
 pub mod models;
 pub mod orchestrator;
 pub mod service;
@@ -48,6 +49,7 @@ pub use execution_service::{
     ExecutionMutationCallback, ExecutionMutationEvent, ExecutionService, StopRunTarget,
     UpdateExecutionStatusParams,
 };
+pub use model_catalog::{Provider, ProviderModelMismatch, classify_model, validate_provider_model};
 pub use orchestrator::{
     ORCHESTRATOR_AGENT_PATH, ORCHESTRATOR_MODEL, ORCHESTRATOR_PROMPT_TEMPLATE, OrchestratorOutput,
     orchestrator_agent_config, orchestrator_output_schema, orchestrator_prompt,
