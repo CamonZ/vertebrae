@@ -1320,6 +1320,10 @@ impl StepService for MockStepService {
         if let Some(schema_update) = &updates.output_schema {
             step.output_schema = schema_update.clone();
         }
+        if let Some(agent_config_value) = &updates.agent_config {
+            step.agent_config = serde_json::from_value(agent_config_value.clone())
+                .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
+        }
         Ok(())
     }
     async fn delete_step(&self, id: &str) -> ServiceResult<()> {

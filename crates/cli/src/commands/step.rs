@@ -4,7 +4,8 @@
 
 use clap::{Args, Subcommand, ValueEnum};
 use vertebrae_core::{
-    AgentConfig, ServiceError, Step, StepService, StepType, StepUpdate, VertebraeServices,
+    AgentConfig, Provider, ServiceError, Step, StepService, StepType, StepUpdate,
+    VertebraeServices, validate_provider_model,
 };
 
 /// CLI representation of step types, maps to `vertebrae_core::StepType`.
@@ -104,6 +105,13 @@ pub struct StepAddCommand {
     #[arg(long, short)]
     pub model: Option<String>,
 
+    /// Built-in execution provider for this step (anthropic, openai).
+    ///
+    /// Convenience shortcut for `agent_config.provider`. Use `--agent-config`
+    /// JSON for any field this flag does not cover.
+    #[arg(long, alias = "model-provider", value_name = "PROVIDER", value_parser = parse_provider_arg)]
+    pub provider: Option<Provider>,
+
     /// Type of this step (execute, evaluate, route, wait_children)
     #[arg(long, value_enum, default_value = "execute")]
     pub step_type: CliStepType,
@@ -123,6 +131,35 @@ pub struct StepAddCommand {
     /// IDs of steps this step can transition to (can be specified multiple times)
     #[arg(long = "transition-to", short = 't', value_parser = crate::commands::parse_uuid("transition target ID"))]
     pub transitions_to: Vec<String>,
+}
+
+fn parse_provider_arg(input: &str) -> Result<Provider, String> {
+    Provider::parse(input)
+}
+
+fn build_overlayed_agent_config(
+    base: AgentConfig,
+    json: Option<&str>,
+    provider: Option<Provider>,
+    model: Option<&str>,
+) -> Result<AgentConfig, ServiceError> {
+    let mut config = match json {
+        Some(json_str) => serde_json::from_str::<AgentConfig>(json_str).map_err(|e| {
+            ServiceError::validation_failed(format!("Invalid --agent-config JSON: {}", e))
+        })?,
+        None => base,
+    };
+    if let Some(provider) = provider {
+        config = config.with_provider(provider);
+    }
+    if let Some(model) = model {
+        config = config.with_model(model);
+    }
+    if let Some(provider) = config.provider {
+        validate_provider_model(provider, config.model.as_deref())
+            .map_err(|e| ServiceError::validation_failed(e.to_string()))?;
+    }
+    Ok(config)
 }
 
 /// Validate that a route step's output_schema matches one of the two accepted
@@ -158,16 +195,12 @@ impl StepAddCommand {
     pub async fn execute(&self, service: &dyn StepService) -> Result<String, ServiceError> {
         let workflow_id = self.workflow.to_lowercase();
 
-        // Start from --agent-config JSON, then overlay --model
-        let mut agent_config = match &self.agent_config {
-            Some(json_str) => serde_json::from_str::<AgentConfig>(json_str).map_err(|e| {
-                ServiceError::validation_failed(format!("Invalid --agent-config JSON: {}", e))
-            })?,
-            None => AgentConfig::new(),
-        };
-        if let Some(model) = &self.model {
-            agent_config = agent_config.with_model(model);
-        }
+        let agent_config = build_overlayed_agent_config(
+            AgentConfig::new(),
+            self.agent_config.as_deref(),
+            self.provider,
+            self.model.as_deref(),
+        )?;
 
         let transitions_to: Vec<String> = self
             .transitions_to
@@ -447,6 +480,13 @@ pub struct StepUpdateCommand {
     #[arg(long, short)]
     pub model: Option<String>,
 
+    /// New built-in execution provider for this step (anthropic, openai).
+    ///
+    /// Convenience shortcut for `agent_config.provider`. Use `--agent-config`
+    /// JSON for any field this flag does not cover.
+    #[arg(long, alias = "model-provider", value_name = "PROVIDER", value_parser = parse_provider_arg)]
+    pub provider: Option<Provider>,
+
     /// New step type (execute, evaluate, route, wait_children)
     #[arg(long, value_enum)]
     pub step_type: Option<CliStepType>,
@@ -544,18 +584,13 @@ impl StepUpdateCommand {
             updates = updates.with_is_final(is_final);
         }
 
-        // Start from --agent-config JSON (merged onto existing), then overlay --model
-        if self.agent_config.is_some() || self.model.is_some() {
-            let existing_step = existing.as_ref().unwrap();
-            let mut agent_config = match &self.agent_config {
-                Some(json_str) => serde_json::from_str::<AgentConfig>(json_str).map_err(|e| {
-                    ServiceError::validation_failed(format!("Invalid --agent-config JSON: {}", e))
-                })?,
-                None => existing_step.agent_config.clone(),
-            };
-            if let Some(model) = &self.model {
-                agent_config = agent_config.with_model(model);
-            }
+        if self.agent_config.is_some() || self.model.is_some() || self.provider.is_some() {
+            let agent_config = build_overlayed_agent_config(
+                existing.as_ref().unwrap().agent_config.clone(),
+                self.agent_config.as_deref(),
+                self.provider,
+                self.model.as_deref(),
+            )?;
             let config_value = serde_json::to_value(&agent_config).map_err(|e| {
                 ServiceError::validation_failed(format!("Invalid agent config: {}", e))
             })?;
@@ -1301,6 +1336,67 @@ mod tests {
                 assert!(cmd.step_type.is_none());
                 assert!(cmd.output_schema.is_none());
                 assert!(!cmd.clear_output_schema);
+            }
+            _ => panic!("Expected Update command"),
+        }
+    }
+
+    #[test]
+    fn test_step_add_with_provider_flag() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "add",
+            "Review",
+            "--workflow",
+            "a1b2c3d4-0000-4000-8000-000000000006",
+            "--provider",
+            "openai",
+            "--model",
+            "gpt-4o",
+        ])
+        .unwrap();
+        match cli.command {
+            StepCommand::Add(cmd) => {
+                assert_eq!(cmd.provider, Some(Provider::Openai));
+                assert_eq!(cmd.model.as_deref(), Some("gpt-4o"));
+            }
+            _ => panic!("Expected Add command"),
+        }
+    }
+
+    #[test]
+    fn test_step_add_provider_alias_model_provider() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "add",
+            "Review",
+            "--workflow",
+            "a1b2c3d4-0000-4000-8000-000000000006",
+            "--model-provider",
+            "anthropic",
+        ])
+        .unwrap();
+        match cli.command {
+            StepCommand::Add(cmd) => {
+                assert_eq!(cmd.provider, Some(Provider::Anthropic));
+            }
+            _ => panic!("Expected Add command"),
+        }
+    }
+
+    #[test]
+    fn test_step_update_with_provider_flag() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "update",
+            "a1b2c3d4-0000-4000-8000-00000000000b",
+            "--provider",
+            "openai",
+        ])
+        .unwrap();
+        match cli.command {
+            StepCommand::Update(cmd) => {
+                assert_eq!(cmd.provider, Some(Provider::Openai));
             }
             _ => panic!("Expected Update command"),
         }
