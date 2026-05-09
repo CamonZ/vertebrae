@@ -95,10 +95,14 @@ vi.mock("../../hooks/useTask", () => ({
   },
 }));
 
+const mockTaskExecutionsOverrides = vi.hoisted(() => ({
+  current: [] as unknown[],
+}));
+
 // Mock the useTaskExecutions hook
 vi.mock("../../hooks/useTaskExecutions", () => ({
   useTaskExecutions: () => ({
-    executions: [],
+    executions: mockTaskExecutionsOverrides.current,
     isLoading: false,
     error: null,
     refetch: vi.fn(),
@@ -154,6 +158,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockTaskOverrides.current = {};
+    mockTaskExecutionsOverrides.current = [];
     vi.mocked(eventsModule.events.taskChangedEvent.listen).mockResolvedValue(
       () => {}
     );
@@ -755,6 +760,162 @@ describe("TaskDetailPanel - Restructured Layout", () => {
         name: /toggle children section/i,
       });
       expect(toggleButton).toBeInTheDocument();
+    });
+  });
+
+  describe("Waiting human_input gate", () => {
+    function waitingControls(taskId = mockTaskData.id): TaskRunControls {
+      return {
+        runnable: false,
+        stoppable: true,
+        disabled_reason_code: "active_run",
+        disabled_reason: "Run is parked on human_input",
+        active_run: createMockTaskRun({
+          id: "run-wait-1",
+          task_id: taskId,
+          status: "waiting",
+          latest_step_execution_id: "exec-wait-1",
+        }),
+      };
+    }
+
+    function notStoppableWaitingControls(): TaskRunControls {
+      return {
+        runnable: false,
+        stoppable: false,
+        disabled_reason_code: "active_run",
+        disabled_reason: "Run is parked",
+        active_run: createMockTaskRun({
+          id: "run-wait-2",
+          task_id: mockTaskData.id,
+          status: "waiting",
+          latest_step_execution_id: "exec-wait-2",
+        }),
+      };
+    }
+
+    function execFor(
+      runId: string,
+      execId: string,
+      overrides: Partial<{ step_name: string; prompt: string | null }> = {}
+    ) {
+      return {
+        id: execId,
+        task_id: mockTaskData.id,
+        task_run_id: runId,
+        workflow_id: "wf-1",
+        step_name: overrides.step_name ?? "approval",
+        started_at: "2026-05-08T10:00:00Z",
+        completed_at: null,
+        status: "in_progress" as const,
+        prompt: overrides.prompt ?? null,
+        output: null,
+        context: null,
+        transition_result: null,
+        model: null,
+        model_provider: null,
+        input_tokens: null,
+        output_tokens: null,
+        cost: null,
+        duration_ms: null,
+        handoff: null,
+        session_id: null,
+      };
+    }
+
+    it("renders the gate with run id, execution id, and step when waiting on human_input", () => {
+      mockTaskExecutionsOverrides.current = [
+        execFor("run-wait-1", "exec-wait-1", {
+          step_name: "approval",
+          prompt: "Approve change?",
+        }),
+      ];
+      renderWithTaskOverrides({ run_controls: waitingControls() });
+
+      const gate = screen.getByTestId("human-input-gate");
+      expect(gate).toHaveAttribute("data-run-id", "run-wait-1");
+      expect(gate).toHaveAttribute("data-execution-id", "exec-wait-1");
+      expect(screen.getByTestId("human-input-gate-run-id")).toHaveTextContent(
+        "run-wait-1"
+      );
+      expect(
+        screen.getByTestId("human-input-gate-execution-id")
+      ).toHaveTextContent("exec-wait-1");
+      expect(screen.getByTestId("human-input-gate-step")).toHaveTextContent(
+        "approval"
+      );
+      // Prompt toggle is present (collapsible) since prompt was attached.
+      expect(
+        screen.getByTestId("human-input-gate-prompt-toggle")
+      ).toBeInTheDocument();
+    });
+
+    it("offers Stop only when run_controls.stoppable is true", () => {
+      mockTaskExecutionsOverrides.current = [
+        execFor("run-wait-1", "exec-wait-1"),
+      ];
+      renderWithTaskOverrides({ run_controls: waitingControls() });
+      expect(
+        screen.getByTestId("human-input-gate-stop")
+      ).toBeInTheDocument();
+    });
+
+    it("hides Stop when run_controls.stoppable is false", () => {
+      mockTaskExecutionsOverrides.current = [
+        execFor("run-wait-2", "exec-wait-2"),
+      ];
+      renderWithTaskOverrides({ run_controls: notStoppableWaitingControls() });
+      expect(screen.getByTestId("human-input-gate")).toBeInTheDocument();
+      expect(
+        screen.queryByTestId("human-input-gate-stop")
+      ).not.toBeInTheDocument();
+    });
+
+    it("does not expose any submit / approve / bypass action", () => {
+      mockTaskExecutionsOverrides.current = [
+        execFor("run-wait-1", "exec-wait-1"),
+      ];
+      renderWithTaskOverrides({ run_controls: waitingControls() });
+      const gate = screen.getByTestId("human-input-gate");
+      expect(
+        gate.querySelector('[data-testid="human-input-gate-submit"]')
+      ).toBeNull();
+      // No "Approve" / "Submit" / "Resume" / "Bypass" labels inside the gate.
+      expect(gate.textContent ?? "").not.toMatch(/approve\b/i);
+      expect(gate.textContent ?? "").not.toMatch(/submit\b/i);
+      expect(gate.textContent ?? "").not.toMatch(/resume\b/i);
+      expect(gate.textContent ?? "").not.toMatch(/bypass\b/i);
+    });
+
+    it("does not render the gate for wait_children waiting runs", () => {
+      mockTaskExecutionsOverrides.current = [
+        execFor("run-wait-1", "exec-wait-1", { step_name: "wait_children" }),
+      ];
+      renderWithTaskOverrides({ run_controls: waitingControls() });
+      expect(screen.queryByTestId("human-input-gate")).not.toBeInTheDocument();
+    });
+
+    it("does not render the gate when there is no active run", () => {
+      mockTaskExecutionsOverrides.current = [];
+      renderWithTaskOverrides({ run_controls: null });
+      expect(screen.queryByTestId("human-input-gate")).not.toBeInTheDocument();
+    });
+
+    it("invokes stopRun with the active TaskRun id when Stop is clicked", () => {
+      mockTaskExecutionsOverrides.current = [
+        execFor("run-wait-1", "exec-wait-1"),
+      ];
+      vi.mocked(eventsModule.commands.stopRun).mockResolvedValue({
+        status: "ok",
+        data: null,
+      });
+      renderWithTaskOverrides({ run_controls: waitingControls() });
+
+      fireEvent.click(screen.getByTestId("human-input-gate-stop"));
+      expect(eventsModule.commands.stopRun).toHaveBeenCalledWith({
+        task_run_id: "run-wait-1",
+        task_id: null,
+      });
     });
   });
 });
