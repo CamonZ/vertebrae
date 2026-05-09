@@ -13,8 +13,10 @@ use ractor::Actor;
 use std::process;
 use tracing_subscriber::EnvFilter;
 
-use vertebrae_daemon::helpers::{find_claude_binary, resolve_shell_path};
-use vertebrae_daemon::{DaemonConfig, DaemonMessage, DaemonSupervisor, ResolvedConfig};
+use vertebrae_daemon::helpers::{find_provider_binary, resolve_shell_path};
+use vertebrae_daemon::{
+    DaemonConfig, DaemonMessage, DaemonSupervisor, ProjectEntry, ResolvedConfig,
+};
 
 /// Initialize structured logging using tracing-subscriber.
 ///
@@ -40,28 +42,38 @@ async fn main() {
 }
 
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let config = ResolvedConfig::load()?;
+    let ResolvedConfig {
+        sacrum_url,
+        api_token,
+        projects,
+        provider,
+    } = ResolvedConfig::load()?;
 
     tracing::info!(
-        sacrum_url = %config.sacrum_url,
-        project_count = config.projects.len(),
+        sacrum_url = %sacrum_url,
+        project_count = projects.len(),
+        provider = %provider,
         "Starting vtb-daemon"
     );
 
     let shell_path = resolve_shell_path();
     tracing::info!(shell_path = %shell_path, "Resolved user shell PATH");
 
-    let claude_binary =
-        find_claude_binary(&shell_path).map_err(|e| format!("Cannot start daemon: {e}"))?;
+    let provider_binary = find_provider_binary(provider, &shell_path)
+        .map_err(|e| format!("Cannot start daemon: {e}"))?;
 
-    tracing::info!(claude_binary = %claude_binary.display(), "Resolved Claude Code CLI path");
+    tracing::info!(
+        provider = %provider,
+        binary = %provider_binary.display(),
+        "Resolved provider CLI binary"
+    );
 
-    // Spawn the DaemonSupervisor actor
     let daemon_config = DaemonConfig {
-        base_url: config.sacrum_url.clone(),
-        api_token: config.api_token.clone(),
-        claude_binary,
+        base_url: sacrum_url,
+        api_token,
+        claude_binary: provider_binary,
         shell_path,
+        provider,
     };
 
     let (actor_ref, actor_handle) = Actor::spawn(
@@ -72,17 +84,21 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     .await
     .map_err(|e| format!("Failed to start DaemonSupervisor: {e}"))?;
 
-    // Register each configured project
-    for project in &config.projects {
+    for ProjectEntry {
+        slug,
+        project_id,
+        path,
+    } in projects
+    {
         tracing::info!(
-            project_id = %project.project_id,
-            slug = %project.slug,
-            path = %project.path,
+            project_id = %project_id,
+            slug = %slug,
+            path = %path,
             "Registering project"
         );
         actor_ref.cast(DaemonMessage::AddProject {
-            project_id: project.project_id.clone(),
-            project_root: std::path::PathBuf::from(&project.path),
+            project_id,
+            project_root: std::path::PathBuf::from(path),
         })?;
     }
 

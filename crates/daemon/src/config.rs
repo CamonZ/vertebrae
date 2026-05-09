@@ -3,6 +3,7 @@
 //! Reuses the existing [`VertebraeConfigFile`] from `sacrum-client` — the same
 //! config file used by the CLI and GUI.
 
+use vertebrae_core::Provider;
 use vertebrae_sacrum_client::{VertebraeConfigFile, load_config_file};
 
 /// Error type for config loading.
@@ -12,6 +13,8 @@ pub enum ConfigError {
     LoadFailed(String),
     #[error("Missing required configuration: {0}")]
     Missing(String),
+    #[error("Invalid provider configuration: {0}")]
+    InvalidProvider(String),
 }
 
 /// A project entry with its Sacrum ID and local path.
@@ -34,6 +37,10 @@ pub struct ResolvedConfig {
     pub api_token: String,
     /// Projects to monitor.
     pub projects: Vec<ProjectEntry>,
+    /// Built-in execution provider the daemon should resolve at startup.
+    /// Defaults to [`Provider::Anthropic`] when no `[daemon].provider` is
+    /// configured, preserving prior Claude-only behavior.
+    pub provider: Provider,
 }
 
 impl ResolvedConfig {
@@ -62,11 +69,29 @@ impl ResolvedConfig {
             })
             .collect();
 
+        let provider = resolve_provider(config)?;
+
         Ok(ResolvedConfig {
             sacrum_url: config.sacrum.url.clone(),
             api_token,
             projects,
+            provider,
         })
+    }
+}
+
+/// Resolve the daemon's built-in provider from `[daemon].provider`, falling
+/// back to [`Provider::Anthropic`] when unset or blank.
+fn resolve_provider(config: &VertebraeConfigFile) -> Result<Provider, ConfigError> {
+    let raw = config
+        .daemon
+        .as_ref()
+        .and_then(|d| d.provider.as_deref())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    match raw {
+        None => Ok(Provider::Anthropic),
+        Some(s) => Provider::parse(s).map_err(ConfigError::InvalidProvider),
     }
 }
 
@@ -74,7 +99,7 @@ impl ResolvedConfig {
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
-    use vertebrae_sacrum_client::{GlobalSacrumSection, ProjectSection};
+    use vertebrae_sacrum_client::{DaemonSection, GlobalSacrumSection, ProjectSection};
 
     // ===== ResolvedConfig::from_config_file tests =====
 
@@ -101,12 +126,14 @@ mod tests {
                     },
                 ),
             ]),
+            daemon: None,
         };
 
         let resolved = ResolvedConfig::from_config_file(&config).unwrap();
         assert_eq!(resolved.sacrum_url, "https://sacrum.example.com");
         assert_eq!(resolved.api_token, "my-token");
         assert_eq!(resolved.projects.len(), 2);
+        assert_eq!(resolved.provider, Provider::Anthropic);
     }
 
     #[test]
@@ -117,6 +144,7 @@ mod tests {
                 token: None,
             },
             projects: BTreeMap::new(),
+            daemon: None,
         };
 
         let result = ResolvedConfig::from_config_file(&config);
@@ -137,6 +165,7 @@ mod tests {
                 token: Some("tok".to_string()),
             },
             projects: BTreeMap::new(),
+            daemon: None,
         };
 
         let resolved = ResolvedConfig::from_config_file(&config).unwrap();
@@ -151,6 +180,7 @@ mod tests {
                 token: Some("tok".to_string()),
             },
             projects: BTreeMap::new(),
+            daemon: None,
         };
 
         let resolved = ResolvedConfig::from_config_file(&config).unwrap();
@@ -171,6 +201,7 @@ mod tests {
                     path: "/home/user/code/myproject".to_string(),
                 },
             )]),
+            daemon: None,
         };
 
         let resolved = ResolvedConfig::from_config_file(&config).unwrap();
@@ -210,5 +241,83 @@ mod tests {
     fn config_error_display_load_failed() {
         let err = ConfigError::LoadFailed("bad config".to_string());
         assert_eq!(err.to_string(), "Failed to load config file: bad config");
+    }
+
+    // ===== Provider resolution tests =====
+
+    fn config_with_token() -> VertebraeConfigFile {
+        VertebraeConfigFile {
+            sacrum: GlobalSacrumSection {
+                url: "http://localhost:4000".to_string(),
+                token: Some("tok".to_string()),
+            },
+            projects: BTreeMap::new(),
+            daemon: None,
+        }
+    }
+
+    #[test]
+    fn provider_resolution_cases() {
+        let cases: &[(Option<&str>, Provider)] = &[
+            (None, Provider::Anthropic),
+            (Some("   "), Provider::Anthropic),
+            (Some("anthropic"), Provider::Anthropic),
+            (Some("openai"), Provider::Openai),
+            (Some("claude"), Provider::Anthropic),
+            (Some("codex"), Provider::Openai),
+        ];
+
+        for (input, expected) in cases {
+            let mut config = config_with_token();
+            config.daemon = Some(DaemonSection {
+                provider: input.map(str::to_string),
+            });
+            let resolved = ResolvedConfig::from_config_file(&config).unwrap();
+            assert_eq!(resolved.provider, *expected, "input was {:?}", input);
+        }
+    }
+
+    #[test]
+    fn provider_defaults_to_anthropic_when_daemon_section_missing() {
+        let resolved = ResolvedConfig::from_config_file(&config_with_token()).unwrap();
+        assert_eq!(resolved.provider, Provider::Anthropic);
+    }
+
+    #[test]
+    fn provider_unknown_value_errors() {
+        let mut config = config_with_token();
+        config.daemon = Some(DaemonSection {
+            provider: Some("bedrock".to_string()),
+        });
+        let err = ResolvedConfig::from_config_file(&config).unwrap_err();
+        let msg = err.to_string();
+        assert!(matches!(err, ConfigError::InvalidProvider(_)));
+        assert!(msg.contains("bedrock"), "got: {msg}");
+        assert!(msg.contains("anthropic"), "got: {msg}");
+        assert!(msg.contains("openai"), "got: {msg}");
+    }
+
+    /// Sanity-check that error formatting never echoes the secret API token —
+    /// the provider error path is the most likely place to accidentally
+    /// `Debug`-print the whole config struct.
+    #[test]
+    fn errors_never_leak_api_token() {
+        let secret = "sac_sup3r_secret_dont_log_me";
+        let config = VertebraeConfigFile {
+            sacrum: GlobalSacrumSection {
+                url: "http://localhost:4000".to_string(),
+                token: Some(secret.to_string()),
+            },
+            projects: BTreeMap::new(),
+            daemon: Some(DaemonSection {
+                provider: Some("not-a-real-provider".to_string()),
+            }),
+        };
+        let err = ResolvedConfig::from_config_file(&config).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            !msg.contains(secret),
+            "API token leaked into provider error: {msg}"
+        );
     }
 }
