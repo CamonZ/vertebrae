@@ -19,7 +19,8 @@ use crate::client::{GraphqlClient, with_fragments};
 use crate::queries::executions::{
     ACTIVE_RUN, CREATE_EXECUTION, CREATE_LOG, EXECUTION_FIELDS, GET_EXECUTION, LIST_EXECUTIONS,
     LIST_LOGS, ORCHESTRATE_TASK, RUN_STEP, RUN_WORKFLOW, SESSION_LOG_FIELDS, STOP_ORCHESTRATOR,
-    STOP_RUN, TASK_RUN_FIELDS, TASK_RUN_TRACE, TASK_RUN_TRACE_FIELDS, TASK_RUNS, UPDATE_EXECUTION,
+    STOP_RUN, TASK_RUN, TASK_RUN_FIELDS, TASK_RUN_TRACE, TASK_RUN_TRACE_FIELDS, TASK_RUNS,
+    UPDATE_EXECUTION,
 };
 
 /// Response shape for mutations that return only an id
@@ -315,6 +316,16 @@ impl ExecutionService for SacrumExecutionService {
             self.client.execute(&query, variables, "task_runs").await?;
 
         Ok(responses.iter().map(Self::response_to_task_run).collect())
+    }
+
+    async fn task_run(&self, task_run_id: &str) -> ServiceResult<Option<TaskRun>> {
+        let query = with_fragments(TASK_RUN, &[TASK_RUN_FIELDS]);
+        let variables = json!({ "id": task_run_id });
+
+        let response: Option<TaskRunResponse> =
+            self.client.execute(&query, variables, "task_run").await?;
+
+        Ok(response.as_ref().map(Self::response_to_task_run))
     }
 
     async fn task_run_trace(&self, root_task_run_id: &str) -> ServiceResult<TaskRunTrace> {

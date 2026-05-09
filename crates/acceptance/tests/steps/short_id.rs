@@ -8,6 +8,7 @@
 //! to splitting.
 
 use cucumber::{given, when};
+use regex::Regex;
 
 use crate::SmokeWorld;
 
@@ -54,6 +55,44 @@ async fn store_step_short_id(world: &mut SmokeWorld, step_name: String, name: St
         })
         .clone();
     world.stored_ids.insert(name, short(&full));
+}
+
+#[given(expr = "I store the latest TaskRun ID as {string}")]
+#[when(expr = "I store the latest TaskRun ID as {string}")]
+async fn store_latest_task_run_id(world: &mut SmokeWorld, name: String) {
+    let re = Regex::new(r"taskRun=([0-9a-f-]{36})").expect("valid TaskRun ID regex");
+    let output = world.combined_output();
+    let captures = re
+        .captures(&output)
+        .unwrap_or_else(|| panic!("no taskRun=<uuid> found in output:\n{}", output));
+    world.stored_ids.insert(name, captures[1].to_string());
+}
+
+#[given(expr = "I store the latest TaskRun short ID as {string}")]
+#[when(expr = "I store the latest TaskRun short ID as {string}")]
+async fn store_latest_task_run_short_id(world: &mut SmokeWorld, name: String) {
+    let re = Regex::new(r"taskRun=([0-9a-f-]{36})").expect("valid TaskRun ID regex");
+    let output = world.combined_output();
+    let captures = re
+        .captures(&output)
+        .unwrap_or_else(|| panic!("no taskRun=<uuid> found in output:\n{}", output));
+    world.stored_ids.insert(name, short(&captures[1]));
+}
+
+#[given(expr = "I store the TaskRun ID for task {string} as {string}")]
+#[when(expr = "I store the TaskRun ID for task {string} as {string}")]
+async fn store_task_run_id_for_task(world: &mut SmokeWorld, task_ref: String, name: String) {
+    let task_id = world.resolve_vars(&task_ref);
+    let pattern = format!(r"run ([0-9a-f-]{{36}}) task={}", regex::escape(&task_id));
+    let re = Regex::new(&pattern).expect("valid task TaskRun ID regex");
+    let output = world.combined_output();
+    let captures = re.captures(&output).unwrap_or_else(|| {
+        panic!(
+            "no TaskRun ID found for task {} in output:\n{}",
+            task_id, output
+        )
+    });
+    world.stored_ids.insert(name, captures[1].to_string());
 }
 
 /// Generic vtb invocation. Splits `args_str` on whitespace after substituting

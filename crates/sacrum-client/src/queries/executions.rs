@@ -95,6 +95,16 @@ pub const TASK_RUNS: &str = r#"
     }
 "#;
 
+/// Get one TaskRun by ID.
+/// NOTE: Prepend TASK_RUN_FIELDS when sending.
+pub const TASK_RUN: &str = r#"
+    query TaskRun($id: Uuid4!) {
+        task_run(id: $id) {
+            ...TaskRunFields
+        }
+    }
+"#;
+
 /// Get the trace tree for a root TaskRun.
 /// NOTE: Prepend TASK_RUN_FIELDS, EXECUTION_FIELDS, SESSION_LOG_FIELDS, and
 /// TASK_RUN_TRACE_FIELDS when sending.

@@ -3,7 +3,9 @@
 //! Implements the `vtb execution` subcommand group for creating, viewing,
 //! and updating step executions and their associated session logs.
 
+use chrono::{DateTime, Utc};
 use clap::{Args, Subcommand};
+use std::collections::BTreeMap;
 use vertebrae_core::{ExecutionStatus, SessionLog, StepExecution};
 use vertebrae_core::{ServiceError, VertebraeServices};
 
@@ -12,7 +14,7 @@ use vertebrae_core::{ServiceError, VertebraeServices};
 pub enum ExecutionCommand {
     /// Create a new execution for a task
     Create(ExecutionCreateCommand),
-    /// List all executions for a task
+    /// List TaskRun-backed executions for a task or one TaskRun
     List(ExecutionListCommand),
     /// Show details of a specific execution
     Show(ExecutionShowCommand),
@@ -197,18 +199,31 @@ impl ExecutionUpdateCommand {
     }
 }
 
-/// List all executions for a task
+/// List TaskRun-backed executions for a task or one TaskRun
 #[derive(Debug, Args)]
 pub struct ExecutionListCommand {
     /// Task ID to list executions for
-    #[arg(required = true, value_parser = crate::commands::parse_uuid("task ID"))]
-    pub task_id: String,
+    #[arg(
+        required_unless_present = "task_run_id",
+        conflicts_with = "task_run_id",
+        value_parser = crate::commands::parse_uuid("task ID")
+    )]
+    pub task_id: Option<String>,
+
+    /// Full TaskRun UUID to list executions for
+    #[arg(
+        long = "task-run",
+        value_name = "TASK_RUN_ID",
+        value_parser = parse_task_run_uuid()
+    )]
+    pub task_run_id: Option<String>,
 }
 
 impl ExecutionListCommand {
-    /// Execute the list executions command.
+    /// Execute the compact execution list command.
     ///
-    /// Lists all step executions for the specified task in chronological order.
+    /// A positional ID is always interpreted as a task ID and may be a short ID.
+    /// `--task-run` is an explicit TaskRun mode and requires a full TaskRun UUID.
     ///
     /// # Arguments
     ///
@@ -216,69 +231,201 @@ impl ExecutionListCommand {
     ///
     /// # Errors
     ///
-    /// Returns `ServiceError` if:
-    /// - The task is not found
-    /// - Database operations fail
     pub async fn execute(&self, services: &VertebraeServices) -> Result<String, ServiceError> {
-        // Normalize task ID to lowercase for case-insensitive lookup
-        let task_id = self.task_id.to_lowercase();
-
-        // Verify the task exists
-        let task_exists = services.tasks().task_exists(&task_id).await?;
-        if !task_exists {
-            return Err(ServiceError::task_not_found(&self.task_id));
+        match (&self.task_id, &self.task_run_id) {
+            (Some(task_id), None) => self.execute_for_task(task_id, services).await,
+            (None, Some(task_run_id)) => self.execute_for_task_run(task_run_id, services).await,
+            (None, None) => Err(ServiceError::validation_failed(
+                "execution list requires a task ID or --task-run <full-task-run-id>",
+            )),
+            (Some(_), Some(_)) => Err(ServiceError::validation_failed(
+                "execution list accepts either a task ID or --task-run, not both",
+            )),
         }
+    }
 
-        // Get executions for the task
+    async fn execute_for_task(
+        &self,
+        task_id: &str,
+        services: &VertebraeServices,
+    ) -> Result<String, ServiceError> {
+        let task_id = resolve_task_id(task_id, services).await?;
         let executions = services
             .executions()
             .list_executions_for_task(&task_id)
             .await?;
 
-        if executions.is_empty() {
-            return Ok(format!("No executions found for task {}", &task_id[..6]));
-        }
-
-        let mut output = format!(
-            "Executions for task {} ({} total)\n",
-            &task_id[..6],
-            executions.len()
-        );
-        output.push_str(&"=".repeat(60));
-        output.push('\n');
-
-        for execution in &executions {
-            let exec_id = execution
-                .id
-                .as_ref()
-                .cloned()
-                .unwrap_or_else(|| "?".to_string());
-            let short_id = if exec_id.len() > 6 {
-                &exec_id[..6]
-            } else {
-                &exec_id
-            };
-
-            let status_str = match execution.status {
-                ExecutionStatus::InProgress => "IN_PROGRESS",
-                ExecutionStatus::Completed => "COMPLETED",
-                ExecutionStatus::Failed => "FAILED",
-            };
-
-            let started = execution.started_at.format("%Y-%m-%d %H:%M:%S");
-            let completed = execution
-                .completed_at
-                .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
-                .unwrap_or_else(|| "-".to_string());
-
-            output.push_str(&format!(
-                "{} | {} | {:12} | {} -> {}\n",
-                short_id, execution.step_name, status_str, started, completed
-            ));
-        }
-
-        Ok(output)
+        Ok(render_task_execution_list(&task_id, &executions))
     }
+
+    async fn execute_for_task_run(
+        &self,
+        task_run_id: &str,
+        services: &VertebraeServices,
+    ) -> Result<String, ServiceError> {
+        let task_run_id = task_run_id.to_lowercase();
+        if crate::commands::is_short_id(&task_run_id) {
+            return Err(task_run_short_id_error());
+        }
+
+        let task_run = services
+            .executions()
+            .task_run(&task_run_id)
+            .await?
+            .ok_or_else(|| {
+                ServiceError::validation_failed(format!("TaskRun not found: {}", task_run_id))
+            })?;
+        let executions: Vec<StepExecution> = services
+            .executions()
+            .list_executions_for_task(&task_run.task_id)
+            .await?
+            .into_iter()
+            .filter(|execution| execution.task_run_id.as_deref() == Some(task_run_id.as_str()))
+            .collect();
+
+        Ok(render_exact_task_run_execution_list(
+            &task_run_id,
+            &executions,
+        ))
+    }
+}
+
+fn parse_task_run_uuid() -> clap::builder::ValueParser {
+    clap::builder::ValueParser::from(|s: &str| -> Result<String, String> {
+        if crate::commands::is_short_id(s) {
+            return Err("TaskRun short IDs are not supported; use a full TaskRun UUID".to_string());
+        }
+        uuid::Uuid::parse_str(s).map_err(|_| {
+            format!(
+                "TaskRun ID '{s}' is not a valid UUID \
+                 (TaskRun short IDs are not supported; use a full TaskRun UUID)"
+            )
+        })?;
+        Ok(s.to_lowercase())
+    })
+}
+
+fn task_run_short_id_error() -> ServiceError {
+    ServiceError::validation_failed("TaskRun short IDs are not supported; use a full TaskRun UUID")
+}
+
+async fn resolve_task_id(
+    task_id: &str,
+    services: &VertebraeServices,
+) -> Result<String, ServiceError> {
+    let task_id = task_id.to_lowercase();
+    if crate::commands::is_short_id(&task_id) {
+        return services
+            .tasks()
+            .resolve_short_id(&task_id)
+            .await
+            .map_err(|err| super::scope_short_id_error(err, "task", &task_id));
+    }
+
+    if services.tasks().task_exists(&task_id).await? {
+        Ok(task_id)
+    } else {
+        Err(ServiceError::task_not_found(&task_id))
+    }
+}
+
+fn task_run_executions_by_run(executions: &[StepExecution]) -> BTreeMap<&str, Vec<&StepExecution>> {
+    let mut grouped = BTreeMap::new();
+    for execution in executions {
+        if let Some(task_run_id) = execution.task_run_id.as_deref() {
+            grouped
+                .entry(task_run_id)
+                .or_insert_with(Vec::new)
+                .push(execution);
+        }
+    }
+    for group in grouped.values_mut() {
+        group.sort_by_key(|execution| execution.started_at);
+    }
+    grouped
+}
+
+fn render_task_execution_list(task_id: &str, executions: &[StepExecution]) -> String {
+    let grouped = task_run_executions_by_run(executions);
+    if grouped.is_empty() {
+        return format!("No TaskRun-backed executions found for task {}", task_id);
+    }
+
+    let count: usize = grouped.values().map(Vec::len).sum();
+    let mut output = format!(
+        "TaskRun Executions for task {} ({} total)\n",
+        task_id, count
+    );
+    output.push_str(&"=".repeat(80));
+    output.push('\n');
+
+    for (task_run_id, group) in grouped {
+        output.push_str(&format!("TaskRun: {}\n", task_run_id));
+        for execution in group {
+            render_execution_summary(&mut output, execution);
+        }
+    }
+
+    output
+}
+
+fn render_exact_task_run_execution_list(task_run_id: &str, executions: &[StepExecution]) -> String {
+    if executions.is_empty() {
+        return format!("No executions found for TaskRun {}", task_run_id);
+    }
+
+    let mut executions: Vec<&StepExecution> = executions.iter().collect();
+    executions.sort_by_key(|execution| execution.started_at);
+
+    let mut output = format!(
+        "TaskRun Executions for TaskRun {} ({} total)\n",
+        task_run_id,
+        executions.len()
+    );
+    output.push_str(&"=".repeat(80));
+    output.push('\n');
+    output.push_str(&format!("TaskRun: {}\n", task_run_id));
+    for execution in executions {
+        render_execution_summary(&mut output, execution);
+    }
+
+    output
+}
+
+fn render_execution_summary(output: &mut String, execution: &StepExecution) {
+    let exec_id = execution.id.as_deref().unwrap_or("?");
+    let task_run_id = execution.task_run_id.as_deref().unwrap_or("?");
+    let completed = format_optional_time(execution.completed_at);
+
+    output.push_str(&format!(
+        "- execution {} task={} taskRunId={} step={} status={}\n",
+        exec_id,
+        execution.task_id,
+        task_run_id,
+        execution.step_name,
+        execution_status_label(&execution.status)
+    ));
+    output.push_str(&format!(
+        "  started={} completed={}\n",
+        format_time(execution.started_at),
+        completed
+    ));
+}
+
+fn execution_status_label(status: &ExecutionStatus) -> &'static str {
+    match status {
+        ExecutionStatus::InProgress => "IN_PROGRESS",
+        ExecutionStatus::Completed => "COMPLETED",
+        ExecutionStatus::Failed => "FAILED",
+    }
+}
+
+fn format_time(time: DateTime<Utc>) -> String {
+    time.format("%Y-%m-%d %H:%M:%S UTC").to_string()
+}
+
+fn format_optional_time(time: Option<DateTime<Utc>>) -> String {
+    time.map(format_time).unwrap_or_else(|| "-".to_string())
 }
 
 /// Show details of a specific execution
@@ -325,17 +472,10 @@ impl ExecutionShowCommand {
         let task_id = execution.task_id.clone();
         let workflow_id = execution.workflow_id.clone();
 
-        let status_str = match execution.status {
-            ExecutionStatus::InProgress => "IN_PROGRESS",
-            ExecutionStatus::Completed => "COMPLETED",
-            ExecutionStatus::Failed => "FAILED",
-        };
+        let status_str = execution_status_label(&execution.status);
 
-        let started = execution.started_at.format("%Y-%m-%d %H:%M:%S UTC");
-        let completed = execution
-            .completed_at
-            .map(|dt| dt.format("%Y-%m-%d %H:%M:%S UTC").to_string())
-            .unwrap_or_else(|| "-".to_string());
+        let started = format_time(execution.started_at);
+        let completed = format_optional_time(execution.completed_at);
 
         let duration = execution.duration().map_or_else(
             || "-".to_string(),
@@ -361,6 +501,10 @@ impl ExecutionShowCommand {
         output.push_str(&format!(
             "Task:       {}\n",
             &task_id[..6.min(task_id.len())]
+        ));
+        output.push_str(&format!(
+            "TaskRun:    {}\n",
+            execution.task_run_id.as_deref().unwrap_or("legacy")
         ));
         output.push_str(&format!(
             "Workflow:   {}\n",
