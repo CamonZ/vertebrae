@@ -1,4 +1,4 @@
-import type { Task, StepExecutionStatus } from '../../bindings';
+import type { Task } from '../../bindings';
 import { TaskRow } from './TaskRow';
 import { ColumnResizer } from './ColumnResizer';
 import { useResizableColumns } from '../../hooks/useResizableColumns';
@@ -10,7 +10,6 @@ interface TaskListProps {
   selectedTaskId?: string | null;
   onTaskSelect?: (task: Task) => void;
   hideStatus?: boolean;
-  taskExecutionStates?: Map<string, { status: StepExecutionStatus; stepName: string }>;
 }
 
 /**
@@ -139,7 +138,6 @@ export function TaskList({
   selectedTaskId,
   onTaskSelect,
   hideStatus,
-  taskExecutionStates,
 }: TaskListProps) {
   // Initialize column widths management
   const columnIds = Object.keys(COLUMN_CONFIG);
@@ -211,7 +209,6 @@ export function TaskList({
               onClick={onTaskSelect}
               columnWidths={columns}
               hideStatus={hideStatus}
-              executionStatus={taskExecutionStates?.get(task.id)?.status ?? null}
             />
           ))}
         </tbody>

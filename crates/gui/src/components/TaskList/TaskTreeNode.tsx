@@ -3,11 +3,11 @@ import type {
   Task,
   TaskLevel,
   TaskPriority,
-  StepExecutionStatus,
 } from "../../bindings";
 import type { TaskTreeNode as TaskTreeNodeType } from "../../types/ui";
 import type { useExpandedNodes } from "../../hooks/useExpandedNodes";
 import { RelativeTime } from "../RelativeTime";
+import { deriveRunStateChip, getRunChipStyles } from "../../utils/runState";
 
 interface TaskTreeNodeProps {
   node: TaskTreeNodeType;
@@ -17,7 +17,6 @@ interface TaskTreeNodeProps {
   onTaskSelect?: (task: Task) => void;
   expandedNodes?: ReturnType<typeof useExpandedNodes>;
   hideStatus?: boolean;
-  taskExecutionStates?: Map<string, { status: StepExecutionStatus; stepName: string }>;
 }
 
 /**
@@ -133,28 +132,6 @@ function getPriorityIndicator(
   }
 }
 
-/**
- * Get execution status indicator styling
- */
-function getExecutionIndicator(status: StepExecutionStatus | null | undefined): { dot: string; label: string } | null {
-  if (!status) return null;
-  switch (status) {
-    case 'Running':
-      return { dot: 'bg-warning animate-pulse', label: 'Running' };
-    case 'Completed':
-      return { dot: 'bg-success', label: 'Completed' };
-    case 'Failed':
-      return { dot: 'bg-error', label: 'Failed' };
-    case 'Pending':
-      return { dot: 'bg-text-muted animate-pulse', label: 'Pending' };
-    default:
-      return null;
-  }
-}
-
-/**
- * Truncate task ID for display (show first 6 characters)
- */
 function truncateId(id: string): string {
   return id.slice(0, 6);
 }
@@ -170,7 +147,6 @@ export function TaskTreeNode({
   onTaskSelect,
   expandedNodes,
   hideStatus,
-  taskExecutionStates,
 }: TaskTreeNodeProps) {
   const task = node.task;
   const hasChildren = node.children.length > 0;
@@ -215,9 +191,8 @@ export function TaskTreeNode({
   const stepStyles = getStepStyles(task.step_name);
   const levelStyles = getLevelStyles(task.level);
   const priorityIndicator = getPriorityIndicator(task.priority);
-
-  const executionState = taskExecutionStates?.get(task.id);
-  const executionIndicator = getExecutionIndicator(executionState?.status);
+  const runChip = deriveRunStateChip(task);
+  const runChipStyles = runChip ? getRunChipStyles(runChip) : null;
 
   // Calculate indentation based on depth
   const indentPx = depth * 24;
@@ -303,11 +278,14 @@ export function TaskTreeNode({
 
         {/* Title */}
         <div className="flex min-w-0 flex-1 items-center gap-2">
-          {/* Execution status indicator */}
-          {executionIndicator && (
+          {/* Run state indicator -- driven by run_controls.active_run only. */}
+          {runChip && runChipStyles && (
             <span
-              className={`w-2 h-2 shrink-0 rounded-full ${executionIndicator.dot}`}
-              title={`Execution: ${executionIndicator.label}`}
+              data-testid="task-tree-node-run-chip"
+              data-run-status={runChip.status}
+              className={`w-2 h-2 shrink-0 rounded-full ${runChipStyles.dot} ${runChipStyles.pulse ? "animate-pulse" : ""}`}
+              title={`Run: ${runChip.label}`}
+              aria-label={`Run state: ${runChip.label}`}
             />
           )}
           <span
@@ -319,6 +297,14 @@ export function TaskTreeNode({
           >
             {task.title}
           </span>
+          {runChip && runChipStyles && (
+            <span
+              data-testid="task-tree-node-run-chip-label"
+              className={`inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${runChipStyles.bg} ${runChipStyles.text}`}
+            >
+              {runChip.label}
+            </span>
+          )}
           {task.needs_human_review && (
             <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-warning/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-warning">
               <svg
@@ -399,7 +385,6 @@ export function TaskTreeNode({
               onTaskSelect={onTaskSelect}
               expandedNodes={expandedNodes}
               hideStatus={hideStatus}
-              taskExecutionStates={taskExecutionStates}
             />
           ))}
         </div>

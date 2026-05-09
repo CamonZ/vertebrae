@@ -1,11 +1,11 @@
 import { useState, useEffect } from "react";
-import type { Task, StepExecution } from "../../bindings";
+import type { Task, TaskRun } from "../../bindings";
+import { runStatusLabel } from "../../utils/runState";
 import { formatDuration } from "./formatDuration";
 
-/** A live execution paired with its task. */
 export interface LiveItem {
   task: Task;
-  execution: StepExecution;
+  taskRun: TaskRun;
 }
 
 interface LiveSectionProps {
@@ -47,21 +47,24 @@ export function LiveSection({ items }: LiveSectionProps) {
       </h2>
 
       <div className="space-y-1">
-        {items.map((item) => (
+        {items.map((item) => {
+          const statusLabel = runStatusLabel(item.taskRun.status).toLowerCase();
+          return (
           <div
-            key={item.execution.id ?? item.task.id}
+            key={item.taskRun.id ?? item.task.id}
             className="border-l-2 border-l-success/40 bg-success/5 px-4 py-3"
             data-testid="live-item"
+            data-run-status={item.taskRun.status}
           >
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-text-primary">
                   {item.task.title}
-                  {item.task.workflow_name && item.execution.step_name && (
+                  {item.task.workflow_name && (
                     <span className="font-normal text-text-secondary">
-                      {" "}&rarr; {item.task.workflow_name} / step &apos;{item.execution.step_name}&apos;
-                      {item.execution.started_at && (
-                        <> ({<LiveDuration startedAt={item.execution.started_at} />})</>
+                      {" "}&rarr; {item.task.workflow_name} ({statusLabel})
+                      {item.taskRun.started_at && (
+                        <> ({<LiveDuration startedAt={item.taskRun.started_at} />})</>
                       )}
                     </span>
                   )}
@@ -70,8 +73,8 @@ export function LiveSection({ items }: LiveSectionProps) {
                   {item.task.workflow_name && (
                     <span>{item.task.workflow_name}</span>
                   )}
-                  {!item.task.workflow_name && item.execution.step_name && (
-                    <span className="font-mono">{item.execution.step_name}</span>
+                  {!item.task.workflow_name && (
+                    <span className="font-mono">{statusLabel}</span>
                   )}
                   {item.task.step_name && (
                     <span> &middot; Step <span className="font-mono">{item.task.step_name}</span></span>
@@ -88,7 +91,8 @@ export function LiveSection({ items }: LiveSectionProps) {
               <div className="h-full animate-signal-flow rounded-full bg-success/40" style={{ width: "100%" }} />
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
     </section>
   );

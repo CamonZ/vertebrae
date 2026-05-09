@@ -16,6 +16,7 @@ import { DependenciesSummary } from "./DependenciesSummary";
 import { CodeRefsSummary } from "./CodeRefsSummary";
 import { SpecSection } from "./SpecSection";
 import { OpenChatButton } from "../OpenChatButton";
+import { deriveRunControlsState, deriveRunStateChip, getRunChipStyles } from "../../utils/runState";
 
 /** Debounce delay in milliseconds for batching rapid events */
 const DEBOUNCE_MS = 100;
@@ -540,25 +541,20 @@ export function TaskDetailPanel({
     : null;
   const levelStyles = taskData ? getLevelStyles(taskData.level) : null;
   const priorityStyles = taskData ? getPriorityStyles(taskData.priority) : null;
-  const isExecuting =
-    taskData?.step_name === "in_progress" ||
-    (taskData?.step_name?.includes(":") &&
-      taskData.step_name.split(":").pop() === "in_progress");
-  const runControls = taskData?.run_controls ?? null;
-  const activeRunStatus = runControls?.active_run?.status ?? null;
-  const isStoppingRun = activeRunStatus === "stopping";
-  const canRunWorkflow =
-    runControls == null ? true : runControls.runnable === true;
-  const shouldShowStopWorkflow =
-    taskData?.workflow_id &&
-    (runControls == null
-      ? isExecuting
-      : runControls.stoppable === true || isStoppingRun);
+  const runControlsState = deriveRunControlsState(
+    taskData?.run_controls ?? null,
+    { hasWorkflow: Boolean(taskData?.workflow_id) }
+  );
+  const runChip = taskData
+    ? deriveRunStateChip(taskData, { includeTerminal: false })
+    : null;
+  const runChipStyles = runChip ? getRunChipStyles(runChip) : null;
+  const isExecuting = runControlsState.hasActiveRun;
   const runWorkflowDisabled =
-    isRunningStep || isRunningWorkflow || !canRunWorkflow;
+    isRunningStep || isRunningWorkflow || runControlsState.runDisabled;
+  const shouldShowStopWorkflow = runControlsState.showStop;
   const stopWorkflowDisabled =
-    isStoppingWorkflow ||
-    (runControls != null && runControls.stoppable !== true);
+    isStoppingWorkflow || runControlsState.stopDisabled;
 
   const content = (
     <>
@@ -616,6 +612,16 @@ export function TaskDetailPanel({
                   </span>
                 </>
               )}
+              {runChip && runChipStyles && (
+                <span
+                  data-testid="task-detail-run-chip"
+                  data-run-status={runChip.status}
+                  className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${runChipStyles.bg} ${runChipStyles.text}`}
+                  aria-label={`Run state: ${runChip.label}`}
+                >
+                  {runChip.label}
+                </span>
+              )}
             </div>
           ) : (
             <h2 className="font-mono text-xs font-medium uppercase tracking-wider text-text-muted">
@@ -625,7 +631,7 @@ export function TaskDetailPanel({
         </div>
         <div className="flex items-center gap-2">
           {/* Run Step Button */}
-          {taskData?.workflow_id && taskData?.current_step_id && (
+          {taskData?.workflow_id && taskData?.current_step_id && !runControlsState.hasActiveRun && (
             <button
               type="button"
               onClick={handleRunStep}
@@ -649,9 +655,10 @@ export function TaskDetailPanel({
             </button>
           )}
           {/* Run Workflow Button */}
-          {taskData?.workflow_id && (
+          {taskData?.workflow_id && !runControlsState.hasActiveRun && (
             <button
               type="button"
+              data-testid="task-detail-run-button"
               onClick={handleRunWorkflow}
               disabled={runWorkflowDisabled}
               className="cursor-pointer flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary bg-primary text-bg-primary hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed"
@@ -687,11 +694,16 @@ export function TaskDetailPanel({
           {shouldShowStopWorkflow && (
             <button
               type="button"
+              data-testid="task-detail-stop-button"
               onClick={handleStopWorkflow}
               disabled={stopWorkflowDisabled}
               className="cursor-pointer flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-error bg-error text-white hover:bg-error/90 disabled:opacity-50 disabled:cursor-not-allowed"
               aria-label="Stop running workflow"
-              title="Stop the running orchestrator for this task"
+              title={
+                runControlsState.isStopping
+                  ? "Cancel the in-flight stop request"
+                  : "Stop the running orchestrator for this task"
+              }
             >
               {isStoppingWorkflow ? (
                 <Spinner />
@@ -705,7 +717,13 @@ export function TaskDetailPanel({
                   <rect x="6" y="6" width="12" height="12" rx="1.5" />
                 </svg>
               )}
-              <span>{isStoppingWorkflow ? "Stopping..." : "Stop"}</span>
+              <span>
+                {isStoppingWorkflow
+                  ? "Stopping..."
+                  : runControlsState.isStopping
+                    ? "Cancel orchestration"
+                    : "Stop"}
+              </span>
             </button>
           )}
           {/* Open Chat Button */}

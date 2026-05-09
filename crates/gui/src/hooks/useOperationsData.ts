@@ -1,10 +1,11 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { commands, type Task, type TaskFilterOptions } from "../bindings";
 import { useTaskStore, useExecutionStore } from "../stores";
 import { useTasks } from "./useTasks";
 import type { AttentionItem } from "../components/Operations/NeedsAttentionSection";
 import type { LiveItem } from "../components/Operations/LiveSection";
 import type { CompletedItem } from "../components/Operations/RecentlyCompletedSection";
+import { isActiveRunStatus } from "../utils/runState";
 
 const ALL_TASKS_FILTER: TaskFilterOptions = {
   step_names: null,
@@ -41,36 +42,47 @@ export function useOperationsData(): OperationsData {
   const { isLoading, error, refetch } = useTasks(ALL_TASKS_FILTER);
   const tasks = useTaskStore((s) => s.tasks);
   const executions = useExecutionStore((s) => s.executions);
-  const setExecutions = useExecutionStore((s) => s.setExecutions);
+  const upsertExecution = useExecutionStore((s) => s.upsertExecution);
 
-  // Seed the ExecutionStore with executions for active tasks on mount.
-  // After this, the store stays live via GlobalListeners.
-  const activeTasks = useMemo(
-    () => tasks.filter((t) => t.workflow_id && t.started_at && !t.completed_at),
-    [tasks],
-  );
+  const activeTaskIds = useMemo(() => {
+    const ids: string[] = [];
+    for (const t of tasks) {
+      if (isActiveRunStatus(t.run_controls?.active_run?.status ?? null)) {
+        ids.push(t.id);
+      }
+    }
+    return ids;
+  }, [tasks]);
+
+  const seededTaskIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    if (activeTasks.length === 0) return;
+    const newlyActive = activeTaskIds.filter(
+      (id) => !seededTaskIdsRef.current.has(id),
+    );
+    if (newlyActive.length === 0) return;
 
     let cancelled = false;
+    for (const id of newlyActive) seededTaskIdsRef.current.add(id);
 
-    async function seedExecutions() {
+    (async () => {
       const results = await Promise.all(
-        activeTasks.map((t) =>
-          commands.getTaskExecutions(t.id).then((r) =>
+        newlyActive.map((id) =>
+          commands.getTaskExecutions(id).then((r) =>
             r.status === "ok" ? r.data : [],
           ),
         ),
       );
-      if (!cancelled) {
-        setExecutions(results.flat());
+      if (cancelled) return;
+      for (const list of results) {
+        for (const exec of list) upsertExecution(exec);
       }
-    }
+    })();
 
-    seedExecutions();
-    return () => { cancelled = true; };
-  }, [activeTasks, setExecutions]);
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTaskIds, upsertExecution]);
 
   // Build a task lookup map for joining executions to tasks
   const taskMap = useMemo(() => {
@@ -84,11 +96,10 @@ export function useOperationsData(): OperationsData {
   const attentionItems = useMemo<AttentionItem[]>(() => {
     const items: AttentionItem[] = [];
 
-    for (const exec of executions) {
-      if (exec.status !== "failed") continue;
-      const task = exec.task_id ? taskMap.get(exec.task_id) : undefined;
-      if (task) {
-        items.push({ kind: "failed_execution", task, execution: exec });
+    for (const task of tasks) {
+      const failedRun = task.run_controls?.active_run;
+      if (failedRun && failedRun.status === "failed") {
+        items.push({ kind: "failed_run", task, taskRun: failedRun });
       }
     }
 
@@ -99,21 +110,22 @@ export function useOperationsData(): OperationsData {
     }
 
     return items;
-  }, [executions, tasks, taskMap]);
+  }, [tasks]);
 
-  // Only show as "live" if the execution is for the task's CURRENT step.
-  // Old in_progress executions for previous steps are stale.
+  // Excludes "stopping" — that transition is signalled via the run chip/Stop
+  // button, not the Live tile.
   const liveItems = useMemo<LiveItem[]>(() => {
-    return executions
-      .filter((e) => e.status === "in_progress")
-      .map((exec) => {
-        const task = exec.task_id ? taskMap.get(exec.task_id) : undefined;
-        if (!task) return null;
-        if (task.step_name !== exec.step_name) return null;
-        return { task, execution: exec };
-      })
-      .filter((item): item is LiveItem => item != null);
-  }, [executions, taskMap]);
+    const live: LiveItem[] = [];
+    for (const task of tasks) {
+      const activeRun = task.run_controls?.active_run;
+      if (!activeRun) continue;
+      const status = activeRun.status;
+      if (status === "queued" || status === "executing" || status === "waiting") {
+        live.push({ task, taskRun: activeRun });
+      }
+    }
+    return live;
+  }, [tasks]);
 
   const completedItems = useMemo<CompletedItem[]>(() => {
     return executions
@@ -131,12 +143,26 @@ export function useOperationsData(): OperationsData {
 
   const readyTasks = useMemo<Task[]>(() => {
     return tasks.filter((t) => {
-      if (t.started_at) return false;
-      if (t.completed_at) return false;
       if (t.archived) return false;
+      if (isActiveRunStatus(t.run_controls?.active_run?.status ?? null)) {
+        return false;
+      }
+      const controls = t.run_controls;
+      if (controls && controls.runnable !== true) {
+        return false;
+      }
+      if (!controls && !t.workflow_id) {
+        return false;
+      }
       const deps = t.dependency_ids ?? [];
       if (deps.length > 0) {
-        return deps.every((depId) => taskMap.get(depId)?.completed_at != null);
+        return deps.every((depId) => {
+          const dep = taskMap.get(depId);
+          if (!dep) return false;
+          const depRunStatus = dep.run_controls?.active_run?.status ?? null;
+          if (depRunStatus === "completed") return true;
+          return dep.step_name === "done";
+        });
       }
       return true;
     });

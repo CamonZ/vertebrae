@@ -173,11 +173,18 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       expect(screen.getAllByText("in progress").length).toBeGreaterThan(0);
     });
 
-    it("displays status badge with glow animation for in_progress", () => {
+    it("status badge does NOT glow purely from step_name=in_progress without an active run", () => {
       render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
       const statusBadge = screen.getByTestId("status-badge");
       expect(statusBadge).toBeInTheDocument();
+      expect(statusBadge.className).not.toContain("animate-pulse-glow");
+    });
+
+    it("status badge glows when an active run is executing, regardless of step_name", () => {
+      renderWithTaskOverrides({ run_controls: activeRunControls() });
+
+      const statusBadge = screen.getByTestId("status-badge");
       expect(statusBadge.className).toContain("animate-pulse-glow");
     });
 
@@ -485,7 +492,31 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     });
   });
 
-  describe("Run workflow buttons", () => {
+  describe("Run/Stop orchestration controls (run_controls source of truth)", () => {
+    function runnableControls(): TaskRunControls {
+      return {
+        runnable: true,
+        stoppable: false,
+        disabled_reason_code: null,
+        disabled_reason: null,
+        active_run: null,
+      };
+    }
+
+    function stoppingControls(taskId = mockTaskData.id): TaskRunControls {
+      return {
+        runnable: false,
+        stoppable: false,
+        disabled_reason_code: "stopping",
+        disabled_reason: "Stop already requested",
+        active_run: createMockTaskRun({
+          id: "run-stopping",
+          task_id: taskId,
+          status: "stopping",
+        }),
+      };
+    }
+
     it("shows Run Step button when task has workflow and current step", () => {
       render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
@@ -494,23 +525,72 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       ).toBeInTheDocument();
     });
 
-    it("shows Run Workflow button when task has workflow", () => {
+    it("renders the Run button even when run_controls is missing", () => {
       render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
-      expect(
-        screen.getByRole("button", { name: /run entire workflow/i })
-      ).toBeInTheDocument();
+      expect(screen.getByTestId("task-detail-run-button")).toBeInTheDocument();
     });
 
-    it("disables Run Workflow when server run_controls marks the task not runnable", () => {
+    it("enables Run when no active run and runnable is true", () => {
+      renderWithTaskOverrides({ run_controls: runnableControls() });
+
+      expect(screen.getByTestId("task-detail-run-button")).not.toBeDisabled();
+      expect(
+        screen.queryByTestId("task-detail-stop-button")
+      ).not.toBeInTheDocument();
+    });
+
+    it("hides Run when an active run is present", () => {
       renderWithTaskOverrides({ run_controls: activeRunControls() });
 
       expect(
-        screen.getByRole("button", { name: /run entire workflow/i })
-      ).toBeDisabled();
+        screen.queryByTestId("task-detail-run-button")
+      ).not.toBeInTheDocument();
     });
 
-    it("hides Stop when server run_controls marks a running task not stoppable", () => {
+    it("disables Run when run_controls is absent (no server-derived runnable signal)", () => {
+      renderWithTaskOverrides({ run_controls: null });
+
+      expect(screen.getByTestId("task-detail-run-button")).toBeDisabled();
+    });
+
+    it("shows Stop and enables it for executing+stoppable runs", () => {
+      renderWithTaskOverrides({ run_controls: activeRunControls() });
+
+      const stop = screen.getByTestId("task-detail-stop-button");
+      expect(stop).toBeInTheDocument();
+      expect(stop).not.toBeDisabled();
+      expect(stop).toHaveTextContent(/^Stop$/);
+    });
+
+    it.each<["queued" | "waiting"]>([["queued"], ["waiting"]])(
+      "shows Stop enabled for %s active runs when stoppable",
+      (status) => {
+        const controls = activeRunControls();
+        renderWithTaskOverrides({
+          run_controls: {
+            ...controls,
+            stoppable: true,
+            active_run: { ...controls.active_run!, status },
+          },
+        });
+
+        const stop = screen.getByTestId("task-detail-stop-button");
+        expect(stop).toBeInTheDocument();
+        expect(stop).not.toBeDisabled();
+      }
+    );
+
+    it("hides Stop when there is no active run, even if step_name is in_progress", () => {
+      // step_name is in_progress on the mock task; Stop must NOT key off that.
+      renderWithTaskOverrides({ run_controls: runnableControls() });
+
+      expect(
+        screen.queryByTestId("task-detail-stop-button")
+      ).not.toBeInTheDocument();
+    });
+
+    it("hides Stop when the server marks a running task not stoppable", () => {
       const controls = activeRunControls();
       renderWithTaskOverrides({
         run_controls: {
@@ -519,19 +599,24 @@ describe("TaskDetailPanel - Restructured Layout", () => {
         },
       });
 
-      expect(
-        screen.queryByRole("button", { name: /stop running workflow/i })
-      ).not.toBeInTheDocument();
+      // Running but not stoppable still surfaces Stop (so the operator sees
+      // the in-flight state) but the button must be disabled.
+      const stop = screen.getByTestId("task-detail-stop-button");
+      expect(stop).toBeInTheDocument();
+      expect(stop).toBeDisabled();
     });
 
-    it("shows Stop button while a step is running (step_name=in_progress)", () => {
-      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
+    it("hides Run and disables Stop while the run is stopping, and labels Stop as 'Cancel orchestration'", () => {
+      renderWithTaskOverrides({ run_controls: stoppingControls() });
 
-      const stopBtn = screen.getByRole("button", {
-        name: /stop running workflow/i,
-      });
-      expect(stopBtn).toBeInTheDocument();
-      expect(stopBtn).toHaveTextContent(/^Stop$/);
+      expect(
+        screen.queryByTestId("task-detail-run-button")
+      ).not.toBeInTheDocument();
+
+      const stop = screen.getByTestId("task-detail-stop-button");
+      expect(stop).toBeInTheDocument();
+      expect(stop).toBeDisabled();
+      expect(stop).toHaveTextContent(/Cancel orchestration/i);
     });
 
     it("calls stopRun with the active run id when Stop is clicked", async () => {
@@ -542,9 +627,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
 
       renderWithTaskOverrides({ run_controls: activeRunControls() });
 
-      const stopBtn = screen.getByRole("button", {
-        name: /stop running workflow/i,
-      });
+      const stopBtn = screen.getByTestId("task-detail-stop-button");
       fireEvent.click(stopBtn);
 
       expect(eventsModule.commands.stopRun).toHaveBeenCalledTimes(1);
@@ -560,16 +643,30 @@ describe("TaskDetailPanel - Restructured Layout", () => {
         error: { message: "no orchestrator running" } as never,
       });
 
-      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
+      renderWithTaskOverrides({ run_controls: activeRunControls() });
 
-      const stopBtn = screen.getByRole("button", {
-        name: /stop running workflow/i,
-      });
+      const stopBtn = screen.getByTestId("task-detail-stop-button");
       fireEvent.click(stopBtn);
 
       expect(
         await screen.findByText(/no orchestrator running/i)
       ).toBeInTheDocument();
+    });
+
+    it("renders a run state chip in the header when a run is active", () => {
+      renderWithTaskOverrides({ run_controls: activeRunControls() });
+
+      const chip = screen.getByTestId("task-detail-run-chip");
+      expect(chip).toHaveAttribute("data-run-status", "executing");
+      expect(chip).toHaveTextContent(/Running/i);
+    });
+
+    it("does not render a run state chip when no run is active", () => {
+      renderWithTaskOverrides({ run_controls: runnableControls() });
+
+      expect(
+        screen.queryByTestId("task-detail-run-chip")
+      ).not.toBeInTheDocument();
     });
   });
 
