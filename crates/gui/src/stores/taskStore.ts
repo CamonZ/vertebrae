@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Task } from "../bindings";
+import type { Task, TaskRunControls } from "../bindings";
 
 interface TaskState {
   /** List of tasks for list views */
@@ -19,6 +19,11 @@ interface TaskActions {
   upsertTask: (task: Task) => void;
   /** Remove a task by ID; clears selection if the removed task is currently selected */
   removeTask: (taskId: string) => void;
+  /** Replace server-derived TaskRun controls on an existing task row */
+  replaceTaskRunControls: (
+    taskId: string,
+    runControls: TaskRunControls | null
+  ) => void;
   /** Select a task by ID and optionally set its full details */
   selectTask: (id: string | null, task?: Task | null) => void;
   /** Set the loading state */
@@ -49,8 +54,12 @@ export const useTaskStore = create<TaskStore>((set) => ({
           ...existing,
           ...task,
           sections: task.sections?.length ? task.sections : existing.sections,
-          code_refs: task.code_refs?.length ? task.code_refs : existing.code_refs,
-          dependency_ids: task.dependency_ids?.length ? task.dependency_ids : existing.dependency_ids,
+          code_refs: task.code_refs?.length
+            ? task.code_refs
+            : existing.code_refs,
+          dependency_ids: task.dependency_ids?.length
+            ? task.dependency_ids
+            : existing.dependency_ids,
           tags: task.tags?.length ? task.tags : existing.tags,
         };
         const tasks = [...state.tasks];
@@ -58,9 +67,7 @@ export const useTaskStore = create<TaskStore>((set) => ({
         return {
           tasks,
           selectedTask:
-            state.selectedTaskId === task.id
-              ? mergedTask
-              : state.selectedTask,
+            state.selectedTaskId === task.id ? mergedTask : state.selectedTask,
         };
       }
       return {
@@ -77,6 +84,26 @@ export const useTaskStore = create<TaskStore>((set) => ({
         ? { selectedTaskId: null, selectedTask: null }
         : {}),
     })),
+
+  replaceTaskRunControls: (taskId, runControls) =>
+    set((state) => {
+      let changed = false;
+      const tasks = state.tasks.map((task) => {
+        if (task.id !== taskId) return task;
+        changed = true;
+        return { ...task, run_controls: runControls };
+      });
+
+      let selectedTask = state.selectedTask;
+      if (selectedTask?.id === taskId) {
+        changed = true;
+        selectedTask = { ...selectedTask, run_controls: runControls };
+      }
+
+      if (!changed) return state;
+
+      return { tasks, selectedTask };
+    }),
 
   selectTask: (id, task) =>
     set({

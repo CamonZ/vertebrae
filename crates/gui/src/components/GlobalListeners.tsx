@@ -1,5 +1,6 @@
 import {
   useTaskChangeListener,
+  useTaskRunChangeListener,
   useWorkflowChangeListener,
   useStepChangeListener,
   useStepExecutionChangeListener,
@@ -20,6 +21,7 @@ import {
  */
 export function GlobalListeners() {
   useTaskChangeListener();
+  useTaskRunChangeListener();
   useWorkflowChangeListener();
   useStepChangeListener();
   useStepExecutionChangeListener();
