@@ -5,12 +5,13 @@
 
 use crate::project_config::{ProjectConfig, SavedProject};
 use crate::types::{
-    SessionLog, Step, StepExecution, Task, TaskFilterOptions, Workflow, WorkflowWithTasks,
+    SessionLog, Step, StepExecution, StopRunRequest, Task, TaskFilterOptions, TaskRun,
+    TaskRunTrace, Workflow, WorkflowWithTasks,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, State};
 use tokio::sync::RwLock;
-use vertebrae_core::VertebraeServices;
+use vertebrae_core::{StopRunTarget, VertebraeServices};
 
 /// Application state holding the services
 pub struct AppState {
@@ -848,6 +849,63 @@ pub async fn get_execution_logs(
     }
 }
 
+/// Get the active TaskRun for a task, if one is currently active.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_active_run(
+    state: State<'_, AppState>,
+    task_id: String,
+) -> Result<Option<TaskRun>, CommandError> {
+    log::info!("get_active_run called for task: {}", task_id);
+    let service_guard = state.services.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    let run = service.executions().active_run(&task_id).await?;
+    Ok(run.map(Into::into))
+}
+
+/// List durable TaskRuns for a task.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_task_runs(
+    state: State<'_, AppState>,
+    task_id: String,
+) -> Result<Vec<TaskRun>, CommandError> {
+    log::info!("get_task_runs called for task: {}", task_id);
+    let service_guard = state.services.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    let runs = service.executions().task_runs(&task_id).await?;
+    Ok(runs.into_iter().map(Into::into).collect())
+}
+
+/// Get the recursive trace tree for a root TaskRun.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_task_run_trace(
+    state: State<'_, AppState>,
+    root_task_run_id: String,
+) -> Result<TaskRunTrace, CommandError> {
+    log::info!(
+        "get_task_run_trace called for root task run: {}",
+        root_task_run_id
+    );
+    let service_guard = state.services.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    let trace = service
+        .executions()
+        .task_run_trace(&root_task_run_id)
+        .await?;
+    Ok(trace.into())
+}
+
 // ============================================================================
 // Step Commands (First-Class Workflow Steps)
 // ============================================================================
@@ -1100,7 +1158,46 @@ pub async fn run_step(
     Ok(execution.into())
 }
 
-/// Orchestrate a task through its entire workflow via Sacrum's TaskOrchestrator FSM
+async fn run_workflow_inner(
+    service: &VertebraeServices,
+    task_id: &str,
+) -> Result<TaskRun, CommandError> {
+    let run = service.executions().run_workflow(task_id).await?;
+    Ok(run.into())
+}
+
+async fn stop_run_inner(
+    service: &VertebraeServices,
+    target: StopRunTarget,
+) -> Result<Option<TaskRun>, CommandError> {
+    let stopped = service.executions().stop_run(target).await?;
+    Ok(stopped.map(Into::into))
+}
+
+/// Start or schedule a durable TaskRun workflow via Sacrum.
+#[tauri::command]
+#[specta::specta]
+pub async fn run_workflow(
+    state: State<'_, AppState>,
+    task_id: String,
+) -> Result<TaskRun, CommandError> {
+    log::info!("run_workflow called for task: {}", task_id);
+
+    let service_guard = state.services.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    let run = run_workflow_inner(service, &task_id).await?;
+
+    log::info!("TaskRun started for task: {}, run: {}", task_id, run.id);
+    Ok(run)
+}
+
+/// Orchestrate a task through its entire workflow via the TaskRun path.
+///
+/// Compatibility shim for existing frontend call sites. New code should call
+/// `run_workflow`, which returns the durable TaskRun.
 #[tauri::command]
 #[specta::specta]
 pub async fn orchestrate_task(
@@ -1114,13 +1211,54 @@ pub async fn orchestrate_task(
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    service.executions().orchestrate_task(&task_id).await?;
+    let run = run_workflow_inner(service, &task_id).await?;
 
-    log::info!("Workflow orchestration started for task: {}", task_id);
+    log::info!(
+        "Workflow orchestration started for task: {}, run: {}",
+        task_id,
+        run.id
+    );
     Ok(())
 }
 
-/// Stop the running TaskOrchestrator for a task via Sacrum.
+/// Stop a durable TaskRun by explicit run ID or by active task ID.
+///
+/// If both IDs are provided, `task_run_id` takes precedence.
+#[tauri::command]
+#[specta::specta]
+pub async fn stop_run(
+    state: State<'_, AppState>,
+    request: StopRunRequest,
+) -> Result<Option<TaskRun>, CommandError> {
+    let service_guard = state.services.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    let task_run_id = request.task_run_id.filter(|id| !id.trim().is_empty());
+    let task_id = request.task_id.filter(|id| !id.trim().is_empty());
+    let target = match (task_run_id, task_id) {
+        (Some(task_run_id), _) => StopRunTarget::TaskRunId(task_run_id),
+        (None, Some(task_id)) => StopRunTarget::TaskId(task_id),
+        (None, None) => {
+            return Err(CommandError {
+                message: "stop_run requires either task_run_id or task_id".to_string(),
+            });
+        }
+    };
+
+    let stopped = stop_run_inner(service, target).await?;
+
+    if let Some(run) = stopped.as_ref() {
+        log::info!("TaskRun stop requested for run: {}", run.id);
+    } else {
+        log::info!("TaskRun stop requested but no active run matched");
+    }
+
+    Ok(stopped)
+}
+
+/// Stop the running TaskRun for a task via Sacrum.
 ///
 /// Idempotent: if no orchestrator is running for the task, the call still
 /// resolves successfully. The daemon receives the corresponding cancel_step
@@ -1136,12 +1274,9 @@ pub async fn stop_orchestrator(
         .as_ref()
         .ok_or_else(CommandError::no_project_selected)?;
 
-    service.executions().stop_orchestrator(&task_id).await?;
+    stop_run_inner(service, StopRunTarget::TaskId(task_id.clone())).await?;
 
-    log::info!(
-        "Workflow orchestration stop requested for task: {}",
-        task_id
-    );
+    log::info!("Workflow TaskRun stop requested for task: {}", task_id);
     Ok(())
 }
 
@@ -1993,6 +2128,40 @@ mod tests {
             .unwrap()
     }
 
+    fn assert_no_project_error<T: std::fmt::Debug>(result: Result<T, CommandError>) {
+        let err = result.expect_err("expected command to fail without a selected project");
+        assert!(err.message.contains("No project selected"));
+    }
+
+    async fn create_task_with_workflow(app: &tauri::App<tauri::test::MockRuntime>) -> String {
+        let app_state = app.state::<AppState>();
+        let (tasks, workflows) = {
+            let services_guard = app_state.services.read().await;
+            let services = services_guard.as_ref().expect("services initialized");
+            (services.tasks_arc(), services.workflows_arc())
+        };
+
+        let task_id = tasks
+            .create_task(vertebrae_core::CreateTaskOptions::new(
+                "TaskRun command task",
+            ))
+            .await
+            .expect("create task");
+        let workflow_id = workflows
+            .create_workflow(vertebrae_core::CreateWorkflowOptions::new(
+                "TaskRun command workflow",
+                vec![],
+            ))
+            .await
+            .expect("create workflow");
+        tasks
+            .assign_workflow(&task_id, &workflow_id)
+            .await
+            .expect("assign workflow");
+
+        task_id
+    }
+
     // ========================================================================
     // No-project-selected error tests
     // ========================================================================
@@ -2756,6 +2925,186 @@ mod tests {
             fetched.handoff.as_deref(),
             Some(r#"{"to":"mock_next_step"}"#)
         );
+    }
+
+    #[tokio::test]
+    async fn task_run_commands_no_project_return_errors() {
+        let app = build_app_without_services();
+        let state: tauri::State<'_, AppState> = app.state();
+
+        assert_no_project_error(get_active_run(state.clone(), "task-1".to_string()).await);
+        assert_no_project_error(get_task_runs(state.clone(), "task-1".to_string()).await);
+        assert_no_project_error(get_task_run_trace(state.clone(), "run-1".to_string()).await);
+        assert_no_project_error(run_workflow(state.clone(), "task-1".to_string()).await);
+        assert_no_project_error(
+            stop_run(
+                state,
+                StopRunRequest {
+                    task_run_id: Some("run-1".to_string()),
+                    task_id: None,
+                },
+            )
+            .await,
+        );
+    }
+
+    #[tokio::test]
+    async fn active_run_and_history_commands_return_task_runs() {
+        let app = build_app_with_services();
+        let task_id = create_task_with_workflow(&app).await;
+        let state: tauri::State<'_, AppState> = app.state();
+
+        let no_active = get_active_run(state.clone(), task_id.clone())
+            .await
+            .expect("active run command succeeds before run");
+        assert!(no_active.is_none());
+
+        let run = run_workflow(state.clone(), task_id.clone())
+            .await
+            .expect("run workflow succeeds");
+        let active = get_active_run(state.clone(), task_id.clone())
+            .await
+            .expect("active run command succeeds")
+            .expect("active run exists");
+        let history = get_task_runs(state, task_id.clone())
+            .await
+            .expect("task run history command succeeds");
+
+        assert_eq!(active.id, run.id);
+        assert_eq!(active.task_id, task_id);
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].id, run.id);
+    }
+
+    #[tokio::test]
+    async fn run_workflow_returns_task_run_serialized_with_snake_case_fields() {
+        let app = build_app_with_services();
+        let task_id = create_task_with_workflow(&app).await;
+        let state: tauri::State<'_, AppState> = app.state();
+
+        let run = run_workflow(state, task_id.clone())
+            .await
+            .expect("run workflow succeeds");
+
+        assert_eq!(run.task_id, task_id);
+        assert_eq!(run.project_id, "mock-project");
+        assert_eq!(run.status, crate::types::TaskRunStatus::Executing);
+        assert!(run.started_at.is_some());
+        assert!(run.latest_step_execution_id.is_some());
+
+        let value = serde_json::to_value(&run).expect("serialize task run");
+        assert_eq!(value["task_id"].as_str(), Some(task_id.as_str()));
+        assert_eq!(value["project_id"].as_str(), Some("mock-project"));
+        assert_eq!(value["status"].as_str(), Some("executing"));
+        assert!(value.get("taskId").is_none());
+        assert!(value.get("projectId").is_none());
+        assert!(value["latest_step_execution_id"].as_str().is_some());
+    }
+
+    #[tokio::test]
+    async fn task_run_trace_serializes_runs_and_step_execution_links() {
+        let app = build_app_with_services();
+        let task_id = create_task_with_workflow(&app).await;
+        let state: tauri::State<'_, AppState> = app.state();
+
+        let run = run_workflow(state.clone(), task_id)
+            .await
+            .expect("run workflow succeeds");
+        let trace = get_task_run_trace(state, run.id.clone())
+            .await
+            .expect("trace command succeeds");
+
+        assert_eq!(trace.root_task_run_id, run.id);
+        assert_eq!(trace.task_runs.len(), 1);
+        assert_eq!(trace.task_runs[0].id, run.id);
+        assert_eq!(trace.step_executions.len(), 1);
+        assert_eq!(
+            trace.step_executions[0].task_run_id.as_deref(),
+            Some(run.id.as_str())
+        );
+
+        let value = serde_json::to_value(&trace).expect("serialize trace");
+        assert_eq!(value["root_task_run_id"].as_str(), Some(run.id.as_str()));
+        assert!(value.get("rootTaskRunId").is_none());
+        assert_eq!(value["task_runs"][0]["id"].as_str(), Some(run.id.as_str()));
+        assert_eq!(
+            value["step_executions"][0]["task_run_id"].as_str(),
+            Some(run.id.as_str())
+        );
+    }
+
+    #[tokio::test]
+    async fn stop_run_by_task_run_id_returns_serialized_task_run() {
+        let app = build_app_with_services();
+        let task_id = create_task_with_workflow(&app).await;
+        let state: tauri::State<'_, AppState> = app.state();
+
+        let run = run_workflow(state.clone(), task_id)
+            .await
+            .expect("run workflow succeeds");
+        let stopped = stop_run(
+            state,
+            StopRunRequest {
+                task_run_id: Some(run.id.clone()),
+                task_id: None,
+            },
+        )
+        .await
+        .expect("stop run command succeeds")
+        .expect("stopped run returned");
+
+        assert_eq!(stopped.id, run.id);
+        assert_eq!(stopped.status, crate::types::TaskRunStatus::Stopping);
+        assert!(stopped.stop_requested_at.is_some());
+
+        let value = serde_json::to_value(&stopped).expect("serialize stopped run");
+        assert_eq!(value["id"].as_str(), Some(run.id.as_str()));
+        assert_eq!(value["status"].as_str(), Some("stopping"));
+        assert!(value["stop_requested_at"].as_str().is_some());
+        assert!(value.get("stopRequestedAt").is_none());
+    }
+
+    #[tokio::test]
+    async fn stop_run_by_task_id_returns_active_task_run() {
+        let app = build_app_with_services();
+        let task_id = create_task_with_workflow(&app).await;
+        let state: tauri::State<'_, AppState> = app.state();
+
+        let run = run_workflow(state.clone(), task_id.clone())
+            .await
+            .expect("run workflow succeeds");
+        let stopped = stop_run(
+            state,
+            StopRunRequest {
+                task_run_id: None,
+                task_id: Some(task_id.clone()),
+            },
+        )
+        .await
+        .expect("stop run command succeeds")
+        .expect("stopped run returned");
+
+        assert_eq!(stopped.id, run.id);
+        assert_eq!(stopped.task_id, task_id);
+        assert_eq!(stopped.status, crate::types::TaskRunStatus::Stopping);
+    }
+
+    #[tokio::test]
+    async fn orchestrate_task_compatibility_starts_task_run() {
+        let app = build_app_with_services();
+        let task_id = create_task_with_workflow(&app).await;
+        let state: tauri::State<'_, AppState> = app.state();
+
+        orchestrate_task(state.clone(), task_id.clone())
+            .await
+            .expect("compat orchestration command succeeds");
+        let history = get_task_runs(state, task_id.clone())
+            .await
+            .expect("task run history command succeeds");
+
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].task_id, task_id);
+        assert_eq!(history[0].status, crate::types::TaskRunStatus::Executing);
     }
 
     // ========================================================================

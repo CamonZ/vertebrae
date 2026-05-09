@@ -2,7 +2,14 @@ import { render, type RenderOptions } from "@testing-library/react";
 import { ReactFlowProvider } from "@xyflow/react";
 import { BrowserRouter } from "react-router-dom";
 import type { ReactElement, ReactNode } from "react";
-import type { Task, Workflow, Step, StepExecution, AgentConfig } from "../bindings";
+import type {
+  AgentConfig,
+  Step,
+  StepExecution,
+  Task,
+  TaskRun,
+  Workflow,
+} from "../bindings";
 
 /**
  * Custom render function that wraps components with necessary providers
@@ -121,11 +128,34 @@ export function createMockStepExecution(overrides?: Partial<StepExecution>): Ste
   return {
     id: `exec-${Math.random().toString(36).slice(2, 10)}`,
     task_id: "task-1",
+    task_run_id: null,
     workflow_id: "workflow-1",
     step_name: "in_progress",
     started_at: new Date().toISOString(),
     completed_at: null,
     status: "in_progress",
+    ...overrides,
+  };
+}
+
+export function createMockTaskRun(overrides?: Partial<TaskRun>): TaskRun {
+  return {
+    id: `run-${Math.random().toString(36).slice(2, 10)}`,
+    task_id: "task-1",
+    project_id: "project-1",
+    user_id: null,
+    status: "executing",
+    started_at: new Date().toISOString(),
+    ended_at: null,
+    stop_requested_at: null,
+    latest_step_execution_id: null,
+    outcome_kind: null,
+    outcome_context: null,
+    parent_task_run_id: null,
+    root_task_run_id: null,
+    triggered_by_step_execution_id: null,
+    inserted_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
     ...overrides,
   };
 }
@@ -145,6 +175,7 @@ export function createMockTask(overrides?: Partial<Task>): Task {
     current_step_id: null,
     workflow_name: null,
     step_name: null,
+    run_controls: null,
     needs_human_review: null,
     archived: false,
     worktree: null,

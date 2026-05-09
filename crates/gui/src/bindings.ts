@@ -508,6 +508,39 @@ async getExecutionLogs(executionId: string) : Promise<Result<SessionLog[], Comma
 }
 },
 /**
+ * Get the active TaskRun for a task, if one is currently active.
+ */
+async getActiveRun(taskId: string) : Promise<Result<TaskRun | null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_active_run", { taskId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * List durable TaskRuns for a task.
+ */
+async getTaskRuns(taskId: string) : Promise<Result<TaskRun[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_task_runs", { taskId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Get the recursive trace tree for a root TaskRun.
+ */
+async getTaskRunTrace(rootTaskRunId: string) : Promise<Result<TaskRunTrace, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_task_run_trace", { rootTaskRunId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * List all steps for a workflow
  * 
  * Returns all first-class Step entities associated with the given workflow ID.
@@ -587,7 +620,34 @@ async runStep(taskId: string, stepId: string) : Promise<Result<StepExecution, Co
 }
 },
 /**
- * Orchestrate a task through its entire workflow via Sacrum's TaskOrchestrator FSM
+ * Start or schedule a durable TaskRun workflow via Sacrum.
+ */
+async runWorkflow(taskId: string) : Promise<Result<TaskRun, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("run_workflow", { taskId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Stop a durable TaskRun by explicit run ID or by active task ID.
+ *
+ * If both IDs are provided, `task_run_id` takes precedence.
+ */
+async stopRun(request: StopRunRequest) : Promise<Result<TaskRun | null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("stop_run", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Orchestrate a task through its entire workflow via the TaskRun path.
+ *
+ * Compatibility shim for existing frontend call sites. New code should call
+ * `run_workflow`, which returns the durable TaskRun.
  */
 async orchestrateTask(taskId: string) : Promise<Result<null, CommandError>> {
     try {
@@ -598,7 +658,7 @@ async orchestrateTask(taskId: string) : Promise<Result<null, CommandError>> {
 }
 },
 /**
- * Stop the running TaskOrchestrator for a task via Sacrum.
+ * Stop the running TaskRun for a task via Sacrum.
  * 
  * Idempotent: if no orchestrator is running for the task, the call still
  * resolves successfully. The daemon receives the corresponding cancel_step
@@ -1095,6 +1155,10 @@ id: string | null;
  */
 task_id?: string; 
 /**
+ * TaskRun ID this execution belongs to, when present
+ */
+task_run_id?: string | null;
+/**
  * Workflow ID being executed
  */
 workflow_id?: string; 
@@ -1191,6 +1255,10 @@ export type StepTransitionChangedEvent = { transition_id: string; change_type: S
  */
 export type StepType = "execute" | "evaluate" | "route" | "wait_children"
 /**
+ * StopRun command input. Provide either `task_run_id` or `task_id`.
+ */
+export type StopRunRequest = { task_run_id: string | null; task_id: string | null }
+/**
  * Full task details - mirrors core::Task with string IDs and dates
  */
 export type Task = { 
@@ -1234,6 +1302,10 @@ workflow_name: string | null;
  * Current step name (if task has a current step in workflow)
  */
 step_name: string | null; 
+/**
+ * Server-derived TaskRun controls for Run/Stop surfaces
+ */
+run_controls?: TaskRunControls | null;
 /**
  * Whether this task needs human review
  */
@@ -1348,6 +1420,86 @@ export type TaskLevel = "epic" | "ticket" | "task"
  * Task priority - mirrors db::Priority
  */
 export type TaskPriority = "low" | "medium" | "high" | "critical"
+/**
+ * Durable workflow run for a task.
+ */
+export type TaskRun = {
+/**
+ * TaskRun ID
+ */
+id: string;
+/**
+ * Task ID this run belongs to
+ */
+task_id: string;
+/**
+ * Project ID this run belongs to
+ */
+project_id: string;
+/**
+ * User ID, when returned by the backend
+ */
+user_id: string | null;
+/**
+ * Durable run lifecycle status
+ */
+status: TaskRunStatus;
+/**
+ * When this run started (ISO 8601 string)
+ */
+started_at: string | null;
+/**
+ * When this run ended (ISO 8601 string)
+ */
+ended_at: string | null;
+/**
+ * When stop was requested (ISO 8601 string)
+ */
+stop_requested_at: string | null;
+/**
+ * Latest step execution ID associated with this run
+ */
+latest_step_execution_id: string | null;
+/**
+ * Terminal outcome kind
+ */
+outcome_kind: string | null;
+/**
+ * Structured terminal outcome context
+ */
+outcome_context: JsonValue | null;
+/**
+ * Parent TaskRun ID for child workflow runs
+ */
+parent_task_run_id: string | null;
+/**
+ * Root TaskRun ID for recursive traces
+ */
+root_task_run_id: string | null;
+/**
+ * Step execution that triggered this child run
+ */
+triggered_by_step_execution_id: string | null;
+/**
+ * Creation timestamp from Sacrum (ISO 8601 string)
+ */
+inserted_at: string | null;
+/**
+ * Last update timestamp from Sacrum (ISO 8601 string)
+ */
+updated_at: string | null }
+/**
+ * Server-derived controls for Run/Stop task actions.
+ */
+export type TaskRunControls = { runnable?: boolean; stoppable?: boolean; disabled_reason_code: string | null; disabled_reason: string | null; active_run: TaskRun | null }
+/**
+ * Durable lifecycle status for a task workflow run.
+ */
+export type TaskRunStatus = "queued" | "executing" | "waiting" | "stopping" | "stopped" | "completed" | "failed"
+/**
+ * Trace tree rooted at a TaskRun.
+ */
+export type TaskRunTrace = { root_task_run_id: string; task_runs?: TaskRun[]; step_executions?: StepExecution[]; session_logs?: SessionLog[] }
 /**
  * Event payload for task current step changes.
  * Emitted when a task's current_step_id is updated during workflow execution.

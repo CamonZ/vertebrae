@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { screen, fireEvent } from "@testing-library/react";
-import { render, createMockTask } from "../../test/test-utils";
+import {
+  render,
+  createMockTask,
+  createMockTaskRun,
+} from "../../test/test-utils";
 import { TaskDetailPanel } from "./TaskDetailPanel";
 import * as eventsModule from "../../bindings";
 import { useTaskStore } from "../../stores";
@@ -76,6 +80,13 @@ vi.mock("../../hooks/useTask", () => ({
         step_name: "in_progress",
         workflow_id: "wf-1",
         current_step_id: "step-1",
+        run_controls: {
+          runnable: false,
+          stoppable: true,
+          disabled_reason_code: "active_run",
+          disabled_reason: "A TaskRun is already active",
+          active_run: createMockTaskRun({ id: "run-123", task_id: id }),
+        },
       }),
       isLoading: false,
       error: null,
@@ -99,6 +110,7 @@ vi.mock("../../bindings", () => ({
   commands: {
     updateTask: vi.fn(),
     runWorkflow: vi.fn(),
+    stopRun: vi.fn(),
     runStep: vi.fn(),
     orchestrateTask: vi.fn(),
     stopOrchestrator: vi.fn(),
@@ -542,8 +554,8 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       expect(stopBtn).toHaveTextContent(/^Stop$/);
     });
 
-    it("calls stopOrchestrator with the task id when Stop is clicked", async () => {
-      vi.mocked(eventsModule.commands.stopOrchestrator).mockResolvedValue({
+    it("calls stopRun with the active run id when Stop is clicked", async () => {
+      vi.mocked(eventsModule.commands.stopRun).mockResolvedValue({
         status: "ok",
         data: null,
       });
@@ -557,14 +569,15 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       });
       fireEvent.click(stopBtn);
 
-      expect(eventsModule.commands.stopOrchestrator).toHaveBeenCalledTimes(1);
-      expect(eventsModule.commands.stopOrchestrator).toHaveBeenCalledWith(
-        mockTaskData.id
-      );
+      expect(eventsModule.commands.stopRun).toHaveBeenCalledTimes(1);
+      expect(eventsModule.commands.stopRun).toHaveBeenCalledWith({
+        task_run_id: "run-123",
+        task_id: null,
+      });
     });
 
-    it("surfaces stopOrchestrator error message when the call fails", async () => {
-      vi.mocked(eventsModule.commands.stopOrchestrator).mockResolvedValue({
+    it("surfaces stopRun error message when the call fails", async () => {
+      vi.mocked(eventsModule.commands.stopRun).mockResolvedValue({
         status: "error",
         error: { message: "no orchestrator running" } as never,
       });
