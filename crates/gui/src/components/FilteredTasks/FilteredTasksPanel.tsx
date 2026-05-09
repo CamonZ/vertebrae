@@ -7,6 +7,7 @@ import { buildTreeFromTasks } from "../../utils/buildTreeFromTasks";
 import { useExpandedNodes } from "../../hooks/useExpandedNodes";
 import { ResizablePanel } from "../ResizablePanel";
 import type { TaskTreeNode } from "../../types/ui";
+import { isActiveRunStatus } from "../../utils/runState";
 
 interface FilteredTasksPanelProps {
   step: Step | null;
@@ -190,8 +191,9 @@ export function FilteredTasksPanel({
     return null;
   }
 
-  // Count active tasks
-  const activeCount = tasks.filter((t) => t.step_name === "in_progress").length;
+  const activeCount = tasks.filter((t) =>
+    isActiveRunStatus(t.run_controls?.active_run?.status ?? null)
+  ).length;
 
   // Count total tasks based on view mode
   const totalTasks =

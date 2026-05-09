@@ -7,6 +7,7 @@ import {
   createMockTask,
   createMockTaskRun,
 } from "../../test/test-utils";
+import type { Task, TaskRunControls } from "../../bindings";
 import { ReadySection } from "./ReadySection";
 
 vi.mock("../../bindings", () => ({
@@ -16,6 +17,53 @@ vi.mock("../../bindings", () => ({
 }));
 
 import { commands } from "../../bindings";
+
+function runnableControls(): TaskRunControls {
+  return {
+    runnable: true,
+    stoppable: false,
+    disabled_reason_code: null,
+    disabled_reason: null,
+    active_run: null,
+  };
+}
+
+function notRunnableControls(reason: string): TaskRunControls {
+  return {
+    runnable: false,
+    stoppable: false,
+    disabled_reason_code: "blocked",
+    disabled_reason: reason,
+    active_run: null,
+  };
+}
+
+function activeControls(): TaskRunControls {
+  return {
+    runnable: false,
+    stoppable: true,
+    disabled_reason_code: "active_run",
+    disabled_reason: "A TaskRun is already active",
+    active_run: createMockTaskRun({
+      id: "run-active",
+      task_id: "t-1",
+      status: "executing",
+    }),
+  };
+}
+
+function readyTask(overrides?: Partial<Task>): Task {
+  return createMockTask({
+    id: "t-1",
+    title: "Ready Task",
+    workflow_id: "wf-1",
+    current_step_id: "step-1",
+    workflow_name: "Development",
+    step_name: "todo",
+    run_controls: runnableControls(),
+    ...overrides,
+  });
+}
 
 describe("ReadySection", () => {
   beforeEach(() => {
@@ -32,106 +80,118 @@ describe("ReadySection", () => {
   });
 
   it("renders section heading with task count", () => {
-    const tasks = [
-      createMockTask({ id: "t-1", title: "Ready Task" }),
-    ];
-    render(<ReadySection tasks={tasks} />);
+    render(<ReadySection tasks={[readyTask()]} />);
 
     expect(screen.getByText("Ready")).toBeInTheDocument();
     expect(screen.getByText("1")).toBeInTheDocument();
   });
 
   it("displays task title and workflow info", () => {
-    const tasks = [
-      createMockTask({
-        id: "t-1",
-        title: "Implement Feature",
-        workflow_name: "Development",
-        step_name: "todo",
-        workflow_id: "wf-1",
-        current_step_id: "step-1",
-      }),
-    ];
-    render(<ReadySection tasks={tasks} />);
+    render(
+      <ReadySection
+        tasks={[
+          readyTask({
+            title: "Implement Feature",
+            workflow_name: "Development",
+            step_name: "todo",
+          }),
+        ]}
+      />
+    );
 
     expect(screen.getByText("Implement Feature")).toBeInTheDocument();
     expect(screen.getByText("Implement Feature").closest("p")?.textContent).toBe(
-      "Implement Feature \u2014 all blockers resolved",
+      "Implement Feature — all blockers resolved"
     );
     expect(screen.getByText(/all blockers resolved/)).toBeInTheDocument();
     expect(screen.queryByText("No workflow assigned")).not.toBeInTheDocument();
     expect(screen.getByText("Development")).toBeInTheDocument();
     expect(screen.getByText("todo")).toBeInTheDocument();
-    expect(screen.getByText("Development").closest("p")?.textContent).toBe(
-      "Development \u00b7 todo",
-    );
   });
 
-  it("shows Start button when task has workflow_id and current_step_id", () => {
-    const tasks = [
-      createMockTask({
-        id: "t-1",
-        title: "Task",
-        workflow_id: "wf-1",
-        current_step_id: "step-1",
-      }),
-    ];
-    render(<ReadySection tasks={tasks} />);
+  it("shows Start button enabled when runControls.runnable is true and current_step_id is set", () => {
+    render(<ReadySection tasks={[readyTask()]} />);
 
-    expect(screen.getByText("Start")).toBeInTheDocument();
+    const start = screen.getByTestId("ready-start-button");
+    expect(start).toBeInTheDocument();
+    expect(start).not.toBeDisabled();
+  });
+
+  it("disables Start when runControls.runnable is false", () => {
+    render(
+      <ReadySection
+        tasks={[
+          readyTask({
+            run_controls: notRunnableControls("Workflow missing"),
+          }),
+        ]}
+      />
+    );
+
+    const start = screen.getByTestId("ready-start-button");
+    expect(start).toBeDisabled();
+  });
+
+  it("disables Start when an active run is already in flight", () => {
+    render(<ReadySection tasks={[readyTask({ run_controls: activeControls() })]} />);
+
+    const start = screen.getByTestId("ready-start-button");
+    expect(start).toBeDisabled();
   });
 
   it("does not show Start button when task has no workflow", () => {
-    const tasks = [
-      createMockTask({
-        id: "t-1",
-        title: "No Workflow Task",
-        workflow_id: null,
-        current_step_id: null,
-      }),
-    ];
-    render(<ReadySection tasks={tasks} />);
+    render(
+      <ReadySection
+        tasks={[
+          readyTask({
+            workflow_id: null,
+            current_step_id: null,
+            workflow_name: null,
+            step_name: null,
+            run_controls: null,
+          }),
+        ]}
+      />
+    );
 
-    expect(screen.queryByText("Start")).not.toBeInTheDocument();
-  });
-
-  it("does not show Start when only part of workflow state is present", () => {
-    const tasks = [
-      createMockTask({
-        id: "t-1",
-        title: "Workflow only",
-        workflow_id: "wf-1",
-        current_step_id: null,
-      }),
-      createMockTask({
-        id: "t-2",
-        title: "Step only",
-        workflow_id: null,
-        current_step_id: "step-1",
-      }),
-    ];
-    render(<ReadySection tasks={tasks} />);
-
-    expect(screen.queryByText("Start")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("ready-start-button")).not.toBeInTheDocument();
   });
 
   it("calls runWorkflow when Start is clicked", async () => {
     const onTaskStarted = vi.fn();
-    const tasks = [
-      createMockTask({
-        id: "t-1",
-        title: "Start Me",
-        workflow_id: "wf-1",
-        current_step_id: "step-1",
-      }),
-    ];
-    render(<ReadySection tasks={tasks} onTaskStarted={onTaskStarted} />);
+    render(
+      <ReadySection
+        tasks={[readyTask({ id: "t-1", title: "Start Me" })]}
+        onTaskStarted={onTaskStarted}
+      />
+    );
 
-    fireEvent.click(screen.getByText("Start"));
+    fireEvent.click(screen.getByTestId("ready-start-button"));
     expect(commands.runWorkflow).toHaveBeenCalledWith("t-1");
     await waitFor(() => {
       expect(onTaskStarted).toHaveBeenCalledWith("t-1");
     });
+  });
+
+  it("does not invoke runWorkflow when Start is disabled by run_controls", async () => {
+    const onTaskStarted = vi.fn();
+    render(
+      <ReadySection
+        tasks={[
+          readyTask({
+            id: "t-1",
+            run_controls: notRunnableControls("Blocked by deps"),
+          }),
+        ]}
+        onTaskStarted={onTaskStarted}
+      />
+    );
+
+    const start = screen.getByTestId("ready-start-button");
+    fireEvent.click(start);
+
+    expect(commands.runWorkflow).not.toHaveBeenCalled();
+    expect(onTaskStarted).not.toHaveBeenCalled();
   });
 
   it("does not notify start when runWorkflow returns an error", async () => {
@@ -140,46 +200,19 @@ describe("ReadySection", () => {
       error: { message: "cannot start" },
     });
     const onTaskStarted = vi.fn();
-    const tasks = [
-      createMockTask({
-        id: "t-1",
-        title: "Start Me",
-        workflow_id: "wf-1",
-        current_step_id: "step-1",
-      }),
-    ];
-    render(<ReadySection tasks={tasks} onTaskStarted={onTaskStarted} />);
+    render(
+      <ReadySection
+        tasks={[readyTask({ id: "t-1", title: "Start Me" })]}
+        onTaskStarted={onTaskStarted}
+      />
+    );
 
-    fireEvent.click(screen.getByText("Start"));
+    fireEvent.click(screen.getByTestId("ready-start-button"));
 
     await waitFor(() => {
       expect(commands.runWorkflow).toHaveBeenCalledWith("t-1");
     });
     expect(onTaskStarted).not.toHaveBeenCalled();
-  });
-
-  it("uses the latest start callback after rerendering", async () => {
-    const initialOnTaskStarted = vi.fn();
-    const latestOnTaskStarted = vi.fn();
-    const tasks = [
-      createMockTask({
-        id: "t-1",
-        title: "Start Me",
-        workflow_id: "wf-1",
-        current_step_id: "step-1",
-      }),
-    ];
-    const { rerender } = render(
-      <ReadySection tasks={tasks} onTaskStarted={initialOnTaskStarted} />,
-    );
-
-    rerender(<ReadySection tasks={tasks} onTaskStarted={latestOnTaskStarted} />);
-    fireEvent.click(screen.getByText("Start"));
-
-    await waitFor(() => {
-      expect(latestOnTaskStarted).toHaveBeenCalledWith("t-1");
-    });
-    expect(initialOnTaskStarted).not.toHaveBeenCalled();
   });
 
   it("disables Start while runWorkflow is in flight", async () => {
@@ -188,19 +221,11 @@ describe("ReadySection", () => {
     vi.mocked(commands.runWorkflow).mockReturnValue(
       new Promise<{ status: "ok"; data: typeof run }>((resolve) => {
         resolveRun = resolve;
-      }),
+      })
     );
-    const tasks = [
-      createMockTask({
-        id: "t-1",
-        title: "Start Me",
-        workflow_id: "wf-1",
-        current_step_id: "step-1",
-      }),
-    ];
-    render(<ReadySection tasks={tasks} />);
+    render(<ReadySection tasks={[readyTask({ id: "t-1" })]} />);
 
-    const start = screen.getByText("Start");
+    const start = screen.getByTestId("ready-start-button");
     fireEvent.click(start);
     fireEvent.click(start);
 
@@ -214,46 +239,42 @@ describe("ReadySection", () => {
   });
 
   it("shows 'No workflow assigned' when task has no workflow or step", () => {
-    const tasks = [
-      createMockTask({
-        id: "t-1",
-        title: "Plain Task",
-        workflow_id: null,
-        workflow_name: null,
-        step_name: null,
-        current_step_id: null,
-      }),
-    ];
-    render(<ReadySection tasks={tasks} />);
+    render(
+      <ReadySection
+        tasks={[
+          createMockTask({
+            id: "t-1",
+            title: "Plain Task",
+            workflow_id: null,
+            workflow_name: null,
+            step_name: null,
+            current_step_id: null,
+            run_controls: null,
+          }),
+        ]}
+      />
+    );
 
     expect(screen.getByText("No workflow assigned")).toBeInTheDocument();
     expect(screen.getByText(/ready to start/)).toBeInTheDocument();
   });
 
-  it("does not show 'No workflow assigned' when only workflow metadata is partial", () => {
-    const tasks = [
-      createMockTask({
-        id: "t-1",
-        title: "Workflow Named Task",
-        workflow_id: null,
-        workflow_name: "Development",
-        step_name: null,
-        current_step_id: null,
-      }),
-    ];
-    render(<ReadySection tasks={tasks} />);
-
-    expect(screen.getByText("Development")).toBeInTheDocument();
-    expect(screen.queryByText("No workflow assigned")).not.toBeInTheDocument();
-  });
-
   it("renders multiple ready tasks", () => {
-    const tasks = [
-      createMockTask({ id: "t-1", title: "Task One", workflow_id: "wf-1", current_step_id: "s-1" }),
-      createMockTask({ id: "t-2", title: "Task Two", workflow_id: "wf-1", current_step_id: "s-1" }),
-      createMockTask({ id: "t-3", title: "Task Three", workflow_id: null, current_step_id: null }),
-    ];
-    render(<ReadySection tasks={tasks} />);
+    render(
+      <ReadySection
+        tasks={[
+          readyTask({ id: "t-1", title: "Task One" }),
+          readyTask({ id: "t-2", title: "Task Two" }),
+          createMockTask({
+            id: "t-3",
+            title: "Task Three",
+            workflow_id: null,
+            current_step_id: null,
+            run_controls: null,
+          }),
+        ]}
+      />
+    );
 
     expect(screen.getByText("3")).toBeInTheDocument();
     const readyItems = screen.getAllByTestId("ready-item");

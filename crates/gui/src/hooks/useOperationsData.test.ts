@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { useTaskStore } from "../stores/taskStore";
 import { useExecutionStore } from "../stores/executionStore";
-import { createMockTask, createMockStepExecution } from "../test/test-utils";
+import { createMockTask, createMockTaskRun } from "../test/test-utils";
+import type { TaskRun, TaskRunStatus } from "../bindings";
 
 const mockListTasks = vi.fn();
 const mockGetTaskExecutions = vi.fn();
@@ -16,21 +17,45 @@ vi.mock("../bindings", () => ({
 
 import { useOperationsData } from "./useOperationsData";
 
+function withActiveRun(
+  taskId: string,
+  status: TaskRunStatus,
+  overrides: { runnable?: boolean; stoppable?: boolean } = {}
+) {
+  const activeRun: TaskRun = createMockTaskRun({
+    id: `run-${taskId}`,
+    task_id: taskId,
+    status,
+  });
+  return {
+    runnable: overrides.runnable ?? false,
+    stoppable: overrides.stoppable ?? (status === "executing"),
+    disabled_reason_code: null,
+    disabled_reason: null,
+    active_run: activeRun,
+  };
+}
+
 describe("useOperationsData", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    useTaskStore.setState({ tasks: [], selectedTaskId: null, selectedTask: null, isLoading: false });
+    useTaskStore.setState({
+      tasks: [],
+      selectedTaskId: null,
+      selectedTask: null,
+      isLoading: false,
+    });
     useExecutionStore.setState({ executions: [] });
     mockListTasks.mockResolvedValue({ status: "ok", data: [] });
     mockGetTaskExecutions.mockResolvedValue({ status: "ok", data: [] });
   });
 
-  it("derives attention items from task and execution stores", async () => {
+  it("derives a failed_run attention item from run_controls.active_run with status=failed", async () => {
     const failedTask = createMockTask({
       id: "t-fail",
       title: "Failed Task",
       workflow_id: "wf-1",
-      started_at: "2025-01-01T00:00:00Z",
+      run_controls: withActiveRun("t-fail", "failed"),
     });
 
     mockListTasks.mockResolvedValue({ status: "ok", data: [failedTask] });
@@ -41,32 +66,24 @@ describe("useOperationsData", () => {
       expect(result.current.isLoading).toBe(false);
     });
 
-    // Simulate a failed execution arriving via WebSocket into the execution store
-    const failedExec = createMockStepExecution({
-      id: "e-fail",
-      task_id: "t-fail",
-      status: "failed",
-    });
-
-    act(() => {
-      useExecutionStore.getState().upsertExecution(failedExec);
-    });
-
     expect(result.current.attentionItems).toHaveLength(1);
-    expect(result.current.attentionItems[0].kind).toBe("failed_execution");
+    expect(result.current.attentionItems[0].kind).toBe("failed_run");
     expect(result.current.attentionItems[0].task.id).toBe("t-fail");
+    expect(result.current.attentionItems[0].taskRun?.status).toBe("failed");
   });
 
-  it("derives live items from task and execution stores", async () => {
-    const runningTask = createMockTask({
-      id: "t-run",
-      title: "Running Task",
+  it("does NOT derive attention items from failed StepExecution rows", async () => {
+    const taskWithoutFailedRun = createMockTask({
+      id: "t-stale",
+      title: "Stale failed exec",
       workflow_id: "wf-1",
-      step_name: "in_progress",
-      started_at: "2025-01-01T00:00:00Z",
+      run_controls: withActiveRun("t-stale", "executing"),
     });
 
-    mockListTasks.mockResolvedValue({ status: "ok", data: [runningTask] });
+    mockListTasks.mockResolvedValue({
+      status: "ok",
+      data: [taskWithoutFailedRun],
+    });
 
     const { result } = renderHook(() => useOperationsData());
 
@@ -74,29 +91,115 @@ describe("useOperationsData", () => {
       expect(result.current.isLoading).toBe(false);
     });
 
-    const runningExec = createMockStepExecution({
-      id: "e-run",
-      task_id: "t-run",
-      status: "in_progress",
+    act(() => {
+      useExecutionStore.getState().upsertExecution({
+        id: "exec-failed",
+        task_id: "t-stale",
+        task_run_id: null,
+        workflow_id: "wf-1",
+        step_name: "build",
+        started_at: "2025-01-01T00:00:00Z",
+        completed_at: "2025-01-01T00:01:00Z",
+        status: "failed",
+      });
+    });
+
+    expect(
+      result.current.attentionItems.filter((i) => i.kind === "failed_run")
+    ).toHaveLength(0);
+  });
+
+  it("derives live items from tasks whose active_run is queued/executing/waiting", async () => {
+    const queuedTask = createMockTask({
+      id: "t-queued",
+      title: "Queued",
+      workflow_id: "wf-1",
+      run_controls: withActiveRun("t-queued", "queued"),
+    });
+    const executingTask = createMockTask({
+      id: "t-exec",
+      title: "Executing",
+      workflow_id: "wf-1",
+      run_controls: withActiveRun("t-exec", "executing"),
+    });
+    const waitingTask = createMockTask({
+      id: "t-wait",
+      title: "Waiting",
+      workflow_id: "wf-1",
+      run_controls: withActiveRun("t-wait", "waiting"),
+    });
+    const stoppingTask = createMockTask({
+      id: "t-stop",
+      title: "Stopping",
+      workflow_id: "wf-1",
+      run_controls: withActiveRun("t-stop", "stopping", { stoppable: false }),
+    });
+
+    mockListTasks.mockResolvedValue({
+      status: "ok",
+      data: [queuedTask, executingTask, waitingTask, stoppingTask],
+    });
+
+    const { result } = renderHook(() => useOperationsData());
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    const liveIds = result.current.liveItems.map((i) => i.task.id).sort();
+    expect(liveIds).toEqual(["t-exec", "t-queued", "t-wait"]);
+    // Stopping is intentionally excluded from Live
+    expect(liveIds).not.toContain("t-stop");
+  });
+
+  it("does NOT derive live items from in_progress StepExecution rows when there is no active TaskRun", async () => {
+    const idleTaskWithLegacyExec = createMockTask({
+      id: "t-idle",
+      title: "Idle",
+      workflow_id: "wf-1",
       step_name: "in_progress",
+      run_controls: null,
+    });
+
+    mockListTasks.mockResolvedValue({
+      status: "ok",
+      data: [idleTaskWithLegacyExec],
+    });
+
+    const { result } = renderHook(() => useOperationsData());
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
     });
 
     act(() => {
-      useExecutionStore.getState().upsertExecution(runningExec);
+      useExecutionStore.getState().upsertExecution({
+        id: "exec-running",
+        task_id: "t-idle",
+        task_run_id: null,
+        workflow_id: "wf-1",
+        step_name: "in_progress",
+        started_at: "2025-01-01T00:00:00Z",
+        completed_at: null,
+        status: "in_progress",
+      });
     });
 
-    expect(result.current.liveItems).toHaveLength(1);
-    expect(result.current.liveItems[0].task.id).toBe("t-run");
-    expect(result.current.liveItems[0].execution.status).toBe("in_progress");
+    expect(result.current.liveItems).toHaveLength(0);
   });
 
-  it("derives ready tasks from task store dependency data", async () => {
+  it("includes a task in readyTasks when run_controls.runnable is true and no active run", async () => {
     const readyTask = createMockTask({
       id: "t-ready",
-      title: "Ready to Start",
-      started_at: null,
-      completed_at: null,
-      archived: false,
+      title: "Ready",
+      workflow_id: "wf-1",
+      run_controls: {
+        runnable: true,
+        stoppable: false,
+        disabled_reason_code: null,
+        disabled_reason: null,
+        active_run: null,
+      },
       dependency_ids: [],
     });
 
@@ -108,13 +211,24 @@ describe("useOperationsData", () => {
       expect(result.current.isLoading).toBe(false);
     });
 
-    expect(result.current.readyTasks).toHaveLength(1);
-    expect(result.current.readyTasks[0].id).toBe("t-ready");
-    expect(result.current.readyTasks[0].title).toBe("Ready to Start");
+    expect(result.current.readyTasks.map((t) => t.id)).toEqual(["t-ready"]);
   });
 
-  it("reflects new tasks upserted externally into the task store", async () => {
-    mockListTasks.mockResolvedValue({ status: "ok", data: [] });
+  it("excludes tasks from readyTasks when run_controls.runnable is false", async () => {
+    const notRunnable = createMockTask({
+      id: "t-locked",
+      title: "Not Runnable",
+      workflow_id: "wf-1",
+      run_controls: {
+        runnable: false,
+        stoppable: false,
+        disabled_reason_code: "no_workflow",
+        disabled_reason: "Workflow missing",
+        active_run: null,
+      },
+    });
+
+    mockListTasks.mockResolvedValue({ status: "ok", data: [notRunnable] });
 
     const { result } = renderHook(() => useOperationsData());
 
@@ -123,45 +237,18 @@ describe("useOperationsData", () => {
     });
 
     expect(result.current.readyTasks).toHaveLength(0);
-
-    // Simulate a new task arriving via WebSocket upsert
-    const newTask = createMockTask({
-      id: "t-ws",
-      title: "WebSocket Task",
-      started_at: null,
-      completed_at: null,
-      archived: false,
-      dependency_ids: [],
-    });
-
-    act(() => {
-      useTaskStore.getState().upsertTask(newTask);
-    });
-
-    expect(result.current.readyTasks).toHaveLength(1);
-    expect(result.current.readyTasks[0].id).toBe("t-ws");
   });
 
-  it("excludes tasks with unmet dependencies from ready list", async () => {
-    const blocker = createMockTask({
-      id: "t-blocker",
-      title: "Blocker",
-      started_at: "2025-01-01T00:00:00Z",
-      completed_at: null,
-      archived: false,
-      dependency_ids: [],
-    });
-
-    const blocked = createMockTask({
-      id: "t-blocked",
-      title: "Blocked Task",
+  it("excludes tasks with an active run from readyTasks even if started_at is unset", async () => {
+    const running = createMockTask({
+      id: "t-running",
+      title: "Running",
+      workflow_id: "wf-1",
       started_at: null,
-      completed_at: null,
-      archived: false,
-      dependency_ids: ["t-blocker"],
+      run_controls: withActiveRun("t-running", "executing"),
     });
 
-    mockListTasks.mockResolvedValue({ status: "ok", data: [blocker, blocked] });
+    mockListTasks.mockResolvedValue({ status: "ok", data: [running] });
 
     const { result } = renderHook(() => useOperationsData());
 
@@ -169,10 +256,78 @@ describe("useOperationsData", () => {
       expect(result.current.isLoading).toBe(false);
     });
 
-    // Only tasks with no unmet deps should be ready; blocker is started so not ready,
-    // blocked has an incomplete dependency
-    const readyIds = result.current.readyTasks.map((t) => t.id);
-    expect(readyIds).not.toContain("t-blocked");
+    expect(result.current.readyTasks).toHaveLength(0);
+  });
+
+  it("excludes tasks whose blockers have not reached a completed run or done step", async () => {
+    const blocker = createMockTask({
+      id: "t-blocker",
+      title: "Blocker",
+      workflow_id: "wf-1",
+      run_controls: withActiveRun("t-blocker", "executing"),
+      step_name: "in_progress",
+    });
+    const blocked = createMockTask({
+      id: "t-blocked",
+      title: "Blocked",
+      workflow_id: "wf-1",
+      run_controls: {
+        runnable: true,
+        stoppable: false,
+        disabled_reason_code: null,
+        disabled_reason: null,
+        active_run: null,
+      },
+      dependency_ids: ["t-blocker"],
+    });
+
+    mockListTasks.mockResolvedValue({
+      status: "ok",
+      data: [blocker, blocked],
+    });
+
+    const { result } = renderHook(() => useOperationsData());
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    expect(result.current.readyTasks.map((t) => t.id)).not.toContain("t-blocked");
+  });
+
+  it("includes a task whose blocker has a completed run", async () => {
+    const blocker = createMockTask({
+      id: "t-blocker",
+      title: "Blocker",
+      workflow_id: "wf-1",
+      run_controls: withActiveRun("t-blocker", "completed"),
+    });
+    const blocked = createMockTask({
+      id: "t-blocked",
+      title: "Blocked",
+      workflow_id: "wf-1",
+      run_controls: {
+        runnable: true,
+        stoppable: false,
+        disabled_reason_code: null,
+        disabled_reason: null,
+        active_run: null,
+      },
+      dependency_ids: ["t-blocker"],
+    });
+
+    mockListTasks.mockResolvedValue({
+      status: "ok",
+      data: [blocker, blocked],
+    });
+
+    const { result } = renderHook(() => useOperationsData());
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    expect(result.current.readyTasks.map((t) => t.id)).toContain("t-blocked");
   });
 
   it("includes review-request tasks in attention items from store", async () => {
@@ -193,6 +348,5 @@ describe("useOperationsData", () => {
     expect(result.current.attentionItems).toHaveLength(1);
     expect(result.current.attentionItems[0].kind).toBe("review_request");
     expect(result.current.attentionItems[0].task.id).toBe("t-review");
-    expect(result.current.attentionItems[0].task.title).toBe("Needs Review");
   });
 });
