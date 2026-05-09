@@ -347,6 +347,52 @@ describe("TracesPage keyboard nav", () => {
   });
 });
 
+describe("TracesPage corridor pin", () => {
+  it("renders the corridor-detail-pin only after a node is clicked AND only in CORRIDOR mode", () => {
+    renderAt("/traces/root");
+    // No pin in the default THREAD mode.
+    expect(screen.queryByTestId("corridor-detail-pin")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("trace-mode-option-corridor"));
+    // Switching modes alone must not render the pin — needs a click first.
+    expect(screen.queryByTestId("corridor-detail-pin")).toBeNull();
+
+    const node = screen
+      .queryAllByTestId("corridor-node")
+      .find((n) => n.getAttribute("data-execution-id") === "exec-root-1");
+    expect(node).toBeDefined();
+    fireEvent.click(node!);
+    const pin = screen.getByTestId("corridor-detail-pin");
+    expect(pin.getAttribute("data-execution-id")).toBe("exec-root-1");
+
+    // Switching back to THREAD must hide the pin even though it's still pinned.
+    fireEvent.click(screen.getByTestId("trace-mode-option-thread"));
+    expect(screen.queryByTestId("corridor-detail-pin")).toBeNull();
+
+    // And re-entering CORRIDOR mode brings the pin back (state is preserved).
+    fireEvent.click(screen.getByTestId("trace-mode-option-corridor"));
+    expect(
+      screen
+        .getByTestId("corridor-detail-pin")
+        .getAttribute("data-execution-id")
+    ).toBe("exec-root-1");
+  });
+});
+
+describe("TracesPage THREAD empty-state", () => {
+  it("does not render the FlightStrip when THREAD mode has zero filtered executions", () => {
+    // Filter to a step name that does not match any execution.
+    renderAt("/traces/root?step=nonexistent-step");
+    expect(screen.queryByTestId("unified-chat-event")).toBeNull();
+    // FlightStrip is gated on filteredExecutions.length > 0; with zero matches
+    // it must be absent.
+    expect(screen.queryByTestId("flight-strip")).toBeNull();
+    expect(
+      screen.queryAllByTestId("flight-strip-marker-main")
+    ).toHaveLength(0);
+  });
+});
+
 describe("TracesPage filter bar updates URL and exposes test ids", () => {
   it("renders status/step/model selects with the right options", () => {
     renderAt("/traces/root");
