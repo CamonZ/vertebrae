@@ -1,19 +1,18 @@
 import { useCallback } from "react";
-import type { Task, StepExecution } from "../../bindings";
+import type { Task, TaskRun } from "../../bindings";
 import { commands } from "../../bindings";
 import { formatDuration } from "./formatDuration";
 
-/** An item that requires human attention -- either a failed execution or a review request. */
 export interface AttentionItem {
-  kind: "failed_execution" | "review_request";
+  kind: "failed_run" | "review_request";
   task: Task;
-  execution?: StepExecution;
+  taskRun?: TaskRun;
 }
 
 interface NeedsAttentionSectionProps {
   items: AttentionItem[];
-  onViewLogs?: (executionId: string) => void;
-  onRetry?: (taskId: string, stepName: string) => void;
+  onViewLogs?: (taskRunId: string) => void;
+  onRetry?: (taskId: string) => void;
 }
 
 const NULL_UPDATE = {
@@ -53,8 +52,8 @@ export function NeedsAttentionSection({
       <div className="space-y-1">
         {items.map((item) => {
           const key =
-            item.kind === "failed_execution" && item.execution?.id
-              ? `exec-${item.execution.id}`
+            item.kind === "failed_run" && item.taskRun?.id
+              ? `run-${item.taskRun.id}`
               : `review-${item.task.id}`;
 
           return (
@@ -99,9 +98,9 @@ export function NeedsAttentionSection({
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-text-primary">
                       {item.task.title}
-                      {item.kind === "failed_execution" && item.execution?.step_name && (
+                      {item.kind === "failed_run" && (
                         <span className="font-normal text-text-secondary">
-                          {" "}&mdash; step &apos;{item.execution.step_name}&apos; failed
+                          {" "}&mdash; orchestration run failed
                         </span>
                       )}
                       {item.kind === "review_request" && (
@@ -111,12 +110,12 @@ export function NeedsAttentionSection({
                       )}
                     </p>
                     <p className="mt-0.5 text-xs text-text-muted">
-                      {item.kind === "failed_execution" ? (
+                      {item.kind === "failed_run" ? (
                         <>
                           {item.task.workflow_name && <>{item.task.workflow_name} &middot; </>}
-                          Step <span className="font-mono">{item.execution?.step_name}</span>
-                          {item.execution?.started_at && (
-                            <> &middot; {formatDuration(item.execution.started_at, item.execution.completed_at)}</>
+                          Run <span className="font-mono">{item.taskRun?.id?.slice(0, 8) ?? "unknown"}</span>
+                          {item.taskRun?.started_at && (
+                            <> &middot; {formatDuration(item.taskRun.started_at, item.taskRun.ended_at)}</>
                           )}
                         </>
                       ) : (
@@ -130,20 +129,18 @@ export function NeedsAttentionSection({
                 </div>
 
                 <div className="flex shrink-0 items-center gap-1.5">
-                  {item.kind === "failed_execution" && item.execution?.id && (
+                  {item.kind === "failed_run" && item.taskRun?.id && (
                     <>
                       <button
                         type="button"
-                        onClick={() => onViewLogs?.(item.execution!.id!)}
+                        onClick={() => onViewLogs?.(item.taskRun!.id!)}
                         className="rounded-md border border-border bg-bg-tertiary px-2.5 py-1 text-xs text-text-secondary transition-colors hover:bg-bg-hover hover:text-text-primary"
                       >
                         View Logs
                       </button>
                       <button
                         type="button"
-                        onClick={() =>
-                          onRetry?.(item.task.id, item.execution!.step_name!)
-                        }
+                        onClick={() => onRetry?.(item.task.id)}
                         className="rounded-md border border-error/30 bg-error/10 px-2.5 py-1 text-xs text-error transition-colors hover:bg-error/20"
                       >
                         Retry

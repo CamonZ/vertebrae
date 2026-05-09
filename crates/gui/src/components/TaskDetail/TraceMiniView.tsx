@@ -1,10 +1,10 @@
-import { useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import type { ExecutionStatus, StepExecution } from "../../bindings";
 import { useTaskExecutions } from "../../hooks";
 import { useSubtreeExecutions } from "../../hooks/useSubtreeExecutions";
 import { useSessionLogStore } from "../../stores/sessionLogStore";
-import { computeExecutionRollups, formatCost, parseCost } from "../../utils";
+import { computeExecutionRollups, formatCost, parseCost, popOut } from "../../utils";
 import { formatDuration } from "../Operations/formatDuration";
 
 interface TraceMiniViewProps {
@@ -127,6 +127,14 @@ export function TraceMiniView({
     navigate(`/traces/${taskId}`);
   };
 
+  const handleDetach = useCallback(async () => {
+    await popOut(`/traces-window/${taskId}`, `traces-${taskId}`, {
+      title: "Traces",
+      width: 1100,
+      height: 800,
+    });
+  }, [taskId]);
+
   return (
     <div
       className="m-4 rounded-lg border border-border bg-bg-secondary p-3"
@@ -216,28 +224,53 @@ export function TraceMiniView({
         </div>
       )}
 
-      <button
-        type="button"
-        onClick={handleExplore}
-        data-testid="trace-mini-explore"
-        className="mt-3 flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-md border border-border-strong bg-bg-tertiary px-2.5 py-1.5 text-xs font-medium text-text-primary transition-colors hover:bg-bg-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-      >
-        <span>Explore traces</span>
-        <svg
-          className="h-3 w-3"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-          aria-hidden="true"
+      <div className="mt-3 flex items-stretch gap-2">
+        <button
+          type="button"
+          onClick={handleExplore}
+          data-testid="trace-mini-explore"
+          className="flex flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-md border border-border-strong bg-bg-tertiary px-2.5 py-1.5 text-xs font-medium text-text-primary transition-colors hover:bg-bg-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M17 8l4 4m0 0l-4 4m4-4H3"
-          />
-        </svg>
-      </button>
+          <span>Explore traces</span>
+          <svg
+            className="h-3 w-3"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M17 8l4 4m0 0l-4 4m4-4H3"
+            />
+          </svg>
+        </button>
+        <button
+          type="button"
+          onClick={handleDetach}
+          data-testid="trace-mini-detach"
+          aria-label="Detach traces into a separate window"
+          title="Detach into separate window"
+          className="cursor-pointer flex shrink-0 items-center justify-center rounded-md border border-border-strong bg-bg-tertiary px-2.5 py-1.5 text-text-primary transition-colors hover:bg-bg-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        >
+          <svg
+            className="h-3.5 w-3.5"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M14 5l7 7m0 0l-7 7m7-7H3"
+            />
+          </svg>
+        </button>
+      </div>
     </div>
   );
 }

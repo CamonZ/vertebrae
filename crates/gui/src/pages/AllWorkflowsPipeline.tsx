@@ -55,6 +55,7 @@ import {
 import { TaskDetailPanel } from "../components/TaskDetail";
 import { StepDetailPanel } from "../components/StepDetail";
 import { WorkflowDetailPanel } from "../components/WorkflowDetail";
+import { popOut } from "../utils";
 
 const nodeTypes: NodeTypes = {
   stepNode: StepNode,
@@ -389,6 +390,17 @@ function AllWorkflowsPipelineInner() {
     setSelectedTaskId(null);
     setPanelHistory([]);
   }, []);
+
+  const handleDetachTaskPanel = useCallback(async () => {
+    if (!selectedTaskId) return;
+    await popOut(`/task/${selectedTaskId}`, `task-${selectedTaskId}`, {
+      title: "Task Details",
+      width: 720,
+      height: 800,
+    });
+    setSelectedTaskId(null);
+    setPanelHistory([]);
+  }, [selectedTaskId]);
 
   const handleRelatedTaskSelect = useCallback(
     (taskId: string) => {
@@ -992,6 +1004,7 @@ function AllWorkflowsPipelineInner() {
           onClose={handleCloseTaskPanel}
           onTaskSelect={handleRelatedTaskSelect}
           onBack={panelHistory.length > 0 ? handleBack : undefined}
+          onDetach={handleDetachTaskPanel}
         />
       )}
 

@@ -3,7 +3,7 @@ import {
   render,
   screen,
   createMockTask,
-  createMockStepExecution,
+  createMockTaskRun,
 } from "../../test/test-utils";
 import { LiveSection } from "./LiveSection";
 import type { LiveItem } from "./LiveSection";
@@ -22,11 +22,10 @@ describe("LiveSection", () => {
     const items: LiveItem[] = [
       {
         task: createMockTask({ id: "t-1", title: "Running Task" }),
-        execution: createMockStepExecution({
-          id: "e-1",
+        taskRun: createMockTaskRun({
+          id: "run-1",
           task_id: "t-1",
-          step_name: "build",
-          status: "in_progress",
+          status: "executing",
           started_at: "2025-01-01T12:00:00Z",
         }),
       },
@@ -37,7 +36,7 @@ describe("LiveSection", () => {
     expect(screen.getByText("1")).toBeInTheDocument();
   });
 
-  it("displays task title and step name", () => {
+  it("displays task title and active run status", () => {
     const items: LiveItem[] = [
       {
         task: createMockTask({
@@ -45,11 +44,10 @@ describe("LiveSection", () => {
           title: "Deploy Frontend",
           workflow_name: "Production",
         }),
-        execution: createMockStepExecution({
-          id: "e-1",
+        taskRun: createMockTaskRun({
+          id: "run-1",
           task_id: "t-1",
-          step_name: "deploy",
-          status: "in_progress",
+          status: "executing",
           started_at: "2025-01-01T12:00:00Z",
         }),
       },
@@ -57,45 +55,70 @@ describe("LiveSection", () => {
     render(<LiveSection items={items} />);
 
     expect(screen.getByText("Deploy Frontend")).toBeInTheDocument();
-    expect(screen.getByText(/deploy/)).toBeInTheDocument();
+    const item = screen.getByTestId("live-item");
+    expect(item).toHaveAttribute("data-run-status", "executing");
+    expect(item.textContent).toContain("running");
   });
 
-  it("displays workflow name and step name in the item description", () => {
+  it("labels queued runs as queued in the description", () => {
     const items: LiveItem[] = [
       {
         task: createMockTask({
           id: "t-1",
-          title: "Task",
-          workflow_name: "CI Pipeline",
+          title: "Pending",
+          workflow_name: "CI",
         }),
-        execution: createMockStepExecution({
-          id: "e-1",
+        taskRun: createMockTaskRun({
+          id: "run-1",
           task_id: "t-1",
-          step_name: "test",
-          status: "in_progress",
-          started_at: "2025-01-01T12:00:00Z",
+          status: "queued",
         }),
       },
     ];
     render(<LiveSection items={items} />);
 
     const item = screen.getByTestId("live-item");
-    expect(item.textContent).toContain("CI Pipeline");
-    expect(item.textContent).toContain("test");
+    expect(item).toHaveAttribute("data-run-status", "queued");
+    expect(item.textContent).toContain("queued");
   });
 
-  it("renders a live duration timer for active executions", () => {
+  it("labels waiting runs as waiting", () => {
+    const items: LiveItem[] = [
+      {
+        task: createMockTask({
+          id: "t-1",
+          title: "Awaiting Input",
+          workflow_name: "Approvals",
+        }),
+        taskRun: createMockTaskRun({
+          id: "run-1",
+          task_id: "t-1",
+          status: "waiting",
+        }),
+      },
+    ];
+    render(<LiveSection items={items} />);
+
+    const item = screen.getByTestId("live-item");
+    expect(item).toHaveAttribute("data-run-status", "waiting");
+    expect(item.textContent).toContain("waiting");
+  });
+
+  it("renders a live duration timer for executing runs", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2025-01-01T12:01:30Z"));
 
     const items: LiveItem[] = [
       {
-        task: createMockTask({ id: "t-1", title: "Running Task", workflow_name: "Build Pipeline" }),
-        execution: createMockStepExecution({
-          id: "e-1",
+        task: createMockTask({
+          id: "t-1",
+          title: "Running Task",
+          workflow_name: "Build Pipeline",
+        }),
+        taskRun: createMockTaskRun({
+          id: "run-1",
           task_id: "t-1",
-          step_name: "build",
-          status: "in_progress",
+          status: "executing",
           started_at: "2025-01-01T12:00:00Z",
         }),
       },
@@ -112,22 +135,18 @@ describe("LiveSection", () => {
     const items: LiveItem[] = [
       {
         task: createMockTask({ id: "t-1", title: "Build App" }),
-        execution: createMockStepExecution({
-          id: "e-1",
+        taskRun: createMockTaskRun({
+          id: "run-1",
           task_id: "t-1",
-          step_name: "build",
-          status: "in_progress",
-          started_at: "2025-01-01T12:00:00Z",
+          status: "executing",
         }),
       },
       {
         task: createMockTask({ id: "t-2", title: "Run Tests" }),
-        execution: createMockStepExecution({
-          id: "e-2",
+        taskRun: createMockTaskRun({
+          id: "run-2",
           task_id: "t-2",
-          step_name: "test",
-          status: "in_progress",
-          started_at: "2025-01-01T12:00:00Z",
+          status: "executing",
         }),
       },
     ];
@@ -144,12 +163,10 @@ describe("LiveSection", () => {
     const items: LiveItem[] = [
       {
         task: createMockTask({ id: "t-1", title: "Task" }),
-        execution: createMockStepExecution({
-          id: "e-1",
+        taskRun: createMockTaskRun({
+          id: "run-1",
           task_id: "t-1",
-          step_name: "step",
-          status: "in_progress",
-          started_at: "2025-01-01T12:00:00Z",
+          status: "executing",
         }),
       },
     ];

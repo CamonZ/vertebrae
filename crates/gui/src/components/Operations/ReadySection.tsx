@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import type { Task } from "../../bindings";
 import { commands } from "../../bindings";
+import { deriveRunControlsState } from "../../utils/runState";
 
 interface ReadySectionProps {
   tasks: Task[];
@@ -26,9 +27,12 @@ export function ReadySection({ tasks, onTaskStarted }: ReadySectionProps) {
 
   const handleStart = useCallback(
     async (task: Task) => {
+      const runControls = deriveRunControlsState(task.run_controls ?? null, {
+        hasWorkflow: Boolean(task.workflow_id),
+      });
       if (
-        !task.workflow_id ||
         !task.current_step_id ||
+        runControls.runDisabled ||
         pendingTaskIdsRef.current.has(task.id)
       ) {
         return;
@@ -63,6 +67,11 @@ export function ReadySection({ tasks, onTaskStarted }: ReadySectionProps) {
       <div className="space-y-1">
         {tasks.map((task) => {
           const isPending = pendingTaskIds.has(task.id);
+          const runControls = deriveRunControlsState(
+            task.run_controls ?? null,
+            { hasWorkflow: Boolean(task.workflow_id) }
+          );
+          const startDisabled = runControls.runDisabled || isPending;
           return (
             <div
               key={task.id}
@@ -105,11 +114,21 @@ export function ReadySection({ tasks, onTaskStarted }: ReadySectionProps) {
                   <button
                     type="button"
                     onClick={() => handleStart(task)}
-                    disabled={isPending}
+                    disabled={startDisabled}
                     aria-busy={isPending}
+                    data-testid="ready-start-button"
+                    title={
+                      runControls.hasActiveRun
+                        ? "Run is already active"
+                        : !runControls.runnable && task.run_controls
+                          ? task.run_controls.disabled_reason ??
+                            "Not runnable right now"
+                          : "Run the entire workflow for this task"
+                    }
+                    aria-label="Run entire workflow"
                     className="shrink-0 rounded-md bg-primary px-3 py-1 text-xs font-medium text-bg-primary transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    Start
+                    Run Workflow
                   </button>
                 )}
               </div>
