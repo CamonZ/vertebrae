@@ -13,5 +13,7 @@
   ],
   "reporters": ["html", "clear-text", "progress"],
   "timeoutMS": 30000,
-  "incremental": true
+  "incremental": true,
+  "concurrency": 6,
+  "maxTestRunnerReuse": 50
 }

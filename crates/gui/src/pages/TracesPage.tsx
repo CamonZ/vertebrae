@@ -13,7 +13,12 @@ import {
   useParams,
   useSearchParams,
 } from "react-router-dom";
-import type { SessionLog, StepExecution, Task, Workflow } from "../bindings";
+import type {
+  SessionLog,
+  StepExecution,
+  Task,
+  Workflow,
+} from "../bindings";
 import {
   CorridorView,
   FilterBar,
@@ -24,7 +29,9 @@ import {
   TracesHeader,
   TracesPickerRail,
   UnifiedChatView,
+  projectTaskRunTrace,
   type TaskPickerHandle,
+  type TaskRunTraceProjection,
   type TraceMode,
 } from "../components/Traces";
 import {
@@ -45,6 +52,7 @@ interface ModeContentProps {
   taskId: string;
   executions: StepExecution[];
   tasks: Task[];
+  runProjection: TaskRunTraceProjection | null;
   workflows: readonly Workflow[];
   logsByExecutionId: Record<string, SessionLog[]>;
   isSubtreeLoading: boolean;
@@ -63,6 +71,7 @@ function renderModeContent(props: ModeContentProps): ReactNode {
     taskId,
     executions,
     tasks,
+    runProjection,
     workflows,
     logsByExecutionId,
     isSubtreeLoading,
@@ -81,6 +90,7 @@ function renderModeContent(props: ModeContentProps): ReactNode {
           rootTaskId={taskId}
           executions={executions}
           tasks={tasks}
+          runProjection={runProjection}
           workflows={workflows}
           logsByExecutionId={logsByExecutionId}
           isLoading={isSubtreeLoading}
@@ -102,6 +112,7 @@ function renderModeContent(props: ModeContentProps): ReactNode {
           rootTaskId={taskId}
           executions={executions}
           tasks={tasks}
+          runProjection={runProjection}
           threadScrollRef={threadScrollRef}
           onPinExecution={onPinExecution}
         />
@@ -219,6 +230,7 @@ export function TracesPage({
     null;
 
   const {
+    taskRuns: runTaskRuns,
     executions: runExecutions,
     sessionLogs: runSessionLogs,
     isLoading: isRunTraceLoading,
@@ -276,6 +288,11 @@ export function TracesPage({
     if (!safeTaskId) return [];
     return filterExecutions(executions, filters, { rootTaskId: safeTaskId });
   }, [executions, filters, safeTaskId]);
+
+  const runProjection = useMemo<TaskRunTraceProjection | null>(() => {
+    if (useLegacySubtree || runTaskRuns.length === 0) return null;
+    return projectTaskRunTrace(runTaskRuns, filteredExecutions, tasks);
+  }, [useLegacySubtree, runTaskRuns, filteredExecutions, tasks]);
 
   const focusExecutionId = useMemo(
     () => parseExecHash(location.hash),
@@ -519,6 +536,7 @@ export function TracesPage({
                   rootTaskId={taskId}
                   executions={filteredExecutions}
                   tasks={tasks}
+                  runProjection={runProjection}
                   logsByExecutionId={logsByExecutionId}
                   threadScrollRef={threadScrollRef}
                 />
@@ -530,6 +548,7 @@ export function TracesPage({
                     taskId,
                     executions: filteredExecutions,
                     tasks,
+                    runProjection,
                     workflows,
                     logsByExecutionId,
                     isSubtreeLoading: dataLoading,
