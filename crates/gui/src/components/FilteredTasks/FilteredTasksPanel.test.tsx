@@ -117,11 +117,42 @@ describe("FilteredTasksPanel", () => {
       expect(matches.length).toBeGreaterThanOrEqual(1);
     });
 
-    it("displays active task count", () => {
+    it("displays active task count derived from run_controls.active_run, not step_name", () => {
       const step = createStep();
+      const activeRun = {
+        id: "run-1",
+        task_id: "task-1",
+        project_id: "project-1",
+        user_id: null,
+        status: "executing" as const,
+        started_at: "2024-01-01T00:00:00Z",
+        ended_at: null,
+        stop_requested_at: null,
+        latest_step_execution_id: null,
+        outcome_kind: null,
+        outcome_context: null,
+        parent_task_run_id: null,
+        root_task_run_id: null,
+        triggered_by_step_execution_id: null,
+        inserted_at: null,
+        updated_at: null,
+      };
       const tasks = [
+        // step_name is in_progress but no active TaskRun -- must NOT count.
         createTask({ id: "task-1", step_name: "in_progress" }),
-        createTask({ id: "task-2", step_name: "todo" }),
+        // No step_name signal but the daemon has an active run -- must count.
+        createTask({
+          id: "task-2",
+          step_name: "todo",
+          run_controls: {
+            runnable: false,
+            stoppable: true,
+            disabled_reason_code: null,
+            disabled_reason: null,
+            active_run: { ...activeRun, task_id: "task-2" },
+          },
+        }),
+        createTask({ id: "task-3", step_name: "todo" }),
       ];
       render(<FilteredTasksPanel step={step} tasks={tasks} workflowId="workflow-1" />);
 

@@ -4,7 +4,7 @@ import {
   screen,
   fireEvent,
   createMockTask,
-  createMockStepExecution,
+  createMockTaskRun,
 } from "../../test/test-utils";
 import { NeedsAttentionSection } from "./NeedsAttentionSection";
 import type { AttentionItem } from "./NeedsAttentionSection";
@@ -26,12 +26,11 @@ describe("NeedsAttentionSection", () => {
   it("renders section heading with item count", () => {
     const items: AttentionItem[] = [
       {
-        kind: "failed_execution",
+        kind: "failed_run",
         task: createMockTask({ id: "t-1", title: "Broken Task" }),
-        execution: createMockStepExecution({
-          id: "e-1",
+        taskRun: createMockTaskRun({
+          id: "run-broken",
           task_id: "t-1",
-          step_name: "build",
           status: "failed",
         }),
       },
@@ -42,25 +41,25 @@ describe("NeedsAttentionSection", () => {
     expect(screen.getByText("1")).toBeInTheDocument();
   });
 
-  it("displays failed execution with task title and step name", () => {
+  it("displays failed run with task title and run id", () => {
     const items: AttentionItem[] = [
       {
-        kind: "failed_execution",
+        kind: "failed_run",
         task: createMockTask({ id: "t-1", title: "Deploy Service" }),
-        execution: createMockStepExecution({
-          id: "e-1",
+        taskRun: createMockTaskRun({
+          id: "run-12345678abcd",
           task_id: "t-1",
-          step_name: "deploy",
           status: "failed",
           started_at: "2025-01-01T12:00:00Z",
-          completed_at: "2025-01-01T12:01:30Z",
+          ended_at: "2025-01-01T12:01:30Z",
         }),
       },
     ];
     render(<NeedsAttentionSection items={items} />);
 
     expect(screen.getByText("Deploy Service")).toBeInTheDocument();
-    expect(screen.getByText("deploy")).toBeInTheDocument();
+    // First 8 chars of the run id are surfaced in the meta line.
+    expect(screen.getByText("run-1234")).toBeInTheDocument();
     expect(screen.getByText("View Logs")).toBeInTheDocument();
     expect(screen.getByText("Retry")).toBeInTheDocument();
   });
@@ -84,16 +83,15 @@ describe("NeedsAttentionSection", () => {
     expect(screen.getByText("Reject")).toBeInTheDocument();
   });
 
-  it("calls onViewLogs with execution ID when View Logs is clicked", () => {
+  it("calls onViewLogs with the failed TaskRun id when View Logs is clicked", () => {
     const onViewLogs = vi.fn();
     const items: AttentionItem[] = [
       {
-        kind: "failed_execution",
+        kind: "failed_run",
         task: createMockTask({ id: "t-1", title: "Task" }),
-        execution: createMockStepExecution({
-          id: "exec-42",
+        taskRun: createMockTaskRun({
+          id: "run-42",
           task_id: "t-1",
-          step_name: "test",
           status: "failed",
         }),
       },
@@ -101,19 +99,18 @@ describe("NeedsAttentionSection", () => {
     render(<NeedsAttentionSection items={items} onViewLogs={onViewLogs} />);
 
     fireEvent.click(screen.getByText("View Logs"));
-    expect(onViewLogs).toHaveBeenCalledWith("exec-42");
+    expect(onViewLogs).toHaveBeenCalledWith("run-42");
   });
 
-  it("calls onRetry with task ID and step name when Retry is clicked", () => {
+  it("calls onRetry with task ID when Retry is clicked", () => {
     const onRetry = vi.fn();
     const items: AttentionItem[] = [
       {
-        kind: "failed_execution",
+        kind: "failed_run",
         task: createMockTask({ id: "t-1", title: "Task" }),
-        execution: createMockStepExecution({
-          id: "exec-42",
+        taskRun: createMockTaskRun({
+          id: "run-42",
           task_id: "t-1",
-          step_name: "deploy",
           status: "failed",
         }),
       },
@@ -121,7 +118,7 @@ describe("NeedsAttentionSection", () => {
     render(<NeedsAttentionSection items={items} onRetry={onRetry} />);
 
     fireEvent.click(screen.getByText("Retry"));
-    expect(onRetry).toHaveBeenCalledWith("t-1", "deploy");
+    expect(onRetry).toHaveBeenCalledWith("t-1");
   });
 
   it("calls updateTask to clear needs_human_review when Approve is clicked", () => {
@@ -134,9 +131,12 @@ describe("NeedsAttentionSection", () => {
     render(<NeedsAttentionSection items={items} />);
 
     fireEvent.click(screen.getByText("Approve"));
-    expect(commands.updateTask).toHaveBeenCalledWith("t-3", expect.objectContaining({
-      needs_human_review: false,
-    }));
+    expect(commands.updateTask).toHaveBeenCalledWith(
+      "t-3",
+      expect.objectContaining({
+        needs_human_review: false,
+      })
+    );
   });
 
   it("calls updateTask with revision_feedback when Reject is clicked", () => {
@@ -149,20 +149,23 @@ describe("NeedsAttentionSection", () => {
     render(<NeedsAttentionSection items={items} />);
 
     fireEvent.click(screen.getByText("Reject"));
-    expect(commands.updateTask).toHaveBeenCalledWith("t-4", expect.objectContaining({
-      needs_human_review: false,
-      revision_feedback: "Rejected during review",
-    }));
+    expect(commands.updateTask).toHaveBeenCalledWith(
+      "t-4",
+      expect.objectContaining({
+        needs_human_review: false,
+        revision_feedback: "Rejected during review",
+      })
+    );
   });
 
   it("renders multiple items of mixed kinds", () => {
     const items: AttentionItem[] = [
       {
-        kind: "failed_execution",
+        kind: "failed_run",
         task: createMockTask({ id: "t-1", title: "Failed Build" }),
-        execution: createMockStepExecution({
-          id: "e-1",
-          step_name: "build",
+        taskRun: createMockTaskRun({
+          id: "run-build",
+          task_id: "t-1",
           status: "failed",
         }),
       },

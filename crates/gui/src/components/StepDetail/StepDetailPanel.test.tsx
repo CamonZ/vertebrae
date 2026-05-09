@@ -1020,147 +1020,160 @@ describe("StepDetailPanel", () => {
     });
   });
 
-  describe("execution state tracking", () => {
-    it("accepts taskExecutionStates prop without error", async () => {
+  describe("run state surfacing (run_controls source of truth)", () => {
+    function withActiveRun(
+      task: Task,
+      status: "queued" | "executing" | "waiting" | "stopping"
+    ): Task {
+      return {
+        ...task,
+        run_controls: {
+          runnable: false,
+          stoppable: status !== "stopping",
+          disabled_reason_code: null,
+          disabled_reason: null,
+          active_run: {
+            id: `run-${task.id}`,
+            task_id: task.id,
+            project_id: "project-1",
+            user_id: null,
+            status,
+            started_at: "2025-01-01T00:00:00Z",
+            ended_at: null,
+            stop_requested_at: null,
+            latest_step_execution_id: null,
+            outcome_kind: null,
+            outcome_context: null,
+            parent_task_run_id: null,
+            root_task_run_id: null,
+            triggered_by_step_execution_id: null,
+            inserted_at: "2025-01-01T00:00:00Z",
+            updated_at: "2025-01-01T00:00:00Z",
+          },
+        },
+      };
+    }
+
+    it("renders Running run chip in tree view when active_run is executing", async () => {
       const user = userEvent.setup();
       const tasks = [
-        createTask({ id: "task-1", title: "Running Task" }),
+        withActiveRun(createTask({ id: "task-1", title: "Running Task" }), "executing"),
       ];
-      const executionStates = new Map([
-        ["task-1", { status: "Running" as const, stepName: "build" }],
-      ]);
 
       render(
-        <StepDetailPanel
-          stepId="step-test"
-          allSteps={[]}
-          tasks={tasks}
-          taskExecutionStates={executionStates}
-        />
+        <StepDetailPanel stepId="step-test" allSteps={[]} tasks={tasks} />
       );
 
-      // Switch to Tasks tab
       await user.click(screen.getByText("Tasks"));
 
-      // Task should be visible
-      expect(screen.getByText("Running Task")).toBeInTheDocument();
+      const chip = screen.getByTestId("task-tree-node-run-chip");
+      expect(chip).toHaveAttribute("data-run-status", "executing");
+      expect(chip).toHaveAttribute("aria-label", "Run state: Running");
+      expect(screen.getByTestId("task-tree-node-run-chip-label")).toHaveTextContent(
+        "Running"
+      );
     });
 
-    it("renders execution indicator for running task in tree view", async () => {
+    it("renders Waiting run chip when active_run status is waiting", async () => {
       const user = userEvent.setup();
       const tasks = [
-        createTask({ id: "task-1", title: "Running Task" }),
+        withActiveRun(createTask({ id: "task-1", title: "Waiting Task" }), "waiting"),
       ];
-      const executionStates = new Map([
-        ["task-1", { status: "Running" as const, stepName: "build" }],
-      ]);
 
       render(
-        <StepDetailPanel
-          stepId="step-test"
-          allSteps={[]}
-          tasks={tasks}
-          taskExecutionStates={executionStates}
-        />
+        <StepDetailPanel stepId="step-test" allSteps={[]} tasks={tasks} />
       );
 
       await user.click(screen.getByText("Tasks"));
 
-      // Should show execution indicator
-      expect(screen.getByTitle("Execution: Running")).toBeInTheDocument();
+      expect(screen.getByTestId("task-tree-node-run-chip")).toHaveAttribute(
+        "data-run-status",
+        "waiting"
+      );
+      expect(screen.getByTestId("task-tree-node-run-chip-label")).toHaveTextContent(
+        "Waiting"
+      );
     });
 
-    it("renders execution indicator for completed task in tree view", async () => {
+    it("renders Stopping run chip when active_run status is stopping", async () => {
       const user = userEvent.setup();
       const tasks = [
-        createTask({ id: "task-1", title: "Done Task" }),
+        withActiveRun(createTask({ id: "task-1", title: "Stopping Task" }), "stopping"),
       ];
-      const executionStates = new Map([
-        ["task-1", { status: "Completed" as const, stepName: "build" }],
-      ]);
 
       render(
-        <StepDetailPanel
-          stepId="step-test"
-          allSteps={[]}
-          tasks={tasks}
-          taskExecutionStates={executionStates}
-        />
+        <StepDetailPanel stepId="step-test" allSteps={[]} tasks={tasks} />
       );
 
       await user.click(screen.getByText("Tasks"));
 
-      expect(screen.getByTitle("Execution: Completed")).toBeInTheDocument();
+      expect(screen.getByTestId("task-tree-node-run-chip-label")).toHaveTextContent(
+        "Stopping"
+      );
     });
 
-    it("renders execution indicator for failed task in tree view", async () => {
+    it("renders run chip in list view when an active run is present", async () => {
       const user = userEvent.setup();
       const tasks = [
-        createTask({ id: "task-1", title: "Failed Task" }),
+        withActiveRun(createTask({ id: "task-1", title: "Running Task" }), "executing"),
       ];
-      const executionStates = new Map([
-        ["task-1", { status: "Failed" as const, stepName: "build" }],
-      ]);
 
       render(
-        <StepDetailPanel
-          stepId="step-test"
-          allSteps={[]}
-          tasks={tasks}
-          taskExecutionStates={executionStates}
-        />
+        <StepDetailPanel stepId="step-test" allSteps={[]} tasks={tasks} />
       );
 
       await user.click(screen.getByText("Tasks"));
-
-      expect(screen.getByTitle("Execution: Failed")).toBeInTheDocument();
-    });
-
-    it("renders execution indicator in list view", async () => {
-      const user = userEvent.setup();
-      const tasks = [
-        createTask({ id: "task-1", title: "Running Task" }),
-      ];
-      const executionStates = new Map([
-        ["task-1", { status: "Running" as const, stepName: "build" }],
-      ]);
-
-      render(
-        <StepDetailPanel
-          stepId="step-test"
-          allSteps={[]}
-          tasks={tasks}
-          taskExecutionStates={executionStates}
-        />
-      );
-
-      await user.click(screen.getByText("Tasks"));
-      // Switch to list view
       await user.click(screen.getByLabelText("List view"));
 
-      expect(screen.getByTitle("Execution: Running")).toBeInTheDocument();
+      expect(screen.getByTestId("task-row-run-chip")).toHaveAttribute(
+        "data-run-status",
+        "executing"
+      );
     });
 
-    it("does not render execution indicator for tasks without execution state", async () => {
+    it("does not render a run chip for idle tasks (no run_controls)", async () => {
       const user = userEvent.setup();
-      const tasks = [
-        createTask({ id: "task-1", title: "Idle Task" }),
-      ];
-      // Empty execution states map
-      const executionStates = new Map<string, { status: "Running" | "Completed" | "Failed" | "Pending"; stepName: string }>();
+      const tasks = [createTask({ id: "task-1", title: "Idle Task" })];
 
       render(
-        <StepDetailPanel
-          stepId="step-test"
-          allSteps={[]}
-          tasks={tasks}
-          taskExecutionStates={executionStates}
-        />
+        <StepDetailPanel stepId="step-test" allSteps={[]} tasks={tasks} />
       );
 
       await user.click(screen.getByText("Tasks"));
 
-      expect(screen.queryByTitle(/^Execution:/)).not.toBeInTheDocument();
+      expect(screen.queryByTestId("task-tree-node-run-chip")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("task-tree-node-run-chip-label")).not.toBeInTheDocument();
+    });
+
+    it("does not render a run chip for terminal completed runs", async () => {
+      const user = userEvent.setup();
+      const completedRun = withActiveRun(
+        createTask({ id: "task-1", title: "Done Task" }),
+        "executing"
+      );
+      const tasks = [
+        {
+          ...completedRun,
+          run_controls: {
+            ...completedRun.run_controls!,
+            stoppable: false,
+            active_run: {
+              ...completedRun.run_controls!.active_run!,
+              status: "completed" as const,
+            },
+          },
+        },
+      ];
+
+      render(
+        <StepDetailPanel stepId="step-test" allSteps={[]} tasks={tasks} />
+      );
+
+      await user.click(screen.getByText("Tasks"));
+
+      expect(
+        screen.queryByTestId("task-tree-node-run-chip")
+      ).not.toBeInTheDocument();
     });
   });
 });

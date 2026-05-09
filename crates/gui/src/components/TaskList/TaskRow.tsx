@@ -1,5 +1,6 @@
-import type { Task, TaskLevel, TaskPriority, StepExecutionStatus } from '../../bindings';
+import type { Task, TaskLevel, TaskPriority } from '../../bindings';
 import { RelativeTime } from '../RelativeTime';
+import { deriveRunStateChip, getRunChipStyles } from '../../utils/runState';
 
 interface TaskRowProps {
   task: Task;
@@ -7,7 +8,6 @@ interface TaskRowProps {
   onClick?: (task: Task) => void;
   columnWidths?: Record<string, number>;
   hideStatus?: boolean;
-  executionStatus?: StepExecutionStatus | null;
 }
 
 /**
@@ -101,28 +101,6 @@ function getPriorityIndicator(priority: TaskPriority | null): { icon: string; co
   }
 }
 
-/**
- * Get execution status indicator styling
- */
-function getExecutionIndicator(status: StepExecutionStatus | null | undefined): { dot: string; label: string } | null {
-  if (!status) return null;
-  switch (status) {
-    case 'Running':
-      return { dot: 'bg-warning animate-pulse', label: 'Running' };
-    case 'Completed':
-      return { dot: 'bg-success', label: 'Completed' };
-    case 'Failed':
-      return { dot: 'bg-error', label: 'Failed' };
-    case 'Pending':
-      return { dot: 'bg-text-muted animate-pulse', label: 'Pending' };
-    default:
-      return null;
-  }
-}
-
-/**
- * Truncate task ID for display (show first 6 characters)
- */
 function truncateId(id: string): string {
   return id.slice(0, 6);
 }
@@ -131,7 +109,7 @@ function truncateId(id: string): string {
  * TaskRow component displays a single task in the task list.
  * Features neural-inspired styling with glowing active states and resizable columns.
  */
-export function TaskRow({ task, isSelected = false, onClick, columnWidths = {}, hideStatus = false, executionStatus }: TaskRowProps) {
+export function TaskRow({ task, isSelected = false, onClick, columnWidths = {}, hideStatus = false }: TaskRowProps) {
   const handleClick = () => {
     onClick?.(task);
   };
@@ -146,6 +124,8 @@ export function TaskRow({ task, isSelected = false, onClick, columnWidths = {}, 
   const stepStyles = getStepStyles(task.step_name);
   const levelStyles = getLevelStyles(task.level);
   const priorityIndicator = getPriorityIndicator(task.priority);
+  const runChip = deriveRunStateChip(task);
+  const runChipStyles = runChip ? getRunChipStyles(runChip) : null;
 
   return (
     <tr
@@ -184,19 +164,26 @@ export function TaskRow({ task, isSelected = false, onClick, columnWidths = {}, 
         className="px-4 py-3"
       >
         <div className="flex items-center gap-2 overflow-hidden">
-          {/* Execution status indicator */}
-          {executionStatus && (() => {
-            const indicator = getExecutionIndicator(executionStatus);
-            return indicator ? (
-              <span
-                className={`w-2 h-2 shrink-0 rounded-full ${indicator.dot}`}
-                title={`Execution: ${indicator.label}`}
-              />
-            ) : null;
-          })()}
+          {runChip && runChipStyles && (
+            <span
+              data-testid="task-row-run-chip"
+              data-run-status={runChip.status}
+              className={`w-2 h-2 shrink-0 rounded-full ${runChipStyles.dot} ${runChipStyles.pulse ? 'animate-pulse' : ''}`}
+              title={`Run: ${runChip.label}`}
+              aria-label={`Run state: ${runChip.label}`}
+            />
+          )}
           <span className={`break-words text-sm font-medium ${isSelected ? 'text-text-primary' : 'text-text-primary group-hover:text-text-primary'}`}>
             {task.title}
           </span>
+          {runChip && runChipStyles && (
+            <span
+              data-testid="task-row-run-chip-label"
+              className={`inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider ${runChipStyles.bg} ${runChipStyles.text}`}
+            >
+              {runChip.label}
+            </span>
+          )}
           {task.needs_human_review && (
             <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-warning/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-warning">
               <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">

@@ -7,6 +7,8 @@ import { buildTreeFromTasks } from "../utils/buildTreeFromTasks";
 import { useExpandedNodes } from "../hooks/useExpandedNodes";
 import { TaskList, TaskFilters, TaskTreeView, type ViewMode } from "../components/TaskList";
 import { TaskDetailPanel } from "../components/TaskDetail";
+import { isActiveRunStatus } from "../utils/runState";
+import { popOut, stashTask } from "../utils";
 
 /**
  * Initial filter state - shows all tasks including done when status is 'All'
@@ -86,12 +88,33 @@ export function TasksPage() {
     setSelectedTaskId(taskId);
   }, []);
 
+  const handleDetachPanel = useCallback(async () => {
+    if (!selectedTaskId) return;
+    const focal = tasks.find((t) => t.id === selectedTaskId);
+    if (focal) {
+      const related = tasks.filter(
+        (t) =>
+          t.id !== selectedTaskId &&
+          (t.parent_id === selectedTaskId ||
+            t.dependency_ids?.includes(selectedTaskId)),
+      );
+      stashTask(focal, related);
+    }
+    await popOut(`/task/${selectedTaskId}`, `task-${selectedTaskId}`, {
+      title: "Task Details",
+      width: 720,
+      height: 800,
+    });
+    setSelectedTaskId(null);
+  }, [selectedTaskId, tasks]);
+
   const handleViewModeChange = useCallback((mode: ViewMode) => {
     setViewMode(mode);
   }, []);
 
-  // Count active tasks - works for both list and tree views
-  const activeCount = tasks.filter((t) => t.step_name === "in_progress").length;
+  const activeCount = tasks.filter((t) =>
+    isActiveRunStatus(t.run_controls?.active_run?.status ?? null)
+  ).length;
 
   // Determine current loading/error state based on view mode
   const currentIsLoading = isLoading;
@@ -189,6 +212,7 @@ export function TasksPage() {
         taskId={selectedTaskId}
         onClose={handleClosePanel}
         onTaskSelect={handleRelatedTaskSelect}
+        onDetach={handleDetachPanel}
       />
     </div>
   );
