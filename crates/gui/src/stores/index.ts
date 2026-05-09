@@ -11,6 +11,9 @@ export type { StepStore } from "./stepStore";
 export { useExecutionStore } from "./executionStore";
 export type { ExecutionStore } from "./executionStore";
 
+export { useTaskRunStore } from "./taskRunStore";
+export type { TaskRunStore } from "./taskRunStore";
+
 export { useUIStore } from "./uiStore";
 export type { UIStore } from "./uiStore";
 
@@ -24,4 +27,9 @@ export { useSessionLogStore } from "./sessionLogStore";
 export type { SessionLogStore } from "./sessionLogStore";
 
 export { useChatStore, getParentScope } from "./chatStore";
-export type { ChatStore, ChatSession, ChatScope, ChatMessage } from "./chatStore";
+export type {
+  ChatStore,
+  ChatSession,
+  ChatScope,
+  ChatMessage,
+} from "./chatStore";

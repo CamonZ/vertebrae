@@ -28,8 +28,8 @@ use claude_session::{
 use commands::AppState;
 use events::{
     SectionChangedEvent, SessionLogCreatedEvent, StepChangedEvent, StepExecutionChangedEvent,
-    StepTransitionChangedEvent, TaskChangedEvent, TaskStepChangedEvent, WorkflowChangedEvent,
-    WorkflowTransitionChangedEvent,
+    StepTransitionChangedEvent, TaskChangedEvent, TaskRunChangedEvent, TaskStepChangedEvent,
+    WorkflowChangedEvent, WorkflowTransitionChangedEvent,
 };
 use project_config::ProjectConfig;
 
@@ -128,6 +128,7 @@ fn create_builder() -> Builder {
         ])
         .events(collect_events![
             TaskChangedEvent,
+            TaskRunChangedEvent,
             TaskStepChangedEvent,
             WorkflowChangedEvent,
             StepChangedEvent,
@@ -266,5 +267,10 @@ mod tests {
                 "generated bindings should include {command}"
             );
         }
+
+        assert!(
+            bindings.contains("taskRunChangedEvent: TaskRunChangedEvent"),
+            "generated bindings should include the TaskRun changed event"
+        );
     }
 }

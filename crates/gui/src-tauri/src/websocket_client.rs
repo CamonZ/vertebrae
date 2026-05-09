@@ -16,8 +16,8 @@ use crate::events::{
     SectionChangeType, SectionChangedEvent, SessionLogCreatedEvent, StepChangeType,
     StepChangedEvent, StepExecutionChangeType, StepExecutionChangedEvent, StepExecutionStatus,
     StepTransitionChangeType, StepTransitionChangedEvent, TaskChangeType, TaskChangedEvent,
-    WorkflowChangeType, WorkflowChangedEvent, WorkflowTransitionChangeType,
-    WorkflowTransitionChangedEvent,
+    TaskRunChangeType, TaskRunChangedEvent, WorkflowChangeType, WorkflowChangedEvent,
+    WorkflowTransitionChangeType, WorkflowTransitionChangedEvent,
 };
 use crate::types;
 
@@ -367,6 +367,9 @@ impl SacrumSocket {
                 }
                 "step_execution_created" | "step_execution_status_changed" => {
                     Self::handle_step_execution_event(event, payload, app_handle)?;
+                }
+                "task_run_created" | "task_run_updated" => {
+                    Self::handle_task_run_event(event, payload, app_handle)?;
                 }
                 "session_log_created" => {
                     Self::handle_session_log_event(payload, app_handle)?;
@@ -787,6 +790,77 @@ impl SacrumSocket {
         Ok(())
     }
 
+    fn task_run_changed_event_from_payload(
+        event: &str,
+        payload: &serde_json::Value,
+    ) -> Result<TaskRunChangedEvent, String> {
+        let task_run_id = payload
+            .get("id")
+            .and_then(|v| v.as_str())
+            .ok_or("Missing id in task run payload")?
+            .to_string();
+
+        let task_id = payload
+            .get("task_id")
+            .and_then(|v| v.as_str())
+            .ok_or("Missing task_id in task run payload")?
+            .to_string();
+
+        let status = payload
+            .get("status")
+            .cloned()
+            .ok_or_else(|| "Missing status in task run payload".to_string())
+            .and_then(|value| {
+                serde_json::from_value::<types::TaskRunStatus>(value)
+                    .map_err(|e| format!("Failed to parse task run status: {}", e))
+            })?;
+
+        let change_type = match event {
+            "task_run_created" => TaskRunChangeType::Created,
+            "task_run_updated" => TaskRunChangeType::Updated,
+            _ => TaskRunChangeType::Updated,
+        };
+
+        let task_run = try_deserialize::<types::TaskRun>(payload, "TaskRun");
+        let run_controls_value = payload
+            .get("run_controls")
+            .ok_or("Missing run_controls in task run payload")?;
+        let run_controls = if run_controls_value.is_null() {
+            None
+        } else {
+            try_deserialize::<types::TaskRunControls>(run_controls_value, "TaskRunControls")
+        };
+
+        Ok(TaskRunChangedEvent {
+            task_run_id,
+            task_id,
+            status,
+            change_type,
+            task_run,
+            run_controls,
+        })
+    }
+
+    /// Handle TaskRun events and emit to Tauri
+    fn handle_task_run_event<R: Runtime>(
+        event: &str,
+        payload: &serde_json::Value,
+        app_handle: &tauri::AppHandle<R>,
+    ) -> Result<(), String> {
+        let event_payload = Self::task_run_changed_event_from_payload(event, payload)?;
+
+        log::debug!(
+            "[WebSocket] Emitting TaskRunChangedEvent: {:?}",
+            event_payload
+        );
+
+        app_handle
+            .emit("task-run-changed-event", &event_payload)
+            .map_err(|e| format!("Failed to emit event: {}", e))?;
+
+        Ok(())
+    }
+
     /// Handle session log events and emit to Tauri
     fn handle_session_log_event<R: Runtime>(
         payload: &serde_json::Value,
@@ -877,6 +951,9 @@ impl SacrumSocket {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::mpsc;
+    use std::time::Duration as StdDuration;
+    use tauri::Listener;
 
     // ===== SacrumSocket Creation and Initialization Tests =====
 
@@ -1066,6 +1143,113 @@ mod tests {
         assert!(exec.prompt.is_none());
         assert!(exec.handoff.is_none());
         assert!(exec.session_id.is_none());
+    }
+
+    #[test]
+    fn task_run_ws_payload_preserves_run_controls() {
+        let payload = serde_json::json!({
+            "id": "run-ws-1",
+            "task_id": "task-1",
+            "project_id": "project-1",
+            "status": "executing",
+            "started_at": "2026-05-09T10:00:00Z",
+            "ended_at": null,
+            "stop_requested_at": null,
+            "latest_step_execution_id": "exec-1",
+            "outcome_kind": null,
+            "outcome_context": null,
+            "parent_task_run_id": null,
+            "root_task_run_id": null,
+            "triggered_by_step_execution_id": null,
+            "inserted_at": "2026-05-09T10:00:00Z",
+            "updated_at": "2026-05-09T10:01:00Z",
+            "run_controls": {
+                "runnable": false,
+                "stoppable": true,
+                "disabled_reason_code": "active_run",
+                "disabled_reason": "A TaskRun is already active",
+                "active_run": {
+                    "id": "run-ws-1",
+                    "task_id": "task-1",
+                    "project_id": "project-1",
+                    "status": "executing",
+                    "started_at": "2026-05-09T10:00:00Z",
+                    "ended_at": null,
+                    "stop_requested_at": null,
+                    "latest_step_execution_id": "exec-1",
+                    "outcome_kind": null,
+                    "outcome_context": null,
+                    "parent_task_run_id": null,
+                    "root_task_run_id": null,
+                    "triggered_by_step_execution_id": null,
+                    "inserted_at": "2026-05-09T10:00:00Z",
+                    "updated_at": "2026-05-09T10:01:00Z"
+                }
+            }
+        });
+
+        let event = SacrumSocket::task_run_changed_event_from_payload("task_run_updated", &payload)
+            .expect("task_run_updated payload should build a Tauri event");
+
+        assert_eq!(event.task_run_id, "run-ws-1");
+        assert_eq!(event.task_id, "task-1");
+        assert!(matches!(event.change_type, TaskRunChangeType::Updated));
+        assert_eq!(event.status, types::TaskRunStatus::Executing);
+
+        let task_run = event.task_run.expect("full TaskRun should hydrate");
+        assert_eq!(task_run.id, "run-ws-1");
+        assert_eq!(task_run.latest_step_execution_id.as_deref(), Some("exec-1"));
+        assert_eq!(task_run.status, types::TaskRunStatus::Executing);
+
+        let controls = event
+            .run_controls
+            .expect("run_controls should be copied from the channel payload");
+        assert!(!controls.runnable);
+        assert!(controls.stoppable);
+        assert_eq!(controls.disabled_reason_code.as_deref(), Some("active_run"));
+        assert_eq!(
+            controls.disabled_reason.as_deref(),
+            Some("A TaskRun is already active")
+        );
+        assert_eq!(
+            controls.active_run.as_ref().map(|run| run.id.as_str()),
+            Some("run-ws-1")
+        );
+    }
+
+    #[test]
+    fn task_run_ws_payload_allows_null_run_controls() {
+        let payload = serde_json::json!({
+            "id": "run-ws-null-controls",
+            "task_id": "task-1",
+            "project_id": "project-1",
+            "status": "completed",
+            "run_controls": null
+        });
+
+        let event = SacrumSocket::task_run_changed_event_from_payload("task_run_created", &payload)
+            .expect("task_run_created payload should build a Tauri event");
+
+        assert_eq!(event.task_run_id, "run-ws-null-controls");
+        assert_eq!(event.status, types::TaskRunStatus::Completed);
+        assert!(matches!(event.change_type, TaskRunChangeType::Created));
+        assert!(event.task_run.is_some());
+        assert!(event.run_controls.is_none());
+    }
+
+    #[test]
+    fn task_run_ws_payload_requires_run_controls_field() {
+        let payload = serde_json::json!({
+            "id": "run-ws-missing-controls",
+            "task_id": "task-1",
+            "project_id": "project-1",
+            "status": "executing"
+        });
+
+        let err = SacrumSocket::task_run_changed_event_from_payload("task_run_updated", &payload)
+            .expect_err("task_run_updated payload should include run_controls");
+
+        assert_eq!(err, "Missing run_controls in task run payload");
     }
 
     // ===== Disconnect Flag Tests =====
@@ -2002,6 +2186,78 @@ mod tests {
         let msg = r#"["ref1", "1", "project:test", "workflow_updated", {"id": "wf123"}]"#;
         let result = SacrumSocket::handle_phoenix_message(msg, handle, "test");
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_handle_phoenix_message_task_run_updated_emits_event() {
+        let app = build_test_app();
+        let handle = app.handle();
+        let (tx, rx) = mpsc::channel();
+        app.listen_any("task-run-changed-event", move |event| {
+            tx.send(event.payload().to_string()).unwrap();
+        });
+
+        let msg = r#"["ref1", "1", "project:test", "task_run_updated", {
+            "id": "run-ws-1",
+            "task_id": "task-1",
+            "project_id": "project-1",
+            "status": "executing",
+            "started_at": "2026-05-09T10:00:00Z",
+            "ended_at": null,
+            "stop_requested_at": null,
+            "latest_step_execution_id": "exec-1",
+            "outcome_kind": null,
+            "outcome_context": null,
+            "parent_task_run_id": null,
+            "root_task_run_id": null,
+            "triggered_by_step_execution_id": null,
+            "inserted_at": "2026-05-09T10:00:00Z",
+            "updated_at": "2026-05-09T10:01:00Z",
+            "run_controls": {
+                "runnable": false,
+                "stoppable": true,
+                "disabled_reason_code": "active_run",
+                "disabled_reason": "A TaskRun is already active",
+                "active_run": {
+                    "id": "run-ws-1",
+                    "task_id": "task-1",
+                    "project_id": "project-1",
+                    "status": "executing",
+                    "started_at": "2026-05-09T10:00:00Z",
+                    "ended_at": null,
+                    "stop_requested_at": null,
+                    "latest_step_execution_id": "exec-1",
+                    "outcome_kind": null,
+                    "outcome_context": null,
+                    "parent_task_run_id": null,
+                    "root_task_run_id": null,
+                    "triggered_by_step_execution_id": null,
+                    "inserted_at": "2026-05-09T10:00:00Z",
+                    "updated_at": "2026-05-09T10:01:00Z"
+                }
+            }
+        }]"#;
+
+        let result = SacrumSocket::handle_phoenix_message(msg, handle, "test");
+        assert!(result.is_ok());
+
+        let emitted = rx
+            .recv_timeout(StdDuration::from_secs(1))
+            .expect("task_run_updated should emit a Tauri event");
+        let event: TaskRunChangedEvent = serde_json::from_str(&emitted)
+            .expect("task-run-changed-event payload should deserialize");
+
+        assert_eq!(event.task_run_id, "run-ws-1");
+        assert_eq!(event.task_id, "task-1");
+        assert!(matches!(event.change_type, TaskRunChangeType::Updated));
+        assert_eq!(event.status, types::TaskRunStatus::Executing);
+        assert_eq!(
+            event
+                .run_controls
+                .and_then(|controls| controls.active_run)
+                .map(|run| run.id),
+            Some("run-ws-1".to_string())
+        );
     }
 
     #[test]

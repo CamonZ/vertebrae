@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { useTaskStore } from "./taskStore";
-import { createMockTask } from "../test/test-utils";
+import { createMockTask, createMockTaskRun } from "../test/test-utils";
 
 describe("taskStore", () => {
   beforeEach(() => {
@@ -138,11 +138,27 @@ describe("taskStore", () => {
     });
 
     it("preserves existing sections when WS payload has empty sections", () => {
-      const sections = [{ type: "checklist_item" as const, content: "Do thing", order: 1, done: false, done_at: null }];
-      const original = createMockTask({ id: "task-1", title: "Task", sections });
+      const sections = [
+        {
+          type: "checklist_item" as const,
+          content: "Do thing",
+          order: 1,
+          done: false,
+          done_at: null,
+        },
+      ];
+      const original = createMockTask({
+        id: "task-1",
+        title: "Task",
+        sections,
+      });
       useTaskStore.getState().setTasks([original]);
 
-      const wsPayload = createMockTask({ id: "task-1", title: "Task Updated", sections: [] });
+      const wsPayload = createMockTask({
+        id: "task-1",
+        title: "Task Updated",
+        sections: [],
+      });
       useTaskStore.getState().upsertTask(wsPayload);
 
       const state = useTaskStore.getState();
@@ -151,8 +167,24 @@ describe("taskStore", () => {
     });
 
     it("replaces sections when WS payload has non-empty sections", () => {
-      const oldSections = [{ type: "checklist_item" as const, content: "Old", order: 1, done: false, done_at: null }];
-      const newSections = [{ type: "constraint" as const, content: "New", order: 1, done: null, done_at: null }];
+      const oldSections = [
+        {
+          type: "checklist_item" as const,
+          content: "Old",
+          order: 1,
+          done: false,
+          done_at: null,
+        },
+      ];
+      const newSections = [
+        {
+          type: "constraint" as const,
+          content: "New",
+          order: 1,
+          done: null,
+          done_at: null,
+        },
+      ];
       const original = createMockTask({ id: "task-1", sections: oldSections });
       useTaskStore.getState().setTasks([original]);
 
@@ -163,11 +195,23 @@ describe("taskStore", () => {
     });
 
     it("preserves existing code_refs when WS payload has empty code_refs", () => {
-      const codeRefs = [{ path: "src/main.rs", line_start: 1, line_end: 10, name: null, description: null }];
+      const codeRefs = [
+        {
+          path: "src/main.rs",
+          line_start: 1,
+          line_end: 10,
+          name: null,
+          description: null,
+        },
+      ];
       const original = createMockTask({ id: "task-1", code_refs: codeRefs });
       useTaskStore.getState().setTasks([original]);
 
-      const wsPayload = createMockTask({ id: "task-1", title: "Updated", code_refs: [] });
+      const wsPayload = createMockTask({
+        id: "task-1",
+        title: "Updated",
+        code_refs: [],
+      });
       useTaskStore.getState().upsertTask(wsPayload);
 
       expect(useTaskStore.getState().tasks[0].code_refs).toEqual(codeRefs);
@@ -178,20 +222,33 @@ describe("taskStore", () => {
       const original = createMockTask({ id: "task-1", dependency_ids: depIds });
       useTaskStore.getState().setTasks([original]);
 
-      const wsPayload = createMockTask({ id: "task-1", title: "Updated", dependency_ids: [] });
+      const wsPayload = createMockTask({
+        id: "task-1",
+        title: "Updated",
+        dependency_ids: [],
+      });
       useTaskStore.getState().upsertTask(wsPayload);
 
       expect(useTaskStore.getState().tasks[0].dependency_ids).toEqual(depIds);
     });
 
     it("replaces dependency_ids when WS payload has non-empty dependency_ids", () => {
-      const original = createMockTask({ id: "task-1", dependency_ids: ["old-dep"] });
+      const original = createMockTask({
+        id: "task-1",
+        dependency_ids: ["old-dep"],
+      });
       useTaskStore.getState().setTasks([original]);
 
-      const wsPayload = createMockTask({ id: "task-1", dependency_ids: ["new-dep-1", "new-dep-2"] });
+      const wsPayload = createMockTask({
+        id: "task-1",
+        dependency_ids: ["new-dep-1", "new-dep-2"],
+      });
       useTaskStore.getState().upsertTask(wsPayload);
 
-      expect(useTaskStore.getState().tasks[0].dependency_ids).toEqual(["new-dep-1", "new-dep-2"]);
+      expect(useTaskStore.getState().tasks[0].dependency_ids).toEqual([
+        "new-dep-1",
+        "new-dep-2",
+      ]);
     });
 
     it("preserves existing tags when WS payload has empty tags", () => {
@@ -199,7 +256,11 @@ describe("taskStore", () => {
       const original = createMockTask({ id: "task-1", tags });
       useTaskStore.getState().setTasks([original]);
 
-      const wsPayload = createMockTask({ id: "task-1", title: "Updated", tags: [] });
+      const wsPayload = createMockTask({
+        id: "task-1",
+        title: "Updated",
+        tags: [],
+      });
       useTaskStore.getState().upsertTask(wsPayload);
 
       expect(useTaskStore.getState().tasks[0].tags).toEqual(tags);
@@ -209,10 +270,16 @@ describe("taskStore", () => {
       const original = createMockTask({ id: "task-1", tags: ["old-tag"] });
       useTaskStore.getState().setTasks([original]);
 
-      const wsPayload = createMockTask({ id: "task-1", tags: ["new-tag-1", "new-tag-2"] });
+      const wsPayload = createMockTask({
+        id: "task-1",
+        tags: ["new-tag-1", "new-tag-2"],
+      });
       useTaskStore.getState().upsertTask(wsPayload);
 
-      expect(useTaskStore.getState().tasks[0].tags).toEqual(["new-tag-1", "new-tag-2"]);
+      expect(useTaskStore.getState().tasks[0].tags).toEqual([
+        "new-tag-1",
+        "new-tag-2",
+      ]);
     });
 
     it("updates selectedTask when the upserted task matches selectedTaskId", () => {
@@ -241,10 +308,16 @@ describe("taskStore", () => {
     });
 
     it("does not update selectedTask when a new task is inserted not matching selectedTaskId", () => {
-      const existingSelected = createMockTask({ id: "task-selected", title: "Selected" });
+      const existingSelected = createMockTask({
+        id: "task-selected",
+        title: "Selected",
+      });
       useTaskStore.getState().selectTask("task-selected", existingSelected);
 
-      const task = createMockTask({ id: "task-other", title: "Other new task" });
+      const task = createMockTask({
+        id: "task-other",
+        title: "Other new task",
+      });
       useTaskStore.getState().upsertTask(task);
 
       const state = useTaskStore.getState();
@@ -258,7 +331,10 @@ describe("taskStore", () => {
       useTaskStore.getState().setTasks([task1, task2]);
       useTaskStore.getState().selectTask("task-1", task1);
 
-      const updatedTask2 = createMockTask({ id: "task-2", title: "Task 2 Updated" });
+      const updatedTask2 = createMockTask({
+        id: "task-2",
+        title: "Task 2 Updated",
+      });
       useTaskStore.getState().upsertTask(updatedTask2);
 
       const state = useTaskStore.getState();
@@ -274,7 +350,9 @@ describe("taskStore", () => {
       ];
       useTaskStore.getState().setTasks(tasks);
 
-      useTaskStore.getState().upsertTask(createMockTask({ id: "task-2", title: "Second Updated" }));
+      useTaskStore
+        .getState()
+        .upsertTask(createMockTask({ id: "task-2", title: "Second Updated" }));
 
       const state = useTaskStore.getState();
       expect(state.tasks[0].id).toBe("task-1");
@@ -334,5 +412,81 @@ describe("taskStore", () => {
 
       expect(useTaskStore.getState().tasks).toHaveLength(1);
     });
+  });
+
+  describe("replaceTaskRunControls", () => {
+    it("replaces run_controls on an existing task row", () => {
+      const task = createMockTask({ id: "task-1", run_controls: null });
+      const activeRun = createMockTaskRun({
+        id: "run-active",
+        task_id: "task-1",
+      });
+      const runControls = {
+        runnable: false,
+        stoppable: true,
+        disabled_reason_code: "active_run",
+        disabled_reason: "A TaskRun is already active",
+        active_run: activeRun,
+      };
+      useTaskStore.getState().setTasks([task]);
+
+      useTaskStore.getState().replaceTaskRunControls("task-1", runControls);
+
+      const stored = useTaskStore.getState().tasks[0];
+      expect(stored.run_controls).toEqual(runControls);
+      expect(stored.run_controls?.active_run?.id).toBe("run-active");
+      expect(stored.run_controls?.stoppable).toBe(true);
+    });
+
+    it("updates selectedTask when the selected task receives run controls", () => {
+      const selected = createMockTask({
+        id: "task-selected",
+        run_controls: null,
+      });
+      const activeRun = createMockTaskRun({
+        id: "run-selected",
+        task_id: "task-selected",
+      });
+      const runControls = {
+        runnable: false,
+        stoppable: true,
+        disabled_reason_code: "active_run",
+        disabled_reason: "A TaskRun is already active",
+        active_run: activeRun,
+      };
+      useTaskStore.getState().setTasks([selected]);
+      useTaskStore.getState().selectTask("task-selected", selected);
+
+      useTaskStore
+        .getState()
+        .replaceTaskRunControls("task-selected", runControls);
+
+      const state = useTaskStore.getState();
+      expect(state.selectedTask?.run_controls).toEqual(runControls);
+      expect(state.tasks[0].run_controls?.active_run?.id).toBe("run-selected");
+    });
+
+    it("can replace existing controls with null from a payload", () => {
+      const activeRun = createMockTaskRun({
+        id: "run-complete",
+        task_id: "task-1",
+      });
+      const task = createMockTask({
+        id: "task-1",
+        run_controls: {
+          runnable: false,
+          stoppable: true,
+          disabled_reason_code: "active_run",
+          disabled_reason: "A TaskRun is already active",
+          active_run: activeRun,
+        },
+      });
+      useTaskStore.getState().setTasks([task]);
+
+      useTaskStore.getState().replaceTaskRunControls("task-1", null);
+
+      expect(useTaskStore.getState().tasks[0].run_controls).toBeNull();
+    });
+
   });
 });

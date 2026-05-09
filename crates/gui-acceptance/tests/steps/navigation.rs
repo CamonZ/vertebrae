@@ -244,6 +244,57 @@ async fn gui_should_show_element_with_title_within(
         .await;
 }
 
+#[then(expr = "the GUI should show a disabled element with title {string} within {int} seconds")]
+async fn gui_should_show_disabled_element_with_title_within(
+    world: &mut GuiWorld,
+    title: String,
+    timeout: u64,
+) {
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+
+    world
+        .screenshot(&client, &format!("before-assert-disabled-title-{title}"))
+        .await;
+
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(timeout);
+    let poll_interval = std::time::Duration::from_millis(250);
+
+    loop {
+        if let Ok(element) = client
+            .find(Locator::XPath(&format!("//*[@title='{}']", title)))
+            .await
+        {
+            let disabled = element
+                .attr("disabled")
+                .await
+                .expect("failed to read disabled attribute");
+            if disabled.is_some() {
+                world
+                    .screenshot(&client, &format!("after-assert-disabled-title-{title}"))
+                    .await;
+                return;
+            }
+        }
+
+        if tokio::time::Instant::now() >= deadline {
+            world
+                .screenshot(&client, &format!("fail-disabled-title-{title}"))
+                .await;
+            panic!(
+                "expected the GUI to show a disabled element with title '{}' within {} seconds",
+                title, timeout
+            );
+        }
+
+        tokio::time::sleep(poll_interval).await;
+    }
+}
+
 #[then(expr = "the GUI should show an element with test id {string} within {int} seconds")]
 async fn gui_should_show_element_with_test_id_within(
     world: &mut GuiWorld,
