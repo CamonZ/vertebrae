@@ -500,7 +500,7 @@ export function TaskDetailPanel({
     setIsRunningWorkflow(true);
     setWorkflowError(null);
     try {
-      const result = await commands.orchestrateTask(taskData.id);
+      const result = await commands.runWorkflow(taskData.id);
       if (result.status === "error") {
         setWorkflowError(result.error.message);
       }
@@ -518,7 +518,11 @@ export function TaskDetailPanel({
     setIsStoppingWorkflow(true);
     setWorkflowError(null);
     try {
-      const result = await commands.stopOrchestrator(taskData.id);
+      const activeRunId = taskData.run_controls?.active_run?.id || null;
+      const result = await commands.stopRun({
+        task_run_id: activeRunId,
+        task_id: activeRunId ? null : taskData.id,
+      });
       if (result.status === "error") {
         setWorkflowError(result.error.message);
       }

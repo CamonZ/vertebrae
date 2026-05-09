@@ -1,7 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { render, createMockTask } from "../../test/test-utils";
+import {
+  render,
+  createMockTask,
+  createMockTaskRun,
+} from "../../test/test-utils";
 import { TaskDetailPanel } from "./TaskDetailPanel";
 import * as eventsModule from "../../bindings";
 import { useTaskStore } from "../../stores";
@@ -113,6 +117,8 @@ vi.mock("../../bindings", () => ({
       .mockResolvedValue({ status: "ok", data: null }),
     deleteTask: vi.fn().mockResolvedValue({ status: "ok", data: null }),
     runStep: vi.fn().mockResolvedValue({ status: "ok", data: null }),
+    runWorkflow: vi.fn(),
+    stopRun: vi.fn().mockResolvedValue({ status: "ok", data: null }),
     orchestrateTask: vi.fn().mockResolvedValue({ status: "ok", data: null }),
     stopOrchestrator: vi.fn().mockResolvedValue({ status: "ok", data: null }),
   },
@@ -129,6 +135,10 @@ describe("TaskDetailPanel - Inline Editing Integration", () => {
     vi.mocked(eventsModule.events.taskChangedEvent.listen).mockResolvedValue(
       () => {}
     );
+    vi.mocked(eventsModule.commands.runWorkflow).mockResolvedValue({
+      status: "ok",
+      data: createMockTaskRun(),
+    });
   });
 
   afterEach(() => {

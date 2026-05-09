@@ -104,6 +104,9 @@ fn create_builder() -> Builder {
             commands::get_task_executions,
             commands::get_execution,
             commands::get_execution_logs,
+            commands::get_active_run,
+            commands::get_task_runs,
+            commands::get_task_run_trace,
             // Step commands (first-class workflow steps)
             commands::list_steps_for_workflow,
             commands::get_step,
@@ -112,6 +115,8 @@ fn create_builder() -> Builder {
             commands::delete_step,
             // Workflow execution commands
             commands::run_step,
+            commands::run_workflow,
+            commands::stop_run,
             commands::orchestrate_task,
             commands::stop_orchestrator,
             // Claude session commands (JSONL streaming)
@@ -231,4 +236,35 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn builder_exports_task_run_command_bindings() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let output = dir.path().join("bindings.ts");
+
+        create_builder()
+            .export(Typescript::default(), &output)
+            .expect("export bindings");
+
+        let bindings = std::fs::read_to_string(output).expect("read generated bindings");
+        for command in [
+            "async getActiveRun(",
+            "async getTaskRuns(",
+            "async getTaskRunTrace(",
+            "async runWorkflow(",
+            "async stopRun(",
+            "async orchestrateTask(",
+            "async stopOrchestrator(",
+        ] {
+            assert!(
+                bindings.contains(command),
+                "generated bindings should include {command}"
+            );
+        }
+    }
 }

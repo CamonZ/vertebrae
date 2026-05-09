@@ -173,6 +173,9 @@ pub struct Task {
     pub workflow_name: Option<String>,
     /// Current step name (if task has a current step in workflow)
     pub step_name: Option<String>,
+    /// Server-derived TaskRun controls for Run/Stop surfaces
+    #[serde(default)]
+    pub run_controls: Option<TaskRunControls>,
     /// Whether this task needs human review
     pub needs_human_review: Option<bool>,
     /// Whether this task is archived
@@ -221,6 +224,7 @@ impl From<vertebrae_core::Task> for Task {
             current_step_id: task.current_step_id,
             workflow_name: task.workflow_name,
             step_name: task.step_name,
+            run_controls: task.run_controls.map(Into::into),
             needs_human_review: task.needs_human_review,
             archived: task.archived,
             worktree: task.worktree,
@@ -668,6 +672,147 @@ pub struct WorkflowTransition {
 // Execution Types
 // ============================================================================
 
+/// Durable lifecycle status for a task workflow run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskRunStatus {
+    Queued,
+    Executing,
+    Waiting,
+    Stopping,
+    Stopped,
+    Completed,
+    Failed,
+}
+
+impl From<vertebrae_core::TaskRunStatus> for TaskRunStatus {
+    fn from(status: vertebrae_core::TaskRunStatus) -> Self {
+        match status {
+            vertebrae_core::TaskRunStatus::Queued => TaskRunStatus::Queued,
+            vertebrae_core::TaskRunStatus::Executing => TaskRunStatus::Executing,
+            vertebrae_core::TaskRunStatus::Waiting => TaskRunStatus::Waiting,
+            vertebrae_core::TaskRunStatus::Stopping => TaskRunStatus::Stopping,
+            vertebrae_core::TaskRunStatus::Stopped => TaskRunStatus::Stopped,
+            vertebrae_core::TaskRunStatus::Completed => TaskRunStatus::Completed,
+            vertebrae_core::TaskRunStatus::Failed => TaskRunStatus::Failed,
+        }
+    }
+}
+
+/// Durable workflow run for a task.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct TaskRun {
+    /// TaskRun ID
+    pub id: String,
+    /// Task ID this run belongs to
+    pub task_id: String,
+    /// Project ID this run belongs to
+    pub project_id: String,
+    /// User ID, when returned by the backend
+    pub user_id: Option<String>,
+    /// Durable run lifecycle status
+    pub status: TaskRunStatus,
+    /// When this run started (ISO 8601 string)
+    pub started_at: Option<String>,
+    /// When this run ended (ISO 8601 string)
+    pub ended_at: Option<String>,
+    /// When stop was requested (ISO 8601 string)
+    pub stop_requested_at: Option<String>,
+    /// Latest step execution ID associated with this run
+    pub latest_step_execution_id: Option<String>,
+    /// Terminal outcome kind
+    pub outcome_kind: Option<String>,
+    /// Structured terminal outcome context
+    pub outcome_context: Option<serde_json::Value>,
+    /// Parent TaskRun ID for child workflow runs
+    pub parent_task_run_id: Option<String>,
+    /// Root TaskRun ID for recursive traces
+    pub root_task_run_id: Option<String>,
+    /// Step execution that triggered this child run
+    pub triggered_by_step_execution_id: Option<String>,
+    /// Creation timestamp from Sacrum (ISO 8601 string)
+    pub inserted_at: Option<String>,
+    /// Last update timestamp from Sacrum (ISO 8601 string)
+    pub updated_at: Option<String>,
+}
+
+impl From<vertebrae_core::TaskRun> for TaskRun {
+    fn from(run: vertebrae_core::TaskRun) -> Self {
+        TaskRun {
+            id: run.id,
+            task_id: run.task_id,
+            project_id: run.project_id,
+            user_id: run.user_id,
+            status: run.status.into(),
+            started_at: run.started_at.map(|dt| dt.to_rfc3339()),
+            ended_at: run.ended_at.map(|dt| dt.to_rfc3339()),
+            stop_requested_at: run.stop_requested_at.map(|dt| dt.to_rfc3339()),
+            latest_step_execution_id: run.latest_step_execution_id,
+            outcome_kind: run.outcome_kind,
+            outcome_context: run.outcome_context,
+            parent_task_run_id: run.parent_task_run_id,
+            root_task_run_id: run.root_task_run_id,
+            triggered_by_step_execution_id: run.triggered_by_step_execution_id,
+            inserted_at: run.inserted_at.map(|dt| dt.to_rfc3339()),
+            updated_at: run.updated_at.map(|dt| dt.to_rfc3339()),
+        }
+    }
+}
+
+/// Server-derived controls for Run/Stop task actions.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct TaskRunControls {
+    #[serde(default)]
+    pub runnable: bool,
+    #[serde(default)]
+    pub stoppable: bool,
+    pub disabled_reason_code: Option<String>,
+    pub disabled_reason: Option<String>,
+    pub active_run: Option<TaskRun>,
+}
+
+impl From<vertebrae_core::TaskRunControls> for TaskRunControls {
+    fn from(controls: vertebrae_core::TaskRunControls) -> Self {
+        TaskRunControls {
+            runnable: controls.runnable,
+            stoppable: controls.stoppable,
+            disabled_reason_code: controls.disabled_reason_code,
+            disabled_reason: controls.disabled_reason,
+            active_run: controls.active_run.map(Into::into),
+        }
+    }
+}
+
+/// Trace tree rooted at a TaskRun.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct TaskRunTrace {
+    pub root_task_run_id: String,
+    #[serde(default)]
+    pub task_runs: Vec<TaskRun>,
+    #[serde(default)]
+    pub step_executions: Vec<StepExecution>,
+    #[serde(default)]
+    pub session_logs: Vec<SessionLog>,
+}
+
+impl From<vertebrae_core::TaskRunTrace> for TaskRunTrace {
+    fn from(trace: vertebrae_core::TaskRunTrace) -> Self {
+        TaskRunTrace {
+            root_task_run_id: trace.root_task_run_id,
+            task_runs: trace.task_runs.into_iter().map(Into::into).collect(),
+            step_executions: trace.step_executions.into_iter().map(Into::into).collect(),
+            session_logs: trace.session_logs.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+/// StopRun command input. Provide either `task_run_id` or `task_id`.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct StopRunRequest {
+    pub task_run_id: Option<String>,
+    pub task_id: Option<String>,
+}
+
 /// Execution status - mirrors db::ExecutionStatus
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
@@ -700,6 +845,9 @@ pub struct StepExecution {
     /// Task ID this execution belongs to
     #[serde(default)]
     pub task_id: String,
+    /// TaskRun ID this execution belongs to, when present
+    #[serde(default)]
+    pub task_run_id: Option<String>,
     /// Workflow ID being executed
     #[serde(default)]
     pub workflow_id: String,
@@ -775,6 +923,7 @@ impl From<vertebrae_core::StepExecution> for StepExecution {
         StepExecution {
             id: exec.id,
             task_id: exec.task_id,
+            task_run_id: exec.task_run_id,
             workflow_id: exec.workflow_id,
             step_name: exec.step_name,
             started_at: exec.started_at.to_rfc3339(),
