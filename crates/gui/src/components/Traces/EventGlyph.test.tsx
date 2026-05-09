@@ -62,6 +62,8 @@ const DELEGATION: DelegationEdge = {
   timestampMs: 0,
   parentTaskId: "p",
   childTaskId: "c",
+  parentTaskRunId: null,
+  childTaskRunId: null,
   parentRowIndex: 0,
   childRowIndex: 1,
   childLevel: "ticket",

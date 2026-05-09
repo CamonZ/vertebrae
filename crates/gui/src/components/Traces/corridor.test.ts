@@ -1,6 +1,38 @@
 import { describe, it, expect } from "vitest";
-import { computeCorridorLayout, DEFAULT_CORRIDOR_LAYOUT } from "./corridor";
-import type { StepExecution, Task } from "../../bindings";
+import {
+  computeCorridorLayout,
+  computeCorridorLayoutFromProjection,
+  DEFAULT_CORRIDOR_LAYOUT,
+} from "./corridor";
+import { projectTaskRunTrace } from "./taskRunTrace";
+import type {
+  StepExecution,
+  Task,
+  TaskRun,
+  TaskRunStatus,
+} from "../../bindings";
+
+const makeRun = (
+  overrides: Partial<TaskRun> & { id: string; task_id: string }
+): TaskRun => ({
+  id: overrides.id,
+  task_id: overrides.task_id,
+  project_id: "p-1",
+  user_id: null,
+  status: (overrides.status ?? "completed") as TaskRunStatus,
+  started_at: overrides.started_at ?? "2024-01-01T00:00:00.000Z",
+  ended_at: overrides.ended_at ?? null,
+  stop_requested_at: null,
+  latest_step_execution_id: null,
+  outcome_kind: null,
+  outcome_context: null,
+  parent_task_run_id: overrides.parent_task_run_id ?? null,
+  root_task_run_id: overrides.root_task_run_id ?? null,
+  triggered_by_step_execution_id:
+    overrides.triggered_by_step_execution_id ?? null,
+  inserted_at: "2024-01-01T00:00:00.000Z",
+  updated_at: "2024-01-01T00:00:00.000Z",
+});
 
 const makeTask = (overrides: Partial<Task> & { id: string }): Task => ({
   id: overrides.id,
@@ -32,6 +64,7 @@ const makeExec = (
 ): StepExecution => ({
   id: overrides.id,
   task_id: overrides.task_id,
+  task_run_id: overrides.task_run_id ?? null,
   workflow_id: "wf-1",
   step_name: overrides.step_name ?? "implement",
   started_at: overrides.started_at,
@@ -219,5 +252,309 @@ describe("computeCorridorLayout", () => {
     expect(layout.nodes).toEqual([]);
     expect(layout.edges).toEqual([]);
     expect(layout.lanes).toEqual([]);
+  });
+});
+
+describe("computeCorridorLayoutFromProjection", () => {
+  it("orders lanes by TaskRun lineage and groups executions under their owning run", () => {
+    const tasks = [
+      makeTask({ id: "t-root" }),
+      makeTask({ id: "t-child" }),
+    ];
+    const runs = [
+      makeRun({
+        id: "r-root",
+        task_id: "t-root",
+        started_at: "2024-01-01T00:00:00Z",
+      }),
+      makeRun({
+        id: "r-child",
+        task_id: "t-child",
+        parent_task_run_id: "r-root",
+        triggered_by_step_execution_id: "p2",
+        started_at: "2024-01-01T00:00:25Z",
+      }),
+    ];
+    const executions = [
+      makeExec({
+        id: "p1",
+        task_id: "t-root",
+        task_run_id: "r-root",
+        started_at: "2024-01-01T00:00:00Z",
+      }),
+      makeExec({
+        id: "p2",
+        task_id: "t-root",
+        task_run_id: "r-root",
+        started_at: "2024-01-01T00:00:20Z",
+      }),
+      makeExec({
+        id: "c1",
+        task_id: "t-child",
+        task_run_id: "r-child",
+        started_at: "2024-01-01T00:00:30Z",
+      }),
+    ];
+
+    const layout = computeCorridorLayoutFromProjection(
+      projectTaskRunTrace(runs, executions, tasks)
+    );
+
+    expect(layout.lanes.map((l) => l.laneId)).toEqual(["r-root", "r-child"]);
+    expect(layout.lanes.map((l) => l.taskRunId)).toEqual([
+      "r-root",
+      "r-child",
+    ]);
+
+    const p1 = layout.nodes.find((n) => n.executionId === "p1");
+    const p2 = layout.nodes.find((n) => n.executionId === "p2");
+    const c1 = layout.nodes.find((n) => n.executionId === "c1");
+    expect(p1?.column).toBe(0);
+    expect(p2?.column).toBe(0);
+    expect(c1?.column).toBe(1);
+    expect(p1?.taskRunId).toBe("r-root");
+    expect(c1?.taskRunId).toBe("r-child");
+
+    const delegations = layout.edges.filter((e) => e.kind === "delegation");
+    expect(delegations).toHaveLength(1);
+    expect(delegations[0]).toMatchObject({
+      kind: "delegation",
+      fromNodeId: "n-p2",
+      toNodeId: "n-c1",
+    });
+  });
+
+  it("draws the delegation edge from the explicit triggering execution even when it is not the most recent", () => {
+    const tasks = [
+      makeTask({ id: "t-root" }),
+      makeTask({ id: "t-child" }),
+    ];
+    const runs = [
+      makeRun({
+        id: "r-root",
+        task_id: "t-root",
+        started_at: "2024-01-01T00:00:00Z",
+      }),
+      makeRun({
+        id: "r-child",
+        task_id: "t-child",
+        parent_task_run_id: "r-root",
+        triggered_by_step_execution_id: "p1",
+        started_at: "2024-01-01T00:00:25Z",
+      }),
+    ];
+    const executions = [
+      makeExec({
+        id: "p1",
+        task_id: "t-root",
+        task_run_id: "r-root",
+        started_at: "2024-01-01T00:00:00Z",
+      }),
+      makeExec({
+        id: "p2",
+        task_id: "t-root",
+        task_run_id: "r-root",
+        started_at: "2024-01-01T00:00:20Z",
+      }),
+      makeExec({
+        id: "c1",
+        task_id: "t-child",
+        task_run_id: "r-child",
+        started_at: "2024-01-01T00:00:30Z",
+      }),
+    ];
+
+    const layout = computeCorridorLayoutFromProjection(
+      projectTaskRunTrace(runs, executions, tasks)
+    );
+    const delegations = layout.edges.filter((e) => e.kind === "delegation");
+    // p1 is the explicit trigger even though p2 is more recent — explicit
+    // lineage wins over chronological inference.
+    expect(delegations[0]).toMatchObject({ fromNodeId: "n-p1", toNodeId: "n-c1" });
+  });
+
+  it("places run-aware lanes/nodes at exact pixel positions and computes width/height", () => {
+    const tasks = [
+      makeTask({ id: "t-root" }),
+      makeTask({ id: "t-child" }),
+    ];
+    const runs = [
+      makeRun({
+        id: "r-root",
+        task_id: "t-root",
+        started_at: "2024-01-01T00:00:00Z",
+      }),
+      makeRun({
+        id: "r-child",
+        task_id: "t-child",
+        parent_task_run_id: "r-root",
+        started_at: "2024-01-01T00:00:25Z",
+      }),
+    ];
+    const executions = [
+      makeExec({
+        id: "p1",
+        task_id: "t-root",
+        task_run_id: "r-root",
+        started_at: "2024-01-01T00:00:00Z",
+      }),
+      makeExec({
+        id: "p2",
+        task_id: "t-root",
+        task_run_id: "r-root",
+        started_at: "2024-01-01T00:00:10Z",
+      }),
+      makeExec({
+        id: "p3",
+        task_id: "t-root",
+        task_run_id: "r-root",
+        started_at: "2024-01-01T00:00:20Z",
+      }),
+      makeExec({
+        id: "c1",
+        task_id: "t-child",
+        task_run_id: "r-child",
+        started_at: "2024-01-01T00:00:30Z",
+      }),
+    ];
+    const layout = computeCorridorLayoutFromProjection(
+      projectTaskRunTrace(runs, executions, tasks)
+    );
+    const { columnSpacing, rowSpacing, padding } = DEFAULT_CORRIDOR_LAYOUT;
+
+    // Lane x = padding + column * columnSpacing; per-lane node count tracked.
+    expect(layout.lanes[0]).toMatchObject({
+      column: 0,
+      x: padding,
+      nodeCount: 3,
+    });
+    expect(layout.lanes[1]).toMatchObject({
+      column: 1,
+      x: padding + columnSpacing,
+      nodeCount: 1,
+    });
+
+    const byId = new Map(layout.nodes.map((n) => [n.executionId, n]));
+    // Within r-root, rows are 0..2 with y stepping by rowSpacing.
+    expect(byId.get("p1")).toMatchObject({
+      column: 0,
+      row: 0,
+      x: padding,
+      y: padding,
+    });
+    expect(byId.get("p2")).toMatchObject({
+      column: 0,
+      row: 1,
+      x: padding,
+      y: padding + rowSpacing,
+    });
+    expect(byId.get("p3")).toMatchObject({
+      column: 0,
+      row: 2,
+      x: padding,
+      y: padding + 2 * rowSpacing,
+    });
+    // r-child first row resets to row 0 in a new column.
+    expect(byId.get("c1")).toMatchObject({
+      column: 1,
+      row: 0,
+      x: padding + columnSpacing,
+      y: padding,
+    });
+
+    // width spans (lanes-1) gaps + 2*padding; height accommodates max row.
+    expect(layout.width).toBe(padding * 2 + columnSpacing);
+    expect(layout.height).toBe(padding * 2 + 2 * rowSpacing);
+  });
+
+  it("returns empty lanes/nodes/edges and minimal canvas when the projection has no runs", () => {
+    const layout = computeCorridorLayoutFromProjection(
+      projectTaskRunTrace([], [], [])
+    );
+    expect(layout.lanes).toEqual([]);
+    expect(layout.nodes).toEqual([]);
+    expect(layout.edges).toEqual([]);
+    expect(layout.width).toBe(DEFAULT_CORRIDOR_LAYOUT.padding * 2);
+    expect(layout.height).toBe(DEFAULT_CORRIDOR_LAYOUT.padding * 2);
+  });
+
+  it("emits transition edges between consecutive executions within the same run lane", () => {
+    const tasks = [makeTask({ id: "t-root" })];
+    const runs = [
+      makeRun({
+        id: "r-root",
+        task_id: "t-root",
+        started_at: "2024-01-01T00:00:00Z",
+      }),
+    ];
+    const executions = [
+      makeExec({
+        id: "a",
+        task_id: "t-root",
+        task_run_id: "r-root",
+        started_at: "2024-01-01T00:00:00Z",
+      }),
+      makeExec({
+        id: "b",
+        task_id: "t-root",
+        task_run_id: "r-root",
+        started_at: "2024-01-01T00:00:10Z",
+      }),
+      makeExec({
+        id: "c",
+        task_id: "t-root",
+        task_run_id: "r-root",
+        started_at: "2024-01-01T00:00:20Z",
+      }),
+    ];
+    const layout = computeCorridorLayoutFromProjection(
+      projectTaskRunTrace(runs, executions, tasks)
+    );
+    const transitions = layout.edges.filter((e) => e.kind === "transition");
+    expect(transitions).toEqual([
+      { id: "e-tr-a-b", kind: "transition", fromNodeId: "n-a", toNodeId: "n-b" },
+      { id: "e-tr-b-c", kind: "transition", fromNodeId: "n-b", toNodeId: "n-c" },
+    ]);
+  });
+
+  it("a failed StepExecution does not change the owning TaskRun lane: per-node failed status is independent of the run", () => {
+    const tasks = [makeTask({ id: "t-root" })];
+    const runs = [
+      makeRun({
+        id: "r-root",
+        task_id: "t-root",
+        status: "executing",
+        started_at: "2024-01-01T00:00:00Z",
+      }),
+    ];
+    const executions = [
+      makeExec({
+        id: "e-fail",
+        task_id: "t-root",
+        task_run_id: "r-root",
+        status: "failed",
+        started_at: "2024-01-01T00:00:00Z",
+      }),
+      makeExec({
+        id: "e-retry",
+        task_id: "t-root",
+        task_run_id: "r-root",
+        status: "in_progress",
+        started_at: "2024-01-01T00:00:10Z",
+      }),
+    ];
+    const layout = computeCorridorLayoutFromProjection(
+      projectTaskRunTrace(runs, executions, tasks)
+    );
+    // Both nodes belong to the same lane (one run); their per-node statuses
+    // remain independent — a failed step alongside an active retry must not
+    // collapse the trace into a single failed lane.
+    expect(layout.lanes).toHaveLength(1);
+    const fail = layout.nodes.find((n) => n.executionId === "e-fail");
+    const retry = layout.nodes.find((n) => n.executionId === "e-retry");
+    expect(fail?.status).toBe("failed");
+    expect(retry?.status).toBe("active");
+    expect(fail?.taskRunId).toBe("r-root");
+    expect(retry?.taskRunId).toBe("r-root");
   });
 });

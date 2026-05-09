@@ -24,7 +24,12 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import type { SessionLog, StepExecution, Task, Workflow } from "../../bindings";
+import type {
+  SessionLog,
+  StepExecution,
+  Task,
+  Workflow,
+} from "../../bindings";
 import {
   mergeExecutionEvents,
   type TaggedConversationEvent,
@@ -39,11 +44,13 @@ import {
 import { StepBoundary } from "./conversation/StepBoundary";
 import { TransitionMarker } from "./conversation/TransitionMarker";
 import { DelegationBlock } from "./conversation/DelegationBlock";
+import type { TaskRunTraceProjection } from "./taskRunTrace";
 
 interface UnifiedChatViewProps {
   rootTaskId: string;
   executions: readonly StepExecution[];
   tasks: readonly Task[];
+  runProjection?: TaskRunTraceProjection | null;
   /**
    * Optional list of workflows used to resolve the workflow tag shown on each
    * execution row's StepBoundary header. The tag must reflect the workflow the
@@ -119,6 +126,8 @@ interface SessionFacts {
 interface Segment {
   executionId: string;
   taskId: string;
+  /** TaskRun id this segment belongs to, when known. */
+  taskRunId: string | null;
   workflowId: string | null;
   stepName: string | null;
   startedAt: string | null;
@@ -132,7 +141,10 @@ interface Segment {
 }
 
 /** Group consecutive tagged events by executionId, preserving order. */
-function groupByExecution(events: TaggedConversationEvent[]): Segment[] {
+function groupByExecution(
+  events: TaggedConversationEvent[],
+  taskRunIdByExecutionId: Map<string, string>
+): Segment[] {
   const segments: Segment[] = [];
   for (const tagged of events) {
     const last = segments[segments.length - 1];
@@ -143,6 +155,7 @@ function groupByExecution(events: TaggedConversationEvent[]): Segment[] {
     const seg: Segment = {
       executionId: tagged.executionId,
       taskId: tagged.taskId,
+      taskRunId: taskRunIdByExecutionId.get(tagged.executionId) ?? null,
       workflowId: tagged.workflowId,
       stepName: tagged.stepName,
       startedAt: tagged.executionStartedAt,
@@ -183,6 +196,7 @@ export function UnifiedChatView({
   rootTaskId,
   executions,
   tasks,
+  runProjection,
   workflows,
   logsByExecutionId: providedLogs,
   isLoading: externalLoading,
@@ -227,6 +241,24 @@ export function UnifiedChatView({
     [rootTaskId, tasksById]
   );
 
+  const taskRunIdByExecutionId = useMemo(() => {
+    if (runProjection) return runProjection.runIdByExecutionId;
+    const m = new Map<string, string>();
+    for (const e of executions) {
+      if (e.id && e.task_run_id) m.set(e.id, e.task_run_id);
+    }
+    return m;
+  }, [runProjection, executions]);
+
+  const depthByTaskRunId = useMemo(() => {
+    const m = new Map<string, number>();
+    if (!runProjection) return m;
+    for (const node of runProjection.orderedRuns) {
+      m.set(node.run.id, node.depth);
+    }
+    return m;
+  }, [runProjection]);
+
   const merged = useMemo(
     () => mergeExecutionEvents(executions, logsByExecutionId),
     [executions, logsByExecutionId]
@@ -242,8 +274,8 @@ export function UnifiedChatView({
   }, [merged, eventFilter, executionFilter]);
 
   const segments = useMemo(
-    () => groupByExecution(filteredMerged),
-    [filteredMerged]
+    () => groupByExecution(filteredMerged, taskRunIdByExecutionId),
+    [filteredMerged, taskRunIdByExecutionId]
   );
 
   // Local fallback ref so live-tail effects work even when no scrollRef is
@@ -350,17 +382,35 @@ export function UnifiedChatView({
             const previousSegment = idx > 0 ? segments[idx - 1] : null;
             const exec = executionsById.get(segment.executionId);
             const task = tasksById.get(segment.taskId);
-            const depth = depthByTaskId.get(segment.taskId) ?? 0;
+
+            // Prefer TaskRun-derived depth/grouping; fall back to task-id for
+            // segments without a TaskRun (legacy / orphan executions).
+            const depthOf = (seg: Segment | null): number => {
+              if (seg === null) return 0;
+              const runDepth =
+                seg.taskRunId !== null
+                  ? depthByTaskRunId.get(seg.taskRunId)
+                  : undefined;
+              return runDepth ?? depthByTaskId.get(seg.taskId) ?? 0;
+            };
+            const depth = depthOf(segment);
+
+            const sameGroupAsPrev =
+              previousSegment !== null &&
+              ((segment.taskRunId !== null &&
+                previousSegment.taskRunId === segment.taskRunId) ||
+                (segment.taskRunId === null &&
+                  previousSegment.taskRunId === null &&
+                  previousSegment.taskId === segment.taskId));
 
             const showTransition =
-              previousSegment !== null &&
-              previousSegment.taskId === segment.taskId &&
-              previousSegment.executionId !== segment.executionId;
+              sameGroupAsPrev &&
+              previousSegment!.executionId !== segment.executionId;
+
+            const previousDepth = depthOf(previousSegment);
 
             const isDelegation =
-              previousSegment !== null &&
-              previousSegment.taskId !== segment.taskId &&
-              depth > (depthByTaskId.get(previousSegment.taskId) ?? 0);
+              previousSegment !== null && !sameGroupAsPrev && depth > previousDepth;
 
             // Hide the title on root-task segments (page header already shows
             // it); descendants render it as a subtitle so delegations read as
@@ -434,6 +484,8 @@ export function UnifiedChatView({
               <div
                 key={segment.executionId}
                 data-segment-execution-id={segment.executionId}
+                data-segment-task-id={segment.taskId}
+                data-segment-task-run-id={segment.taskRunId ?? undefined}
                 data-active={isActive ? "1" : "0"}
                 className={
                   isActive

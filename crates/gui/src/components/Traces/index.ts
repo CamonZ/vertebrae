@@ -15,7 +15,11 @@ export type { TraceMode } from "./ModeToggle";
 export { UnifiedChatView } from "./UnifiedChatView";
 export { FlightStrip } from "./FlightStrip";
 export { CorridorView } from "./CorridorView";
-export { computeCorridorLayout, DEFAULT_CORRIDOR_LAYOUT } from "./corridor";
+export {
+  computeCorridorLayout,
+  computeCorridorLayoutFromProjection,
+  DEFAULT_CORRIDOR_LAYOUT,
+} from "./corridor";
 export type {
   CorridorLayout,
   CorridorLayoutOptions,
@@ -24,7 +28,10 @@ export type {
   CorridorEdge,
   CorridorLane,
 } from "./corridor";
-export { buildTimelineProjection } from "./timeline";
+export {
+  buildTimelineProjection,
+  buildTimelineProjectionFromProjection,
+} from "./timeline";
 export type {
   TimelineProjection,
   TimelineMarker,
@@ -36,3 +43,12 @@ export type {
   LaneKind,
   ThresholdMarkerKind,
 } from "./timeline";
+export {
+  projectTaskRunTrace,
+  resolveParentExecution,
+} from "./taskRunTrace";
+export type {
+  TaskRunTraceProjection,
+  TaskRunNode,
+  RunDelegationEdge,
+} from "./taskRunTrace";
