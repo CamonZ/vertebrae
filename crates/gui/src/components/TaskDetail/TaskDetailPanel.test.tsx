@@ -7,7 +7,12 @@ import {
 } from "../../test/test-utils";
 import { TaskDetailPanel } from "./TaskDetailPanel";
 import * as eventsModule from "../../bindings";
+import type { Task, TaskRunControls } from "../../bindings";
 import { useTaskStore } from "../../stores";
+
+const mockTaskOverrides = vi.hoisted(() => ({
+  current: {} as Partial<Task>,
+}));
 
 // Mock the useTask hook to return task data directly
 vi.mock("../../hooks/useTask", () => ({
@@ -80,13 +85,8 @@ vi.mock("../../hooks/useTask", () => ({
         step_name: "in_progress",
         workflow_id: "wf-1",
         current_step_id: "step-1",
-        run_controls: {
-          runnable: false,
-          stoppable: true,
-          disabled_reason_code: "active_run",
-          disabled_reason: "A TaskRun is already active",
-          active_run: createMockTaskRun({ id: "run-123", task_id: id }),
-        },
+        run_controls: null,
+        ...mockTaskOverrides.current,
       }),
       isLoading: false,
       error: null,
@@ -135,9 +135,25 @@ const mockTaskData = createMockTask({
   code_refs: [],
 });
 
+function activeRunControls(taskId = mockTaskData.id): TaskRunControls {
+  return {
+    runnable: false,
+    stoppable: true,
+    disabled_reason_code: "active_run",
+    disabled_reason: "A TaskRun is already active",
+    active_run: createMockTaskRun({ id: "run-123", task_id: taskId }),
+  };
+}
+
+function renderWithTaskOverrides(overrides: Partial<Task>) {
+  mockTaskOverrides.current = overrides;
+  return render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
+}
+
 describe("TaskDetailPanel - Restructured Layout", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockTaskOverrides.current = {};
     vi.mocked(eventsModule.events.taskChangedEvent.listen).mockResolvedValue(
       () => {}
     );
@@ -149,9 +165,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
 
   describe("Header", () => {
     it("displays workflow -> step breadcrumb when task has workflow", () => {
-      render(
-        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
-      );
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
       // "Implementation" + "in progress" appear both in the header breadcrumb
       // and inside TraceMiniView — assert presence rather than uniqueness.
@@ -160,9 +174,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     });
 
     it("displays status badge with glow animation for in_progress", () => {
-      render(
-        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
-      );
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
       const statusBadge = screen.getByTestId("status-badge");
       expect(statusBadge).toBeInTheDocument();
@@ -201,9 +213,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     });
 
     it("does not render back button when onBack is not provided", () => {
-      render(
-        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
-      );
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
       expect(
         screen.queryByRole("button", { name: /go back/i })
@@ -213,9 +223,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
 
   describe("Close button", () => {
     it("renders Close button", () => {
-      render(
-        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
-      );
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
       const closeButton = screen.getByRole("button", {
         name: /close panel/i,
@@ -239,12 +247,10 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     });
 
     it("hides the Detach button when no onDetach handler is provided", () => {
-      render(
-        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />,
-      );
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
       expect(
-        screen.queryByRole("button", { name: /detach into pop-out window/i }),
+        screen.queryByRole("button", { name: /detach into pop-out window/i })
       ).not.toBeInTheDocument();
     });
 
@@ -255,7 +261,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
           taskId={mockTaskData.id}
           onClose={vi.fn()}
           onDetach={mockOnDetach}
-        />,
+        />
       );
 
       const detachButton = screen.getByRole("button", {
@@ -271,20 +277,18 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       render(<TaskDetailPanel taskId={mockTaskData.id} standalone />);
 
       expect(
-        screen.getByTestId("task-detail-panel-standalone"),
+        screen.getByTestId("task-detail-panel-standalone")
       ).toBeInTheDocument();
       // Detach is meaningless in a window that's already detached
       expect(
-        screen.queryByRole("button", { name: /detach into pop-out window/i }),
+        screen.queryByRole("button", { name: /detach into pop-out window/i })
       ).not.toBeInTheDocument();
     });
   });
 
   describe("Header buttons", () => {
     it("renders Delete and Close buttons in header", () => {
-      render(
-        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
-      );
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
       expect(
         screen.getByRole("button", { name: /delete/i })
@@ -295,9 +299,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     });
 
     it("Delete button is positioned before Close button", () => {
-      render(
-        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
-      );
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
       const buttons = screen.getAllByRole("button");
       const deleteIndex = buttons.findIndex(
@@ -313,9 +315,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
 
   describe("Task title display", () => {
     it("displays task title in the panel", () => {
-      render(
-        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
-      );
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
       expect(screen.getByText("Test Task")).toBeInTheDocument();
     });
@@ -323,9 +323,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
 
   describe("Inline editing - Title", () => {
     it("makes title editable when clicked", () => {
-      render(
-        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
-      );
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
       const titleElement = screen.getByText("Test Task");
       fireEvent.click(titleElement);
@@ -338,9 +336,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
 
   describe("Acceptance Criteria section", () => {
     it("is the first section after the title badges", () => {
-      render(
-        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
-      );
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
       expect(screen.getByText("Acceptance Criteria")).toBeInTheDocument();
       const criteriaSection = screen.getByTestId("acceptance-criteria");
@@ -348,9 +344,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     });
 
     it("displays testing_criterion sections with met/pending indicators", () => {
-      render(
-        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
-      );
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
       expect(screen.getByText("App loads without errors")).toBeInTheDocument();
       expect(
@@ -359,27 +353,21 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     });
 
     it("shows progress count for criteria", () => {
-      render(
-        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
-      );
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
       expect(screen.getByText("1/2 met")).toBeInTheDocument();
       expect(screen.getByText("50%")).toBeInTheDocument();
     });
 
     it("shows human/machine validation badges", () => {
-      render(
-        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
-      );
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
       const humanBadges = screen.getAllByText("human");
       expect(humanBadges.length).toBeGreaterThan(0);
     });
 
     it("met criteria have line-through styling", () => {
-      render(
-        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
-      );
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
       const metCriterion = screen.getByText("App loads without errors");
       expect(metCriterion.className).toContain("line-through");
@@ -388,9 +376,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
 
   describe("Progress section", () => {
     it("shows checklist items in progress section", () => {
-      render(
-        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
-      );
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
       const progressSection = screen.getByTestId("progress-section");
       expect(progressSection).toBeInTheDocument();
@@ -399,9 +385,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     });
 
     it("shows checklist progress badge", () => {
-      render(
-        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
-      );
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
       expect(screen.getByText("1/2")).toBeInTheDocument();
     });
@@ -409,9 +393,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
 
   describe("Collapsible sections", () => {
     it("renders Spec collapsible section", () => {
-      render(
-        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
-      );
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
       const specToggle = screen.getByRole("button", {
         name: /toggle spec section/i,
@@ -420,9 +402,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     });
 
     it("renders Dependencies collapsible section", () => {
-      render(
-        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
-      );
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
       const depsToggle = screen.getByRole("button", {
         name: /toggle dependencies section/i,
@@ -431,9 +411,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     });
 
     it("renders Code collapsible section", () => {
-      render(
-        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
-      );
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
       const codeToggle = screen.getByRole("button", {
         name: /toggle code section/i,
@@ -442,9 +420,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     });
 
     it("renders Details collapsible section", () => {
-      render(
-        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
-      );
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
       const detailsToggle = screen.getByRole("button", {
         name: /toggle details section/i,
@@ -453,9 +429,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     });
 
     it("Spec section is open by default showing goal and constraints", () => {
-      render(
-        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
-      );
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
       expect(screen.getByText("Build a working feature")).toBeInTheDocument();
       expect(
@@ -464,9 +438,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     });
 
     it("Details section expands to show priority, tags", () => {
-      render(
-        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
-      );
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
       const detailsToggle = screen.getByRole("button", {
         name: /toggle details section/i,
@@ -477,9 +449,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     });
 
     it("Code section expands to show file paths with line numbers", () => {
-      render(
-        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
-      );
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
       const codeToggle = screen.getByRole("button", {
         name: /toggle code section/i,
@@ -493,9 +463,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
 
   describe("Delete confirmation - Toggle", () => {
     it("renders Delete button in header", () => {
-      render(
-        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
-      );
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
       expect(
         screen.getByRole("button", { name: /delete task/i })
@@ -505,17 +473,13 @@ describe("TaskDetailPanel - Restructured Layout", () => {
 
   describe("Level and ID badges", () => {
     it("shows level badge in title area", () => {
-      render(
-        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
-      );
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
       expect(screen.getByText("task")).toBeInTheDocument();
     });
 
     it("shows short task ID in title area", () => {
-      render(
-        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
-      );
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
       expect(screen.getByText("task-123")).toBeInTheDocument();
     });
@@ -523,9 +487,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
 
   describe("Run workflow buttons", () => {
     it("shows Run Step button when task has workflow and current step", () => {
-      render(
-        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
-      );
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
       expect(
         screen.getByRole("button", { name: /run current step/i })
@@ -533,19 +495,37 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     });
 
     it("shows Run Workflow button when task has workflow", () => {
-      render(
-        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
-      );
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
       expect(
         screen.getByRole("button", { name: /run entire workflow/i })
       ).toBeInTheDocument();
     });
 
+    it("disables Run Workflow when server run_controls marks the task not runnable", () => {
+      renderWithTaskOverrides({ run_controls: activeRunControls() });
+
+      expect(
+        screen.getByRole("button", { name: /run entire workflow/i })
+      ).toBeDisabled();
+    });
+
+    it("hides Stop when server run_controls marks a running task not stoppable", () => {
+      const controls = activeRunControls();
+      renderWithTaskOverrides({
+        run_controls: {
+          ...controls,
+          stoppable: false,
+        },
+      });
+
+      expect(
+        screen.queryByRole("button", { name: /stop running workflow/i })
+      ).not.toBeInTheDocument();
+    });
+
     it("shows Stop button while a step is running (step_name=in_progress)", () => {
-      render(
-        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
-      );
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
       const stopBtn = screen.getByRole("button", {
         name: /stop running workflow/i,
@@ -560,9 +540,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
         data: null,
       });
 
-      render(
-        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
-      );
+      renderWithTaskOverrides({ run_controls: activeRunControls() });
 
       const stopBtn = screen.getByRole("button", {
         name: /stop running workflow/i,
@@ -582,9 +560,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
         error: { message: "no orchestrator running" } as never,
       });
 
-      render(
-        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
-      );
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
       const stopBtn = screen.getByRole("button", {
         name: /stop running workflow/i,
@@ -619,9 +595,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     it("renders Children section with child count badge when task has children", () => {
       useTaskStore.getState().setTasks([childTask1, childTask2]);
 
-      render(
-        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
-      );
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
       const childrenSection = screen.getByTestId("children-section");
       expect(childrenSection).toBeInTheDocument();
@@ -632,9 +606,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     it("displays each child with its level badge, title, and step name", () => {
       useTaskStore.getState().setTasks([childTask1, childTask2]);
 
-      render(
-        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
-      );
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
       expect(screen.getByText("First child task")).toBeInTheDocument();
       expect(screen.getByText("Second child task")).toBeInTheDocument();
@@ -672,9 +644,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     it("does not render Children section when task has no children", () => {
       useTaskStore.getState().setTasks([]);
 
-      render(
-        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
-      );
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
       expect(screen.queryByTestId("children-section")).not.toBeInTheDocument();
     });
@@ -682,9 +652,7 @@ describe("TaskDetailPanel - Restructured Layout", () => {
     it("renders Children toggle button for accessibility", () => {
       useTaskStore.getState().setTasks([childTask1]);
 
-      render(
-        <TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />
-      );
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
       const toggleButton = screen.getByRole("button", {
         name: /toggle children section/i,

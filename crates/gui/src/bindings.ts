@@ -27,7 +27,7 @@ async getProjects() : Promise<Result<SavedProject[], CommandError>> {
 },
 /**
  * Add a project to the saved list
- * 
+ *
  * Takes a directory path, derives a slug from the folder name,
  * creates the project in Sacrum API if needed, and registers in global config.
  */
@@ -41,7 +41,7 @@ async addProject(path: string) : Promise<Result<SavedProject, CommandError>> {
 },
 /**
  * Remove a project from the saved list
- * 
+ *
  * Removes the project from config.toml by slug. If the removed project
  * is the currently selected project, clears the selection and services.
  */
@@ -99,7 +99,7 @@ async hasProjectSelected() : Promise<Result<boolean, CommandError>> {
 },
 /**
  * List tasks with optional filters
- * 
+ *
  * Returns a list of task summaries matching the filter criteria.
  */
 async listTasks(filter: TaskFilterOptions | null) : Promise<Result<Task[], CommandError>> {
@@ -112,7 +112,7 @@ async listTasks(filter: TaskFilterOptions | null) : Promise<Result<Task[], Comma
 },
 /**
  * Get a single task by ID with its relations
- * 
+ *
  * Returns the full task details.
  */
 async getTask(id: string) : Promise<Result<Task, CommandError>> {
@@ -744,6 +744,7 @@ stepChangedEvent: StepChangedEvent,
 stepExecutionChangedEvent: StepExecutionChangedEvent,
 stepTransitionChangedEvent: StepTransitionChangedEvent,
 taskChangedEvent: TaskChangedEvent,
+taskRunChangedEvent: TaskRunChangedEvent,
 taskStepChangedEvent: TaskStepChangedEvent,
 workflowChangedEvent: WorkflowChangedEvent,
 workflowTransitionChangedEvent: WorkflowTransitionChangedEvent
@@ -762,6 +763,7 @@ stepChangedEvent: "step-changed-event",
 stepExecutionChangedEvent: "step-execution-changed-event",
 stepTransitionChangedEvent: "step-transition-changed-event",
 taskChangedEvent: "task-changed-event",
+taskRunChangedEvent: "task-run-changed-event",
 taskStepChangedEvent: "task-step-changed-event",
 workflowChangedEvent: "workflow-changed-event",
 workflowTransitionChangedEvent: "workflow-transition-changed-event"
@@ -1153,7 +1155,7 @@ id: string | null;
 /**
  * Task ID this execution belongs to
  */
-task_id?: string; 
+task_id?: string;
 /**
  * TaskRun ID this execution belongs to, when present
  */
@@ -1301,7 +1303,7 @@ workflow_name: string | null;
 /**
  * Current step name (if task has a current step in workflow)
  */
-step_name: string | null; 
+step_name: string | null;
 /**
  * Server-derived TaskRun controls for Run/Stop surfaces
  */
@@ -1488,6 +1490,16 @@ inserted_at: string | null;
  * Last update timestamp from Sacrum (ISO 8601 string)
  */
 updated_at: string | null }
+/**
+ * The type of change that occurred on a TaskRun.
+ */
+export type TaskRunChangeType = "Created" | "Updated"
+/**
+ * Event payload for TaskRun changes.
+ * Emitted when a TaskRun is created or updated. `run_controls` is copied
+ * directly from the channel payload so the frontend does not recompute it.
+ */
+export type TaskRunChangedEvent = { task_run_id: string; task_id: string; status: TaskRunStatus; change_type: TaskRunChangeType; task_run: TaskRun | null; run_controls: TaskRunControls | null }
 /**
  * Server-derived controls for Run/Stop task actions.
  */

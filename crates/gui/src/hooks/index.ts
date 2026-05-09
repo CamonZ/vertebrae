@@ -7,6 +7,7 @@ export { useTaskExecutions } from "./useTaskExecutions";
 export { useSubtreeExecutions } from "./useSubtreeExecutions";
 export type { UseSubtreeExecutionsResult } from "./useSubtreeExecutions";
 export { useTaskChangeListener } from "./useTaskChangeListener";
+export { useTaskRunChangeListener } from "./useTaskRunChangeListener";
 export { useTaskStepChangeListener } from "./useTaskStepChangeListener";
 export { useWorkflows } from "./useWorkflows";
 export { useWorkflow } from "./useWorkflow";
@@ -22,7 +23,14 @@ export { useExpandedNodes } from "./useExpandedNodes";
 export { useResizableColumns } from "./useResizableColumns";
 export { useElkLayout, calculateElkLayout } from "./useElkLayout";
 export { useOperationsData } from "./useOperationsData";
-export type { LayoutNode, LayoutEdge, LayoutPoint, LayoutEdgePath, LayoutResult, ElkLayoutOptions } from "./useElkLayout";
+export type {
+  LayoutNode,
+  LayoutEdge,
+  LayoutPoint,
+  LayoutEdgePath,
+  LayoutResult,
+  ElkLayoutOptions,
+} from "./useElkLayout";
 export { useScopedChat, useOpenChat } from "./useScopedChat";
 export { usePipelineSummary } from "./usePipelineSummary";
 export { useWebSocketStatus } from "./useWebSocketStatus";
