@@ -237,6 +237,28 @@ async fn delete_task_via_cli(world: &mut GuiWorld) {
     world.created_task_ids.retain(|id| id != &task_id);
 }
 
+#[when("I start the task workflow via the CLI")]
+async fn start_task_workflow_via_cli(world: &mut GuiWorld) {
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+    world.run_vtb(&["run-workflow", &task_id]).await;
+    assert_eq!(
+        world.last_exit_code, 0,
+        "vtb run-workflow failed: {}{}",
+        world.last_stdout, world.last_stderr
+    );
+}
+
+#[when("I stop the task workflow via the CLI")]
+async fn stop_task_workflow_via_cli(world: &mut GuiWorld) {
+    let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
+    world.run_vtb(&["stop-taskrun", &task_id]).await;
+    assert_eq!(
+        world.last_exit_code, 0,
+        "vtb stop-taskrun failed: {}{}",
+        world.last_stdout, world.last_stderr
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Step steps
 // ---------------------------------------------------------------------------

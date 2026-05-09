@@ -1,9 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import type {
-  TaskLevel,
-  TaskPriority,
-  TaskChangedEvent,
-} from "../../bindings";
+import type { TaskLevel, TaskPriority, TaskChangedEvent } from "../../bindings";
 import { commands, events } from "../../bindings";
 import { useTask } from "../../hooks/useTask";
 import { useTaskStore } from "../../stores";
@@ -222,15 +218,12 @@ export function TaskDetailPanel({
   // Extract sections by type
   const acceptanceCriteria = useMemo(
     () =>
-      (taskData?.sections ?? []).filter(
-        (s) => s.type === "testing_criterion"
-      ),
+      (taskData?.sections ?? []).filter((s) => s.type === "testing_criterion"),
     [taskData?.sections]
   );
 
   const checklistItems = useMemo(
-    () =>
-      (taskData?.sections ?? []).filter((s) => s.type === "checklist_item"),
+    () => (taskData?.sections ?? []).filter((s) => s.type === "checklist_item"),
     [taskData?.sections]
   );
 
@@ -308,10 +301,7 @@ export function TaskDetailPanel({
   );
 
   const handleFieldChange = useCallback(
-    (
-      fieldName: "title" | "priority" | "level",
-      value: string
-    ) => {
+    (fieldName: "title" | "priority" | "level", value: string) => {
       setEditValues((prev) => ({ ...prev, [fieldName]: value }));
     },
     []
@@ -336,7 +326,10 @@ export function TaskDetailPanel({
         const options = {
           title: fieldName === "title" ? editValues.title : taskData.title,
           description: taskData.description,
-          priority: fieldName === "priority" ? (editValues.priority as string | null) : taskData.priority,
+          priority:
+            fieldName === "priority"
+              ? (editValues.priority as string | null)
+              : taskData.priority,
           add_tags: [],
           remove_tags: [],
           level: fieldName === "level" ? editValues.level : taskData.level,
@@ -421,8 +414,8 @@ export function TaskDetailPanel({
           // For tags, we need to compute the difference
           const newTags = value as string[];
           const currentTags = taskData.tags ?? [];
-          options.add_tags = newTags.filter(t => !currentTags.includes(t));
-          options.remove_tags = currentTags.filter(t => !newTags.includes(t));
+          options.add_tags = newTags.filter((t) => !currentTags.includes(t));
+          options.remove_tags = currentTags.filter((t) => !newTags.includes(t));
           break;
         }
         case "needs_human_review":
@@ -482,7 +475,10 @@ export function TaskDetailPanel({
     setIsRunningStep(true);
     setWorkflowError(null);
     try {
-      const result = await commands.runStep(taskData.id, taskData.current_step_id);
+      const result = await commands.runStep(
+        taskData.id,
+        taskData.current_step_id
+      );
       if (result.status === "error") {
         setWorkflowError(result.error.message);
       }
@@ -533,7 +529,7 @@ export function TaskDetailPanel({
     } finally {
       setIsStoppingWorkflow(false);
     }
-  }, [taskData?.id]);
+  }, [taskData?.id, taskData?.run_controls?.active_run?.id]);
 
   if (!taskId) {
     return null;
@@ -543,13 +539,26 @@ export function TaskDetailPanel({
     ? getStatusStyles(taskData.step_name ?? "unassigned")
     : null;
   const levelStyles = taskData ? getLevelStyles(taskData.level) : null;
-  const priorityStyles = taskData
-    ? getPriorityStyles(taskData.priority)
-    : null;
+  const priorityStyles = taskData ? getPriorityStyles(taskData.priority) : null;
   const isExecuting =
     taskData?.step_name === "in_progress" ||
     (taskData?.step_name?.includes(":") &&
       taskData.step_name.split(":").pop() === "in_progress");
+  const runControls = taskData?.run_controls ?? null;
+  const activeRunStatus = runControls?.active_run?.status ?? null;
+  const isStoppingRun = activeRunStatus === "stopping";
+  const canRunWorkflow =
+    runControls == null ? true : runControls.runnable === true;
+  const shouldShowStopWorkflow =
+    taskData?.workflow_id &&
+    (runControls == null
+      ? isExecuting
+      : runControls.stoppable === true || isStoppingRun);
+  const runWorkflowDisabled =
+    isRunningStep || isRunningWorkflow || !canRunWorkflow;
+  const stopWorkflowDisabled =
+    isStoppingWorkflow ||
+    (runControls != null && runControls.stoppable !== true);
 
   const content = (
     <>
@@ -563,8 +572,18 @@ export function TaskDetailPanel({
               className="cursor-pointer rounded-lg p-1.5 text-text-muted transition-colors hover:bg-bg-hover hover:text-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               aria-label="Go back"
             >
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 19l-7-7 7-7" />
+              <svg
+                className="h-4 w-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.5}
+                  d="M15 19l-7-7 7-7"
+                />
               </svg>
             </button>
           )}
@@ -618,7 +637,11 @@ export function TaskDetailPanel({
               {isRunningStep ? (
                 <Spinner />
               ) : (
-                <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24">
+                <svg
+                  className="h-3.5 w-3.5"
+                  fill="currentColor"
+                  viewBox="0 0 24 24"
+                >
                   <path d="M8 5v14l11-7z" />
                 </svg>
               )}
@@ -630,7 +653,7 @@ export function TaskDetailPanel({
             <button
               type="button"
               onClick={handleRunWorkflow}
-              disabled={isRunningStep || isRunningWorkflow}
+              disabled={runWorkflowDisabled}
               className="cursor-pointer flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary bg-primary text-bg-primary hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed"
               aria-label="Run entire workflow"
               title="Run the entire workflow for this task"
@@ -638,19 +661,34 @@ export function TaskDetailPanel({
               {isRunningWorkflow ? (
                 <Spinner />
               ) : (
-                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                <svg
+                  className="h-3.5 w-3.5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"
+                  />
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
                 </svg>
               )}
               <span>{isRunningWorkflow ? "Running..." : "Run Workflow"}</span>
             </button>
           )}
-          {taskData?.workflow_id && isExecuting && (
+          {shouldShowStopWorkflow && (
             <button
               type="button"
               onClick={handleStopWorkflow}
-              disabled={isStoppingWorkflow}
+              disabled={stopWorkflowDisabled}
               className="cursor-pointer flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-error bg-error text-white hover:bg-error/90 disabled:opacity-50 disabled:cursor-not-allowed"
               aria-label="Stop running workflow"
               title="Stop the running orchestrator for this task"
@@ -1071,7 +1109,8 @@ export function TaskDetailPanel({
               <div className="space-y-1 px-4 py-2">
                 {children.map((child) => {
                   const childLevelStyles = getLevelStyles(child.level);
-                  const childStepName = child.step_name?.replace("_", " ") ?? null;
+                  const childStepName =
+                    child.step_name?.replace("_", " ") ?? null;
 
                   return (
                     <button
@@ -1123,7 +1162,9 @@ export function TaskDetailPanel({
             }
             badge={
               <span className="rounded-full bg-bg-tertiary px-2 py-0.5 text-[10px] text-text-muted">
-                {(taskData.dependency_ids?.length ?? 0) + dependentIds.length + (taskData.parent_id ? 1 : 0)}
+                {(taskData.dependency_ids?.length ?? 0) +
+                  dependentIds.length +
+                  (taskData.parent_id ? 1 : 0)}
               </span>
             }
           >
@@ -1197,7 +1238,9 @@ export function TaskDetailPanel({
                   <div className="space-y-2">
                     <select
                       value={editValues.priority || ""}
-                      onChange={(e) => handleFieldChange("priority", e.target.value)}
+                      onChange={(e) =>
+                        handleFieldChange("priority", e.target.value)
+                      }
                       onKeyDown={(e) => handleKeyDown(e, "priority")}
                       onBlur={() => handleFieldSave("priority")}
                       autoFocus
@@ -1210,7 +1253,9 @@ export function TaskDetailPanel({
                       <option value="high">High</option>
                       <option value="critical">Critical</option>
                     </select>
-                    {fieldError && <p className="text-xs text-error">{fieldError}</p>}
+                    {fieldError && (
+                      <p className="text-xs text-error">{fieldError}</p>
+                    )}
                   </div>
                 ) : (
                   <p
@@ -1249,14 +1294,19 @@ export function TaskDetailPanel({
                         </button>
                       ))}
                     </div>
-                    {fieldError && <p className="text-xs text-error">{fieldError}</p>}
+                    {fieldError && (
+                      <p className="text-xs text-error">{fieldError}</p>
+                    )}
                   </div>
                 ) : (
                   <p
                     onClick={() => handleFieldClick("level")}
                     className="text-sm text-text-secondary cursor-pointer hover:bg-bg-hover p-2 rounded"
                   >
-                    {taskData.level ? taskData.level.charAt(0).toUpperCase() + taskData.level.slice(1) : "Unknown"}
+                    {taskData.level
+                      ? taskData.level.charAt(0).toUpperCase() +
+                        taskData.level.slice(1)
+                      : "Unknown"}
                   </p>
                 )}
               </div>
@@ -1270,7 +1320,10 @@ export function TaskDetailPanel({
                   value={(taskData.tags ?? []).join(", ")}
                   placeholder="Click to add tags (comma-separated)"
                   onSave={async (value) => {
-                    const tags = value.split(",").map(t => t.trim()).filter(t => t.length > 0);
+                    const tags = value
+                      .split(",")
+                      .map((t) => t.trim())
+                      .filter((t) => t.length > 0);
                     await onUpdateField("tags", tags);
                   }}
                 />
@@ -1321,13 +1374,17 @@ export function TaskDetailPanel({
                   </h4>
                   <Toggle
                     checked={taskData.needs_human_review ?? false}
-                    onChange={(checked) => onUpdateField("needs_human_review", checked)}
+                    onChange={(checked) =>
+                      onUpdateField("needs_human_review", checked)
+                    }
                     label="Toggle human review requirement"
                     activeColor="warning"
                   />
                 </div>
                 {taskData.needs_human_review && (
-                  <p className="mt-1 text-xs text-warning">This task requires human review before completion</p>
+                  <p className="mt-1 text-xs text-warning">
+                    This task requires human review before completion
+                  </p>
                 )}
               </div>
 
