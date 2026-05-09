@@ -31,3 +31,5 @@ export {
   isActiveRunStatus,
 } from "./runState";
 export type { RunStateChip, RunChipStyles, RunControlsState } from "./runState";
+export { resolveHumanInputGate } from "./humanInputGate";
+export type { HumanInputGateContext } from "./humanInputGate";

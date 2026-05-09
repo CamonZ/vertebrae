@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import type { TaskLevel, TaskPriority, TaskChangedEvent } from "../../bindings";
 import { commands, events } from "../../bindings";
 import { useTask } from "../../hooks/useTask";
+import { useTaskExecutions } from "../../hooks/useTaskExecutions";
 import { useTaskStore } from "../../stores";
 import { TraceMiniView } from "./TraceMiniView";
 import { DeleteConfirmation } from "../DeleteConfirmation";
@@ -17,6 +18,8 @@ import { CodeRefsSummary } from "./CodeRefsSummary";
 import { SpecSection } from "./SpecSection";
 import { OpenChatButton } from "../OpenChatButton";
 import { deriveRunControlsState, deriveRunStateChip, getRunChipStyles } from "../../utils/runState";
+import { resolveHumanInputGate } from "../../utils/humanInputGate";
+import { HumanInputGate } from "../Traces/HumanInputGate";
 
 /** Debounce delay in milliseconds for batching rapid events */
 const DEBOUNCE_MS = 100;
@@ -199,6 +202,7 @@ export function TaskDetailPanel({
   const [isStoppingWorkflow, setIsStoppingWorkflow] = useState(false);
   const [workflowError, setWorkflowError] = useState<string | null>(null);
   const { task: taskData, isLoading, error, refetch } = useTask(taskId);
+  const { executions: taskExecutions } = useTaskExecutions(taskId);
   const allTasks = useTaskStore((s) => s.tasks);
 
   // Derive children and dependents from the already-loaded task list
@@ -227,6 +231,15 @@ export function TaskDetailPanel({
     () => (taskData?.sections ?? []).filter((s) => s.type === "checklist_item"),
     [taskData?.sections]
   );
+
+  const activeRun = taskData?.run_controls?.active_run ?? null;
+  const humanInputGate = useMemo(() => {
+    if (!activeRun) return null;
+    const runExecs = taskExecutions.filter(
+      (e) => e.task_run_id === activeRun.id
+    );
+    return resolveHumanInputGate(activeRun, runExecs);
+  }, [activeRun, taskExecutions]);
 
   // Track pending refetch for debouncing
   const pendingRefetch = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -943,6 +956,17 @@ export function TaskDetailPanel({
                   </p>
                 </div>
               </div>
+            </div>
+          )}
+
+          {humanInputGate && (
+            <div className="mx-4 mt-3">
+              <HumanInputGate
+                context={humanInputGate}
+                stoppable={runControlsState.stoppable}
+                isStopping={isStoppingWorkflow || runControlsState.isStopping}
+                onStop={handleStopWorkflow}
+              />
             </div>
           )}
 

@@ -44,7 +44,9 @@ import {
 import { StepBoundary } from "./conversation/StepBoundary";
 import { TransitionMarker } from "./conversation/TransitionMarker";
 import { DelegationBlock } from "./conversation/DelegationBlock";
+import { HumanInputGate } from "./HumanInputGate";
 import type { TaskRunTraceProjection } from "./taskRunTrace";
+import { resolveHumanInputGate } from "../../utils/humanInputGate";
 
 interface UnifiedChatViewProps {
   rootTaskId: string;
@@ -90,6 +92,9 @@ interface UnifiedChatViewProps {
   focusExecutionId?: string | null;
   /** Currently keyboard-focused execution id (j/k cycles). */
   activeExecutionId?: string | null;
+  activeRunStoppable?: boolean;
+  isStoppingActiveRun?: boolean;
+  onStopActiveRun?: () => void;
 }
 
 function buildDepthMap(
@@ -207,6 +212,9 @@ export function UnifiedChatView({
   autoScroll = false,
   focusExecutionId = null,
   activeExecutionId = null,
+  activeRunStoppable = false,
+  isStoppingActiveRun = false,
+  onStopActiveRun,
 }: UnifiedChatViewProps): ReactNode {
   const [timeMode, setTimeMode] = useState<TimeMode>("absolute");
   const fetched = useSubtreeSessionLogs(providedLogs ? [] : executions);
@@ -277,6 +285,16 @@ export function UnifiedChatView({
     () => groupByExecution(filteredMerged, taskRunIdByExecutionId),
     [filteredMerged, taskRunIdByExecutionId]
   );
+
+  const humanInputGate = useMemo(() => {
+    if (!runProjection) return null;
+    for (const node of runProjection.orderedRuns) {
+      if (node.run.status !== "waiting") continue;
+      const gate = resolveHumanInputGate(node.run, node.executions);
+      if (gate) return gate;
+    }
+    return null;
+  }, [runProjection]);
 
   // Local fallback ref so live-tail effects work even when no scrollRef is
   // forwarded by a parent (kept stable across renders).
@@ -352,7 +370,36 @@ export function UnifiedChatView({
     );
   }
 
+  const gateNode = humanInputGate ? (
+    <div className="px-4 pt-2">
+      <HumanInputGate
+        context={humanInputGate}
+        stoppable={activeRunStoppable}
+        isStopping={isStoppingActiveRun}
+        onStop={onStopActiveRun}
+      />
+    </div>
+  ) : null;
+
   if (segments.length === 0) {
+    if (gateNode) {
+      return (
+        <div
+          ref={setScrollEl}
+          data-testid="unified-chat-view"
+          data-auto-scroll={autoScroll ? "1" : "0"}
+          className="relative h-full overflow-y-auto bg-bg-primary"
+        >
+          {gateNode}
+          <div
+            data-testid="unified-chat-empty"
+            className="flex flex-col items-center justify-center p-8 text-center text-sm text-text-muted"
+          >
+            No conversation yet — run is parked waiting on human input.
+          </div>
+        </div>
+      );
+    }
     return (
       <div
         data-testid="unified-chat-empty"
@@ -377,6 +424,7 @@ export function UnifiedChatView({
             {timeMode === "absolute" ? "HH:MM:SS.mmm" : "time after"}
           </span>
         </div>
+        {gateNode}
         <div className="px-2 pb-4">
           {segments.map((segment, idx) => {
             const previousSegment = idx > 0 ? segments[idx - 1] : null;
