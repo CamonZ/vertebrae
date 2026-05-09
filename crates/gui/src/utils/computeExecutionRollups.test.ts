@@ -34,6 +34,7 @@ describe("computeExecutionRollups", () => {
   it("returns zeros for an empty list", () => {
     expect(computeExecutionRollups([])).toEqual({
       totalRuns: 0,
+      totalAttempts: 0,
       totalCost: 0,
       totalTokens: 0,
       totalWallTimeMs: 0,
@@ -46,10 +47,62 @@ describe("computeExecutionRollups", () => {
       exec({ cost: "0.5", input_tokens: 200, output_tokens: 75, duration_ms: 800 }),
       exec({ cost: "0.1", input_tokens: 10, output_tokens: 5, duration_ms: 100 }),
     ]);
-    expect(rollups.totalRuns).toBe(3);
+    // Unattributed executions collapse into a single pseudo-run so the count
+    // reflects "runs we know about", not raw attempt density.
+    expect(rollups.totalRuns).toBe(1);
+    expect(rollups.totalAttempts).toBe(3);
     expect(rollups.totalCost).toBeCloseTo(0.85, 10);
     expect(rollups.totalTokens).toBe(100 + 50 + 200 + 75 + 10 + 5);
     expect(rollups.totalWallTimeMs).toBe(2100);
+  });
+
+  it("counts distinct task_run_ids as totalRuns and StepExecutions as totalAttempts", () => {
+    const rollups = computeExecutionRollups([
+      exec({ id: "e-1", task_run_id: "run-A", cost: "0.1" }),
+      exec({ id: "e-2", task_run_id: "run-A", cost: "0.2" }),
+      exec({ id: "e-3", task_run_id: "run-B", cost: "0.3" }),
+      exec({ id: "e-4", task_run_id: "run-C", cost: "0.4" }),
+    ]);
+    expect(rollups.totalRuns).toBe(3);
+    expect(rollups.totalAttempts).toBe(4);
+    expect(rollups.totalCost).toBeCloseTo(1.0, 10);
+  });
+
+  it("does not double-count failed retries inside the same TaskRun", () => {
+    // The exact scenario the ticket calls out: a TaskRun that retried a
+    // step several times after failures must still count as one run.
+    const rollups = computeExecutionRollups([
+      exec({ id: "attempt-1", task_run_id: "run-X", status: "failed" }),
+      exec({ id: "attempt-2", task_run_id: "run-X", status: "failed" }),
+      exec({ id: "attempt-3", task_run_id: "run-X", status: "completed" }),
+    ]);
+    expect(rollups.totalRuns).toBe(1);
+    expect(rollups.totalAttempts).toBe(3);
+  });
+
+  it("collapses every execution missing task_run_id into a single unknown run", () => {
+    // Legacy rows emitted before TaskRun lineage existed have null
+    // task_run_id. They should appear as a single "unknown" run rather than
+    // inflating the count once per attempt.
+    const rollups = computeExecutionRollups([
+      exec({ id: "legacy-1", task_run_id: null }),
+      exec({ id: "legacy-2", task_run_id: null }),
+      exec({ id: "legacy-3", task_run_id: undefined }),
+    ]);
+    expect(rollups.totalRuns).toBe(1);
+    expect(rollups.totalAttempts).toBe(3);
+  });
+
+  it("counts a mix of known and unknown task_run_ids correctly", () => {
+    const rollups = computeExecutionRollups([
+      exec({ id: "e-1", task_run_id: "run-A" }),
+      exec({ id: "e-2", task_run_id: null }),
+      exec({ id: "e-3", task_run_id: null }),
+      exec({ id: "e-4", task_run_id: "run-B" }),
+    ]);
+    // run-A, run-B, plus the unknown bucket = 3 runs across 4 attempts.
+    expect(rollups.totalRuns).toBe(3);
+    expect(rollups.totalAttempts).toBe(4);
   });
 
   it("falls back to completed_at - started_at when duration_ms is missing", () => {
@@ -68,7 +121,9 @@ describe("computeExecutionRollups", () => {
       exec({ cost: null, input_tokens: null, output_tokens: null, duration_ms: null }),
       exec({ cost: "0.4", input_tokens: 10, output_tokens: 20, duration_ms: 500 }),
     ]);
-    expect(rollups.totalRuns).toBe(2);
+    // Both executions lack task_run_id, so they collapse into one pseudo-run.
+    expect(rollups.totalRuns).toBe(1);
+    expect(rollups.totalAttempts).toBe(2);
     expect(rollups.totalCost).toBeCloseTo(0.4, 10);
     expect(rollups.totalTokens).toBe(30);
     expect(rollups.totalWallTimeMs).toBe(500);
@@ -85,7 +140,9 @@ describe("computeExecutionRollups", () => {
       "exec-2": [sessionEndLog("exec-2", 0.1166)],
     };
     const rollups = computeExecutionRollups([e1, e2], logsByExecutionId);
-    expect(rollups.totalRuns).toBe(2);
+    // Both legacy executions have no task_run_id → one unknown pseudo-run.
+    expect(rollups.totalRuns).toBe(1);
+    expect(rollups.totalAttempts).toBe(2);
     expect(rollups.totalCost).toBeCloseTo(0.0742 + 0.1166, 10);
   });
 

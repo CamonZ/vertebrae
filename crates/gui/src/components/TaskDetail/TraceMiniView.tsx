@@ -61,12 +61,20 @@ function pickLastExecution(
 interface RollupCardProps {
   label: string;
   runs: number;
+  attempts: number;
   cost: number;
   testId: string;
   accent?: boolean;
 }
 
-function RollupCard({ label, runs, cost, testId, accent }: RollupCardProps) {
+function RollupCard({
+  label,
+  runs,
+  attempts,
+  cost,
+  testId,
+  accent,
+}: RollupCardProps) {
   const containerClass = accent
     ? "rounded border border-primary/30 bg-primary/5 px-2 py-1.5"
     : "rounded border border-border bg-bg-tertiary/50 px-2 py-1.5";
@@ -77,8 +85,21 @@ function RollupCard({ label, runs, cost, testId, accent }: RollupCardProps) {
     <div data-testid={testId} className={containerClass}>
       <div className={labelClass}>{label}</div>
       <div className="mt-0.5 flex items-baseline gap-2">
-        <span className="text-sm font-medium text-text-primary">{runs}</span>
-        <span className="text-[10px] text-text-muted">runs</span>
+        <span
+          data-testid={`${testId}-runs`}
+          className="text-sm font-medium text-text-primary"
+        >
+          {runs}
+        </span>
+        <span className="text-[10px] text-text-muted">
+          {runs === 1 ? "run" : "runs"}
+        </span>
+      </div>
+      <div
+        data-testid={`${testId}-attempts`}
+        className="font-mono text-[10px] text-text-secondary"
+      >
+        {attempts} {attempts === 1 ? "attempt" : "attempts"}
       </div>
       <div className="font-mono text-[10px] text-text-secondary">
         {formatCost(cost)}
@@ -202,12 +223,14 @@ export function TraceMiniView({
           testId="trace-mini-rollup-task"
           label="This task"
           runs={taskRollups.totalRuns}
+          attempts={taskRollups.totalAttempts}
           cost={taskRollups.totalCost}
         />
         <RollupCard
           testId="trace-mini-rollup-subtree"
           label="Subtree"
           runs={subtreeRollups.totalRuns}
+          attempts={subtreeRollups.totalAttempts}
           cost={subtreeRollups.totalCost}
           accent
         />

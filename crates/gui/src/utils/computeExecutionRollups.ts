@@ -3,8 +3,22 @@ import { parseSessionLogs } from "../types/conversation";
 
 /** Aggregate metrics computed across an execution set. */
 export interface ExecutionRollups {
-  /** Number of executions in the set. */
+  /**
+   * Number of distinct TaskRuns the executions belong to (counted by
+   * `task_run_id`). Executions with no `task_run_id` collapse into a single
+   * pseudo-run so legacy rows register without inflating the count.
+   *
+   * This is the canonical run count surfaced in trace summaries — it answers
+   * "how many durable runs has this task had?", not "how many step attempts
+   * have we recorded?"
+   */
   totalRuns: number;
+  /**
+   * Number of StepExecution rows in the set. Each row is a single step
+   * attempt — a TaskRun typically owns several. Use this when you want to
+   * communicate retry/attempt density rather than run history.
+   */
+  totalAttempts: number;
   /** Sum of `cost` (USD), missing values treated as 0. */
   totalCost: number;
   /** Sum of `input_tokens + output_tokens`, missing values treated as 0. */
@@ -76,6 +90,10 @@ export function computeExecutionRollups(
   let totalCost = 0;
   let totalTokens = 0;
   let totalWallTimeMs = 0;
+  // Executions with no `task_run_id` (legacy rows predating TaskRun lineage)
+  // all share the `null` key, so they collapse into one pseudo-run rather
+  // than inflating the count once per attempt.
+  const distinctRunIds = new Set<string | null>();
   for (const exec of executions) {
     const execCost = parseCost(exec.cost);
     if (execCost !== null) {
@@ -87,9 +105,11 @@ export function computeExecutionRollups(
     if (typeof exec.output_tokens === "number")
       totalTokens += exec.output_tokens;
     totalWallTimeMs += durationMs(exec);
+    distinctRunIds.add(exec.task_run_id ?? null);
   }
   return {
-    totalRuns: executions.length,
+    totalRuns: distinctRunIds.size,
+    totalAttempts: executions.length,
     totalCost,
     totalTokens,
     totalWallTimeMs,
