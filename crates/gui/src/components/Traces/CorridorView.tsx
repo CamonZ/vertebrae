@@ -23,15 +23,18 @@ import {
 import type { StepExecution, Task } from "../../bindings";
 import {
   computeCorridorLayout,
+  computeCorridorLayoutFromProjection,
   type CorridorLayout,
   type CorridorNode,
   type CorridorNodeStatus,
 } from "./corridor";
+import type { TaskRunTraceProjection } from "./taskRunTrace";
 
 interface CorridorViewProps {
   rootTaskId: string;
   executions: readonly StepExecution[];
   tasks: readonly Task[];
+  runProjection?: TaskRunTraceProjection | null;
   /** Scroll container of the THREAD/UnifiedChatView; used to scroll-to-row. */
   threadScrollRef?: RefObject<HTMLElement | null>;
   /** Called when a node is clicked. Parent should pin detail in right pane. */
@@ -70,14 +73,18 @@ export function CorridorView({
   rootTaskId,
   executions,
   tasks,
+  runProjection,
   threadScrollRef,
   onPinExecution,
   layout: layoutOverride,
 }: CorridorViewProps): ReactNode {
-  const layout = useMemo(
-    () => layoutOverride ?? computeCorridorLayout(rootTaskId, executions, tasks),
-    [layoutOverride, rootTaskId, executions, tasks]
-  );
+  const layout = useMemo(() => {
+    if (layoutOverride) return layoutOverride;
+    if (runProjection?.hasRuns) {
+      return computeCorridorLayoutFromProjection(runProjection);
+    }
+    return computeCorridorLayout(rootTaskId, executions, tasks);
+  }, [layoutOverride, rootTaskId, executions, tasks, runProjection]);
 
   const nodeById = useMemo(() => {
     const m = new Map<string, CorridorNode>();
@@ -212,9 +219,10 @@ export function CorridorView({
           {/* Lane labels */}
           {layout.lanes.map((lane) => (
             <text
-              key={`lane-${lane.taskId}`}
+              key={`lane-${lane.laneId}`}
               data-testid="corridor-lane-label"
               data-task-id={lane.taskId}
+              data-task-run-id={lane.taskRunId ?? undefined}
               x={lane.x}
               y={16}
               textAnchor="middle"
@@ -259,6 +267,7 @@ export function CorridorView({
               data-testid="corridor-node"
               data-execution-id={node.executionId}
               data-task-id={node.taskId}
+              data-task-run-id={node.taskRunId ?? undefined}
               data-status={node.status}
               data-column={node.column}
               data-row={node.row}

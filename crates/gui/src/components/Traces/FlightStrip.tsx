@@ -15,15 +15,18 @@ import { EventGlyph, resolveGlyph } from "./EventGlyph";
 import { levelTintClass } from "./levelColors";
 import {
   buildTimelineProjection,
+  buildTimelineProjectionFromProjection,
   type ThresholdMarker,
   type TimelineMarker,
   type TimelineProjection,
 } from "./timeline";
+import type { TaskRunTraceProjection } from "./taskRunTrace";
 
 interface FlightStripProps {
   rootTaskId: string;
   executions: readonly StepExecution[];
   tasks: readonly Task[];
+  runProjection?: TaskRunTraceProjection | null;
   logsByExecutionId: Readonly<Record<string, SessionLog[]>>;
   threadScrollRef?: RefObject<HTMLElement | null>;
   /** Override projection (testing). */
@@ -77,6 +80,7 @@ export function FlightStrip({
   rootTaskId,
   executions,
   tasks,
+  runProjection,
   logsByExecutionId,
   threadScrollRef,
   projection: projectionOverride,
@@ -93,17 +97,28 @@ export function FlightStrip({
   const rafRef = useRef<number | null>(null);
   const pendingRatioRef = useRef<number | null>(null);
 
-  const projection = useMemo(
-    () =>
-      projectionOverride ??
-      buildTimelineProjection(
-        rootTaskId,
-        executions,
-        tasks,
+  const projection = useMemo(() => {
+    if (projectionOverride) return projectionOverride;
+    if (runProjection?.hasRuns) {
+      return buildTimelineProjectionFromProjection(
+        runProjection,
         logsByExecutionId
-      ),
-    [projectionOverride, rootTaskId, executions, tasks, logsByExecutionId]
-  );
+      );
+    }
+    return buildTimelineProjection(
+      rootTaskId,
+      executions,
+      tasks,
+      logsByExecutionId
+    );
+  }, [
+    projectionOverride,
+    rootTaskId,
+    executions,
+    tasks,
+    runProjection,
+    logsByExecutionId,
+  ]);
 
   useEffect(() => {
     let attached: HTMLElement | null = null;
@@ -401,9 +416,10 @@ export function FlightStrip({
               >
                 {projection.mainRows.map((row) => (
                   <div
-                    key={row.taskId}
+                    key={row.rowKey}
                     data-testid="flight-strip-main-row"
                     data-task-id={row.taskId}
+                    data-task-run-id={row.taskRunId ?? undefined}
                     data-row-index={row.index}
                     className="absolute left-0 right-0 border-t border-border/40"
                     style={{

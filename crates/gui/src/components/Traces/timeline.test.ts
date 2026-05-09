@@ -1,6 +1,38 @@
 import { describe, it, expect } from "vitest";
-import { buildTimelineProjection } from "./timeline";
-import type { SessionLog, StepExecution, Task } from "../../bindings";
+import {
+  buildTimelineProjection,
+  buildTimelineProjectionFromProjection,
+} from "./timeline";
+import { projectTaskRunTrace } from "./taskRunTrace";
+import type {
+  SessionLog,
+  StepExecution,
+  Task,
+  TaskRun,
+  TaskRunStatus,
+} from "../../bindings";
+
+const makeRun = (
+  overrides: Partial<TaskRun> & { id: string; task_id: string }
+): TaskRun => ({
+  id: overrides.id,
+  task_id: overrides.task_id,
+  project_id: "p-1",
+  user_id: null,
+  status: (overrides.status ?? "completed") as TaskRunStatus,
+  started_at: overrides.started_at ?? "2024-01-01T00:00:00.000Z",
+  ended_at: overrides.ended_at ?? null,
+  stop_requested_at: null,
+  latest_step_execution_id: null,
+  outcome_kind: null,
+  outcome_context: null,
+  parent_task_run_id: overrides.parent_task_run_id ?? null,
+  root_task_run_id: overrides.root_task_run_id ?? null,
+  triggered_by_step_execution_id:
+    overrides.triggered_by_step_execution_id ?? null,
+  inserted_at: "2024-01-01T00:00:00.000Z",
+  updated_at: "2024-01-01T00:00:00.000Z",
+});
 
 const makeTask = (overrides: Partial<Task> & { id: string }): Task => ({
   id: overrides.id,
@@ -32,6 +64,7 @@ const makeExec = (
 ): StepExecution => ({
   id: overrides.id,
   task_id: overrides.task_id,
+  task_run_id: overrides.task_run_id ?? null,
   workflow_id: overrides.workflow_id ?? "wf-1",
   step_name: overrides.step_name ?? "implement",
   started_at: overrides.started_at,
@@ -250,5 +283,292 @@ describe("buildTimelineProjection", () => {
     expect(edge.parentRowIndex).toBe(0);
     expect(edge.childRowIndex).toBe(1);
     expect(edge.x).toBeCloseTo(1, 5);
+    // Legacy delegation edges aren't keyed on TaskRun lineage.
+    expect(edge.parentTaskRunId).toBeNull();
+    expect(edge.childTaskRunId).toBeNull();
+  });
+});
+
+describe("buildTimelineProjectionFromProjection", () => {
+  it("builds rows per TaskRun and emits run-keyed delegation edges", () => {
+    const tasks = [
+      makeTask({ id: "t-root" }),
+      makeTask({ id: "t-child" }),
+    ];
+    const runs = [
+      makeRun({
+        id: "r-root",
+        task_id: "t-root",
+        started_at: "2024-01-01T10:00:00Z",
+      }),
+      makeRun({
+        id: "r-child",
+        task_id: "t-child",
+        parent_task_run_id: "r-root",
+        triggered_by_step_execution_id: "ep",
+        started_at: "2024-01-01T10:00:50Z",
+      }),
+    ];
+    const executions = [
+      makeExec({
+        id: "ep",
+        task_id: "t-root",
+        task_run_id: "r-root",
+        started_at: "2024-01-01T10:00:00Z",
+      }),
+      makeExec({
+        id: "ec",
+        task_id: "t-child",
+        task_run_id: "r-child",
+        started_at: "2024-01-01T10:01:00Z",
+      }),
+    ];
+
+    const proj = buildTimelineProjectionFromProjection(
+      projectTaskRunTrace(runs, executions, tasks),
+      {}
+    );
+
+    expect(proj.mainRows).toHaveLength(2);
+    expect(proj.mainRows[0]).toMatchObject({
+      rowKey: "r-root",
+      taskRunId: "r-root",
+      depth: 0,
+      index: 0,
+    });
+    expect(proj.mainRows[1]).toMatchObject({
+      rowKey: "r-child",
+      taskRunId: "r-child",
+      depth: 1,
+      index: 1,
+    });
+
+    expect(proj.delegations).toHaveLength(1);
+    const edge = proj.delegations[0];
+    expect(edge.parentTaskRunId).toBe("r-root");
+    expect(edge.childTaskRunId).toBe("r-child");
+    expect(edge.parentRowIndex).toBe(0);
+    expect(edge.childRowIndex).toBe(1);
+    // Anchor x is at the child's first execution time (the "end" of the
+    // observed range here).
+    expect(edge.x).toBeCloseTo(1, 5);
+  });
+
+  it("buckets thinking markers into mainByRow keyed on the execution's TaskRun, not its task", () => {
+    const tasks = [
+      makeTask({ id: "t-root" }),
+      makeTask({ id: "t-child" }),
+    ];
+    const runs = [
+      makeRun({
+        id: "r-root",
+        task_id: "t-root",
+        started_at: "2024-01-01T10:00:00Z",
+      }),
+      makeRun({
+        id: "r-child",
+        task_id: "t-child",
+        parent_task_run_id: "r-root",
+        started_at: "2024-01-01T10:00:30Z",
+      }),
+    ];
+    const executions = [
+      makeExec({
+        id: "ep",
+        task_id: "t-root",
+        task_run_id: "r-root",
+        started_at: "2024-01-01T10:00:00Z",
+      }),
+      makeExec({
+        id: "ec",
+        task_id: "t-child",
+        task_run_id: "r-child",
+        started_at: "2024-01-01T10:01:00Z",
+      }),
+    ];
+    const logs: Record<string, SessionLog[]> = {
+      ep: [
+        makeLog(
+          "ep",
+          {
+            type: "assistant",
+            message: { content: [{ type: "text", text: "parent thinking" }] },
+          },
+          "2024-01-01T10:00:15Z",
+          0
+        ),
+      ],
+      ec: [
+        makeLog(
+          "ec",
+          {
+            type: "assistant",
+            message: { content: [{ type: "text", text: "child thinking" }] },
+          },
+          "2024-01-01T10:01:30Z",
+          0
+        ),
+      ],
+    };
+    const proj = buildTimelineProjectionFromProjection(
+      projectTaskRunTrace(runs, executions, tasks),
+      logs
+    );
+
+    expect(proj.mainByRow).toHaveLength(2);
+    expect(proj.mainByRow[0].map((m) => m.executionId)).toEqual(["ep"]);
+    expect(proj.mainByRow[1].map((m) => m.executionId)).toEqual(["ec"]);
+    expect(proj.main).toHaveLength(2);
+    // Each main marker carries the rowIndex matching its bucket.
+    expect(proj.main.find((m) => m.executionId === "ep")?.rowIndex).toBe(0);
+    expect(proj.main.find((m) => m.executionId === "ec")?.rowIndex).toBe(1);
+  });
+
+  it("emits model_fallback per-run only (no cross-run fallback) and at the new exec's x", () => {
+    const tasks = [
+      makeTask({ id: "t-root" }),
+      makeTask({ id: "t-child" }),
+    ];
+    const runs = [
+      makeRun({
+        id: "r-root",
+        task_id: "t-root",
+        started_at: "2024-01-01T10:00:00Z",
+      }),
+      makeRun({
+        id: "r-child",
+        task_id: "t-child",
+        parent_task_run_id: "r-root",
+        started_at: "2024-01-01T10:01:00Z",
+      }),
+    ];
+    const executions = [
+      // r-root: opus → sonnet (model_fallback expected within this run).
+      makeExec({
+        id: "p1",
+        task_id: "t-root",
+        task_run_id: "r-root",
+        started_at: "2024-01-01T10:00:00Z",
+        model: "claude-opus-4",
+      }),
+      makeExec({
+        id: "p2",
+        task_id: "t-root",
+        task_run_id: "r-root",
+        started_at: "2024-01-01T10:00:30Z",
+        model: "claude-sonnet-4",
+      }),
+      // r-child: only one exec on a different model → no fallback.
+      makeExec({
+        id: "c1",
+        task_id: "t-child",
+        task_run_id: "r-child",
+        started_at: "2024-01-01T10:01:00Z",
+        model: "claude-haiku-4",
+      }),
+    ];
+    const proj = buildTimelineProjectionFromProjection(
+      projectTaskRunTrace(runs, executions, tasks),
+      {}
+    );
+    const fallbacks = proj.thresholds.filter((m) => m.kind === "model_fallback");
+    expect(fallbacks).toHaveLength(1);
+    expect(fallbacks[0].executionId).toBe("p2");
+    // p2 is at the midpoint of [10:00:00, 10:01:00] → x = 0.5.
+    expect(fallbacks[0].x).toBeCloseTo(0.5, 5);
+    expect(fallbacks[0].label).toBe("claude-opus-4 → claude-sonnet-4");
+  });
+
+  it("anchors run-aware delegation x at the child's first execution and binds row indices to the projection order", () => {
+    const tasks = [
+      makeTask({ id: "t-root" }),
+      makeTask({ id: "t-child" }),
+    ];
+    const runs = [
+      makeRun({
+        id: "r-root",
+        task_id: "t-root",
+        started_at: "2024-01-01T10:00:00Z",
+      }),
+      makeRun({
+        id: "r-child",
+        task_id: "t-child",
+        parent_task_run_id: "r-root",
+        triggered_by_step_execution_id: "ep",
+        started_at: "2024-01-01T10:00:10Z",
+      }),
+    ];
+    const executions = [
+      makeExec({
+        id: "ep",
+        task_id: "t-root",
+        task_run_id: "r-root",
+        started_at: "2024-01-01T10:00:00Z",
+      }),
+      makeExec({
+        // Child first execution at 25% through the [10:00:00, 10:01:00] span.
+        id: "ec",
+        task_id: "t-child",
+        task_run_id: "r-child",
+        started_at: "2024-01-01T10:00:15Z",
+      }),
+      makeExec({
+        id: "ep2",
+        task_id: "t-root",
+        task_run_id: "r-root",
+        started_at: "2024-01-01T10:01:00Z",
+      }),
+    ];
+    const proj = buildTimelineProjectionFromProjection(
+      projectTaskRunTrace(runs, executions, tasks),
+      {}
+    );
+    expect(proj.delegations).toHaveLength(1);
+    const edge = proj.delegations[0];
+    expect(edge.parentTaskRunId).toBe("r-root");
+    expect(edge.childTaskRunId).toBe("r-child");
+    expect(edge.parentRowIndex).toBe(0);
+    expect(edge.childRowIndex).toBe(1);
+    expect(edge.x).toBeCloseTo(0.25, 5);
+  });
+
+  it("keeps a failed retry inside the same run row instead of fanning out", () => {
+    const tasks = [makeTask({ id: "t-root" })];
+    const runs = [
+      makeRun({
+        id: "r-root",
+        task_id: "t-root",
+        status: "executing",
+        started_at: "2024-01-01T10:00:00Z",
+      }),
+    ];
+    const e1 = makeExec({
+      id: "e1",
+      task_id: "t-root",
+      task_run_id: "r-root",
+      step_name: "implement",
+      started_at: "2024-01-01T10:00:00Z",
+      status: "failed",
+    });
+    const e2 = makeExec({
+      id: "e2",
+      task_id: "t-root",
+      task_run_id: "r-root",
+      step_name: "implement",
+      started_at: "2024-01-01T10:01:00Z",
+      status: "in_progress",
+    });
+    const proj = buildTimelineProjectionFromProjection(
+      projectTaskRunTrace(runs, [e1, e2], tasks),
+      {}
+    );
+
+    // Single row keyed on the run; both executions live there.
+    expect(proj.mainRows).toHaveLength(1);
+    expect(proj.mainRows[0].taskRunId).toBe("r-root");
+    // No cross-task delegation edge — both executions belong to the same run.
+    expect(proj.delegations).toEqual([]);
+    // Same-step retry threshold still surfaces inside the run.
+    expect(proj.thresholds.some((m) => m.kind === "retry")).toBe(true);
   });
 });

@@ -18,6 +18,11 @@
  *   - completed                                                    -> "done"
  */
 import type { StepExecution, Task } from "../../bindings";
+import {
+  resolveParentExecution,
+  type TaskRunTraceProjection,
+} from "./taskRunTrace";
+import { safeMs } from "./timeUtils";
 
 export type CorridorNodeStatus = "active" | "done" | "failed";
 
@@ -25,6 +30,8 @@ export interface CorridorNode {
   id: string;
   executionId: string;
   taskId: string;
+  /** TaskRun this execution belongs to, when known. */
+  taskRunId: string | null;
   stepName: string | null;
   status: CorridorNodeStatus;
   startedAtMs: number | null;
@@ -46,7 +53,11 @@ export interface CorridorEdge {
 }
 
 export interface CorridorLane {
+  /** TaskRun id for run-aware layouts; Task id for the legacy layout. */
+  laneId: string;
   taskId: string;
+  /** Null in the legacy task-keyed layout. */
+  taskRunId: string | null;
   title: string | null;
   column: number;
   /** Pixel x of the lane center. */
@@ -80,12 +91,6 @@ export const DEFAULT_CORRIDOR_LAYOUT: Required<CorridorLayoutOptions> = {
 };
 
 const REJECTION_RE = /reject|revise|fail/i;
-
-function safeMs(iso: string | null | undefined): number | null {
-  if (!iso) return null;
-  const ms = Date.parse(iso);
-  return Number.isNaN(ms) ? null : ms;
-}
 
 function classifyStatus(exec: StepExecution): CorridorNodeStatus {
   if (exec.status === "failed") return "failed";
@@ -197,6 +202,7 @@ export function computeCorridorLayout(
         id,
         executionId: e.id ?? "",
         taskId,
+        taskRunId: e.task_run_id ?? null,
         stepName: e.step_name ?? null,
         status: classifyStatus(e),
         startedAtMs: safeMs(e.started_at),
@@ -268,7 +274,9 @@ export function computeCorridorLayout(
   }
 
   const lanes: CorridorLane[] = orderedTasks.map((t, i) => ({
+    laneId: t.taskId,
     taskId: t.taskId,
+    taskRunId: null,
     title: t.title,
     column: i,
     x: padding + i * columnSpacing,
@@ -280,6 +288,102 @@ export function computeCorridorLayout(
     orderedTasks.length === 0
       ? padding * 2
       : padding * 2 + (orderedTasks.length - 1) * columnSpacing;
+  const height = padding * 2 + maxRow * rowSpacing;
+
+  return { nodes, edges, lanes, width, height };
+}
+
+// Build a corridor layout from explicit TaskRun lineage.
+// Orphan executions (no task_run_id) are not rendered here; route them
+// through computeCorridorLayout via projection.orphanExecutions instead.
+export function computeCorridorLayoutFromProjection(
+  projection: TaskRunTraceProjection,
+  options: CorridorLayoutOptions = {}
+): CorridorLayout {
+  const { columnSpacing, rowSpacing, padding } = {
+    ...DEFAULT_CORRIDOR_LAYOUT,
+    ...options,
+  };
+
+  const orderedRuns = projection.orderedRuns;
+
+  const nodes: CorridorNode[] = [];
+  const nodeByExecutionId = new Map<string, CorridorNode>();
+  const lanes: CorridorLane[] = [];
+
+  orderedRuns.forEach((node, column) => {
+    const lane: CorridorLane = {
+      laneId: node.run.id,
+      taskId: node.run.task_id,
+      taskRunId: node.run.id,
+      title: node.task?.title ?? null,
+      column,
+      x: padding + column * columnSpacing,
+      nodeCount: node.executions.length,
+    };
+    lanes.push(lane);
+
+    node.executions.forEach((e, row) => {
+      if (!e.id) return;
+      const id = `n-${e.id}`;
+      const corridorNode: CorridorNode = {
+        id,
+        executionId: e.id,
+        taskId: node.run.task_id,
+        taskRunId: node.run.id,
+        stepName: e.step_name ?? null,
+        status: classifyStatus(e),
+        startedAtMs: safeMs(e.started_at),
+        column,
+        row,
+        x: lane.x,
+        y: padding + row * rowSpacing,
+      };
+      nodes.push(corridorNode);
+      nodeByExecutionId.set(e.id, corridorNode);
+    });
+  });
+
+  const edges: CorridorEdge[] = [];
+
+  // Transition edges: consecutive executions within a run.
+  for (const node of orderedRuns) {
+    for (let i = 1; i < node.executions.length; i += 1) {
+      const prev = node.executions[i - 1];
+      const curr = node.executions[i];
+      if (!prev.id || !curr.id) continue;
+      edges.push({
+        id: `e-tr-${prev.id}-${curr.id}`,
+        kind: "transition",
+        fromNodeId: `n-${prev.id}`,
+        toNodeId: `n-${curr.id}`,
+      });
+    }
+  }
+
+  // Delegation edges: explicit run-to-run lineage.
+  for (const edge of projection.delegationEdges) {
+    const childNode = projection.runsById.get(edge.childRunId);
+    const childFirst = childNode?.executions[0];
+    if (!childFirst?.id) continue;
+    const parentExec = resolveParentExecution(projection, edge);
+    if (!parentExec?.id) continue;
+    const fromCorridor = nodeByExecutionId.get(parentExec.id);
+    const toCorridor = nodeByExecutionId.get(childFirst.id);
+    if (!fromCorridor || !toCorridor) continue;
+    edges.push({
+      id: `e-dl-${parentExec.id}-${childFirst.id}`,
+      kind: "delegation",
+      fromNodeId: fromCorridor.id,
+      toNodeId: toCorridor.id,
+    });
+  }
+
+  const maxRow = nodes.reduce((m, n) => (n.row > m ? n.row : m), 0);
+  const width =
+    orderedRuns.length === 0
+      ? padding * 2
+      : padding * 2 + (orderedRuns.length - 1) * columnSpacing;
   const height = padding * 2 + maxRow * rowSpacing;
 
   return { nodes, edges, lanes, width, height };

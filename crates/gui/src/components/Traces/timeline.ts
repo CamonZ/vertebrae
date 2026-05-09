@@ -3,6 +3,11 @@ import {
   mergeExecutionEvents,
   type TaggedConversationEvent,
 } from "../../types/conversation";
+import {
+  resolveParentExecution,
+  type TaskRunTraceProjection,
+} from "./taskRunTrace";
+import { safeMs } from "./timeUtils";
 
 export type LaneKind = "threshold" | "tool" | "main" | "delegation";
 
@@ -56,6 +61,16 @@ export interface DelegationEdge {
   timestampMs: number;
   parentTaskId: string;
   childTaskId: string;
+  /**
+   * Parent TaskRun id when the edge was derived from explicit run lineage.
+   * Null for legacy task-hierarchy delegation edges.
+   */
+  parentTaskRunId: string | null;
+  /**
+   * Child TaskRun id when the edge was derived from explicit run lineage.
+   * Null for legacy task-hierarchy delegation edges.
+   */
+  childTaskRunId: string | null;
   parentRowIndex: number;
   childRowIndex: number;
   childLevel: string | null;
@@ -64,7 +79,11 @@ export interface DelegationEdge {
 export type TimelineMarker = ThresholdMarker | ToolMarker | MainMarker;
 
 export interface MainRow {
+  /** Stable row key. For run-aware projections this is the TaskRun id. */
+  rowKey: string;
   taskId: string;
+  /** TaskRun id when the row is keyed on a TaskRun; null for legacy rows. */
+  taskRunId: string | null;
   title: string | null;
   level: string | null;
   /** Depth from root (0 = root). */
@@ -116,7 +135,9 @@ function buildMainRows(
     if (taskIdsWithExecutions.has(taskId)) {
       const t = tasksById.get(taskId);
       rows.push({
+        rowKey: taskId,
         taskId,
+        taskRunId: null,
         title: t?.title ?? null,
         level: t?.level ?? null,
         depth,
@@ -134,7 +155,9 @@ function buildMainRows(
     if (!visited.has(taskId)) {
       const t = tasksById.get(taskId);
       rows.push({
+        rowKey: taskId,
         taskId,
+        taskRunId: null,
         title: t?.title ?? null,
         level: t?.level ?? null,
         depth: 0,
@@ -144,12 +167,6 @@ function buildMainRows(
   }
 
   return rows;
-}
-
-function safeMs(iso: string | null | undefined): number | null {
-  if (!iso) return null;
-  const ms = Date.parse(iso);
-  return Number.isNaN(ms) ? null : ms;
 }
 
 export function buildTimelineProjection(
@@ -338,6 +355,8 @@ export function buildTimelineProjection(
           timestampMs: ms,
           parentTaskId: prevExec.task_id,
           childTaskId: exec.task_id,
+          parentTaskRunId: null,
+          childTaskRunId: null,
           parentRowIndex: parentRow,
           childRowIndex: childRow,
           childLevel: levelByTaskId.get(exec.task_id) ?? null,
@@ -360,3 +379,221 @@ export function buildTimelineProjection(
     taggedEvents: tagged,
   };
 }
+
+// Build a timeline projection from explicit TaskRun lineage. Orphan
+// executions (no task_run_id) are skipped here; route them through
+// buildTimelineProjection via projection.orphanExecutions instead.
+export function buildTimelineProjectionFromProjection(
+  projection: TaskRunTraceProjection,
+  logsByExecutionId: Readonly<Record<string, SessionLog[]>>
+): TimelineProjection {
+  const orderedRuns = projection.orderedRuns;
+
+  // Flatten executions that belong to known runs; skip orphans.
+  const runExecutions: StepExecution[] = [];
+  for (const node of orderedRuns) {
+    for (const e of node.executions) runExecutions.push(e);
+  }
+
+  let minMs: number | null = null;
+  let maxMs: number | null = null;
+  const observe = (ms: number): void => {
+    if (minMs === null || ms < minMs) minMs = ms;
+    if (maxMs === null || ms > maxMs) maxMs = ms;
+  };
+
+  for (const exec of runExecutions) {
+    const startMs = safeMs(exec.started_at);
+    if (startMs !== null) observe(startMs);
+    const endMs = safeMs(exec.completed_at);
+    if (endMs !== null) observe(endMs);
+  }
+
+  const tagged = mergeExecutionEvents(runExecutions, logsByExecutionId);
+  for (const t of tagged) {
+    const ms = safeMs(t.event.timestamp);
+    if (ms !== null) observe(ms);
+  }
+
+  const spanMs = minMs !== null && maxMs !== null ? maxMs - minMs : 0;
+  const xOf = (ms: number): number => {
+    if (minMs === null || spanMs <= 0) return 0;
+    return (ms - minMs) / spanMs;
+  };
+
+  // Rows: one per TaskRun, in DFS order, with depth from the projection.
+  const mainRows: MainRow[] = orderedRuns.map((node, i) => ({
+    rowKey: node.run.id,
+    taskId: node.run.task_id,
+    taskRunId: node.run.id,
+    title: node.task?.title ?? null,
+    level: node.task?.level ?? null,
+    depth: node.depth,
+    index: i,
+  }));
+  const rowIndexByRunId = new Map<string, number>();
+  for (const row of mainRows) {
+    if (row.taskRunId) rowIndexByRunId.set(row.taskRunId, row.index);
+  }
+
+  // Thresholds: per-run consecutive transitions / retries / model fallbacks.
+  const thresholds: ThresholdMarker[] = [];
+  for (const node of orderedRuns) {
+    let lastModel: string | null = null;
+    for (let i = 0; i < node.executions.length; i += 1) {
+      const exec = node.executions[i];
+      const startMs = safeMs(exec.started_at);
+      if (startMs === null) continue;
+      const x = xOf(startMs);
+      const stepName = exec.step_name ?? null;
+      const taskId = exec.task_id ?? node.run.task_id;
+      const prev = i > 0 ? node.executions[i - 1] : null;
+      if (prev) {
+        const prevStep = prev.step_name ?? null;
+        let kind: ThresholdMarkerKind = "transition";
+        if (prevStep && stepName && prevStep === stepName) {
+          kind = "retry";
+        } else if (stepName && REJECTION_RE.test(stepName)) {
+          kind = "rejection";
+        } else if (stepName && APPROVAL_RE.test(stepName)) {
+          kind = "approval";
+        }
+        thresholds.push({
+          lane: "threshold",
+          kind,
+          x,
+          timestampMs: startMs,
+          executionId: exec.id ?? "",
+          taskId,
+          fromStep: prevStep,
+          toStep: stepName,
+          label: `${prevStep ?? "?"} → ${stepName ?? "?"}`,
+        });
+      } else {
+        thresholds.push({
+          lane: "threshold",
+          kind: "execution_start",
+          x,
+          timestampMs: startMs,
+          executionId: exec.id ?? "",
+          taskId,
+          fromStep: null,
+          toStep: stepName,
+          label: stepName ?? "start",
+        });
+      }
+      if (lastModel && exec.model && lastModel !== exec.model) {
+        thresholds.push({
+          lane: "threshold",
+          kind: "model_fallback",
+          x,
+          timestampMs: startMs,
+          executionId: exec.id ?? "",
+          taskId,
+          fromStep: prev?.step_name ?? null,
+          toStep: stepName,
+          label: `${lastModel} → ${exec.model}`,
+        });
+      }
+      if (exec.model) lastModel = exec.model;
+    }
+  }
+
+  const { runIdByExecutionId } = projection;
+
+  const tools: ToolMarker[] = [];
+  const main: MainMarker[] = [];
+  const mainByRow: MainMarker[][] = mainRows.map(() => []);
+
+  for (const t of tagged) {
+    const ms = safeMs(t.event.timestamp);
+    if (ms === null) continue;
+    const x = xOf(ms);
+    const event = t.event;
+    if (event.kind === "tool_call") {
+      tools.push({
+        lane: "tool",
+        kind: "tool_use",
+        x,
+        timestampMs: ms,
+        executionId: t.executionId,
+        taskId: t.taskId,
+        toolId: event.toolId,
+        toolName: event.toolName,
+        isError: false,
+      });
+    } else if (event.kind === "tool_result") {
+      tools.push({
+        lane: "tool",
+        kind: "tool_result",
+        x,
+        timestampMs: ms,
+        executionId: t.executionId,
+        taskId: t.taskId,
+        toolId: event.toolUseId,
+        toolName: "",
+        isError: event.isError,
+      });
+    } else if (event.kind === "thinking") {
+      const runId = runIdByExecutionId.get(t.executionId);
+      const rowIndex = runId !== undefined ? rowIndexByRunId.get(runId) : undefined;
+      if (rowIndex !== undefined) {
+        const marker: MainMarker = {
+          lane: "main",
+          kind: "message",
+          x,
+          timestampMs: ms,
+          executionId: t.executionId,
+          taskId: t.taskId,
+          rowIndex,
+        };
+        main.push(marker);
+        mainByRow[rowIndex].push(marker);
+      }
+    }
+  }
+
+  // Delegation edges: explicit run-to-run lineage. Anchor x to either the
+  // child's first execution or the resolved trigger execution time.
+  const delegations: DelegationEdge[] = [];
+  for (const edge of projection.delegationEdges) {
+    const childNode = projection.runsById.get(edge.childRunId);
+    const parentNode = projection.runsById.get(edge.parentRunId);
+    if (!childNode || !parentNode) continue;
+    const parentRow = rowIndexByRunId.get(edge.parentRunId);
+    const childRow = rowIndexByRunId.get(edge.childRunId);
+    if (parentRow === undefined || childRow === undefined) continue;
+    const childFirst = childNode.executions[0];
+    const triggerExec = resolveParentExecution(projection, edge);
+    const anchorMs =
+      safeMs(childFirst?.started_at) ??
+      safeMs(triggerExec?.started_at) ??
+      0;
+    delegations.push({
+      lane: "delegation",
+      x: xOf(anchorMs),
+      timestampMs: anchorMs,
+      parentTaskId: parentNode.run.task_id,
+      childTaskId: childNode.run.task_id,
+      parentTaskRunId: edge.parentRunId,
+      childTaskRunId: edge.childRunId,
+      parentRowIndex: parentRow,
+      childRowIndex: childRow,
+      childLevel: childNode.task?.level ?? null,
+    });
+  }
+
+  return {
+    minMs,
+    maxMs,
+    spanMs,
+    mainRows,
+    thresholds,
+    tools,
+    main,
+    mainByRow,
+    delegations,
+    taggedEvents: tagged,
+  };
+}
+
