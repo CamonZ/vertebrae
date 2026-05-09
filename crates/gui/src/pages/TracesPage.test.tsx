@@ -53,6 +53,7 @@ const subtreeExecutions = [
   createMockStepExecution({
     id: "ex-1",
     task_id: "root",
+    task_run_id: "run-root",
     status: "completed",
     step_name: "in_progress",
     cost: "0.2",
@@ -61,6 +62,7 @@ const subtreeExecutions = [
   createMockStepExecution({
     id: "ex-2",
     task_id: "child",
+    task_run_id: "run-child",
     status: "failed",
     step_name: "in_progress",
     cost: "0.22",
@@ -72,6 +74,7 @@ const subtreeExecutions = [
 // hook field only satisfies the mock shape — the page no longer reads it.
 const subtreeRollups = {
   totalRuns: subtreeExecutions.length,
+  totalAttempts: subtreeExecutions.length,
   totalCost: 0.42,
   totalTokens: 8000,
   totalWallTimeMs: 30000,

@@ -29,14 +29,18 @@ const executions = [
   createMockStepExecution({
     id: "e-root-1",
     task_id: "root",
+    task_run_id: "run-root",
     step_name: "review",
     status: "completed",
     cost: "0.5",
     duration_ms: 1000,
   }),
+  // Child has two attempts under run-child-A (a retry) and one under
+  // run-child-B (a separate later run) — 2 runs / 3 attempts.
   createMockStepExecution({
     id: "e-child-1",
     task_id: "child",
+    task_run_id: "run-child-A",
     step_name: "in_progress",
     status: "failed",
     cost: "0.25",
@@ -45,14 +49,25 @@ const executions = [
   createMockStepExecution({
     id: "e-child-2",
     task_id: "child",
+    task_run_id: "run-child-A",
     step_name: "in_progress",
     status: "completed",
     cost: "0.1",
     duration_ms: 500,
   }),
   createMockStepExecution({
+    id: "e-child-3",
+    task_id: "child",
+    task_run_id: "run-child-B",
+    step_name: "in_progress",
+    status: "completed",
+    cost: "0.0",
+    duration_ms: 100,
+  }),
+  createMockStepExecution({
     id: "e-grand-1",
     task_id: "grand",
+    task_run_id: "run-grand",
     step_name: "in_progress",
     status: "in_progress",
     cost: "0.0",
@@ -80,7 +95,7 @@ describe("SubtreeRail", () => {
     expect(groups[2].getAttribute("data-depth")).toBe("2");
   });
 
-  it("shows per-group rollups with run counts and cost", () => {
+  it("shows per-group rollups with TaskRun counts, attempt counts, and cost", () => {
     render(
       <SubtreeRail
         rootTaskId="root"
@@ -95,9 +110,39 @@ describe("SubtreeRail", () => {
     expect(childGroup).toBeDefined();
     if (!childGroup) return;
     const runs = within(childGroup).getByTestId("subtree-rail-group-runs");
+    const attempts = within(childGroup).getByTestId(
+      "subtree-rail-group-attempts"
+    );
     const cost = within(childGroup).getByTestId("subtree-rail-group-cost");
+    // Child has 2 distinct task_run_ids (run-child-A retried twice, run-child-B once)
+    // across 3 StepExecution attempts.
     expect(runs.textContent).toBe("2 runs");
+    expect(attempts.textContent).toBe("3 attempts");
     expect(cost.textContent).toMatch(/\$0\.35/);
+  });
+
+  it("singularizes the run/attempt labels when a group has exactly one of each", () => {
+    // Root has one execution under one TaskRun — both labels should be
+    // singular ("1 run", "1 attempt").
+    render(
+      <SubtreeRail
+        rootTaskId="root"
+        tasks={tasks}
+        subtreeTaskIds={subtreeTaskIds}
+        executions={executions}
+      />
+    );
+    const rootGroup = screen
+      .getAllByTestId("subtree-rail-group")
+      .find((g) => g.getAttribute("data-task-id") === "root");
+    expect(rootGroup).toBeDefined();
+    if (!rootGroup) return;
+    const runs = within(rootGroup).getByTestId("subtree-rail-group-runs");
+    const attempts = within(rootGroup).getByTestId(
+      "subtree-rail-group-attempts"
+    );
+    expect(runs.textContent).toBe("1 run");
+    expect(attempts.textContent).toBe("1 attempt");
   });
 
   it("renders status pips reflecting the per-group execution statuses", () => {
@@ -119,7 +164,9 @@ describe("SubtreeRail", () => {
     expect(failed).not.toBeNull();
     expect(completed).not.toBeNull();
     expect(failed?.getAttribute("data-count")).toBe("1");
-    expect(completed?.getAttribute("data-count")).toBe("1");
+    // Child has two completed StepExecutions (the retry success in
+    // run-child-A and the standalone run-child-B).
+    expect(completed?.getAttribute("data-count")).toBe("2");
   });
 
   it("collapses and expands a group on toggle click", () => {

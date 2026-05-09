@@ -3,13 +3,18 @@ import {
   render,
   screen,
   createMockTask,
+  createMockTaskRun,
   createMockStepExecution,
 } from "../test/test-utils";
 import { OperationsPage } from "./OperationsPage";
-import type { Task, StepExecution } from "../bindings";
+import type { Task, StepExecution, TaskRun } from "../bindings";
 
-let mockAttentionItems: { kind: string; task: Task; execution?: StepExecution }[] = [];
-let mockLiveItems: { task: Task; execution: StepExecution }[] = [];
+let mockAttentionItems: {
+  kind: "failed_run" | "review_request";
+  task: Task;
+  taskRun?: TaskRun;
+}[] = [];
+let mockLiveItems: { task: Task; taskRun: TaskRun }[] = [];
 let mockCompletedItems: { task: Task; execution: StepExecution }[] = [];
 let mockReadyTasks: Task[] = [];
 let mockIsLoading = false;
@@ -92,10 +97,10 @@ describe("OperationsPage", () => {
       mockLiveItems = [
         {
           task: createMockTask({ id: "t-1", title: "Task" }),
-          execution: createMockStepExecution({
-            id: "e-1",
+          taskRun: createMockTaskRun({
+            id: "run-1",
             task_id: "t-1",
-            status: "in_progress",
+            status: "executing",
           }),
         },
       ];
@@ -131,13 +136,13 @@ describe("OperationsPage", () => {
   });
 
   describe("section rendering", () => {
-    it("renders NeedsAttentionSection when there are attention items", () => {
+    it("renders NeedsAttentionSection when there is a failed TaskRun", () => {
       mockAttentionItems = [
         {
-          kind: "failed_execution",
+          kind: "failed_run",
           task: createMockTask({ id: "t-1", title: "Failed Task" }),
-          execution: createMockStepExecution({
-            id: "e-1",
+          taskRun: createMockTaskRun({
+            id: "run-1",
             task_id: "t-1",
             status: "failed",
           }),
@@ -153,10 +158,10 @@ describe("OperationsPage", () => {
       mockLiveItems = [
         {
           task: createMockTask({ id: "t-1", title: "Running Task" }),
-          execution: createMockStepExecution({
-            id: "e-1",
+          taskRun: createMockTaskRun({
+            id: "run-1",
             task_id: "t-1",
-            status: "in_progress",
+            status: "executing",
           }),
         },
       ];
@@ -204,10 +209,10 @@ describe("OperationsPage", () => {
       mockLiveItems = [
         {
           task: createMockTask({ id: "t-2", title: "Running" }),
-          execution: createMockStepExecution({
-            id: "e-1",
+          taskRun: createMockTaskRun({
+            id: "run-2",
             task_id: "t-2",
-            status: "in_progress",
+            status: "executing",
           }),
         },
       ];
@@ -237,10 +242,10 @@ describe("OperationsPage", () => {
       mockLiveItems = [
         {
           task: createMockTask({ id: "t-1", title: "Running" }),
-          execution: createMockStepExecution({
-            id: "e-1",
+          taskRun: createMockTaskRun({
+            id: "run-1",
             task_id: "t-1",
-            status: "in_progress",
+            status: "executing",
           }),
         },
       ];

@@ -64,6 +64,8 @@ describe("useSubtreeExecutions", () => {
           exec({
             id: `${taskId}-e1`,
             task_id: taskId,
+            // Each subtree task contributes a single distinct TaskRun.
+            task_run_id: `run-${taskId}`,
             cost: "0.1",
             input_tokens: 50,
             output_tokens: 25,
@@ -88,6 +90,7 @@ describe("useSubtreeExecutions", () => {
     expect(result.current.executions).toHaveLength(4);
     expect(result.current.rollups).toEqual({
       totalRuns: 4,
+      totalAttempts: 4,
       totalCost: 0.4,
       totalTokens: 4 * 75,
       totalWallTimeMs: 4000,
@@ -122,6 +125,7 @@ describe("useSubtreeExecutions", () => {
           exec({
             id: `${taskId}-e1`,
             task_id: taskId,
+            task_run_id: `run-${taskId}`,
             cost: "0.1",
             input_tokens: 10,
             output_tokens: 0,
@@ -135,6 +139,7 @@ describe("useSubtreeExecutions", () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     expect(result.current.rollups.totalRuns).toBe(4);
+    expect(result.current.rollups.totalAttempts).toBe(4);
     expect(result.current.rollups.totalCost).toBeCloseTo(0.4, 10);
 
     act(() => {
@@ -142,6 +147,8 @@ describe("useSubtreeExecutions", () => {
         exec({
           id: "new-exec",
           task_id: "task-1",
+          // A retry inside an existing TaskRun must bump attempts but not runs.
+          task_run_id: "run-task-1",
           cost: "1.0",
           input_tokens: 100,
           output_tokens: 200,
@@ -150,7 +157,8 @@ describe("useSubtreeExecutions", () => {
       );
     });
 
-    await waitFor(() => expect(result.current.rollups.totalRuns).toBe(5));
+    await waitFor(() => expect(result.current.rollups.totalAttempts).toBe(5));
+    expect(result.current.rollups.totalRuns).toBe(4);
     expect(result.current.rollups.totalCost).toBeCloseTo(1.4, 10);
     expect(result.current.rollups.totalTokens).toBe(4 * 10 + 300);
     expect(result.current.rollups.totalWallTimeMs).toBe(400 + 5000);

@@ -10,10 +10,13 @@ import {
  * Operations dashboard showing live system activity.
  *
  * Sections are ordered by urgency:
- *   1. Needs Attention -- failed executions and review requests
- *   2. Live -- currently running operations
- *   3. Recently Completed -- what just finished
- *   4. Ready -- unblocked tasks waiting to start
+ *   1. Needs Attention -- failed TaskRuns and review requests. Failed
+ *      StepExecution attempts inside an active TaskRun are NOT surfaced
+ *      here -- they live in trace history, not the attention queue.
+ *   2. Live -- TaskRuns whose status is queued/executing/waiting.
+ *   3. Recently Completed -- StepExecutions that just finished (kept for
+ *      attempt-level cost/log rollups).
+ *   4. Ready -- unblocked tasks waiting to start.
  *
  * Real-time sync is handled by GlobalListeners at the app root.
  */
