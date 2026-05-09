@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { Task } from "../../bindings";
 import { commands } from "../../bindings";
 
@@ -8,17 +8,44 @@ interface ReadySectionProps {
 }
 
 export function ReadySection({ tasks, onTaskStarted }: ReadySectionProps) {
+  const [pendingTaskIds, setPendingTaskIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const pendingTaskIdsRef = useRef<Set<string>>(new Set());
+
+  const setTaskPending = useCallback((taskId: string, pending: boolean) => {
+    const next = new Set(pendingTaskIdsRef.current);
+    if (pending) {
+      next.add(taskId);
+    } else {
+      next.delete(taskId);
+    }
+    pendingTaskIdsRef.current = next;
+    setPendingTaskIds(next);
+  }, []);
+
   const handleStart = useCallback(
     async (task: Task) => {
-      if (!task.workflow_id || !task.current_step_id) return;
+      if (
+        !task.workflow_id ||
+        !task.current_step_id ||
+        pendingTaskIdsRef.current.has(task.id)
+      ) {
+        return;
+      }
+      setTaskPending(task.id, true);
       try {
-        await commands.orchestrateTask(task.id);
-        onTaskStarted?.(task.id);
+        const result = await commands.runWorkflow(task.id);
+        if (result.status === "ok") {
+          onTaskStarted?.(task.id);
+        }
       } catch {
         // Errors are surfaced via toasts from the event listeners
+      } finally {
+        setTaskPending(task.id, false);
       }
     },
-    [onTaskStarted],
+    [onTaskStarted, setTaskPending],
   );
 
   if (tasks.length === 0) return null;
@@ -34,56 +61,61 @@ export function ReadySection({ tasks, onTaskStarted }: ReadySectionProps) {
       </h2>
 
       <div className="space-y-1">
-        {tasks.map((task) => (
-          <div
-            key={task.id}
-            className="border-l-2 border-l-border bg-bg-secondary px-4 py-3"
-            data-testid="ready-item"
-          >
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex min-w-0 flex-1 items-start gap-3">
-                <svg
-                  className="mt-0.5 h-4 w-4 shrink-0 text-text-muted"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                  aria-hidden="true"
-                >
-                  <circle cx="12" cy="12" r="9" strokeWidth={2} />
-                </svg>
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-text-primary">
-                    {task.title}
-                    <span className="font-normal text-text-secondary">
-                      {" "}&mdash; {task.workflow_id ? "all blockers resolved" : "ready to start"}
-                    </span>
-                  </p>
-                  <p className="mt-0.5 text-xs text-text-muted">
-                    {task.workflow_name && (
-                      <span>{task.workflow_name}</span>
-                    )}
-                    {task.step_name && (
-                      <> &middot; <span className="font-mono">{task.step_name}</span></>
-                    )}
-                    {!task.workflow_name && !task.step_name && (
-                      <span>No workflow assigned</span>
-                    )}
-                  </p>
+        {tasks.map((task) => {
+          const isPending = pendingTaskIds.has(task.id);
+          return (
+            <div
+              key={task.id}
+              className="border-l-2 border-l-border bg-bg-secondary px-4 py-3"
+              data-testid="ready-item"
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex min-w-0 flex-1 items-start gap-3">
+                  <svg
+                    className="mt-0.5 h-4 w-4 shrink-0 text-text-muted"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                    aria-hidden="true"
+                  >
+                    <circle cx="12" cy="12" r="9" strokeWidth={2} />
+                  </svg>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-text-primary">
+                      {task.title}
+                      <span className="font-normal text-text-secondary">
+                        {" "}&mdash; {task.workflow_id ? "all blockers resolved" : "ready to start"}
+                      </span>
+                    </p>
+                    <p className="mt-0.5 text-xs text-text-muted">
+                      {task.workflow_name && (
+                        <span>{task.workflow_name}</span>
+                      )}
+                      {task.step_name && (
+                        <> &middot; <span className="font-mono">{task.step_name}</span></>
+                      )}
+                      {!task.workflow_name && !task.step_name && (
+                        <span>No workflow assigned</span>
+                      )}
+                    </p>
+                  </div>
                 </div>
-              </div>
 
-              {task.workflow_id && task.current_step_id && (
-                <button
-                  type="button"
-                  onClick={() => handleStart(task)}
-                  className="shrink-0 rounded-md bg-primary px-3 py-1 text-xs font-medium text-bg-primary transition-colors hover:bg-primary-hover"
-                >
-                  Start
-                </button>
-              )}
+                {task.workflow_id && task.current_step_id && (
+                  <button
+                    type="button"
+                    onClick={() => handleStart(task)}
+                    disabled={isPending}
+                    aria-busy={isPending}
+                    className="shrink-0 rounded-md bg-primary px-3 py-1 text-xs font-medium text-bg-primary transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Start
+                  </button>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </section>
   );

@@ -35,6 +35,13 @@ export type {
   // API types
   CommandError,
   Result,
+
+  // TaskRun types
+  TaskRun,
+  TaskRunControls,
+  TaskRunStatus,
+  TaskRunTrace,
+  StopRunRequest,
 } from "../bindings";
 
 // Re-export commands for convenient access

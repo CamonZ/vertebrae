@@ -76,6 +76,7 @@ if (globalThis !== window) {
 // Cleanup after each test
 afterEach(() => {
   cleanup();
+  localStorage.clear();
 });
 
 // Mock Tauri APIs
