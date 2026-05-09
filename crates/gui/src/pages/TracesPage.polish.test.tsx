@@ -62,6 +62,7 @@ vi.mock("../hooks", () => ({
 
 const rollups = {
   totalRuns: 4,
+  totalAttempts: 4,
   totalCost: 0,
   totalTokens: 0,
   totalWallTimeMs: 0,

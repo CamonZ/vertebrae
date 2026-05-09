@@ -72,6 +72,8 @@ describe("useOperationsData", () => {
     expect(result.current.attentionItems[0].taskRun?.status).toBe("failed");
   });
 
+  // Testing criterion 2 of ticket 55e35cdc: a failed StepExecution inside an
+  // active TaskRun is attempt-level history, not a failed-task signal.
   it("does NOT derive attention items from failed StepExecution rows", async () => {
     const taskWithoutFailedRun = createMockTask({
       id: "t-stale",
@@ -109,6 +111,8 @@ describe("useOperationsData", () => {
     ).toHaveLength(0);
   });
 
+  // Testing criterion 1 of ticket 55e35cdc: a waiting TaskRun must show up
+  // under live operations alongside queued/executing runs.
   it("derives live items from tasks whose active_run is queued/executing/waiting", async () => {
     const queuedTask = createMockTask({
       id: "t-queued",

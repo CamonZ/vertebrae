@@ -51,7 +51,7 @@ vi.mock("../hooks/useSubtreeExecutions", () => ({
     executions: [
       createMockStepExecution({ id: "ex-1", task_id: "root" }),
     ],
-    rollups: { totalRuns: 1, totalCost: 0, totalTokens: 0, totalWallTimeMs: 0 },
+    rollups: { totalRuns: 1, totalAttempts: 1, totalCost: 0, totalTokens: 0, totalWallTimeMs: 0 },
     isLoading: false,
     error: null,
     refetch: vi.fn(),

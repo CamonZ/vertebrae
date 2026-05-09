@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, fireEvent } from "@testing-library/react";
+import { screen, fireEvent, within } from "@testing-library/react";
 import { render, createMockStepExecution } from "../../test/test-utils";
 import { TraceMiniView } from "./TraceMiniView";
 
@@ -15,51 +15,89 @@ vi.mock("react-router-dom", async () => {
   };
 });
 
-// useTaskExecutions: only the task's own executions
+// Two attempts share the same TaskRun (run-A) and one belongs to a separate,
+// earlier run (run-B), so "this task" rollups report 2 distinct runs across 3
+// attempts.
+const PLURAL_TASK_EXECUTIONS = [
+  createMockStepExecution({
+    id: "exec-task-old",
+    task_id: "task-1",
+    task_run_id: "run-B",
+    step_name: "in_progress",
+    started_at: "2025-01-01T10:00:00Z",
+    completed_at: "2025-01-01T10:00:30Z",
+    status: "completed",
+    cost: "0.12",
+    input_tokens: 1000,
+    output_tokens: 500,
+    duration_ms: 30000,
+  }),
+  createMockStepExecution({
+    id: "exec-task-retry",
+    task_id: "task-1",
+    task_run_id: "run-A",
+    step_name: "in_progress",
+    started_at: "2025-01-02T09:30:00Z",
+    completed_at: "2025-01-02T09:31:00Z",
+    status: "failed",
+    cost: "0.03",
+    input_tokens: 400,
+    output_tokens: 100,
+    duration_ms: 60000,
+  }),
+  createMockStepExecution({
+    id: "exec-task-new",
+    task_id: "task-1",
+    task_run_id: "run-A",
+    step_name: "in_progress",
+    started_at: "2025-01-02T10:00:00Z",
+    completed_at: "2025-01-02T10:01:30Z",
+    status: "failed",
+    cost: "0.05",
+    input_tokens: 800,
+    output_tokens: 200,
+    duration_ms: 90000,
+  }),
+];
+
+const SINGULAR_TASK_EXECUTIONS = [
+  createMockStepExecution({
+    id: "exec-task-only",
+    task_id: "task-1",
+    task_run_id: "run-only",
+    step_name: "in_progress",
+    started_at: "2025-01-02T10:00:00Z",
+    completed_at: "2025-01-02T10:00:10Z",
+    status: "completed",
+    cost: "0.01",
+    input_tokens: 100,
+    output_tokens: 50,
+    duration_ms: 10000,
+  }),
+];
+
+let taskExecutions = PLURAL_TASK_EXECUTIONS;
+let subtreeRollups = {
+  totalRuns: 4,
+  totalAttempts: 7,
+  totalCost: 1.25,
+  totalTokens: 12000,
+  totalWallTimeMs: 600000,
+};
+
 vi.mock("../../hooks/useTaskExecutions", () => ({
   useTaskExecutions: () => ({
-    executions: [
-      createMockStepExecution({
-        id: "exec-task-old",
-        task_id: "task-1",
-        step_name: "in_progress",
-        started_at: "2025-01-01T10:00:00Z",
-        completed_at: "2025-01-01T10:00:30Z",
-        status: "completed",
-        cost: "0.12",
-        input_tokens: 1000,
-        output_tokens: 500,
-        duration_ms: 30000,
-      }),
-      createMockStepExecution({
-        id: "exec-task-new",
-        task_id: "task-1",
-        step_name: "in_progress",
-        started_at: "2025-01-02T10:00:00Z",
-        completed_at: "2025-01-02T10:01:30Z",
-        status: "failed",
-        cost: "0.05",
-        input_tokens: 800,
-        output_tokens: 200,
-        duration_ms: 90000,
-      }),
-    ],
+    executions: taskExecutions,
     isLoading: false,
     error: null,
     refetch: vi.fn(),
   }),
 }));
 
-// useSubtreeExecutions: rollups across the whole subtree (including this task)
 vi.mock("../../hooks/useSubtreeExecutions", () => ({
   useSubtreeExecutions: () => ({
     executions: [],
-    rollups: {
-      totalRuns: 7,
-      totalCost: 1.25,
-      totalTokens: 12000,
-      totalWallTimeMs: 600000,
-    },
+    rollups: subtreeRollups,
     isLoading: false,
     error: null,
     refetch: vi.fn(),
@@ -71,6 +109,14 @@ vi.mock("../../hooks/useSubtreeExecutions", () => ({
 describe("TraceMiniView", () => {
   beforeEach(() => {
     mockNavigate.mockClear();
+    taskExecutions = PLURAL_TASK_EXECUTIONS;
+    subtreeRollups = {
+      totalRuns: 4,
+      totalAttempts: 7,
+      totalCost: 1.25,
+      totalTokens: 12000,
+      totalWallTimeMs: 600000,
+    };
   });
 
   it("renders workflow and step breadcrumb", () => {
@@ -111,23 +157,74 @@ describe("TraceMiniView", () => {
     expect(lastExec).toHaveTextContent("$0.05");
   });
 
-  it("renders 'this task' rollup distinct from 'subtree' rollup", () => {
+  it("renders 'this task' rollup with TaskRun count and StepExecution attempt count separated", () => {
     render(<TraceMiniView taskId="task-1" />);
 
     const taskRollup = screen.getByTestId("trace-mini-rollup-task");
     const subtreeRollup = screen.getByTestId("trace-mini-rollup-subtree");
 
+    // Three attempts (StepExecutions) span two TaskRuns; the headline number
+    // is the TaskRun count so retries don't inflate "runs". Both labels must
+    // pluralize since the counts are > 1.
     expect(taskRollup).toHaveTextContent("This task");
-    expect(taskRollup).toHaveTextContent("2");
-    expect(taskRollup).toHaveTextContent("$0.17");
+    expect(screen.getByTestId("trace-mini-rollup-task-runs")).toHaveTextContent(
+      "2"
+    );
+    expect(within(taskRollup).getByText("runs")).toBeInTheDocument();
+    expect(within(taskRollup).queryByText("run")).toBeNull();
+    expect(
+      screen.getByTestId("trace-mini-rollup-task-attempts")
+    ).toHaveTextContent("3 attempts");
+    expect(taskRollup).toHaveTextContent("$0.20");
 
     expect(subtreeRollup).toHaveTextContent("Subtree");
-    expect(subtreeRollup).toHaveTextContent("7");
+    expect(
+      screen.getByTestId("trace-mini-rollup-subtree-runs")
+    ).toHaveTextContent("4");
+    expect(within(subtreeRollup).getByText("runs")).toBeInTheDocument();
+    expect(within(subtreeRollup).queryByText("run")).toBeNull();
+    expect(
+      screen.getByTestId("trace-mini-rollup-subtree-attempts")
+    ).toHaveTextContent("7 attempts");
     expect(subtreeRollup).toHaveTextContent("$1.25");
 
     // Visually distinguished: subtree card uses primary accent
     expect(subtreeRollup.className).toContain("primary");
     expect(taskRollup.className).not.toContain("primary");
+  });
+
+  it("singularizes the run/attempt labels when the counts are exactly one", () => {
+    taskExecutions = SINGULAR_TASK_EXECUTIONS;
+    subtreeRollups = {
+      totalRuns: 1,
+      totalAttempts: 1,
+      totalCost: 0.01,
+      totalTokens: 150,
+      totalWallTimeMs: 10000,
+    };
+
+    render(<TraceMiniView taskId="task-1" />);
+
+    const taskRollup = screen.getByTestId("trace-mini-rollup-task");
+    const subtreeRollup = screen.getByTestId("trace-mini-rollup-subtree");
+
+    expect(screen.getByTestId("trace-mini-rollup-task-runs")).toHaveTextContent(
+      "1"
+    );
+    expect(within(taskRollup).getByText("run")).toBeInTheDocument();
+    expect(within(taskRollup).queryByText("runs")).toBeNull();
+    expect(
+      screen.getByTestId("trace-mini-rollup-task-attempts").textContent
+    ).toBe("1 attempt");
+
+    expect(
+      screen.getByTestId("trace-mini-rollup-subtree-runs")
+    ).toHaveTextContent("1");
+    expect(within(subtreeRollup).getByText("run")).toBeInTheDocument();
+    expect(within(subtreeRollup).queryByText("runs")).toBeNull();
+    expect(
+      screen.getByTestId("trace-mini-rollup-subtree-attempts").textContent
+    ).toBe("1 attempt");
   });
 
   it("navigates to /traces/:taskId when Explore traces is clicked", () => {
