@@ -37,6 +37,7 @@ mod step_create_tests {
             prompt: None,
             agent_config: None,
             model: None,
+            provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -72,6 +73,7 @@ mod step_create_tests {
             prompt: None,
             agent_config: None,
             model: None,
+            provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -117,6 +119,7 @@ mod step_create_tests {
             prompt: None,
             agent_config: None,
             model: None,
+            provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -162,6 +165,7 @@ mod step_create_tests {
             prompt: None,
             agent_config: None,
             model: None,
+            provider: None,
             order: 5,
             r#final: false,
             transitions_to: vec![],
@@ -199,6 +203,7 @@ mod step_create_tests {
             prompt: None,
             agent_config: None,
             model: None,
+            provider: None,
             order: 0,
             r#final: true,
             transitions_to: vec![],
@@ -244,6 +249,7 @@ mod step_create_tests {
             prompt: None,
             agent_config: None,
             model: None,
+            provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -294,6 +300,7 @@ mod step_create_tests {
             prompt: None,
             agent_config: None,
             model: None,
+            provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -333,6 +340,7 @@ mod step_create_tests {
             prompt: None,
             agent_config: None,
             model: None,
+            provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![
@@ -382,6 +390,7 @@ mod step_create_tests {
             prompt: None,
             agent_config: None,
             model: Some("sonnet".to_string()),
+            provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -434,6 +443,7 @@ mod step_list_tests {
                 prompt: None,
                 agent_config: None,
                 model: None,
+                provider: None,
                 order: i,
                 r#final: i == 2,
                 transitions_to: vec![],
@@ -502,6 +512,7 @@ mod step_list_tests {
             prompt: None,
             agent_config: None,
             model: None,
+            provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -551,6 +562,7 @@ mod step_show_tests {
             prompt: None,
             agent_config: None,
             model: None,
+            provider: None,
             order: 1,
             r#final: false,
             transitions_to: vec!["approved".to_string(), "rejected".to_string()],
@@ -596,6 +608,7 @@ mod step_show_tests {
             prompt: None,
             agent_config: None,
             model: Some("opus".to_string()),
+            provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -638,6 +651,7 @@ mod step_show_tests {
             prompt: None,
             agent_config: None,
             model: None,
+            provider: None,
             order: 10,
             r#final: true,
             transitions_to: vec![],
@@ -690,6 +704,7 @@ mod step_show_tests {
             prompt: None,
             agent_config: None,
             model: None,
+            provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -738,6 +753,7 @@ mod step_update_tests {
             prompt: None,
             agent_config: None,
             model: None,
+            provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -758,6 +774,7 @@ mod step_update_tests {
             prompt: None,
             agent_config: None,
             model: None,
+            provider: None,
             order: None,
             r#final: None,
             transitions_to: vec![],
@@ -794,6 +811,7 @@ mod step_update_tests {
             prompt: None,
             agent_config: None,
             model: None,
+            provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -814,6 +832,7 @@ mod step_update_tests {
             prompt: None,
             agent_config: None,
             model: None,
+            provider: None,
             order: None,
             r#final: None,
             transitions_to: vec![],
@@ -850,6 +869,7 @@ mod step_update_tests {
             prompt: None,
             agent_config: None,
             model: None,
+            provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -870,6 +890,7 @@ mod step_update_tests {
             prompt: None,
             agent_config: None,
             model: None,
+            provider: None,
             order: Some(5),
             r#final: Some(true),
             transitions_to: vec![],
@@ -906,6 +927,7 @@ mod step_update_tests {
             prompt: None,
             agent_config: None,
             model: None,
+            provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -926,6 +948,7 @@ mod step_update_tests {
             prompt: None,
             agent_config: None,
             model: None,
+            provider: None,
             order: None,
             r#final: None,
             transitions_to: vec![],
@@ -970,6 +993,7 @@ mod step_update_tests {
             prompt: None,
             agent_config: None,
             model: None,
+            provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -990,6 +1014,7 @@ mod step_update_tests {
             prompt: None,
             agent_config: None,
             model: None,
+            provider: None,
             order: None,
             r#final: None,
             transitions_to: vec![],
@@ -1026,6 +1051,7 @@ mod step_update_tests {
             prompt: None,
             agent_config: None,
             model: None,
+            provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1046,6 +1072,7 @@ mod step_update_tests {
             prompt: None,
             agent_config: None,
             model: None,
+            provider: None,
             order: None,
             r#final: None,
             transitions_to: vec!["next".to_string(), "retry".to_string()],
@@ -1095,6 +1122,7 @@ mod step_update_tests {
             prompt: None,
             agent_config: None,
             model: None,
+            provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec!["old".to_string()],
@@ -1115,6 +1143,7 @@ mod step_update_tests {
             prompt: None,
             agent_config: None,
             model: None,
+            provider: None,
             order: None,
             r#final: None,
             transitions_to: vec![],
@@ -1150,6 +1179,7 @@ mod step_update_tests {
             prompt: None,
             agent_config: None,
             model: None,
+            provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1169,6 +1199,7 @@ mod step_update_tests {
             prompt: None,
             agent_config: None,
             model: None,
+            provider: None,
             order: None,
             r#final: None,
             transitions_to: vec![],
@@ -1226,6 +1257,7 @@ mod step_dispatcher_tests {
             prompt: None,
             agent_config: None,
             model: None,
+            provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1273,6 +1305,7 @@ mod step_delete_tests {
             prompt: None,
             agent_config: None,
             model: None,
+            provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1334,6 +1367,7 @@ mod step_delete_tests {
             prompt: None,
             agent_config: None,
             model: None,
+            provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1374,6 +1408,7 @@ mod step_delete_tests {
             prompt: None,
             agent_config: None,
             model: None,
+            provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1423,6 +1458,7 @@ mod step_prompt_and_agent_config_tests {
 
             agent_config: None,
             model: None,
+            provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1460,6 +1496,7 @@ mod step_prompt_and_agent_config_tests {
             prompt: None,
             agent_config: Some(r#"{"model":"opus","max_budget_usd":5.0}"#.to_string()),
             model: None,
+            provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1496,6 +1533,7 @@ mod step_prompt_and_agent_config_tests {
             prompt: None,
             agent_config: Some(r#"{"model":"sonnet","max_budget_usd":10.0}"#.to_string()),
             model: Some("opus".to_string()),
+            provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1544,6 +1582,7 @@ mod step_prompt_and_agent_config_tests {
             prompt: None,
             agent_config: Some("not valid json".to_string()),
             model: None,
+            provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1582,6 +1621,7 @@ mod step_prompt_and_agent_config_tests {
             prompt: None,
             agent_config: None,
             model: Some("sonnet".to_string()),
+            provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1601,6 +1641,7 @@ mod step_prompt_and_agent_config_tests {
             prompt: None,
             agent_config: Some(r#"{"model":"haiku","max_budget_usd":2.5}"#.to_string()),
             model: None,
+            provider: None,
             order: None,
             r#final: None,
             transitions_to: vec![],
@@ -1635,6 +1676,7 @@ mod step_prompt_and_agent_config_tests {
             prompt: None,
             agent_config: None,
             model: None,
+            provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1655,6 +1697,7 @@ mod step_prompt_and_agent_config_tests {
             prompt: None,
             agent_config: Some(r#"{"model":"sonnet","max_budget_usd":3.0}"#.to_string()),
             model: Some("opus".to_string()),
+            provider: None,
             order: None,
             r#final: None,
             transitions_to: vec![],
@@ -1689,6 +1732,7 @@ mod step_prompt_and_agent_config_tests {
             prompt: None,
             agent_config: None,
             model: None,
+            provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1708,6 +1752,7 @@ mod step_prompt_and_agent_config_tests {
             prompt: None,
             agent_config: Some("{bad json}".to_string()),
             model: None,
+            provider: None,
             order: None,
             r#final: None,
             transitions_to: vec![],
@@ -1748,6 +1793,7 @@ mod step_prompt_and_agent_config_tests {
             prompt: Some("Analyze the codebase".to_string()),
             agent_config: Some(r#"{"model":"opus","max_budget_usd":15.0}"#.to_string()),
             model: None,
+            provider: None,
             order: 2,
             r#final: false,
             transitions_to: vec![],
@@ -1795,6 +1841,7 @@ mod route_step_schema_tests {
             prompt: None,
             agent_config: None,
             model: None,
+            provider: None,
             order: 0,
             r#final: false,
             transitions_to: vec![],
@@ -1815,6 +1862,7 @@ mod route_step_schema_tests {
             prompt: None,
             agent_config: None,
             model: None,
+            provider: None,
             order: None,
             r#final: None,
             transitions_to: vec![],
@@ -1994,5 +2042,334 @@ mod route_step_schema_tests {
             .unwrap()
             .unwrap();
         assert_eq!(step.output_schema, Some(initial_schema));
+    }
+}
+
+// ============================================================================
+// Provider selection tests
+// ============================================================================
+
+#[cfg(test)]
+mod provider_tests {
+    use super::*;
+    use vertebrae_core::{AgentConfig, PermissionMode, Provider};
+
+    fn add_cmd_with(
+        name: &str,
+        workflow_id: String,
+        id: &str,
+        agent_config: Option<String>,
+        model: Option<String>,
+        provider: Option<Provider>,
+    ) -> StepAddCommand {
+        StepAddCommand {
+            name: name.to_string(),
+            workflow: workflow_id,
+            id: Some(id.to_string()),
+            goal: None,
+            agent: vec![],
+            skill: vec![],
+            prompt: None,
+            agent_config,
+            model,
+            provider,
+            order: 0,
+            r#final: false,
+            transitions_to: vec![],
+            step_type: CliStepType::Execute,
+            output_schema: None,
+        }
+    }
+
+    fn update_cmd_with(
+        id: &str,
+        agent_config: Option<String>,
+        model: Option<String>,
+        provider: Option<Provider>,
+    ) -> StepUpdateCommand {
+        StepUpdateCommand {
+            id: id.to_string(),
+            name: None,
+            goal: None,
+            agent: vec![],
+            clear_agents: false,
+            skill: vec![],
+            clear_skills: false,
+            prompt: None,
+            agent_config,
+            model,
+            provider,
+            order: None,
+            r#final: None,
+            transitions_to: vec![],
+            clear_transitions: false,
+            step_type: None,
+            output_schema: None,
+            clear_output_schema: false,
+        }
+    }
+
+    async fn mk_workflow() -> (vertebrae_core::VertebraeServices, String) {
+        let services = mock_services();
+        let workflow_id = services
+            .workflows()
+            .create_workflow(CreateWorkflowOptions::new("Default", vec![]))
+            .await
+            .unwrap();
+        (services, workflow_id)
+    }
+
+    #[tokio::test]
+    async fn add_overlay_preserves_unrelated_agent_config_fields() {
+        let (services, workflow_id) = mk_workflow().await;
+
+        let agent_config_json = r#"{
+            "model": "sonnet",
+            "system_prompt": "Be helpful",
+            "permission_mode": "plan",
+            "max_budget_usd": 7.5,
+            "allowed_tools": ["bash", "read"]
+        }"#;
+
+        let cmd = add_cmd_with(
+            "Step",
+            workflow_id,
+            "ovl-1",
+            Some(agent_config_json.to_string()),
+            Some("opus".to_string()),
+            Some(Provider::Anthropic),
+        );
+
+        cmd.execute(services.steps()).await.unwrap();
+
+        let step = services.steps().get_step("ovl-1").await.unwrap().unwrap();
+        let cfg: &AgentConfig = &step.agent_config;
+
+        assert_eq!(cfg.model.as_deref(), Some("opus"));
+        assert_eq!(cfg.provider, Some(Provider::Anthropic));
+        assert_eq!(cfg.system_prompt.as_deref(), Some("Be helpful"));
+        assert_eq!(cfg.permission_mode, Some(PermissionMode::Plan));
+        assert_eq!(cfg.max_budget_usd, Some(7.5));
+        assert_eq!(
+            cfg.allowed_tools,
+            vec!["bash".to_string(), "read".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn update_provider_only_preserves_existing_agent_config() {
+        let (services, workflow_id) = mk_workflow().await;
+
+        let initial = r#"{
+            "model": "claude-opus-4-5",
+            "system_prompt": "Original prompt",
+            "permission_mode": "delegate",
+            "max_budget_usd": 12.0,
+            "allowed_tools": ["bash"]
+        }"#;
+        add_cmd_with(
+            "S",
+            workflow_id,
+            "upd-1",
+            Some(initial.to_string()),
+            None,
+            None,
+        )
+        .execute(services.steps())
+        .await
+        .unwrap();
+
+        update_cmd_with("upd-1", None, None, Some(Provider::Anthropic))
+            .execute(services.steps())
+            .await
+            .unwrap();
+
+        let step = services.steps().get_step("upd-1").await.unwrap().unwrap();
+        let cfg = &step.agent_config;
+
+        assert_eq!(cfg.provider, Some(Provider::Anthropic));
+        assert_eq!(cfg.model.as_deref(), Some("claude-opus-4-5"));
+        assert_eq!(cfg.system_prompt.as_deref(), Some("Original prompt"));
+        assert_eq!(cfg.permission_mode, Some(PermissionMode::Delegate));
+        assert_eq!(cfg.max_budget_usd, Some(12.0));
+        assert_eq!(cfg.allowed_tools, vec!["bash".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn update_model_only_preserves_existing_provider_and_fields() {
+        let (services, workflow_id) = mk_workflow().await;
+
+        let initial = r#"{
+            "provider": "anthropic",
+            "model": "sonnet",
+            "system_prompt": "Stay focused",
+            "max_budget_usd": 4.0
+        }"#;
+        add_cmd_with(
+            "S",
+            workflow_id,
+            "upd-2",
+            Some(initial.to_string()),
+            None,
+            None,
+        )
+        .execute(services.steps())
+        .await
+        .unwrap();
+
+        update_cmd_with("upd-2", None, Some("opus".to_string()), None)
+            .execute(services.steps())
+            .await
+            .unwrap();
+
+        let step = services.steps().get_step("upd-2").await.unwrap().unwrap();
+        let cfg = &step.agent_config;
+
+        assert_eq!(cfg.provider, Some(Provider::Anthropic));
+        assert_eq!(cfg.model.as_deref(), Some("opus"));
+        assert_eq!(cfg.system_prompt.as_deref(), Some("Stay focused"));
+        assert_eq!(cfg.max_budget_usd, Some(4.0));
+    }
+
+    #[tokio::test]
+    async fn add_rejects_openai_provider_with_claude_model() {
+        let (services, workflow_id) = mk_workflow().await;
+
+        let cmd = add_cmd_with(
+            "Bad",
+            workflow_id,
+            "bad-1",
+            None,
+            Some("claude-opus".to_string()),
+            Some(Provider::Openai),
+        );
+
+        let err = cmd.execute(services.steps()).await.expect_err("must fail");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("claude-opus"),
+            "error should mention rejected model: {}",
+            msg
+        );
+        assert!(
+            msg.to_lowercase().contains("anthropic"),
+            "error should suggest anthropic provider: {}",
+            msg
+        );
+        assert!(
+            msg.to_lowercase().contains("openai"),
+            "error should mention requested provider: {}",
+            msg
+        );
+
+        assert!(services.steps().get_step("bad-1").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn add_rejects_openai_provider_with_unknown_model() {
+        let (services, workflow_id) = mk_workflow().await;
+
+        let cmd = add_cmd_with(
+            "Bad",
+            workflow_id,
+            "bad-2",
+            None,
+            Some("kimi2.6".to_string()),
+            Some(Provider::Openai),
+        );
+
+        let err = cmd.execute(services.steps()).await.expect_err("must fail");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("kimi2.6"),
+            "error should mention model: {}",
+            msg
+        );
+        assert!(
+            msg.contains("--agent-config"),
+            "error should point at the JSON escape hatch: {}",
+            msg
+        );
+
+        assert!(services.steps().get_step("bad-2").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn update_rejects_openai_provider_with_claude_model() {
+        let (services, workflow_id) = mk_workflow().await;
+
+        add_cmd_with(
+            "S",
+            workflow_id,
+            "upd-bad-1",
+            Some(r#"{"provider":"anthropic","model":"sonnet"}"#.to_string()),
+            None,
+            None,
+        )
+        .execute(services.steps())
+        .await
+        .unwrap();
+
+        let err = update_cmd_with(
+            "upd-bad-1",
+            None,
+            Some("claude-opus".to_string()),
+            Some(Provider::Openai),
+        )
+        .execute(services.steps())
+        .await
+        .expect_err("must fail");
+        let msg = err.to_string();
+        assert!(msg.contains("claude-opus"));
+        assert!(msg.to_lowercase().contains("openai"));
+
+        let step = services
+            .steps()
+            .get_step("upd-bad-1")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(step.agent_config.provider, Some(Provider::Anthropic));
+        assert_eq!(step.agent_config.model.as_deref(), Some("sonnet"));
+    }
+
+    #[tokio::test]
+    async fn add_accepts_unknown_model_via_full_agent_config_json() {
+        let (services, workflow_id) = mk_workflow().await;
+
+        let cmd = add_cmd_with(
+            "Custom",
+            workflow_id,
+            "esc-1",
+            Some(r#"{"model":"vendor-mystery-3"}"#.to_string()),
+            None,
+            None,
+        );
+
+        cmd.execute(services.steps()).await.unwrap();
+        let step = services.steps().get_step("esc-1").await.unwrap().unwrap();
+        assert_eq!(step.agent_config.model.as_deref(), Some("vendor-mystery-3"));
+        assert_eq!(step.agent_config.provider, None);
+    }
+
+    #[tokio::test]
+    async fn add_accepts_matching_provider_and_model() {
+        let (services, workflow_id) = mk_workflow().await;
+
+        add_cmd_with(
+            "OK",
+            workflow_id.clone(),
+            "ok-1",
+            None,
+            Some("gpt-4o".to_string()),
+            Some(Provider::Openai),
+        )
+        .execute(services.steps())
+        .await
+        .unwrap();
+
+        let step = services.steps().get_step("ok-1").await.unwrap().unwrap();
+        assert_eq!(step.agent_config.provider, Some(Provider::Openai));
+        assert_eq!(step.agent_config.model.as_deref(), Some("gpt-4o"));
     }
 }

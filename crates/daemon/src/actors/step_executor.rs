@@ -169,8 +169,7 @@ pub fn build_claude_command_with_settings(
         agent_config = agent_config.with_permission_mode(PermissionMode::BypassPermissions);
     }
 
-    // Apply agent_config args (model, allowed_tools, disallowed_tools, etc.)
-    let cli_args = agent_config.to_cli_args();
+    let cli_args = agent_config.to_claude_cli_args();
     for arg in &cli_args {
         cmd.arg(arg);
     }

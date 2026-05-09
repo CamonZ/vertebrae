@@ -3,6 +3,7 @@
 //! These are the canonical domain models for the Vertebrae task management system.
 //! All IDs are plain strings rather than database-specific record types.
 
+use crate::model_catalog::Provider;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -635,9 +636,12 @@ impl TaskFilter {
     }
 }
 
-/// Configuration for a Claude agent execution
+/// Configuration for an agent execution.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AgentConfig {
+    /// Built-in execution provider. `None` means the implicit Anthropic default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider: Option<Provider>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -669,6 +673,11 @@ pub struct AgentConfig {
 impl AgentConfig {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn with_provider(mut self, provider: Provider) -> Self {
+        self.provider = Some(provider);
+        self
     }
 
     pub fn with_model(mut self, model: impl Into<String>) -> Self {
@@ -736,7 +745,9 @@ impl AgentConfig {
         self
     }
 
-    pub fn to_cli_args(&self) -> Vec<String> {
+    /// Translate this config into Claude Code CLI flags. Anthropic-specific —
+    /// other providers must use their own translator.
+    pub fn to_claude_cli_args(&self) -> Vec<String> {
         let mut args = Vec::new();
 
         if let Some(ref model) = self.model {
@@ -796,7 +807,8 @@ impl AgentConfig {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.model.is_none()
+        self.provider.is_none()
+            && self.model.is_none()
             && self.fallback_model.is_none()
             && self.system_prompt.is_none()
             && self.append_system_prompt.is_none()
@@ -812,6 +824,9 @@ impl AgentConfig {
     }
 
     pub fn merge(mut self, other: AgentConfig) -> Self {
+        if other.provider.is_some() {
+            self.provider = other.provider;
+        }
         if other.model.is_some() {
             self.model = other.model;
         }
@@ -857,7 +872,8 @@ impl AgentConfig {
 
 impl PartialEq for AgentConfig {
     fn eq(&self, other: &Self) -> bool {
-        self.model == other.model
+        self.provider == other.provider
+            && self.model == other.model
             && self.fallback_model == other.fallback_model
             && self.system_prompt == other.system_prompt
             && self.append_system_prompt == other.append_system_prompt
@@ -3286,7 +3302,7 @@ mod tests {
     }
 
     #[test]
-    fn agent_config_to_cli_args() {
+    fn agent_config_to_claude_cli_args() {
         let config = AgentConfig::new()
             .with_model("claude-opus")
             .with_fallback_model("claude-sonnet")
@@ -3295,7 +3311,7 @@ mod tests {
             .with_permission_mode(PermissionMode::Plan)
             .with_max_budget_usd(5.5);
 
-        let args = config.to_cli_args();
+        let args = config.to_claude_cli_args();
         assert!(args.contains(&"--model".to_string()));
         assert!(args.contains(&"claude-opus".to_string()));
         assert!(args.contains(&"--fallback-model".to_string()));
