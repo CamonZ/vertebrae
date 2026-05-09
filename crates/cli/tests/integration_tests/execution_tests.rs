@@ -7,7 +7,7 @@
 //! - Update: Update execution output and transition result
 //! - Log: Add a log entry to an execution
 
-use super::mock::mock_services;
+use super::mock::{mock_services, mock_services_with_seeder};
 use chrono::Utc;
 use vertebrae_cli::commands::execution::{
     ExecutionCreateCommand, ExecutionListCommand, ExecutionLogCommand, ExecutionShowCommand,
@@ -15,6 +15,7 @@ use vertebrae_cli::commands::execution::{
 };
 use vertebrae_core::{
     CreateTaskOptions, CreateWorkflowOptions, ExecutionStatus, SessionLog, Step, StepExecution,
+    TaskRun, TaskRunStatus,
 };
 
 // ============================================================================
@@ -279,18 +280,19 @@ async fn test_execution_list_empty() {
         .unwrap();
 
     let list_cmd = ExecutionListCommand {
-        task_id: task_id.clone(),
+        task_id: Some(task_id.clone()),
+        task_run_id: None,
     };
 
     let result = list_cmd.execute(&services).await;
     assert!(result.is_ok());
     let output = result.unwrap();
-    assert!(output.contains("No executions found"));
-    assert!(output.contains(&task_id[..6]));
+    assert!(output.contains("No TaskRun-backed executions found"));
+    assert!(output.contains(&task_id));
 }
 
 #[tokio::test]
-async fn test_execution_list_with_executions() {
+async fn test_execution_list_ignores_legacy_executions_without_task_run() {
     let services = mock_services();
 
     let task_id = services
@@ -311,26 +313,25 @@ async fn test_execution_list_with_executions() {
 
     // Create multiple executions for the task
     let now = Utc::now();
-    let exec1 = StepExecution::new(&task_id, "workflow1", "step1");
-    let exec1_id = services.executions().create_execution(exec1).await.unwrap();
+    let exec1 = StepExecution::new(&task_id, "workflow1", "legacy-step1");
+    services.executions().create_execution(exec1).await.unwrap();
 
     let exec2 = StepExecution::new(&task_id, "workflow1", "step2")
         .with_started_at(now + chrono::Duration::seconds(10));
-    let _exec2_id = services.executions().create_execution(exec2).await.unwrap();
+    services.executions().create_execution(exec2).await.unwrap();
 
     let list_cmd = ExecutionListCommand {
-        task_id: task_id.clone(),
+        task_id: Some(task_id.clone()),
+        task_run_id: None,
     };
 
     let result = list_cmd.execute(&services).await;
     assert!(result.is_ok());
     let output = result.unwrap();
-    assert!(output.contains("Executions for task"));
-    assert!(output.contains("2 total"));
-    assert!(output.contains("step1"));
-    assert!(output.contains("step2"));
-    assert!(output.contains(&exec1_id[..6]));
-    assert!(output.contains("IN_PROGRESS"));
+    assert!(output.contains("No TaskRun-backed executions found"));
+    assert!(!output.contains("Legacy Step Executions"));
+    assert!(!output.contains("legacy-step1"));
+    assert!(!output.contains("step2"));
 }
 
 #[tokio::test]
@@ -338,7 +339,8 @@ async fn test_execution_list_nonexistent_task_fails() {
     let services = mock_services();
 
     let list_cmd = ExecutionListCommand {
-        task_id: "nonexistent".to_string(),
+        task_id: Some("00000000-0000-4000-8000-000000000000".to_string()),
+        task_run_id: None,
     };
 
     let result = list_cmd.execute(&services).await;
@@ -389,6 +391,253 @@ async fn test_execution_list_chronological_order() {
     assert_eq!(executions[0].step_name, "step0");
     assert_eq!(executions[1].step_name, "step1");
     assert_eq!(executions[2].step_name, "step2");
+}
+
+fn seeded_task_run(
+    id: &str,
+    task_id: &str,
+    status: TaskRunStatus,
+    inserted_at: chrono::DateTime<chrono::Utc>,
+) -> TaskRun {
+    TaskRun {
+        id: id.to_string(),
+        task_id: task_id.to_string(),
+        project_id: "mock-project".to_string(),
+        user_id: None,
+        status,
+        started_at: Some(inserted_at),
+        ended_at: None,
+        stop_requested_at: None,
+        latest_step_execution_id: None,
+        outcome_kind: None,
+        outcome_context: None,
+        parent_task_run_id: None,
+        root_task_run_id: None,
+        triggered_by_step_execution_id: None,
+        inserted_at: Some(inserted_at),
+        updated_at: Some(inserted_at),
+    }
+}
+
+#[tokio::test]
+async fn test_execution_list_task_short_id_groups_task_run_backed_executions() {
+    let (services, seeder) = mock_services_with_seeder();
+    let task_id = services
+        .tasks()
+        .create_task(CreateTaskOptions {
+            id: None,
+            title: "TaskRun execution list task".to_string(),
+            description: None,
+            level: None,
+            priority: None,
+            tags: vec![],
+            parent_id: None,
+            depends_on: vec![],
+            needs_review: false,
+        })
+        .await
+        .unwrap();
+
+    let base_time = Utc::now();
+    let first_run_id = "11111111-1111-4111-8111-111111111111";
+    let second_run_id = "22222222-2222-4222-8222-222222222222";
+    let first_exec_id = "33333333-3333-4333-8333-333333333333";
+    let second_exec_id = "44444444-4444-4444-8444-444444444444";
+    let third_exec_id = "55555555-5555-4555-8555-555555555555";
+    let log_id = "66666666-6666-4666-8666-666666666666";
+
+    seeder.insert_task_run(seeded_task_run(
+        first_run_id,
+        &task_id,
+        TaskRunStatus::Completed,
+        base_time,
+    ));
+    seeder.insert_task_run(seeded_task_run(
+        second_run_id,
+        &task_id,
+        TaskRunStatus::Failed,
+        base_time + chrono::Duration::seconds(10),
+    ));
+
+    let mut second_execution = StepExecution::new(&task_id, "workflow-1", "build")
+        .with_task_run_id(first_run_id)
+        .with_started_at(base_time + chrono::Duration::seconds(2));
+    second_execution.id = Some(second_exec_id.to_string());
+    seeder.insert_execution(second_execution);
+
+    let mut first_execution = StepExecution::new(&task_id, "workflow-1", "plan")
+        .with_task_run_id(first_run_id)
+        .with_started_at(base_time + chrono::Duration::seconds(1));
+    first_execution.id = Some(first_exec_id.to_string());
+    seeder.insert_execution(first_execution);
+
+    let mut third_execution = StepExecution::new(&task_id, "workflow-1", "review")
+        .with_task_run_id(second_run_id)
+        .with_started_at(base_time + chrono::Duration::seconds(11));
+    third_execution.id = Some(third_exec_id.to_string());
+    third_execution.complete_at(base_time + chrono::Duration::seconds(15));
+    seeder.insert_execution(third_execution);
+
+    let mut legacy_execution = StepExecution::new(&task_id, "workflow-1", "legacy-without-run-id");
+    legacy_execution.id = Some("77777777-7777-4777-8777-777777777777".to_string());
+    seeder.insert_execution(legacy_execution);
+
+    let mut log = SessionLog::new(first_exec_id, "log content that belongs in execution show");
+    log.id = Some(log_id.to_string());
+    seeder.insert_log(log);
+
+    let short_task_id = task_id[..8].to_string();
+    let list_cmd = ExecutionListCommand {
+        task_id: Some(short_task_id),
+        task_run_id: None,
+    };
+    let output = list_cmd.execute(&services).await.unwrap();
+
+    assert!(output.contains(&format!(
+        "TaskRun Executions for task {} (3 total)",
+        task_id
+    )));
+    assert!(output.contains(&format!("TaskRun: {}", first_run_id)));
+    assert!(output.contains(&format!("TaskRun: {}", second_run_id)));
+    assert!(output.contains(&format!(
+        "- execution {} task={} taskRunId={} step=plan status=IN_PROGRESS",
+        first_exec_id, task_id, first_run_id
+    )));
+    assert!(output.contains(&format!(
+        "- execution {} task={} taskRunId={} step=build status=IN_PROGRESS",
+        second_exec_id, task_id, first_run_id
+    )));
+    assert!(output.contains(&format!(
+        "- execution {} task={} taskRunId={} step=review status=COMPLETED",
+        third_exec_id, task_id, second_run_id
+    )));
+    assert!(output.find("step=plan").unwrap() < output.find("step=build").unwrap());
+    assert!(!output.contains("TaskRun Trace"));
+    assert!(!output.contains("Run Tree"));
+    assert!(!output.contains("Session Logs"));
+    assert!(!output.contains("rootTaskRunId"));
+    assert!(!output.contains("legacy-without-run-id"));
+    assert!(!output.contains("log content that belongs in execution show"));
+}
+
+#[tokio::test]
+async fn test_execution_list_task_run_full_uuid_filters_exact_run() {
+    let (services, seeder) = mock_services_with_seeder();
+    let root_task_id = services
+        .tasks()
+        .create_task(CreateTaskOptions {
+            id: None,
+            title: "Root task".to_string(),
+            description: None,
+            level: None,
+            priority: None,
+            tags: vec![],
+            parent_id: None,
+            depends_on: vec![],
+            needs_review: false,
+        })
+        .await
+        .unwrap();
+    let child_task_id = services
+        .tasks()
+        .create_task(CreateTaskOptions {
+            id: None,
+            title: "Child task".to_string(),
+            description: None,
+            level: None,
+            priority: None,
+            tags: vec![],
+            parent_id: None,
+            depends_on: vec![],
+            needs_review: false,
+        })
+        .await
+        .unwrap();
+    let root_run_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    let child_run_id = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    let root_exec_id = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    let child_exec_id = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+    let log_id = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    let base_time = Utc::now();
+
+    let mut root_run = seeded_task_run(
+        root_run_id,
+        &root_task_id,
+        TaskRunStatus::Completed,
+        base_time,
+    );
+    root_run.latest_step_execution_id = Some(root_exec_id.to_string());
+    let mut child_run = seeded_task_run(
+        child_run_id,
+        &child_task_id,
+        TaskRunStatus::Executing,
+        base_time + chrono::Duration::seconds(5),
+    );
+    child_run.parent_task_run_id = Some(root_run_id.to_string());
+    child_run.root_task_run_id = Some(root_run_id.to_string());
+    child_run.triggered_by_step_execution_id = Some(root_exec_id.to_string());
+    child_run.latest_step_execution_id = Some(child_exec_id.to_string());
+    seeder.insert_task_run(root_run);
+    seeder.insert_task_run(child_run);
+
+    let mut root_execution = StepExecution::new(&root_task_id, "workflow-root", "wait_children")
+        .with_task_run_id(root_run_id)
+        .with_started_at(base_time);
+    root_execution.id = Some(root_exec_id.to_string());
+    root_execution.complete_at(base_time + chrono::Duration::seconds(2));
+    seeder.insert_execution(root_execution);
+
+    let mut child_execution = StepExecution::new(&child_task_id, "workflow-child", "implement")
+        .with_task_run_id(child_run_id)
+        .with_started_at(base_time + chrono::Duration::seconds(6));
+    child_execution.id = Some(child_exec_id.to_string());
+    seeder.insert_execution(child_execution);
+
+    let mut log = SessionLog::new(child_exec_id, "child output streamed");
+    log.id = Some(log_id.to_string());
+    seeder.insert_log(log);
+
+    let list_cmd = ExecutionListCommand {
+        task_id: None,
+        task_run_id: Some(child_run_id.to_string()),
+    };
+    let output = list_cmd.execute(&services).await.unwrap();
+
+    assert!(output.contains(&format!(
+        "TaskRun Executions for TaskRun {} (1 total)",
+        child_run_id
+    )));
+    assert!(output.contains(&format!("TaskRun: {}", child_run_id)));
+    assert!(output.contains(&format!(
+        "- execution {} task={} taskRunId={} step=implement status=IN_PROGRESS",
+        child_exec_id, child_task_id, child_run_id
+    )));
+    assert!(!output.contains(root_exec_id));
+    assert!(!output.contains(&format!("task={}", root_task_id)));
+    assert!(!output.contains("TaskRun Trace"));
+    assert!(!output.contains("Run Tree"));
+    assert!(!output.contains("Session Logs"));
+    assert!(!output.contains("rootTaskRunId"));
+    assert!(!output.contains("child output streamed"));
+}
+
+#[tokio::test]
+async fn test_execution_list_task_run_short_id_fails() {
+    let services = mock_services();
+    let list_cmd = ExecutionListCommand {
+        task_id: None,
+        task_run_id: Some("bbbbbbbb".to_string()),
+    };
+
+    let result = list_cmd.execute(&services).await;
+
+    assert!(result.is_err());
+    let error = result.unwrap_err().to_string();
+    assert!(
+        error.contains("TaskRun short IDs are not supported"),
+        "expected TaskRun short ID error, got: {}",
+        error
+    );
 }
 
 // ============================================================================
@@ -931,17 +1180,22 @@ async fn test_execution_workflow_create_list_show() {
         .unwrap();
 
     // Create executions
+    let task_run_id = "88888888-8888-4888-8888-888888888888";
     let exec1 = StepExecution::new(&task_id, "wf", "step1")
+        .with_task_run_id(task_run_id)
         .with_output("First result")
         .with_transition_result("approve");
     let exec1_id = services.executions().create_execution(exec1).await.unwrap();
 
-    let exec2 = StepExecution::new(&task_id, "wf", "step2").with_output("Second result");
+    let exec2 = StepExecution::new(&task_id, "wf", "step2")
+        .with_task_run_id(task_run_id)
+        .with_output("Second result");
     let exec2_id = services.executions().create_execution(exec2).await.unwrap();
 
     // List executions
     let list_cmd = ExecutionListCommand {
-        task_id: task_id.clone(),
+        task_id: Some(task_id.clone()),
+        task_run_id: None,
     };
     let list_result = list_cmd.execute(&services).await.unwrap();
     assert!(list_result.contains("2 total"));

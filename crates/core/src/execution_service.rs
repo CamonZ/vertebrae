@@ -253,6 +253,9 @@ pub trait ExecutionService: Send + Sync {
     /// List TaskRuns for a task in backend-defined order.
     async fn task_runs(&self, task_id: &str) -> ServiceResult<Vec<TaskRun>>;
 
+    /// Get one TaskRun by full TaskRun ID.
+    async fn task_run(&self, task_run_id: &str) -> ServiceResult<Option<TaskRun>>;
+
     /// Get a TaskRun trace tree rooted at the provided run ID.
     async fn task_run_trace(&self, root_task_run_id: &str) -> ServiceResult<TaskRunTrace>;
 

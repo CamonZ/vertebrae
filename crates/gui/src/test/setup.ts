@@ -2,6 +2,77 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
 
+const createStorageMock = (): Storage => {
+  let store: Record<string, string> = {};
+
+  Object.defineProperties(Storage.prototype, {
+    length: {
+      configurable: true,
+      get() {
+        return Object.keys(store).length;
+      },
+    },
+    clear: {
+      configurable: true,
+      writable: true,
+      value() {
+        store = {};
+      },
+    },
+    getItem: {
+      configurable: true,
+      writable: true,
+      value(key: string) {
+        return Object.prototype.hasOwnProperty.call(store, key)
+          ? store[key]
+          : null;
+      },
+    },
+    key: {
+      configurable: true,
+      writable: true,
+      value(index: number) {
+        return Object.keys(store)[index] ?? null;
+      },
+    },
+    removeItem: {
+      configurable: true,
+      writable: true,
+      value(key: string) {
+        delete store[key];
+      },
+    },
+    setItem: {
+      configurable: true,
+      writable: true,
+      value(key: string, value: string) {
+        store[key] = String(value);
+      },
+    },
+  });
+
+  return Object.create(Storage.prototype) as Storage;
+};
+
+const testLocalStorage = createStorageMock();
+
+// Node 25 exposes a global localStorage object without Web Storage methods
+// unless it is launched with --localstorage-file. Install a browser-like
+// storage object for jsdom tests and keep bare `localStorage` in sync with
+// `window.localStorage` when the test runner uses separate globals.
+Object.defineProperty(window, "localStorage", {
+  configurable: true,
+  value: testLocalStorage,
+});
+
+if (globalThis !== window) {
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    enumerable: true,
+    get: () => window.localStorage,
+  });
+}
+
 // Cleanup after each test
 afterEach(() => {
   cleanup();
