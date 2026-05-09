@@ -19,6 +19,8 @@ import type {
   Task,
   Workflow,
 } from "../bindings";
+import { commands } from "../bindings";
+import { resolveHumanInputGate } from "../utils/humanInputGate";
 import {
   CorridorView,
   FilterBar,
@@ -63,6 +65,9 @@ interface ModeContentProps {
   autoScroll: boolean;
   focusExecutionId: string | null;
   activeExecutionId: string | null;
+  activeRunStoppable: boolean;
+  isStoppingActiveRun: boolean;
+  onStopActiveRun: () => void;
 }
 
 function renderModeContent(props: ModeContentProps): ReactNode {
@@ -82,6 +87,9 @@ function renderModeContent(props: ModeContentProps): ReactNode {
     autoScroll,
     focusExecutionId,
     activeExecutionId,
+    activeRunStoppable,
+    isStoppingActiveRun,
+    onStopActiveRun,
   } = props;
   switch (mode) {
     case "thread":
@@ -104,6 +112,9 @@ function renderModeContent(props: ModeContentProps): ReactNode {
           autoScroll={autoScroll}
           focusExecutionId={focusExecutionId}
           activeExecutionId={activeExecutionId}
+          activeRunStoppable={activeRunStoppable}
+          isStoppingActiveRun={isStoppingActiveRun}
+          onStopActiveRun={onStopActiveRun}
         />
       );
     case "corridor":
@@ -293,6 +304,39 @@ export function TracesPage({
     if (useLegacySubtree || runTaskRuns.length === 0) return null;
     return projectTaskRunTrace(runTaskRuns, filteredExecutions, tasks);
   }, [useLegacySubtree, runTaskRuns, filteredExecutions, tasks]);
+
+  const humanInputGate = useMemo(() => {
+    if (useLegacySubtree) return null;
+    const waitingRuns = runTaskRuns.filter((r) => r.status === "waiting");
+    if (waitingRuns.length === 0) return null;
+    const execsByRunId = new Map<string, StepExecution[]>();
+    for (const exec of runExecutions) {
+      if (!exec.task_run_id) continue;
+      const list = execsByRunId.get(exec.task_run_id);
+      if (list) list.push(exec);
+      else execsByRunId.set(exec.task_run_id, [exec]);
+    }
+    for (const run of waitingRuns) {
+      const gate = resolveHumanInputGate(run, execsByRunId.get(run.id) ?? []);
+      if (gate) return gate;
+    }
+    return null;
+  }, [useLegacySubtree, runTaskRuns, runExecutions]);
+
+  const activeRunStoppable = task?.run_controls?.stoppable === true;
+  const [isStoppingActiveRun, setIsStoppingActiveRun] = useState(false);
+  const handleStopActiveRun = useCallback(async () => {
+    if (!humanInputGate) return;
+    setIsStoppingActiveRun(true);
+    try {
+      await commands.stopRun({
+        task_run_id: humanInputGate.run.id,
+        task_id: null,
+      });
+    } finally {
+      setIsStoppingActiveRun(false);
+    }
+  }, [humanInputGate]);
 
   const focusExecutionId = useMemo(
     () => parseExecHash(location.hash),
@@ -559,6 +603,9 @@ export function TracesPage({
                     autoScroll,
                     focusExecutionId,
                     activeExecutionId,
+                    activeRunStoppable,
+                    isStoppingActiveRun,
+                    onStopActiveRun: handleStopActiveRun,
                   })}
                 </div>
                 {mode === "corridor" && pinnedExecutionId && (

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import { UnifiedChatView } from "./UnifiedChatView";
 import type { SessionLog, StepExecution, Task, Workflow } from "../../bindings";
@@ -602,5 +602,213 @@ describe("UnifiedChatView", () => {
     // Without a workflows lookup table, resolution can't map wf-backlog →
     // "Backlog" so we fall back to the task's current workflow name.
     expect(within(boundary).getByText("Implementation")).toBeInTheDocument();
+  });
+
+  describe("waiting human_input gate", () => {
+    function makeRunProjection(
+      runs: Array<{
+        id: string;
+        status: "waiting" | "executing" | "completed";
+        executions: StepExecution[];
+        latestExecutionId?: string;
+      }>
+    ) {
+      const runsById = new Map<string, ReturnType<typeof buildNode>>();
+      function buildNode(args: {
+        id: string;
+        status: "waiting" | "executing" | "completed";
+        executions: StepExecution[];
+        latestExecutionId?: string;
+      }) {
+        return {
+          run: {
+            id: args.id,
+            task_id: "t-root",
+            project_id: "project-1",
+            user_id: null,
+            status: args.status,
+            started_at: "2024-01-01T10:00:00.000Z",
+            ended_at: null,
+            stop_requested_at: null,
+            latest_step_execution_id: args.latestExecutionId ?? null,
+            outcome_kind: null,
+            outcome_context: null,
+            parent_task_run_id: null,
+            root_task_run_id: null,
+            triggered_by_step_execution_id: null,
+            inserted_at: null,
+            updated_at: null,
+          },
+          task: null,
+          depth: 0,
+          executions: args.executions,
+          childRunIds: [],
+        };
+      }
+      const ordered = runs.map(buildNode);
+      for (const node of ordered) runsById.set(node.run.id, node);
+      const runIdByExecutionId = new Map<string, string>();
+      for (const node of ordered) {
+        for (const e of node.executions) {
+          if (e.id) runIdByExecutionId.set(e.id, node.run.id);
+        }
+      }
+      return {
+        orderedRuns: ordered,
+        runsById,
+        delegationEdges: [],
+        orphanExecutions: [],
+        runIdByExecutionId,
+        hasRuns: ordered.length > 0,
+      };
+    }
+
+    it("renders the gate when the active TaskRun is waiting on human_input", () => {
+      const tasks = [makeTask({ id: "t-root", title: "Root" })];
+      const exec = makeExec({
+        id: "exec-wait",
+        task_id: "t-root",
+        task_run_id: "run-1",
+        step_name: "approval",
+        started_at: "2024-01-01T10:00:00.000Z",
+        status: "in_progress",
+        prompt: "Approve change?",
+      });
+      const projection = makeRunProjection([
+        {
+          id: "run-1",
+          status: "waiting",
+          executions: [exec],
+          latestExecutionId: "exec-wait",
+        },
+      ]);
+      const logs = {
+        "exec-wait": [
+          makeLog("exec-wait", thinking("hi"), "2024-01-01T10:00:01.000Z", 0),
+        ],
+      };
+      render(
+        <UnifiedChatView
+          rootTaskId="t-root"
+          executions={[exec]}
+          tasks={tasks}
+          runProjection={projection}
+          logsByExecutionId={logs}
+        />
+      );
+      const gate = screen.getByTestId("human-input-gate");
+      expect(gate).toHaveAttribute("data-run-id", "run-1");
+      expect(gate).toHaveAttribute("data-execution-id", "exec-wait");
+      expect(within(gate).getByTestId("human-input-gate-step")).toHaveTextContent(
+        "approval"
+      );
+      // No submit/approve/bypass action is exposed.
+      expect(within(gate).queryByRole("button", { name: /approve/i })).toBeNull();
+      expect(within(gate).queryByRole("button", { name: /submit/i })).toBeNull();
+    });
+
+    it("does not render Stop unless activeRunStoppable is true", () => {
+      const tasks = [makeTask({ id: "t-root" })];
+      const exec = makeExec({
+        id: "exec-wait",
+        task_id: "t-root",
+        task_run_id: "run-1",
+        step_name: "approval",
+      });
+      const projection = makeRunProjection([
+        { id: "run-1", status: "waiting", executions: [exec] },
+      ]);
+      const onStop = vi.fn();
+      const { rerender } = render(
+        <UnifiedChatView
+          rootTaskId="t-root"
+          executions={[exec]}
+          tasks={tasks}
+          runProjection={projection}
+          logsByExecutionId={{
+            "exec-wait": [
+              makeLog("exec-wait", thinking("a"), "2024-01-01T10:00:01.000Z", 0),
+            ],
+          }}
+          activeRunStoppable={false}
+          onStopActiveRun={onStop}
+        />
+      );
+      expect(
+        screen.queryByTestId("human-input-gate-stop")
+      ).not.toBeInTheDocument();
+
+      rerender(
+        <UnifiedChatView
+          rootTaskId="t-root"
+          executions={[exec]}
+          tasks={tasks}
+          runProjection={projection}
+          logsByExecutionId={{
+            "exec-wait": [
+              makeLog("exec-wait", thinking("a"), "2024-01-01T10:00:01.000Z", 0),
+            ],
+          }}
+          activeRunStoppable={true}
+          onStopActiveRun={onStop}
+        />
+      );
+      expect(screen.getByTestId("human-input-gate-stop")).toBeEnabled();
+    });
+
+    it("does not render the gate for wait_children waiting runs", () => {
+      const tasks = [makeTask({ id: "t-root" })];
+      const exec = makeExec({
+        id: "exec-wait",
+        task_id: "t-root",
+        task_run_id: "run-1",
+        step_name: "wait_children",
+      });
+      const projection = makeRunProjection([
+        {
+          id: "run-1",
+          status: "waiting",
+          executions: [exec],
+          latestExecutionId: "exec-wait",
+        },
+      ]);
+      render(
+        <UnifiedChatView
+          rootTaskId="t-root"
+          executions={[exec]}
+          tasks={tasks}
+          runProjection={projection}
+          logsByExecutionId={{
+            "exec-wait": [
+              makeLog("exec-wait", thinking("a"), "2024-01-01T10:00:01.000Z", 0),
+            ],
+          }}
+        />
+      );
+      expect(screen.queryByTestId("human-input-gate")).not.toBeInTheDocument();
+    });
+
+    it("renders the gate even when there are no events yet", () => {
+      const tasks = [makeTask({ id: "t-root" })];
+      const exec = makeExec({
+        id: "exec-wait",
+        task_id: "t-root",
+        task_run_id: "run-1",
+        step_name: "approval",
+      });
+      const projection = makeRunProjection([
+        { id: "run-1", status: "waiting", executions: [exec] },
+      ]);
+      render(
+        <UnifiedChatView
+          rootTaskId="t-root"
+          executions={[]}
+          tasks={tasks}
+          runProjection={projection}
+          logsByExecutionId={{}}
+        />
+      );
+      expect(screen.getByTestId("human-input-gate")).toBeInTheDocument();
+    });
   });
 });
