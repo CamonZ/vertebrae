@@ -8,6 +8,7 @@ export {
   matchesSearch,
 } from "./applyFilters";
 export { SubtreeRail } from "./SubtreeRail";
+export { RunHistoryRail } from "./RunHistoryRail";
 export { TracesPickerRail } from "./TracesPickerRail";
 export { ModeToggle, TRACE_MODES } from "./ModeToggle";
 export type { TraceMode } from "./ModeToggle";

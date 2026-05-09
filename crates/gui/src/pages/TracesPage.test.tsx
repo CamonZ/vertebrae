@@ -29,6 +29,24 @@ vi.mock("../hooks", () => ({
     error: mockTaskError,
     refetch: vi.fn(),
   }),
+  useTaskRuns: () => ({
+    runs: [],
+    activeRun: null,
+    latestRun: null,
+    resolveRun: () => ({ run: null, source: "none" }),
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
+  useTaskRunTrace: () => ({
+    trace: null,
+    taskRuns: [],
+    executions: [],
+    sessionLogs: [],
+    isLoading: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
 }));
 
 const subtreeExecutions = [
