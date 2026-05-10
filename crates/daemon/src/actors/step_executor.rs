@@ -18,11 +18,13 @@ use std::sync::Arc;
 use ractor::{Actor, ActorProcessingErr, ActorRef};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
+use vertebrae_core::Provider;
 use vertebrae_core::execution_service::ExecutionService;
 use vertebrae_core::models::{AgentConfig, PermissionMode, SessionLog};
 
 use crate::actors::project_supervisor::{ProjectMessage, VERBOSE_LOG_TARGET};
 use crate::output_validator::{CompiledSchema, SchemaError, SchemaValidationError};
+use crate::provider::{ParserKind, resolve_provider_command};
 use crate::settings_synthesis::SyntheticSettings;
 
 /// Default model used when agent_config does not specify one.
@@ -31,6 +33,10 @@ pub const DEFAULT_MODEL: &str = "claude-sonnet-4-20250514";
 pub const CHECKPOINT_CLAUDE_ARGV: &str = "claude_argv";
 pub const CHECKPOINT_CLAUDE_STDERR: &str = "claude_stderr";
 pub const CHECKPOINT_STREAM_JSON_INIT: &str = "stream_json_init";
+
+/// Reported when a child process exits without a numeric exit code (e.g.
+/// killed by a signal on Unix, where `ExitStatus::code()` returns `None`).
+pub const PROCESS_EXIT_CODE_UNKNOWN: i32 = -1;
 
 #[derive(Debug, Clone)]
 pub struct StepConfig {
@@ -99,7 +105,7 @@ pub struct StepExecutorConfig {
 
 impl StepExecutorConfig {
     /// Returns the effective working directory: worktree if set, otherwise project_root.
-    fn working_dir(&self) -> &Path {
+    pub(crate) fn working_dir(&self) -> &Path {
         self.worktree.as_deref().unwrap_or(&self.project_root)
     }
 }
@@ -193,29 +199,48 @@ pub fn build_claude_command_with_settings(
     // tools like `mix`, `node`, `vtb`, etc. that aren't in launchd's minimal PATH.
     cmd.env("PATH", &config.shell_path);
 
-    // Verbose checkpoint 3: final claude argv — confirms `--json-schema` (and
-    // every other resolved flag, including the rendered prompt) reaches the
-    // child process. Logs the raw argv verbatim; debugging verbose mode is
-    // opt-in per-step and needs full fidelity.
+    // Verbose checkpoint: final argv confirms every resolved flag (including
+    // --json-schema and the rendered prompt) reaches the child verbatim.
     if step.verbose_daemon_logging {
-        let program = cmd.as_std().get_program().to_string_lossy().to_string();
-        let argv: Vec<String> = cmd
-            .as_std()
-            .get_args()
-            .map(|a| a.to_string_lossy().to_string())
-            .collect();
-        tracing::info!(
-            target: VERBOSE_LOG_TARGET,
-            execution_id = %config.execution_id,
-            task_id = %config.task_id,
-            checkpoint = CHECKPOINT_CLAUDE_ARGV,
-            program = %program,
-            argv = ?argv,
-            "verbose: built claude CLI command"
+        let _ = log_built_argv(
+            &cmd,
+            config,
+            Provider::Anthropic,
+            "verbose: built claude CLI command",
         );
     }
 
     cmd
+}
+
+/// Emit the verbose `claude_argv` checkpoint with the resolved program/argv
+/// and selected provider; returns the formatted argv so call sites and tests
+/// can observe what was logged. Shared by every built-in provider command
+/// builder.
+pub(crate) fn log_built_argv(
+    cmd: &Command,
+    config: &StepExecutorConfig,
+    provider: Provider,
+    msg: &'static str,
+) -> Vec<String> {
+    let program = cmd.as_std().get_program().to_string_lossy().to_string();
+    let argv: Vec<String> = cmd
+        .as_std()
+        .get_args()
+        .map(|a| a.to_string_lossy().to_string())
+        .collect();
+    tracing::info!(
+        target: VERBOSE_LOG_TARGET,
+        execution_id = %config.execution_id,
+        task_id = %config.task_id,
+        checkpoint = CHECKPOINT_CLAUDE_ARGV,
+        program = %program,
+        argv = ?argv,
+        provider = %provider,
+        "{}",
+        msg,
+    );
+    argv
 }
 
 pub struct StepExecutorState {
@@ -328,6 +353,16 @@ impl Actor for StepExecutor {
     }
 }
 
+/// Map an output-schema validation error onto the failed `StepResult`
+/// variant -- preserving structured violation entries when available.
+pub(crate) fn step_result_for_schema_error(err: SchemaError) -> StepResult {
+    let summary = err.summary();
+    match err {
+        SchemaError::SchemaViolation(errors) => StepResult::failed_schema(summary, errors),
+        _ => StepResult::failed(None, summary),
+    }
+}
+
 impl StepExecutor {
     fn validate_output(
         &self,
@@ -356,8 +391,9 @@ impl StepExecutor {
         }
 
         tracing::info!(
-            "Spawning Claude Code CLI for execution {}, model={:?}, working_dir={}",
+            "Spawning provider CLI for execution {}, provider={:?}, model={:?}, working_dir={}",
             state.execution_id,
+            state.config.step_config.agent_config.provider,
             state.config.step_config.agent_config.model,
             state.config.working_dir().display()
         );
@@ -386,8 +422,28 @@ impl StepExecutor {
         let settings_path = settings_guard
             .as_ref()
             .map(|g| g.settings_path().to_path_buf());
-        let mut cmd = build_claude_command_with_settings(&state.config, settings_path.as_deref());
+
+        let resolved = match resolve_provider_command(&state.config, settings_path.as_deref()) {
+            Ok(resolved) => resolved,
+            Err(err) => {
+                tracing::error!(
+                    "Provider resolution failed for execution {}: {}",
+                    state.execution_id,
+                    err
+                );
+                let _ = state.parent.cast(ProjectMessage::StepFinished {
+                    execution_id: state.execution_id.clone(),
+                    task_id: state.task_id.clone(),
+                    result: StepResult::failed(None, format!("Provider resolution failed: {err}")),
+                });
+                myself.stop(Some("provider resolution failed".to_string()));
+                return Ok(());
+            }
+        };
+
         state.settings_guard = settings_guard;
+        let parser_kind = resolved.parser_kind;
+        let mut cmd = resolved.command;
 
         match cmd.spawn() {
             Ok(mut child) => {
@@ -407,35 +463,45 @@ impl StepExecutor {
 
                 let stream_handle = tokio::spawn(async move {
                     // Stream stdout line by line, posting each as a SessionLog.
-                    // Parse each line for stream-json result; retain the last one found.
+                    // Structured-result extraction dispatches on parser_kind;
+                    // raw lines are always stored as logs.
                     if let Some(stdout) = stdout {
                         let reader = BufReader::new(stdout);
                         let mut lines = reader.lines();
 
                         while let Ok(Some(line)) = lines.next_line().await {
-                            if let Some(parsed) = crate::stream_json::parse_stream_json_line(&line)
-                                && let Ok(mut slot) = result_slot.lock()
-                            {
-                                *slot = Some(parsed);
-                            }
+                            match parser_kind {
+                                ParserKind::StreamJson => {
+                                    if let Some(parsed) =
+                                        crate::stream_json::parse_stream_json_line(&line)
+                                        && let Ok(mut slot) = result_slot.lock()
+                                    {
+                                        *slot = Some(parsed);
+                                    }
 
-                            // Verbose checkpoint 5: parse and log the stream-json
-                            // system/init line — its `tools` array is the source of
-                            // the StructuredOutput-advertisement metric (0/39 vs 39/39).
-                            if verbose
-                                && let Some(init) =
-                                    crate::stream_json::parse_stream_json_init_line(&line)
-                            {
-                                tracing::info!(
-                                    target: VERBOSE_LOG_TARGET,
-                                    execution_id = %execution_id,
-                                    task_id = %task_id,
-                                    checkpoint = CHECKPOINT_STREAM_JSON_INIT,
-                                    session_id = ?init.session_id,
-                                    tools = ?init.tools,
-                                    structured_output_advertised = init.structured_output_advertised(),
-                                    "verbose: claude system/init line"
-                                );
+                                    // Verbose checkpoint 5: parse and log the stream-json
+                                    // system/init line — its `tools` array is the source of
+                                    // the StructuredOutput-advertisement metric (0/39 vs 39/39).
+                                    if verbose
+                                        && let Some(init) =
+                                            crate::stream_json::parse_stream_json_init_line(&line)
+                                    {
+                                        tracing::info!(
+                                            target: VERBOSE_LOG_TARGET,
+                                            execution_id = %execution_id,
+                                            task_id = %task_id,
+                                            checkpoint = CHECKPOINT_STREAM_JSON_INIT,
+                                            session_id = ?init.session_id,
+                                            tools = ?init.tools,
+                                            structured_output_advertised = init.structured_output_advertised(),
+                                            "verbose: claude system/init line"
+                                        );
+                                    }
+                                }
+                                ParserKind::CodexJsonl => {
+                                    // Structured-result extraction not yet implemented;
+                                    // raw lines are still posted as session logs below.
+                                }
                             }
 
                             let log = SessionLog::new(execution_id.clone(), line);
@@ -464,8 +530,9 @@ impl StepExecutor {
                                     execution_id = %execution_id,
                                     task_id = %task_id,
                                     checkpoint = CHECKPOINT_CLAUDE_STDERR,
+                                    parser_kind = ?parser_kind,
                                     line = %line,
-                                    "verbose: claude stderr"
+                                    "verbose: provider stderr"
                                 );
                             } else {
                                 tracing::warn!("stderr [{}]: {}", execution_id, line);
@@ -486,7 +553,7 @@ impl StepExecutor {
             }
             Err(e) => {
                 tracing::error!(
-                    "Failed to spawn Claude Code CLI for execution {}: {}",
+                    "Failed to spawn provider CLI for execution {}: {}",
                     state.execution_id,
                     e
                 );
@@ -550,7 +617,7 @@ impl StepExecutor {
         let step_result = if let Some(ref mut child) = state.child_process {
             match child.wait().await {
                 Ok(status) => {
-                    let code = status.code().unwrap_or(-1);
+                    let code = status.code().unwrap_or(PROCESS_EXIT_CODE_UNKNOWN);
                     if status.success() {
                         tracing::info!(
                             "Process completed successfully for execution {} (exit code {}, metrics={:?}, has_output={}, has_structured_output={})",
@@ -587,13 +654,7 @@ impl StepExecutor {
                                     state.execution_id,
                                     err
                                 );
-                                let summary = err.summary();
-                                match err {
-                                    SchemaError::SchemaViolation(errors) => {
-                                        StepResult::failed_schema(summary, errors)
-                                    }
-                                    _ => StepResult::failed(None, summary),
-                                }
+                                step_result_for_schema_error(err)
                             }
                         }
                     } else {
@@ -2047,5 +2108,165 @@ mod tests {
             serde_json::from_str(schema_str).expect("schema arg must be valid JSON");
         assert_eq!(parsed["type"], "object");
         assert_eq!(parsed["properties"]["verdict"]["type"], "string");
+    }
+
+    #[test]
+    fn process_exit_code_unknown_is_negative_one() {
+        // Wire-protocol contract with downstream consumers (Sacrum + GUI):
+        // -1 is the sentinel for "child exited without a numeric code".
+        assert_eq!(PROCESS_EXIT_CODE_UNKNOWN, -1);
+    }
+
+    #[test]
+    fn log_built_argv_returns_resolved_argv_for_anthropic() {
+        let cfg = test_config("exec-log-anthropic");
+        let cmd = build_claude_command_with_settings(&cfg, None);
+        let argv = log_built_argv(&cmd, &cfg, Provider::Anthropic, "test");
+        assert!(!argv.is_empty(), "argv must not be empty");
+        assert!(argv.contains(&"-p".to_string()));
+        assert!(argv.contains(&"--output-format".to_string()));
+        assert!(argv.contains(&"stream-json".to_string()));
+    }
+
+    #[test]
+    fn log_built_argv_mirrors_command_args_in_order() {
+        // The returned argv must match the Command's argv exactly, in order.
+        let cfg = test_config("exec-log-mirror");
+        let cmd = build_claude_command_with_settings(&cfg, None);
+        let baseline = argv_of(&cmd);
+        let returned = log_built_argv(&cmd, &cfg, Provider::Anthropic, "test");
+        assert_eq!(returned, baseline);
+    }
+
+    #[test]
+    fn step_result_for_schema_violation_returns_failed_schema_with_errors() {
+        use crate::output_validator::SchemaValidationError;
+
+        let errors = vec![SchemaValidationError {
+            instance_path: "/foo".to_string(),
+            schema_path: "#/properties/foo/type".to_string(),
+            message: "is not of type 'string'".to_string(),
+        }];
+        let err = SchemaError::SchemaViolation(errors.clone());
+        match step_result_for_schema_error(err) {
+            StepResult::Failed {
+                exit_code,
+                error,
+                schema_errors,
+            } => {
+                assert_eq!(exit_code, None);
+                assert!(!error.is_empty(), "summary should be non-empty");
+                let captured =
+                    schema_errors.expect("schema_errors must be Some for SchemaViolation");
+                assert_eq!(captured.len(), 1);
+                assert_eq!(captured[0].instance_path, "/foo");
+            }
+            other => panic!("expected Failed with schema_errors, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn step_result_for_non_violation_returns_failed_without_errors() {
+        // Any SchemaError variant other than SchemaViolation must take the
+        // generic-failure arm with schema_errors = None.
+        let err = SchemaError::MissingOutput;
+        match step_result_for_schema_error(err) {
+            StepResult::Failed {
+                exit_code,
+                schema_errors,
+                ..
+            } => {
+                assert_eq!(exit_code, None);
+                assert!(
+                    schema_errors.is_none(),
+                    "non-violation errors must NOT carry structured entries"
+                );
+            }
+            other => panic!("expected Failed without schema_errors, got {other:?}"),
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn step_executor_post_stop_emits_stopping_log() {
+        use ractor::Actor;
+        use std::io;
+        use std::sync::{Arc, Mutex};
+        use tracing_subscriber::fmt::MakeWriter;
+
+        #[derive(Clone, Default)]
+        struct CapturedLines(Arc<Mutex<Vec<u8>>>);
+
+        impl io::Write for CapturedLines {
+            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(buf);
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+
+        impl<'a> MakeWriter<'a> for CapturedLines {
+            type Writer = Self;
+            fn make_writer(&'a self) -> Self::Writer {
+                self.clone()
+            }
+        }
+
+        struct MockParent;
+        impl Actor for MockParent {
+            type Msg = ProjectMessage;
+            type State = ();
+            type Arguments = ();
+            async fn pre_start(
+                &self,
+                _: ActorRef<Self::Msg>,
+                _: Self::Arguments,
+            ) -> Result<Self::State, ActorProcessingErr> {
+                Ok(())
+            }
+            async fn handle(
+                &self,
+                _: ActorRef<Self::Msg>,
+                _: Self::Msg,
+                _: &mut Self::State,
+            ) -> Result<(), ActorProcessingErr> {
+                Ok(())
+            }
+        }
+
+        let captured = CapturedLines::default();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(captured.clone())
+            .with_ansi(false)
+            .finish();
+        let _guard = tracing::subscriber::set_default(subscriber);
+
+        let (parent_ref, _ph) = Actor::spawn(Some("mp-poststop".to_string()), MockParent, ())
+            .await
+            .expect("spawn parent");
+
+        let cfg = test_config("exec-poststop-log");
+        let (executor_ref, executor_handle) = Actor::spawn(
+            Some("step-executor-poststop".to_string()),
+            StepExecutor,
+            (cfg, parent_ref.clone()),
+        )
+        .await
+        .expect("spawn executor");
+
+        executor_ref.stop(Some("test stop".to_string()));
+        let _ = tokio::time::timeout(Duration::from_secs(5), executor_handle).await;
+        // Give the writer time to flush after post_stop runs.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let bytes = captured.0.lock().unwrap().clone();
+        let text = String::from_utf8(bytes).unwrap_or_default();
+        assert!(
+            text.contains("StepExecutor stopping for execution exec-poststop-log"),
+            "post_stop must emit the stopping log line; captured: {text}"
+        );
+
+        parent_ref.stop(Some("done".to_string()));
     }
 }

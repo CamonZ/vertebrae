@@ -3,6 +3,7 @@ pub mod config;
 pub mod helpers;
 pub mod output_validator;
 pub mod phoenix;
+pub mod provider;
 pub mod settings_synthesis;
 pub mod stream_json;
 
@@ -14,3 +15,7 @@ pub use actors::{DaemonConfig, DaemonMessage, DaemonSupervisor};
 pub use actors::{ProjectConfig, ProjectMessage, ProjectSupervisor};
 pub use actors::{StepConfig, StepExecutor, StepExecutorConfig, StepExecutorMessage, StepResult};
 pub use config::{ConfigError, ProjectEntry, ResolvedConfig};
+pub use provider::{
+    ParserKind, ProviderResolutionError, ResolvedProviderCommand, resolve_provider,
+    resolve_provider_command,
+};
