@@ -5,13 +5,14 @@
 
 use crate::project_config::{ProjectConfig, SavedProject};
 use crate::types::{
-    SessionLog, Step, StepExecution, StopRunRequest, Task, TaskFilterOptions, TaskRun,
-    TaskRunTrace, Workflow, WorkflowWithTasks,
+    ChatMessage, ChatSession, SessionLog, Step, StepExecution, StopRunRequest, Task,
+    TaskFilterOptions, TaskRun, TaskRunTrace, Workflow, WorkflowWithTasks,
 };
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use tauri::{Emitter, State};
 use tokio::sync::RwLock;
-use vertebrae_core::{StopRunTarget, VertebraeServices};
+use vertebrae_core::{ChatService, SendMessageOptions, StopRunTarget, VertebraeServices};
 
 /// Application state holding the services
 pub struct AppState {
@@ -20,6 +21,8 @@ pub struct AppState {
     /// Raw Sacrum GraphQL client used for queries that bypass the service
     /// trait abstractions (e.g. `pipeline_summary`, which is GUI-specific).
     pub sacrum_client: RwLock<Option<std::sync::Arc<vertebrae_sacrum_client::GraphqlClient>>>,
+    /// Sacrum live chat service (None until a project is selected).
+    pub chat_service: RwLock<Option<Arc<dyn ChatService>>>,
     /// Project configuration manager
     pub project_config: ProjectConfig,
 }
@@ -216,6 +219,8 @@ pub async fn remove_project(
         *service_lock = None;
         let mut client_lock = state.sacrum_client.write().await;
         *client_lock = None;
+        let mut chat_lock = state.chat_service.write().await;
+        *chat_lock = None;
 
         let mut socket = socket_state.lock().await;
         socket.disconnect();
@@ -294,16 +299,22 @@ pub async fn set_current_project(
     {
         let mut service_lock = state.services.write().await;
         let mut client_lock = state.sacrum_client.write().await;
+        let mut chat_lock = state.chat_service.write().await;
         match sacrum_config.as_ref() {
             Some(config) => {
                 let client = vertebrae_sacrum_client::GraphqlClient::new(config.clone());
                 let client_arc = std::sync::Arc::new(client);
                 *service_lock = Some(vertebrae_sacrum_client::from_sacrum(client_arc.clone()));
+                let chat: Arc<dyn ChatService> = Arc::new(
+                    vertebrae_sacrum_client::SacrumChatService::new((*client_arc).clone()),
+                );
+                *chat_lock = Some(chat);
                 *client_lock = Some(client_arc);
             }
             None => {
                 *service_lock = None;
                 *client_lock = None;
+                *chat_lock = None;
             }
         }
     }
@@ -1350,6 +1361,45 @@ pub async fn close_claude_session(
 }
 
 // ============================================================================
+// Sacrum Live Chat Commands
+// ============================================================================
+
+#[tauri::command]
+#[specta::specta]
+pub async fn create_chat_session(state: State<'_, AppState>) -> Result<ChatSession, CommandError> {
+    let chat_guard = state.chat_service.read().await;
+    let chat = chat_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    let session = chat.create_session().await?;
+    Ok(session.into())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn send_chat_message(
+    state: State<'_, AppState>,
+    chat_session_id: String,
+    content: String,
+    content_format: Option<String>,
+    client_message_id: Option<String>,
+) -> Result<ChatMessage, CommandError> {
+    let chat_guard = state.chat_service.read().await;
+    let chat = chat_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    let options = SendMessageOptions {
+        content,
+        content_format,
+        client_message_id,
+    };
+    let message = chat.send_message(&chat_session_id, options).await?;
+    Ok(message.into())
+}
+
+// ============================================================================
 // Task Relationship Commands
 // ============================================================================
 
@@ -2101,6 +2151,7 @@ mod tests {
             .manage(AppState {
                 services: RwLock::new(Some(services)),
                 sacrum_client: RwLock::new(None),
+                chat_service: RwLock::new(None),
                 project_config,
             })
             .manage(tokio::sync::Mutex::new(
@@ -2119,6 +2170,7 @@ mod tests {
             .manage(AppState {
                 services: RwLock::new(None),
                 sacrum_client: RwLock::new(None),
+                chat_service: RwLock::new(None),
                 project_config,
             })
             .manage(tokio::sync::Mutex::new(
