@@ -18,8 +18,11 @@ import {
   type ReactNode,
 } from "react";
 import type {
+  AssistantMessageEvent,
   ConversationEvent,
+  FileEditEvent,
   ThinkingEvent,
+  TodoListEvent,
   ToolCallEvent,
   ToolResultEvent,
 } from "../../../types/conversation";
@@ -292,6 +295,206 @@ export function ToolCall({
   );
 }
 
+/**
+ * Final assistant text from Codex `agent_message`. Visually distinct from
+ * `ThinkingBlock` (chain-of-thought) so users can scan for the actual reply
+ * vs. the model's reasoning.
+ */
+export function AssistantMessageBlock({
+  event,
+  previousTimestamp,
+}: {
+  event: AssistantMessageEvent;
+  previousTimestamp: string | null;
+}) {
+  return (
+    <div
+      data-testid="assistant-message"
+      className="py-2 border-l-2 border-primary/40 pl-3"
+    >
+      <div className="flex items-start gap-2">
+        <span className="font-mono text-[10px] uppercase tracking-wider text-primary mt-1">
+          assistant
+        </span>
+        <div className="flex-1 min-w-0">
+          <MarkdownContent text={event.text} />
+        </div>
+        <Timestamp
+          timestamp={event.timestamp}
+          previousTimestamp={previousTimestamp}
+        />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Diff-style render for a Codex `file_change` item. Lists each affected
+ * file path with its change kind (add/delete/update); the unified diff
+ * body is shown collapsed by default and expandable via per-file toggle.
+ *
+ * The patch status (`completed` / `failed`) tints the header so failed
+ * patches are visually distinct.
+ */
+export function FileEditBlock({
+  event,
+  previousTimestamp,
+}: {
+  event: FileEditEvent;
+  previousTimestamp: string | null;
+}) {
+  const [openIdx, setOpenIdx] = useState<number | null>(null);
+  const failed = event.status === "failed";
+  return (
+    <div
+      data-testid="file-edit"
+      data-status={event.status}
+      className="py-2"
+    >
+      <div className="flex items-start gap-2">
+        <span
+          className={`font-mono text-[10px] uppercase tracking-wider mt-1 ${failed ? "text-error" : "text-success"}`}
+        >
+          {failed ? "patch failed" : "patch"}
+        </span>
+        <div className="flex-1 min-w-0">
+          {event.changes.map((change, idx) => {
+            const isOpen = openIdx === idx;
+            const hasDiff = typeof change.diff === "string" && change.diff.length > 0;
+            return (
+              <div key={`${change.path}-${idx}`} className="text-sm">
+                <button
+                  type="button"
+                  className="flex items-center gap-2 w-full text-left py-0.5"
+                  onClick={() => setOpenIdx(isOpen ? null : idx)}
+                  disabled={!hasDiff}
+                >
+                  <span
+                    className={`font-mono text-[10px] uppercase tracking-wider ${changeKindClass(change.kind)}`}
+                  >
+                    {change.kind}
+                  </span>
+                  <span className="font-mono text-xs text-text-primary truncate">
+                    {change.path}
+                  </span>
+                  {hasDiff && (
+                    <span
+                      className={`text-text-muted transition-transform ${isOpen ? "rotate-90" : ""}`}
+                    >
+                      <ChevronRightIcon />
+                    </span>
+                  )}
+                </button>
+                {isOpen && hasDiff && (
+                  <pre className="mt-1 ml-4 p-2 bg-bg-tertiary rounded text-xs font-mono whitespace-pre-wrap break-words">
+                    {renderDiffLines(change.diff!)}
+                  </pre>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        <Timestamp
+          timestamp={event.timestamp}
+          previousTimestamp={previousTimestamp}
+        />
+      </div>
+    </div>
+  );
+}
+
+function changeKindClass(kind: string): string {
+  switch (kind) {
+    case "add":
+      return "text-success";
+    case "delete":
+      return "text-error";
+    case "update":
+      return "text-warning";
+    default:
+      return "text-text-muted";
+  }
+}
+
+/**
+ * Render a unified diff body with per-line +/- coloring. Recognized line
+ * leads:
+ *   `+` -> addition (text-success)
+ *   `-` -> deletion (text-error)
+ *   `@@` -> hunk header (text-info)
+ * everything else renders neutral.
+ */
+function renderDiffLines(diff: string): ReactNode {
+  return diff.split("\n").map((line, i) => {
+    let cls = "text-text-secondary";
+    if (line.startsWith("+++") || line.startsWith("---")) {
+      cls = "text-text-muted";
+    } else if (line.startsWith("@@")) {
+      cls = "text-info";
+    } else if (line.startsWith("+")) {
+      cls = "text-success";
+    } else if (line.startsWith("-")) {
+      cls = "text-error";
+    }
+    return (
+      <div key={i} className={cls}>
+        {line || " "}
+      </div>
+    );
+  });
+}
+
+/**
+ * Render a Codex `todo_list` plan as a checklist. Each row is a checkbox
+ * (read-only) plus the row text; completed items are struck through.
+ */
+export function TodoListBlock({
+  event,
+  previousTimestamp,
+}: {
+  event: TodoListEvent;
+  previousTimestamp: string | null;
+}) {
+  return (
+    <div data-testid="todo-list" data-item-id={event.itemId} className="py-2">
+      <div className="flex items-start gap-2">
+        <span className="font-mono text-[10px] uppercase tracking-wider text-primary mt-1">
+          plan
+        </span>
+        <ul className="flex-1 min-w-0 space-y-0.5">
+          {event.items.map((row, i) => (
+            <li
+              key={`${i}-${row.text}`}
+              className="flex items-start gap-2 text-sm"
+              data-completed={row.completed}
+            >
+              <span
+                className={`mt-0.5 flex-shrink-0 ${row.completed ? "text-success" : "text-text-muted"}`}
+                aria-hidden="true"
+              >
+                {row.completed ? "[x]" : "[ ]"}
+              </span>
+              <span
+                className={
+                  row.completed
+                    ? "text-text-muted line-through"
+                    : "text-text-primary"
+                }
+              >
+                {row.text}
+              </span>
+            </li>
+          ))}
+        </ul>
+        <Timestamp
+          timestamp={event.timestamp}
+          previousTimestamp={previousTimestamp}
+        />
+      </div>
+    </div>
+  );
+}
+
 export function ToolResult({ event }: { event: ToolResultEvent }) {
   return (
     <div className="py-1 ml-8 flex items-start gap-2">
@@ -336,10 +539,25 @@ export function EventRenderer({
           level={level}
         />
       );
+    case "assistant_message":
+      return (
+        <AssistantMessageBlock
+          event={event}
+          previousTimestamp={previousTimestamp}
+        />
+      );
     case "tool_call":
       return <ToolCall event={event} previousTimestamp={previousTimestamp} />;
     case "tool_result":
       return <ToolResult event={event} />;
+    case "file_edit":
+      return (
+        <FileEditBlock event={event} previousTimestamp={previousTimestamp} />
+      );
+    case "todo_list":
+      return (
+        <TodoListBlock event={event} previousTimestamp={previousTimestamp} />
+      );
     default:
       return null;
   }
