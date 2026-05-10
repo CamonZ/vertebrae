@@ -160,6 +160,10 @@ impl DaemonWorld {
                 std::env::var("CLAUDE_CODE_PATH").unwrap_or_default(),
             )
             .env(
+                "CODEX_PATH",
+                std::env::var("CODEX_PATH").unwrap_or_default(),
+            )
+            .env(
                 "MOCK_OUTPUT_DIR",
                 self.mock_output_dir.to_string_lossy().to_string(),
             )
