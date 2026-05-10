@@ -1,4 +1,5 @@
 import { ConnectionStatus } from "./ConnectionStatus";
+import { OpenLiveChatButton } from "./LiveChatWindow";
 import { ThemeToggle } from "./ThemeToggle";
 
 interface HeaderProps {
@@ -29,6 +30,7 @@ export function Header({ title, subtitle }: HeaderProps) {
 
       {/* Actions */}
       <div className="titlebar-button flex items-center gap-4">
+        <OpenLiveChatButton />
         <ConnectionStatus />
         <ThemeToggle />
       </div>

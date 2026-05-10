@@ -18,7 +18,8 @@ use specta_typescript::Typescript;
 use tauri::Manager;
 use tauri_plugin_log::{Target, TargetKind};
 use tauri_specta::{collect_commands, collect_events, Builder};
-use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig};
+use vertebrae_core::ChatService;
+use vertebrae_sacrum_client::{GraphqlClient, SacrumChatService, SacrumConfig};
 
 use claude_session::{
     ClaudePermissionRequestEvent, ClaudeSessionEndEvent, ClaudeSessionErrorEvent,
@@ -123,6 +124,9 @@ fn create_builder() -> Builder {
             commands::create_claude_session,
             commands::send_claude_message,
             commands::close_claude_session,
+            // Sacrum live chat commands
+            commands::create_chat_session,
+            commands::send_chat_message,
             // WebSocket status command
             commands::get_websocket_status,
         ])
@@ -193,20 +197,23 @@ pub fn run() {
                 }
             });
 
-            let (service, client_arc) = match sacrum_config.as_ref() {
+            let (service, client_arc, chat_service) = match sacrum_config.as_ref() {
                 Some(config) => {
                     let client = GraphqlClient::new(config.clone());
                     let client_arc = Arc::new(client);
                     let services = vertebrae_sacrum_client::from_sacrum(client_arc.clone());
-                    (Some(services), Some(client_arc))
+                    let chat: Arc<dyn ChatService> =
+                        Arc::new(SacrumChatService::new((*client_arc).clone()));
+                    (Some(services), Some(client_arc), Some(chat))
                 }
-                None => (None, None),
+                None => (None, None, None),
             };
 
             // Manage application state with optional services
             app.manage(AppState {
                 services: RwLock::new(service),
                 sacrum_client: RwLock::new(client_arc),
+                chat_service: RwLock::new(chat_service),
                 project_config,
             });
 

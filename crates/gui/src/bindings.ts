@@ -27,7 +27,7 @@ async getProjects() : Promise<Result<SavedProject[], CommandError>> {
 },
 /**
  * Add a project to the saved list
- *
+ * 
  * Takes a directory path, derives a slug from the folder name,
  * creates the project in Sacrum API if needed, and registers in global config.
  */
@@ -41,7 +41,7 @@ async addProject(path: string) : Promise<Result<SavedProject, CommandError>> {
 },
 /**
  * Remove a project from the saved list
- *
+ * 
  * Removes the project from config.toml by slug. If the removed project
  * is the currently selected project, clears the selection and services.
  */
@@ -99,7 +99,7 @@ async hasProjectSelected() : Promise<Result<boolean, CommandError>> {
 },
 /**
  * List tasks with optional filters
- *
+ * 
  * Returns a list of task summaries matching the filter criteria.
  */
 async listTasks(filter: TaskFilterOptions | null) : Promise<Result<Task[], CommandError>> {
@@ -112,7 +112,7 @@ async listTasks(filter: TaskFilterOptions | null) : Promise<Result<Task[], Comma
 },
 /**
  * Get a single task by ID with its relations
- *
+ * 
  * Returns the full task details.
  */
 async getTask(id: string) : Promise<Result<Task, CommandError>> {
@@ -632,7 +632,7 @@ async runWorkflow(taskId: string) : Promise<Result<TaskRun, CommandError>> {
 },
 /**
  * Stop a durable TaskRun by explicit run ID or by active task ID.
- *
+ * 
  * If both IDs are provided, `task_run_id` takes precedence.
  */
 async stopRun(request: StopRunRequest) : Promise<Result<TaskRun | null, CommandError>> {
@@ -645,7 +645,7 @@ async stopRun(request: StopRunRequest) : Promise<Result<TaskRun | null, CommandE
 },
 /**
  * Orchestrate a task through its entire workflow via the TaskRun path.
- *
+ * 
  * Compatibility shim for existing frontend call sites. New code should call
  * `run_workflow`, which returns the durable TaskRun.
  */
@@ -708,6 +708,33 @@ async sendClaudeMessage(sessionId: string, content: string) : Promise<Result<nul
 async closeClaudeSession(sessionId: string) : Promise<Result<null, ClaudeSessionError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("close_claude_session", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Create a new sacrum live chat session bound to the active project.
+ * 
+ * V0: project-scoped only — `session_kind` and `public_metadata` are
+ * left server-default. Returns the freshly-created session.
+ */
+async createChatSession() : Promise<Result<ChatSession, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("create_chat_session") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Send a user message into an existing sacrum chat session.
+ * 
+ * `content_format` defaults to `"plain"` server-side when omitted.
+ */
+async sendChatMessage(chatSessionId: string, content: string, contentFormat: string | null, clientMessageId: string | null) : Promise<Result<ChatMessage, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("send_chat_message", { chatSessionId, content, contentFormat, clientMessageId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -831,6 +858,14 @@ plugin_dirs?: string[];
  * JSON Schema for structured output validation (serialized as JSON string)
  */
 json_schema: string | null }
+/**
+ * Sacrum live chat message, frontend-friendly form.
+ */
+export type ChatMessage = { id: string; project_id: string; chat_session_id: string; role: string; content: string; content_format: string | null; client_message_id: string | null; inserted_at: string | null; updated_at: string | null }
+/**
+ * Sacrum live chat session, frontend-friendly form.
+ */
+export type ChatSession = { id: string; project_id: string; status: string; session_kind: string | null; started_at: string | null; ended_at: string | null; stop_requested_at: string | null; inserted_at: string | null; updated_at: string | null }
 /**
  * Event emitted when Claude requests permission
  */
@@ -1155,11 +1190,11 @@ id: string | null;
 /**
  * Task ID this execution belongs to
  */
-task_id?: string;
+task_id?: string; 
 /**
  * TaskRun ID this execution belongs to, when present
  */
-task_run_id?: string | null;
+task_run_id?: string | null; 
 /**
  * Workflow ID being executed
  */
@@ -1303,11 +1338,11 @@ workflow_name: string | null;
 /**
  * Current step name (if task has a current step in workflow)
  */
-step_name: string | null;
+step_name: string | null; 
 /**
  * Server-derived TaskRun controls for Run/Stop surfaces
  */
-run_controls?: TaskRunControls | null;
+run_controls?: TaskRunControls | null; 
 /**
  * Whether this task needs human review
  */
@@ -1425,67 +1460,67 @@ export type TaskPriority = "low" | "medium" | "high" | "critical"
 /**
  * Durable workflow run for a task.
  */
-export type TaskRun = {
+export type TaskRun = { 
 /**
  * TaskRun ID
  */
-id: string;
+id: string; 
 /**
  * Task ID this run belongs to
  */
-task_id: string;
+task_id: string; 
 /**
  * Project ID this run belongs to
  */
-project_id: string;
+project_id: string; 
 /**
  * User ID, when returned by the backend
  */
-user_id: string | null;
+user_id: string | null; 
 /**
  * Durable run lifecycle status
  */
-status: TaskRunStatus;
+status: TaskRunStatus; 
 /**
  * When this run started (ISO 8601 string)
  */
-started_at: string | null;
+started_at: string | null; 
 /**
  * When this run ended (ISO 8601 string)
  */
-ended_at: string | null;
+ended_at: string | null; 
 /**
  * When stop was requested (ISO 8601 string)
  */
-stop_requested_at: string | null;
+stop_requested_at: string | null; 
 /**
  * Latest step execution ID associated with this run
  */
-latest_step_execution_id: string | null;
+latest_step_execution_id: string | null; 
 /**
  * Terminal outcome kind
  */
-outcome_kind: string | null;
+outcome_kind: string | null; 
 /**
  * Structured terminal outcome context
  */
-outcome_context: JsonValue | null;
+outcome_context: JsonValue | null; 
 /**
  * Parent TaskRun ID for child workflow runs
  */
-parent_task_run_id: string | null;
+parent_task_run_id: string | null; 
 /**
  * Root TaskRun ID for recursive traces
  */
-root_task_run_id: string | null;
+root_task_run_id: string | null; 
 /**
  * Step execution that triggered this child run
  */
-triggered_by_step_execution_id: string | null;
+triggered_by_step_execution_id: string | null; 
 /**
  * Creation timestamp from Sacrum (ISO 8601 string)
  */
-inserted_at: string | null;
+inserted_at: string | null; 
 /**
  * Last update timestamp from Sacrum (ISO 8601 string)
  */

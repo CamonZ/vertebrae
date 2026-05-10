@@ -33,3 +33,6 @@ export type {
   ChatScope,
   ChatMessage,
 } from "./chatStore";
+
+export { useLiveChatStore } from "./liveChatStore";
+export type { LiveChatStore, LiveChatMessage } from "./liveChatStore";
