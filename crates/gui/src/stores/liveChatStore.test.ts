@@ -5,6 +5,10 @@ vi.mock("../bindings", () => ({
   commands: {
     createChatSession: vi.fn(),
     sendChatMessage: vi.fn(),
+    getChatSession: vi.fn(),
+    listChatMessages: vi.fn(),
+    getActiveChatSessionId: vi.fn(),
+    setActiveChatSessionId: vi.fn(),
   },
 }));
 
@@ -13,6 +17,10 @@ import { useLiveChatStore, type LiveChatMessage } from "./liveChatStore";
 
 const mockedCreate = vi.mocked(commands.createChatSession);
 const mockedSend = vi.mocked(commands.sendChatMessage);
+const mockedGetSession = vi.mocked(commands.getChatSession);
+const mockedListMessages = vi.mocked(commands.listChatMessages);
+const mockedGetActive = vi.mocked(commands.getActiveChatSessionId);
+const mockedSetActive = vi.mocked(commands.setActiveChatSessionId);
 
 function makeSession(overrides: Partial<ChatSession> = {}): ChatSession {
   return {
@@ -49,6 +57,11 @@ describe("liveChatStore", () => {
     useLiveChatStore.getState().reset();
     mockedCreate.mockReset();
     mockedSend.mockReset();
+    mockedGetSession.mockReset();
+    mockedListMessages.mockReset();
+    mockedGetActive.mockReset();
+    mockedSetActive.mockReset();
+    mockedSetActive.mockResolvedValue({ status: "ok", data: null });
   });
 
   describe("createSession", () => {
@@ -379,6 +392,202 @@ describe("liveChatStore", () => {
       expect(useLiveChatStore.getState().panelOpen).toBe(true);
       useLiveChatStore.getState().setPanelOpen(false);
       expect(useLiveChatStore.getState().panelOpen).toBe(false);
+    });
+  });
+
+  describe("hydrate", () => {
+    it("is a no-op when no cached session exists", async () => {
+      mockedGetActive.mockResolvedValueOnce({ status: "ok", data: null });
+
+      const result = await useLiveChatStore.getState().hydrate();
+
+      expect(result).toBeNull();
+      expect(mockedGetSession).not.toHaveBeenCalled();
+      expect(mockedListMessages).not.toHaveBeenCalled();
+      const state = useLiveChatStore.getState();
+      expect(state.currentSession).toBeNull();
+      expect(state.messages).toHaveLength(0);
+      expect(state.hydrated).toBe(true);
+    });
+
+    it("clears the cached id when the session no longer exists", async () => {
+      mockedGetActive.mockResolvedValueOnce({
+        status: "ok",
+        data: "sess-stale",
+      });
+      mockedGetSession.mockResolvedValueOnce({ status: "ok", data: null });
+
+      const result = await useLiveChatStore.getState().hydrate();
+
+      expect(result).toBeNull();
+      expect(mockedSetActive).toHaveBeenCalledWith(null);
+      expect(mockedListMessages).not.toHaveBeenCalled();
+      expect(useLiveChatStore.getState().hydrated).toBe(true);
+    });
+
+    it("hydrates session and messages from the backend", async () => {
+      const session = makeSession({ id: "sess-restored" });
+      const persistedMessages = [
+        makeMessage({
+          id: "msg-1",
+          chat_session_id: "sess-restored",
+          role: "user",
+          content: "first",
+        }),
+        makeMessage({
+          id: "msg-2",
+          chat_session_id: "sess-restored",
+          role: "assistant",
+          content: "second",
+        }),
+      ];
+      mockedGetActive.mockResolvedValueOnce({
+        status: "ok",
+        data: "sess-restored",
+      });
+      mockedGetSession.mockResolvedValueOnce({ status: "ok", data: session });
+      mockedListMessages.mockResolvedValueOnce({
+        status: "ok",
+        data: persistedMessages,
+      });
+
+      const result = await useLiveChatStore.getState().hydrate();
+
+      expect(result).toEqual(session);
+      expect(mockedListMessages).toHaveBeenCalledWith(
+        "sess-restored",
+        200,
+        null
+      );
+      const state = useLiveChatStore.getState();
+      expect(state.currentSession).toEqual(session);
+      expect(state.hydrated).toBe(true);
+      expect(state.messages).toHaveLength(2);
+      expect(state.messages[0].id).toBe("msg-1");
+      expect(state.messages[0].content).toBe("first");
+      expect(state.messages[1].id).toBe("msg-2");
+      expect(state.messages[1].role).toBe("assistant");
+    });
+
+    it("dedupes a duplicate WebSocket event delivered before hydrate completes", async () => {
+      const session = makeSession({ id: "sess-race" });
+      const persistedMessage = makeMessage({
+        id: "msg-race",
+        chat_session_id: "sess-race",
+        content: "raced content",
+      });
+
+      let resolveList: (value: {
+        status: "ok";
+        data: ChatMessage[];
+      }) => void = () => {};
+      mockedGetActive.mockResolvedValueOnce({
+        status: "ok",
+        data: "sess-race",
+      });
+      mockedGetSession.mockResolvedValueOnce({ status: "ok", data: session });
+      mockedListMessages.mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveList = resolve;
+        }) as ReturnType<typeof commands.listChatMessages>
+      );
+
+      const hydratePromise = useLiveChatStore.getState().hydrate();
+
+      // Simulate a WebSocket event for the same message arriving while
+      // list_chat_messages is still in flight.
+      useLiveChatStore.getState().applyRemoteMessage(persistedMessage);
+      expect(useLiveChatStore.getState().messages).toHaveLength(1);
+
+      resolveList({ status: "ok", data: [persistedMessage] });
+      await hydratePromise;
+
+      const finalMessages = useLiveChatStore.getState().messages;
+      expect(finalMessages).toHaveLength(1);
+      expect(finalMessages[0].id).toBe("msg-race");
+      expect(finalMessages[0].content).toBe("raced content");
+    });
+
+    it("dedupes a duplicate WebSocket event delivered after hydrate completes", async () => {
+      const session = makeSession({ id: "sess-after" });
+      const persistedMessage = makeMessage({
+        id: "msg-after",
+        chat_session_id: "sess-after",
+        content: "after content",
+      });
+      mockedGetActive.mockResolvedValueOnce({
+        status: "ok",
+        data: "sess-after",
+      });
+      mockedGetSession.mockResolvedValueOnce({ status: "ok", data: session });
+      mockedListMessages.mockResolvedValueOnce({
+        status: "ok",
+        data: [persistedMessage],
+      });
+
+      await useLiveChatStore.getState().hydrate();
+      expect(useLiveChatStore.getState().messages).toHaveLength(1);
+
+      // The same message arrives again via WebSocket — applyRemoteMessage
+      // dedupes by persisted id.
+      useLiveChatStore.getState().applyRemoteMessage(persistedMessage);
+
+      const finalMessages = useLiveChatStore.getState().messages;
+      expect(finalMessages).toHaveLength(1);
+      expect(finalMessages[0].id).toBe("msg-after");
+    });
+
+    it("is idempotent — concurrent calls only fetch once", async () => {
+      mockedGetActive.mockResolvedValueOnce({ status: "ok", data: null });
+
+      const [a, b] = await Promise.all([
+        useLiveChatStore.getState().hydrate(),
+        useLiveChatStore.getState().hydrate(),
+      ]);
+
+      expect(a).toBeNull();
+      expect(b).toBeNull();
+      expect(mockedGetActive).toHaveBeenCalledTimes(1);
+    });
+
+    it("after reset, hydrate runs again", async () => {
+      mockedGetActive.mockResolvedValueOnce({ status: "ok", data: null });
+      await useLiveChatStore.getState().hydrate();
+      expect(mockedGetActive).toHaveBeenCalledTimes(1);
+
+      useLiveChatStore.getState().reset();
+      mockedGetActive.mockResolvedValueOnce({ status: "ok", data: null });
+      await useLiveChatStore.getState().hydrate();
+      expect(mockedGetActive).toHaveBeenCalledTimes(2);
+    });
+
+    it("records the error and still marks as hydrated when getChatSession fails", async () => {
+      mockedGetActive.mockResolvedValueOnce({
+        status: "ok",
+        data: "sess-broken",
+      });
+      mockedGetSession.mockResolvedValueOnce({
+        status: "error",
+        error: { message: "network error" },
+      });
+
+      const result = await useLiveChatStore.getState().hydrate();
+      expect(result).toBeNull();
+      const state = useLiveChatStore.getState();
+      expect(state.lastError).toBe("network error");
+      expect(state.hydrated).toBe(true);
+    });
+  });
+
+  describe("createSession + persistence", () => {
+    it("persists the new session id via setActiveChatSessionId", async () => {
+      const session = makeSession({ id: "sess-persist" });
+      mockedCreate.mockResolvedValueOnce({ status: "ok", data: session });
+
+      await useLiveChatStore.getState().createSession();
+
+      expect(mockedSetActive).toHaveBeenCalledWith("sess-persist");
+      expect(useLiveChatStore.getState().hydrated).toBe(true);
     });
   });
 });

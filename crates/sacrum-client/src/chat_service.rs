@@ -3,7 +3,9 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
-use vertebrae_core::chat_service::{ChatMessage, ChatService, ChatSession, SendMessageOptions};
+use vertebrae_core::chat_service::{
+    ChatMessage, ChatService, ChatSession, ListMessagesOptions, SendMessageOptions,
+};
 use vertebrae_core::error::ServiceResult;
 
 use crate::api_types::{ChatMessageResponse, ChatSessionResponse};
@@ -101,6 +103,50 @@ impl ChatService for SacrumChatService {
             .await?;
 
         Ok(message_response_to_model(response))
+    }
+
+    async fn get_session(&self, chat_session_id: &str) -> ServiceResult<Option<ChatSession>> {
+        let query = with_fragments(chat::GET_CHAT_SESSION, &[chat::CHAT_SESSION_FIELDS]);
+        let variables = json!({
+            "project_id": self.project_id(),
+            "id": chat_session_id,
+        });
+
+        let response: Option<ChatSessionResponse> = self
+            .client
+            .execute(&query, variables, "chat_session")
+            .await?;
+
+        Ok(response.map(session_response_to_model))
+    }
+
+    async fn list_messages(
+        &self,
+        chat_session_id: &str,
+        options: ListMessagesOptions,
+    ) -> ServiceResult<Vec<ChatMessage>> {
+        let query = with_fragments(chat::LIST_CHAT_MESSAGES, &[chat::CHAT_MESSAGE_FIELDS]);
+        let mut variables = json!({
+            "project_id": self.project_id(),
+            "chat_session_id": chat_session_id,
+        });
+
+        if let Some(limit) = options.limit {
+            variables["limit"] = Value::from(limit);
+        }
+        if let Some(after) = options.after {
+            variables["after"] = Value::String(after);
+        }
+
+        let response: Vec<ChatMessageResponse> = self
+            .client
+            .execute(&query, variables, "chat_messages")
+            .await?;
+
+        Ok(response
+            .into_iter()
+            .map(message_response_to_model)
+            .collect())
     }
 }
 
@@ -250,6 +296,129 @@ mod tests {
         };
         let message = service.send_message("sess-1", opts).await.unwrap();
         assert_eq!(message.id, "msg-2");
+    }
+
+    #[tokio::test]
+    async fn get_session_returns_session_when_present() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("GetChatSession"))
+            .and(body_string_contains("sess-known"))
+            .and(body_string_contains("test-project"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "chat_session": session_payload("sess-known") }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_service(&server.uri());
+        let session = service.get_session("sess-known").await.unwrap();
+
+        let session = session.expect("expected Some(session)");
+        assert_eq!(session.id, "sess-known");
+        assert_eq!(session.status, "active");
+    }
+
+    #[tokio::test]
+    async fn get_session_returns_none_when_null() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("GetChatSession"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "chat_session": null }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_service(&server.uri());
+        let session = service.get_session("sess-missing").await.unwrap();
+        assert!(session.is_none(), "expected None, got {session:?}");
+    }
+
+    #[tokio::test]
+    async fn list_messages_returns_messages_in_order() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("ListChatMessages"))
+            .and(body_string_contains("sess-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "chat_messages": [
+                        message_payload("msg-1", "sess-1", "first"),
+                        message_payload("msg-2", "sess-1", "second"),
+                    ]
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_service(&server.uri());
+        let messages = service
+            .list_messages("sess-1", ListMessagesOptions::default())
+            .await
+            .unwrap();
+
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].id, "msg-1");
+        assert_eq!(messages[0].content, "first");
+        assert_eq!(messages[1].id, "msg-2");
+        assert_eq!(messages[1].content, "second");
+    }
+
+    #[tokio::test]
+    async fn list_messages_passes_limit_and_after() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("ListChatMessages"))
+            .and(body_string_contains("\"limit\":50"))
+            .and(body_string_contains("2026-05-10T11:00:00Z"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": { "chat_messages": [] }
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_service(&server.uri());
+        let messages = service
+            .list_messages(
+                "sess-1",
+                ListMessagesOptions {
+                    limit: Some(50),
+                    after: Some("2026-05-10T11:00:00Z".to_string()),
+                },
+            )
+            .await
+            .unwrap();
+        assert!(messages.is_empty());
+    }
+
+    #[tokio::test]
+    async fn list_messages_propagates_graphql_errors() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .and(body_string_contains("ListChatMessages"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "errors": [{ "message": "session not found" }]
+            })))
+            .mount(&server)
+            .await;
+
+        let service = create_service(&server.uri());
+        let err = service
+            .list_messages("sess-missing", ListMessagesOptions::default())
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("session not found"));
     }
 
     #[tokio::test]

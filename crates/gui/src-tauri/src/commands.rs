@@ -12,7 +12,9 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tauri::{Emitter, State};
 use tokio::sync::RwLock;
-use vertebrae_core::{ChatService, SendMessageOptions, StopRunTarget, VertebraeServices};
+use vertebrae_core::{
+    ChatService, ListMessagesOptions, SendMessageOptions, StopRunTarget, VertebraeServices,
+};
 
 /// Application state holding the services
 pub struct AppState {
@@ -1397,6 +1399,71 @@ pub async fn send_chat_message(
     };
     let message = chat.send_message(&chat_session_id, options).await?;
     Ok(message.into())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn get_chat_session(
+    state: State<'_, AppState>,
+    chat_session_id: String,
+) -> Result<Option<ChatSession>, CommandError> {
+    let chat_guard = state.chat_service.read().await;
+    let chat = chat_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    let session = chat.get_session(&chat_session_id).await?;
+    Ok(session.map(Into::into))
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn list_chat_messages(
+    state: State<'_, AppState>,
+    chat_session_id: String,
+    limit: Option<i32>,
+    after: Option<String>,
+) -> Result<Vec<ChatMessage>, CommandError> {
+    let chat_guard = state.chat_service.read().await;
+    let chat = chat_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    let options = ListMessagesOptions { limit, after };
+    let messages = chat.list_messages(&chat_session_id, options).await?;
+    Ok(messages.into_iter().map(Into::into).collect())
+}
+
+/// Read the cached active chat session id for the currently selected project.
+/// Returns `None` if no project is selected or no session has been cached.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_active_chat_session_id(
+    state: State<'_, AppState>,
+) -> Result<Option<String>, CommandError> {
+    let slug = match state.project_config.get_current_project() {
+        Some(s) => s,
+        None => return Ok(None),
+    };
+    Ok(state.project_config.get_active_chat_session(&slug))
+}
+
+/// Persist (or clear) the active chat session id for the currently selected
+/// project so it can be restored on reopen / relaunch.
+#[tauri::command]
+#[specta::specta]
+pub async fn set_active_chat_session_id(
+    state: State<'_, AppState>,
+    chat_session_id: Option<String>,
+) -> Result<(), CommandError> {
+    let slug = state
+        .project_config
+        .get_current_project()
+        .ok_or_else(CommandError::no_project_selected)?;
+    state
+        .project_config
+        .set_active_chat_session(&slug, chat_session_id)
+        .map_err(|message| CommandError { message })
 }
 
 // ============================================================================
