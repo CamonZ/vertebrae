@@ -103,6 +103,12 @@ export function resolveGlyph(input: GlyphInput): ResolvedGlyph {
       return { glyph: "stop", variant: "default", label: "session end" };
     case "thinking":
       return { glyph: "brain", variant: "default", label: "thinking" };
+    case "assistant_message":
+      return {
+        glyph: "file-text",
+        variant: "default",
+        label: "assistant message",
+      };
     case "tool_call":
       return {
         glyph: toolNameToGlyph(ev.toolName),
@@ -115,6 +121,14 @@ export function resolveGlyph(input: GlyphInput): ResolvedGlyph {
         variant: ev.isError ? "error" : "filled",
         label: ev.isError ? "tool error" : "tool result",
       };
+    case "file_edit":
+      return {
+        glyph: "edit",
+        variant: ev.status === "failed" ? "error" : "default",
+        label: ev.status === "failed" ? "patch failed" : "file edit",
+      };
+    case "todo_list":
+      return { glyph: "file-text", variant: "default", label: "plan" };
   }
 }
 
