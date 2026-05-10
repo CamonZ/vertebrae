@@ -4,6 +4,7 @@
 //! Projects are stored in the app data directory.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
@@ -23,6 +24,11 @@ pub struct SavedProject {
 pub struct ProjectConfigFile {
     /// Currently selected project slug (if any)
     pub current_project_slug: Option<String>,
+    /// Last-used live chat session id per project slug. Allows the GUI to
+    /// reopen the previous conversation on relaunch / project switch since the
+    /// V0 sacrum API exposes no list-sessions-for-project query.
+    #[serde(default)]
+    pub active_chat_sessions: HashMap<String, String>,
 }
 
 /// Configuration manager for project settings
@@ -111,6 +117,29 @@ impl ProjectConfig {
         config.current_project_slug = slug;
         self.save(&config)
     }
+
+    /// Get the cached active chat session id for the given project slug, if any.
+    pub fn get_active_chat_session(&self, slug: &str) -> Option<String> {
+        self.load().active_chat_sessions.get(slug).cloned()
+    }
+
+    /// Set or clear the cached active chat session id for the given project slug.
+    pub fn set_active_chat_session(
+        &self,
+        slug: &str,
+        session_id: Option<String>,
+    ) -> Result<(), String> {
+        let mut config = self.load();
+        match session_id {
+            Some(id) => {
+                config.active_chat_sessions.insert(slug.to_string(), id);
+            }
+            None => {
+                config.active_chat_sessions.remove(slug);
+            }
+        }
+        self.save(&config)
+    }
 }
 
 #[cfg(test)]
@@ -133,7 +162,95 @@ mod tests {
 
         let result = config.load();
         assert!(result.current_project_slug.is_none());
+        assert!(result.active_chat_sessions.is_empty());
 
         let _ = fs::remove_dir_all(&config_dir);
+    }
+
+    fn unique_config(slug_suffix: &str) -> (PathBuf, ProjectConfig) {
+        let config_dir = env::temp_dir().join(format!(
+            "vtb-gui-test-chat-{}-{}",
+            std::process::id(),
+            slug_suffix
+        ));
+        let _ = fs::create_dir_all(&config_dir);
+        let config_path = config_dir.join("projects.json");
+        let config = ProjectConfig {
+            config_path: config_path.clone(),
+        };
+        (config_dir, config)
+    }
+
+    #[test]
+    fn test_set_and_get_active_chat_session_round_trips() {
+        let (dir, config) = unique_config("round-trip");
+
+        assert!(config.get_active_chat_session("alpha").is_none());
+
+        config
+            .set_active_chat_session("alpha", Some("sess-abc".to_string()))
+            .unwrap();
+
+        assert_eq!(
+            config.get_active_chat_session("alpha"),
+            Some("sess-abc".to_string())
+        );
+
+        // Other slugs are untouched.
+        assert!(config.get_active_chat_session("beta").is_none());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_clearing_active_chat_session_removes_entry() {
+        let (dir, config) = unique_config("clear");
+
+        config
+            .set_active_chat_session("alpha", Some("sess-1".to_string()))
+            .unwrap();
+        config
+            .set_active_chat_session("beta", Some("sess-2".to_string()))
+            .unwrap();
+
+        config.set_active_chat_session("alpha", None).unwrap();
+
+        assert!(config.get_active_chat_session("alpha").is_none());
+        assert_eq!(
+            config.get_active_chat_session("beta"),
+            Some("sess-2".to_string())
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_active_chat_session_persists_across_loads() {
+        let (dir, _) = unique_config("persist");
+        let config_path = dir.join("projects.json");
+
+        {
+            let config = ProjectConfig {
+                config_path: config_path.clone(),
+            };
+            config
+                .set_active_chat_session("alpha", Some("sess-persist".to_string()))
+                .unwrap();
+            config
+                .set_active_chat_session("beta", Some("sess-other".to_string()))
+                .unwrap();
+        }
+
+        let config = ProjectConfig { config_path };
+        assert_eq!(
+            config.get_active_chat_session("alpha"),
+            Some("sess-persist".to_string())
+        );
+        assert_eq!(
+            config.get_active_chat_session("beta"),
+            Some("sess-other".to_string())
+        );
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }

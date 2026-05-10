@@ -729,6 +729,46 @@ async sendChatMessage(chatSessionId: string, content: string, contentFormat: str
     else return { status: "error", error: e  as any };
 }
 },
+async getChatSession(chatSessionId: string) : Promise<Result<ChatSession | null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_chat_session", { chatSessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async listChatMessages(chatSessionId: string, limit: number | null, after: string | null) : Promise<Result<ChatMessage[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_chat_messages", { chatSessionId, limit, after }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Read the cached active chat session id for the currently selected project.
+ * Returns `None` if no project is selected or no session has been cached.
+ */
+async getActiveChatSessionId() : Promise<Result<string | null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_active_chat_session_id") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Persist (or clear) the active chat session id for the currently selected
+ * project so it can be restored on reopen / relaunch.
+ */
+async setActiveChatSessionId(chatSessionId: string | null) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_active_chat_session_id", { chatSessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 /**
  * Get the current WebSocket connection status
  */
@@ -962,36 +1002,19 @@ export type CreateStepOptions = { workflow_id: string; name: string; goal: strin
 export type ExecutionStatus = "in_progress" | "completed" | "failed"
 export type JsonValue = null | boolean | number | string | JsonValue[] | Partial<{ [key in string]: JsonValue }>
 /**
- * Event payload for generic chat events not covered by the four typed
- * channel events. Sacrum persists every public chat event as a `chat_event`
- * row and rebroadcasts unknown event types under the `chat_event_created`
- * channel event. Surfaced for future event types (e.g. tool calls,
- * streaming chunks) without requiring a frontend rebuild.
+ * Generic chat event for types not covered by the typed channel events
+ * (e.g. future tool calls, streaming chunks) — `payload` is kept opaque
+ * so new types reach the frontend without a binding rebuild.
  */
-export type LiveChatEventCreatedEvent = { event_id: string | null; chat_session_id: string | null; event_type: string | null; 
+export type LiveChatEventCreatedEvent = { event_id: string | null; chat_session_id: string | null; event_type: string | null; payload: JsonValue }
+export type LiveChatMessageCreatedEvent = { message_id: string; chat_session_id: string; 
 /**
- * Raw `public_payload` map for the event, kept opaque so unknown event
- * types still reach the frontend without a binding update.
+ * Hoisted from `message.client_message_id` so the frontend can dedupe
+ * against optimistic local messages even when `message` fails to
+ * deserialize.
  */
-payload: JsonValue }
-/**
- * Event payload for live chat message creation.
- * Emitted when a `chat_message_created` event is received on a `project:`
- * Phoenix channel. The `message` field carries the deserialized entity.
- * `client_message_id` is hoisted to the top level so the frontend can match
- * it against optimistic local messages without parsing nested fields.
- */
-export type LiveChatMessageCreatedEvent = { message_id: string; chat_session_id: string; client_message_id: string | null; message: ChatMessage | null }
-/**
- * The type of change that occurred on a live chat session.
- */
+client_message_id: string | null; message: ChatMessage | null }
 export type LiveChatSessionChangeType = "Created" | "Updated"
-/**
- * Event payload for live chat session changes.
- * Emitted when a `chat_session_created` or `chat_session_updated` event is
- * received on a `project:` Phoenix channel. The session field carries the
- * fully-deserialized entity from the channel's atomized public_payload.
- */
 export type LiveChatSessionChangedEvent = { session_id: string; change_type: LiveChatSessionChangeType; session: ChatSession | null }
 /**
  * Permission mode for agent sessions - mirrors db::PermissionMode

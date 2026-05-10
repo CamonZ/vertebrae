@@ -9,6 +9,10 @@ vi.mock("../../bindings", () => ({
   commands: {
     createChatSession: vi.fn(),
     sendChatMessage: vi.fn(),
+    getChatSession: vi.fn(),
+    listChatMessages: vi.fn(),
+    getActiveChatSessionId: vi.fn(),
+    setActiveChatSessionId: vi.fn(),
   },
 }));
 
@@ -18,6 +22,10 @@ import { LiveChatWindow } from "./LiveChatWindow";
 
 const mockedCreate = vi.mocked(commands.createChatSession);
 const mockedSend = vi.mocked(commands.sendChatMessage);
+const mockedGetSession = vi.mocked(commands.getChatSession);
+const mockedListMessages = vi.mocked(commands.listChatMessages);
+const mockedGetActive = vi.mocked(commands.getActiveChatSessionId);
+const mockedSetActive = vi.mocked(commands.setActiveChatSessionId);
 
 function makeSession(overrides: Partial<ChatSession> = {}): ChatSession {
   return {
@@ -54,6 +62,13 @@ describe("LiveChatWindow", () => {
     useLiveChatStore.getState().reset();
     mockedCreate.mockReset();
     mockedSend.mockReset();
+    mockedGetSession.mockReset();
+    mockedListMessages.mockReset();
+    mockedGetActive.mockReset();
+    mockedSetActive.mockReset();
+    // Default: no cached session — hydrate is a no-op for the existing tests.
+    mockedGetActive.mockResolvedValue({ status: "ok", data: null });
+    mockedSetActive.mockResolvedValue({ status: "ok", data: null });
   });
 
   it("renders an empty-state hint when no messages exist", () => {
@@ -167,5 +182,44 @@ describe("LiveChatWindow", () => {
     await waitFor(() => expect(mockedSend).toHaveBeenCalledTimes(1));
     const [, content] = mockedSend.mock.calls[0];
     expect(content).toBe("via enter");
+  });
+
+  it("hydrates the cached session and renders prior messages on mount", async () => {
+    const session = makeSession({ id: "sess-restored" });
+    const persisted = makeMessage({
+      id: "msg-restored-1",
+      chat_session_id: "sess-restored",
+      role: "user",
+      content: "previous user message",
+    });
+    const persistedAssistant = makeMessage({
+      id: "msg-restored-2",
+      chat_session_id: "sess-restored",
+      role: "assistant",
+      content: "previous assistant reply",
+    });
+
+    mockedGetActive.mockReset();
+    mockedGetActive.mockResolvedValue({ status: "ok", data: "sess-restored" });
+    mockedGetSession.mockResolvedValue({ status: "ok", data: session });
+    mockedListMessages.mockResolvedValue({
+      status: "ok",
+      data: [persisted, persistedAssistant],
+    });
+
+    render(<LiveChatWindow />);
+
+    await waitFor(() => {
+      expect(screen.getByText("previous user message")).toBeInTheDocument();
+      expect(screen.getByText("previous assistant reply")).toBeInTheDocument();
+    });
+    expect(mockedListMessages).toHaveBeenCalledWith(
+      "sess-restored",
+      200,
+      null
+    );
+    expect(useLiveChatStore.getState().currentSession?.id).toBe(
+      "sess-restored"
+    );
   });
 });
