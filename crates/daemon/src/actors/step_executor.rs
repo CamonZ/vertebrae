@@ -255,6 +255,13 @@ pub(crate) struct HarnessStreamResult {
     /// Surfaced when the child also exited non-zero so the user gets the
     /// human-readable cause instead of a bare exit code.
     pub provider_error: Option<String>,
+    /// Underlying `serde_json::Error` rendering when Codex `--output-schema`
+    /// was set but the final `agent_message.text` was not valid JSON.
+    pub schema_parse_error: Option<String>,
+    /// True when `structured_output` came from Codex's `--output-schema`
+    /// enforcement. Suppresses the daemon-side schema validator (Codex is
+    /// trusted; only the JSON parse is verified).
+    pub structured_output_from_codex: bool,
 }
 
 pub struct StepExecutorState {
@@ -474,11 +481,17 @@ impl StepExecutor {
                 let execution_service = Arc::clone(&state.config.execution_service);
                 let result_slot = Arc::clone(&state.stream_result);
 
+                let codex_output_schema_used =
+                    state.config.step_config.agent_config.json_schema.is_some();
+
                 let stream_handle = tokio::spawn(async move {
                     // Stream stdout line by line, posting each as a SessionLog.
                     // Structured-result extraction dispatches on parser_kind;
                     // raw lines are always stored as logs.
-                    let mut codex_aggregate = crate::codex_jsonl::CodexAggregate::default();
+                    let mut codex_aggregate =
+                        crate::codex_jsonl::CodexAggregate::with_output_schema(
+                            codex_output_schema_used,
+                        );
                     if let Some(stdout) = stdout {
                         let reader = BufReader::new(stdout);
                         let mut lines = reader.lines();
@@ -534,6 +547,14 @@ impl StepExecutor {
                                         });
                                         slot.result_text = codex_aggregate.final_output.clone();
                                         slot.provider_error = codex_aggregate.error.clone();
+                                        if codex_aggregate.output_schema_used {
+                                            slot.structured_output =
+                                                codex_aggregate.final_output_json.clone();
+                                            slot.schema_parse_error =
+                                                codex_aggregate.schema_parse_error.clone();
+                                            slot.structured_output_from_codex =
+                                                slot.structured_output.is_some();
+                                        }
                                     }
                                 }
                             }
@@ -649,6 +670,8 @@ impl StepExecutor {
         let result_text = stream_result.result_text;
         let structured_output = stream_result.structured_output;
         let provider_error = stream_result.provider_error;
+        let schema_parse_error = stream_result.schema_parse_error;
+        let structured_output_from_codex = stream_result.structured_output_from_codex;
 
         let step_result = if let Some(ref mut child) = state.child_process {
             match child.wait().await {
@@ -656,41 +679,67 @@ impl StepExecutor {
                     let code = status.code().unwrap_or(PROCESS_EXIT_CODE_UNKNOWN);
                     if status.success() {
                         tracing::info!(
-                            "Process completed successfully for execution {} (exit code {}, metrics={:?}, has_output={}, has_structured_output={})",
+                            "Process completed successfully for execution {} (exit code {}, metrics={:?}, has_output={}, has_structured_output={}, schema_parse_error={:?})",
                             state.execution_id,
                             code,
                             metrics,
                             result_text.is_some(),
                             structured_output.is_some(),
+                            schema_parse_error,
                         );
-                        match self.validate_output(
-                            state,
-                            structured_output.as_ref(),
-                            result_text.as_deref(),
-                        ) {
-                            Ok(()) => {
-                                // Re-serialize so existing text-based consumers (Sacrum
-                                // output field) keep working when structured_output is the
-                                // source of truth.
-                                let output = match &structured_output {
-                                    Some(value) => {
-                                        serde_json::to_string_pretty(value).ok().or(result_text)
+                        if let Some(parse_err) = schema_parse_error {
+                            tracing::warn!(
+                                "Codex agent_message JSON parse failed for execution {}: {}",
+                                state.execution_id,
+                                parse_err
+                            );
+                            StepResult::failed_schema(
+                                format!(
+                                    "step output_schema was set but agent_message text was not valid JSON: {parse_err}"
+                                ),
+                                vec![SchemaValidationError {
+                                    instance_path: String::new(),
+                                    schema_path: String::new(),
+                                    message: parse_err,
+                                }],
+                            )
+                        } else {
+                            // Codex's --output-schema is trusted; only the
+                            // Anthropic path runs the daemon-side validator.
+                            let validation = if structured_output_from_codex {
+                                Ok(())
+                            } else {
+                                self.validate_output(
+                                    state,
+                                    structured_output.as_ref(),
+                                    result_text.as_deref(),
+                                )
+                            };
+                            match validation {
+                                Ok(()) => {
+                                    // Re-serialize so existing text-based consumers (Sacrum
+                                    // output field) keep working when structured_output is the
+                                    // source of truth.
+                                    let output = match &structured_output {
+                                        Some(value) => {
+                                            serde_json::to_string_pretty(value).ok().or(result_text)
+                                        }
+                                        None => result_text,
+                                    };
+                                    StepResult::Completed {
+                                        exit_code: code,
+                                        metrics,
+                                        output,
                                     }
-                                    None => result_text,
-                                };
-                                StepResult::Completed {
-                                    exit_code: code,
-                                    metrics,
-                                    output,
                                 }
-                            }
-                            Err(err) => {
-                                tracing::warn!(
-                                    "Output-schema validation failed for execution {}: {}",
-                                    state.execution_id,
-                                    err
-                                );
-                                step_result_for_schema_error(err)
+                                Err(err) => {
+                                    tracing::warn!(
+                                        "Output-schema validation failed for execution {}: {}",
+                                        state.execution_id,
+                                        err
+                                    );
+                                    step_result_for_schema_error(err)
+                                }
                             }
                         }
                     } else {
