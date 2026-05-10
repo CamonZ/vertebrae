@@ -81,6 +81,46 @@ pub async fn script_codex_emits_turn_failed(world: &mut DaemonWorld) {
     set_prompt(world, builder).await;
 }
 
+#[when("the codex mock is scripted to emit a structured JSON agent_message")]
+pub async fn script_codex_structured_json_agent_message(world: &mut DaemonWorld) {
+    let text = r#"{\"verdict\":\"approved\",\"score\":0.92}"#;
+    script_codex_agent_message_with_text(
+        world,
+        "codex-structured-ok",
+        "thr-codex-structured",
+        text,
+    )
+    .await;
+}
+
+#[when("the codex mock is scripted to emit a malformed JSON agent_message")]
+pub async fn script_codex_malformed_json_agent_message(world: &mut DaemonWorld) {
+    let text = "definitely not valid json {";
+    script_codex_agent_message_with_text(world, "codex-structured-bad", "thr-codex-bad", text)
+        .await;
+}
+
+async fn script_codex_agent_message_with_text(
+    world: &mut DaemonWorld,
+    mock_name: &str,
+    thread_id: &str,
+    text: &str,
+) {
+    let agent_message = format!(
+        r#"{{"type":"item.completed","item":{{"id":"m1","type":"agent_message","text":"{text}"}}}}"#
+    );
+    let thread_started = format!(r#"{{"type":"thread.started","thread_id":"{thread_id}"}}"#);
+    let turn_completed = r#"{"type":"turn.completed","usage":{"input_tokens":120,"cached_input_tokens":0,"output_tokens":40,"reasoning_output_tokens":0}}"#;
+    let builder = world
+        .mock_response(mock_name)
+        .with_exit_code(0)
+        .with_stdout_line(&thread_started)
+        .with_stdout_line(r#"{"type":"turn.started"}"#)
+        .with_stdout_line(&agent_message)
+        .with_stdout_line(turn_completed);
+    set_prompt(world, builder).await;
+}
+
 async fn set_prompt(world: &mut DaemonWorld, builder: daemon_acceptance::MockResponse) {
     let envelope = builder.build().expect("MockResponse envelope builds");
     let step_id = world.step_id.as_ref().expect("step not created").clone();
