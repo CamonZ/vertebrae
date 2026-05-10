@@ -973,6 +973,68 @@ impl From<vertebrae_core::SessionLog> for SessionLog {
 }
 
 // ============================================================================
+// Live Chat Types
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct ChatSession {
+    pub id: String,
+    pub project_id: String,
+    pub status: String,
+    pub session_kind: Option<String>,
+    pub started_at: Option<String>,
+    pub ended_at: Option<String>,
+    pub stop_requested_at: Option<String>,
+    pub inserted_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+impl From<vertebrae_core::ChatSession> for ChatSession {
+    fn from(session: vertebrae_core::ChatSession) -> Self {
+        ChatSession {
+            id: session.id,
+            project_id: session.project_id,
+            status: session.status,
+            session_kind: session.session_kind,
+            started_at: session.started_at.map(|dt| dt.to_rfc3339()),
+            ended_at: session.ended_at.map(|dt| dt.to_rfc3339()),
+            stop_requested_at: session.stop_requested_at.map(|dt| dt.to_rfc3339()),
+            inserted_at: session.inserted_at.map(|dt| dt.to_rfc3339()),
+            updated_at: session.updated_at.map(|dt| dt.to_rfc3339()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct ChatMessage {
+    pub id: String,
+    pub project_id: String,
+    pub chat_session_id: String,
+    pub role: String,
+    pub content: String,
+    pub content_format: Option<String>,
+    pub client_message_id: Option<String>,
+    pub inserted_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+impl From<vertebrae_core::ChatMessage> for ChatMessage {
+    fn from(message: vertebrae_core::ChatMessage) -> Self {
+        ChatMessage {
+            id: message.id,
+            project_id: message.project_id,
+            chat_session_id: message.chat_session_id,
+            role: message.role,
+            content: message.content,
+            content_format: message.content_format,
+            client_message_id: message.client_message_id,
+            inserted_at: message.inserted_at.map(|dt| dt.to_rfc3339()),
+            updated_at: message.updated_at.map(|dt| dt.to_rfc3339()),
+        }
+    }
+}
+
+// ============================================================================
 // Pipeline Types
 // ============================================================================
 

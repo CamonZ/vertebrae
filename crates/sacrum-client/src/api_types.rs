@@ -488,6 +488,48 @@ pub struct PipelineWorkflowResponse {
     pub transitions: Vec<PipelineWorkflowTransitionResponse>,
 }
 
+/// Chat session response (matches the `ChatSession` Absinthe type).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatSessionResponse {
+    pub id: String,
+    pub project_id: String,
+    pub status: String,
+    #[serde(default)]
+    pub session_kind: Option<String>,
+    #[serde(default)]
+    pub started_at: Option<String>,
+    #[serde(default)]
+    pub ended_at: Option<String>,
+    #[serde(default)]
+    pub stop_requested_at: Option<String>,
+    #[serde(default)]
+    pub public_metadata: Option<serde_json::Value>,
+    #[serde(default)]
+    pub inserted_at: Option<String>,
+    #[serde(default)]
+    pub updated_at: Option<String>,
+}
+
+/// Chat message response (matches the `ChatMessage` Absinthe type).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatMessageResponse {
+    pub id: String,
+    pub project_id: String,
+    pub chat_session_id: String,
+    pub role: String,
+    pub content: String,
+    #[serde(default)]
+    pub content_format: Option<String>,
+    #[serde(default)]
+    pub client_message_id: Option<String>,
+    #[serde(default)]
+    pub metadata: Option<serde_json::Value>,
+    #[serde(default)]
+    pub inserted_at: Option<String>,
+    #[serde(default)]
+    pub updated_at: Option<String>,
+}
+
 /// Project response from Sacrum API
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectResponse {
@@ -1144,6 +1186,75 @@ mod tests {
         assert_eq!(step.task_counts.epic, 0);
         assert_eq!(step.running_count, 0);
         assert!(step.transitions.is_empty());
+    }
+
+    #[test]
+    fn test_chat_session_response_full() {
+        let json = r#"{
+            "id": "sess-1",
+            "project_id": "proj-1",
+            "status": "active",
+            "session_kind": "live",
+            "started_at": "2026-05-10T12:00:00Z",
+            "ended_at": null,
+            "stop_requested_at": null,
+            "public_metadata": {"foo": "bar"},
+            "inserted_at": "2026-05-10T12:00:00Z",
+            "updated_at": "2026-05-10T12:00:01Z"
+        }"#;
+
+        let session: ChatSessionResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(session.id, "sess-1");
+        assert_eq!(session.project_id, "proj-1");
+        assert_eq!(session.status, "active");
+        assert_eq!(session.session_kind.as_deref(), Some("live"));
+        assert_eq!(
+            session.public_metadata.as_ref().and_then(|v| v.get("foo")),
+            Some(&serde_json::Value::String("bar".to_string()))
+        );
+        assert!(session.ended_at.is_none());
+    }
+
+    #[test]
+    fn test_chat_session_response_minimal() {
+        let json = r#"{
+            "id": "sess-min",
+            "project_id": "proj-min",
+            "status": "active"
+        }"#;
+
+        let session: ChatSessionResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(session.id, "sess-min");
+        assert!(session.session_kind.is_none());
+        assert!(session.public_metadata.is_none());
+    }
+
+    #[test]
+    fn test_chat_message_response_full() {
+        let json = r#"{
+            "id": "msg-1",
+            "project_id": "proj-1",
+            "chat_session_id": "sess-1",
+            "role": "user",
+            "content": "hello there",
+            "content_format": "plain",
+            "client_message_id": "client-1",
+            "metadata": {"k": 1},
+            "inserted_at": "2026-05-10T12:00:00Z",
+            "updated_at": "2026-05-10T12:00:00Z"
+        }"#;
+
+        let message: ChatMessageResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(message.id, "msg-1");
+        assert_eq!(message.chat_session_id, "sess-1");
+        assert_eq!(message.role, "user");
+        assert_eq!(message.content, "hello there");
+        assert_eq!(message.content_format.as_deref(), Some("plain"));
+        assert_eq!(message.client_message_id.as_deref(), Some("client-1"));
+        assert_eq!(
+            message.metadata.as_ref().and_then(|v| v.get("k")),
+            Some(&serde_json::Value::from(1))
+        );
     }
 
     #[test]
