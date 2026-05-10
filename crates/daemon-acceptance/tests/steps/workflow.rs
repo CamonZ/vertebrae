@@ -7,6 +7,16 @@ pub async fn given_workflow_with_one_execute_step(world: &mut DaemonWorld) {
     create_workflow_and_step(world, None).await;
 }
 
+#[given("a workflow with one execute step using openai")]
+pub async fn given_workflow_with_codex_step(world: &mut DaemonWorld) {
+    create_workflow_and_step(world, None).await;
+    let step_id = world.step_id.as_ref().expect("step not created").clone();
+    world
+        .run_vtb(&["step", "update", &step_id, "--provider", "openai"])
+        .await;
+    world.assert_vtb_ok("step update --provider openai");
+}
+
 #[given("a workflow with one execute step and an output schema")]
 pub async fn given_workflow_with_schema(world: &mut DaemonWorld) {
     let schema = serde_json::json!({
