@@ -30,6 +30,31 @@ pub async fn given_workflow_with_schema(world: &mut DaemonWorld) {
     create_workflow_and_step(world, Some(schema.to_string())).await;
 }
 
+#[given("a workflow with one execute step using openai and an output schema")]
+pub async fn given_workflow_with_codex_schema_step(world: &mut DaemonWorld) {
+    // Same schema shape as the Anthropic schema_validation feature so the
+    // happy-path payload is small and obvious. The daemon does NOT validate
+    // against this schema for the Codex path -- it only verifies the final
+    // agent_message text parses as JSON -- but the schema must still be set
+    // so `--output-schema` is passed to Codex and the parser flips into
+    // structured-output mode.
+    let schema = serde_json::json!({
+        "type": "object",
+        "properties": {
+            "verdict": { "type": "string" },
+            "score":   { "type": "number" }
+        },
+        "required": ["verdict"],
+        "additionalProperties": false
+    });
+    create_workflow_and_step(world, Some(schema.to_string())).await;
+    let step_id = world.step_id.as_ref().expect("step not created").clone();
+    world
+        .run_vtb(&["step", "update", &step_id, "--provider", "openai"])
+        .await;
+    world.assert_vtb_ok("step update --provider openai");
+}
+
 #[given(expr = "the step is configured with agent_config {string}")]
 pub async fn step_has_agent_config(world: &mut DaemonWorld, json: String) {
     let step_id = world.step_id.as_ref().expect("step not created").clone();

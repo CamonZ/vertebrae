@@ -44,6 +44,21 @@ pub struct CodexAggregate {
     pub final_output: Option<String>,
     /// `Some(message)` if any `turn.failed` or top-level `error` was observed.
     pub error: Option<String>,
+    /// Set by the caller when Codex was launched with `--output-schema`. Toggles
+    /// JSON parsing of each `agent_message.text` into `final_output_json` /
+    /// `schema_parse_error`. Last message wins across multiple `agent_message`s.
+    pub output_schema_used: bool,
+    pub final_output_json: Option<serde_json::Value>,
+    pub schema_parse_error: Option<String>,
+}
+
+impl CodexAggregate {
+    pub fn with_output_schema(output_schema_used: bool) -> Self {
+        Self {
+            output_schema_used,
+            ..Default::default()
+        }
+    }
 }
 
 /// Fold a single Codex JSONL line into the aggregate. Returns `true` when
@@ -65,6 +80,18 @@ pub fn apply_codex_line(line: &str, aggregate: &mut CodexAggregate) -> bool {
     match event_type {
         "item.completed" => {
             if let Some(text) = extract_agent_message_text(&value) {
+                if aggregate.output_schema_used {
+                    match serde_json::from_str::<serde_json::Value>(&text) {
+                        Ok(parsed) => {
+                            aggregate.final_output_json = Some(parsed);
+                            aggregate.schema_parse_error = None;
+                        }
+                        Err(err) => {
+                            aggregate.final_output_json = None;
+                            aggregate.schema_parse_error = Some(err.to_string());
+                        }
+                    }
+                }
                 aggregate.final_output = Some(text);
             }
         }
@@ -350,6 +377,111 @@ mod tests {
         assert_eq!(usage.output_tokens, 900);
         assert_eq!(usage.reasoning_output_tokens, 40);
         assert!(agg.error.is_none());
+    }
+
+    #[test]
+    fn output_schema_used_parses_agent_message_text_as_json() {
+        let line = r#"{"type":"item.completed","item":{"id":"m1","type":"agent_message","text":"{\"verdict\":\"approved\",\"score\":0.92}"}}"#;
+        let mut agg = CodexAggregate::with_output_schema(true);
+        assert!(apply_codex_line(line, &mut agg));
+
+        assert_eq!(
+            agg.final_output.as_deref(),
+            Some(r#"{"verdict":"approved","score":0.92}"#)
+        );
+
+        let parsed = agg
+            .final_output_json
+            .expect("parsed JSON must be populated when output_schema_used is true");
+        assert_eq!(
+            parsed["verdict"],
+            serde_json::Value::String("approved".into())
+        );
+        assert_eq!(
+            parsed["score"],
+            serde_json::Value::Number(serde_json::Number::from_f64(0.92).expect("finite"))
+        );
+        assert!(agg.schema_parse_error.is_none());
+    }
+
+    #[test]
+    fn output_schema_used_records_serde_error_on_invalid_json() {
+        let line = r#"{"type":"item.completed","item":{"id":"m1","type":"agent_message","text":"not json {"}}"#;
+        let mut agg = CodexAggregate::with_output_schema(true);
+        assert!(apply_codex_line(line, &mut agg));
+
+        assert_eq!(agg.final_output.as_deref(), Some("not json {"));
+        assert!(agg.final_output_json.is_none());
+        let err = agg
+            .schema_parse_error
+            .expect("schema_parse_error must be populated on parse failure");
+        assert!(
+            !err.is_empty(),
+            "serde_json error message must not be empty"
+        );
+        assert!(
+            err.to_lowercase().contains("expected") || err.to_lowercase().contains("column"),
+            "expected serde_json error to cite a specific cause, got: {err}"
+        );
+    }
+
+    #[test]
+    fn output_schema_not_used_leaves_json_fields_untouched() {
+        let line = r#"{"type":"item.completed","item":{"id":"m1","type":"agent_message","text":"{\"could_be\":\"json\"}"}}"#;
+        let mut agg = CodexAggregate::default();
+        assert!(!agg.output_schema_used);
+        apply_codex_line(line, &mut agg);
+        assert_eq!(agg.final_output.as_deref(), Some(r#"{"could_be":"json"}"#));
+        assert!(agg.final_output_json.is_none());
+        assert!(agg.schema_parse_error.is_none());
+    }
+
+    #[test]
+    fn later_valid_agent_message_clears_earlier_schema_parse_error() {
+        let lines = [
+            r#"{"type":"item.completed","item":{"id":"a","type":"agent_message","text":"oops not json"}}"#,
+            r#"{"type":"item.completed","item":{"id":"b","type":"agent_message","text":"{\"ok\":true}"}}"#,
+        ];
+        let mut agg = CodexAggregate::with_output_schema(true);
+        for line in lines {
+            apply_codex_line(line, &mut agg);
+        }
+        assert_eq!(agg.final_output.as_deref(), Some(r#"{"ok":true}"#));
+        assert_eq!(agg.final_output_json, Some(serde_json::json!({"ok": true})));
+        assert!(
+            agg.schema_parse_error.is_none(),
+            "earlier parse error must be cleared once a valid JSON message arrives"
+        );
+    }
+
+    #[test]
+    fn later_invalid_agent_message_clears_earlier_parsed_json() {
+        let lines = [
+            r#"{"type":"item.completed","item":{"id":"a","type":"agent_message","text":"{\"ok\":true}"}}"#,
+            r#"{"type":"item.completed","item":{"id":"b","type":"agent_message","text":"oops"}}"#,
+        ];
+        let mut agg = CodexAggregate::with_output_schema(true);
+        for line in lines {
+            apply_codex_line(line, &mut agg);
+        }
+        assert_eq!(agg.final_output.as_deref(), Some("oops"));
+        assert!(agg.final_output_json.is_none());
+        assert!(agg.schema_parse_error.is_some());
+    }
+
+    #[test]
+    fn with_output_schema_sets_flag_and_leaves_other_fields_default() {
+        let on = CodexAggregate::with_output_schema(true);
+        assert!(on.output_schema_used);
+        assert!(on.usage.is_none());
+        assert!(on.final_output.is_none());
+        assert!(on.error.is_none());
+        assert!(on.final_output_json.is_none());
+        assert!(on.schema_parse_error.is_none());
+
+        let off = CodexAggregate::with_output_schema(false);
+        assert!(!off.output_schema_used);
+        assert_eq!(off, CodexAggregate::default());
     }
 
     #[test]
