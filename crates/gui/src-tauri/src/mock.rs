@@ -977,6 +977,12 @@ impl ExecutionService for MockExecutionService {
         if let Some(out) = params.output {
             execution.output = Some(out);
         }
+        if let Some(model) = params.model {
+            execution.model_used = Some(model);
+        }
+        if let Some(provider) = params.model_provider {
+            execution.model_provider = Some(provider);
+        }
         Ok(())
     }
 

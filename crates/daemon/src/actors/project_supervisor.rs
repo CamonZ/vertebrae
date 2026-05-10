@@ -13,6 +13,7 @@ use std::sync::Arc;
 use ractor::{Actor, ActorProcessingErr, ActorRef, SupervisionEvent};
 use vertebrae_core::VertebraeServices;
 use vertebrae_core::execution_service::UpdateExecutionStatusParams;
+use vertebrae_core::model_catalog::Provider;
 use vertebrae_core::models::{AgentConfig, ExecutionStatus};
 
 use crate::actors::step_executor::{
@@ -266,6 +267,33 @@ pub fn build_step_config_from_payload(payload: &RunStepPayload) -> StepConfig {
     }
 }
 
+/// Resolve the `(provider, model)` pair the daemon reports for an execution.
+/// Provider comes verbatim from `agent_config` (defaulting to Anthropic via
+/// [`crate::provider::resolve_provider_from_agent_config`]); model is never
+/// inferred from the model string.
+pub fn resolved_execution_metadata(agent_config: &AgentConfig) -> (Provider, Option<String>) {
+    let provider = crate::provider::resolve_provider_from_agent_config(agent_config);
+    let model = agent_config
+        .model
+        .as_deref()
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+        .map(|m| m.to_string());
+    (provider, model)
+}
+
+fn attach_resolved_metadata(
+    params: UpdateExecutionStatusParams,
+    agent_config: &AgentConfig,
+) -> UpdateExecutionStatusParams {
+    let (provider, model) = resolved_execution_metadata(agent_config);
+    let mut params = params.with_model_provider(provider.as_str());
+    if let Some(model) = model {
+        params = params.with_model(model);
+    }
+    params
+}
+
 /// Stable tracing target for verbose daemon diagnostics.
 ///
 /// Lines emitted under this target are gated behind a step's
@@ -291,6 +319,10 @@ pub struct ProjectState {
     /// Map from execution_id to the running StepExecutor actor ref.
     /// Used to route cancel_step events to the correct executor.
     running_executors: HashMap<String, ActorRef<StepExecutorMessage>>,
+    /// AgentConfig captured at spawn time, keyed by execution_id, so terminal
+    /// status updates can re-attach provider/model metadata after the
+    /// StepExecutor (which owned the original) has stopped.
+    pending_metadata: HashMap<String, AgentConfig>,
 }
 
 /// Per-project supervisor actor.
@@ -322,6 +354,7 @@ impl Actor for ProjectSupervisor {
             claude_binary: args.claude_binary,
             shell_path: args.shell_path,
             running_executors: HashMap::new(),
+            pending_metadata: HashMap::new(),
         })
     }
 
@@ -607,14 +640,15 @@ impl ProjectSupervisor {
             task_id
         );
 
-        // Mark execution as running in Sacrum.
+        let running_params = attach_resolved_metadata(
+            UpdateExecutionStatusParams::new(ExecutionStatus::InProgress),
+            &step_config.agent_config,
+        );
+
         if let Err(e) = state
             .services
             .executions()
-            .update_execution_status(
-                execution_id,
-                UpdateExecutionStatusParams::new(ExecutionStatus::InProgress),
-            )
+            .update_execution_status(execution_id, running_params)
             .await
         {
             tracing::error!(
@@ -625,6 +659,10 @@ impl ProjectSupervisor {
             );
             return Ok(());
         }
+
+        state
+            .pending_metadata
+            .insert(execution_id.to_string(), step_config.agent_config.clone());
 
         let executor_config = StepExecutorConfig {
             execution_id: execution_id.to_string(),
@@ -660,6 +698,7 @@ impl ProjectSupervisor {
                         e
                     );
                     state.running_executors.remove(execution_id);
+                    state.pending_metadata.remove(execution_id);
                 }
             }
             Err(e) => {
@@ -670,15 +709,16 @@ impl ProjectSupervisor {
                     e
                 );
 
-                // Report failure to Sacrum since we already marked it running.
+                let agent_config = state.pending_metadata.remove(execution_id);
+                let mut failure_params = UpdateExecutionStatusParams::new(ExecutionStatus::Failed)
+                    .with_output(format!("Failed to spawn executor: {e}"));
+                if let Some(cfg) = agent_config.as_ref() {
+                    failure_params = attach_resolved_metadata(failure_params, cfg);
+                }
                 let _ = state
                     .services
                     .executions()
-                    .update_execution_status(
-                        execution_id,
-                        UpdateExecutionStatusParams::new(ExecutionStatus::Failed)
-                            .with_output(format!("Failed to spawn executor: {e}")),
-                    )
+                    .update_execution_status(execution_id, failure_params)
                     .await;
             }
         }
@@ -726,6 +766,7 @@ impl ProjectSupervisor {
     ) {
         // Remove from running executors map (it may already be removed by cancel).
         state.running_executors.remove(execution_id);
+        let agent_config = state.pending_metadata.remove(execution_id);
 
         match result {
             StepResult::Completed {
@@ -756,6 +797,10 @@ impl ProjectSupervisor {
 
                 if let Some(text) = output {
                     params = params.with_output(text);
+                }
+
+                if let Some(cfg) = agent_config.as_ref() {
+                    params = attach_resolved_metadata(params, cfg);
                 }
 
                 // Report completed status to Sacrum via updateStepExecution.
@@ -790,15 +835,15 @@ impl ProjectSupervisor {
 
                 let output_payload = build_failure_output_payload(error, schema_errors.as_deref());
 
-                // Report failed status to Sacrum via updateStepExecution.
+                let mut params = UpdateExecutionStatusParams::new(ExecutionStatus::Failed)
+                    .with_output(output_payload);
+                if let Some(cfg) = agent_config.as_ref() {
+                    params = attach_resolved_metadata(params, cfg);
+                }
                 if let Err(e) = state
                     .services
                     .executions()
-                    .update_execution_status(
-                        execution_id,
-                        UpdateExecutionStatusParams::new(ExecutionStatus::Failed)
-                            .with_output(output_payload),
-                    )
+                    .update_execution_status(execution_id, params)
                     .await
                 {
                     tracing::error!(
@@ -1765,5 +1810,112 @@ mod tests {
             !config.verbose_daemon_logging,
             "StepConfig must default verbose_daemon_logging to false"
         );
+    }
+
+    // =========================================================================
+    // resolved_execution_metadata tests
+    // =========================================================================
+
+    #[test]
+    fn resolved_metadata_defaults_provider_to_anthropic_when_unset() {
+        let agent_config = AgentConfig::default();
+        let (provider, model) = resolved_execution_metadata(&agent_config);
+        assert_eq!(provider, Provider::Anthropic);
+        assert!(model.is_none());
+    }
+
+    #[test]
+    fn resolved_metadata_uses_explicit_openai_provider_with_codex_model() {
+        let agent_config = AgentConfig::new()
+            .with_provider(Provider::Openai)
+            .with_model("gpt-5");
+        let (provider, model) = resolved_execution_metadata(&agent_config);
+        assert_eq!(provider, Provider::Openai);
+        assert_eq!(model.as_deref(), Some("gpt-5"));
+    }
+
+    #[test]
+    fn resolved_metadata_uses_explicit_anthropic_provider_with_claude_model() {
+        let agent_config = AgentConfig::new()
+            .with_provider(Provider::Anthropic)
+            .with_model("claude-sonnet-4-5");
+        let (provider, model) = resolved_execution_metadata(&agent_config);
+        assert_eq!(provider, Provider::Anthropic);
+        assert_eq!(model.as_deref(), Some("claude-sonnet-4-5"));
+    }
+
+    #[test]
+    fn resolved_metadata_treats_blank_model_as_unset() {
+        let agent_config = AgentConfig::new()
+            .with_provider(Provider::Anthropic)
+            .with_model("   ");
+        let (provider, model) = resolved_execution_metadata(&agent_config);
+        assert_eq!(provider, Provider::Anthropic);
+        assert!(
+            model.is_none(),
+            "blank/whitespace-only model must be treated as unset"
+        );
+    }
+
+    #[test]
+    fn resolved_metadata_does_not_infer_provider_from_model_name() {
+        // Provider must come from agent_config.provider, not from a model-name
+        // classifier. Default-to-Anthropic applies even for Codex-shaped names.
+        let agent_config = AgentConfig::new().with_model("gpt-5");
+        let (provider, model) = resolved_execution_metadata(&agent_config);
+        assert_eq!(
+            provider,
+            Provider::Anthropic,
+            "provider must come from agent_config, not from the model string"
+        );
+        assert_eq!(model.as_deref(), Some("gpt-5"));
+    }
+
+    #[test]
+    fn attach_resolved_metadata_sets_provider_and_model_on_params() {
+        let agent_config = AgentConfig::new()
+            .with_provider(Provider::Openai)
+            .with_model("gpt-5");
+        let params = attach_resolved_metadata(
+            UpdateExecutionStatusParams::new(ExecutionStatus::InProgress),
+            &agent_config,
+        );
+        assert_eq!(params.model.as_deref(), Some("gpt-5"));
+        assert_eq!(params.model_provider.as_deref(), Some("openai"));
+    }
+
+    #[test]
+    fn attach_resolved_metadata_sets_default_provider_without_model() {
+        let agent_config = AgentConfig::default();
+        let params = attach_resolved_metadata(
+            UpdateExecutionStatusParams::new(ExecutionStatus::InProgress),
+            &agent_config,
+        );
+        assert_eq!(params.model_provider.as_deref(), Some("anthropic"));
+        assert!(
+            params.model.is_none(),
+            "no model in agent_config means no model on the update params"
+        );
+    }
+
+    #[test]
+    fn attach_resolved_metadata_preserves_existing_metric_fields() {
+        let agent_config = AgentConfig::new()
+            .with_provider(Provider::Anthropic)
+            .with_model("claude-sonnet-4-5");
+        let params = UpdateExecutionStatusParams::new(ExecutionStatus::Completed)
+            .with_input_tokens(1500)
+            .with_output_tokens(800)
+            .with_cost("0.0123")
+            .with_duration_ms(4321)
+            .with_output("done");
+        let params = attach_resolved_metadata(params, &agent_config);
+        assert_eq!(params.input_tokens, Some(1500));
+        assert_eq!(params.output_tokens, Some(800));
+        assert_eq!(params.cost.as_deref(), Some("0.0123"));
+        assert_eq!(params.duration_ms, Some(4321));
+        assert_eq!(params.output.as_deref(), Some("done"));
+        assert_eq!(params.model.as_deref(), Some("claude-sonnet-4-5"));
+        assert_eq!(params.model_provider.as_deref(), Some("anthropic"));
     }
 }
