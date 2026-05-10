@@ -8,6 +8,7 @@ import {
   useSessionLogChangeListener,
   useStepTransitionChangeListener,
   useTaskStepChangeListener,
+  useLiveChatChangeListener,
 } from "../hooks";
 
 /**
@@ -29,6 +30,7 @@ export function GlobalListeners() {
   useSessionLogChangeListener();
   useStepTransitionChangeListener();
   useTaskStepChangeListener();
+  useLiveChatChangeListener();
 
   return null;
 }

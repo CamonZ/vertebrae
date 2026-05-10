@@ -713,12 +713,6 @@ async closeClaudeSession(sessionId: string) : Promise<Result<null, ClaudeSession
     else return { status: "error", error: e  as any };
 }
 },
-/**
- * Create a new sacrum live chat session bound to the active project.
- * 
- * V0: project-scoped only — `session_kind` and `public_metadata` are
- * left server-default. Returns the freshly-created session.
- */
 async createChatSession() : Promise<Result<ChatSession, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("create_chat_session") };
@@ -727,11 +721,6 @@ async createChatSession() : Promise<Result<ChatSession, CommandError>> {
     else return { status: "error", error: e  as any };
 }
 },
-/**
- * Send a user message into an existing sacrum chat session.
- * 
- * `content_format` defaults to `"plain"` server-side when omitted.
- */
 async sendChatMessage(chatSessionId: string, content: string, contentFormat: string | null, clientMessageId: string | null) : Promise<Result<ChatMessage, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("send_chat_message", { chatSessionId, content, contentFormat, clientMessageId }) };
@@ -765,6 +754,9 @@ claudeSessionUsageEvent: ClaudeSessionUsageEvent,
 claudeTextEvent: ClaudeTextEvent,
 claudeToolCallEvent: ClaudeToolCallEvent,
 claudeToolResultEvent: ClaudeToolResultEvent,
+liveChatEventCreatedEvent: LiveChatEventCreatedEvent,
+liveChatMessageCreatedEvent: LiveChatMessageCreatedEvent,
+liveChatSessionChangedEvent: LiveChatSessionChangedEvent,
 sectionChangedEvent: SectionChangedEvent,
 sessionLogCreatedEvent: SessionLogCreatedEvent,
 stepChangedEvent: StepChangedEvent,
@@ -784,6 +776,9 @@ claudeSessionUsageEvent: "claude-session-usage-event",
 claudeTextEvent: "claude-text-event",
 claudeToolCallEvent: "claude-tool-call-event",
 claudeToolResultEvent: "claude-tool-result-event",
+liveChatEventCreatedEvent: "live-chat-event-created-event",
+liveChatMessageCreatedEvent: "live-chat-message-created-event",
+liveChatSessionChangedEvent: "live-chat-session-changed-event",
 sectionChangedEvent: "section-changed-event",
 sessionLogCreatedEvent: "session-log-created-event",
 stepChangedEvent: "step-changed-event",
@@ -858,13 +853,7 @@ plugin_dirs?: string[];
  * JSON Schema for structured output validation (serialized as JSON string)
  */
 json_schema: string | null }
-/**
- * Sacrum live chat message, frontend-friendly form.
- */
 export type ChatMessage = { id: string; project_id: string; chat_session_id: string; role: string; content: string; content_format: string | null; client_message_id: string | null; inserted_at: string | null; updated_at: string | null }
-/**
- * Sacrum live chat session, frontend-friendly form.
- */
 export type ChatSession = { id: string; project_id: string; status: string; session_kind: string | null; started_at: string | null; ended_at: string | null; stop_requested_at: string | null; inserted_at: string | null; updated_at: string | null }
 /**
  * Event emitted when Claude requests permission
@@ -972,6 +961,38 @@ export type CreateStepOptions = { workflow_id: string; name: string; goal: strin
  */
 export type ExecutionStatus = "in_progress" | "completed" | "failed"
 export type JsonValue = null | boolean | number | string | JsonValue[] | Partial<{ [key in string]: JsonValue }>
+/**
+ * Event payload for generic chat events not covered by the four typed
+ * channel events. Sacrum persists every public chat event as a `chat_event`
+ * row and rebroadcasts unknown event types under the `chat_event_created`
+ * channel event. Surfaced for future event types (e.g. tool calls,
+ * streaming chunks) without requiring a frontend rebuild.
+ */
+export type LiveChatEventCreatedEvent = { event_id: string | null; chat_session_id: string | null; event_type: string | null; 
+/**
+ * Raw `public_payload` map for the event, kept opaque so unknown event
+ * types still reach the frontend without a binding update.
+ */
+payload: JsonValue }
+/**
+ * Event payload for live chat message creation.
+ * Emitted when a `chat_message_created` event is received on a `project:`
+ * Phoenix channel. The `message` field carries the deserialized entity.
+ * `client_message_id` is hoisted to the top level so the frontend can match
+ * it against optimistic local messages without parsing nested fields.
+ */
+export type LiveChatMessageCreatedEvent = { message_id: string; chat_session_id: string; client_message_id: string | null; message: ChatMessage | null }
+/**
+ * The type of change that occurred on a live chat session.
+ */
+export type LiveChatSessionChangeType = "Created" | "Updated"
+/**
+ * Event payload for live chat session changes.
+ * Emitted when a `chat_session_created` or `chat_session_updated` event is
+ * received on a `project:` Phoenix channel. The session field carries the
+ * fully-deserialized entity from the channel's atomized public_payload.
+ */
+export type LiveChatSessionChangedEvent = { session_id: string; change_type: LiveChatSessionChangeType; session: ChatSession | null }
 /**
  * Permission mode for agent sessions - mirrors db::PermissionMode
  */

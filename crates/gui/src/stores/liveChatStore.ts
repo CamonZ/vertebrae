@@ -27,6 +27,17 @@ interface LiveChatStoreActions {
   createSession: () => Promise<ChatSession | null>;
   sendMessage: (content: string) => Promise<ChatMessage | null>;
   appendMessage: (message: LiveChatMessage) => void;
+  /**
+   * Apply a message received from the server (e.g. via WebSocket). Matches
+   * against the optimistic message (by `client_message_id`) and then by
+   * persisted `id` so the same message is not displayed twice when both the
+   * REST response and the WS broadcast arrive.
+   */
+  applyRemoteMessage: (
+    message: ChatMessage,
+    clientMessageId?: string | null
+  ) => void;
+  upsertSession: (session: ChatSession) => void;
   reset: () => void;
 }
 
@@ -71,6 +82,34 @@ export const useLiveChatStore = create<LiveChatStore>((set, get) => ({
 
   appendMessage: (message) =>
     set((state) => ({ messages: [...state.messages, message] })),
+
+  applyRemoteMessage: (message, clientMessageId) =>
+    set((state) => {
+      const persisted = toLiveMessage(message);
+      const matchClientId =
+        clientMessageId ?? message.client_message_id ?? null;
+
+      // Replace by client_message_id (optimistic message) first, then by id
+      // (idempotent against duplicate WS deliveries / REST + WS race).
+      const existingIndex = state.messages.findIndex((m) => {
+        if (matchClientId && m.id === matchClientId) return true;
+        if (m.id === persisted.id) return true;
+        return false;
+      });
+
+      if (existingIndex >= 0) {
+        const next = state.messages.slice();
+        next[existingIndex] = persisted;
+        return { messages: next };
+      }
+      return { messages: [...state.messages, persisted] };
+    }),
+
+  upsertSession: (session) => {
+    const { currentSession } = get();
+    if (currentSession && currentSession.id !== session.id) return;
+    set({ currentSession: session });
+  },
 
   reset: () => set({ ...initialState, messages: [] }),
 
@@ -125,13 +164,8 @@ export const useLiveChatStore = create<LiveChatStore>((set, get) => ({
     );
 
     if (result.status === "ok") {
-      const persisted = toLiveMessage(result.data);
-      set((state) => ({
-        sending: false,
-        messages: state.messages.map((m) =>
-          m.id === optimistic.id ? persisted : m
-        ),
-      }));
+      get().applyRemoteMessage(result.data, optimistic.id);
+      set({ sending: false });
       return result.data;
     }
 
