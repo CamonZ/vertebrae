@@ -28,6 +28,7 @@ use claude_session::{
 };
 use commands::AppState;
 use events::{
+    LiveChatEventCreatedEvent, LiveChatMessageCreatedEvent, LiveChatSessionChangedEvent,
     SectionChangedEvent, SessionLogCreatedEvent, StepChangedEvent, StepExecutionChangedEvent,
     StepTransitionChangedEvent, TaskChangedEvent, TaskRunChangedEvent, TaskStepChangedEvent,
     WorkflowChangedEvent, WorkflowTransitionChangedEvent,
@@ -141,6 +142,10 @@ fn create_builder() -> Builder {
             WorkflowTransitionChangedEvent,
             SessionLogCreatedEvent,
             SectionChangedEvent,
+            // Sacrum live chat events
+            LiveChatSessionChangedEvent,
+            LiveChatMessageCreatedEvent,
+            LiveChatEventCreatedEvent,
             // Claude session events
             ClaudeSessionInitEvent,
             ClaudeTextEvent,
