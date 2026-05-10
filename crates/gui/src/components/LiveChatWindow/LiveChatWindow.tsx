@@ -15,6 +15,11 @@ export function LiveChatWindow() {
   const lastError = useLiveChatStore((s) => s.lastError);
   const sendMessage = useLiveChatStore((s) => s.sendMessage);
   const togglePanel = useLiveChatStore((s) => s.togglePanel);
+  const hydrate = useLiveChatStore((s) => s.hydrate);
+
+  useEffect(() => {
+    void hydrate();
+  }, [hydrate]);
 
   useEffect(() => {
     if (messages.length > lastMessageCountRef.current) {

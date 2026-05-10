@@ -48,6 +48,32 @@ pub const CREATE_CHAT_SESSION: &str = r#"
     }
 "#;
 
+pub const GET_CHAT_SESSION: &str = r#"
+    query GetChatSession($project_id: Uuid4!, $id: Uuid4!) {
+        chat_session(project_id: $project_id, id: $id) {
+            ...ChatSessionFields
+        }
+    }
+"#;
+
+pub const LIST_CHAT_MESSAGES: &str = r#"
+    query ListChatMessages(
+        $project_id: Uuid4!,
+        $chat_session_id: Uuid4!,
+        $limit: Int,
+        $after: DateTime
+    ) {
+        chat_messages(
+            project_id: $project_id,
+            chat_session_id: $chat_session_id,
+            limit: $limit,
+            after: $after
+        ) {
+            ...ChatMessageFields
+        }
+    }
+"#;
+
 pub const SEND_CHAT_MESSAGE: &str = r#"
     mutation SendChatMessage(
         $project_id: Uuid4!,

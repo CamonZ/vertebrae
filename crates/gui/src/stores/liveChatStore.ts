@@ -18,6 +18,7 @@ interface LiveChatStoreState {
   creatingSession: boolean;
   sending: boolean;
   panelOpen: boolean;
+  hydrated: boolean;
   lastError: string | null;
 }
 
@@ -27,21 +28,18 @@ interface LiveChatStoreActions {
   createSession: () => Promise<ChatSession | null>;
   sendMessage: (content: string) => Promise<ChatMessage | null>;
   appendMessage: (message: LiveChatMessage) => void;
-  /**
-   * Apply a message received from the server (e.g. via WebSocket). Matches
-   * against the optimistic message (by `client_message_id`) and then by
-   * persisted `id` so the same message is not displayed twice when both the
-   * REST response and the WS broadcast arrive.
-   */
   applyRemoteMessage: (
     message: ChatMessage,
     clientMessageId?: string | null
   ) => void;
   upsertSession: (session: ChatSession) => void;
+  hydrate: () => Promise<ChatSession | null>;
   reset: () => void;
 }
 
 export type LiveChatStore = LiveChatStoreState & LiveChatStoreActions;
+
+const HYDRATE_MESSAGE_LIMIT = 200;
 
 const initialState: LiveChatStoreState = {
   currentSession: null,
@@ -49,6 +47,7 @@ const initialState: LiveChatStoreState = {
   creatingSession: false,
   sending: false,
   panelOpen: false,
+  hydrated: false,
   lastError: null,
 };
 
@@ -74,6 +73,31 @@ function toLiveMessage(message: ChatMessage): LiveChatMessage {
   };
 }
 
+// Replace by client_message_id (matches an optimistic local message) first,
+// then by persisted id (idempotent against duplicate WS deliveries / REST + WS
+// race). If neither matches, append.
+function mergeMessage(
+  messages: LiveChatMessage[],
+  message: ChatMessage,
+  clientMessageId: string | null
+): LiveChatMessage[] {
+  const persisted = toLiveMessage(message);
+  const matchClientId = clientMessageId ?? message.client_message_id ?? null;
+  const idx = messages.findIndex(
+    (m) =>
+      (matchClientId !== null && m.id === matchClientId) ||
+      m.id === persisted.id
+  );
+  if (idx >= 0) {
+    const next = messages.slice();
+    next[idx] = persisted;
+    return next;
+  }
+  return [...messages, persisted];
+}
+
+let inflightHydrate: Promise<ChatSession | null> | null = null;
+
 export const useLiveChatStore = create<LiveChatStore>((set, get) => ({
   ...initialState,
 
@@ -84,26 +108,9 @@ export const useLiveChatStore = create<LiveChatStore>((set, get) => ({
     set((state) => ({ messages: [...state.messages, message] })),
 
   applyRemoteMessage: (message, clientMessageId) =>
-    set((state) => {
-      const persisted = toLiveMessage(message);
-      const matchClientId =
-        clientMessageId ?? message.client_message_id ?? null;
-
-      // Replace by client_message_id (optimistic message) first, then by id
-      // (idempotent against duplicate WS deliveries / REST + WS race).
-      const existingIndex = state.messages.findIndex((m) => {
-        if (matchClientId && m.id === matchClientId) return true;
-        if (m.id === persisted.id) return true;
-        return false;
-      });
-
-      if (existingIndex >= 0) {
-        const next = state.messages.slice();
-        next[existingIndex] = persisted;
-        return { messages: next };
-      }
-      return { messages: [...state.messages, persisted] };
-    }),
+    set((state) => ({
+      messages: mergeMessage(state.messages, message, clientMessageId ?? null),
+    })),
 
   upsertSession: (session) => {
     const { currentSession } = get();
@@ -120,7 +127,14 @@ export const useLiveChatStore = create<LiveChatStore>((set, get) => ({
     set({ creatingSession: true, lastError: null });
     const result = await commands.createChatSession();
     if (result.status === "ok") {
-      set({ currentSession: result.data, creatingSession: false });
+      set({
+        currentSession: result.data,
+        creatingSession: false,
+        hydrated: true,
+      });
+      void commands.setActiveChatSessionId(result.data.id).catch(() => {
+        /* persistence failure is non-fatal — chat works without the cache */
+      });
       return result.data;
     }
     set({
@@ -128,6 +142,72 @@ export const useLiveChatStore = create<LiveChatStore>((set, get) => ({
       lastError: result.error.message,
     });
     return null;
+  },
+
+  hydrate: async () => {
+    if (get().hydrated) return get().currentSession;
+    if (inflightHydrate) return inflightHydrate;
+
+    inflightHydrate = (async () => {
+      set({ lastError: null });
+
+      const cachedResult = await commands.getActiveChatSessionId();
+      if (cachedResult.status !== "ok" || !cachedResult.data) {
+        set({ hydrated: true });
+        return null;
+      }
+      const cachedSessionId = cachedResult.data;
+
+      const sessionResult = await commands.getChatSession(cachedSessionId);
+      if (sessionResult.status !== "ok") {
+        set({ hydrated: true, lastError: sessionResult.error.message });
+        return null;
+      }
+      const session = sessionResult.data;
+      if (!session) {
+        void commands.setActiveChatSessionId(null).catch(() => {
+          /* persistence failure is non-fatal — chat works without the cache */
+        });
+        set({ hydrated: true });
+        return null;
+      }
+
+      const messagesResult = await commands.listChatMessages(
+        session.id,
+        HYDRATE_MESSAGE_LIMIT,
+        null
+      );
+      if (messagesResult.status !== "ok") {
+        set({
+          hydrated: true,
+          currentSession: session,
+          lastError: messagesResult.error.message,
+        });
+        return session;
+      }
+
+      // Merge through `mergeMessage` so any WebSocket events that arrived
+      // during the hydrate fetches are preserved and deduped consistently.
+      set((current) => {
+        let merged = current.messages;
+        for (const m of messagesResult.data) {
+          merged = mergeMessage(merged, m, null);
+        }
+        return {
+          currentSession: session,
+          messages: merged,
+          hydrated: true,
+        };
+      });
+
+      return session;
+    })();
+
+    try {
+      return await inflightHydrate;
+    } finally {
+      inflightHydrate = null;
+    }
   },
 
   sendMessage: async (content) => {

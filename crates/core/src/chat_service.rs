@@ -48,6 +48,14 @@ impl SendMessageOptions {
     }
 }
 
+/// Pagination / filter options for `ChatService::list_messages`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ListMessagesOptions {
+    pub limit: Option<i32>,
+    /// RFC3339 timestamp; messages with `inserted_at > after` are returned.
+    pub after: Option<String>,
+}
+
 #[async_trait]
 pub trait ChatService: Send + Sync {
     async fn create_session(&self) -> ServiceResult<ChatSession>;
@@ -57,4 +65,16 @@ pub trait ChatService: Send + Sync {
         chat_session_id: &str,
         options: SendMessageOptions,
     ) -> ServiceResult<ChatMessage>;
+
+    /// Fetch a chat session by id within the configured project. Returns
+    /// `Ok(None)` if the session does not exist (or is not visible to the
+    /// caller).
+    async fn get_session(&self, chat_session_id: &str) -> ServiceResult<Option<ChatSession>>;
+
+    /// List chat messages for a session in chronological order.
+    async fn list_messages(
+        &self,
+        chat_session_id: &str,
+        options: ListMessagesOptions,
+    ) -> ServiceResult<Vec<ChatMessage>>;
 }

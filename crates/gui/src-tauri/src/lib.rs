@@ -128,6 +128,10 @@ fn create_builder() -> Builder {
             // Sacrum live chat commands
             commands::create_chat_session,
             commands::send_chat_message,
+            commands::get_chat_session,
+            commands::list_chat_messages,
+            commands::get_active_chat_session_id,
+            commands::set_active_chat_session_id,
             // WebSocket status command
             commands::get_websocket_status,
         ])

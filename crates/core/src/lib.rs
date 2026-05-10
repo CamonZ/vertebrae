@@ -45,7 +45,9 @@ pub mod step_service;
 pub mod workflow_service;
 
 // Re-export main types for convenience
-pub use chat_service::{ChatMessage, ChatService, ChatSession, SendMessageOptions};
+pub use chat_service::{
+    ChatMessage, ChatService, ChatSession, ListMessagesOptions, SendMessageOptions,
+};
 pub use error::{ServiceError, ServiceResult};
 pub use execution_service::{
     ExecutionMutationCallback, ExecutionMutationEvent, ExecutionService, StopRunTarget,
