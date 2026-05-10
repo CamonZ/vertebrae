@@ -10,10 +10,13 @@ import {
   humanizeStepName,
 } from "./EventRenderer";
 import type {
+  AssistantMessageEvent,
   ConversationEvent,
+  FileEditEvent,
   SessionStartEvent,
   SessionEndEvent,
   ThinkingEvent,
+  TodoListEvent,
   ToolCallEvent,
   ToolResultEvent,
 } from "../../../types/conversation";
@@ -244,6 +247,81 @@ describe("EventRenderer", () => {
     expect(glyph.getAttribute("data-variant")).toBe("error");
     expect(glyph.getAttribute("data-label")).toBe("tool error");
     expect(glyph.className).toMatch(/text-error/);
+  });
+
+  it("renders assistant_message text inside its own block, distinct from thinking", () => {
+    const event: AssistantMessageEvent = {
+      kind: "assistant_message",
+      timestamp: ts,
+      text: "Here is your final answer.",
+    };
+    render(<EventRenderer event={event} previousTimestamp={null} />);
+    const block = screen.getByTestId("assistant-message");
+    expect(block).toBeInTheDocument();
+    // Heading marker that distinguishes the assistant block from thinking
+    expect(screen.getByText("assistant")).toBeInTheDocument();
+    expect(
+      screen.getByText("Here is your final answer.")
+    ).toBeInTheDocument();
+  });
+
+  it("renders file_edit with one row per change and reveals the diff on click when present", () => {
+    const event: FileEditEvent = {
+      kind: "file_edit",
+      timestamp: ts,
+      toolId: "fc1",
+      status: "completed",
+      changes: [
+        { path: "src/foo.rs", kind: "update", diff: "@@ -1 +1 @@\n-old\n+new" },
+        { path: "src/bar.rs", kind: "add" },
+      ],
+    };
+    render(<EventRenderer event={event} previousTimestamp={null} />);
+    const block = screen.getByTestId("file-edit");
+    expect(block.getAttribute("data-status")).toBe("completed");
+    // Both file paths render as their own rows
+    expect(screen.getByText("src/foo.rs")).toBeInTheDocument();
+    expect(screen.getByText("src/bar.rs")).toBeInTheDocument();
+    // Per-change kind label
+    expect(screen.getByText("update")).toBeInTheDocument();
+    expect(screen.getByText("add")).toBeInTheDocument();
+    // Diff body is hidden until the row is clicked
+    expect(screen.queryByText("-old")).toBeNull();
+    fireEvent.click(screen.getByText("src/foo.rs"));
+    expect(screen.getByText("-old")).toBeInTheDocument();
+    expect(screen.getByText("+new")).toBeInTheDocument();
+  });
+
+  it("renders failed file_edit status with the patch-failed marker and error tint", () => {
+    const event: FileEditEvent = {
+      kind: "file_edit",
+      timestamp: ts,
+      toolId: "fc2",
+      status: "failed",
+      changes: [{ path: "src/x.rs", kind: "update" }],
+    };
+    render(<EventRenderer event={event} previousTimestamp={null} />);
+    const label = screen.getByText("patch failed");
+    expect(label.className).toMatch(/text-error/);
+  });
+
+  it("renders todo_list as a checklist with completed items struck through", () => {
+    const event: TodoListEvent = {
+      kind: "todo_list",
+      timestamp: ts,
+      itemId: "plan-1",
+      items: [
+        { text: "first step", completed: true },
+        { text: "second step", completed: false },
+      ],
+    };
+    render(<EventRenderer event={event} previousTimestamp={null} />);
+    const block = screen.getByTestId("todo-list");
+    expect(block.getAttribute("data-item-id")).toBe("plan-1");
+    const first = screen.getByText("first step");
+    const second = screen.getByText("second step");
+    expect(first.className).toMatch(/line-through/);
+    expect(second.className).not.toMatch(/line-through/);
   });
 
   it("returns null for unknown event kinds", () => {

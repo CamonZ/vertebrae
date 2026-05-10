@@ -312,7 +312,10 @@ describe("getToolIcon", () => {
 describe("parseCodexMessage", () => {
   const timestamp = "2024-01-02T08:00:00Z";
 
-  const newState = (): CodexParseState => ({ turnCount: 0 });
+  const newState = (): CodexParseState => ({
+    turnCount: 0,
+    todoListByItemId: new Map(),
+  });
 
   it("maps thread.started to a session_start event with the thread_id and a 'codex' model", () => {
     // Per upstream schema, ThreadStartedEvent carries only `thread_id`; there
@@ -378,7 +381,7 @@ describe("parseCodexMessage", () => {
     ]);
   });
 
-  it("maps agent_message item.completed to a thinking event carrying the final reply", () => {
+  it("maps agent_message item.completed to a dedicated assistant_message event (not thinking)", () => {
     const events = parseCodexMessage(
       {
         type: "item.completed",
@@ -387,7 +390,9 @@ describe("parseCodexMessage", () => {
       timestamp,
       newState()
     );
-    expect(events).toEqual([{ kind: "thinking", timestamp, text: "Done!" }]);
+    expect(events).toEqual([
+      { kind: "assistant_message", timestamp, text: "Done!" },
+    ]);
   });
 
   it("drops reasoning/agent_message items with empty text", () => {
@@ -406,6 +411,219 @@ describe("parseCodexMessage", () => {
         {
           type: "item.completed",
           item: { id: "m", type: "agent_message", text: "" },
+        },
+        timestamp,
+        newState()
+      )
+    ).toEqual([]);
+  });
+
+  it("maps mcp_tool_call item.completed to tool_call(mcp__server__tool, arguments) + tool_result", () => {
+    const events = parseCodexMessage(
+      {
+        type: "item.completed",
+        item: {
+          id: "mcp1",
+          type: "mcp_tool_call",
+          server: "morph_mcp",
+          tool: "edit_file",
+          arguments: { path: "/tmp/foo.txt", content: "hello" },
+          result: { ok: true, bytes: 5 },
+        },
+      },
+      timestamp,
+      newState()
+    );
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({
+      kind: "tool_call",
+      toolId: "mcp1",
+      toolName: "mcp__morph_mcp__edit_file",
+      displayName: "edit file",
+      input: { path: "/tmp/foo.txt", content: "hello" },
+    });
+    expect(events[1]).toMatchObject({
+      kind: "tool_result",
+      toolUseId: "mcp1",
+      isError: false,
+      result: '{"ok":true,"bytes":5}',
+    });
+  });
+
+  it("flags mcp_tool_call with an error string as is_error and surfaces the message", () => {
+    const events = parseCodexMessage(
+      {
+        type: "item.completed",
+        item: {
+          id: "mcp2",
+          type: "mcp_tool_call",
+          server: "morph_mcp",
+          tool: "edit_file",
+          arguments: { path: "/etc/passwd" },
+          error: "permission denied",
+        },
+      },
+      timestamp,
+      newState()
+    );
+    expect(events[1]).toEqual({
+      kind: "tool_result",
+      timestamp,
+      toolUseId: "mcp2",
+      isError: true,
+      result: "permission denied",
+    });
+  });
+
+  it("maps web_search item.completed to a WebSearch tool_call with {query, action} + tool_result", () => {
+    const events = parseCodexMessage(
+      {
+        type: "item.completed",
+        item: {
+          id: "ws1",
+          type: "web_search",
+          query: "rust async traits",
+          action: "search",
+          result: ["doc1", "doc2"],
+        },
+      },
+      timestamp,
+      newState()
+    );
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({
+      kind: "tool_call",
+      toolId: "ws1",
+      toolName: "WebSearch",
+      displayName: "WebSearch",
+      summary: "rust async traits",
+      input: { query: "rust async traits", action: "search" },
+    });
+    expect(events[1]).toMatchObject({
+      kind: "tool_result",
+      toolUseId: "ws1",
+      isError: false,
+      result: '["doc1","doc2"]',
+    });
+  });
+
+  it("maps file_change item.completed to a file_edit event carrying the changes and status", () => {
+    const events = parseCodexMessage(
+      {
+        type: "item.completed",
+        item: {
+          id: "fc1",
+          type: "file_change",
+          status: "completed",
+          changes: [
+            { path: "src/foo.rs", kind: "update", diff: "@@ -1 +1 @@\n-old\n+new" },
+            { path: "src/bar.rs", kind: "add", diff: "+++ b/src/bar.rs" },
+          ],
+        },
+      },
+      timestamp,
+      newState()
+    );
+    expect(events).toEqual([
+      {
+        kind: "file_edit",
+        timestamp,
+        toolId: "fc1",
+        status: "completed",
+        changes: [
+          { path: "src/foo.rs", kind: "update", diff: "@@ -1 +1 @@\n-old\n+new" },
+          { path: "src/bar.rs", kind: "add", diff: "+++ b/src/bar.rs" },
+        ],
+      },
+    ]);
+  });
+
+  it("drops file_change items with no changes silently", () => {
+    expect(
+      parseCodexMessage(
+        {
+          type: "item.completed",
+          item: { id: "fc-empty", type: "file_change", status: "completed", changes: [] },
+        },
+        timestamp,
+        newState()
+      )
+    ).toEqual([]);
+  });
+
+  it("emits a fresh todo_list event for each item.started / item.updated (parseSessionLogs dedupes by id)", () => {
+    const state = newState();
+    const startEvents = parseCodexMessage(
+      {
+        type: "item.started",
+        item: {
+          id: "plan-1",
+          type: "todo_list",
+          items: [
+            { text: "step a", completed: false },
+            { text: "step b", completed: false },
+          ],
+        },
+      },
+      timestamp,
+      state
+    );
+    expect(startEvents).toHaveLength(1);
+    expect(startEvents[0]).toMatchObject({
+      kind: "todo_list",
+      itemId: "plan-1",
+      items: [
+        { text: "step a", completed: false },
+        { text: "step b", completed: false },
+      ],
+    });
+
+    const updateEvents = parseCodexMessage(
+      {
+        type: "item.updated",
+        item: {
+          id: "plan-1",
+          type: "todo_list",
+          items: [
+            { text: "step a", completed: true },
+            { text: "step b", completed: false },
+            { text: "step c", completed: false },
+          ],
+        },
+      },
+      "2024-01-02T08:00:01Z",
+      state
+    );
+    expect(updateEvents).toHaveLength(1);
+    expect(updateEvents[0]).toMatchObject({
+      kind: "todo_list",
+      itemId: "plan-1",
+      timestamp: "2024-01-02T08:00:01Z",
+      items: [
+        { text: "step a", completed: true },
+        { text: "step b", completed: false },
+        { text: "step c", completed: false },
+      ],
+    });
+    expect(updateEvents[0]).not.toBe(startEvents[0]);
+    expect(startEvents[0]).toMatchObject({
+      timestamp,
+      items: [
+        { text: "step a", completed: false },
+        { text: "step b", completed: false },
+      ],
+    });
+  });
+
+  it("drops collab_tool_call items silently (no renderer yet)", () => {
+    expect(
+      parseCodexMessage(
+        {
+          type: "item.completed",
+          item: {
+            id: "ct1",
+            type: "collab_tool_call",
+          },
         },
         timestamp,
         newState()
@@ -625,11 +843,11 @@ describe("parseSessionLogs provider dispatch", () => {
 
     const events = parseSessionLogs(logs);
 
-    // Codex: session_start, thinking (agent_message)
-    // Claude: thinking
+    // Codex: session_start, assistant_message (agent_message → final reply)
+    // Claude: thinking (Claude's `text` content stays on the thinking kind)
     expect(events.map((e) => e.kind)).toEqual([
       "session_start",
-      "thinking",
+      "assistant_message",
       "thinking",
     ]);
     expect(events[0]).toMatchObject({
@@ -637,7 +855,7 @@ describe("parseSessionLogs provider dispatch", () => {
       sessionId: "thr-1",
       model: "codex",
     });
-    expect(events[1]).toMatchObject({ kind: "thinking", text: "ok" });
+    expect(events[1]).toMatchObject({ kind: "assistant_message", text: "ok" });
     expect(events[2]).toMatchObject({ kind: "thinking", text: "Hello" });
   });
 
@@ -678,6 +896,180 @@ describe("parseSessionLogs provider dispatch", () => {
     expect(sessionEnds).toHaveLength(2);
     expect(sessionEnds[0]).toMatchObject({ numTurns: 3 });
     expect(sessionEnds[1]).toMatchObject({ numTurns: 1 });
+  });
+
+  it("renders a full Codex trace covering every supported item type without dropping artefacts", () => {
+    const logs: SessionLog[] = [
+      createLog(
+        JSON.stringify({ type: "thread.started", thread_id: "thr-mix" }),
+        "t1",
+        "exec-mix"
+      ),
+      createLog(JSON.stringify({ type: "turn.started" }), "t2", "exec-mix"),
+      createLog(
+        JSON.stringify({
+          type: "item.completed",
+          item: { id: "r1", type: "reasoning", text: "let me think" },
+        }),
+        "t3",
+        "exec-mix"
+      ),
+      createLog(
+        JSON.stringify({
+          type: "item.completed",
+          item: {
+            id: "c1",
+            type: "command_execution",
+            command: "ls",
+            exit_code: 0,
+            aggregated_output: "foo bar",
+          },
+        }),
+        "t4",
+        "exec-mix"
+      ),
+      createLog(
+        JSON.stringify({
+          type: "item.completed",
+          item: {
+            id: "mcp1",
+            type: "mcp_tool_call",
+            server: "morph_mcp",
+            tool: "edit_file",
+            arguments: { path: "x" },
+            result: "ok",
+          },
+        }),
+        "t5",
+        "exec-mix"
+      ),
+      createLog(
+        JSON.stringify({
+          type: "item.completed",
+          item: {
+            id: "ws1",
+            type: "web_search",
+            query: "rust",
+            action: "search",
+            result: ["a"],
+          },
+        }),
+        "t6",
+        "exec-mix"
+      ),
+      createLog(
+        JSON.stringify({
+          type: "item.completed",
+          item: {
+            id: "fc1",
+            type: "file_change",
+            status: "completed",
+            changes: [{ path: "a.rs", kind: "update", diff: "@@ -1 +1 @@" }],
+          },
+        }),
+        "t7",
+        "exec-mix"
+      ),
+      createLog(
+        JSON.stringify({
+          type: "item.started",
+          item: {
+            id: "plan",
+            type: "todo_list",
+            items: [{ text: "do x", completed: false }],
+          },
+        }),
+        "t8",
+        "exec-mix"
+      ),
+      createLog(
+        JSON.stringify({
+          type: "item.updated",
+          item: {
+            id: "plan",
+            type: "todo_list",
+            items: [{ text: "do x", completed: true }],
+          },
+        }),
+        "t9",
+        "exec-mix"
+      ),
+      createLog(
+        JSON.stringify({
+          type: "item.completed",
+          item: { id: "m1", type: "agent_message", text: "all done" },
+        }),
+        "t10",
+        "exec-mix"
+      ),
+    ];
+
+    const events = parseSessionLogs(logs);
+    // Expected sequence:
+    //   session_start, thinking (reasoning), tool_call/tool_result (command),
+    //   tool_call/tool_result (mcp), tool_call/tool_result (web_search),
+    //   file_edit, todo_list, assistant_message
+    expect(events.map((e) => e.kind)).toEqual([
+      "session_start",
+      "thinking",
+      "tool_call",
+      "tool_result",
+      "tool_call",
+      "tool_result",
+      "tool_call",
+      "tool_result",
+      "file_edit",
+      "todo_list",
+      "assistant_message",
+    ]);
+    // Acceptance criterion 3: the rendered todo_list reflects the latest
+    // item.updated state (completed=true), not the started state.
+    const todo = events.find((e) => e.kind === "todo_list");
+    expect(todo).toMatchObject({
+      kind: "todo_list",
+      itemId: "plan",
+      items: [{ text: "do x", completed: true }],
+    });
+  });
+
+  it("isolates todo_list dedup state per execution so concurrent plans don't trample each other", () => {
+    const logs: SessionLog[] = [
+      createLog(
+        JSON.stringify({
+          type: "item.started",
+          item: {
+            id: "plan",
+            type: "todo_list",
+            items: [{ text: "exec-a step", completed: false }],
+          },
+        }),
+        "ta1",
+        "exec-a"
+      ),
+      createLog(
+        JSON.stringify({
+          type: "item.started",
+          item: {
+            id: "plan", // same id, different execution -- must NOT merge
+            type: "todo_list",
+            items: [{ text: "exec-b step", completed: false }],
+          },
+        }),
+        "tb1",
+        "exec-b"
+      ),
+    ];
+    const events = parseSessionLogs(logs);
+    const todos = events.filter((e) => e.kind === "todo_list");
+    expect(todos).toHaveLength(2);
+    expect(todos[0]).toMatchObject({
+      itemId: "plan",
+      items: [{ text: "exec-a step" }],
+    });
+    expect(todos[1]).toMatchObject({
+      itemId: "plan",
+      items: [{ text: "exec-b step" }],
+    });
   });
 
   it("skips malformed JSON without throwing", () => {
