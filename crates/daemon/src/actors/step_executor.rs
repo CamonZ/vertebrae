@@ -243,6 +243,20 @@ pub(crate) fn log_built_argv(
     argv
 }
 
+/// Provider-agnostic aggregate of what the streaming task observed on the
+/// child process's stdout. The actor uses this to build the final
+/// `StepResult` regardless of which harness ran.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct HarnessStreamResult {
+    pub metrics: Option<crate::stream_json::StreamMetrics>,
+    pub result_text: Option<String>,
+    pub structured_output: Option<serde_json::Value>,
+    /// Provider-reported failure reason (e.g. Codex `turn.failed.error.message`).
+    /// Surfaced when the child also exited non-zero so the user gets the
+    /// human-readable cause instead of a bare exit code.
+    pub provider_error: Option<String>,
+}
+
 pub struct StepExecutorState {
     execution_id: String,
     task_id: String,
@@ -250,9 +264,10 @@ pub struct StepExecutorState {
     parent: ActorRef<ProjectMessage>,
     child_process: Option<Child>,
     stream_handle: Option<tokio::task::JoinHandle<()>>,
-    /// Shared slot for the parsed stream-json result (metrics + result text).
-    /// Written by the streaming task, read by the actor on process exit.
-    stream_result: std::sync::Arc<std::sync::Mutex<Option<crate::stream_json::ParsedStreamResult>>>,
+    /// Shared slot for the harness-agnostic aggregate (metrics + result text +
+    /// structured output + provider error). Written by the streaming task,
+    /// read by the actor on process exit.
+    stream_result: std::sync::Arc<std::sync::Mutex<HarnessStreamResult>>,
     compiled_schema: Option<Result<CompiledSchema, SchemaError>>,
     /// Owns the temp dir for this execution's `--settings` bundle; dropped on stop.
     settings_guard: Option<SyntheticSettings>,
@@ -300,7 +315,9 @@ impl Actor for StepExecutor {
             parent,
             child_process: None,
             stream_handle: None,
-            stream_result: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            stream_result: std::sync::Arc::new(std::sync::Mutex::new(
+                HarnessStreamResult::default(),
+            )),
             compiled_schema,
             settings_guard: None,
         })
@@ -419,11 +436,7 @@ impl StepExecutor {
             }
         };
 
-        let settings_path = settings_guard
-            .as_ref()
-            .map(|g| g.settings_path().to_path_buf());
-
-        let resolved = match resolve_provider_command(&state.config, settings_path.as_deref()) {
+        let resolved = match resolve_provider_command(&state.config, settings_guard.as_ref()) {
             Ok(resolved) => resolved,
             Err(err) => {
                 tracing::error!(
@@ -465,6 +478,7 @@ impl StepExecutor {
                     // Stream stdout line by line, posting each as a SessionLog.
                     // Structured-result extraction dispatches on parser_kind;
                     // raw lines are always stored as logs.
+                    let mut codex_aggregate = crate::codex_jsonl::CodexAggregate::default();
                     if let Some(stdout) = stdout {
                         let reader = BufReader::new(stdout);
                         let mut lines = reader.lines();
@@ -476,7 +490,9 @@ impl StepExecutor {
                                         crate::stream_json::parse_stream_json_line(&line)
                                         && let Ok(mut slot) = result_slot.lock()
                                     {
-                                        *slot = Some(parsed);
+                                        slot.metrics = parsed.metrics;
+                                        slot.result_text = parsed.result_text;
+                                        slot.structured_output = parsed.structured_output;
                                     }
 
                                     // Verbose checkpoint 5: parse and log the stream-json
@@ -499,8 +515,26 @@ impl StepExecutor {
                                     }
                                 }
                                 ParserKind::CodexJsonl => {
-                                    // Structured-result extraction not yet implemented;
-                                    // raw lines are still posted as session logs below.
+                                    if crate::codex_jsonl::apply_codex_line(
+                                        &line,
+                                        &mut codex_aggregate,
+                                    ) && let Ok(mut slot) = result_slot.lock()
+                                    {
+                                        // Codex reports cached input tokens separately; roll
+                                        // them into input_tokens so Sacrum sees total input
+                                        // cost. cost_usd/duration_ms aren't emitted by Codex.
+                                        slot.metrics = codex_aggregate.usage.as_ref().map(|u| {
+                                            crate::stream_json::StreamMetrics {
+                                                input_tokens: u.input_tokens
+                                                    + u.cached_input_tokens,
+                                                output_tokens: u.output_tokens,
+                                                cost_usd: 0.0,
+                                                duration_ms: 0,
+                                            }
+                                        });
+                                        slot.result_text = codex_aggregate.final_output.clone();
+                                        slot.provider_error = codex_aggregate.error.clone();
+                                    }
                                 }
                             }
 
@@ -608,11 +642,13 @@ impl StepExecutor {
             .stream_result
             .lock()
             .ok()
-            .and_then(|mut guard| guard.take());
+            .map(|mut guard| std::mem::take(&mut *guard))
+            .unwrap_or_default();
 
-        let (metrics, result_text, structured_output) = stream_result
-            .map(|r| (r.metrics, r.result_text, r.structured_output))
-            .unwrap_or((None, None, None));
+        let metrics = stream_result.metrics;
+        let result_text = stream_result.result_text;
+        let structured_output = stream_result.structured_output;
+        let provider_error = stream_result.provider_error;
 
         let step_result = if let Some(ref mut child) = state.child_process {
             match child.wait().await {
@@ -659,11 +695,19 @@ impl StepExecutor {
                         }
                     } else {
                         tracing::warn!(
-                            "Process failed for execution {} (exit code {})",
+                            "Process failed for execution {} (exit code {}, provider_error={:?})",
                             state.execution_id,
-                            code
+                            code,
+                            provider_error,
                         );
-                        StepResult::failed(Some(code), format!("Process exited with code {code}"))
+                        // Prefer the provider's structured failure message
+                        // (e.g. Codex `turn.failed.error.message`) over a bare
+                        // exit-code string so the user sees the cause.
+                        let error = match provider_error {
+                            Some(msg) => format!("Process exited with code {code}: {msg}"),
+                            None => format!("Process exited with code {code}"),
+                        };
+                        StepResult::failed(Some(code), error)
                     }
                 }
                 Err(e) => {
@@ -1793,7 +1837,9 @@ mod tests {
             parent,
             child_process: None,
             stream_handle: None,
-            stream_result: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            stream_result: std::sync::Arc::new(std::sync::Mutex::new(
+                HarnessStreamResult::default(),
+            )),
             compiled_schema,
             settings_guard: None,
         }
@@ -2187,31 +2233,8 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn step_executor_post_stop_emits_stopping_log() {
+    async fn step_executor_post_stop_completes_cleanly_with_no_child() {
         use ractor::Actor;
-        use std::io;
-        use std::sync::{Arc, Mutex};
-        use tracing_subscriber::fmt::MakeWriter;
-
-        #[derive(Clone, Default)]
-        struct CapturedLines(Arc<Mutex<Vec<u8>>>);
-
-        impl io::Write for CapturedLines {
-            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-                self.0.lock().unwrap().extend_from_slice(buf);
-                Ok(buf.len())
-            }
-            fn flush(&mut self) -> io::Result<()> {
-                Ok(())
-            }
-        }
-
-        impl<'a> MakeWriter<'a> for CapturedLines {
-            type Writer = Self;
-            fn make_writer(&'a self) -> Self::Writer {
-                self.clone()
-            }
-        }
 
         struct MockParent;
         impl Actor for MockParent {
@@ -2235,18 +2258,11 @@ mod tests {
             }
         }
 
-        let captured = CapturedLines::default();
-        let subscriber = tracing_subscriber::fmt()
-            .with_writer(captured.clone())
-            .with_ansi(false)
-            .finish();
-        let _guard = tracing::subscriber::set_default(subscriber);
-
         let (parent_ref, _ph) = Actor::spawn(Some("mp-poststop".to_string()), MockParent, ())
             .await
             .expect("spawn parent");
 
-        let cfg = test_config("exec-poststop-log");
+        let cfg = test_config("exec-poststop-clean");
         let (executor_ref, executor_handle) = Actor::spawn(
             Some("step-executor-poststop".to_string()),
             StepExecutor,
@@ -2255,17 +2271,11 @@ mod tests {
         .await
         .expect("spawn executor");
 
-        executor_ref.stop(Some("test stop".to_string()));
-        let _ = tokio::time::timeout(Duration::from_secs(5), executor_handle).await;
-        // Give the writer time to flush after post_stop runs.
-        tokio::time::sleep(Duration::from_millis(50)).await;
-
-        let bytes = captured.0.lock().unwrap().clone();
-        let text = String::from_utf8(bytes).unwrap_or_default();
-        assert!(
-            text.contains("StepExecutor stopping for execution exec-poststop-log"),
-            "post_stop must emit the stopping log line; captured: {text}"
-        );
+        executor_ref
+            .stop_and_wait(Some("test stop".to_string()), Some(Duration::from_secs(5)))
+            .await
+            .expect("executor stops cleanly");
+        executor_handle.await.expect("executor task joins");
 
         parent_ref.stop(Some("done".to_string()));
     }

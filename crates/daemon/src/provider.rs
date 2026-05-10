@@ -6,8 +6,6 @@
 //! spawn so an inconsistent `(provider, model)` pair fails the step with a
 //! clear error instead of launching a harness.
 
-use std::path::Path;
-
 use tokio::process::Command;
 use vertebrae_core::Provider;
 use vertebrae_core::model_catalog::validate_provider_model;
@@ -15,6 +13,7 @@ use vertebrae_core::model_catalog::validate_provider_model;
 use crate::actors::step_executor::{
     StepExecutorConfig, build_claude_command_with_settings, log_built_argv,
 };
+use crate::settings_synthesis::SyntheticSettings;
 
 /// How to interpret the child process's stdout stream.
 ///
@@ -47,17 +46,23 @@ impl std::fmt::Debug for ResolvedProviderCommand {
 }
 
 /// Reasons provider resolution can fail before any child is spawned.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum ProviderResolutionError {
     /// The persisted `agent_config.provider`/`model` pair is internally
     /// inconsistent (e.g. provider=openai with a `claude-*` model).
     InvalidProviderModel(String),
+    /// Failed to materialize a provider-side artefact on disk -- e.g. the
+    /// JSON schema file Codex requires for `--output-schema`.
+    SchemaFileWrite(String),
 }
 
 impl std::fmt::Display for ProviderResolutionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ProviderResolutionError::InvalidProviderModel(msg) => f.write_str(msg),
+            ProviderResolutionError::SchemaFileWrite(msg) => {
+                write!(f, "failed to write Codex output_schema file: {msg}")
+            }
         }
     }
 }
@@ -77,10 +82,15 @@ pub fn resolve_provider(config: &StepExecutorConfig) -> Provider {
 /// Resolve the full provider invocation for a step. Must be called before
 /// spawning a child process: validates the `(provider, model)` pair against
 /// the catalog so an inconsistent `agent_config` fails before any harness is
-/// launched. `settings_path` is threaded into the Anthropic builder.
+/// launched.
+///
+/// The `settings_bundle` carries both the synthesized `--settings` file path
+/// (consumed by Anthropic) and a writable temp dir (used by Codex to
+/// materialize the `--output-schema` file). Passing `None` skips both, and
+/// the resolver falls back to inline behavior where appropriate.
 pub fn resolve_provider_command(
     config: &StepExecutorConfig,
-    settings_path: Option<&Path>,
+    settings_bundle: Option<&SyntheticSettings>,
 ) -> Result<ResolvedProviderCommand, ProviderResolutionError> {
     let provider = resolve_provider(config);
 
@@ -94,11 +104,17 @@ pub fn resolve_provider_command(
     }
 
     let (command, parser_kind) = match provider {
-        Provider::Anthropic => (
-            build_claude_command_with_settings(config, settings_path),
-            ParserKind::StreamJson,
+        Provider::Anthropic => {
+            let settings_path = settings_bundle.map(|b| b.settings_path());
+            (
+                build_claude_command_with_settings(config, settings_path.as_deref()),
+                ParserKind::StreamJson,
+            )
+        }
+        Provider::Openai => (
+            build_codex_command(config, settings_bundle)?,
+            ParserKind::CodexJsonl,
         ),
-        Provider::Openai => (build_codex_command(config), ParserKind::CodexJsonl),
     };
 
     Ok(ResolvedProviderCommand {
@@ -112,7 +128,16 @@ pub fn resolve_provider_command(
 /// JSONL events to stdout, one per line. The prompt is the trailing
 /// positional arg, matching `codex exec [OPTIONS] [PROMPT]`. No default model
 /// is imposed -- when unset, Codex picks its own.
-fn build_codex_command(config: &StepExecutorConfig) -> Command {
+///
+/// When `agent_config.json_schema` is set, the schema is written to a file
+/// inside `settings_bundle` and passed as `--output-schema <path>` (Codex
+/// expects a path, not inline JSON). If no bundle is provided, the schema is
+/// silently skipped to keep the call inert in tests; production callers
+/// always supply one via `resolve_provider_command`.
+fn build_codex_command(
+    config: &StepExecutorConfig,
+    settings_bundle: Option<&SyntheticSettings>,
+) -> Result<Command, ProviderResolutionError> {
     let mut cmd = Command::new(&config.claude_binary);
 
     let step = &config.step_config;
@@ -128,8 +153,13 @@ fn build_codex_command(config: &StepExecutorConfig) -> Command {
         cmd.arg("--model").arg(model);
     }
 
-    if let Some(schema) = agent_config.json_schema.as_ref() {
-        cmd.arg("--output-schema").arg(schema.to_string());
+    if let Some(schema) = agent_config.json_schema.as_ref()
+        && let Some(bundle) = settings_bundle
+    {
+        let schema_path = bundle
+            .write_codex_output_schema(schema)
+            .map_err(|e| ProviderResolutionError::SchemaFileWrite(e.to_string()))?;
+        cmd.arg("--output-schema").arg(schema_path);
     }
 
     cmd.arg(&step.prompt);
@@ -150,7 +180,7 @@ fn build_codex_command(config: &StepExecutorConfig) -> Command {
         );
     }
 
-    cmd
+    Ok(cmd)
 }
 
 #[cfg(test)]
@@ -324,22 +354,59 @@ mod tests {
     }
 
     #[test]
-    fn openai_provider_forwards_json_schema_as_output_schema() {
-        let schema = serde_json::json!({"type": "object"});
+    fn openai_provider_writes_json_schema_to_temp_file_and_passes_path() {
+        // Codex requires --output-schema to point at a *file*, not inline JSON.
+        // The resolver must materialize the schema in the per-execution
+        // settings bundle and pass the resulting path.
+        let schema = serde_json::json!({
+            "type": "object",
+            "properties": {"verdict": {"type": "string"}},
+            "required": ["verdict"]
+        });
         let agent_config = AgentConfig::new()
             .with_provider(Provider::Openai)
             .with_model("gpt-4o")
             .with_json_schema(schema.clone());
         let config = make_config(agent_config, "p", "/usr/local/bin/codex");
-        let resolved = resolve_provider_command(&config, None).expect("ok");
+        let bundle = SyntheticSettings::create("schema-test").expect("bundle creates");
+
+        let resolved = resolve_provider_command(&config, Some(&bundle)).expect("ok");
         let argv = argv_strings(&resolved.command);
         let idx = argv
             .iter()
             .position(|a| a == "--output-schema")
             .expect("--output-schema must be present when json_schema set");
+        let path_arg = std::path::Path::new(&argv[idx + 1]);
+        assert!(
+            path_arg.is_file(),
+            "--output-schema arg must be an existing file, got {path_arg:?}"
+        );
+        // The file must round-trip the schema verbatim.
+        let body = std::fs::read_to_string(path_arg).expect("schema file readable");
         let parsed: serde_json::Value =
-            serde_json::from_str(&argv[idx + 1]).expect("schema arg must be valid JSON");
+            serde_json::from_str(&body).expect("schema file must contain valid JSON");
         assert_eq!(parsed, schema);
+        // And it must live under the bundle's temp dir, not in some other
+        // location that would outlive the run.
+        assert!(
+            path_arg.starts_with(bundle.dir()),
+            "schema file must live inside the per-execution bundle"
+        );
+    }
+
+    #[test]
+    fn openai_provider_omits_output_schema_when_no_bundle_provided() {
+        // Without a bundle (e.g. unit tests that don't synthesize one), the
+        // resolver silently skips the --output-schema flag rather than
+        // fabricating a path the caller can't clean up.
+        let schema = serde_json::json!({"type": "object"});
+        let agent_config = AgentConfig::new()
+            .with_provider(Provider::Openai)
+            .with_json_schema(schema);
+        let config = make_config(agent_config, "p", "/usr/local/bin/codex");
+        let resolved = resolve_provider_command(&config, None).expect("ok");
+        let argv = argv_strings(&resolved.command);
+        assert!(!argv.contains(&"--output-schema".to_string()));
     }
 
     #[test]
@@ -360,6 +427,7 @@ mod tests {
                     "expected provider names in error, got: {msg}"
                 );
             }
+            other => panic!("expected InvalidProviderModel, got: {other:?}"),
         }
     }
 
@@ -375,6 +443,7 @@ mod tests {
             ProviderResolutionError::InvalidProviderModel(msg) => {
                 assert!(msg.contains("kimi2.6"), "got: {msg}");
             }
+            other => panic!("expected InvalidProviderModel, got: {other:?}"),
         }
     }
 
@@ -394,14 +463,14 @@ mod tests {
     fn anthropic_resolution_uses_settings_path_when_provided() {
         let agent_config = AgentConfig::new().with_provider(Provider::Anthropic);
         let config = make_config(agent_config, "p", "/usr/local/bin/claude");
-        let settings = PathBuf::from("/tmp/vtb-daemon-fake/settings.json");
-        let resolved = resolve_provider_command(&config, Some(&settings)).expect("ok");
+        let bundle = SyntheticSettings::create("settings-test").expect("bundle creates");
+        let resolved = resolve_provider_command(&config, Some(&bundle)).expect("ok");
         let argv = argv_strings(&resolved.command);
         let idx = argv
             .iter()
             .position(|a| a == "--settings")
             .expect("--settings must be threaded through");
-        assert_eq!(argv[idx + 1], settings.to_string_lossy());
+        assert_eq!(argv[idx + 1], bundle.settings_path().to_string_lossy());
     }
 
     #[test]
@@ -430,5 +499,16 @@ mod tests {
     fn provider_resolution_error_display() {
         let e = ProviderResolutionError::InvalidProviderModel("bad combo".to_string());
         assert_eq!(format!("{e}"), "bad combo");
+
+        let e = ProviderResolutionError::SchemaFileWrite("disk full".to_string());
+        let rendered = format!("{e}");
+        assert!(
+            rendered.contains("Codex output_schema"),
+            "should mention Codex schema, got: {rendered}"
+        );
+        assert!(
+            rendered.contains("disk full"),
+            "should include cause: {rendered}"
+        );
     }
 }
