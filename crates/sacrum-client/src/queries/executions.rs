@@ -191,7 +191,9 @@ pub const UPDATE_EXECUTION: &str = r#"
         $input_tokens: Int,
         $output_tokens: Int,
         $cost: Decimal,
-        $duration_ms: Int
+        $duration_ms: Int,
+        $model: String,
+        $model_provider: String
     ) {
         update_step_execution(
             id: $id,
@@ -201,7 +203,9 @@ pub const UPDATE_EXECUTION: &str = r#"
             input_tokens: $input_tokens,
             output_tokens: $output_tokens,
             cost: $cost,
-            duration_ms: $duration_ms
+            duration_ms: $duration_ms,
+            model: $model,
+            model_provider: $model_provider
         ) {
             id
         }
