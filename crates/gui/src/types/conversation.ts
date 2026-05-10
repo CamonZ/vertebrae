@@ -272,21 +272,238 @@ export function parseClaudeMessage(
   return events;
 }
 
+// ============================================================================
+// Codex `exec --json` raw message types
+// ============================================================================
+
+/** Item payload inside a Codex `item.started` / `item.updated` / `item.completed` event.
+ *
+ * Per the upstream schema (`codex-rs/exec/src/exec_events.rs`), `ThreadItemDetails`
+ * is `#[serde(tag = "type", rename_all = "snake_case")]` flattened into
+ * `ThreadItem`, so the discriminator is the `type` field on the item object.
+ */
+export interface CodexItem {
+  id?: string;
+  type?:
+    | "agent_message"
+    | "reasoning"
+    | "command_execution"
+    | string;
+  /** Present on `agent_message` and `reasoning` items. */
+  text?: string;
+  /** Present on `command_execution` items. */
+  command?: string;
+  exit_code?: number;
+  /** Captured stdout/stderr for completed command_execution items. */
+  aggregated_output?: string;
+}
+
+/** Raw shape of a single Codex `exec --json` JSONL line.
+ *
+ * Mirrors `ThreadEvent` in the upstream schema. Note that there is no
+ * `thread.completed` or `thread.failed` event -- successful streams just
+ * terminate, and fatal errors arrive as `{"type":"error","message":"..."}`.
+ */
+export interface CodexRawMessage {
+  type:
+    | "thread.started"
+    | "turn.started"
+    | "turn.completed"
+    | "turn.failed"
+    | "item.started"
+    | "item.updated"
+    | "item.completed"
+    | "error"
+    | string;
+  thread_id?: string;
+  item?: CodexItem;
+  usage?: {
+    input_tokens?: number;
+    cached_input_tokens?: number;
+    output_tokens?: number;
+    reasoning_output_tokens?: number;
+  };
+  error?: { message?: string };
+  /** Present on top-level `error` events (`ThreadErrorEvent`). */
+  message?: string;
+}
+
+/**
+ * True if a parsed JSON object looks like a Codex `exec --json` event.
+ *
+ * Codex events carry `type` strings prefixed with `thread.`, `turn.`, or
+ * `item.`, plus the bare `error` event for fatal stream errors. Claude
+ * `--output-format stream-json` uses bare names like `system`, `assistant`,
+ * `user`, `result`. The two namespaces don't overlap.
+ */
+function isCodexRawMessage(raw: unknown): raw is CodexRawMessage {
+  if (raw === null || typeof raw !== "object") return false;
+  const t = (raw as { type?: unknown }).type;
+  if (typeof t !== "string") return false;
+  return (
+    t.startsWith("thread.") ||
+    t.startsWith("turn.") ||
+    t.startsWith("item.") ||
+    t === "error"
+  );
+}
+
+/**
+ * Parse a single Codex JSONL event into the same `ConversationEvent` union
+ * Claude logs produce. The mapping is:
+ *
+ * - `thread.started`                         -> `session_start`
+ * - `turn.failed`                            -> `thinking` (`[error] ...`)
+ * - `error` (top-level, fatal stream error)  -> `session_end` + `thinking`
+ * - `item.completed` w/ `reasoning`          -> `thinking` (text)
+ * - `item.completed` w/ `command_execution`  -> `tool_call` + `tool_result`
+ * - `item.completed` w/ `agent_message`      -> `thinking` (final text)
+ *
+ * Note: there is no `thread.completed` event in the upstream schema --
+ * successful streams just terminate after `turn.completed`. The session_end
+ * event is synthesised at a higher layer (e.g. when the execution row reaches
+ * a terminal status), not from a JSONL marker.
+ *
+ * The `state` arg lets `parseSessionLogs` thread a shared turn counter
+ * across the contiguous run of Codex lines belonging to one execution.
+ */
+export function parseCodexMessage(
+  raw: CodexRawMessage,
+  timestamp: string,
+  state: CodexParseState = { turnCount: 0 }
+): ConversationEvent[] {
+  const events: ConversationEvent[] = [];
+
+  switch (raw.type) {
+    case "thread.started":
+      events.push({
+        kind: "session_start",
+        timestamp,
+        // ThreadStartedEvent has only `thread_id` -- no model field.
+        model: "codex",
+        sessionId: raw.thread_id ?? "",
+      });
+      break;
+
+    case "turn.started":
+      state.turnCount += 1;
+      break;
+
+    case "item.completed": {
+      const item = raw.item;
+      if (!item) break;
+      switch (item.type) {
+        case "agent_message":
+        case "reasoning": {
+          const text = item.text;
+          if (text && text.length > 0) {
+            events.push({ kind: "thinking", timestamp, text });
+          }
+          break;
+        }
+        case "command_execution": {
+          const toolId = item.id ?? "";
+          const command = item.command ?? "";
+          events.push({
+            kind: "tool_call",
+            timestamp,
+            toolId,
+            toolName: "Bash",
+            displayName: "Bash",
+            icon: getToolIcon("Bash"),
+            summary: truncate(command, 80),
+            input: { command },
+          });
+          events.push({
+            kind: "tool_result",
+            timestamp,
+            toolUseId: toolId,
+            isError: typeof item.exit_code === "number" && item.exit_code !== 0,
+            result: truncate(
+              (item.aggregated_output ?? "").replace(/\n/g, " "),
+              200
+            ),
+          });
+          break;
+        }
+        default:
+          // Unknown item types are intentionally dropped from the timeline;
+          // the raw line is still preserved at the SessionLog layer.
+          break;
+      }
+      break;
+    }
+
+    case "turn.failed": {
+      const msg = raw.error?.message ?? "turn failed";
+      events.push({ kind: "thinking", timestamp, text: `[error] ${msg}` });
+      break;
+    }
+
+    case "error": {
+      // Top-level `ThreadErrorEvent`: an unrecoverable stream error. Surface
+      // the message as a `thinking` event and emit a `session_end` so the
+      // timeline closes cleanly even though no `turn.completed` followed.
+      const msg = raw.message ?? "codex error";
+      events.push({ kind: "thinking", timestamp, text: `[error] ${msg}` });
+      events.push({
+        kind: "session_end",
+        timestamp,
+        durationMs: 0,
+        numTurns: state.turnCount,
+        costUsd: 0,
+      });
+      break;
+    }
+
+    // item.started / item.updated / unknown types contribute nothing --
+    // partial streaming chunks are consumed by item.completed.
+    default:
+      break;
+  }
+
+  return events;
+}
+
+/** Per-stream state shared across a single Codex JSONL run. */
+export interface CodexParseState {
+  turnCount: number;
+}
+
 /**
  * Parse an array of SessionLog entries into conversation events.
- * Skips entries that fail to parse as JSON.
+ *
+ * Each log is parsed as JSON and routed to either the Claude (stream-json) or
+ * Codex (`exec --json`) parser based on the `type` namespace. Per-execution
+ * Codex turn counts are threaded across logs of the same execution so a
+ * top-level `error` event can emit a `session_end` with the right `numTurns`.
+ * Entries that fail to parse as JSON are skipped.
  */
 export function parseSessionLogs(logs: SessionLog[]): ConversationEvent[] {
   const events: ConversationEvent[] = [];
+  // One Codex state per (step_execution_id) so concurrent executions don't
+  // share turn counts. Anthropic logs ignore this map.
+  const codexStateByExecution = new Map<string, CodexParseState>();
 
   for (const log of logs) {
+    let raw: unknown;
     try {
-      const raw = JSON.parse(log.content ?? '') as ClaudeRawMessage;
-      const parsed = parseClaudeMessage(raw, log.created_at ?? '');
-      events.push(...parsed);
+      raw = JSON.parse(log.content ?? "");
     } catch {
-      // Skip non-JSON or malformed entries
       continue;
+    }
+
+    const ts = log.created_at ?? "";
+    if (isCodexRawMessage(raw)) {
+      const execId = log.step_execution_id ?? "";
+      let state = codexStateByExecution.get(execId);
+      if (!state) {
+        state = { turnCount: 0 };
+        codexStateByExecution.set(execId, state);
+      }
+      events.push(...parseCodexMessage(raw, ts, state));
+    } else {
+      events.push(...parseClaudeMessage(raw as ClaudeRawMessage, ts));
     }
   }
 
