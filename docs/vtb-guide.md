@@ -421,6 +421,137 @@ vtb step update <step-id> --output-schema '{"type":"object"}'
 vtb step update <step-id> --clear-output-schema
 ```
 
+### Provider Selection (Anthropic / OpenAI)
+
+Each step picks the harness (the local CLI) that will run its prompt via
+`agent_config.provider`. The MVP ships with two built-in providers:
+
+| Provider | Harness CLI | Binary | Stream parser | Provider-binary lookup env var |
+|----------|-------------|--------|---------------|--------------------------------|
+| `anthropic` (default) | Claude Code | `claude` | `--output-format stream-json` JSONL | `CLAUDE_CODE_PATH` |
+| `openai` | Codex CLI | `codex` | `codex exec --json` JSONL | `CODEX_PATH` |
+
+When `provider` is unset on a step, the daemon defaults to **Anthropic** to
+preserve pre-refactor behavior. The daemon resolves the harness binary by
+checking the provider-specific env var first, then the user's login-shell
+`PATH`, then well-known install locations (`~/.local/bin`, `/usr/local/bin`,
+`/opt/homebrew/bin`).
+
+> **Authentication is the harness's job, not Vertebrae's.** The daemon does not
+> read `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or any other vendor credential
+> directly. Each provider authenticates through its own CLI's existing
+> mechanism — typically `claude login` for Claude Code and `codex login` (or
+> the equivalent vendor env var the harness itself reads) for Codex. Run the
+> harness once interactively, confirm it works standalone, then point
+> Vertebrae at it.
+
+#### Setting the provider on a step
+
+`vtb step add` and `vtb step update` accept `--provider` (alias:
+`--model-provider`) and `--model` as convenience shortcuts that overlay the
+step's `agent_config`:
+
+```bash
+# Default behavior — provider unset, daemon uses Anthropic / Claude Code
+vtb step add "Coding" -w <wf-id> --model sonnet
+
+# Explicit Anthropic with a Claude model
+vtb step add "Coding" -w <wf-id> \
+  --provider anthropic \
+  --model claude-sonnet-4-20250514
+
+# OpenAI / Codex with a GPT model (alias --model-provider also works)
+vtb step add "Coding" -w <wf-id> \
+  --model-provider openai \
+  --model gpt-4o
+
+# Switch an existing step over to Codex
+vtb step update <step-id> --provider openai --model o3-mini
+
+# Drop back to Anthropic
+vtb step update <step-id> --provider anthropic --model opus
+```
+
+Accepted provider names (case-insensitive): `anthropic` / `claude`,
+`openai` / `codex`.
+
+#### Recognized model aliases
+
+The CLI validates the `(provider, model)` pair against a small built-in
+catalog before persisting the step:
+
+- **Anthropic:** the bare aliases `opus`, `sonnet`, `haiku`, plus any
+  `claude-*` / `claude` model name.
+- **OpenAI:** any `gpt-*` / `gpt` model, the reasoning aliases `o<digit>...`
+  (e.g. `o1`, `o1-mini`, `o3`, `o3-mini`, `o4-mini`), and `codex-*` / `codex`.
+
+Mismatched pairs (e.g. `--provider openai --model claude-opus-4-5`) are
+rejected at the CLI with an actionable error. Unknown model names are also
+rejected; if you genuinely need a model name the catalog doesn't recognize,
+fall back to the full JSON via `--agent-config`:
+
+```bash
+vtb step update <step-id> \
+  --agent-config '{"provider":"openai","model":"some-new-codex-model"}'
+```
+
+#### Local smoke test
+
+The end-to-end smoke path exercises both providers. It assumes the daemon is
+installed (`vtb daemon install`) and the relevant harness CLI is logged in.
+
+```bash
+# 0. Confirm the harnesses Vertebrae will spawn are reachable.
+which claude   # or set CLAUDE_CODE_PATH
+which codex    # or set CODEX_PATH
+claude --version
+codex --version
+
+# 1. Anthropic / Claude default behavior.
+#    Provider is unset on the step, so the daemon picks Anthropic and runs `claude`.
+vtb workflow add "Smoke-Claude" --step Hello:sonnet
+vtb add "Smoke: Claude default" -d "say hi"
+vtb workflow assign <task-id> <smoke-claude-wf-id>
+vtb run <task-id>
+vtb execution list <task-id>          # confirm a run was recorded
+
+# 2. OpenAI / Codex provider selection.
+#    Separate workflow whose single step targets Codex/gpt-4o.
+vtb workflow add "Smoke-Codex"
+vtb step add "Hello" -w <smoke-codex-wf-id> \
+  --provider openai \
+  --model gpt-4o \
+  --prompt "Reply with the single word: ok"
+vtb add "Smoke: Codex" -d "say hi"
+vtb workflow assign <task-id-2> <smoke-codex-wf-id>
+vtb run <task-id-2>
+vtb execution list <task-id-2>        # confirm a run was recorded
+```
+
+Each smoke task uses a single-step workflow so the run is unambiguous about
+which provider the daemon resolved. The resolved provider and model are
+persisted on the `StepExecution` record (and reported back to Sacrum); the
+`vtb execution show` text output does not yet print those fields, so confirm
+the harness was actually used by tailing the daemon logs or by inspecting the
+spawned process while the run is in flight.
+
+#### Out of scope for the MVP
+
+The current tranche is intentionally CLI-driven. The following are **not**
+supported and should not be assumed to work:
+
+- **GUI profile editing.** Provider/model selection is set via `vtb step
+  add` / `vtb step update` only. The GUI does not yet expose a profile editor.
+- **Remote or durable workers.** The daemon runs locally and spawns local
+  harness binaries. Remote daemon routing, durable worker registration, and
+  claim/lease assignment are not implemented.
+- **Arbitrary harness profiles.** Only the two built-in providers
+  (`anthropic`, `openai`) are recognized. User-owned harness profile
+  registries and arbitrary binary profiles are deferred.
+- **Storing secrets in Sacrum.** API keys, login tokens, and other vendor
+  credentials must remain with the harness CLI on the local machine. Sacrum
+  does not store, proxy, or distribute provider secrets.
+
 ---
 
 ## Moving Tasks Between Workflows and Steps
@@ -673,7 +804,7 @@ Tasks with `needs_human_review: true` pause automated workflow advancement.
 
 ## Daemon Management
 
-The daemon (`vtb-daemon`) is a background service that executes workflow steps via Claude Code subprocesses. It runs as a macOS launchd service.
+The daemon (`vtb-daemon`) is a background service that executes workflow steps by spawning a local harness CLI — Claude Code (`claude`) for `anthropic` provider steps and Codex CLI (`codex`) for `openai` provider steps. See [Provider Selection](#provider-selection-anthropic--openai) for how to pick a harness per step. It runs as a macOS launchd service.
 
 ```bash
 # Install as a launchd service
